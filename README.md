@@ -7,7 +7,7 @@
 | Name | GitHub | Email |
 |------|--------|-------|
 | Name 1 | [@TheMarco408](https://github.com/username) | marco.lopez@sjsu.edu |
-| Name 2 | [@username](https://github.com/username) | name@sjsu.edu |
+| Tommy Liu | [@toommyliu](https://github.com/toommyliu) | tommy.liu@sjsu.edu |
 | Name 3 | [@username](https://github.com/username) | name@sjsu.edu |
 | Name 4 | [@username](https://github.com/username) | name@sjsu.edu |
 
