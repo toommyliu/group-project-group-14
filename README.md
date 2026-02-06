@@ -8,7 +8,7 @@
 |------|--------|-------|
 | Name 1 | [@TheMarco408](https://github.com/username) | marco.lopez@sjsu.edu |
 | Tommy Liu | [@toommyliu](https://github.com/toommyliu) | tommy.liu@sjsu.edu |
-| Name 3 | [@username](https://github.com/username) | name@sjsu.edu |
+| Andy Cortes | [@username](https://github.com/andycortes23) | andy.cortes@sjsu.edu |
 | Name 4 | [@username](https://github.com/username) | name@sjsu.edu |
 
 **Advisor:** [Advisor Name]
