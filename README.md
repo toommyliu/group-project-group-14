@@ -75,6 +75,7 @@ cd [repo]
 
 # Install dependencies
 [install command]
+1. pip install textual rich
 
 # Set up environment variables
 cp .env.example .env
