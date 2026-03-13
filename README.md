@@ -75,7 +75,13 @@ cd [repo]
 
 # Install dependencies
 [install command]
-1. pip install textual rich
+
+Installing Poetry
+
+On macOS:
+brew install pipx
+pipx ensurepath
+pipx install poetry
 
 # Set up environment variables
 cp .env.example .env
