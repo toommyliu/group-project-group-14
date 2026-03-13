@@ -1,0 +1,31 @@
+[project]
+name = "grading-tui-package"
+dynamic = [ "version" ]
+description = "TUI application that will streamline and automate grading"
+authors = [
+{ name = "Andy Cortes", email = "andy.cortes@sjsu.edu" },
+{ name = "Arjun Gill", email = "arjun.gill@sjsu.edu" },
+{ name = "Tommy Liu", email = "tommy.liu@sjsu.edu" },
+{ name = "Marco Lopez", email = "marco.lopez@sjsu.edu" }
+]
+requires-python = ">=3.10,<4.0"
+dependencies = [
+  "textual (>=8.1.1,<9.0.0)",
+  "typing-extensions >=4.4.0",
+  "rich >=14.2.0",
+  "poetry (>=2.3.2,<3.0.0)",
+  "update (>=0.0.1,<0.0.2)",
+]
+
+[tool.poetry]
+version = "1.0"
+packages = [
+  { include = "grading_tui_package", from = "src" }
+]
+
+[tool.poetry.scripts]
+grading_tui_app = "grading_tui_package.main:run_app"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
