@@ -15,6 +15,7 @@ dependencies = [
   "rich >=14.2.0",
   "poetry (>=2.3.2,<3.0.0)",
   "update (>=0.0.1,<0.0.2)",
+  "pypdf (>=6.9.1,<7.0.0)",
 ]
 
 [tool.poetry]
