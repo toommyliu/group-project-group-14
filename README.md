@@ -63,25 +63,39 @@
 
 ### Prerequisites
 
-- [Prerequisite 1] v.X.X+
-- [Prerequisite 2] v.X.X+
+- [Python v3.13+](https://www.python.org/)
+- [Homebrew](https://brew.sh/)
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/[org]/[repo].git
-cd [repo]
+git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git my-folder-name
+cd my-folder-name
+```
 
-# Install dependencies
-[install command]
-
-Installing Poetry
+#### Installing Poetry
 
 On macOS:
-brew install pipx
-pipx ensurepath
-pipx install poetry
+
+```
+# Install 
+brew install pipx # package installer
+pipx ensurepath 
+pipx install poetry # dependency management and packaging
+
+# activate the poetry environment
+eval $(poetry env activate)
+```
+
+#### Library Management
+```
+# install a library
+poetry add my-library
+
+# remove a library
+poetry remove my-library
+```
 
 # Set up environment variables
 cp .env.example .env
