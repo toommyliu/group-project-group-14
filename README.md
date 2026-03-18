@@ -84,6 +84,8 @@ brew install pipx # package installer
 pipx ensurepath 
 pipx install poetry # dependency management and packaging
 
+pip install textual-image
+
 # activate the poetry environment
 eval $(poetry env activate)
 ```
