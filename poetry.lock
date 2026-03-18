@@ -1868,8 +1868,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-<<<<<<< HEAD
-content-hash = "aeebc3838672bbbb3fbb30c55e58f9f09b07e9336c767c238ad646ef37cfa0ff"
-=======
-content-hash = "e6acbfaa80cc4b0a8610c5a0144d620a8ee43d6de6f8ce0ce2ba5a20f6aa69e0"
->>>>>>> e356bd5 (Adding the image capabilities)
+content-hash = "5319f73c1ee0098f853505dea4b064a97c9c2e8abb16176d530fe5cf97d0a350"
