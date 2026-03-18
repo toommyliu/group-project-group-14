@@ -1,0 +1,5 @@
+name,email,section,course,sid,grade
+Example,xxxxx@example.com,1,CMPE195,12345,A
+Example,xxxxx@example.com,1,CMPE195,67890,A
+Example,xxxxx@example.com,1,CMPE195,09876,A
+Example,xxxxx@example.com,1,CMPE195,54321,A
