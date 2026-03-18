@@ -21,6 +21,18 @@ typing_extensions = {version = ">=4.5", markers = "python_version < \"3.13\""}
 trio = ["trio (>=0.31.0) ; python_version < \"3.10\"", "trio (>=0.32.0) ; python_version >= \"3.10\""]
 
 [[package]]
+name = "argparse"
+version = "1.4.0"
+description = "Python command-line parsing library"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "argparse-1.4.0-py2.py3-none-any.whl", hash = "sha256:c31647edb69fd3d465a847ea3157d37bed1f95f19760b11a47aa91c04b666314"},
+    {file = "argparse-1.4.0.tar.gz", hash = "sha256:62b089a55be1d8949cd2bc7e0df0bddb9e028faefc8c32038cc84862aefdd6e4"},
+]
+
+[[package]]
 name = "backports-tarfile"
 version = "1.2.0"
 description = "Backport of CPython tarfile module"
@@ -1727,4 +1739,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "a783e0af6133fba9b9a0a14862ae2482113b12ac2cc4e47de837b09f58c836b5"
+content-hash = "aeebc3838672bbbb3fbb30c55e58f9f09b07e9336c767c238ad646ef37cfa0ff"
