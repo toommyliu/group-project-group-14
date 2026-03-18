@@ -1,6 +1,6 @@
-# Project Title
+# Local Grader
 
-> One-line description of what your project does
+> 
 
 ## Team
 
@@ -11,23 +11,25 @@
 | Andy Cortes | [@andycortes23](https://github.com/andycortes23) | andy.cortes@sjsu.edu |
 | Arjun Gill | [@arjung04](https://github.com/arjung04) | arjun.gill@sjsu.edu |
 
-**Advisor:** [Advisor Name]
+**Advisor:** [Dr. Carlos Rojas](mailto:carlos.rojas@sjsu.edu) 
 
 ---
 
 ## Problem Statement
 
-[2-3 sentences describing the problem you're solving and why it matters]
+Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. They aren't able to grade efficiently and provide students quality feedback in a timely manner.
+Timely, quality feedback helps improve student learning outcomes, and yet, today's tools failure to meet these needs.
 
 ## Solution
 
-[2-3 sentences describing your solution approach]
+The application will ingest scanned PDF submissions that are split by assignment.
+Graders can create and customize rubrics per assignment, manage course rosters, and annotate PDFs directly.
+These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them. 
 
 ### Key Features
 
-- Feature 1
-- Feature 2
-- Feature 3
+- Local/offline-first grading tool
+- TUI-based workflow(s)
 
 ---
 
@@ -52,10 +54,10 @@
 
 | Category | Technology |
 |----------|------------|
-| Frontend | |
-| Backend | |
-| Database | |
-| Deployment | |
+| Frontend | Python     |
+| Backend | Python     |
+| Database |            |
+| Deployment |            |
 
 ---
 
