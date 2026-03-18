@@ -8,7 +8,7 @@
 |------|--------|-------|
 | Marco Lopez | [@TheMarco408](https://github.com/username) | marco.lopez@sjsu.edu |
 | Tommy Liu | [@toommyliu](https://github.com/toommyliu) | tommy.liu@sjsu.edu |
-| Andy Cortes | [@username](https://github.com/andycortes23) | andy.cortes@sjsu.edu |
+| Andy Cortes | [@andycortes23](https://github.com/andycortes23) | andy.cortes@sjsu.edu |
 | Arjun Gill | [@arjung04](https://github.com/arjung04) | arjun.gill@sjsu.edu |
 
 **Advisor:** [Advisor Name]
