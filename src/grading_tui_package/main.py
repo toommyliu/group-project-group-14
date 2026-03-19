@@ -1,19 +1,8 @@
-from PIL import Image as PILImage
-from rich.console import Console
+from rich.console import Console, RenderableType
 from textual.app import App, ComposeResult
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, Static, Button, Label, ContentSwitcher, Input
-from textual.widget import Widget           # or: from textual.widgets import Widget
-from textual_image.renderable.halfcell import Image as TIImage
-from rich.console import RenderableType
-
-class ImageWidget(Widget):
-    def __init__(self, path: str) -> None:
-        super().__init__()
-        self._img = TIImage(path)
-
-    def render(self) -> RenderableType:
-        return self._img
+from textual_image.widget import Image
 
 class Sidebar(Vertical):
     def compose(self) -> ComposeResult:
@@ -50,6 +39,12 @@ class GradingTUIManager(App):
         padding: 1; 
     }
 
+    #about-image {
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+    }
+
     """
 
     BINDINGS = [("q", "quit", "Quit"), ("n", "user_input", "Enter Input"), ("c", "clear_all", "Clear All")]
@@ -73,13 +68,10 @@ class GradingTUIManager(App):
                     yield Static("Settings content goes here...")
                 
                 # ABOUT PAGE
-                with Vertical(id="page-about"):
+                with VerticalScroll(id="page-about"):
                     yield Label("ABOUT", classes="page-title")
-                    yield Static("Grading TUI Application v1.1")
-                    img = PILImage.open("images/Grading.png").convert("RGBA")
-                    img = img.resize((360, 360), PILImage.LANCZOS)
-                    img.save("images/Grading_360.png")
-                    yield Static(TIImage("images/Grading_360.png"))
+                    yield Static("Grading TUI Application v1.1", classes="welcome-text")
+                    yield Image("images/Grading.jpg", id="about-image")
 
         yield Footer()
 
