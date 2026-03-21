@@ -4,10 +4,12 @@ from textual.containers import Center, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, Static, Button, Label, ContentSwitcher, Input
 from textual_image.widget import Image
 
-class Sidebar(Vertical):
+class Sidebar(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield Label("MENU", id="menu-title")
         yield Button("My Notes", id="nav-notes", variant="primary")
+        yield Button("Upload Documents", id="nav-upload")
+        yield Button("View Documents", id="nav-view")
         yield Button("Settings", id="nav-settings")
         yield Button("About", id="nav-about")
 
@@ -39,6 +41,24 @@ class GradingTUIManager(App):
         padding: 1; 
     }
 
+    Horizontal#split {
+        height: auto;
+        border: solid green;
+    }
+
+    Vertical.left-view {
+        width: 50%;
+        padding: 1 2;
+        content-align: left middle;
+    }
+
+    Vertical.right-view {
+        width: 50%;
+        padding: 1 2;
+        border-left: solid red;
+        content-align: left top;
+    }
+
     #about-image {
     width: 100%;
     height: auto;
@@ -58,10 +78,27 @@ class GradingTUIManager(App):
                 with VerticalScroll(id="page-notes"):
                     yield Label("MY NOTES", classes="page-title")
                     yield Label("Welcome to our Grading TUI Application. Press 'N' to add a note.", classes="welcome-text")
-                    
                     yield Input(placeholder="Type a note and press Enter...", id="note-input")
                     yield Vertical(id="notes-container")
-                
+
+                # UPLOAD PAGE
+                with VerticalScroll(id="page-upload"):
+                    yield Label("UPLOAD DOCUMENTS", classes="page-title")
+                    yield Static("Upload documents script should go here...")
+
+                # VIEW PAGE
+                with VerticalScroll(id="page-view"):
+                    yield Label("VIEW DOCUMENTS", classes="page-title")
+                    with Horizontal(id = "split"):  
+                            with VerticalScroll (classes = "left-view"):
+                                yield Image("images/Grading.jpg", id="about-image")
+                            with VerticalScroll (classes = "right-view"):
+                                yield Input(placeholder= "First Name", id = "first-name")
+                                yield Input(placeholder= "Last Name", id = "last-name")
+                                yield Input(placeholder= "Grade", id = "grade")
+                                yield Button("Submit", id="submit-view")
+                                yield Static("", id = "view-submit-status")
+
                 # SETTINGS PAGE
                 with Vertical(id="page-settings"):
                     yield Label("SETTINGS", classes="page-title")
@@ -70,8 +107,7 @@ class GradingTUIManager(App):
                 # ABOUT PAGE
                 with VerticalScroll(id="page-about"):
                     yield Label("ABOUT", classes="page-title")
-                    yield Static("Grading TUI Application v1.1", classes="welcome-text")
-                    yield Image("images/Grading.jpg", id="about-image")
+                    yield Static("Grading TUI Application v1.0", classes="welcome-text")
 
         yield Footer()
 
@@ -79,10 +115,20 @@ class GradingTUIManager(App):
         switcher = self.query_one(ContentSwitcher)
         if event.button.id == "nav-notes":
             switcher.current = "page-notes"
+        elif event.button.id == "nav-upload":
+            switcher.current = "page-upload"
+        elif event.button.id == "nav-view":
+            switcher.current = "page-view"
         elif event.button.id == "nav-settings":
             switcher.current = "page-settings"
         elif event.button.id == "nav-about":
             switcher.current = "page-about"
+        if event.button.id == "submit-view":
+            first = self.query_one("#first-name" , Input).value
+            last = self.query_one("#last-name" , Input).value
+            grade = self.query_one("#grade" , Input).value
+            status = f"Submitted: {first} {last} -> {grade}"
+            self.query_one("#view-submit-status", Static).update(status)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Triggered when you press Enter in the Input field."""
