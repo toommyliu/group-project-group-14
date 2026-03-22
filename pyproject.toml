@@ -21,20 +21,14 @@ dependencies = [
   "pillow (>=12.1.1,<13.0.0)",
 ]
 
-[tool.poetry]
-version = "1.0"
-packages = [
-  { include = "local_grader", from = "src" }
-]
-
-[tool.poetry.scripts]
+[project.scripts]
 tui = "local_grader.tui.main:run_app"
-pdf_splitter = "local_grader.cli.pdf_splitter:run_cli"
-question_splitter = "local_grader.cli.question_splitter:run_cli"
-roster_reader = "local_grader.cli.roster_reader:run_cli"
+pdf-splitter = "local_grader.cli.pdf_splitter:run_cli"
+question-splitter = "local_grader.cli.question_splitter:run_cli"
+roster-reader = "local_grader.cli.roster_reader:run_cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/grading_tui_package"]
+packages = ["src/local_grader"]
 
 [build-system]
 requires = ["hatchling"]
