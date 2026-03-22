@@ -10,15 +10,15 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-  "textual (>=8.1.1,<9.0.0)",
-  "typing-extensions >=4.4.0",
-  "rich >=14.2.0",
-  "update (>=0.0.1,<0.0.2)",
-  "pypdf (>=6.9.1,<7.0.0)",
-  "pymupdf (>=1.25.3,<2.0.0)",
-  "argparse (>=1.4.0,<2.0.0)",
-  "textual-image (>=0.8.5,<0.9.0)",
-  "pillow (>=12.1.1,<13.0.0)",
+  "textual>=8.1.1,<9.0.0",
+  "typing-extensions>=4.4.0",
+  "rich>=14.2.0",
+  "update>=0.0.1,<0.0.2",
+  "pypdf>=6.9.1,<7.0.0",
+  "pymupdf>=1.25.3,<2.0.0",
+  "argparse>=1.4.0,<2.0.0",
+  "textual-image>=0.8.5,<0.9.0",
+  "pillow>=12.1.1,<13.0.0",
 ]
 
 [project.scripts]
