@@ -36,8 +36,8 @@ def run_cli() -> None:
         description="Generate sample gradeable unit template and submission PDFs for testing.",
         epilog=(
             "examples:\n"
-            "  poetry run generate_sample_gradeable_pdf --output tests/sample_output --write-spec\n"
-            "  poetry run generate_sample_gradeable_pdf --output tests/sample_output --versions A B --write-spec\n"
+            "  uv run sample-pdf --output tests/sample_output --write-spec\n"
+            "  uv run sample-pdf --output tests/sample_output --versions A B --write-spec\n"
         ),
         formatter_class=RawDescriptionHelpFormatter,
     )
