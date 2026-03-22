@@ -26,6 +26,7 @@ tui = "local_grader.tui.main:run_app"
 pdf-splitter = "local_grader.cli.pdf_splitter:run_cli"
 question-splitter = "local_grader.cli.question_splitter:run_cli"
 roster-reader = "local_grader.cli.roster_reader:run_cli"
+sample-pdf = "local_grader.cli.generate_sample_gradeable_pdf:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_grader"]
