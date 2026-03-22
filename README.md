@@ -68,6 +68,7 @@ These capabilities will enable educators to visualize trends in grade statistics
 - [Python v3.13+](https://www.python.org/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
   - If not using standalone installer, install [Homebrew](https://brew.sh/) first
+- [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
 
 ### Installation
 
