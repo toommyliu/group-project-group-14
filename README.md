@@ -1,17 +1,17 @@
 # Local Grader
 
-> 
+>
 
 ## Team
 
-| Name | GitHub | Email |
-|------|--------|-------|
-| Marco Lopez | [@TheMarco408](https://github.com/username) | marco.lopez@sjsu.edu |
-| Tommy Liu | [@toommyliu](https://github.com/toommyliu) | tommy.liu@sjsu.edu |
+| Name        | GitHub                                           | Email                |
+| ----------- | ------------------------------------------------ | -------------------- |
+| Marco Lopez | [@TheMarco408](https://github.com/username)      | marco.lopez@sjsu.edu |
+| Tommy Liu   | [@toommyliu](https://github.com/toommyliu)       | tommy.liu@sjsu.edu   |
 | Andy Cortes | [@andycortes23](https://github.com/andycortes23) | andy.cortes@sjsu.edu |
-| Arjun Gill | [@arjung04](https://github.com/arjung04) | arjun.gill@sjsu.edu |
+| Arjun Gill  | [@arjung04](https://github.com/arjung04)         | arjun.gill@sjsu.edu  |
 
-**Advisor:** [Dr. Carlos Rojas](mailto:carlos.rojas@sjsu.edu) 
+**Advisor:** [Dr. Carlos Rojas](mailto:carlos.rojas@sjsu.edu)
 
 ---
 
@@ -24,7 +24,7 @@ Timely, quality feedback helps improve student learning outcomes, and yet, today
 
 The application will ingest scanned PDF submissions that are split by assignment.
 Graders can create and customize rubrics per assignment, manage course rosters, and annotate PDFs directly.
-These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them. 
+These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them.
 
 ### Key Features
 
@@ -43,8 +43,8 @@ These capabilities will enable educators to visualize trends in grade statistics
 
 ## Screenshots
 
-| Feature | Screenshot |
-|---------|------------|
+| Feature     | Screenshot                                   |
+| ----------- | -------------------------------------------- |
 | [Feature 1] | ![Screenshot](docs/screenshots/feature1.png) |
 | [Feature 2] | ![Screenshot](docs/screenshots/feature2.png) |
 
@@ -52,11 +52,11 @@ These capabilities will enable educators to visualize trends in grade statistics
 
 ## Tech Stack
 
-| Category | Technology |
-|----------|------------|
-| Frontend | Python     |
-| Backend | Python     |
-| Database |            |
+| Category   | Technology |
+| ---------- | ---------- |
+| Frontend   | Python     |
+| Backend    | Python     |
+| Database   |            |
 | Deployment |            |
 
 ---
@@ -66,7 +66,8 @@ These capabilities will enable educators to visualize trends in grade statistics
 ### Prerequisites
 
 - [Python v3.13+](https://www.python.org/)
-- [Homebrew](https://brew.sh/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+  - If not using standalone installer, install [Homebrew](https://brew.sh/) first
 
 ### Installation
 
@@ -82,13 +83,14 @@ On macOS:
 
 ```bash
 # Install uv
-brew install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh # or brew install uv
 
 # Install dependencies and sync virtual environment
 uv sync
 ```
 
 #### Library Management
+
 ```bash
 # install a library
 uv add my-library
@@ -100,8 +102,11 @@ uv remove my-library
 ### Running Locally
 
 ```bash
-# Run the application
-uv run grading_tui_app
+# Run the TUI
+uv run tui
+
+# Executing CLI tools
+uv run pdf-splitter assets/sample.pdf
 ```
 
 ### Running Tests
@@ -117,13 +122,13 @@ uv run grading_tui_app
 <details>
 <summary>Click to expand API endpoints</summary>
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/resource` | Get all resources |
-| GET | `/api/resource/:id` | Get resource by ID |
-| POST | `/api/resource` | Create new resource |
-| PUT | `/api/resource/:id` | Update resource |
-| DELETE | `/api/resource/:id` | Delete resource |
+| Method | Endpoint            | Description         |
+| ------ | ------------------- | ------------------- |
+| GET    | `/api/resource`     | Get all resources   |
+| GET    | `/api/resource/:id` | Get resource by ID  |
+| POST   | `/api/resource`     | Create new resource |
+| PUT    | `/api/resource/:id` | Update resource     |
+| DELETE | `/api/resource/:id` | Delete resource     |
 
 </details>
 
@@ -159,6 +164,7 @@ uv run grading_tui_app
 ### Commit Messages
 
 Use clear, descriptive commit messages:
+
 - `Add user authentication endpoint`
 - `Fix database connection timeout issue`
 - `Update README with setup instructions`
@@ -178,4 +184,4 @@ This project is licensed under the <FILL IN> License - see the [LICENSE](LICENSE
 
 ---
 
-*CMPE 195A/B - Senior Design Project | San Jose State University | Spring 2026*
+_CMPE 195A/B - Senior Design Project | San Jose State University | Spring 2026_
