@@ -100,7 +100,7 @@ def build_info_section(
     name: str,
     student_id: str,
     page_w: float,
-    unit_title: str,
+    title: str,
     fontname: str = DEFAULT_FONT,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
     """
@@ -110,7 +110,7 @@ def build_info_section(
     cx = page_w / 2
 
     # Title
-    lines = unit_title.split("\n")
+    lines = title.split("\n")
     num_lines = len(lines)
     fontsize = 14
     line_h = fontsize * 1.4

@@ -10,7 +10,7 @@ def generate_template_pdf(
     output_path: Path,
     version: str,
     questions: list[tuple[str, int, str]],
-    unit_title: str,
+    title: str,
     all_versions: list[str] | None = None,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
@@ -19,7 +19,7 @@ def generate_template_pdf(
     filled = set(VERSION_ANCHOR_MAP.get(version, ANCHOR_LOCATIONS))
     doc = fitz.Document()
     page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
-    start_y, field_rects = build_info_section(page, "", "", page_w, unit_title, fontname=fontname)
+    start_y, field_rects = build_info_section(page, "", "", page_w, title, fontname=fontname)
 
     remaining = questions[:]
     page_number = 1
@@ -61,7 +61,7 @@ def generate_submission_pdf(
     name: str,
     student_id: str,
     questions: list[tuple[str, int, str]],
-    unit_title: str,
+    title: str,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
     fontname: str = DEFAULT_FONT,
@@ -69,7 +69,7 @@ def generate_submission_pdf(
     filled = set(VERSION_ANCHOR_MAP.get(version, ANCHOR_LOCATIONS))
     doc = fitz.Document()
     page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
-    start_y, _ = build_info_section(page, name, student_id, page_w, unit_title, fontname=fontname)
+    start_y, _ = build_info_section(page, name, student_id, page_w, title, fontname=fontname)
 
     remaining = questions[:]
     page_number = 1

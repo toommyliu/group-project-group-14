@@ -45,7 +45,7 @@ def run_cli() -> None:
         "--output", required=True, help="Output directory for generated PDFs."
     )
     parser.add_argument(
-        "--unit-title",
+        "--title",
         default="CMPE 195 Sample Exam",
         help="Title shown on template pages (default: 'CMPE 195 Sample Exam').",
     )
@@ -97,7 +97,7 @@ def run_cli() -> None:
             out,
             v,
             questions,
-            args.unit_title,
+            args.title,
             all_versions=args.versions,
             fontname=args.font,
         )
@@ -127,7 +127,7 @@ def run_cli() -> None:
                     name,
                     sid,
                     questions,
-                    args.unit_title,
+                    args.title,
                     fontname=args.font,
                 )
                 print(f"  Wrote {out}")
