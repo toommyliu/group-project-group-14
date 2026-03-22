@@ -1,6 +1,6 @@
 [project]
 name = "local-grader"
-dynamic = [ "version" ]
+version = "1.0"
 description = "TUI application that will streamline and automate grading"
 authors = [
   { name = "Andy Cortes", email = "andy.cortes@sjsu.edu" },
@@ -8,12 +8,11 @@ authors = [
   { name = "Tommy Liu", email = "tommy.liu@sjsu.edu" },
   { name = "Marco Lopez", email = "marco.lopez@sjsu.edu" }
 ]
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.10"
 dependencies = [
   "textual (>=8.1.1,<9.0.0)",
   "typing-extensions >=4.4.0",
   "rich >=14.2.0",
-  "poetry (>=2.3.2,<3.0.0)",
   "update (>=0.0.1,<0.0.2)",
   "pypdf (>=6.9.1,<7.0.0)",
   "pymupdf (>=1.25.3,<2.0.0)",
@@ -22,18 +21,15 @@ dependencies = [
   "pillow (>=12.1.1,<13.0.0)",
 ]
 
-[tool.poetry]
-version = "1.0"
-packages = [
-  { include = "local_grader", from = "src" }
-]
-
-[tool.poetry.scripts]
+[project.scripts]
 tui = "local_grader.tui.main:run_app"
-pdf_splitter = "local_grader.cli.pdf_splitter:run_cli"
-question_splitter = "local_grader.cli.question_splitter:run_cli"
-roster_reader = "local_grader.cli.roster_reader:run_cli"
+pdf-splitter = "local_grader.cli.pdf_splitter:run_cli"
+question-splitter = "local_grader.cli.question_splitter:run_cli"
+roster-reader = "local_grader.cli.roster_reader:run_cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/local_grader"]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

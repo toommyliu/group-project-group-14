@@ -1,17 +1,17 @@
 # Local Grader
 
-> 
+>
 
 ## Team
 
-| Name | GitHub | Email |
-|------|--------|-------|
-| Marco Lopez | [@TheMarco408](https://github.com/username) | marco.lopez@sjsu.edu |
-| Tommy Liu | [@toommyliu](https://github.com/toommyliu) | tommy.liu@sjsu.edu |
+| Name        | GitHub                                           | Email                |
+| ----------- | ------------------------------------------------ | -------------------- |
+| Marco Lopez | [@TheMarco408](https://github.com/username)      | marco.lopez@sjsu.edu |
+| Tommy Liu   | [@toommyliu](https://github.com/toommyliu)       | tommy.liu@sjsu.edu   |
 | Andy Cortes | [@andycortes23](https://github.com/andycortes23) | andy.cortes@sjsu.edu |
-| Arjun Gill | [@arjung04](https://github.com/arjung04) | arjun.gill@sjsu.edu |
+| Arjun Gill  | [@arjung04](https://github.com/arjung04)         | arjun.gill@sjsu.edu  |
 
-**Advisor:** [Dr. Carlos Rojas](mailto:carlos.rojas@sjsu.edu) 
+**Advisor:** [Dr. Carlos Rojas](mailto:carlos.rojas@sjsu.edu)
 
 ---
 
@@ -24,7 +24,7 @@ Timely, quality feedback helps improve student learning outcomes, and yet, today
 
 The application will ingest scanned PDF submissions that are split by assignment.
 Graders can create and customize rubrics per assignment, manage course rosters, and annotate PDFs directly.
-These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them. 
+These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them.
 
 ### Key Features
 
@@ -43,8 +43,8 @@ These capabilities will enable educators to visualize trends in grade statistics
 
 ## Screenshots
 
-| Feature | Screenshot |
-|---------|------------|
+| Feature     | Screenshot                                   |
+| ----------- | -------------------------------------------- |
 | [Feature 1] | ![Screenshot](docs/screenshots/feature1.png) |
 | [Feature 2] | ![Screenshot](docs/screenshots/feature2.png) |
 
@@ -52,11 +52,11 @@ These capabilities will enable educators to visualize trends in grade statistics
 
 ## Tech Stack
 
-| Category | Technology |
-|----------|------------|
-| Frontend | Python     |
-| Backend | Python     |
-| Database |            |
+| Category   | Technology |
+| ---------- | ---------- |
+| Frontend   | Python     |
+| Backend    | Python     |
+| Database   |            |
 | Deployment |            |
 
 ---
@@ -66,7 +66,8 @@ These capabilities will enable educators to visualize trends in grade statistics
 ### Prerequisites
 
 - [Python v3.13+](https://www.python.org/)
-- [Homebrew](https://brew.sh/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+  - If not using standalone installer, install [Homebrew](https://brew.sh/) first
 
 ### Installation
 
@@ -76,46 +77,36 @@ git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git my-folder-
 cd my-folder-name
 ```
 
-#### Installing Poetry
+#### Installing UV
 
 On macOS:
 
-```
-# Install 
-brew install pipx # package installer
-pipx ensurepath 
-pipx install poetry # dependency management and packaging
+```bash
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh # or brew install uv
 
-pip install textual-image
-
-# activate the poetry environment
-eval $(poetry env activate)
+# Install dependencies and sync virtual environment
+uv sync
 ```
 
 #### Library Management
-```
+
+```bash
 # install a library
-poetry add my-library
+uv add my-library
 
 # remove a library
-poetry remove my-library
-```
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your values
-
-# Run database migrations (if applicable)
-[migration command]
+uv remove my-library
 ```
 
 ### Running Locally
 
 ```bash
-# Development mode
-[dev command]
+# Run the TUI
+uv run tui
 
-# The app will be available at http://localhost:XXXX
+# Executing CLI tools
+uv run pdf-splitter assets/sample.pdf
 ```
 
 ### Running Tests
@@ -131,13 +122,13 @@ cp .env.example .env
 <details>
 <summary>Click to expand API endpoints</summary>
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/resource` | Get all resources |
-| GET | `/api/resource/:id` | Get resource by ID |
-| POST | `/api/resource` | Create new resource |
-| PUT | `/api/resource/:id` | Update resource |
-| DELETE | `/api/resource/:id` | Delete resource |
+| Method | Endpoint            | Description         |
+| ------ | ------------------- | ------------------- |
+| GET    | `/api/resource`     | Get all resources   |
+| GET    | `/api/resource/:id` | Get resource by ID  |
+| POST   | `/api/resource`     | Create new resource |
+| PUT    | `/api/resource/:id` | Update resource     |
+| DELETE | `/api/resource/:id` | Delete resource     |
 
 </details>
 
@@ -173,6 +164,7 @@ cp .env.example .env
 ### Commit Messages
 
 Use clear, descriptive commit messages:
+
 - `Add user authentication endpoint`
 - `Fix database connection timeout issue`
 - `Update README with setup instructions`
@@ -192,4 +184,4 @@ This project is licensed under the <FILL IN> License - see the [LICENSE](LICENSE
 
 ---
 
-*CMPE 195A/B - Senior Design Project | San Jose State University | Spring 2026*
+_CMPE 195A/B - Senior Design Project | San Jose State University | Spring 2026_
