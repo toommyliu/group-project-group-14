@@ -110,7 +110,7 @@ def build_info_section(
     cx = page_w / 2
 
     # Title
-    lines = title.split("\n")
+    lines = [line.strip() for line in title.strip().split("\n") if line.strip()]
     num_lines = len(lines)
     fontsize = 14
     line_h = fontsize * 1.4
