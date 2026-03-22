@@ -1,12 +1,12 @@
 [project]
-name = "grading-tui-package"
+name = "local-grader"
 dynamic = [ "version" ]
 description = "TUI application that will streamline and automate grading"
 authors = [
-{ name = "Andy Cortes", email = "andy.cortes@sjsu.edu" },
-{ name = "Arjun Gill", email = "arjun.gill@sjsu.edu" },
-{ name = "Tommy Liu", email = "tommy.liu@sjsu.edu" },
-{ name = "Marco Lopez", email = "marco.lopez@sjsu.edu" }
+  { name = "Andy Cortes", email = "andy.cortes@sjsu.edu" },
+  { name = "Arjun Gill", email = "arjun.gill@sjsu.edu" },
+  { name = "Tommy Liu", email = "tommy.liu@sjsu.edu" },
+  { name = "Marco Lopez", email = "marco.lopez@sjsu.edu" }
 ]
 requires-python = ">=3.10,<4.0"
 dependencies = [
@@ -16,6 +16,7 @@ dependencies = [
   "poetry (>=2.3.2,<3.0.0)",
   "update (>=0.0.1,<0.0.2)",
   "pypdf (>=6.9.1,<7.0.0)",
+  "pymupdf (>=1.25.3,<2.0.0)",
   "argparse (>=1.4.0,<2.0.0)",
   "textual-image (>=0.8.5,<0.9.0)",
   "pillow (>=12.1.1,<13.0.0)",
@@ -24,11 +25,14 @@ dependencies = [
 [tool.poetry]
 version = "1.0"
 packages = [
-  { include = "grading_tui_package", from = "src" }
+  { include = "local_grader", from = "src" }
 ]
 
 [tool.poetry.scripts]
-grading_tui_app = "grading_tui_package.main:run_app"
+tui = "local_grader.tui.main:run_app"
+pdf_splitter = "local_grader.cli.pdf_splitter:run_cli"
+question_splitter = "local_grader.cli.question_splitter:run_cli"
+roster_reader = "local_grader.cli.roster_reader:run_cli"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
