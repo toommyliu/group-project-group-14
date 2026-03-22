@@ -1,23 +1,5 @@
 from pathlib import Path
 from pypdf import PdfReader, PdfWriter
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
-
-
-def setup_args() -> Namespace:
-    parser = ArgumentParser(
-        description="Split a PDF into smaller chunks.",
-        epilog=(
-            "examples:\n"
-            " python pdf_splitter.py sample.pdf\n"
-            " python pdf_splitter.py sample.pdf --chunk 5\n"
-        ),
-        formatter_class=RawDescriptionHelpFormatter
-    )
-    parser.add_argument("path", type=str,
-                        help="Path to the PDF file.")
-    parser.add_argument("--chunk", type=int, default=1, help="Number of pages per chunk (default: 1).")
-    return parser.parse_args()
-
 
 def format_output_filename(filename: str, start_page: int, end_page: int) -> str:
     if start_page == end_page:
@@ -48,19 +30,3 @@ def pdf_splitter(path: Path, pages_per_chunk: int = 1) -> None:
             pdf_writer.write(out)
 
         print(f"Created: {output_filename}")
-
-
-if __name__ == "__main__":
-    args = setup_args()
-    final_path = Path(args.path)
-    if final_path.suffix.lower() != ".pdf":
-        raise ValueError("The provided file must be a PDF.")
-
-    if args.chunk <= 0:
-        raise ValueError("Chunk size must be a positive integer.")
-
-    abs_path = final_path.absolute()
-    if not abs_path.is_file():
-        raise FileNotFoundError(f"File not found: {abs_path}")
-
-    pdf_splitter(abs_path, args.chunk)
