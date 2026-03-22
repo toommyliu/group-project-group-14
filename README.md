@@ -76,46 +76,32 @@ git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git my-folder-
 cd my-folder-name
 ```
 
-#### Installing Poetry
+#### Installing UV
 
 On macOS:
 
-```
-# Install 
-brew install pipx # package installer
-pipx ensurepath 
-pipx install poetry # dependency management and packaging
+```bash
+# Install uv
+brew install uv
 
-pip install textual-image
-
-# activate the poetry environment
-eval $(poetry env activate)
+# Install dependencies and sync virtual environment
+uv sync
 ```
 
 #### Library Management
-```
+```bash
 # install a library
-poetry add my-library
+uv add my-library
 
 # remove a library
-poetry remove my-library
-```
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your values
-
-# Run database migrations (if applicable)
-[migration command]
+uv remove my-library
 ```
 
 ### Running Locally
 
 ```bash
-# Development mode
-[dev command]
-
-# The app will be available at http://localhost:XXXX
+# Run the application
+uv run grading_tui_app
 ```
 
 ### Running Tests
