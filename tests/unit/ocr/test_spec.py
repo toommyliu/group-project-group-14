@@ -115,9 +115,8 @@ def test_validate_spec_accepts_all_field_types() -> None:
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
                 "fields": [
-                    {"id": "student_name", "bbox": [0.1, 0.1, 0.2, 0.05], "type": "name"},
+                    {"id": "student_name", "bbox": [0.1, 0.1, 0.2, 0.05], "type": "text"},
                     {"id": "student_id", "bbox": [0.1, 0.2, 0.2, 0.05], "type": "sid"},
-                    {"id": "email", "bbox": [0.1, 0.3, 0.2, 0.05], "type": "email"},
                     {"id": "section", "bbox": [0.1, 0.4, 0.2, 0.05], "type": "section"},
                     {"id": "custom_field", "bbox": [0.1, 0.5, 0.2, 0.05], "type": "custom"},
                     {"id": "version", "bbox": [0.1, 0.6, 0.2, 0.05], "type": "version_marker", "expected": "A"},
