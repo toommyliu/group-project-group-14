@@ -19,97 +19,12 @@ class Sidebar(VerticalScroll):
         yield Button("About", id="nav-about")
 
 class GradingTUIManager(App):
+    CSS_PATH = "tui_interface_style.tcss"
     
     grade = reactive(100.0)
     history_counter = 0
-
-    CSS = """
-    Screen { background: #1a1a1a; }
-    Sidebar {
-        width: 25;
-        background: #242424;
-        border-right: solid $accent;
-        padding: 1;
-    }
-    #menu-title { text-style: bold; margin-bottom: 1; text-align: center; }
-
-    #document-input {
-        margin-bottom: 1;
-        border: tall $accent;
-    }
-    
-    .document_note { 
-        background: $panel; 
-        border: solid $accent; 
-        margin-bottom: 1; 
-        padding: 1; 
-    }
-
-
-    Sidebar Button { width: 100%; margin-bottom: 1; }
-
-    .sidebar-header-text {
-        color: cyan;
-        text-style: bold;
-        padding: 1 2;
-        width: 100%;
-        text-align: center;
-    }
-
-    .sidebar-highlight { border: double #00ffff; }
-
-    ContentSwitcher { padding: 1; }
-    .page-title { text-style: bold underline; margin-bottom: 1; color: $accent; }
-    
-    #total-grade-label {
-        text-style: bold;
-        margin: 1 0;
-        color: $success;
-    }
-    /* Requirement: Red score if below 70 */
-    .low-grade { color: red !important; text-style: bold italic; }
-
-    .input-row { height: auto; margin-bottom: 1; }
-    .input-row Input { width: 1fr; margin-right: 1; }
-    
-    #history-log {
-        height: 12;
-        border: tall $accent;
-        background: $surface;
-        margin: 1 0;
-        padding: 0 1;
-    }
-    
-    .history-entry {
-        border-bottom: double;
-        padding: 0 1;
-        margin-bottom: 0;
-    }
-
-    .delete-row { height: auto; margin-top: 1; }
-    #delete-idx-input { width: 15; margin-right: 1; }
-
-    Horizontal#split { height: 100%; border: solid green; }
-    VerticalScroll.left-view { width: 50%; padding: 1 2; }
-    VerticalScroll.right-view { width: 50%; padding: 1 2; border-left: solid red; }
-
-    #about-image { width: 100%; height: auto; margin-top: 1; }
-
-    /* Requirement: Centered and Wider Submit Button */
-    #submit-container {
-        align: center middle;
-        width: 100%;
-        margin-top: 1;
-    }
-    #submit-db {
-        width: 60%;
-        min-width: 30;
-    }
-    #db-status {
-        text-align: center;
-        width: 100%;
-    }
-    """
+    # Added to track unique widget IDs regardless of deletions
+    total_entries_created = 0
 
     BINDINGS = [("q", "quit", "Quit"), ("n", "user_input", "Enter Note"), ("c", "clear_all", "Clear Notes")]
 
@@ -126,7 +41,7 @@ class GradingTUIManager(App):
                 with VerticalScroll(id="page-documents"):
                     yield Label("MY DOCUMENTS", classes="page-title")
                     yield Input(placeholder="Type a note and press Enter...", id="document-input")
-                    yield Vertical(id="document-container")
+                    yield VerticalScroll(id="document-container")
 
                 # UPLOAD PAGE
                 with VerticalScroll(id="page-upload"):
@@ -158,9 +73,12 @@ class GradingTUIManager(App):
                                 yield Input(placeholder="[ # ]", id="delete-idx-input")
                                 yield Button("Delete Line", id="btn-delete-entry", variant="error")
 
-                            # UI Update: Wrapped in Center container for styling
+                            # Wrapped in Center container for styling
                             with Center(id="submit-container"):
-                                yield Button("Submit to Database", id="submit-db", variant="success")
+                                with Horizontal():
+                                    yield Button("Previous", id="btn-prev-doc", classes="nav-btn")
+                                    yield Button("Submit to Database", id="submit-db", variant="success")
+                                    yield Button("Next", id="btn-next-doc", classes="nav-btn")
                             yield Static("", id="db-status")
 
                 # SETTINGS PAGE
@@ -178,7 +96,7 @@ class GradingTUIManager(App):
         try:
             lbl = self.query_one("#total-grade-label", Label)
             lbl.update(f"Total Grade: {new_grade:.1f}")
-            # Logic: color red if below 70
+            # Color red if below 70
             lbl.set_class(new_grade < 70.0, "low-grade")
         except:
             pass
@@ -217,16 +135,19 @@ class GradingTUIManager(App):
             penalty_val = float(penalty_raw)
             self.grade -= penalty_val
             self.history_counter += 1
+            self.total_entries_created += 1
             
             log_container = self.query_one("#history-log")
             # Store metadata in attributes for re-indexing later
-            new_entry = Static("", classes="history-entry", id=f"log-idx-{self.history_counter}")
+            # Using total_entries_created for ID to ensure uniqueness
+            new_entry = Static("", classes="history-entry", id=f"log-widget-{self.total_entries_created}")
             new_entry.penalty_amt = penalty_val
             new_entry.prob_name = prob
             new_entry.comment_text = comment
+            new_entry.display_idx = self.history_counter
             
             # Use formatting helper
-            new_entry.update(f"[{self.history_counter}] Prob: {prob} | -{penalty_val:.1f} | {comment}")
+            new_entry.update(f"[{new_entry.display_idx}] Prob: {prob} | -{penalty_val:.1f} | {comment}")
             
             log_container.mount(new_entry)
             log_container.scroll_end()
@@ -239,29 +160,32 @@ class GradingTUIManager(App):
     def process_delete_entry(self) -> None:
         idx_input = self.query_one("#delete-idx-input", Input)
         try:
-            target_id = f"#log-idx-{idx_input.value}"
-            entry = self.query_one(target_id, Static)
-            self.grade += entry.penalty_amt 
-            entry.remove()
-            idx_input.value = ""
+            target_display_idx = int(idx_input.value)
+            entries = self.query("#history-log .history-entry")
             
-            # Call re-indexing after removal
-            self.reindex_history()
+            for entry in entries:
+                if entry.display_idx == target_display_idx:
+                    self.grade += entry.penalty_amt 
+                    entry.remove()
+                    idx_input.value = ""
+                    # Call re-indexing after removal
+                    self.reindex_history()
+                    break
         except:
             pass 
 
     def reindex_history(self) -> None:
-        """Requirement: Fixes index sequence after a deletion."""
+        """ Index sequence after a deletion. """
         entries = self.query("#history-log .history-entry")
         self.history_counter = 0
         for entry in entries:
             self.history_counter += 1
-            # Update ID for future deletions
-            entry.id = f"log-idx-{self.history_counter}"
-            # Update displayed text with new index
-            entry.update(f"[{self.history_counter}] Prob: {entry.prob_name} | -{entry.penalty_amt:.1f} | {entry.comment_text}")
+            # Update display metadata and text, NOT the widget ID
+            entry.display_idx = self.history_counter
+            entry.update(f"[{entry.display_idx}] Prob: {entry.prob_name} | -{entry.penalty_amt:.1f} | {entry.comment_text}")
 
     def process_db_submit(self) -> None:
+        """Triggered when Submit to Database is clicked. Currently just simulates submission and updates status."""
         history_items = self.query("#history-log Static")
         status = f"Success: Sent {len(history_items)} entries. Final Grade: {self.grade:.1f}"
         self.query_one("#db-status", Static).update(status)
