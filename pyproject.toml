@@ -36,6 +36,10 @@ scan-template = "local_grader.cli.scan_template:run_cli"
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_grader"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
