@@ -16,13 +16,15 @@ ConfidenceThreshold = float
 
 DEFAULT_CONFIDENCE_THRESHOLD = 60.0
 MIN_TEXT_LENGTH = 1
-MAX_TEXT_LENGTH = 1000 # ?
+MAX_TEXT_LENGTH = 1000  # ?
+
 
 @dataclass
 class OcrResult:
     text: str
     confidence: float
     bbox_px: tuple[int, int, int, int]
+
 
 @dataclass
 class FieldExtractionResult:
@@ -32,6 +34,7 @@ class FieldExtractionResult:
     validated: bool = False
     error: str | None = None
 
+
 @dataclass
 class QuestionExtractionResult:
     question_id: str
@@ -39,6 +42,7 @@ class QuestionExtractionResult:
     output_path: str | None = None
     skipped: bool = False
     error: str | None = None
+
 
 @dataclass
 class SubmissionResult:
@@ -52,6 +56,7 @@ class SubmissionResult:
     needs_review: bool = False
     review_reasons: list[str] = field(default_factory=list)
 
+
 @dataclass
 class OcrConfig:
     lang: str = "eng"
@@ -60,6 +65,7 @@ class OcrConfig:
     deskew: bool = True
     confidence_threshold: ConfidenceThreshold = DEFAULT_CONFIDENCE_THRESHOLD
     text_cleanup_fn: Callable[[str], str] | None = None
+
 
 def _override_config(base: OcrConfig, field: dict) -> OcrConfig:
     return OcrConfig(
@@ -73,8 +79,10 @@ def _override_config(base: OcrConfig, field: dict) -> OcrConfig:
         text_cleanup_fn=base.text_cleanup_fn,
     )
 
+
 def _normalize_text(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip()
+
 
 def _short_text_from_result(text: str, field: dict) -> str:
     ftype = field.get("type", "text")
@@ -107,8 +115,10 @@ def _short_text_from_result(text: str, field: dict) -> str:
             return letters[0]
     return text
 
+
 def _is_empty(text: str) -> bool:
     return len(text.strip()) < MIN_TEXT_LENGTH
+
 
 def _bbox_norm_to_px(
     bbox_norm: list[float], page_w: int, page_h: int
@@ -119,6 +129,7 @@ def _bbox_norm_to_px(
     x1 = int((x + w) * page_w)
     y1 = int((y + h) * page_h)
     return x0, y0, x1, y1
+
 
 def render_page_to_image(
     doc: fitz.Document, page_idx: int, dpi: int = 300
@@ -132,9 +143,11 @@ def render_page_to_image(
     w, h = img.size
     return img, w, h
 
+
 def crop_region(image: Image.Image, bbox_px: tuple[int, int, int, int]) -> Image.Image:
     x0, y0, x1, y1 = bbox_px
     return image.crop((x0, y0, x1, y1))
+
 
 def ocr_region(
     image: Image.Image,
@@ -193,6 +206,7 @@ def ocr_region(
         bbox_px=(min_x, min_y, max_x, max_y),
     )
 
+
 def validate_field_result(
     result: OcrResult, field: dict, config: OcrConfig
 ) -> FieldExtractionResult:
@@ -241,6 +255,7 @@ def validate_field_result(
 
     return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
 
+
 def extract_fields_from_page(
     page_image: Image.Image,
     fields: list[dict],
@@ -259,6 +274,7 @@ def extract_fields_from_page(
         results.append(field_result)
     return results
 
+
 def extract_version_field(spec: dict) -> dict | None:
     for page_dict in spec.get("pages", []):
         for f in page_dict.get("fields", []):
@@ -272,17 +288,7 @@ def detect_version_from_anchors(
     page_anchors: list[dict],
     spec: dict,
 ) -> str | None:
-    """
-    Detect template version by checking which anchors are present in the image.
-
-    Args:
-        page_image: The rendered page image.
-        page_anchors: List of anchor definitions from the spec for this page.
-        spec: The full spec dictionary, used to look up version mappings.
-
-    Returns:
-        The detected version ID, or None if detection failed.
-    """
+    """Return version ID from filled anchors on a rendered page."""
     if not version_anchor_map(spec):
         return None
     if not page_anchors:
@@ -336,68 +342,79 @@ def process_submission_pdf(
     all_question_results: list[QuestionExtractionResult] = []
     anchor_version_id: str | None = None
 
-    for page_dict in spec.get("pages", []):
-        page_num = page_dict["page_number"]
-        page_idx = page_num - 1
-        if page_idx < 0 or page_idx >= len(doc):
-            continue
+    try:
+        for page_dict in spec.get("pages", []):
+            page_num = page_dict["page_number"]
+            page_idx = page_num - 1
+            if page_idx < 0 or page_idx >= len(doc):
+                continue
 
-        page_image, page_w, page_h = render_page_to_image(doc, page_idx, dpi)
+            page_image, page_w, page_h = render_page_to_image(doc, page_idx, dpi)
 
-        # Try anchor-based version detection on the first page
-        if page_num == 1 and anchor_version_id is None:
-            anchor_version_id = detect_version_from_anchors(
-                page_image, page_dict.get("anchors", []), spec
-            )
-
-        field_results = extract_fields_from_page(
-            page_image, page_dict.get("fields", []), config, page_w, page_h
-        )
-        all_field_results.extend(field_results)
-
-        questions = page_dict.get("questions", [])
-        for q in questions:
-            qid = q["id"]
-            bbox_px = _bbox_norm_to_px(q["bbox"], page_w, page_h)
-            region = crop_region(page_image, bbox_px)
-            sub_dir = Path(output_dir) / "responses" / path.stem
-            sub_dir.mkdir(parents=True, exist_ok=True)
-            ext = response_format
-            out_path = sub_dir / f"{qid}.{ext}"
-            region.save(out_path)
-            all_question_results.append(
-                QuestionExtractionResult(
-                    question_id=qid, page_number=page_num, output_path=str(out_path)
+            # Try detecting version from anchors on the first page
+            if page_num == 1 and anchor_version_id is None:
+                anchor_version_id = detect_version_from_anchors(
+                    page_image, page_dict.get("anchors", []), spec
                 )
-            )
 
-    # Version detection: prefer anchor-based, fall back to OCR version_marker
-    if anchor_version_id is not None:
+            field_results = extract_fields_from_page(
+                page_image, page_dict.get("fields", []), config, page_w, page_h
+            )
+            all_field_results.extend(field_results)
+
+            questions = page_dict.get("questions", [])
+            for q in questions:
+                qid = q["id"]
+                bbox_px = _bbox_norm_to_px(q["bbox"], page_w, page_h)
+                region = crop_region(page_image, bbox_px)
+                sub_dir = Path(output_dir) / "responses" / path.stem
+                sub_dir.mkdir(parents=True, exist_ok=True)
+                ext = response_format
+                out_path = sub_dir / f"{qid}.{ext}"
+                region.save(out_path)
+                all_question_results.append(
+                    QuestionExtractionResult(
+                        question_id=qid, page_number=page_num, output_path=str(out_path)
+                    )
+                )
+    finally:
+        doc.close()
+
+    versions = version_anchor_map(spec)
+
+    # Use anchor-based version if possible
+    if versions:
         result.version_id = anchor_version_id
-        result.version_confidence = 100.0
-        result.version_validated = True
-        result.version_error = None
-    else:
-        version_field = extract_version_field(spec)
-        version_result = next(
-            (
-                r
-                for r in all_field_results
-                if r.field_id == (version_field or {}).get("id")
-            ),
-            None,
-        )
-        if version_result:
-            result.version_id = (
-                version_result.ocr_result.text if version_result.ocr_result else None
-            )
-            result.version_confidence = (
-                version_result.ocr_result.confidence
-                if version_result.ocr_result
-                else None
-            )
-            result.version_validated = version_result.validated
-            result.version_error = version_result.error
+        if anchor_version_id is not None:
+            result.version_confidence = 100.0
+            result.version_validated = True
+            result.version_error = None
+        else:
+            result.version_confidence = 0.0
+            result.version_validated = False
+            result.version_error = "anchor_version_not_detected"
+    # TODO: legacy code?
+    # else:
+    #     version_field = extract_version_field(spec)
+    #     version_result = next(
+    #         (
+    #             r
+    #             for r in all_field_results
+    #             if r.field_id == (version_field or {}).get("id")
+    #         ),
+    #         None,
+    #     )
+    #     if version_result:
+    #         result.version_id = (
+    #             version_result.ocr_result.text if version_result.ocr_result else None
+    #         )
+    #         result.version_confidence = (
+    #             version_result.ocr_result.confidence
+    #             if version_result.ocr_result
+    #             else None
+    #         )
+    #         result.version_validated = version_result.validated
+    #         result.version_error = version_result.error
 
     version_field = extract_version_field(spec)
     result.fields = [
@@ -407,6 +424,7 @@ def process_submission_pdf(
     make_review_reason(result, config)
 
     return result
+
 
 def results_to_dict(result: SubmissionResult) -> dict:
     return {

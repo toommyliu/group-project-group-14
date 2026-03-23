@@ -3,8 +3,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+
 class SpecError(Exception):
     pass
+
 
 REQUIRED_SCHEMA_KEYS = {"schema_version", "unit_id", "pages"}
 VALID_FIELD_TYPES = {
@@ -19,6 +21,7 @@ VALID_RESPONSE_TYPE_FIELDS = {
 }
 
 # TODO: refactor to use pydantic?
+
 
 def validate_bbox(bbox: list[float], ctx: str) -> None:
     if not isinstance(bbox, list) or len(bbox) != 4:
@@ -35,6 +38,7 @@ def validate_bbox(bbox: list[float], ctx: str) -> None:
         raise SpecError(
             f"{ctx}: bbox width/height must be positive, got [x={x}, y={y}, w={w}, h={h}]"
         )
+
 
 def validate_field(field: dict, ctx: str) -> None:
     if "id" not in field:
@@ -69,6 +73,7 @@ def validate_field(field: dict, ctx: str) -> None:
             raise SpecError(
                 f"{field_ctx}: type='version_marker' requires 'expected' value"
             )
+
 
 def validate_question(question: dict, ctx: str) -> None:
     if "id" not in question:
@@ -122,17 +127,29 @@ def validate_page(page: dict, page_idx: int) -> None:
 def _validate_versions(versions: Any) -> list[SpecError]:
     errors: list[SpecError] = []
     if not isinstance(versions, dict):
-        errors.append(SpecError("'versions' must be an object mapping version IDs to anchor ID lists"))
+        errors.append(
+            SpecError(
+                "'versions' must be an object mapping version IDs to anchor ID lists"
+            )
+        )
         return errors
     for vid, anchor_ids in versions.items():
         if not isinstance(vid, str) or not vid:
-            errors.append(SpecError(f"versions: key must be a non-empty string, got {vid!r}"))
+            errors.append(
+                SpecError(f"versions: key must be a non-empty string, got {vid!r}")
+            )
         if not isinstance(anchor_ids, list) or not anchor_ids:
-            errors.append(SpecError(f"versions[{vid!r}]: must be a non-empty list of anchor IDs"))
+            errors.append(
+                SpecError(f"versions[{vid!r}]: must be a non-empty list of anchor IDs")
+            )
             continue
         for aid in anchor_ids:
             if not isinstance(aid, str):
-                errors.append(SpecError(f"versions[{vid!r}]: anchor IDs must be strings, got {aid!r}"))
+                errors.append(
+                    SpecError(
+                        f"versions[{vid!r}]: anchor IDs must be strings, got {aid!r}"
+                    )
+                )
     return errors
 
 
@@ -227,9 +244,7 @@ def version_anchor_map(spec: dict) -> dict[str, list[str]]:
     return spec.get("versions", {})
 
 
-def lookup_version_by_anchors(
-    detected_anchor_ids: set[str], spec: dict
-) -> str | None:
+def lookup_version_by_anchors(detected_anchor_ids: set[str], spec: dict) -> str | None:
     """Match detected anchor IDs to a version from the spec's `versions` map.
 
     Returns the version ID with the best match, or None if no match.
@@ -237,17 +252,33 @@ def lookup_version_by_anchors(
     versions = version_anchor_map(spec)
     if not versions:
         return None
+    if not detected_anchor_ids:
+        return None
+
+    for vid, expected_ids in versions.items():
+        if detected_anchor_ids == set(expected_ids):
+            return vid
+
     best_version: str | None = None
-    best_score = 0.0
+    best_score = float("-inf")
+    tied_versions: list[str] = []
     for vid, expected_ids in versions.items():
         expected_set = set(expected_ids)
         if not expected_set:
             continue
         matched = detected_anchor_ids & expected_set
-        score = len(matched) / len(expected_set)
+        extras = detected_anchor_ids - expected_set
+        missed = expected_set - detected_anchor_ids
+        score = (len(matched) * 2 - len(extras) - len(missed)) / len(expected_set)
         if score > best_score:
             best_score = score
             best_version = vid
+            tied_versions = [vid]
+        elif score == best_score:
+            tied_versions.append(vid)
+
     if best_score < 0.5:
+        return None
+    if len(tied_versions) != 1:
         return None
     return best_version

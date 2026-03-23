@@ -5,22 +5,28 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from local_grader.core.pdf.templates.anchor import anchor_entries_norm
+from .utils import apply_grayscale
+
 @dataclass
 class DetectedRegion:
     """A rectangular region detected in a template scan."""
+
     bbox: list[float]  # [x, y, w, h] normalized 0-1
     region_type: Literal["header_field", "question", "unknown"]
     confidence: float  # 0-100
     label: str | None = None
 
+
 # Minimum area as fraction of page area to consider a contour
 MIN_REGION_AREA_RATIO = 0.002
-# Maximum area — skip huge rectangles (e.g., page borders)
+# Maximum area - skip huge rectangles (e.g., page borders)
 MAX_REGION_AREA_RATIO = 0.5
-# Minimum aspect ratio (w/h) to consider — skip very narrow/tall regions
+# Minimum aspect ratio (w/h) to consider - skip very narrow/tall regions
 MIN_ASPECT_RATIO = 0.3
 # Header zone: regions with y-center in the top N% are header fields
 HEADER_ZONE_RATIO = 0.15
+
 
 def _find_rectangles(
     gray: np.ndarray,
@@ -34,7 +40,7 @@ def _find_rectangles(
         gray: Grayscale image as numpy array.
         min_area: Minimum area in pixels to consider a valid region.
         max_area: Maximum area in pixels to consider a valid region.
-    
+
     Returns:
         List of (x, y, w, h) tuples for detected rectangles in pixel coordinates.
     """
@@ -140,10 +146,7 @@ def scan_template(
         List of DetectedRegion objects sorted top-to-bottom.
     """
     arr = np.array(image)
-    if len(arr.shape) == 3:
-        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = arr
+    gray = apply_grayscale(arr)
 
     page_h, page_w = gray.shape[:2]
     page_area = page_w * page_h
@@ -176,14 +179,13 @@ def scan_template(
 
     return regions
 
+
 def regions_to_spec_draft(
     regions: list[DetectedRegion],
     unit_id: str,
 ) -> dict:
     """
-        Convert detected regions into a draft template spec JSON.
-        Header fields are assigned IDs like field_1, field_2.
-        Question regions are assigned IDs like q1, q2.
+    Convert detected regions into a draft template spec JSON.
     """
     fields: list[dict] = []
     questions: list[dict] = []
@@ -214,12 +216,7 @@ def regions_to_spec_draft(
 
     page_spec: dict = {
         "page_number": 1,
-        "anchors": [
-            {"id": "tl", "bbox": [0.020, 0.020, 0.029, 0.023]},
-            {"id": "tr", "bbox": [0.951, 0.020, 0.029, 0.023]},
-            {"id": "bl", "bbox": [0.020, 0.950, 0.029, 0.023]},
-            {"id": "br", "bbox": [0.951, 0.950, 0.029, 0.023]},
-        ],
+        "anchors": anchor_entries_norm(),
         "fields": fields,
         "questions": questions,
     }

@@ -5,6 +5,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from .utils import apply_grayscale
+
 @dataclass
 class AnchorRegion:
     id: str
@@ -74,16 +76,20 @@ def crop_anchor_region(
     page_w: int,
     page_h: int,
 ) -> np.ndarray:
-    x = int(anchor.x_norm * page_w)
-    y = int(anchor.y_norm * page_h)
-    w = int(anchor.w_norm * page_w)
-    h = int(anchor.h_norm * page_h)
-    return image[y : y + h, x : x + w]
+    x0 = int(round(anchor.x_norm * page_w))
+    y0 = int(round(anchor.y_norm * page_h))
+    x1 = int(round((anchor.x_norm + anchor.w_norm) * page_w))
+    y1 = int(round((anchor.y_norm + anchor.h_norm) * page_h))
 
-def apply_grayscale(image: np.ndarray) -> np.ndarray:
-    if len(image.shape) == 3 and image.shape[2] == 3:
-        return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    return image
+    x0 = max(0, min(page_w, x0))
+    y0 = max(0, min(page_h, y0))
+    x1 = max(0, min(page_w, x1))
+    y1 = max(0, min(page_h, y1))
+
+    if x1 <= x0 or y1 <= y0:
+        return image[0:0, 0:0]
+    return image[y0:y1, x0:x1]
+
 
 def compute_transform(
     reference_image: np.ndarray,
@@ -156,17 +162,33 @@ def detect_anchor_presence(
     anchor: AnchorRegion,
     page_w: int,
     page_h: int,
-    dark_threshold: int = 128,
-    fill_ratio_threshold: float = 0.15,
+    dark_threshold: int = 140,
+    fill_ratio_threshold: float = 0.35,
 ) -> bool:
     """Check if an anchor region contains a filled marker"""
     region = crop_anchor_region(image, anchor, page_w, page_h)
     if region.size == 0:
         return False
     gray = apply_grayscale(region)
-    dark_pixels = np.sum(gray < dark_threshold)
-    total_pixels = gray.size
-    if total_pixels == 0:
+    _, binary_inv = cv2.threshold(gray, dark_threshold, 255, cv2.THRESH_BINARY_INV)
+    if binary_inv.size == 0:
         return False
-    ratio = dark_pixels / total_pixels
-    return ratio >= fill_ratio_threshold
+
+    h, w = binary_inv.shape[:2]
+    margin_x = max(1, int(round(w * 0.18)))
+    margin_y = max(1, int(round(h * 0.18)))
+
+    if margin_x * 2 >= w or margin_y * 2 >= h:
+        inner = binary_inv
+    else:
+        inner = binary_inv[margin_y : h - margin_y, margin_x : w - margin_x]
+
+    if inner.size == 0:
+        return False
+
+    full_ratio = float(np.count_nonzero(binary_inv)) / float(binary_inv.size)
+    inner_ratio = float(np.count_nonzero(inner)) / float(inner.size)
+
+    return inner_ratio >= fill_ratio_threshold and full_ratio >= (
+        fill_ratio_threshold * 0.5
+    )

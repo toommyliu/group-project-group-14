@@ -1,4 +1,4 @@
-from .anchor import ANCHOR_LOCATIONS, Anchor
+from .anchor import ANCHOR_LOCATIONS, Anchor, anchor_entries_norm
 
 # version -> list of anchors that should be filled
 VERSION_ANCHOR_MAP: dict[str, list[Anchor]] = {
@@ -8,7 +8,10 @@ VERSION_ANCHOR_MAP: dict[str, list[Anchor]] = {
     "D": [Anchor.TopRight, Anchor.Bottomleft, Anchor.BottomRight],
 }
 
-def _bbox_norm(rect: tuple[float, float, float, float], page_w: float, page_h: float) -> list[float]:
+
+def _bbox_norm(
+    rect: tuple[float, float, float, float], page_w: float, page_h: float
+) -> list[float]:
     """
     Convert a bounding box from absolute coordinates to normalized coordinates.
     Args:
@@ -44,12 +47,7 @@ def build_layout_spec(
         if page_number not in pages:
             pages[page_number] = {
                 "page_number": page_number,
-                "anchors": [
-                    {"id": Anchor.TopLeft.value, "bbox": [0.020, 0.020, 0.029, 0.023]},
-                    {"id": Anchor.TopRight.value, "bbox": [0.951, 0.020, 0.029, 0.023]},
-                    {"id": Anchor.Bottomleft.value, "bbox": [0.020, 0.950, 0.029, 0.023]},
-                    {"id": Anchor.BottomRight.value, "bbox": [0.951, 0.950, 0.029, 0.023]},
-                ],
+                "anchors": anchor_entries_norm(page_w=page_w, page_h=page_h),
                 "fields": [],
                 "questions": [],
             }
@@ -63,7 +61,7 @@ def build_layout_spec(
             "bbox": _bbox_norm(field_rects["student_name"], page_w, page_h),
             "type": "text",
             "required": True,
-            "psm": 7, # "Treat the image as a single text line."
+            "psm": 7,  # "Treat the image as a single text line."
             "confidence_threshold": 70,
         },
         {
