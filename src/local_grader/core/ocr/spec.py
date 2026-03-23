@@ -9,6 +9,9 @@ class SpecError(Exception):
 REQUIRED_SCHEMA_KEYS = {"schema_version", "unit_id", "pages"}
 VALID_FIELD_TYPES = {
     "text",
+    "sid",
+    "section",
+    "custom",
     "version_marker",
 }
 VALID_RESPONSE_TYPE_FIELDS = {
