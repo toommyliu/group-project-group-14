@@ -35,6 +35,9 @@ def build_layout_spec(
     field_rects: dict[str, tuple[float, float, float, float]],
     question_meta: list[tuple[str, tuple[float, float, float, float], int, int, str]],
 ) -> dict:
+    """
+    Build the layout specification of the PDF template.
+    """
     pages: dict[int, dict] = {}
 
     def page_entry(page_number: int) -> dict:
@@ -52,21 +55,21 @@ def build_layout_spec(
             }
         return pages[page_number]
 
+    # first page is special: it contains the fields for student name and id
     first_page = page_entry(1)
     first_page["fields"] = [
         {
             "id": "student_name",
             "bbox": _bbox_norm(field_rects["student_name"], page_w, page_h),
-            "type": "name",
+            "type": "text",
             "required": True,
-            "psm": 7,
+            "psm": 7, # "Treat the image as a single text line."
             "confidence_threshold": 70,
         },
         {
             "id": "student_id",
             "bbox": _bbox_norm(field_rects["student_id"], page_w, page_h),
-            "type": "sid",
-            "regex": r"^\d{9}$",
+            "type": "text",
             "required": True,
             "whitelist": "0123456789",
             "psm": 7,
@@ -80,6 +83,7 @@ def build_layout_spec(
             {
                 "id": qid,
                 "bbox": _bbox_norm(rect, page_w, page_h),
+                # TODO: support multiple response types?
                 "response_type": "free_response",
                 "points": points,
                 "prompt": prompt,
