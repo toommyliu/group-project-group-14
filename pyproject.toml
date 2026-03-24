@@ -10,15 +10,18 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-  "textual (>=8.1.1,<9.0.0)",
-  "typing-extensions >=4.4.0",
-  "rich >=14.2.0",
-  "update (>=0.0.1,<0.0.2)",
-  "pypdf (>=6.9.1,<7.0.0)",
-  "pymupdf (>=1.25.3,<2.0.0)",
-  "argparse (>=1.4.0,<2.0.0)",
-  "textual-image (>=0.8.5,<0.9.0)",
-  "pillow (>=12.1.1,<13.0.0)",
+  "textual>=8.1.1,<9.0.0",
+  "typing-extensions>=4.4.0",
+  "rich>=14.2.0",
+  "update>=0.0.1,<0.0.2",
+  "pypdf>=6.9.1,<7.0.0",
+  "pymupdf>=1.25.3,<2.0.0",
+  "argparse>=1.4.0,<2.0.0",
+  "textual-image>=0.8.5,<0.9.0",
+  "pillow>=12.1.1,<13.0.0",
+  "pytesseract>=0.3.13",
+  "opencv-python>=4.13.0.92",
+  "pytest>=9.0.2",
 ]
 
 [project.scripts]
@@ -26,9 +29,18 @@ tui = "local_grader.tui.main:run_app"
 pdf-splitter = "local_grader.cli.pdf_splitter:run_cli"
 question-splitter = "local_grader.cli.question_splitter:run_cli"
 roster-reader = "local_grader.cli.roster_reader:run_cli"
+sample-pdf = "local_grader.cli.generate_sample_gradeable_pdf:run_cli"
+ocr-pdf = "local_grader.cli.ocr_pdf:run_cli"
+scan-template = "local_grader.cli.scan_template:run_cli"
+ocr-preview-pdf = "local_grader.cli.ocr_preview_pdf:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_grader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v"
 
 [build-system]
 requires = ["hatchling"]

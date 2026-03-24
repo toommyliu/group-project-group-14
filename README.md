@@ -68,6 +68,7 @@ These capabilities will enable educators to visualize trends in grade statistics
 - [Python v3.13+](https://www.python.org/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
   - If not using standalone installer, install [Homebrew](https://brew.sh/) first
+- [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
 
 ### Installation
 
@@ -106,13 +107,14 @@ uv remove my-library
 uv run tui
 
 # Executing CLI tools
-uv run pdf-splitter assets/sample.pdf
+uv run pdf-splitter assets/sample.pdf assets/sample.pdf
+uv run ocr-pdf --template spec.json --input submission.pdf ...
 ```
 
 ### Running Tests
 
 ```bash
-[test command]
+uv run pytest
 ```
 
 ---
