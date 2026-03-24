@@ -94,7 +94,7 @@
             0.16
           ],
           "response_type": "free_response",
-          "points": 20,
+          "points": 18,
           "prompt": "Explain your reasoning clearly."
         },
         {
@@ -106,7 +106,7 @@
             0.16
           ],
           "response_type": "free_response",
-          "points": 9,
+          "points": 7,
           "prompt": "Show all intermediate steps and calculation details."
         },
         {
@@ -118,7 +118,7 @@
             0.16
           ],
           "response_type": "free_response",
-          "points": 8,
+          "points": 10,
           "prompt": "State assumptions and justify your chosen approach."
         }
       ]
@@ -169,36 +169,36 @@
           "id": "q4",
           "bbox": [
             0.039,
-            0.073,
+            0.116,
             0.922,
-            0.275
+            0.261
           ],
           "response_type": "free_response",
-          "points": 14,
+          "points": 7,
           "prompt": "Compare two valid solutions and discuss their trade-offs."
         },
         {
           "id": "q5",
           "bbox": [
             0.039,
-            0.358,
+            0.387,
             0.922,
-            0.275
+            0.261
           ],
           "response_type": "free_response",
-          "points": 18,
+          "points": 9,
           "prompt": "Provide a concise argument followed by your final answer."
         },
         {
           "id": "q6",
           "bbox": [
             0.039,
-            0.643,
+            0.657,
             0.922,
-            0.275
+            0.261
           ],
           "response_type": "free_response",
-          "points": 20,
+          "points": 10,
           "prompt": "Draw a diagram or visual representation if it helps clarify your explanation."
         }
       ]

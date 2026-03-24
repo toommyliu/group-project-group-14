@@ -1,0 +1,207 @@
+{
+  "schema_version": "1.0",
+  "unit_id": "cmpe195-exam1-sp26",
+  "versions": {
+    "A": [
+      "tl",
+      "tr",
+      "bl"
+    ],
+    "B": [
+      "tl",
+      "tr",
+      "br"
+    ]
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "anchors": [
+        {
+          "id": "tl",
+          "bbox": [
+            0.039,
+            0.03,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "tr",
+          "bbox": [
+            0.946,
+            0.03,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "bl",
+          "bbox": [
+            0.039,
+            0.958,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "br",
+          "bbox": [
+            0.946,
+            0.958,
+            0.015,
+            0.011
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "id": "student_name",
+          "bbox": [
+            0.349,
+            0.261,
+            0.392,
+            0.043
+          ],
+          "type": "name",
+          "required": true,
+          "psm": 7,
+          "confidence_threshold": 70
+        },
+        {
+          "id": "student_id",
+          "bbox": [
+            0.349,
+            0.324,
+            0.392,
+            0.043
+          ],
+          "type": "sid",
+          "required": true,
+          "regex": "^\\d{9}$",
+          "whitelist": "0123456789",
+          "psm": 7,
+          "confidence_threshold": 70
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "bbox": [
+            0.039,
+            0.416,
+            0.922,
+            0.16
+          ],
+          "response_type": "free_response",
+          "points": 18,
+          "prompt": "Explain your reasoning clearly."
+        },
+        {
+          "id": "q2",
+          "bbox": [
+            0.039,
+            0.587,
+            0.922,
+            0.16
+          ],
+          "response_type": "free_response",
+          "points": 7,
+          "prompt": "Show all intermediate steps and calculation details."
+        },
+        {
+          "id": "q3",
+          "bbox": [
+            0.039,
+            0.757,
+            0.922,
+            0.16
+          ],
+          "response_type": "free_response",
+          "points": 10,
+          "prompt": "State assumptions and justify your chosen approach."
+        }
+      ]
+    },
+    {
+      "page_number": 2,
+      "anchors": [
+        {
+          "id": "tl",
+          "bbox": [
+            0.039,
+            0.03,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "tr",
+          "bbox": [
+            0.946,
+            0.03,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "bl",
+          "bbox": [
+            0.039,
+            0.958,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "br",
+          "bbox": [
+            0.946,
+            0.958,
+            0.015,
+            0.011
+          ]
+        }
+      ],
+      "fields": [],
+      "questions": [
+        {
+          "id": "q4",
+          "bbox": [
+            0.039,
+            0.116,
+            0.922,
+            0.261
+          ],
+          "response_type": "free_response",
+          "points": 7,
+          "prompt": "Compare two valid solutions and discuss their trade-offs."
+        },
+        {
+          "id": "q5",
+          "bbox": [
+            0.039,
+            0.387,
+            0.922,
+            0.261
+          ],
+          "response_type": "free_response",
+          "points": 9,
+          "prompt": "Provide a concise argument followed by your final answer."
+        },
+        {
+          "id": "q6",
+          "bbox": [
+            0.039,
+            0.657,
+            0.922,
+            0.261
+          ],
+          "response_type": "free_response",
+          "points": 10,
+          "prompt": "Draw a diagram or visual representation if it helps clarify your explanation."
+        }
+      ]
+    }
+  ]
+}

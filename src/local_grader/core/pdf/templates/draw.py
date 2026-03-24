@@ -231,6 +231,45 @@ def draw_page_number(
     )
 
 
+def draw_continued_page_header(
+    page: fitz.Page,
+    page_w: float,
+    header_text: str,
+    fonts: ResolvedTemplateFonts,
+) -> float:
+    margin = ANCHOR_MARGIN
+    text = header_text.strip() or "Quiz"
+
+    header_baseline_y = 60.0
+    header_size = _fit_font_size(
+        text,
+        target_width=page_w * 0.78,
+        base_size=13,
+        min_size=10,
+        bold=False,
+        fonts=fonts,
+    )
+    _draw_centered_text(
+        page,
+        text=text,
+        center_x=page_w / 2.0,
+        baseline_y=header_baseline_y,
+        fontsize=header_size,
+        bold=False,
+        fonts=fonts,
+    )
+
+    underline_y = header_baseline_y + 8
+    page.draw_line(
+        fitz.Point(margin, underline_y),
+        fitz.Point(page_w - margin, underline_y),
+        color=(0.0, 0.0, 0.0),
+        width=BOX_LINE,
+    )
+
+    return underline_y + 24
+
+
 def draw_question_box(
     page: fitz.Page,
     x0: float,

@@ -58,6 +58,11 @@ def run_cli() -> None:
         help="Optional instructions shown below Student ID (for example: 'closed book, closed notes').",
     )
     parser.add_argument(
+        "--continued-page-header",
+        default=None,
+        help="Optional header text shown on page 2+ (defaults to the first title line).",
+    )
+    parser.add_argument(
         "--versions",
         nargs="+",
         default=["A", "B", "C"],
@@ -116,6 +121,7 @@ def run_cli() -> None:
             questions,
             args.title,
             instructions=args.instructions,
+            continued_page_header=args.continued_page_header,
             all_versions=args.versions,
             font_regular_file=args.font_regular_file,
             font_bold_file=args.font_bold_file,
@@ -148,6 +154,7 @@ def run_cli() -> None:
                     questions,
                     args.title,
                     instructions=args.instructions,
+                    continued_page_header=args.continued_page_header,
                     font_regular_file=args.font_regular_file,
                     font_bold_file=args.font_bold_file,
                 )

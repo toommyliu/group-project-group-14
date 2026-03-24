@@ -5,7 +5,12 @@ import fitz
 
 from .anchor import ANCHOR_LOCATIONS, Anchor
 from .constants import LETTER_H, LETTER_W
-from .draw import build_info_section, create_page_with_anchors, draw_questions_on_page
+from .draw import (
+    build_info_section,
+    create_page_with_anchors,
+    draw_continued_page_header,
+    draw_questions_on_page,
+)
 from .fonts import register_page_fonts, resolve_template_fonts
 from .spec import VERSION_ANCHOR_MAP, build_layout_spec
 
@@ -17,12 +22,22 @@ def _filled_anchors_for_version(version: str) -> set[Anchor]:
     return {Anchor(anchor_id) for anchor_id in ANCHOR_LOCATIONS}
 
 
+def _resolve_continued_page_header(title: str, override: str | None) -> str:
+    if override is not None and override.strip():
+        return override.strip()
+    lines = [line.strip() for line in title.split("\n") if line.strip()]
+    if lines:
+        return lines[0]
+    return "Quiz"
+
+
 def generate_template_pdf(
     output_path: Path,
     version: str,
     questions: list[tuple[str, int, str]],
     title: str,
     instructions: str | None = None,
+    continued_page_header: str | None = None,
     all_versions: list[str] | None = None,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
@@ -36,6 +51,7 @@ def generate_template_pdf(
         print(fonts.warning, file=sys.stderr)
 
     filled = _filled_anchors_for_version(version)
+    continued_header_text = _resolve_continued_page_header(title, continued_page_header)
     doc = fitz.Document()
     page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
     register_page_fonts(page, fonts)
@@ -59,7 +75,12 @@ def generate_template_pdf(
         if page_number > 1:
             page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
             register_page_fonts(page, fonts)
-            start_y = 24 + 18 + 16
+            start_y = draw_continued_page_header(
+                page=page,
+                page_w=page_w,
+                header_text=continued_header_text,
+                fonts=fonts,
+            )
 
         drawn_count, drawn_meta = draw_questions_on_page(
             page,
@@ -95,6 +116,7 @@ def generate_submission_pdf(
     questions: list[tuple[str, int, str]],
     title: str,
     instructions: str | None = None,
+    continued_page_header: str | None = None,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
     font_regular_file: str | Path | None = None,
@@ -107,6 +129,7 @@ def generate_submission_pdf(
         print(fonts.warning, file=sys.stderr)
 
     filled = _filled_anchors_for_version(version)
+    continued_header_text = _resolve_continued_page_header(title, continued_page_header)
     doc = fitz.Document()
     page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
     register_page_fonts(page, fonts)
@@ -126,7 +149,12 @@ def generate_submission_pdf(
         if page_number > 1:
             page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
             register_page_fonts(page, fonts)
-            start_y = 24 + 18 + 16
+            start_y = draw_continued_page_header(
+                page=page,
+                page_w=page_w,
+                header_text=continued_header_text,
+                fonts=fonts,
+            )
         drawn_count, _ = draw_questions_on_page(
             page,
             page_number,
