@@ -31,7 +31,6 @@ question-splitter = "local_grader.cli.question_splitter:run_cli"
 roster-reader = "local_grader.cli.roster_reader:run_cli"
 sample-pdf = "local_grader.cli.generate_sample_gradeable_pdf:run_cli"
 ocr-pdf = "local_grader.cli.ocr_pdf:run_cli"
-scan-template = "local_grader.cli.scan_template:run_cli"
 ocr-preview-pdf = "local_grader.cli.ocr_preview_pdf:run_cli"
 
 [tool.hatch.build.targets.wheel]
