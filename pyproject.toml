@@ -39,6 +39,7 @@ packages = ["src/local_grader"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "-v"
 
 [build-system]
 requires = ["hatchling"]
