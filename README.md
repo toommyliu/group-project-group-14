@@ -113,7 +113,7 @@ uv run pdf-splitter assets/sample.pdf
 ### Running Tests
 
 ```bash
-[test command]
+uv run pytest
 ```
 
 ---
