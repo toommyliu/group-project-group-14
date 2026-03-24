@@ -30,7 +30,7 @@
         {
           "id": "student_name",
           "bbox": [0.108, 0.149, 0.425, 0.04],
-          "type": "text",
+          "type": "name",
           "required": true,
           "psm": 7,
           "confidence_threshold": 70
@@ -38,8 +38,9 @@
         {
           "id": "student_id",
           "bbox": [0.565, 0.149, 0.327, 0.04],
-          "type": "text",
+          "type": "sid",
           "required": true,
+          "regex": "^\\d{9}$",
           "whitelist": "0123456789",
           "psm": 7,
           "confidence_threshold": 70

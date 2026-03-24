@@ -59,7 +59,7 @@ def build_layout_spec(
         {
             "id": "student_name",
             "bbox": _bbox_norm(field_rects["student_name"], page_w, page_h),
-            "type": "text",
+            "type": "name",
             "required": True,
             "psm": 7,  # "Treat the image as a single text line."
             "confidence_threshold": 70,
@@ -67,8 +67,9 @@ def build_layout_spec(
         {
             "id": "student_id",
             "bbox": _bbox_norm(field_rects["student_id"], page_w, page_h),
-            "type": "text",
+            "type": "sid",
             "required": True,
+            "regex": "^\\d{9}$",
             "whitelist": "0123456789",
             "psm": 7,
             "confidence_threshold": 70,
@@ -91,9 +92,9 @@ def build_layout_spec(
     versions_map = {}
     for v in versions:
         if v in VERSION_ANCHOR_MAP:
-            versions_map[v] = [a.value for a in VERSION_ANCHOR_MAP[v]]
+            versions_map[v] = [Anchor(a).value for a in VERSION_ANCHOR_MAP[v]]
         else:
-            versions_map[v] = [a.value for a in ANCHOR_LOCATIONS]
+            versions_map[v] = sorted(list(ANCHOR_LOCATIONS))
 
     return {
         "schema_version": "1.0",

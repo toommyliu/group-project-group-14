@@ -1,6 +1,7 @@
 REQUIRED_SCHEMA_KEYS = {"schema_version", "unit_id", "pages"}
 VALID_FIELD_TYPES = {
     "text",
+    "name",
     "sid",
     "section",
     "custom",
