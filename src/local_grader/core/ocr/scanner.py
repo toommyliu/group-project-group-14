@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 
 from local_grader.core.pdf.templates.anchor import anchor_entries_norm
+from .constants import REQUIRED_SCHEMA_KEYS, SCHEMA_VERSION
 from .utils import apply_grayscale
 
 @dataclass
@@ -222,7 +223,7 @@ def regions_to_spec_draft(
     }
 
     return {
-        "schema_version": "1.0",
+        "schema_version": SCHEMA_VERSION,
         "unit_id": unit_id,
         "pages": [page_spec],
     }

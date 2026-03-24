@@ -3,22 +3,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from local_grader.core.ocr.constants import VALID_FIELD_TYPES, REQUIRED_SCHEMA_KEYS, VALID_RESPONSE_TYPE_FIELDS
+
 
 class SpecError(Exception):
     pass
-
-
-REQUIRED_SCHEMA_KEYS = {"schema_version", "unit_id", "pages"}
-VALID_FIELD_TYPES = {
-    "text",
-    "sid",
-    "section",
-    "custom",
-    "version_marker",
-}
-VALID_RESPONSE_TYPE_FIELDS = {
-    "free_response",
-}
 
 # TODO: refactor to use pydantic?
 
