@@ -4,10 +4,11 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from local_grader.core.pdf.templates import (
-    generate_template_pdf,
-    generate_submission_pdf,
+    CMU_BOLD_FILE,
+    CMU_REGULAR_FILE,
     generate_prompts,
-    DEFAULT_FONT,
+    generate_submission_pdf,
+    generate_template_pdf,
 )
 
 SAMPLE_NAMES = [
@@ -38,16 +39,23 @@ def run_cli() -> None:
             "examples:\n"
             "  uv run sample-pdf --output tests/sample_output --write-spec\n"
             "  uv run sample-pdf --output tests/sample_output --versions A B --write-spec\n"
+            '  uv run sample-pdf --output tests/sample_output --instructions "closed book, closed notes"\n'
         ),
         formatter_class=RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--output", required=True, help="Output directory for generated PDFs."
     )
+    # TODO: support templates/placeholders to dynamically populate?
     parser.add_argument(
         "--title",
-        default="CMPE 195 Sample Exam",
-        help="Title shown on template pages (default: 'CMPE 195 Sample Exam').",
+        default="Quiz 1: Shell/Linux Commands\nCMPE195A: Senior Design Project I\nSan Jose State University\nFriday, March 22, 2026",
+        help="Title shown on template pages. Put each header line on a new line.",
+    )
+    parser.add_argument(
+        "--instructions",
+        default=None,
+        help="Optional instructions shown below Student ID (for example: 'closed book, closed notes').",
     )
     parser.add_argument(
         "--versions",
@@ -68,12 +76,19 @@ def run_cli() -> None:
         "--template-only", action="store_true", help="Only generate templates."
     )
     parser.add_argument(
-        "--font",
-        default=DEFAULT_FONT,
-        help=f"Font to use for text (standard PDF fonts like 'tiro', 'cour', 'helv') (default: '{DEFAULT_FONT}').",
+        "--font-regular-file",
+        default=str(CMU_REGULAR_FILE),
+        help=f"Path to regular font file (default: {CMU_REGULAR_FILE}).",
     )
     parser.add_argument(
-        "--write-spec", action="store_true", help="Write the generated layout spec to a JSON file."
+        "--font-bold-file",
+        default=str(CMU_BOLD_FILE),
+        help=f"Path to bold font file (default: {CMU_BOLD_FILE}).",
+    )
+    parser.add_argument(
+        "--write-spec",
+        action="store_true",
+        help="Write the generated layout spec to a JSON file.",
     )
     args = parser.parse_args()
 
@@ -87,7 +102,9 @@ def run_cli() -> None:
         submissions_dir.mkdir(parents=True, exist_ok=True)
 
     prompts = generate_prompts(args.questions)
-    questions = [(f"q{i + 1}", random.randint(5, 20), prompts[i]) for i in range(args.questions)]
+    questions = [
+        (f"q{i + 1}", random.randint(5, 20), prompts[i]) for i in range(args.questions)
+    ]
 
     print(f"Generating templates for versions: {args.versions}")
     generated_specs = {}
@@ -98,8 +115,10 @@ def run_cli() -> None:
             v,
             questions,
             args.title,
+            instructions=args.instructions,
             all_versions=args.versions,
-            fontname=args.font,
+            font_regular_file=args.font_regular_file,
+            font_bold_file=args.font_bold_file,
         )
         generated_specs[v] = spec
         print(f"  Wrote {out}")
@@ -128,11 +147,14 @@ def run_cli() -> None:
                     sid,
                     questions,
                     args.title,
-                    fontname=args.font,
+                    instructions=args.instructions,
+                    font_regular_file=args.font_regular_file,
+                    font_bold_file=args.font_bold_file,
                 )
                 print(f"  Wrote {out}")
 
     print("\nDone.")
+
 
 if __name__ == "__main__":
     run_cli()

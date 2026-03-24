@@ -1,33 +1,64 @@
+import sys
 from pathlib import Path
+
 import fitz
 
-from .draw import create_page_with_anchors, build_info_section, draw_questions_on_page
-from .spec import build_layout_spec, VERSION_ANCHOR_MAP
-from .constants import LETTER_W, LETTER_H, DEFAULT_FONT
-from .anchor import ANCHOR_LOCATIONS
+from .anchor import ANCHOR_LOCATIONS, Anchor
+from .constants import LETTER_H, LETTER_W
+from .draw import build_info_section, create_page_with_anchors, draw_questions_on_page
+from .fonts import register_page_fonts, resolve_template_fonts
+from .spec import VERSION_ANCHOR_MAP, build_layout_spec
+
+
+def _filled_anchors_for_version(version: str) -> set[Anchor]:
+    configured = VERSION_ANCHOR_MAP.get(version)
+    if configured is not None:
+        return set(configured)
+    return {Anchor(anchor_id) for anchor_id in ANCHOR_LOCATIONS}
+
 
 def generate_template_pdf(
     output_path: Path,
     version: str,
     questions: list[tuple[str, int, str]],
     title: str,
+    instructions: str | None = None,
     all_versions: list[str] | None = None,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
-    fontname: str = DEFAULT_FONT,
+    font_regular_file: str | Path | None = None,
+    font_bold_file: str | Path | None = None,
 ) -> dict:
-    filled = set(VERSION_ANCHOR_MAP.get(version, ANCHOR_LOCATIONS))
+    fonts = resolve_template_fonts(
+        regular_file=font_regular_file, bold_file=font_bold_file
+    )
+    if fonts.warning:
+        print(fonts.warning, file=sys.stderr)
+
+    filled = _filled_anchors_for_version(version)
     doc = fitz.Document()
     page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
-    start_y, field_rects = build_info_section(page, "", "", page_w, title, fontname=fontname)
+    register_page_fonts(page, fonts)
+    start_y, field_rects = build_info_section(
+        page,
+        "",
+        "",
+        page_w,
+        title,
+        instructions,
+        fonts,
+    )
 
     remaining = questions[:]
     page_number = 1
-    question_meta: list[tuple[str, tuple[float, float, float, float], int, int, str]] = []
+    question_meta: list[
+        tuple[str, tuple[float, float, float, float], int, int, str]
+    ] = []
 
     while remaining:
         if page_number > 1:
             page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
+            register_page_fonts(page, fonts)
             start_y = 24 + 18 + 16
 
         drawn_count, drawn_meta = draw_questions_on_page(
@@ -37,7 +68,7 @@ def generate_template_pdf(
             page_w,
             page_h,
             start_y,
-            fontname=fontname,
+            fonts,
         )
         question_meta.extend(drawn_meta)
         remaining = remaining[drawn_count:]
@@ -55,6 +86,7 @@ def generate_template_pdf(
         question_meta=question_meta,
     )
 
+
 def generate_submission_pdf(
     output_path: Path,
     version: str,
@@ -62,20 +94,38 @@ def generate_submission_pdf(
     student_id: str,
     questions: list[tuple[str, int, str]],
     title: str,
+    instructions: str | None = None,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
-    fontname: str = DEFAULT_FONT,
+    font_regular_file: str | Path | None = None,
+    font_bold_file: str | Path | None = None,
 ) -> None:
-    filled = set(VERSION_ANCHOR_MAP.get(version, ANCHOR_LOCATIONS))
+    fonts = resolve_template_fonts(
+        regular_file=font_regular_file, bold_file=font_bold_file
+    )
+    if fonts.warning:
+        print(fonts.warning, file=sys.stderr)
+
+    filled = _filled_anchors_for_version(version)
     doc = fitz.Document()
     page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
-    start_y, _ = build_info_section(page, name, student_id, page_w, title, fontname=fontname)
+    register_page_fonts(page, fonts)
+    start_y, _ = build_info_section(
+        page,
+        name,
+        student_id,
+        page_w,
+        title,
+        instructions,
+        fonts,
+    )
 
     remaining = questions[:]
     page_number = 1
     while remaining:
         if page_number > 1:
             page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
+            register_page_fonts(page, fonts)
             start_y = 24 + 18 + 16
         drawn_count, _ = draw_questions_on_page(
             page,
@@ -84,7 +134,7 @@ def generate_submission_pdf(
             page_w,
             page_h,
             start_y,
-            fontname=fontname,
+            fonts,
         )
         remaining = remaining[drawn_count:]
         page_number += 1

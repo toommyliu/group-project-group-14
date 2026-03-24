@@ -6,4 +6,4 @@ Quiz 1: Shell/Linux Commands
 CMPE195A: Senior Design Project I
 San Jose State University
 Friday, March 22, 2026
-"
+" --instructions "Closed book, closed notes. 6 questions, 10 minutes."
