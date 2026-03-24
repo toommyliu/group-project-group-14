@@ -107,7 +107,8 @@ uv remove my-library
 uv run tui
 
 # Executing CLI tools
-uv run pdf-splitter assets/sample.pdf
+uv run pdf-splitter assets/sample.pdf assets/sample.pdf
+uv run ocr-pdf --template spec.json --input submission.pdf ...
 ```
 
 ### Running Tests
