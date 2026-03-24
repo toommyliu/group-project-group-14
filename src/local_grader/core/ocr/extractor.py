@@ -17,6 +17,7 @@ ConfidenceThreshold = float
 DEFAULT_CONFIDENCE_THRESHOLD = 60.0
 MIN_TEXT_LENGTH = 1
 MAX_TEXT_LENGTH = 1000  # ?
+DEFAULT_SID_REGEX = r"^\d{9}$"
 
 
 @dataclass
@@ -230,7 +231,6 @@ def validate_field_result(
             )
         return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
 
-    # TODO: regex validate student id?
 
     if ftype == "version_marker":
         expected = field.get("expected", "")
@@ -251,6 +251,16 @@ def validate_field_result(
                 ocr_result=result,
                 validated=False,
                 error=f"invalid_name_characters(got={text!r})",
+            )
+
+    if ftype == "sid":
+        pattern = field.get("regex", DEFAULT_SID_REGEX)
+        if not re.fullmatch(pattern, text):
+            return FieldExtractionResult(
+                field_id=fid,
+                ocr_result=result,
+                validated=False,
+                error=f"invalid_sid_format(got={text!r}, pattern={pattern!r})",
             )
 
     return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
