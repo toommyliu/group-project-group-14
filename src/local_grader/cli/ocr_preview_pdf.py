@@ -330,7 +330,7 @@ class LiveRegionEditor:
         )
         keymap = (
             "Mouse: click/drag move, drag corners resize | "
-            "n/p next-prev region | [/ ] prev-next page | arrows move | "
+            "n/p next-prev region | [] prev-next page | arrows move | "
             "WASD fast move | -/= resize | s save+exit | q quit"
         )
         cv2.rectangle(
@@ -457,6 +457,7 @@ class LiveRegionEditor:
         key_right = {83, 2555904, 65363}
         key_down = {84, 2621440, 65364}
 
+        # TODO: this is a little jank
         try:
             while True:
                 image = self._render_page(self._current_page_number())
