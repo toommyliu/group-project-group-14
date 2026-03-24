@@ -1,3 +1,7 @@
+Our software includes the following third-party licensing:
+
+** Computer Modern; version 0.7.0 -- https://sourceforge.net/projects/cm-unicode/
+
 Copyright (C) Authors of original metafont fonts:
 Donald Ervin Knuth (cm, concrete fonts)
 1995, 1996, 1997 J"org Knappen, 1990, 1992 Norbert Schwarz (ec fonts)
@@ -101,3 +105,5 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
+
+------
