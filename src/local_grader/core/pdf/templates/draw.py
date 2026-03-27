@@ -5,6 +5,7 @@ from .constants import (
     ANCHOR_MARGIN,
     ANCHOR_SIZE,
     BOX_LINE,
+    CONTENT_MARGIN,
     MIN_QUESTION_BOX_HEIGHT,
     QUESTION_GAP,
 )
@@ -237,13 +238,14 @@ def draw_continued_page_header(
     header_text: str,
     fonts: ResolvedTemplateFonts,
 ) -> float:
-    margin = ANCHOR_MARGIN
+    content_x0 = CONTENT_MARGIN
+    content_x1 = page_w - CONTENT_MARGIN
     text = header_text.strip() or "Quiz"
 
     header_baseline_y = 60.0
     header_size = _fit_font_size(
         text,
-        target_width=page_w * 0.78,
+        target_width=content_x1 - content_x0,
         base_size=13,
         min_size=10,
         bold=False,
@@ -261,8 +263,8 @@ def draw_continued_page_header(
 
     underline_y = header_baseline_y + 8
     page.draw_line(
-        fitz.Point(margin, underline_y),
-        fitz.Point(page_w - margin, underline_y),
+        fitz.Point(content_x0, underline_y),
+        fitz.Point(content_x1, underline_y),
         color=(0.0, 0.0, 0.0),
         width=BOX_LINE,
     )
@@ -301,9 +303,8 @@ def build_info_section(
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
-    margin = ANCHOR_MARGIN
-    content_x0 = margin
-    content_x1 = page_w - margin
+    content_x0 = CONTENT_MARGIN
+    content_x1 = page_w - CONTENT_MARGIN
 
     lines = [line.strip() for line in title.strip().split("\n") if line.strip()]
     if not lines:
@@ -466,9 +467,10 @@ def draw_questions_on_page(
     start_y: float,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[int, list[tuple[str, tuple[float, float, float, float], int, int, str]]]:
-    margin = ANCHOR_MARGIN
+    content_x0 = CONTENT_MARGIN
+    content_x1 = page_w - CONTENT_MARGIN
     content_top = start_y
-    content_bottom = page_h - margin - ANCHOR_SIZE - 32
+    content_bottom = page_h - ANCHOR_MARGIN - ANCHOR_SIZE - 32
     if content_bottom <= content_top:
         draw_page_number(page, page_number, page_w, page_h, fonts)
         return 0, []
@@ -493,9 +495,9 @@ def draw_questions_on_page(
         y1 = y0 + max_fit_height
         draw_question_box(
             page,
-            margin,
+            content_x0,
             y0,
-            page_w - margin,
+            content_x1,
             y1,
             qid,
             points,
@@ -503,7 +505,7 @@ def draw_questions_on_page(
             fonts,
         )
         drawn_meta.append(
-            (qid, (margin, y0, page_w - margin, y1), page_number, points, prompt)
+            (qid, (content_x0, y0, content_x1, y1), page_number, points, prompt)
         )
 
     draw_page_number(page, page_number, page_w, page_h, fonts)

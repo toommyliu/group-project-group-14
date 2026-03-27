@@ -1,5 +1,6 @@
 ANCHOR_SIZE = 9
 ANCHOR_MARGIN = 24
+CONTENT_MARGIN = ANCHOR_MARGIN + 50 # instructions, questions, sequential page geader
 
 BOX_LINE = 0.75
 
