@@ -242,12 +242,12 @@ def draw_continued_page_header(
     content_x1 = page_w - CONTENT_MARGIN
     text = header_text.strip() or "Quiz"
 
-    header_baseline_y = 60.0
+    header_baseline_y = 39.0
     header_size = _fit_font_size(
         text,
         target_width=content_x1 - content_x0,
-        base_size=13,
-        min_size=10,
+        base_size=10.5,
+        min_size=9,
         bold=False,
         fonts=fonts,
     )
@@ -261,7 +261,7 @@ def draw_continued_page_header(
         fonts=fonts,
     )
 
-    underline_y = header_baseline_y + 8
+    underline_y = header_baseline_y + max(4.0, header_size * 0.45)
     page.draw_line(
         fitz.Point(content_x0, underline_y),
         fitz.Point(content_x1, underline_y),
