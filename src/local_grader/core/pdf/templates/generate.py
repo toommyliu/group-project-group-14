@@ -43,6 +43,7 @@ def generate_template_pdf(
     page_h: float = LETTER_H,
     font_regular_file: str | Path | None = None,
     font_bold_file: str | Path | None = None,
+    start_questions_on_first_page: bool = True,
 ) -> dict:
     fonts = resolve_template_fonts(
         regular_file=font_regular_file, bold_file=font_bold_file
@@ -67,33 +68,52 @@ def generate_template_pdf(
 
     remaining = questions[:]
     page_number = 1
+    current_page = page
+    current_start_y = start_y
+
+    if not start_questions_on_first_page and remaining:
+        page_number = 2
+        current_page = create_page_with_anchors(
+            doc, page_w, page_h, filled_anchors=filled
+        )
+        register_page_fonts(current_page, fonts)
+        current_start_y = draw_continued_page_header(
+            page=current_page,
+            page_w=page_w,
+            header_text=continued_header_text,
+            fonts=fonts,
+        )
+
     question_meta: list[
         tuple[str, tuple[float, float, float, float], int, int, str]
     ] = []
 
     while remaining:
-        if page_number > 1:
-            page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
-            register_page_fonts(page, fonts)
-            start_y = draw_continued_page_header(
-                page=page,
-                page_w=page_w,
-                header_text=continued_header_text,
-                fonts=fonts,
-            )
-
         drawn_count, drawn_meta = draw_questions_on_page(
-            page,
+            current_page,
             page_number,
             remaining,
             page_w,
             page_h,
-            start_y,
+            current_start_y,
             fonts,
         )
         question_meta.extend(drawn_meta)
         remaining = remaining[drawn_count:]
+        if not remaining:
+            break
+
         page_number += 1
+        current_page = create_page_with_anchors(
+            doc, page_w, page_h, filled_anchors=filled
+        )
+        register_page_fonts(current_page, fonts)
+        current_start_y = draw_continued_page_header(
+            page=current_page,
+            page_w=page_w,
+            header_text=continued_header_text,
+            fonts=fonts,
+        )
 
     doc.save(str(output_path), garbage=4, deflate=True)
     doc.close()
@@ -121,6 +141,7 @@ def generate_submission_pdf(
     page_h: float = LETTER_H,
     font_regular_file: str | Path | None = None,
     font_bold_file: str | Path | None = None,
+    start_questions_on_first_page: bool = True,
 ) -> None:
     fonts = resolve_template_fonts(
         regular_file=font_regular_file, bold_file=font_bold_file
@@ -145,27 +166,47 @@ def generate_submission_pdf(
 
     remaining = questions[:]
     page_number = 1
+    current_page = page
+    current_start_y = start_y
+
+    if not start_questions_on_first_page and remaining:
+        page_number = 2
+        current_page = create_page_with_anchors(
+            doc, page_w, page_h, filled_anchors=filled
+        )
+        register_page_fonts(current_page, fonts)
+        current_start_y = draw_continued_page_header(
+            page=current_page,
+            page_w=page_w,
+            header_text=continued_header_text,
+            fonts=fonts,
+        )
+
     while remaining:
-        if page_number > 1:
-            page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
-            register_page_fonts(page, fonts)
-            start_y = draw_continued_page_header(
-                page=page,
-                page_w=page_w,
-                header_text=continued_header_text,
-                fonts=fonts,
-            )
         drawn_count, _ = draw_questions_on_page(
-            page,
+            current_page,
             page_number,
             remaining,
             page_w,
             page_h,
-            start_y,
+            current_start_y,
             fonts,
         )
         remaining = remaining[drawn_count:]
+        if not remaining:
+            break
+
         page_number += 1
+        current_page = create_page_with_anchors(
+            doc, page_w, page_h, filled_anchors=filled
+        )
+        register_page_fonts(current_page, fonts)
+        current_start_y = draw_continued_page_header(
+            page=current_page,
+            page_w=page_w,
+            header_text=continued_header_text,
+            fonts=fonts,
+        )
 
     doc.save(str(output_path), garbage=4, deflate=True)
     doc.close()

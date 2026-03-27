@@ -40,6 +40,7 @@ def run_cli() -> None:
             "  uv run sample-pdf --output tests/sample_output --write-spec\n"
             "  uv run sample-pdf --output tests/sample_output --versions A B --write-spec\n"
             '  uv run sample-pdf --output tests/sample_output --instructions "closed book, closed notes"\n'
+            "  uv run sample-pdf --output tests/sample_output --questions-start-page 2\n"
         ),
         formatter_class=RawDescriptionHelpFormatter,
     )
@@ -61,6 +62,16 @@ def run_cli() -> None:
         "--continued-page-header",
         default=None,
         help="Optional header text shown on page 2+ (defaults to the first title line).",
+    )
+    parser.add_argument(
+        "--questions-start-page",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help=(
+            "Page number where questions begin (1 = below instructions on page 1, "
+            "2 = start on page 2; default: 1)."
+        ),
     )
     parser.add_argument(
         "--versions",
@@ -125,6 +136,7 @@ def run_cli() -> None:
             all_versions=args.versions,
             font_regular_file=args.font_regular_file,
             font_bold_file=args.font_bold_file,
+            start_questions_on_first_page=(args.questions_start_page == 1),
         )
         generated_specs[v] = spec
         print(f"  Wrote {out}")
@@ -157,6 +169,7 @@ def run_cli() -> None:
                     continued_page_header=args.continued_page_header,
                     font_regular_file=args.font_regular_file,
                     font_bold_file=args.font_bold_file,
+                    start_questions_on_first_page=(args.questions_start_page == 1),
                 )
                 print(f"  Wrote {out}")
 
