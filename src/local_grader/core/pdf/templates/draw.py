@@ -289,7 +289,7 @@ def draw_question_box(
         fitz.Rect(x0 + 4, y0 + 5, x1 - 4, y0 + 30),
         header,
         fontsize=11,
-        fontname=fonts.regular_name,
+        fontname=fonts.bold_name,
         color=(0.2, 0.2, 0.2),
     )
 
