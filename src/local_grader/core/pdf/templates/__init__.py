@@ -1,10 +1,11 @@
 from .generate import generate_template_pdf, generate_submission_pdf
 from .prompts import generate_prompts
-from .constants import DEFAULT_FONT
+from .fonts import CMU_BOLD_FILE, CMU_REGULAR_FILE
 
 __all__ = [
     "generate_template_pdf",
     "generate_submission_pdf",
     "generate_prompts",
-    "DEFAULT_FONT",
+    "CMU_REGULAR_FILE",
+    "CMU_BOLD_FILE",
 ]
