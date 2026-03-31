@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from local_grader.core.courses.contracts.transaction import CoursesTransaction
-from local_grader.core.courses.infrastructure.sqlite.connection import (
+from local_grader.core.courses.adapters.sqlite.connection import (
     create_sqlite_connection,
 )
-from local_grader.core.courses.infrastructure.sqlite.stores import (
+from local_grader.core.courses.adapters.sqlite.stores import (
     SqliteAssessmentStore,
     SqliteCourseStore,
     SqliteEnrollmentStore,

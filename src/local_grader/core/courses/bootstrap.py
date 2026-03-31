@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from local_grader.core.courses.infrastructure.sqlite.migrations import (
+from local_grader.core.courses.adapters.sqlite.migrations import (
     initialize_sqlite_database,
 )
-from local_grader.core.courses.infrastructure.sqlite.transaction import (
+from local_grader.core.courses.adapters.sqlite.transaction import (
     SqliteCoursesTransaction,
 )
 from local_grader.core.courses.services.assessment_service import AssessmentService
