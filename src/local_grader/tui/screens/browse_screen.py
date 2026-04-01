@@ -21,7 +21,6 @@ class BrowseScreen(Vertical):
             "Use arrows to move and Enter to select a course → assignment → student.",
             id="browse-status",
         )
-        yield Static("", id="browse-keymap")
 
     def column(self, column_id: str) -> MillerColumn:
         return self.query_one(f"#{column_id}", MillerColumn)
@@ -55,11 +54,6 @@ class BrowseScreen(Vertical):
 
     def set_status(self, text: str) -> None:
         self.query_one("#browse-status", Static).update(text)
-
-    def set_keymap_label(self, profile_name: str) -> None:
-        self.query_one("#browse-keymap", Static).update(
-            f"Keymap: {profile_name.upper()} (arrows + enter always available)"
-        )
 
     def selected_student(self) -> MillerItem | None:
         return self.column("students").selected_item

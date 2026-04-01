@@ -66,7 +66,6 @@ class TuiApp(App):
 
     def on_mount(self) -> None:
         self.browse_controller.initialize()
-        self._refresh_keymap_labels()
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
@@ -167,10 +166,4 @@ class TuiApp(App):
 
     def set_input_profile(self, profile_name: InputProfileName | str) -> None:
         self.input_controller.set_profile(profile_name)
-        self._refresh_keymap_labels()
         self.refresh_bindings()
-
-    def _refresh_keymap_labels(self) -> None:
-        profile_name = self.input_controller.profile_name().value
-        self.get_browse_screen().set_keymap_label(profile_name)
-        self.get_grade_screen().set_keymap_label(profile_name)

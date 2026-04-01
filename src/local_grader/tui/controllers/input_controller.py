@@ -49,7 +49,7 @@ class CommandBindingSpec:
     command: InputCommand
     description: str
     contexts: tuple[InputContext, ...]
-    show: bool = False
+    show: bool = True
     priority: bool = True
     key_display: str | None = None
 
@@ -172,24 +172,56 @@ VIM_PROFILE = InputProfile(
             InputCommand.BROWSE_MOVE_UP,
             "Browse Up",
             (InputContext.BROWSE,),
+            key_display="k/up",
+        ),
+        CommandBindingSpec(
+            "up",
+            InputCommand.BROWSE_MOVE_UP,
+            "Browse Up",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "j",
             InputCommand.BROWSE_MOVE_DOWN,
             "Browse Down",
             (InputContext.BROWSE,),
+            key_display="j/down",
+        ),
+        CommandBindingSpec(
+            "down",
+            InputCommand.BROWSE_MOVE_DOWN,
+            "Browse Down",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "h",
             InputCommand.BROWSE_MOVE_LEFT,
             "Browse Left",
             (InputContext.BROWSE,),
+            key_display="h/left",
+        ),
+        CommandBindingSpec(
+            "left",
+            InputCommand.BROWSE_MOVE_LEFT,
+            "Browse Left",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "l",
             InputCommand.BROWSE_MOVE_RIGHT,
             "Browse Right",
             (InputContext.BROWSE,),
+            key_display="l/right",
+        ),
+        CommandBindingSpec(
+            "right",
+            InputCommand.BROWSE_MOVE_RIGHT,
+            "Browse Right",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "enter",
@@ -252,24 +284,56 @@ EMACS_PROFILE = InputProfile(
             InputCommand.BROWSE_MOVE_UP,
             "Browse Up",
             (InputContext.BROWSE,),
+            key_display="ctrl+p/up",
+        ),
+        CommandBindingSpec(
+            "up",
+            InputCommand.BROWSE_MOVE_UP,
+            "Browse Up",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "ctrl+n",
             InputCommand.BROWSE_MOVE_DOWN,
             "Browse Down",
             (InputContext.BROWSE,),
+            key_display="ctrl+n/down",
+        ),
+        CommandBindingSpec(
+            "down",
+            InputCommand.BROWSE_MOVE_DOWN,
+            "Browse Down",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "ctrl+b",
             InputCommand.BROWSE_MOVE_LEFT,
             "Browse Left",
             (InputContext.BROWSE,),
+            key_display="ctrl+b/left",
+        ),
+        CommandBindingSpec(
+            "left",
+            InputCommand.BROWSE_MOVE_LEFT,
+            "Browse Left",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "ctrl+f",
             InputCommand.BROWSE_MOVE_RIGHT,
             "Browse Right",
             (InputContext.BROWSE,),
+            key_display="ctrl+f/right",
+        ),
+        CommandBindingSpec(
+            "right",
+            InputCommand.BROWSE_MOVE_RIGHT,
+            "Browse Right",
+            (InputContext.BROWSE,),
+            show=False,
         ),
         CommandBindingSpec(
             "enter",
@@ -387,10 +451,7 @@ class InputController:
         command: InputCommand | str,
     ) -> bool:
         normalized_profile = self._coerce_profile_name(profile_name)
-        if normalized_profile not in (
-            InputProfileName.STANDARD,
-            self._profile_name,
-        ):
+        if normalized_profile != self._profile_name:
             return False
         return self.command_available(command)
 
