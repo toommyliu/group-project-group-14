@@ -1,0 +1,69 @@
+from dataclasses import dataclass
+
+from textual.app import ComposeResult
+from textual.containers import Vertical
+from textual.message import Message
+from textual.widgets import Label, ListItem, ListView, Static
+
+
+@dataclass(frozen=True)
+class MillerItem:
+    item_id: str
+    label: str
+    meta: str = ""
+
+
+class MillerColumn(Vertical):
+    class ItemSelected(Message):
+        def __init__(self, column_id: str, item: MillerItem) -> None:
+            self.column_id = column_id
+            self.item = item
+            super().__init__()
+
+    def __init__(
+        self,
+        title: str,
+        column_id: str,
+        *,
+        id: str | None = None,
+        classes: str | None = None,
+    ) -> None:
+        self.column_id = column_id
+        self._title = title
+        self._items: list[MillerItem] = []
+        self._selected_item: MillerItem | None = None
+        super().__init__(id=id, classes=classes)
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._title, classes="miller-title")
+        yield ListView(id=f"{self.column_id}-list")
+
+    def set_items(self, items: list[MillerItem]) -> None:
+        self._items = items
+        self._selected_item = None
+        list_view = self.query_one(ListView)
+        list_view.clear()
+        for item in items:
+            text = item.label
+            if item.meta:
+                text = f"{item.label} [{item.meta}]"
+            list_view.append(ListItem(Static(text)))
+
+    def clear_items(self) -> None:
+        self.set_items([])
+
+    @property
+    def selected_item(self) -> MillerItem | None:
+        return self._selected_item
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.list_view.id != f"{self.column_id}-list":
+            return
+        if event.index is None:
+            return
+        if event.index < 0 or event.index >= len(self._items):
+            return
+        self._selected_item = self._items[event.index]
+        self.post_message(
+            self.ItemSelected(column_id=self.column_id, item=self._selected_item)
+        )
