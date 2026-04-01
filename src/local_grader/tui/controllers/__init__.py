@@ -1,9 +1,9 @@
-from .browse_controller import BrowseController
+from .home_controller import HomeController
 from .grade_controller import GradeController
 from .input_controller import InputController
 
 __all__ = [
-    "BrowseController",
+    "HomeController",
     "GradeController",
     "InputController",
 ]

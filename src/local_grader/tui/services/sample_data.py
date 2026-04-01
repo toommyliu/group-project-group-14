@@ -6,7 +6,7 @@ from pathlib import Path
 import fitz
 
 from local_grader.tui.state import QuestionGrade, RubricOption
-from local_grader.tui.widgets.miller_column import MillerItem
+from local_grader.tui.widgets.nav_item import NavItem
 
 
 class SampleDataService:
@@ -14,25 +14,25 @@ class SampleDataService:
         self._default_image_path = default_image_path
         self._sample_question_images: list[tuple[str, str]] = []
 
-    def load_courses(self) -> list[MillerItem]:
+    def load_courses(self) -> list[NavItem]:
         return [
-            MillerItem("c1", "CMPE 195", "Spring 2026"),
-            MillerItem("c2", "CMPE 102", "Spring 2026"),
+            NavItem("c1", "CMPE 195", "Spring 2026"),
+            NavItem("c2", "CMPE 102", "Spring 2026"),
         ]
 
-    def load_assignments(self, course_id: int | None) -> list[MillerItem]:
+    def load_assignments(self, course_id: int | None) -> list[NavItem]:
         if course_id is None:
             return []
         return [
-            MillerItem("a1", "HW 1"),
-            MillerItem("a2", "HW 2"),
-            MillerItem("a3", "Midterm"),
+            NavItem("a1", "HW 1"),
+            NavItem("a2", "HW 2"),
+            NavItem("a3", "Midterm"),
         ]
 
     def load_students(
         self,
         status_lookup: Callable[[str], str],
-    ) -> list[MillerItem]:
+    ) -> list[NavItem]:
         students = [
             ("s1", "Tommy Liu"),
             ("s2", "Andy Cortes"),
@@ -40,7 +40,7 @@ class SampleDataService:
             ("s4", "Marco Lopez"),
         ]
         return [
-            MillerItem(item_id, label, status_lookup(item_id))
+            NavItem(item_id, label, status_lookup(item_id))
             for item_id, label in students
         ]
 

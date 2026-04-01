@@ -3,21 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from local_grader.tui.screens import BrowseScreen, GradeScreen
+from local_grader.tui.screens import GradeScreen, HomeScreen
 from local_grader.tui.services.sample_data import SampleDataService
-from local_grader.tui.state import PAGE_BROWSE, PAGE_GRADE, TuiWorkflowState
-from local_grader.tui.widgets.miller_column import MillerItem
+from local_grader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
+from local_grader.tui.widgets.nav_item import NavItem
 
 
 class GradeApp(Protocol):
-    def get_browse_screen(self) -> BrowseScreen:
-        ...
+    def get_home_screen(self) -> HomeScreen: ...
 
-    def get_grade_screen(self) -> GradeScreen:
-        ...
+    def get_grade_screen(self) -> GradeScreen: ...
 
-    def switch_to(self, page_id: str) -> None:
-        ...
+    def switch_to(self, page_id: str) -> None: ...
 
 
 class GradeController:
@@ -67,9 +64,9 @@ class GradeController:
     def on_comment_updated(self, comment: str) -> None:
         self._state.grading_run.update_comment(comment)
 
-    def return_to_browse(self) -> None:
-        self._app.switch_to(PAGE_BROWSE)
-        self._app.get_browse_screen().focus_column("students")
+    def return_to_home(self) -> None:
+        self._app.switch_to(PAGE_HOME)
+        self._app.get_home_screen().focus_tree()
 
     def next_question(self) -> None:
         if not self._on_grade_page():
@@ -118,10 +115,10 @@ class GradeController:
             self.refresh_grade_screen(status="Student finalized. Loaded next student.")
             return
 
-        self._app.switch_to(PAGE_BROWSE)
-        browse_screen = self._app.get_browse_screen()
-        browse_screen.set_status("All students finalized for this assignment.")
-        browse_screen.focus_column("students")
+        self._app.switch_to(PAGE_HOME)
+        home_screen = self._app.get_home_screen()
+        home_screen.set_status("All students finalized for this assignment.")
+        home_screen.focus_tree()
 
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
@@ -131,7 +128,7 @@ class GradeController:
         )
         grade_screen.set_status(status)
 
-    def _current_student_item(self) -> MillerItem | None:
+    def _current_student_item(self) -> NavItem | None:
         if self._state.active_student_index < 0:
             return None
         if self._state.active_student_index >= len(self._state.student_items):

@@ -1,19 +1,19 @@
 import asyncio
 from unittest.mock import patch
 
-from textual.widgets import ContentSwitcher
+from textual.widgets import ContentSwitcher, Tree
 
-from local_grader.tui.tui import TuiApp
 from local_grader.tui.controllers.input_controller import (
     InputController,
     InputProfileName,
 )
 from local_grader.tui.main import run_app
+from local_grader.tui.tui import TuiApp
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeSampleDataService
 
 
-def test_browse_screen_navigation_helpers_and_auto_advance() -> None:
+def test_home_tree_navigation_helpers() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -22,24 +22,20 @@ def test_browse_screen_navigation_helpers_and_auto_advance() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            browse_screen = app.get_browse_screen()
+            tree = app.get_home_screen().query_one("#home-tree", Tree)
 
-            assert browse_screen.focused_column_id() == "courses"
-            assert browse_screen.highlighted_item("courses").item_id == "c1"
-
-            await pilot.press("enter")
-            await pilot.pause()
-
-            assert browse_screen.focused_column_id() == "assignments"
-            assert browse_screen.highlighted_item("assignments").item_id == "a1"
-
-            await pilot.press("left")
-            await pilot.pause()
-            assert browse_screen.focused_column_id() == "courses"
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "CMPE 195 [Spring 2026]"
 
             await pilot.press("right")
             await pilot.pause()
-            assert browse_screen.focused_column_id() == "assignments"
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "Assignments"
+
+            await pilot.press("left")
+            await pilot.pause()
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "CMPE 195 [Spring 2026]"
 
     asyncio.run(run())
 
@@ -53,11 +49,11 @@ def test_happy_path_opens_student_and_finalize_loads_next_student() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("right")
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("g")
             await pilot.pause()
 
             switcher = app.query_one(ContentSwitcher)
@@ -74,7 +70,41 @@ def test_happy_path_opens_student_and_finalize_loads_next_student() -> None:
     asyncio.run(run())
 
 
-def test_vim_profile_binds_j_and_enter_for_browse_flow() -> None:
+def test_student_submissions_path_opens_selected_submission() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_service=FakeSampleDataService(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-grade"
+            assert app.workflow_state.selection_labels["assignment"] == "HW 2"
+            assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
+
+    asyncio.run(run())
+
+
+def test_vim_profile_binds_j_and_enter_for_home_flow() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -84,15 +114,19 @@ def test_vim_profile_binds_j_and_enter_for_browse_flow() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
+            await pilot.press("l")
+            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-            assert app.get_browse_screen().focused_column_id() == "assignments"
+
+            tree = app.get_home_screen().query_one("#home-tree", Tree)
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "HW 1"
 
             await pilot.press("j")
             await pilot.pause()
-            assert (
-                app.get_browse_screen().highlighted_item("assignments").item_id == "a2"
-            )
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "HW 2"
 
     asyncio.run(run())
 
@@ -109,14 +143,16 @@ def test_runtime_profile_switch_updates_live_bindings() -> None:
             app.set_input_profile(InputProfileName.VIM)
             await pilot.pause()
 
+            await pilot.press("l")
+            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
             await pilot.press("j")
             await pilot.pause()
 
-            assert (
-                app.get_browse_screen().highlighted_item("assignments").item_id == "a2"
-            )
+            tree = app.get_home_screen().query_one("#home-tree", Tree)
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "HW 2"
 
     asyncio.run(run())
 
@@ -131,21 +167,29 @@ def test_emacs_profile_supports_ctrl_p_plus_standard_keys() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
+            await pilot.press("ctrl+f")
+            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-            assert app.get_browse_screen().focused_column_id() == "assignments"
+
+            tree = app.get_home_screen().query_one("#home-tree", Tree)
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "HW 1"
 
             await pilot.press("down")
             await pilot.pause()
-            assert (
-                app.get_browse_screen().highlighted_item("assignments").item_id == "a2"
-            )
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "HW 2"
 
             await pilot.press("ctrl+p")
             await pilot.pause()
-            assert (
-                app.get_browse_screen().highlighted_item("assignments").item_id == "a1"
-            )
+            assert tree.cursor_node is not None
+            assert str(tree.cursor_node.label) == "HW 1"
+
+            await pilot.press("g")
+            await pilot.pause()
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-grade"
 
     asyncio.run(run())
 

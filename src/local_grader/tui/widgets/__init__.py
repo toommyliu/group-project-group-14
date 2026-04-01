@@ -1,10 +1,9 @@
 from .breadcrumb import Breadcrumb
-from .miller_column import MillerColumn, MillerItem
+from .nav_item import NavItem
 from .response_viewer import ResponseViewer
 
 __all__ = [
+    "NavItem",
     "Breadcrumb",
-    "MillerColumn",
-    "MillerItem",
     "ResponseViewer",
 ]

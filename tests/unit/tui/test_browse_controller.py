@@ -1,82 +1,89 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from local_grader.tui.controllers.browse_controller import BrowseController
+from local_grader.tui.controllers.home_controller import HomeController
+from local_grader.tui.screens.home_screen import HomeNodeData
 from local_grader.tui.state import TuiWorkflowState
-from local_grader.tui.widgets.miller_column import MillerItem
+from local_grader.tui.widgets.nav_item import NavItem
 
 from .fakes import FakeSampleDataService
 
 
 @dataclass
-class FakeBrowseScreen:
-    courses: list[MillerItem] = field(default_factory=list)
-    assignments: list[MillerItem] = field(default_factory=list)
-    students: list[MillerItem] = field(default_factory=list)
+class FakeHomeScreen:
     status: str = ""
-    focused_column: str | None = None
+    details: str = ""
+    has_focus: bool = False
+    courses: list[NavItem] | None = None
+    course_assignments: dict[str, list[NavItem]] | None = None
+    course_students: dict[str, list[NavItem]] | None = None
+    student_submissions: dict[tuple[str, str], list[NavItem]] | None = None
+    _focused_first_child: bool = False
+    highlighted_data: HomeNodeData | None = None
+
+    def __post_init__(self) -> None:
+        self.course_assignments = {}
+        self.course_students = {}
+        self.student_submissions = {}
 
     def set_courses(
-        self,
-        courses: list[MillerItem],
-        *,
-        highlight_first: bool = False,
+        self, courses: list[NavItem], *, highlight_first: bool = False
     ) -> None:
         self.courses = courses
 
-    def set_assignments(
+    def set_course_assignments(
         self,
-        assignments: list[MillerItem],
-        *,
-        highlight_first: bool = False,
+        course_item_id: str,
+        assignments: list[NavItem],
     ) -> None:
-        self.assignments = assignments
+        self.course_assignments[course_item_id] = assignments
 
-    def set_students(
+    def set_course_assignments_loading(self, course_item_id: str) -> None:
+        self.course_assignments[course_item_id] = []
+
+    def set_course_students(
         self,
-        students: list[MillerItem],
-        *,
-        highlight_first: bool = False,
+        course_item_id: str,
+        students: list[NavItem],
     ) -> None:
-        self.students = students
+        self.course_students[course_item_id] = students
+
+    def set_course_students_loading(self, course_item_id: str) -> None:
+        self.course_students[course_item_id] = []
+
+    def set_student_submissions(
+        self,
+        course_item_id: str,
+        student_item_id: str,
+        assignments: list[NavItem],
+    ) -> None:
+        self.student_submissions[(course_item_id, student_item_id)] = assignments
+
+    def set_student_submissions_loading(
+        self,
+        course_item_id: str,
+        student_item_id: str,
+    ) -> None:
+        self.student_submissions[(course_item_id, student_item_id)] = []
 
     def set_status(self, text: str) -> None:
         self.status = text
 
-    def focus_column(self, column_id: str) -> bool:
-        self.focused_column = column_id
+    def set_details(self, text: str) -> None:
+        self.details = text
+
+    def focus_tree(self) -> bool:
+        self.has_focus = True
         return True
 
-    def focus_first_populated_column(self) -> bool:
-        self.focused_column = "courses"
+    def focused(self) -> bool:
+        return self.has_focus
+
+    def focus_first_child(self) -> bool:
+        self._focused_first_child = True
         return True
 
-    def focus_next_populated_column(self, column_id: str) -> bool:
-        self.focused_column = {
-            "courses": "assignments",
-            "assignments": "students",
-            "students": "students",
-        }[column_id]
-        return True
-
-    def focus_previous_populated_column(self, column_id: str) -> bool:
-        self.focused_column = {
-            "students": "assignments",
-            "assignments": "courses",
-            "courses": "courses",
-        }[column_id]
-        return True
-
-    def focused_column_id(self) -> str | None:
-        return self.focused_column
-
-    def highlighted_item(self, column_id: str) -> MillerItem | None:
-        collections = {
-            "courses": self.courses,
-            "assignments": self.assignments,
-            "students": self.students,
-        }
-        items = collections[column_id]
-        return items[0] if items else None
+    def highlighted_node_data(self) -> HomeNodeData | None:
+        return self.highlighted_data
 
     def move_cursor_up(self) -> None:
         return None
@@ -84,20 +91,26 @@ class FakeBrowseScreen:
     def move_cursor_down(self) -> None:
         return None
 
+    def move_cursor_left(self) -> None:
+        return None
+
+    def move_cursor_right(self) -> None:
+        return None
+
 
 class FakeApp:
     def __init__(self) -> None:
-        self.browse_screen = FakeBrowseScreen()
+        self.home_screen = FakeHomeScreen()
 
-    def get_browse_screen(self) -> FakeBrowseScreen:
-        return self.browse_screen
+    def get_home_screen(self) -> FakeHomeScreen:
+        return self.home_screen
 
 
-def test_course_selection_resets_downstream_state_and_focuses_assignments() -> None:
+def test_assignment_path_opens_student_for_grading() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
     opened_students: list[int] = []
-    controller = BrowseController(
+    controller = HomeController(
         app,
         state,
         FakeSampleDataService(),
@@ -105,53 +118,110 @@ def test_course_selection_resets_downstream_state_and_focuses_assignments() -> N
     )
 
     controller.initialize()
-    controller.handle_item_selected("courses", MillerItem("c1", "CMPE 195"))
+    controller.handle_node_selected(
+        HomeNodeData(kind="course", course=NavItem("c1", "CMPE 195"))
+    )
+    controller.handle_node_selected(
+        HomeNodeData(
+            kind="course_assignments_section",
+            course=NavItem("c1", "CMPE 195"),
+        )
+    )
+    controller.handle_node_selected(
+        HomeNodeData(
+            kind="assignment",
+            course=NavItem("c1", "CMPE 195"),
+            assignment=NavItem("a2", "HW 2"),
+        )
+    )
+    app.home_screen.highlighted_data = HomeNodeData(
+        kind="assignment",
+        course=NavItem("c1", "CMPE 195"),
+        assignment=NavItem("a2", "HW 2"),
+    )
+    controller.start_grading_selected_assignment()
 
     assert state.selection.course_id == 1
-    assert state.selection.assessment_id is None
-    assert state.selection.student_id is None
-    assert state.selection_labels["course"] == "CMPE 195"
-    assert state.selection_labels["assignment"] == ""
-    assert app.browse_screen.assignments
-    assert app.browse_screen.students == []
-    assert app.browse_screen.focused_column == "assignments"
-    assert opened_students == []
-
-
-def test_assignment_selection_populates_students_and_focuses_students() -> None:
-    app = FakeApp()
-    state = TuiWorkflowState()
-    controller = BrowseController(
-        app,
-        state,
-        FakeSampleDataService(),
-        lambda index: None,
-    )
-
-    controller.handle_item_selected("courses", MillerItem("c1", "CMPE 195"))
-    controller.handle_item_selected("assignments", MillerItem("a2", "HW 2"))
-
     assert state.selection.assessment_id == 2
-    assert state.selection_labels["assignment"] == "HW 2"
     assert [item.item_id for item in state.student_items] == ["s1", "s2"]
-    assert app.browse_screen.focused_column == "students"
+    assert state.selection_labels["assignment"] == "HW 2"
+    assert opened_students == [0]
 
 
-def test_student_selection_opens_expected_student_index() -> None:
+def test_student_submissions_path_opens_selected_submission() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
     opened_students: list[int] = []
-    controller = BrowseController(
+    controller = HomeController(
         app,
         state,
         FakeSampleDataService(),
         opened_students.append,
     )
 
-    controller.handle_item_selected("courses", MillerItem("c1", "CMPE 195"))
-    controller.handle_item_selected("assignments", MillerItem("a1", "HW 1"))
-    controller.handle_item_selected("students", MillerItem("s2", "Andy Cortes"))
+    controller.initialize()
+    controller.handle_node_selected(
+        HomeNodeData(kind="course", course=NavItem("c1", "CMPE 195"))
+    )
+    controller.handle_node_selected(
+        HomeNodeData(
+            kind="course_students_section",
+            course=NavItem("c1", "CMPE 195"),
+        )
+    )
+    controller.handle_node_selected(
+        HomeNodeData(
+            kind="student",
+            course=NavItem("c1", "CMPE 195"),
+            student=NavItem("s1", "Tommy Liu"),
+        )
+    )
+    controller.handle_node_selected(
+        HomeNodeData(
+            kind="student_submissions_section",
+            course=NavItem("c1", "CMPE 195"),
+            student=NavItem("s1", "Tommy Liu"),
+        )
+    )
+    controller.handle_node_selected(
+        HomeNodeData(
+            kind="submission",
+            course=NavItem("c1", "CMPE 195"),
+            assignment=NavItem("a1", "HW 1"),
+            student=NavItem("s1", "Tommy Liu"),
+        )
+    )
 
-    assert state.selection.student_id == 2
-    assert state.selection_labels["student"] == "Andy Cortes"
-    assert opened_students == [1]
+    assert state.selection.course_id == 1
+    assert state.selection.assessment_id == 1
+    assert state.selection.student_id == 1
+    assert state.selection_labels["assignment"] == "HW 1"
+    assert state.selection_labels["student"] == "Tommy Liu"
+    assert opened_students == [0]
+
+
+def test_assignment_actions_write_to_details_pane() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    controller = HomeController(
+        app,
+        state,
+        FakeSampleDataService(),
+        lambda _index: None,
+    )
+
+    controller.initialize()
+    app.home_screen.highlighted_data = HomeNodeData(
+        kind="assignment",
+        course=NavItem("c1", "CMPE 195"),
+        assignment=NavItem("a1", "HW 1"),
+    )
+
+    controller.show_assignment_details()
+    assert app.home_screen.status == "Assignment details: HW 1"
+
+    controller.edit_assignment_rubric()
+    assert app.home_screen.status == "Edit rubric: HW 1"
+
+    controller.edit_assignment_template()
+    assert app.home_screen.status == "Edit template: HW 1"

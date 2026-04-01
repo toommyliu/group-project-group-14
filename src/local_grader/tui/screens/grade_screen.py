@@ -39,7 +39,7 @@ class GradeScreen(Vertical):
     class FinalizeStudentRequested(Message):
         pass
 
-    class ReturnToBrowseRequested(Message):
+    class ReturnToHomeRequested(Message):
         pass
 
     def __init__(self, default_image_path: str, *, id: str | None = None) -> None:
@@ -71,7 +71,7 @@ class GradeScreen(Vertical):
                     "ctrl+j / ctrl+k  Prev / Next question\n"
                     "ctrl+[ / ctrl+]  Prev / Next student\n"
                     "ctrl+g           Finalize + next student\n"
-                    "escape           Back to browse",
+                    "escape           Back to home",
                     id="keybinding-ref",
                 )
                 yield Static("", id="db-status")

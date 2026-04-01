@@ -1,22 +1,22 @@
 from dataclasses import dataclass
 
 from local_grader.tui.controllers.grade_controller import GradeController
-from local_grader.tui.state import PAGE_BROWSE, PAGE_GRADE, TuiWorkflowState
-from local_grader.tui.widgets.miller_column import MillerItem
+from local_grader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
+from local_grader.tui.widgets.nav_item import NavItem
 
 from .fakes import FakeSampleDataService
 
 
 @dataclass
-class FakeBrowseScreen:
+class FakeHomeScreen:
     status: str = ""
-    focused_column: str | None = None
+    focused: bool = False
 
     def set_status(self, text: str) -> None:
         self.status = text
 
-    def focus_column(self, column_id: str) -> bool:
-        self.focused_column = column_id
+    def focus_tree(self) -> bool:
+        self.focused = True
         return True
 
 
@@ -36,12 +36,12 @@ class FakeGradeScreen:
 
 class FakeApp:
     def __init__(self) -> None:
-        self.browse_screen = FakeBrowseScreen()
+        self.home_screen = FakeHomeScreen()
         self.grade_screen = FakeGradeScreen()
-        self.page = PAGE_BROWSE
+        self.page = PAGE_HOME
 
-    def get_browse_screen(self) -> FakeBrowseScreen:
-        return self.browse_screen
+    def get_home_screen(self) -> FakeHomeScreen:
+        return self.home_screen
 
     def get_grade_screen(self) -> FakeGradeScreen:
         return self.grade_screen
@@ -58,8 +58,8 @@ def build_controller() -> tuple[FakeApp, TuiWorkflowState, GradeController]:
     state.selection_labels["course"] = "CMPE 195"
     state.selection_labels["assignment"] = "HW 1"
     state.student_items = [
-        MillerItem("s1", "Tommy Liu"),
-        MillerItem("s2", "Andy Cortes"),
+        NavItem("s1", "Tommy Liu"),
+        NavItem("s2", "Andy Cortes"),
     ]
     controller = GradeController(app, state, FakeSampleDataService())
     controller.attach_student_refresh(lambda: None)
@@ -99,13 +99,13 @@ def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
     assert app.grade_screen.status == "Student finalized. Loaded next student."
 
 
-def test_finalize_last_student_returns_to_browse() -> None:
+def test_finalize_last_student_returns_to_home() -> None:
     app, state, controller = build_controller()
 
     controller.open_student_by_index(1)
     state.current_page = PAGE_GRADE
     controller.finalize_student()
 
-    assert app.page == PAGE_BROWSE
-    assert app.browse_screen.status == "All students finalized for this assignment."
-    assert app.browse_screen.focused_column == "students"
+    assert app.page == PAGE_HOME
+    assert app.home_screen.status == "All students finalized for this assignment."
+    assert app.home_screen.focused is True

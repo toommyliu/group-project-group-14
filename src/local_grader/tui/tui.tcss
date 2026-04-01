@@ -1,8 +1,8 @@
 # /* tui_interface_style.tcss */
 
 # /* --- GLOBAL & SCREEN --- */
-# Screen { 
-#     background: #1a1a1a; 
+# Screen {
+#     background: #1a1a1a;
 # }
 
 # /* --- LAYOUT STRUCTURE --- */
@@ -13,36 +13,36 @@
 #     padding: 1;
 # }
 
-# ContentSwitcher { 
-#     padding: 1; 
+# ContentSwitcher {
+#     padding: 1;
 # }
 
-# Horizontal#split { 
-#     height: 100%; 
-#     border: solid green; 
+# Horizontal#split {
+#     height: 100%;
+#     border: solid green;
 # }
 
-# VerticalScroll.left-view { 
-#     width: 50%; 
-#     padding: 1 2; 
+# VerticalScroll.left-view {
+#     width: 50%;
+#     padding: 1 2;
 # }
 
-# VerticalScroll.right-view { 
-#     width: 50%; 
-#     padding: 1 2; 
-#     border-left: solid red; 
+# VerticalScroll.right-view {
+#     width: 50%;
+#     padding: 1 2;
+#     border-left: solid red;
 # }
 
 # /* --- SIDEBAR COMPONENTS --- */
-# #menu-title { 
-#     text-style: bold; 
-#     margin-bottom: 1; 
-#     text-align: center; 
+# #menu-title {
+#     text-style: bold;
+#     margin-bottom: 1;
+#     text-align: center;
 # }
 
-# Sidebar Button { 
-#     width: 100%; 
-#     margin-bottom: 1; 
+# Sidebar Button {
+#     width: 100%;
+#     margin-bottom: 1;
 # }
 
 # .sidebar-header-text {
@@ -53,15 +53,15 @@
 #     text-align: center;
 # }
 
-# .sidebar-highlight { 
-#     border: double #00ffff; 
+# .sidebar-highlight {
+#     border: double #00ffff;
 # }
 
 # /* --- PAGE CONTENT COMPONENTS --- */
-# .page-title { 
-#     text-style: bold underline; 
-#     margin-bottom: 1; 
-#     color: $accent; 
+# .page-title {
+#     text-style: bold underline;
+#     margin-bottom: 1;
+#     color: $accent;
 # }
 
 # #document-input {
@@ -69,28 +69,28 @@
 #     border: tall $accent;
 # }
 
-# .document_note { 
-#     background: $panel; 
-#     border: solid $accent; 
-#     margin-bottom: 1; 
-#     padding: 1; 
+# .document_note {
+#     background: $panel;
+#     border: solid $accent;
+#     margin-bottom: 1;
+#     padding: 1;
 # }
 
-# #about-image { 
-#     width: 100%; 
-#     height: auto; 
-#     margin-top: 1; 
+# #about-image {
+#     width: 100%;
+#     height: auto;
+#     margin-top: 1;
 # }
 
 # /* --- GRADING LOG & INPUTS --- */
-# .input-row { 
-#     height: auto; 
-#     margin-bottom: 1; 
+# .input-row {
+#     height: auto;
+#     margin-bottom: 1;
 # }
 
-# .input-row Input { 
-#     width: 1fr; 
-#     margin-right: 1; 
+# .input-row Input {
+#     width: 1fr;
+#     margin-right: 1;
 # }
 
 # #history-log {
@@ -107,14 +107,14 @@
 #     margin-bottom: 0;
 # }
 
-# .delete-row { 
-#     height: auto; 
-#     margin-top: 1; 
+# .delete-row {
+#     height: auto;
+#     margin-top: 1;
 # }
 
-# #delete-idx-input { 
-#     width: 15; 
-#     margin-right: 1; 
+# #delete-idx-input {
+#     width: 15;
+#     margin-right: 1;
 # }
 
 # /* --- SUBMIT & NAVIGATION AREA --- */
@@ -151,7 +151,22 @@
 # }
 
 # /* Requirement: Red score if below 70 */
-# .low-grade { 
-#     color: red !important; 
-#     text-style: bold italic; 
+# .low-grade {
+#     color: red !important;
+#     text-style: bold italic;
 # }
+
+# 1/1
+#home-workspace {
+    height: 1fr;
+}
+
+# 1/4
+#home-tree {
+    width: 1fr;
+}
+
+# 3/4
+#home-details-pane {
+    width: 3fr;
+}

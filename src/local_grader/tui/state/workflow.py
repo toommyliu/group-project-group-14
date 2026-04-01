@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from local_grader.tui.state.grading_session import StudentGradingRun
-from local_grader.tui.state.route import PAGE_BROWSE
+from local_grader.tui.state.route import PAGE_HOME
 from local_grader.tui.state.selection import GradingSelection
-from local_grader.tui.widgets.miller_column import MillerItem
+from local_grader.tui.widgets.nav_item import NavItem
 
 
 @dataclass
 class TuiWorkflowState:
-    current_page: str = PAGE_BROWSE
+    current_page: str = PAGE_HOME
     selection: GradingSelection = field(default_factory=GradingSelection)
     grading_run: StudentGradingRun = field(
         default_factory=lambda: StudentGradingRun(
@@ -27,7 +27,7 @@ class TuiWorkflowState:
             "student": "",
         }
     )
-    student_items: list[MillerItem] = field(default_factory=list)
+    student_items: list[NavItem] = field(default_factory=list)
     active_student_index: int = -1
     student_status: dict[tuple[str, str, str], str] = field(default_factory=dict)
 

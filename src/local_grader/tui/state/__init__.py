@@ -1,6 +1,6 @@
 from .grading_session import QuestionGrade, RubricOption, StudentGradingRun
 from .route import (
-    PAGE_BROWSE,
+    PAGE_HOME,
     PAGE_GRADE,
     PRIMARY_NAV_PAGES,
 )
@@ -13,7 +13,7 @@ __all__ = [
     "RubricOption",
     "StudentGradingRun",
     "TuiWorkflowState",
-    "PAGE_BROWSE",
+    "PAGE_HOME",
     "PAGE_GRADE",
     "PRIMARY_NAV_PAGES",
 ]

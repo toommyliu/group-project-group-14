@@ -6,17 +6,21 @@ from enum import Enum
 
 from textual.binding import Binding
 
-from local_grader.tui.state import PAGE_BROWSE, PAGE_GRADE, TuiWorkflowState
+from local_grader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 
 class InputCommand(str, Enum):
     APP_QUIT = "app_quit"
     APP_BACK = "app_back"
-    BROWSE_MOVE_UP = "browse_move_up"
-    BROWSE_MOVE_DOWN = "browse_move_down"
-    BROWSE_MOVE_LEFT = "browse_move_left"
-    BROWSE_MOVE_RIGHT = "browse_move_right"
-    BROWSE_CONFIRM = "browse_confirm"
+    HOME_MOVE_UP = "home_move_up"
+    HOME_MOVE_DOWN = "home_move_down"
+    HOME_MOVE_LEFT = "home_move_left"
+    HOME_MOVE_RIGHT = "home_move_right"
+    HOME_CONFIRM = "home_confirm"
+    HOME_ASSIGNMENT_START = "home_assignment_start"
+    HOME_ASSIGNMENT_DETAILS = "home_assignment_details"
+    HOME_ASSIGNMENT_EDIT_RUBRIC = "home_assignment_edit_rubric"
+    HOME_ASSIGNMENT_EDIT_TEMPLATE = "home_assignment_edit_template"
     GRADE_NEXT_QUESTION = "grade_next_question"
     GRADE_PREVIOUS_QUESTION = "grade_previous_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
@@ -25,7 +29,7 @@ class InputCommand(str, Enum):
 
 
 class InputContext(str, Enum):
-    BROWSE = "browse"
+    HOME = "home"
     GRADE = "grade"
     GLOBAL = "global"
 
@@ -89,33 +93,57 @@ STANDARD_PROFILE = InputProfile(
         ),
         CommandBindingSpec(
             "up",
-            InputCommand.BROWSE_MOVE_UP,
-            "Browse Up",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_UP,
+            "Navigate Up",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "down",
-            InputCommand.BROWSE_MOVE_DOWN,
-            "Browse Down",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_DOWN,
+            "Navigate Down",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "left",
-            InputCommand.BROWSE_MOVE_LEFT,
-            "Browse Left",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_LEFT,
+            "Navigate Left",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "right",
-            InputCommand.BROWSE_MOVE_RIGHT,
-            "Browse Right",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_RIGHT,
+            "Navigate Right",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "enter",
-            InputCommand.BROWSE_CONFIRM,
+            InputCommand.HOME_CONFIRM,
             "Select",
-            (InputContext.BROWSE,),
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "g",
+            InputCommand.HOME_ASSIGNMENT_START,
+            "Start Grading",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "d",
+            InputCommand.HOME_ASSIGNMENT_DETAILS,
+            "Assignment Details",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "r",
+            InputCommand.HOME_ASSIGNMENT_EDIT_RUBRIC,
+            "Edit Rubric",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "t",
+            InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
+            "Edit Template",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -169,65 +197,89 @@ VIM_PROFILE = InputProfile(
         ),
         CommandBindingSpec(
             "k",
-            InputCommand.BROWSE_MOVE_UP,
-            "Browse Up",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_UP,
+            "Navigate Up",
+            (InputContext.HOME,),
             key_display="k/up",
         ),
         CommandBindingSpec(
             "up",
-            InputCommand.BROWSE_MOVE_UP,
-            "Browse Up",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_UP,
+            "Navigate Up",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "j",
-            InputCommand.BROWSE_MOVE_DOWN,
-            "Browse Down",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_DOWN,
+            "Navigate Down",
+            (InputContext.HOME,),
             key_display="j/down",
         ),
         CommandBindingSpec(
             "down",
-            InputCommand.BROWSE_MOVE_DOWN,
-            "Browse Down",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_DOWN,
+            "Navigate Down",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "h",
-            InputCommand.BROWSE_MOVE_LEFT,
-            "Browse Left",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_LEFT,
+            "Navigate Left",
+            (InputContext.HOME,),
             key_display="h/left",
         ),
         CommandBindingSpec(
             "left",
-            InputCommand.BROWSE_MOVE_LEFT,
-            "Browse Left",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_LEFT,
+            "Navigate Left",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "l",
-            InputCommand.BROWSE_MOVE_RIGHT,
-            "Browse Right",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_RIGHT,
+            "Navigate Right",
+            (InputContext.HOME,),
             key_display="l/right",
         ),
         CommandBindingSpec(
             "right",
-            InputCommand.BROWSE_MOVE_RIGHT,
-            "Browse Right",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_RIGHT,
+            "Navigate Right",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "enter",
-            InputCommand.BROWSE_CONFIRM,
+            InputCommand.HOME_CONFIRM,
             "Select",
-            (InputContext.BROWSE,),
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "g",
+            InputCommand.HOME_ASSIGNMENT_START,
+            "Start Grading",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "d",
+            InputCommand.HOME_ASSIGNMENT_DETAILS,
+            "Assignment Details",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "r",
+            InputCommand.HOME_ASSIGNMENT_EDIT_RUBRIC,
+            "Edit Rubric",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "t",
+            InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
+            "Edit Template",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -281,65 +333,89 @@ EMACS_PROFILE = InputProfile(
         ),
         CommandBindingSpec(
             "ctrl+p",
-            InputCommand.BROWSE_MOVE_UP,
-            "Browse Up",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_UP,
+            "Navigate Up",
+            (InputContext.HOME,),
             key_display="ctrl+p/up",
         ),
         CommandBindingSpec(
             "up",
-            InputCommand.BROWSE_MOVE_UP,
-            "Browse Up",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_UP,
+            "Navigate Up",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "ctrl+n",
-            InputCommand.BROWSE_MOVE_DOWN,
-            "Browse Down",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_DOWN,
+            "Navigate Down",
+            (InputContext.HOME,),
             key_display="ctrl+n/down",
         ),
         CommandBindingSpec(
             "down",
-            InputCommand.BROWSE_MOVE_DOWN,
-            "Browse Down",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_DOWN,
+            "Navigate Down",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "ctrl+b",
-            InputCommand.BROWSE_MOVE_LEFT,
-            "Browse Left",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_LEFT,
+            "Navigate Left",
+            (InputContext.HOME,),
             key_display="ctrl+b/left",
         ),
         CommandBindingSpec(
             "left",
-            InputCommand.BROWSE_MOVE_LEFT,
-            "Browse Left",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_LEFT,
+            "Navigate Left",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "ctrl+f",
-            InputCommand.BROWSE_MOVE_RIGHT,
-            "Browse Right",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_RIGHT,
+            "Navigate Right",
+            (InputContext.HOME,),
             key_display="ctrl+f/right",
         ),
         CommandBindingSpec(
             "right",
-            InputCommand.BROWSE_MOVE_RIGHT,
-            "Browse Right",
-            (InputContext.BROWSE,),
+            InputCommand.HOME_MOVE_RIGHT,
+            "Navigate Right",
+            (InputContext.HOME,),
             show=False,
         ),
         CommandBindingSpec(
             "enter",
-            InputCommand.BROWSE_CONFIRM,
+            InputCommand.HOME_CONFIRM,
             "Select",
-            (InputContext.BROWSE,),
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "g",
+            InputCommand.HOME_ASSIGNMENT_START,
+            "Start Grading",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "d",
+            InputCommand.HOME_ASSIGNMENT_DETAILS,
+            "Assignment Details",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "r",
+            InputCommand.HOME_ASSIGNMENT_EDIT_RUBRIC,
+            "Edit Rubric",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "t",
+            InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
+            "Edit Template",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -470,8 +546,8 @@ class InputController:
     def current_context(self) -> InputContext:
         if self._state.current_page == PAGE_GRADE:
             return InputContext.GRADE
-        if self._state.current_page == PAGE_BROWSE:
-            return InputContext.BROWSE
+        if self._state.current_page == PAGE_HOME:
+            return InputContext.HOME
         return InputContext.GLOBAL
 
     @staticmethod

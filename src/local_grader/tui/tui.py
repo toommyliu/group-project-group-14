@@ -1,24 +1,20 @@
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.widgets import ContentSwitcher, Footer
+from textual.widgets import ContentSwitcher, Footer, Tree
 
 from local_grader.tui.controllers import (
-    BrowseController,
     GradeController,
+    HomeController,
     InputController,
 )
 from local_grader.tui.controllers.input_controller import (
     InputCommand,
     InputProfileName,
 )
-from local_grader.tui.screens import (
-    BrowseScreen,
-    GradeScreen,
-)
+from local_grader.tui.screens import GradeScreen, HomeNodeData, HomeScreen
 from local_grader.tui.services import SampleDataService
-from local_grader.tui.state import PAGE_BROWSE, PAGE_GRADE, TuiWorkflowState
-from local_grader.tui.widgets import MillerColumn
+from local_grader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 
 class TuiApp(App):
@@ -43,14 +39,14 @@ class TuiApp(App):
             self.workflow_state,
             self.data_service,
         )
-        self.browse_controller = BrowseController(
+        self.home_controller = HomeController(
             self,
             self.workflow_state,
             self.data_service,
             self.grade_controller.open_student_by_index,
         )
         self.grade_controller.attach_student_refresh(
-            self.browse_controller.refresh_students
+            self.home_controller.refresh_students
         )
         self.input_controller = InputController(
             self.workflow_state,
@@ -59,21 +55,21 @@ class TuiApp(App):
         self._register_input_handlers()
 
     def compose(self) -> ComposeResult:
-        with ContentSwitcher(initial=PAGE_BROWSE, id="workspace-switcher"):
-            yield BrowseScreen(id=PAGE_BROWSE)
+        with ContentSwitcher(initial=PAGE_HOME, id="workspace-switcher"):
+            yield HomeScreen(id=PAGE_HOME)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.browse_controller.initialize()
+        self.home_controller.initialize()
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
         self.query_one(ContentSwitcher).current = page_id
         self.refresh_bindings()
 
-    def get_browse_screen(self) -> BrowseScreen:
-        return self.query_one(f"#{PAGE_BROWSE}", BrowseScreen)
+    def get_home_screen(self) -> HomeScreen:
+        return self.query_one(f"#{PAGE_HOME}", HomeScreen)
 
     def get_grade_screen(self) -> GradeScreen:
         return self.query_one(f"#{PAGE_GRADE}", GradeScreen)
@@ -93,8 +89,17 @@ class TuiApp(App):
             return False
         return self.input_controller.binding_available(profile_name, command)
 
-    def on_miller_column_item_selected(self, event: MillerColumn.ItemSelected) -> None:
-        self.browse_controller.handle_item_selected(event.column_id, event.item)
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        data = event.node.data
+        if not isinstance(data, HomeNodeData):
+            return
+        self.home_controller.handle_node_selected(data)
+
+    def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
+        data = event.node.data
+        if not isinstance(data, HomeNodeData):
+            return
+        self.home_controller.handle_node_expanded(data)
 
     def on_grade_screen_question_selected(
         self, event: GradeScreen.QuestionSelected
@@ -111,33 +116,49 @@ class TuiApp(App):
     ) -> None:
         self.grade_controller.on_comment_updated(event.comment)
 
-    def on_grade_screen_return_to_browse_requested(
-        self, _event: GradeScreen.ReturnToBrowseRequested
+    def on_grade_screen_return_to_home_requested(
+        self, _event: GradeScreen.ReturnToHomeRequested
     ) -> None:
-        self.grade_controller.return_to_browse()
+        self.grade_controller.return_to_home()
 
     def _register_input_handlers(self) -> None:
         self.input_controller.register(InputCommand.APP_QUIT, self.exit)
         self.input_controller.register(InputCommand.APP_BACK, self._handle_back)
         self.input_controller.register(
-            InputCommand.BROWSE_MOVE_UP,
-            self.browse_controller.move_up,
+            InputCommand.HOME_MOVE_UP,
+            self.home_controller.move_up,
         )
         self.input_controller.register(
-            InputCommand.BROWSE_MOVE_DOWN,
-            self.browse_controller.move_down,
+            InputCommand.HOME_MOVE_DOWN,
+            self.home_controller.move_down,
         )
         self.input_controller.register(
-            InputCommand.BROWSE_MOVE_LEFT,
-            self.browse_controller.move_left,
+            InputCommand.HOME_MOVE_LEFT,
+            self.home_controller.move_left,
         )
         self.input_controller.register(
-            InputCommand.BROWSE_MOVE_RIGHT,
-            self.browse_controller.move_right,
+            InputCommand.HOME_MOVE_RIGHT,
+            self.home_controller.move_right,
         )
         self.input_controller.register(
-            InputCommand.BROWSE_CONFIRM,
-            self.browse_controller.confirm,
+            InputCommand.HOME_CONFIRM,
+            self.home_controller.confirm,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_ASSIGNMENT_START,
+            self.home_controller.start_grading_selected_assignment,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_ASSIGNMENT_DETAILS,
+            self.home_controller.show_assignment_details,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_ASSIGNMENT_EDIT_RUBRIC,
+            self.home_controller.edit_assignment_rubric,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
+            self.home_controller.edit_assignment_template,
         )
         self.input_controller.register(
             InputCommand.GRADE_NEXT_QUESTION,
@@ -162,7 +183,7 @@ class TuiApp(App):
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
-            self.grade_controller.return_to_browse()
+            self.grade_controller.return_to_home()
 
     def set_input_profile(self, profile_name: InputProfileName | str) -> None:
         self.input_controller.set_profile(profile_name)
