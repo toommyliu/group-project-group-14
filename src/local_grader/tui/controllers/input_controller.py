@@ -21,6 +21,7 @@ class InputCommand(str, Enum):
     HOME_ASSIGNMENT_DETAILS = "home_assignment_details"
     HOME_ASSIGNMENT_EDIT_RUBRIC = "home_assignment_edit_rubric"
     HOME_ASSIGNMENT_EDIT_TEMPLATE = "home_assignment_edit_template"
+    HOME_CREATE = "home_create"
     GRADE_NEXT_QUESTION = "grade_next_question"
     GRADE_PREVIOUS_QUESTION = "grade_previous_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
@@ -144,6 +145,13 @@ STANDARD_PROFILE = InputProfile(
             InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
             "Edit Template",
             (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "n",
+            InputCommand.HOME_CREATE,
+            "Create",
+            (InputContext.HOME,),
+            show=True,
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -304,6 +312,13 @@ VIM_PROFILE = InputProfile(
             InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
             "Edit Template",
             (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "n",
+            InputCommand.HOME_CREATE,
+            "Create Course",
+            (InputContext.HOME,),
+            show=True,
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -468,6 +483,13 @@ EMACS_PROFILE = InputProfile(
             InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
             "Edit Template",
             (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "n",
+            InputCommand.HOME_CREATE,
+            "Create Course",
+            (InputContext.HOME,),
+            show=True,
         ),
         CommandBindingSpec(
             "ctrl+j",

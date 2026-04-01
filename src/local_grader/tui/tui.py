@@ -161,6 +161,10 @@ class TuiApp(App):
             self.home_controller.edit_assignment_template,
         )
         self.input_controller.register(
+            InputCommand.HOME_CREATE,
+            self.home_controller.create,
+        )
+        self.input_controller.register(
             InputCommand.GRADE_NEXT_QUESTION,
             self.grade_controller.next_question,
         )

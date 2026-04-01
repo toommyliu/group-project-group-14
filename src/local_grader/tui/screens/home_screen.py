@@ -20,6 +20,7 @@ class HomeNodeData:
 
 class HomeScreen(Vertical):
     def __init__(self, *, id: str | None = None) -> None:
+        self._courses_section_node: TreeNode[HomeNodeData] | None = None
         self._course_nodes: dict[str, TreeNode[HomeNodeData]] = {}
         self._course_assignments_nodes: dict[str, TreeNode[HomeNodeData]] = {}
         self._course_students_nodes: dict[str, TreeNode[HomeNodeData]] = {}
@@ -58,6 +59,7 @@ class HomeScreen(Vertical):
     ) -> None:
         tree = self.tree
         tree.clear()
+        self._courses_section_node = None
         self._course_nodes.clear()
         self._course_assignments_nodes.clear()
         self._course_students_nodes.clear()
@@ -65,9 +67,15 @@ class HomeScreen(Vertical):
         self._student_nodes.clear()
         self._student_submissions_nodes.clear()
 
+        courses_section = tree.root.add(
+            "Courses",
+            data=HomeNodeData(kind="courses_section"),
+        )
+        self._courses_section_node = courses_section
+
         first_course_node: TreeNode[HomeNodeData] | None = None
         for course in courses:
-            course_node = tree.root.add(
+            course_node = courses_section.add(
                 self._item_text(course),
                 data=HomeNodeData(kind="course", course=course),
             )
@@ -87,8 +95,9 @@ class HomeScreen(Vertical):
             self._course_students_nodes[course.item_id] = students_node
 
         tree.root.expand()
+        courses_section.expand()
         if highlight_first and first_course_node is not None:
-            tree.move_cursor(first_course_node)
+            tree.move_cursor(courses_section)
 
     def set_course_assignments(
         self,
@@ -236,6 +245,9 @@ class HomeScreen(Vertical):
 
     def set_details(self, text: str) -> None:
         self.query_one("#home-details", Static).update(text)
+
+    def refresh_courses(self) -> None:
+        pass
 
     def focus_tree(self) -> bool:
         tree = self.tree

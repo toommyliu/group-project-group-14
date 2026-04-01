@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
+from textual.widgets.tree import TreeNode
+
 from local_grader.tui.screens import HomeNodeData, HomeScreen
 from local_grader.tui.services.sample_data import SampleDataService
 from local_grader.tui.state import TuiWorkflowState
@@ -42,6 +44,9 @@ class HomeController:
 
     def handle_node_selected(self, data: HomeNodeData) -> None:
         kind = data.kind
+        if kind == "courses_section":
+            self._handle_courses_section(data)
+            return
         if kind == "course":
             self._handle_course(data)
             return
@@ -124,6 +129,12 @@ class HomeController:
 
     def _ensure_focus(self) -> None:
         self._app.get_home_screen().focus_tree()
+
+    def _handle_courses_section(self, data: HomeNodeData) -> None:
+        self._app.get_home_screen().set_status("Courses Section")
+        self._app.get_home_screen().set_details(
+            "Press n or right-click to add a new course."
+        )
 
     def _handle_course(self, data: HomeNodeData) -> None:
         if data.course is None:
@@ -211,6 +222,46 @@ class HomeController:
         self._app.get_home_screen().set_details(
             "Template editor coming soon. This action is reserved for template setup."
         )
+
+    def create(self) -> None:
+        data = self._app.get_home_screen().highlighted_node_data()
+        if data is None:
+            self._app.get_home_screen().set_status(
+                "Select a section (Courses, Assignments, or Students) and press n to create."
+            )
+            return
+
+        kind = data.kind
+        if kind == "courses_section":
+            self._app.get_home_screen().set_status("Create new course")
+        elif kind == "course_assignments_section" and data.course:
+            self._app.get_home_screen().set_status(
+                f"Create new assignment for {data.course.label}"
+            )
+        elif kind == "course_students_section" and data.course:
+            self._app.get_home_screen().set_status(
+                f"Create new student for {data.course.label}"
+            )
+        else:
+            self._app.get_home_screen().set_status(
+                "Select a section (Courses, Assignments, or Students) and press n to create."
+            )
+
+    def show_context_menu(
+        self,
+        node: TreeNode[HomeNodeData],
+        data: HomeNodeData,
+    ) -> None:
+        if data.kind == "courses_section":
+            self._app.get_home_screen().set_status("Right-click: Add Course")
+        elif data.kind == "course_assignments_section" and data.course:
+            self._app.get_home_screen().set_status(
+                f"Right-click: Add Assignment to {data.course.label}"
+            )
+        elif data.kind == "course_students_section" and data.course:
+            self._app.get_home_screen().set_status(
+                f"Right-click: Add Student to {data.course.label}"
+            )
 
     def _start_grading_assignment(self, data: HomeNodeData) -> None:
         if data.course is None or data.assignment is None:
