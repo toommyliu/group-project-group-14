@@ -68,8 +68,10 @@ class GradeScreen(Vertical):
                 )
                 yield Rule()
                 yield Static(
-                    "ctrl+j / ctrl+k  Prev / Next question\n"
-                    "ctrl+[ / ctrl+]  Prev / Next student\n"
+                    "up/down         Prev / Next question\n"
+                    "left/right      Prev / Next student\n"
+                    "ctrl+j / ctrl+k  (alt: prev/next question)\n"
+                    "ctrl+[ / ctrl+]  (alt: prev/next student)\n"
                     "ctrl+g           Finalize + next student\n"
                     "escape           Back to home",
                     id="keybinding-ref",

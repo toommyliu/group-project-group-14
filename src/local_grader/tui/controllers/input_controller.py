@@ -175,6 +175,30 @@ STANDARD_PROFILE = InputProfile(
             "Finalize",
             (InputContext.GRADE,),
         ),
+        CommandBindingSpec(
+            "down",
+            InputCommand.GRADE_NEXT_QUESTION,
+            "Next Q",
+            (InputContext.GRADE,),
+        ),
+        CommandBindingSpec(
+            "up",
+            InputCommand.GRADE_PREVIOUS_QUESTION,
+            "Prev Q",
+            (InputContext.GRADE,),
+        ),
+        CommandBindingSpec(
+            "right",
+            InputCommand.GRADE_NEXT_STUDENT,
+            "Next Student",
+            (InputContext.GRADE,),
+        ),
+        CommandBindingSpec(
+            "left",
+            InputCommand.GRADE_PREVIOUS_STUDENT,
+            "Prev Student",
+            (InputContext.GRADE,),
+        ),
     ),
 )
 
@@ -311,6 +335,34 @@ VIM_PROFILE = InputProfile(
             "Finalize",
             (InputContext.GRADE,),
         ),
+        CommandBindingSpec(
+            "down",
+            InputCommand.GRADE_NEXT_QUESTION,
+            "Next Q",
+            (InputContext.GRADE,),
+            show=False,
+        ),
+        CommandBindingSpec(
+            "up",
+            InputCommand.GRADE_PREVIOUS_QUESTION,
+            "Prev Q",
+            (InputContext.GRADE,),
+            show=False,
+        ),
+        CommandBindingSpec(
+            "right",
+            InputCommand.GRADE_NEXT_STUDENT,
+            "Next Student",
+            (InputContext.GRADE,),
+            show=False,
+        ),
+        CommandBindingSpec(
+            "left",
+            InputCommand.GRADE_PREVIOUS_STUDENT,
+            "Prev Student",
+            (InputContext.GRADE,),
+            show=False,
+        ),
     ),
 )
 
@@ -446,6 +498,34 @@ EMACS_PROFILE = InputProfile(
             InputCommand.GRADE_FINALIZE_STUDENT,
             "Finalize",
             (InputContext.GRADE,),
+        ),
+        CommandBindingSpec(
+            "down",
+            InputCommand.GRADE_NEXT_QUESTION,
+            "Next Q",
+            (InputContext.GRADE,),
+            key_display="ctrl+j/down",
+        ),
+        CommandBindingSpec(
+            "up",
+            InputCommand.GRADE_PREVIOUS_QUESTION,
+            "Prev Q",
+            (InputContext.GRADE,),
+            key_display="ctrl+k/up",
+        ),
+        CommandBindingSpec(
+            "right",
+            InputCommand.GRADE_NEXT_STUDENT,
+            "Next Student",
+            (InputContext.GRADE,),
+            key_display="ctrl+]/right",
+        ),
+        CommandBindingSpec(
+            "left",
+            InputCommand.GRADE_PREVIOUS_STUDENT,
+            "Prev Student",
+            (InputContext.GRADE,),
+            key_display="ctrl+[/left",
         ),
     ),
 )
