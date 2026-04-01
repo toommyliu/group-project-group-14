@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Task Completion Requirements
+
+- `uv run pytest` must pass without errors.
+
 ## Project Overview
 
 Local Grader is a TUI application for efficient grading workflows. Think GradeScope but local and offline-first, with a focus on keyboard-driven workflows.
