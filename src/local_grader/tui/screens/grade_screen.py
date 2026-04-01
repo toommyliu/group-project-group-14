@@ -51,9 +51,7 @@ class GradeScreen(Vertical):
     def compose(self) -> ComposeResult:
         yield Breadcrumb(id="grade-breadcrumb")
         with Horizontal(id="grade-workspace"):
-            yield ResponseViewer(
-                self._default_image_path, id="response-viewer"
-            )
+            yield ResponseViewer(self._default_image_path, id="response-viewer")
             with VerticalScroll(id="grade-sidebar"):
                 yield Label("", id="grade-student-name")
                 yield Label("Score: 100.0", id="total-grade-label")
@@ -76,6 +74,7 @@ class GradeScreen(Vertical):
                     "escape           Back to browse",
                     id="keybinding-ref",
                 )
+                yield Static("", id="grade-keymap")
                 yield Static("", id="db-status")
 
     def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
@@ -137,6 +136,11 @@ class GradeScreen(Vertical):
 
     def set_status(self, text: str) -> None:
         self.query_one("#db-status", Static).update(text)
+
+    def set_keymap_label(self, profile_name: str) -> None:
+        self.query_one("#grade-keymap", Static).update(
+            f"Keymap: {profile_name.upper()} (standard keys also enabled)"
+        )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         list_id = event.list_view.id or ""
