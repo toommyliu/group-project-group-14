@@ -5,7 +5,6 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import ContentSwitcher, Footer, Input
 
-from local_grader.core.roster import read_roster
 from local_grader.tui.screens import (
     BrowseScreen,
     GradeScreen,
@@ -22,8 +21,9 @@ from local_grader.tui.widgets import MillerColumn
 from local_grader.tui.widgets.miller_column import MillerItem
 
 
-class GradingApp(App):
-    CSS_PATH = "tui_interface_style.tcss"
+class TuiApp(App):
+    CSS_PATH = Path(__file__).parent / "tui.tcss"
+    print("CSS Path:", CSS_PATH)
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -63,16 +63,6 @@ class GradingApp(App):
 
     def _switch_to(self, page_id: str) -> None:
         self.query_one(ContentSwitcher).current = page_id
-
-    # def on_upload_screen_process_roster_requested(
-    #     self, _event: UploadScreen.ProcessRosterRequested
-    # ) -> None:
-    #     upload_screen = self.query_one(f"#{PAGE_UPLOAD}", UploadScreen)
-    #     try:
-    #         students = read_roster("data/roster.csv")
-    #         upload_screen.set_status(f"Loaded {len(students)} students from roster.")
-    #     except Exception as exc:
-    #         upload_screen.set_status(f"Error: {exc}")
 
     def on_miller_column_item_selected(self, event: MillerColumn.ItemSelected) -> None:
         browse_screen = self.query_one(f"#{PAGE_BROWSE}", BrowseScreen)
@@ -260,8 +250,6 @@ class GradingApp(App):
         note = event.value.strip()
         if not note:
             return
-        documents_screen = self.query_one(f"#{PAGE_DOCUMENTS}", DocumentsScreen)
-        documents_screen.add_note(note)
         event.input.value = ""
 
     def _status_key(self, student_item_id: str) -> tuple[str, str, str]:
@@ -284,27 +272,8 @@ class GradingApp(App):
     def _on_grade_page(self) -> bool:
         return self.query_one(ContentSwitcher).current == PAGE_GRADE
 
-    def action_back(self) -> None:
-        if self._on_grade_page():
-            self._switch_to(PAGE_BROWSE)
-
     def action_browse(self) -> None:
         self._switch_to(PAGE_BROWSE)
-
-    def action_documents(self) -> None:
-        self._switch_to(PAGE_DOCUMENTS)
-
-    def action_upload(self) -> None:
-        self._switch_to(PAGE_UPLOAD)
-
-    def action_settings(self) -> None:
-        self._switch_to(PAGE_SETTINGS)
-
-    def action_about(self) -> None:
-        self._switch_to(PAGE_ABOUT)
-
-    def action_clear_all(self) -> None:
-        self.query_one(f"#{PAGE_DOCUMENTS}", DocumentsScreen).clear_notes()
 
     def action_next_question(self) -> None:
         if not self._on_grade_page():
