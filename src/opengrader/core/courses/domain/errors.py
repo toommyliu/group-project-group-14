@@ -1,23 +1,23 @@
-class LocalGraderDomainError(Exception):
+class OpenGraderDomainError(Exception):
     pass
 
-class CourseAlreadyExistsError(LocalGraderDomainError):
+class CourseAlreadyExistsError(OpenGraderDomainError):
     pass
 
-class CourseNotFoundError(LocalGraderDomainError):
+class CourseNotFoundError(OpenGraderDomainError):
     pass
 
-class AssessmentNotFoundError(LocalGraderDomainError):
+class AssessmentNotFoundError(OpenGraderDomainError):
     pass
 
-class InvalidAssessmentTypeError(LocalGraderDomainError):
+class InvalidAssessmentTypeError(OpenGraderDomainError):
     pass
 
-class InvalidPointsError(LocalGraderDomainError):
+class InvalidPointsError(OpenGraderDomainError):
     pass
 
-class StudentNotEnrolledError(LocalGraderDomainError):
+class StudentNotEnrolledError(OpenGraderDomainError):
     pass
 
-class GradeConflictError(LocalGraderDomainError):
+class GradeConflictError(OpenGraderDomainError):
     pass

@@ -19,7 +19,7 @@ from .domain.errors import (
     GradeConflictError,
     InvalidAssessmentTypeError,
     InvalidPointsError,
-    LocalGraderDomainError,
+    OpenGraderDomainError,
     StudentNotEnrolledError,
 )
 from .services.assessment_service import AssessmentService
@@ -47,7 +47,7 @@ __all__ = [
     "GradingService",
     "InvalidAssessmentTypeError",
     "InvalidPointsError",
-    "LocalGraderDomainError",
+    "OpenGraderDomainError",
     "Student",
     "StudentGradeSummary",
     "StudentInput",

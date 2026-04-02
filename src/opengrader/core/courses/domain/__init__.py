@@ -18,7 +18,7 @@ from .errors import (
     GradeConflictError,
     InvalidAssessmentTypeError,
     InvalidPointsError,
-    LocalGraderDomainError,
+    OpenGraderDomainError,
     StudentNotEnrolledError,
 )
 
@@ -37,7 +37,7 @@ __all__ = [
     "GradeInput",
     "InvalidAssessmentTypeError",
     "InvalidPointsError",
-    "LocalGraderDomainError",
+    "OpenGraderDomainError",
     "Student",
     "StudentGradeSummary",
     "StudentInput",

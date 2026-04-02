@@ -4,7 +4,7 @@ from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import Protocol
 
-from opengrader.core.courses import ALLOWED_ASSESSMENT_TYPES, LocalGraderDomainError
+from opengrader.core.courses import ALLOWED_ASSESSMENT_TYPES, OpenGraderDomainError
 from textual.widgets.tree import TreeNode
 
 from opengrader.tui.data import (
@@ -561,7 +561,7 @@ class HomeController:
                 term=values["term"],
                 section=values["section"],
             )
-        except LocalGraderDomainError as exc:
+        except OpenGraderDomainError as exc:
             home.set_status(f"Create course failed: {exc}")
             return
 
@@ -594,7 +594,7 @@ class HomeController:
                 title=values["title"],
                 max_points=values["max_points"],
             )
-        except LocalGraderDomainError as exc:
+        except OpenGraderDomainError as exc:
             home.set_status(f"Create assignment failed: {exc}")
             return
 
@@ -630,7 +630,7 @@ class HomeController:
                 middle_name=values["middle_name"] or None,
                 email=values["email"] or None,
             )
-        except LocalGraderDomainError as exc:
+        except OpenGraderDomainError as exc:
             home.set_status(f"Enroll student failed: {exc}")
             return
 
