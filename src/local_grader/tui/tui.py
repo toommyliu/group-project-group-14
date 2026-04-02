@@ -48,6 +48,7 @@ class TuiApp(App):
             self.data_service,
             self.grade_controller.open_student_by_index,
             course_service=self.course_services.courses if self.course_services else None,
+            assessment_service=self.course_services.assessments if self.course_services else None,
         )
         self.grade_controller.attach_student_refresh(
             self.home_controller.refresh_students

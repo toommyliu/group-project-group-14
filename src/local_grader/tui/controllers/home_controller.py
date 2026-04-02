@@ -5,6 +5,7 @@ from typing import Protocol
 
 from textual.widgets.tree import TreeNode
 
+from local_grader.core.courses.services.assessment_service import AssessmentService
 from local_grader.core.courses.services.course_service import CourseService
 from local_grader.tui.screens import HomeNodeData, HomeScreen
 from local_grader.tui.services.sample_data import SampleDataService
@@ -24,12 +25,14 @@ class HomeController:
         data_service: SampleDataService,
         open_student: Callable[[int], None],
         course_service: CourseService | None = None,
+        assessment_service: AssessmentService | None = None,
     ) -> None:
         self._app = app
         self._state = state
         self._data_service = data_service
         self._open_student = open_student
         self._course_service = course_service
+        self._assessment_service = assessment_service
         self._loaded_course_assignments: set[str] = set()
         self._loaded_course_students: set[str] = set()
         self._loaded_student_submissions: set[tuple[str, str]] = set()
@@ -332,9 +335,12 @@ class HomeController:
         home_screen.set_course_assignments_loading(course_item_id)
         home_screen.set_status(f"Loading assignments for {data.course.label}...")
         home_screen.set_details("Fetching assignments...")
-        assignments = self._data_service.load_assignments(
-            self._numeric_id(course_item_id)
-        )
+        course_id = self._numeric_id(course_item_id)
+        if self._assessment_service is not None and course_id is not None:
+            assessments = self._assessment_service.list_assessments(course_id)
+            assignments = [NavItem(str(a.id), a.title, a.type) for a in assessments]
+        else:
+            assignments = self._data_service.load_assignments(course_id)
         home_screen.set_course_assignments(course_item_id, assignments)
         self._loaded_course_assignments.add(course_item_id)
 
