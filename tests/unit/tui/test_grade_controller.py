@@ -4,7 +4,7 @@ from local_grader.tui.controllers.grade_controller import GradeController
 from local_grader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
 from local_grader.tui.widgets.nav_item import NavItem
 
-from .fakes import FakeSampleDataService
+from .fakes import FakeDataProvider
 
 
 @dataclass
@@ -61,7 +61,7 @@ def build_controller() -> tuple[FakeApp, TuiWorkflowState, GradeController]:
         NavItem("s1", "Tommy Liu"),
         NavItem("s2", "Andy Cortes"),
     ]
-    controller = GradeController(app, state, FakeSampleDataService())
+    controller = GradeController(app, state, FakeDataProvider())
     controller.attach_student_refresh(lambda: None)
     return app, state, controller
 

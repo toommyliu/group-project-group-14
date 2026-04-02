@@ -5,7 +5,7 @@ from local_grader.tui.screens.home_screen import HomeNodeData
 from local_grader.tui.state import TuiWorkflowState
 from local_grader.tui.widgets.nav_item import NavItem
 
-from .fakes import FakeSampleDataService
+from .fakes import FakeDataProvider
 
 
 @dataclass
@@ -113,7 +113,7 @@ def test_assignment_path_opens_student_for_grading() -> None:
     controller = HomeController(
         app,
         state,
-        FakeSampleDataService(),
+        FakeDataProvider(),
         opened_students.append,
     )
 
@@ -155,7 +155,7 @@ def test_student_submissions_path_opens_selected_submission() -> None:
     controller = HomeController(
         app,
         state,
-        FakeSampleDataService(),
+        FakeDataProvider(),
         opened_students.append,
     )
 
@@ -206,7 +206,7 @@ def test_assignment_actions_write_to_details_pane() -> None:
     controller = HomeController(
         app,
         state,
-        FakeSampleDataService(),
+        FakeDataProvider(),
         lambda _index: None,
     )
 
