@@ -5,7 +5,6 @@ from pathlib import Path
 
 import platformdirs
 
-_APP_DIR_NAME = ".opengrader"
 _DB_FILE_NAME = "courses.db"
 _ENV_HOME = "OPENGRADER_HOME"
 
