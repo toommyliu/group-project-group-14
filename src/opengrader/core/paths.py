@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import platformdirs
+
 _APP_DIR_NAME = ".opengrader"
 _DB_FILE_NAME = "courses.db"
 _ENV_HOME = "OPENGRADER_HOME"
@@ -12,7 +14,7 @@ def get_home_dir() -> Path:
     configured_home = os.getenv(_ENV_HOME)
     if configured_home is not None and configured_home.strip():
         return Path(configured_home).expanduser()
-    return Path.home() / _APP_DIR_NAME
+    return Path(platformdirs.user_data_dir("opengrader"))
 
 
 def get_data_dir() -> Path:
