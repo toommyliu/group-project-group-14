@@ -1,7 +1,7 @@
 import numpy as np
 
-from local_grader.core.ocr.alignment import AnchorRegion, detect_anchor_presence
-from local_grader.core.pdf.templates.anchor import anchor_bbox_map_norm
+from opengrader.core.ocr.alignment import AnchorRegion, detect_anchor_presence
+from opengrader.core.pdf.templates.anchor import anchor_bbox_map_norm
 
 
 def _anchor_region() -> AnchorRegion:

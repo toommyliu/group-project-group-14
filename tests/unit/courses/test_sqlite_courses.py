@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from local_grader.core.courses import (
+from opengrader.core.courses import (
     AssessmentNotFoundError,
     CourseAlreadyExistsError,
     GradeConflictError,

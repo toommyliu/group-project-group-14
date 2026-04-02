@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
-from local_grader.tui.controllers.grade_controller import GradeController
-from local_grader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
-from local_grader.tui.widgets.nav_item import NavItem
+from opengrader.tui.controllers.grade_controller import GradeController
+from opengrader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
+from opengrader.tui.widgets.nav_item import NavItem
 
 from .fakes import FakeDataProvider
 

@@ -1,6 +1,6 @@
 import pytest
 
-from local_grader.core.ocr.spec import (
+from opengrader.core.ocr.spec import (
     SpecError,
     lookup_version_by_anchors,
     validate_spec,

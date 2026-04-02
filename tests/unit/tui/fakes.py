@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from local_grader.tui.data import (
+from opengrader.tui.data import (
     AssignmentSummary,
     CourseSummary,
     QuestionSeed,

@@ -1,6 +1,6 @@
 import fitz
 
-from local_grader.core.ocr.editor import (
+from opengrader.core.ocr.editor import (
     EditorRegion,
     apply_editor_regions_to_spec,
     border_strip_rects,
@@ -9,7 +9,7 @@ from local_grader.core.ocr.editor import (
     render_review_pdf,
     spec_to_editor_regions,
 )
-from local_grader.cli.ocr_preview_pdf import LiveRegionEditor
+from opengrader.cli.ocr_preview_pdf import LiveRegionEditor
 
 
 def _sample_spec() -> dict:

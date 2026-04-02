@@ -1,4 +1,4 @@
-# Local Grader
+# Opengrader
 
 >
 
