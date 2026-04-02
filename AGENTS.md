@@ -10,8 +10,9 @@ Local Grader is a TUI application for efficient grading workflows. Think GradeSc
 
 ## Core Priorities
 
-1. Performance first.
-2. Reliability first.
+1. Unix philosophy: to do one thing and do it well.
+2. Performance first.
+3. Reliability first.
 
 ## Maintainabilty
 

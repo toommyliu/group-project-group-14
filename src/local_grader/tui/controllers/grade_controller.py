@@ -3,9 +3,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
+from local_grader.tui.data import QuestionSeed, Provider
 from local_grader.tui.screens import GradeScreen, HomeScreen
-from local_grader.tui.services.sample_data import SampleDataService
-from local_grader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
+from local_grader.tui.state import (
+    PAGE_GRADE,
+    PAGE_HOME,
+    QuestionGrade,
+    RubricOption,
+    TuiWorkflowState,
+)
 from local_grader.tui.widgets.nav_item import NavItem
 
 
@@ -22,11 +28,11 @@ class GradeController:
         self,
         app: GradeApp,
         state: TuiWorkflowState,
-        data_service: SampleDataService,
+        data_provider: Provider,
     ) -> None:
         self._app = app
         self._state = state
-        self._data_service = data_service
+        self._data_provider = data_provider
         self._refresh_students: Callable[[], None] | None = None
 
     def attach_student_refresh(self, callback: Callable[[], None]) -> None:
@@ -48,7 +54,9 @@ class GradeController:
             or "Assignment",
         )
         self._state.grading_run.max_points = 100.0
-        self._state.grading_run.questions = self._data_service.build_question_grades()
+        self._state.grading_run.questions = self._question_grades(
+            self._data_provider.build_question_seeds()
+        )
 
         self.refresh_grade_screen(status="")
         self._app.switch_to(PAGE_GRADE)
@@ -144,6 +152,23 @@ class GradeController:
 
     def _on_grade_page(self) -> bool:
         return self._state.current_page == PAGE_GRADE
+
+    @staticmethod
+    def _question_grades(seeds: list[QuestionSeed]) -> list[QuestionGrade]:
+        return [
+            QuestionGrade(
+                question_id=seed.question_id,
+                image_path=seed.image_path,
+                rubric_options=[
+                    RubricOption(
+                        label=option.label,
+                        points_delta=option.points_delta,
+                    )
+                    for option in seed.rubric_options
+                ],
+            )
+            for seed in seeds
+        ]
 
     @staticmethod
     def _numeric_id(raw_id: str) -> int | None:

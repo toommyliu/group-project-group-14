@@ -119,6 +119,7 @@ htmlcov/
 .nyc_output/
 *.lcov
 .pytest_cache/
+.ruff_cache/
 .tox/
 nosetests.xml
 coverage.xml

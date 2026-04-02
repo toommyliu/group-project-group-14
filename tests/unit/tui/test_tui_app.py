@@ -11,14 +11,14 @@ from local_grader.tui.controllers.input_controller import (
 from local_grader.tui.main import run_app
 from local_grader.tui.tui import TuiApp
 
-from .fakes import DEFAULT_IMAGE_PATH, FakeSampleDataService
+from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
 
 def test_home_tree_navigation_helpers() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            data_service=FakeSampleDataService(),
+            data_provider=FakeDataProvider(),
         )
 
         async with app.run_test() as pilot:
@@ -50,7 +50,7 @@ def test_happy_path_opens_student_and_finalize_loads_next_student() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            data_service=FakeSampleDataService(),
+            data_provider=FakeDataProvider(),
         )
 
         async with app.run_test() as pilot:
@@ -85,7 +85,7 @@ def test_student_submissions_path_opens_selected_submission() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            data_service=FakeSampleDataService(),
+            data_provider=FakeDataProvider(),
         )
 
         async with app.run_test() as pilot:
@@ -123,7 +123,7 @@ def test_vim_profile_binds_j_and_enter_for_home_flow() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            data_service=FakeSampleDataService(),
+            data_provider=FakeDataProvider(),
             input_profile=InputProfileName.VIM,
         )
 
@@ -152,7 +152,7 @@ def test_runtime_profile_switch_updates_live_bindings() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            data_service=FakeSampleDataService(),
+            data_provider=FakeDataProvider(),
         )
 
         async with app.run_test() as pilot:
@@ -180,7 +180,7 @@ def test_emacs_profile_supports_ctrl_p_plus_standard_keys() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            data_service=FakeSampleDataService(),
+            data_provider=FakeDataProvider(),
             input_profile=InputProfileName.EMACS,
         )
 

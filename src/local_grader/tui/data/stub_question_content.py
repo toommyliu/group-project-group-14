@@ -1,59 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import fitz
 
-from local_grader.tui.state import QuestionGrade, RubricOption
-from local_grader.tui.widgets.nav_item import NavItem
+from local_grader.tui.data.models import QuestionSeed, RubricOptionSeed
 
 
-class SampleDataService:
+class StubQuestionContent:
     def __init__(self, default_image_path: str) -> None:
         self._default_image_path = default_image_path
-        self._sample_question_images: list[tuple[str, str]] = []
+        self._question_images: list[tuple[str, str]] = []
 
-    def load_courses(self) -> list[NavItem]:
-        return [
-            NavItem("c1", "CMPE 195", "Spring 2026"),
-            NavItem("c2", "CMPE 102", "Spring 2026"),
-        ]
-
-    def load_assignments(self, course_id: int | None) -> list[NavItem]:
-        if course_id is None:
-            return []
-        return [
-            NavItem("a1", "HW 1"),
-            NavItem("a2", "HW 2"),
-            NavItem("a3", "Midterm"),
-        ]
-
-    def load_students(
-        self,
-        status_lookup: Callable[[str], str],
-    ) -> list[NavItem]:
-        students = [
-            ("s1", "Tommy Liu"),
-            ("s2", "Andy Cortes"),
-            ("s3", "Arjun Gill"),
-            ("s4", "Marco Lopez"),
-        ]
-        return [
-            NavItem(item_id, label, status_lookup(item_id))
-            for item_id, label in students
-        ]
-
-    def build_question_grades(self) -> list[QuestionGrade]:
+    def build_question_seeds(self) -> list[QuestionSeed]:
         rubric_options = [
-            RubricOption(label="Correct", points_delta=0.0),
-            RubricOption(label="Partially Correct", points_delta=-4.0),
-            RubricOption(label="Incorrect", points_delta=-10.0),
+            RubricOptionSeed(label="Correct", points_delta=0.0),
+            RubricOptionSeed(label="Partially Correct", points_delta=-4.0),
+            RubricOptionSeed(label="Incorrect", points_delta=-10.0),
         ]
-        output: list[QuestionGrade] = []
-        for question_id, image_path in self._load_sample_question_images():
+        output: list[QuestionSeed] = []
+        for question_id, image_path in self._load_question_images():
             output.append(
-                QuestionGrade(
+                QuestionSeed(
                     question_id=question_id,
                     image_path=image_path,
                     rubric_options=list(rubric_options),
@@ -61,9 +29,9 @@ class SampleDataService:
             )
         return output
 
-    def _load_sample_question_images(self) -> list[tuple[str, str]]:
-        if self._sample_question_images:
-            return self._sample_question_images
+    def _load_question_images(self) -> list[tuple[str, str]]:
+        if self._question_images:
+            return self._question_images
 
         source_dir = Path("tests/question_split_output")
         image_dir = Path(".tui_cache/question_split_images")
@@ -85,11 +53,11 @@ class SampleDataService:
             question_to_path.keys(),
             key=lambda qid: int(qid[1:]) if qid[1:].isdigit() else 999,
         )
-        self._sample_question_images = [
+        self._question_images = [
             (question_id, question_to_path[question_id])
             for question_id in ordered_questions
         ]
-        return self._sample_question_images
+        return self._question_images
 
     @staticmethod
     def _question_ids_from_stem(stem: str) -> list[str]:
