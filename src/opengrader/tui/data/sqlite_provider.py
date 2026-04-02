@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from opengrader.core import resolve_database_path
 from opengrader.core.courses import (
     CourseNotFoundError,
     StudentInput,
@@ -15,14 +16,16 @@ from opengrader.tui.data.models import (
 )
 from opengrader.tui.data.stub_question_content import StubQuestionContent
 
+
 class SqliteProvider:
     def __init__(
         self,
         default_image_path: str,
         *,
-        db_path: str | Path = "courses.db",
+        db_path: str | Path | None = None,
     ) -> None:
-        self._courses = build_sqlite_course_services(db_path)
+        self._db_path = resolve_database_path(db_path)
+        self._courses = build_sqlite_course_services(self._db_path)
         self._question_content = StubQuestionContent(default_image_path)
 
     def list_courses(self) -> list[CourseSummary]:

@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from opengrader.core import get_database_path
 from opengrader.core.courses import (
     AssessmentNotFoundError,
     CourseAlreadyExistsError,
@@ -27,8 +28,8 @@ def setup_args() -> Namespace:
     parser.add_argument(
         "--db",
         type=str,
-        default="courses.db",
-        help="Path to SQLite DB file (default: courses.db in current directory).",
+        default=str(get_database_path()),
+        help="Path to SQLite DB file (default: ~/.opengrader/data/courses.db).",
     )
     parser.add_argument(
         "--no-delete",
@@ -128,7 +129,9 @@ def run_cli() -> None:
 
     print(f"Using DB at: {db_path}")
     if db_existed:
-        print("Existing DB file detected; it will not be removed unless --no-delete is used.")
+        print(
+            "Existing DB file detected; it will not be removed unless --no-delete is used."
+        )
 
     services = build_sqlite_course_services(db_path)
 
@@ -273,6 +276,7 @@ def run_cli() -> None:
                 print("Unknown choice")
     except KeyboardInterrupt:
         print("\nInterrupted, exiting.")
+
 
 if __name__ == "__main__":
     run_cli()
