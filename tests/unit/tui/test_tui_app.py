@@ -4,12 +4,12 @@ from unittest.mock import patch
 import pytest
 from textual.widgets import ContentSwitcher, Tree
 
-from local_grader.tui.controllers.input_controller import (
+from opengrader.tui.controllers.input_controller import (
     InputController,
     InputProfileName,
 )
-from local_grader.tui.main import run_app
-from local_grader.tui.tui import TuiApp
+from opengrader.tui.main import run_app
+from opengrader.tui.tui import TuiApp
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -217,7 +217,7 @@ def test_emacs_profile_supports_ctrl_p_plus_standard_keys() -> None:
 
 def test_run_app_uses_runtime_default_profile() -> None:
     expected_profile = InputController.profile().name
-    with patch("local_grader.tui.main.TuiApp.run", autospec=True) as run_mock:
+    with patch("opengrader.tui.main.TuiApp.run", autospec=True) as run_mock:
         run_app()
 
     app_self = run_mock.call_args.args[0]

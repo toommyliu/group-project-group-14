@@ -1,5 +1,5 @@
 [project]
-name = "local-grader"
+name = "opengrader"
 version = "1.0"
 description = "TUI application that will streamline and automate grading"
 authors = [
@@ -25,17 +25,17 @@ dependencies = [
 ]
 
 [project.scripts]
-tui = "local_grader.tui.main:run_app"
-pdf-splitter = "local_grader.cli.pdf_splitter:run_cli"
-question-splitter = "local_grader.cli.question_splitter:run_cli"
-roster-reader = "local_grader.cli.roster_reader:run_cli"
-sample-pdf = "local_grader.cli.generate_sample_gradeable_pdf:run_cli"
-ocr-pdf = "local_grader.cli.ocr_pdf:run_cli"
-ocr-preview-pdf = "local_grader.cli.ocr_preview_pdf:run_cli"
-course-demo = "local_grader.cli.course_core_cli:run_cli"
+tui = "opengrader.tui.main:run_app"
+pdf-splitter = "opengrader.cli.pdf_splitter:run_cli"
+question-splitter = "opengrader.cli.question_splitter:run_cli"
+roster-reader = "opengrader.cli.roster_reader:run_cli"
+sample-pdf = "opengrader.cli.generate_sample_gradeable_pdf:run_cli"
+ocr-pdf = "opengrader.cli.ocr_pdf:run_cli"
+ocr-preview-pdf = "opengrader.cli.ocr_preview_pdf:run_cli"
+course-demo = "opengrader.cli.course_core_cli:run_cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/local_grader"]
+packages = ["src/opengrader"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

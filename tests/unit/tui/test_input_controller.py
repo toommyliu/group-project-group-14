@@ -1,4 +1,4 @@
-from local_grader.tui.controllers.input_controller import (
+from opengrader.tui.controllers.input_controller import (
     DEFAULT_INPUT_PROFILE,
     InputCommand,
     InputContext,
@@ -6,7 +6,7 @@ from local_grader.tui.controllers.input_controller import (
     InputController,
     current_default_input_profile,
 )
-from local_grader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
+from opengrader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
 
 
 def test_command_availability_tracks_active_context() -> None:
