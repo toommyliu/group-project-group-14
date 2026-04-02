@@ -5,9 +5,11 @@ from typing import Protocol
 
 from textual.widgets.tree import TreeNode
 
+from local_grader.core.courses.services.course_service import CourseService
 from local_grader.tui.screens import HomeNodeData, HomeScreen
 from local_grader.tui.services.sample_data import SampleDataService
 from local_grader.tui.state import TuiWorkflowState
+from local_grader.tui.widgets.nav_item import NavItem
 
 
 class HomeApp(Protocol):
@@ -21,21 +23,25 @@ class HomeController:
         state: TuiWorkflowState,
         data_service: SampleDataService,
         open_student: Callable[[int], None],
+        course_service: CourseService | None = None,
     ) -> None:
         self._app = app
         self._state = state
         self._data_service = data_service
         self._open_student = open_student
+        self._course_service = course_service
         self._loaded_course_assignments: set[str] = set()
         self._loaded_course_students: set[str] = set()
         self._loaded_student_submissions: set[tuple[str, str]] = set()
 
     def initialize(self) -> None:
         home_screen = self._app.get_home_screen()
-        home_screen.set_courses(
-            self._data_service.load_courses(),
-            highlight_first=True,
-        )
+        if self._course_service is not None:
+            courses = self._course_service.list_courses()
+            items = [NavItem(str(c.id), c.name, c.term) for c in courses]
+        else:
+            items = self._data_service.load_courses()
+        home_screen.set_courses(items, highlight_first=True)
         home_screen.set_status("Use arrows to navigate tree and Enter to select.")
         home_screen.set_details(
             "Select a course to access assignment-centric and student-centric workflows."
