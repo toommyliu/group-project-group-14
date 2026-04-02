@@ -15,9 +15,6 @@ def _row_to_grade(row: sqlite3.Row) -> Grade:
         assessment_id=row["assessment_id"],
         student_id=row["student_id"],
         points_awarded=Decimal(row["points_awarded"]),
-        grader_note=row["grader_note"],
-        graded_by=row["graded_by"],
-        graded_at=parse_datetime(row["graded_at"]),
         updated_at=parse_datetime(row["updated_at"]),
         version=row["version"],
     )
@@ -30,8 +27,8 @@ class SqliteGradeStore:
     def get(self, assessment_id: int, student_id: int) -> Grade | None:
         row = self._conn.execute(
             """
-            SELECT assessment_id, student_id, points_awarded, grader_note,
-                   graded_by, graded_at, updated_at, version
+            SELECT assessment_id, student_id, points_awarded,
+                   updated_at, version
             FROM grades
             WHERE assessment_id = ? AND student_id = ?
             """,
@@ -46,9 +43,7 @@ class SqliteGradeStore:
         assessment_id: int,
         student_id: int,
         points_awarded: Decimal,
-        grader_note: str | None,
-        graded_by: str | None,
-        graded_at: datetime,
+        updated_at: datetime,
         expected_version: int | None,
     ) -> Grade:
         existing = self.get(assessment_id=assessment_id, student_id=student_id)
@@ -57,17 +52,14 @@ class SqliteGradeStore:
                 """
                 INSERT INTO grades(
                     assessment_id, student_id, points_awarded,
-                    grader_note, graded_by, graded_at, updated_at, version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    updated_at, version
+                ) VALUES (?, ?, ?, ?, 1)
                 """,
                 (
                     assessment_id,
                     student_id,
                     str(points_awarded),
-                    grader_note,
-                    graded_by,
-                    graded_at.isoformat(),
-                    graded_at.isoformat(),
+                    updated_at.isoformat(),
                 ),
             )
             created = self.get(assessment_id=assessment_id, student_id=student_id)
@@ -85,19 +77,13 @@ class SqliteGradeStore:
             """
             UPDATE grades
             SET points_awarded = ?,
-                grader_note = ?,
-                graded_by = ?,
-                graded_at = ?,
                 updated_at = ?,
                 version = ?
             WHERE assessment_id = ? AND student_id = ? AND version = ?
             """,
             (
                 str(points_awarded),
-                grader_note,
-                graded_by,
-                graded_at.isoformat(),
-                graded_at.isoformat(),
+                updated_at.isoformat(),
                 target_version,
                 assessment_id,
                 student_id,
@@ -115,8 +101,8 @@ class SqliteGradeStore:
     def list_for_course(self, course_id: int) -> list[Grade]:
         rows = self._conn.execute(
             """
-            SELECT g.assessment_id, g.student_id, g.points_awarded, g.grader_note,
-                   g.graded_by, g.graded_at, g.updated_at, g.version
+            SELECT g.assessment_id, g.student_id, g.points_awarded,
+                   g.updated_at, g.version
             FROM grades g
             INNER JOIN assessments a ON a.id = g.assessment_id
             WHERE a.course_id = ?

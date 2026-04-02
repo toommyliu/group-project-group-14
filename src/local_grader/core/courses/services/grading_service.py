@@ -31,8 +31,6 @@ class GradingService:
         assessment_id: int,
         student_id: int,
         points_awarded: Decimal | float | int | str,
-        grader_note: str | None = None,
-        graded_by: str | None = None,
         expected_version: int | None = None,
     ) -> Grade:
         normalized_points = normalize_points(points_awarded)
@@ -61,9 +59,7 @@ class GradingService:
                 assessment_id=assessment_id,
                 student_id=student_id,
                 points_awarded=normalized_points,
-                grader_note=grader_note,
-                graded_by=graded_by,
-                graded_at=now,
+                updated_at=now,
                 expected_version=expected_version,
             )
             transaction.commit()
@@ -97,9 +93,7 @@ class GradingService:
                     assessment_id=grade_input.assessment_id,
                     student_id=grade_input.student_id,
                     points_awarded=normalized_points,
-                    grader_note=grade_input.grader_note,
-                    graded_by=grade_input.graded_by,
-                    graded_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                     expected_version=grade_input.expected_version,
                 )
                 results.append(grade)

@@ -9,6 +9,7 @@ SCHEMA_VERSION = 1
 
 # TODO: maybe ORM?
 
+
 def _apply_v1_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -59,9 +60,6 @@ def _apply_v1_schema(conn: sqlite3.Connection) -> None:
             assessment_id INTEGER NOT NULL,
             student_id INTEGER NOT NULL,
             points_awarded TEXT NOT NULL,
-            grader_note TEXT,
-            graded_by TEXT,
-            graded_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             version INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (assessment_id, student_id),

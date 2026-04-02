@@ -62,9 +62,7 @@ class GradeStore(Protocol):
         assessment_id: int,
         student_id: int,
         points_awarded: Decimal,
-        grader_note: str | None,
-        graded_by: str | None,
-        graded_at: datetime,
+        updated_at: datetime,
         expected_version: int | None,
     ) -> Grade: ...
 

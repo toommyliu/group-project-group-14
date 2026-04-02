@@ -21,7 +21,7 @@ _POINTS_QUANTUM = Decimal("0.01")
 def normalize_points(value: Decimal | float | int | str) -> Decimal:
     try:
         points = Decimal(str(value))
-    except Exception as exc: 
+    except Exception as exc:
         raise InvalidPointsError(f"invalid points value: {value!r}") from exc
 
     if points < Decimal("0"):
@@ -41,11 +41,11 @@ def normalize_assessment_type(value: str) -> AssessmentType:
 @dataclass(frozen=True)
 class Course:
     # TODO: look into decomposing further
-    id: int # database PK or the class number
+    id: int  # database PK or the class number
     code: str
     name: str
     term: str
-    section: str 
+    section: str
     created_at: datetime
 
 
@@ -82,11 +82,8 @@ class Grade:
     assessment_id: int
     student_id: int
     points_awarded: Decimal
-    grader_note: str | None
-    graded_by: str | None
-    graded_at: datetime
     updated_at: datetime
-    version: int
+    version: int # optimistic offline concurrency control
 
 
 @dataclass(frozen=True)
@@ -101,8 +98,6 @@ class GradeInput:
     assessment_id: int
     student_id: int
     points_awarded: Decimal
-    grader_note: str | None = None
-    graded_by: str | None = None
     expected_version: int | None = None
 
 
