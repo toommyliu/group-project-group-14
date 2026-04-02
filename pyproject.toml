@@ -32,6 +32,7 @@ roster-reader = "local_grader.cli.roster_reader:run_cli"
 sample-pdf = "local_grader.cli.generate_sample_gradeable_pdf:run_cli"
 ocr-pdf = "local_grader.cli.ocr_pdf:run_cli"
 ocr-preview-pdf = "local_grader.cli.ocr_preview_pdf:run_cli"
+course-demo = "local_grader.cli.course_core_cli:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_grader"]
