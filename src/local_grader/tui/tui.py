@@ -3,7 +3,6 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Footer, Tree
 
-from local_grader.core.courses.bootstrap import CourseServices
 from local_grader.tui.controllers import (
     GradeController,
     HomeController,
@@ -13,42 +12,42 @@ from local_grader.tui.controllers.input_controller import (
     InputCommand,
     InputProfileName,
 )
+from local_grader.tui.data import SqliteProvider, Provider
 from local_grader.tui.screens import GradeScreen, HomeNodeData, HomeScreen
-from local_grader.tui.services import SampleDataService
 from local_grader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 
 class TuiApp(App):
     CSS_PATH = Path(__file__).parent / "tui.tcss"
     COMMAND_PALETTE_BINDING = "ctrl+backslash"
-    BINDINGS = InputController.all_bindings()
+    BINDINGS = InputController.all_bindings() # pyright: ignore[reportAssignmentType]
 
     def __init__(
         self,
         *,
         default_image_path: str | None = None,
-        data_service: SampleDataService | None = None,
-        course_services: CourseServices | None = None,
+        data_provider: Provider | None = None,
         input_profile: InputProfileName | str | None = None,
+        db_path: str | Path = "courses.db",
     ) -> None:
         self._input_profile = InputController._coerce_profile_name(input_profile)
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
-        self.course_services = course_services
         self.workflow_state = TuiWorkflowState()
-        self.data_service = data_service or SampleDataService(self.default_image_path)
+        self.data_provider = data_provider or SqliteProvider(
+            self.default_image_path,
+            db_path=db_path,
+        )
         self.grade_controller = GradeController(
             self,
             self.workflow_state,
-            self.data_service,
+            self.data_provider,
         )
         self.home_controller = HomeController(
             self,
             self.workflow_state,
-            self.data_service,
+            self.data_provider,
             self.grade_controller.open_student_by_index,
-            course_service=self.course_services.courses if self.course_services else None,
-            assessment_service=self.course_services.assessments if self.course_services else None,
         )
         self.grade_controller.attach_student_refresh(
             self.home_controller.refresh_students
