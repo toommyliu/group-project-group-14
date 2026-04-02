@@ -3,6 +3,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Footer, Tree
 
+from local_grader.core.courses.bootstrap import CourseServices
 from local_grader.tui.controllers import (
     GradeController,
     HomeController,
@@ -27,11 +28,13 @@ class TuiApp(App):
         *,
         default_image_path: str | None = None,
         data_service: SampleDataService | None = None,
+        course_services: CourseServices | None = None,
         input_profile: InputProfileName | str | None = None,
     ) -> None:
         self._input_profile = InputController._coerce_profile_name(input_profile)
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
+        self.course_services = course_services
         self.workflow_state = TuiWorkflowState()
         self.data_service = data_service or SampleDataService(self.default_image_path)
         self.grade_controller = GradeController(
