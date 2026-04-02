@@ -23,23 +23,43 @@ class SqliteCourseStore:
         self._conn = conn
 
     def create(self, code: str, name: str, term: str, section: str) -> Course:
+        self._conn.execute(
+            """
+            INSERT INTO course_catalogs(code, name)
+            VALUES (?, ?)
+            ON CONFLICT(code) DO UPDATE SET
+                name = excluded.name
+            """,
+            (code, name),
+        )
+
         cursor = self._conn.execute(
             """
-            INSERT INTO courses(code, name, term, section)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO courses(catalog_code, term, section)
+            VALUES (?, ?, ?)
             """,
-            (code, name, term, section),
+            (code, term, section),
         )
         course_id = int(cursor.lastrowid)
         row = self._conn.execute(
-            "SELECT id, code, name, term, section, created_at FROM courses WHERE id = ?",
+            """
+            SELECT c.id, cc.code, cc.name, c.term, c.section, c.created_at
+            FROM courses c
+            INNER JOIN course_catalogs cc ON cc.code = c.catalog_code
+            WHERE c.id = ?
+            """,
             (course_id,),
         ).fetchone()
         return _row_to_course(row)
 
     def get_by_id(self, course_id: int) -> Course | None:
         row = self._conn.execute(
-            "SELECT id, code, name, term, section, created_at FROM courses WHERE id = ?",
+            """
+            SELECT c.id, cc.code, cc.name, c.term, c.section, c.created_at
+            FROM courses c
+            INNER JOIN course_catalogs cc ON cc.code = c.catalog_code
+            WHERE c.id = ?
+            """,
             (course_id,),
         ).fetchone()
         if row is None:
@@ -49,9 +69,10 @@ class SqliteCourseStore:
     def get_by_key(self, code: str, term: str, section: str) -> Course | None:
         row = self._conn.execute(
             """
-            SELECT id, code, name, term, section, created_at
-            FROM courses
-            WHERE code = ? AND term = ? AND section = ?
+            SELECT c.id, cc.code, cc.name, c.term, c.section, c.created_at
+            FROM courses c
+            INNER JOIN course_catalogs cc ON cc.code = c.catalog_code
+            WHERE cc.code = ? AND c.term = ? AND c.section = ?
             """,
             (code, term, section),
         ).fetchone()
@@ -62,9 +83,10 @@ class SqliteCourseStore:
     def list_all(self) -> list[Course]:
         rows = self._conn.execute(
             """
-            SELECT id, code, name, term, section, created_at
-            FROM courses
-            ORDER BY created_at DESC, id DESC
+            SELECT c.id, cc.code, cc.name, c.term, c.section, c.created_at
+            FROM courses c
+            INNER JOIN course_catalogs cc ON cc.code = c.catalog_code
+            ORDER BY c.created_at DESC, c.id DESC
             """
         ).fetchall()
         return [_row_to_course(row) for row in rows]

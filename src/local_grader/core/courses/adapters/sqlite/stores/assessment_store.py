@@ -35,7 +35,7 @@ class SqliteAssessmentStore:
     ) -> Assessment:
         cursor = self._conn.execute(
             """
-            INSERT INTO assessments(course_id, type, title, max_points, due_at)
+            INSERT INTO assessments(course_id, type_code, title, max_points, due_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
@@ -49,7 +49,7 @@ class SqliteAssessmentStore:
         assessment_id = int(cursor.lastrowid)
         row = self._conn.execute(
             """
-            SELECT id, course_id, type, title, max_points, due_at, created_at
+            SELECT id, course_id, type_code AS type, title, max_points, due_at, created_at
             FROM assessments
             WHERE id = ?
             """,
@@ -60,7 +60,7 @@ class SqliteAssessmentStore:
     def get_by_id(self, assessment_id: int) -> Assessment | None:
         row = self._conn.execute(
             """
-            SELECT id, course_id, type, title, max_points, due_at, created_at
+            SELECT id, course_id, type_code AS type, title, max_points, due_at, created_at
             FROM assessments
             WHERE id = ?
             """,
@@ -73,7 +73,7 @@ class SqliteAssessmentStore:
     def list_for_course(self, course_id: int) -> list[Assessment]:
         rows = self._conn.execute(
             """
-            SELECT id, course_id, type, title, max_points, due_at, created_at
+            SELECT id, course_id, type_code AS type, title, max_points, due_at, created_at
             FROM assessments
             WHERE course_id = ?
             ORDER BY CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at ASC, id ASC

@@ -11,7 +11,9 @@ def _row_to_student(row: sqlite3.Row) -> Student:
     return Student(
         id=row["id"],
         sid=row["sid"],
-        name=row["name"],
+        first_name=row["first_name"],
+        last_name=row["last_name"],
+        middle_name=row["middle_name"],
         email=row["email"],
         created_at=parse_datetime(row["created_at"]),
     )
@@ -71,11 +73,11 @@ class SqliteEnrollmentStore:
     def list_students_for_course(self, course_id: int) -> list[Student]:
         rows = self._conn.execute(
             """
-            SELECT s.id, s.sid, s.name, s.email, s.created_at
+            SELECT s.id, s.sid, s.first_name, s.last_name, s.middle_name, s.email, s.created_at
             FROM students s
             INNER JOIN enrollments e ON e.student_id = s.id
             WHERE e.course_id = ?
-            ORDER BY s.name ASC, s.sid ASC
+            ORDER BY s.last_name ASC, s.first_name ASC, s.sid ASC
             """,
             (course_id,),
         ).fetchall()

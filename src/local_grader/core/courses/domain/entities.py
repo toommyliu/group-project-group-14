@@ -53,10 +53,19 @@ class Course:
 class Student:
     id: int
     sid: str
-    # TODO: decompose first_name, last_name, middle_name, etc...?
-    name: str
+    first_name: str
+    last_name: str
+    middle_name: str | None
     email: str | None
     created_at: datetime
+
+    @property
+    def full_name(self) -> str:
+        parts = [self.first_name]
+        if self.middle_name:
+            parts.append(self.middle_name)
+        parts.append(self.last_name)
+        return " ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -89,7 +98,9 @@ class Grade:
 @dataclass(frozen=True)
 class StudentInput:
     sid: str
-    name: str
+    first_name: str
+    last_name: str
+    middle_name: str | None = None
     email: str | None = None
 
 

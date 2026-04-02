@@ -89,7 +89,7 @@ def select_student_id(services, course_id: int) -> Optional[int]:
         return None
     print("Roster:")
     for s in roster:
-        print(f"  {s.id}: {s.sid} {s.name} {s.email or ''}")
+        print(f"  {s.id}: {s.sid} {s.full_name} {s.email or ''}")
     sid = safe_input("Enter student id: ")
     if not sid:
         return None
@@ -172,9 +172,19 @@ def run_cli() -> None:
                     sid = safe_input("Student SID (blank to finish): ")
                     if not sid:
                         break
-                    student_name = safe_input("Student name: ")
+                    first_name = safe_input("Student first name: ")
+                    middle_name = safe_input("Student middle name (optional): ")
+                    last_name = safe_input("Student last name: ")
                     student_email = safe_input("Student email (optional): ")
-                    students.append(StudentInput(sid=sid, name=student_name, email=student_email or None))
+                    students.append(
+                        StudentInput(
+                            sid=sid,
+                            first_name=first_name,
+                            middle_name=middle_name or None,
+                            last_name=last_name,
+                            email=student_email or None,
+                        )
+                    )
                 if students:
                     enrolled = services.enrollments.enroll_students(course_id, students)
                     print(f"Enrolled {len(enrolled)} student(s).")
@@ -186,7 +196,7 @@ def run_cli() -> None:
                     continue
                 roster = services.enrollments.list_roster(course_id)
                 for s in roster:
-                    print(f"{s.id}: {s.sid} {s.name} {s.email or ''}")
+                    print(f"{s.id}: {s.sid} {s.full_name} {s.email or ''}")
             elif choice == "5":
                 course_id = select_course_id(services)
                 if not course_id:

@@ -49,7 +49,12 @@ def test_enroll_students_is_idempotent_by_sid(tmp_path) -> None:
     services.enrollments.enroll_students(
         course.id,
         [
-            StudentInput(sid="100000001", name="Ada Lovelace", email="ada@example.com"),
+            StudentInput(
+                sid="100000001",
+                first_name="Ada",
+                last_name="Lovelace",
+                email="ada@example.com",
+            ),
         ],
     )
     services.enrollments.enroll_students(
@@ -57,7 +62,8 @@ def test_enroll_students_is_idempotent_by_sid(tmp_path) -> None:
         [
             StudentInput(
                 sid="100000001",
-                name="Ada L.",
+                first_name="Ada",
+                last_name="L.",
                 email="ada@example.com",
             ),
         ],
@@ -66,7 +72,7 @@ def test_enroll_students_is_idempotent_by_sid(tmp_path) -> None:
     roster = services.enrollments.list_roster(course.id)
     assert len(roster) == 1
     assert roster[0].sid == "100000001"
-    assert roster[0].name == "Ada L."
+    assert roster[0].full_name == "Ada L."
 
 
 def test_assessment_sorting_uses_due_date_with_nulls_last(tmp_path) -> None:
@@ -128,7 +134,14 @@ def test_assign_grade_requires_enrollment_and_honors_max_points(tmp_path) -> Non
 
     student = services.enrollments.enroll_students(
         course.id,
-        [StudentInput(sid="100000002", name="Grace Hopper", email=None)],
+        [
+            StudentInput(
+                sid="100000002",
+                first_name="Grace",
+                last_name="Hopper",
+                email=None,
+            )
+        ],
     )[0]
 
     with pytest.raises(InvalidPointsError):
@@ -149,7 +162,14 @@ def test_assign_grade_uses_optimistic_locking_version(tmp_path) -> None:
     )
     student = services.enrollments.enroll_students(
         course.id,
-        [StudentInput(sid="100000003", name="Alan Turing", email=None)],
+        [
+            StudentInput(
+                sid="100000003",
+                first_name="Alan",
+                last_name="Turing",
+                email=None,
+            )
+        ],
     )[0]
     assessment = services.assessments.create_assessment(
         course_id=course.id,
@@ -193,8 +213,18 @@ def test_get_course_gradebook_returns_totals_and_percentage(tmp_path) -> None:
     students = services.enrollments.enroll_students(
         course.id,
         [
-            StudentInput(sid="100000004", name="Student A", email=None),
-            StudentInput(sid="100000005", name="Student B", email=None),
+            StudentInput(
+                sid="100000004",
+                first_name="Student",
+                last_name="A",
+                email=None,
+            ),
+            StudentInput(
+                sid="100000005",
+                first_name="Student",
+                last_name="B",
+                email=None,
+            ),
         ],
     )
     assessments = [
