@@ -15,7 +15,7 @@ class FakeHomeScreen:
     def set_status(self, text: str) -> None:
         self.status = text
 
-    def focus_tree(self) -> bool:
+    def focus_courses(self) -> bool:
         self.focused = True
         return True
 

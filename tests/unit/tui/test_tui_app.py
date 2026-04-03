@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import ContentSwitcher, Tree
+from textual.widgets import ContentSwitcher, ListView, TabbedContent
 
 from opengrader.tui.controllers.input_controller import (
     InputController,
@@ -16,7 +16,7 @@ from opengrader.tui.tui import TuiApp
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
 
-def test_home_tree_navigation_helpers() -> None:
+def test_home_course_list_populates_on_mount() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -25,30 +25,13 @@ def test_home_tree_navigation_helpers() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            tree = app.get_home_screen().query_one("#home-tree", Tree)
-
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "Courses"
-
-            await pilot.press("right")
-            await pilot.pause()
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "CMPE 195 [Spring 2026]"
-
-            await pilot.press("right")
-            await pilot.pause()
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "Assignments"
-
-            await pilot.press("left")
-            await pilot.pause()
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "CMPE 195 [Spring 2026]"
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            assert len(course_list.children) == 2
 
     asyncio.run(run())
 
 
-def test_happy_path_opens_student_and_finalize_loads_next_student() -> None:
+def test_tabs_hidden_until_course_selected() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -57,11 +40,97 @@ def test_happy_path_opens_student_and_finalize_loads_next_student() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("right")
-            await pilot.pause()
-            await pilot.press("right")
+            tabs = app.get_home_screen().query_one("#home-content-tabs", TabbedContent)
+            assert tabs.display is False
+
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
+            await pilot.pause()
+
+            assert tabs.display is True
+
+    asyncio.run(run())
+
+
+def test_course_selection_populates_tabs() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
+            )
+            assert len(assignment_list.children) == 2
+            assert len(student_list.children) == 2
+
+    asyncio.run(run())
+
+
+def test_happy_path_opens_grading_via_assignment_tab() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            assert len(assignment_list.children) == 2
+            assert assignment_list.highlighted_child is not None
+
+            await pilot.press("g")
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-grade"
+            assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
+
+    asyncio.run(run())
+
+
+def test_finalize_loads_next_student() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("right")
             await pilot.pause()
             await pilot.press("g")
             await pilot.pause()
@@ -80,48 +149,7 @@ def test_happy_path_opens_student_and_finalize_loads_next_student() -> None:
     asyncio.run(run())
 
 
-@pytest.mark.skip(
-    reason="Student submissions path test needs update for new tree structure"
-)
-def test_student_submissions_path_opens_selected_submission() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("right")
-            await pilot.pause()
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.press("right")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.press("right")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.pause()
-            await pilot.pause()
-            await pilot.press("down")
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            switcher = app.query_one(ContentSwitcher)
-            assert switcher.current == "page-grade"
-            assert app.workflow_state.selection_labels["assignment"] == "HW 2"
-            assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
-
-    asyncio.run(run())
-
-
-def test_vim_profile_binds_j_and_enter_for_home_flow() -> None:
+def test_vim_profile_navigates_with_j_k_h_l() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -131,21 +159,19 @@ def test_vim_profile_binds_j_and_enter_for_home_flow() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("l")
-            await pilot.pause()
-            await pilot.press("l")
+
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-
-            tree = app.get_home_screen().query_one("#home-tree", Tree)
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "HW 1"
-
-            await pilot.press("j")
+            await pilot.press("l")
             await pilot.pause()
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "HW 2"
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            assert assignment_list.has_focus
 
     asyncio.run(run())
 
@@ -162,23 +188,23 @@ def test_runtime_profile_switch_updates_live_bindings() -> None:
             app.set_input_profile(InputProfileName.VIM)
             await pilot.pause()
 
-            await pilot.press("l")
-            await pilot.pause()
-            await pilot.press("l")
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-            await pilot.press("j")
+            await pilot.press("l")
             await pilot.pause()
 
-            tree = app.get_home_screen().query_one("#home-tree", Tree)
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "HW 2"
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            assert assignment_list.has_focus
 
     asyncio.run(run())
 
 
-def test_emacs_profile_supports_ctrl_p_plus_standard_keys() -> None:
+def test_emacs_profile_navigates_with_ctrl_keys() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -188,31 +214,19 @@ def test_emacs_profile_supports_ctrl_p_plus_standard_keys() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("ctrl+f")
-            await pilot.pause()
-            await pilot.press("ctrl+f")
+
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
-
-            tree = app.get_home_screen().query_one("#home-tree", Tree)
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "HW 1"
-
-            await pilot.press("down")
+            await pilot.press("ctrl+f")
             await pilot.pause()
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "HW 2"
 
-            await pilot.press("ctrl+p")
-            await pilot.pause()
-            assert tree.cursor_node is not None
-            assert str(tree.cursor_node.label) == "HW 1"
-
-            await pilot.press("g")
-            await pilot.pause()
-            switcher = app.query_one(ContentSwitcher)
-            assert switcher.current == "page-grade"
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            assert assignment_list.has_focus
 
     asyncio.run(run())
 

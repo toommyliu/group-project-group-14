@@ -1,305 +1,259 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Static, Tree
-from textual.widgets.tree import TreeNode
+from textual.containers import Horizontal, Vertical
+from textual.message import Message
+from textual.widgets import (
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
+from opengrader.tui.widgets import tabs  # type: ignore -- applies monkeypatch to textual's Tab widget
 from opengrader.tui.widgets.nav_item import NavItem
 
 
-@dataclass(frozen=True)
-class HomeNodeData:
-    kind: str
-    course: NavItem | None = None
-    assignment: NavItem | None = None
-    student: NavItem | None = None
-
-
-class HomeScreen(Vertical):
-    def __init__(self, *, id: str | None = None) -> None:
-        self._courses_section_node: TreeNode[HomeNodeData] | None = None
-        self._course_nodes: dict[str, TreeNode[HomeNodeData]] = {}
-        self._course_assignments_nodes: dict[str, TreeNode[HomeNodeData]] = {}
-        self._course_students_nodes: dict[str, TreeNode[HomeNodeData]] = {}
-        self._assignment_nodes: dict[tuple[str, str], TreeNode[HomeNodeData]] = {}
-        self._student_nodes: dict[tuple[str, str], TreeNode[HomeNodeData]] = {}
-        self._student_submissions_nodes: dict[
-            tuple[str, str], TreeNode[HomeNodeData]
-        ] = {}
-        super().__init__(id=id)
-
-    def compose(self) -> ComposeResult:
-        with Horizontal(id="home-workspace"):
-            yield Tree[HomeNodeData]("Courses", id="home-tree")
-            with VerticalScroll(id="home-details-pane"):
-                yield Static("", id="home-details")
-        yield Static(
-            "Use arrows to navigate tree nodes and Enter to select.",
-            id="home-status",
-        )
-
-    @property
-    def tree(self) -> Tree[HomeNodeData]:
-        return self.query_one("#home-tree", Tree)
-
-    def on_mount(self) -> None:
-        tree = self.tree
-        tree.show_root = False
-        tree.auto_expand = False
-        tree.root.expand()
-
-    def set_courses(
-        self,
-        courses: list[NavItem],
-        *,
-        highlight_first: bool = False,
-    ) -> None:
-        tree = self.tree
-        tree.clear()
-        self._courses_section_node = None
-        self._course_nodes.clear()
-        self._course_assignments_nodes.clear()
-        self._course_students_nodes.clear()
-        self._assignment_nodes.clear()
-        self._student_nodes.clear()
-        self._student_submissions_nodes.clear()
-
-        courses_section = tree.root.add(
-            "Courses",
-            data=HomeNodeData(kind="courses_section"),
-        )
-        self._courses_section_node = courses_section
-
-        first_course_node: TreeNode[HomeNodeData] | None = None
-        for course in courses:
-            course_node = courses_section.add(
-                self._item_text(course),
-                data=HomeNodeData(kind="course", course=course),
-            )
-            self._course_nodes[course.item_id] = course_node
-            if first_course_node is None:
-                first_course_node = course_node
-
-            assignments_node = course_node.add(
-                "Assignments",
-                data=HomeNodeData(kind="course_assignments_section", course=course),
-            )
-            students_node = course_node.add(
-                "Students",
-                data=HomeNodeData(kind="course_students_section", course=course),
-            )
-            self._course_assignments_nodes[course.item_id] = assignments_node
-            self._course_students_nodes[course.item_id] = students_node
-
-        tree.root.expand()
-        courses_section.expand()
-        if highlight_first and first_course_node is not None:
-            tree.move_cursor(courses_section)
-
-    def set_course_assignments(
-        self,
-        course_item_id: str,
-        assignments: list[NavItem],
-    ) -> None:
-        parent = self._course_assignments_nodes.get(course_item_id)
-        if parent is None:
-            return
-        course_item = parent.data.course if parent.data is not None else None
-        if course_item is None:
-            return
-
-        self._clear_course_assignments(course_item_id)
-        parent.remove_children()
-
-        for assignment in assignments:
-            assignment_node = parent.add_leaf(
-                self._item_text(assignment),
-                data=HomeNodeData(
-                    kind="assignment",
-                    course=course_item,
-                    assignment=assignment,
-                ),
-            )
-            key = (course_item_id, assignment.item_id)
-            self._assignment_nodes[key] = assignment_node
-
-        parent.expand()
-
-    def set_course_assignments_loading(self, course_item_id: str) -> None:
-        parent = self._course_assignments_nodes.get(course_item_id)
-        if parent is None:
-            return
-        parent.remove_children()
-        parent.add_leaf(
-            "Loading assignments...",
-            data=HomeNodeData(kind="loading"),
-        )
-        parent.expand()
-
-    def set_course_students(
-        self,
-        course_item_id: str,
-        students: list[NavItem],
-    ) -> None:
-        parent = self._course_students_nodes.get(course_item_id)
-        if parent is None:
-            return
-        course_item = parent.data.course if parent.data is not None else None
-        if course_item is None:
-            return
-
-        self._clear_course_students(course_item_id)
-        parent.remove_children()
-
-        for student in students:
-            student_node = parent.add(
-                self._item_text(student),
-                data=HomeNodeData(
-                    kind="student",
-                    course=course_item,
-                    student=student,
-                ),
-            )
-            key = (course_item_id, student.item_id)
-            self._student_nodes[key] = student_node
-            self._student_submissions_nodes[key] = student_node.add(
-                "Submissions",
-                data=HomeNodeData(
-                    kind="student_submissions_section",
-                    course=course_item,
-                    student=student,
-                ),
-            )
-
-        parent.expand()
-
-    def set_course_students_loading(self, course_item_id: str) -> None:
-        parent = self._course_students_nodes.get(course_item_id)
-        if parent is None:
-            return
-        parent.remove_children()
-        parent.add_leaf(
-            "Loading students...",
-            data=HomeNodeData(kind="loading"),
-        )
-        parent.expand()
-
-    def set_student_submissions(
-        self,
-        course_item_id: str,
-        student_item_id: str,
-        assignments: list[NavItem],
-    ) -> None:
-        key = (course_item_id, student_item_id)
-        parent = self._student_submissions_nodes.get(key)
-        if parent is None:
-            return
-        course_item = parent.data.course if parent.data is not None else None
-        student_item = parent.data.student if parent.data is not None else None
-        if course_item is None or student_item is None:
-            return
-
-        parent.remove_children()
-        for assignment in assignments:
-            parent.add_leaf(
-                self._item_text(assignment),
-                data=HomeNodeData(
-                    kind="submission",
-                    course=course_item,
-                    assignment=assignment,
-                    student=student_item,
-                ),
-            )
-        parent.expand()
-
-    def set_student_submissions_loading(
-        self,
-        course_item_id: str,
-        student_item_id: str,
-    ) -> None:
-        key = (course_item_id, student_item_id)
-        parent = self._student_submissions_nodes.get(key)
-        if parent is None:
-            return
-        parent.remove_children()
-        parent.add_leaf(
-            "Loading submissions...",
-            data=HomeNodeData(kind="loading"),
-        )
-        parent.expand()
-
-    def highlighted_node_data(self) -> HomeNodeData | None:
-        node = self.tree.cursor_node
-        if node is None:
-            return None
-        data = node.data
-        if not isinstance(data, HomeNodeData):
-            return None
-        return data
-
-    def set_status(self, text: str) -> None:
-        self.query_one("#home-status", Static).update(text)
-
-    def set_details(self, text: str) -> None:
-        self.query_one("#home-details", Static).update(text)
-
-    def refresh_courses(self) -> None:
-        pass
-
-    def focus_tree(self) -> bool:
-        tree = self.tree
-        tree.focus()
-        if tree.cursor_node is not None:
-            return True
-        if not tree.root.children:
-            return False
-        tree.move_cursor(tree.root.children[0])
-        return True
-
-    def focused(self) -> bool:
-        return self.tree.has_focus
-
-    def move_cursor_up(self) -> None:
-        self.tree.action_cursor_up()
-
-    def move_cursor_down(self) -> None:
-        self.tree.action_cursor_down()
-
-    def move_cursor_left(self) -> None:
-        self.tree.action_cursor_parent()
-
-    def move_cursor_right(self) -> None:
-        node = self.tree.cursor_node
-        if node is None:
-            return
-        if node.children:
-            node.expand()
-            self.tree.action_cursor_down()
-
-    def focus_first_child(self) -> bool:
-        node = self.tree.cursor_node
-        if node is None or not node.children:
-            return False
-        node.expand()
-        self.tree.action_cursor_down()
-        return True
+class _NavListItem(ListItem):
+    def __init__(self, nav: NavItem, *, is_sub_item: bool = False) -> None:
+        self.nav = nav
+        self.is_sub_item = is_sub_item
+        prefix = "  └ " if is_sub_item else ""
+        label_text = prefix + self._format(nav)
+        super().__init__(Label(label_text))
 
     @staticmethod
-    def _item_text(item: NavItem) -> str:
+    def _format(item: NavItem) -> str:
         if item.meta:
             return f"{item.label} [{item.meta}]"
         return item.label
 
-    def _clear_course_assignments(self, course_item_id: str) -> None:
-        keys = [key for key in self._assignment_nodes if key[0] == course_item_id]
-        for key in keys:
-            self._assignment_nodes.pop(key, None)
 
-    def _clear_course_students(self, course_item_id: str) -> None:
-        keys = [key for key in self._student_nodes if key[0] == course_item_id]
-        for key in keys:
-            self._student_nodes.pop(key, None)
-            self._student_submissions_nodes.pop(key, None)
+class HomeScreen(Vertical):
+    class CourseHighlighted(Message):
+        def __init__(self, item: NavItem) -> None:
+            self.item = item
+            super().__init__()
+
+    class AssignmentHighlighted(Message):
+        def __init__(self, item: NavItem) -> None:
+            self.item = item
+            super().__init__()
+
+    class StudentHighlighted(Message):
+        def __init__(self, item: NavItem) -> None:
+            self.item = item
+            super().__init__()
+
+    class AssignmentSelected(Message):
+        def __init__(self, item: NavItem) -> None:
+            self.item = item
+            super().__init__()
+
+    class StudentSelected(Message):
+        def __init__(self, item: NavItem) -> None:
+            self.item = item
+            super().__init__()
+
+    class StudentSubmissionSelected(Message):
+        def __init__(self, student: NavItem, assignment: NavItem) -> None:
+            self.student = student
+            self.assignment = assignment
+            super().__init__()
+
+    def __init__(self, *, id: str | None = None) -> None:
+        self._course_items: list[NavItem] = []
+        self._assignment_items: list[NavItem] = []
+        self._student_items: list[NavItem] = []
+        self._expanded_student: NavItem | None = None
+        self._expanded_student_assignments: list[NavItem] = []
+        super().__init__(id=id)
+
+    def compose(self) -> ComposeResult:
+        with Horizontal(id="home-workspace"):
+            yield ListView(id="home-course-list")
+            with TabbedContent(id="home-content-tabs"):
+                with TabPane("Assignments", id="tab-assignments"):
+                    yield ListView(id="home-assignment-list")
+                with TabPane("Students", id="tab-students"):
+                    yield ListView(id="home-student-list")
+        yield Static(
+            "Select a course to get started.",
+            id="home-status",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#home-content-tabs", TabbedContent).display = False
+
+    def show_content_tabs(self) -> None:
+        self.query_one("#home-content-tabs", TabbedContent).display = True
+
+    def set_courses(self, courses: list[NavItem]) -> None:
+        self._course_items = list(courses)
+        course_list = self.query_one("#home-course-list", ListView)
+        course_list.clear()
+        for item in courses:
+            course_list.append(_NavListItem(item))
+
+    def set_assignments(self, assignments: list[NavItem]) -> None:
+        self._assignment_items = list(assignments)
+        assignment_list = self.query_one("#home-assignment-list", ListView)
+        assignment_list.clear()
+        for item in assignments:
+            assignment_list.append(_NavListItem(item))
+
+    def set_students(self, students: list[NavItem]) -> None:
+        self._student_items = list(students)
+        self._expanded_student = None
+        self._expanded_student_assignments = []
+        student_list = self.query_one("#home-student-list", ListView)
+        student_list.clear()
+        for item in students:
+            student_list.append(_NavListItem(item))
+
+    def expand_student_assignments(
+        self,
+        student: NavItem,
+        assignments: list[NavItem],
+    ) -> None:
+        self._collapse_expanded_student()
+        self._expanded_student = student
+        self._expanded_student_assignments = list(assignments)
+
+        student_list = self.query_one("#home-student-list", ListView)
+        insert_after = self._student_list_index(student)
+        if insert_after is None:
+            return
+
+        for offset, assignment in enumerate(assignments):
+            sub_item = _NavListItem(assignment, is_sub_item=True)
+            sub_item.add_class("student-sub-item")
+            student_list.insert(insert_after + 1 + offset, sub_item)
+
+    def collapse_student_assignments(self) -> None:
+        self._collapse_expanded_student()
+
+    def selected_course(self) -> NavItem | None:
+        return self._item_from_list("#home-course-list")
+
+    def selected_assignment(self) -> NavItem | None:
+        return self._item_from_list("#home-assignment-list")
+
+    def selected_student(self) -> NavItem | None:
+        item = self._item_from_list("#home-student-list")
+        if item is not None and self._is_sub_item("#home-student-list"):
+            return None
+        return item
+
+    def active_tab(self) -> str:
+        tabs = self.query_one("#home-content-tabs", TabbedContent)
+        active = tabs.active
+        if active == "tab-students":
+            return "students"
+        return "assignments"
+
+    def switch_tab(self, tab_id: str) -> None:
+        tabs = self.query_one("#home-content-tabs", TabbedContent)
+        if tab_id in ("assignments", "tab-assignments"):
+            tabs.active = "tab-assignments"
+        elif tab_id in ("students", "tab-students"):
+            tabs.active = "tab-students"
+
+    def focus_courses(self) -> None:
+        lv = self.query_one("#home-course-list", ListView)
+        lv.focus()
+        if lv.highlighted_child is None and len(lv.children) > 0:
+            lv.index = 0
+
+    def focus_content(self) -> None:
+        tab = self.active_tab()
+        if tab == "assignments":
+            lv = self.query_one("#home-assignment-list", ListView)
+            lv.focus()
+            if lv.highlighted_child is None and len(lv.children) > 0:
+                lv.index = 0
+        else:
+            lv = self.query_one("#home-student-list", ListView)
+            lv.focus()
+            if lv.highlighted_child is None and len(lv.children) > 0:
+                lv.index = 0
+
+    def set_status(self, text: str) -> None:
+        self.query_one("#home-status", Static).update(text)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.item is None:
+            return
+        if not isinstance(event.item, _NavListItem):
+            return
+        list_id = event.list_view.id or ""
+        nav = event.item.nav
+        if list_id == "home-course-list":
+            self.post_message(self.CourseHighlighted(nav))
+        elif list_id == "home-assignment-list":
+            self.post_message(self.AssignmentHighlighted(nav))
+        elif list_id == "home-student-list":
+            if not event.item.is_sub_item:
+                self.post_message(self.StudentHighlighted(nav))
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.item is None:
+            return
+        if not isinstance(event.item, _NavListItem):
+            return
+        list_id = event.list_view.id or ""
+        nav = event.item.nav
+        if list_id == "home-course-list":
+            self.post_message(self.CourseHighlighted(nav))
+        elif list_id == "home-assignment-list":
+            self.post_message(self.AssignmentSelected(nav))
+        elif list_id == "home-student-list":
+            if event.item.is_sub_item and self._expanded_student is not None:
+                self.post_message(
+                    self.StudentSubmissionSelected(self._expanded_student, nav)
+                )
+            else:
+                self.post_message(self.StudentSelected(nav))
+
+    def _item_from_list(self, list_selector: str) -> NavItem | None:
+        lv = self.query_one(list_selector, ListView)
+        if lv.highlighted_child is None:
+            return None
+        child = lv.highlighted_child
+        if isinstance(child, _NavListItem):
+            return child.nav
+        return None
+
+    def _is_sub_item(self, list_selector: str) -> bool:
+        lv = self.query_one(list_selector, ListView)
+        if lv.highlighted_child is None:
+            return False
+        child = lv.highlighted_child
+        return isinstance(child, _NavListItem) and child.is_sub_item
+
+    def _student_list_index(self, student: NavItem) -> int | None:
+        lv = self.query_one("#home-student-list", ListView)
+        for idx, child in enumerate(lv.children):
+            if (
+                isinstance(child, _NavListItem)
+                and child.nav == student
+                and not child.is_sub_item
+            ):
+                return idx
+        return None
+
+    def _collapse_expanded_student(self) -> None:
+        if self._expanded_student is None:
+            return
+        student_list = self.query_one("#home-student-list", ListView)
+        to_remove = [
+            child
+            for child in student_list.children
+            if isinstance(child, _NavListItem) and child.is_sub_item
+        ]
+        for child in to_remove:
+            child.remove()
+        self._expanded_student = None
+        self._expanded_student_assignments = []
