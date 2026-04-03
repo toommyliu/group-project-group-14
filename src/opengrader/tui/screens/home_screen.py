@@ -155,14 +155,23 @@ class HomeScreen(Vertical):
             tabs.active = "tab-students"
 
     def focus_courses(self) -> None:
-        self.query_one("#home-course-list", ListView).focus()
+        lv = self.query_one("#home-course-list", ListView)
+        lv.focus()
+        if lv.highlighted_child is None and len(lv.children) > 0:
+            lv.index = 0
 
     def focus_content(self) -> None:
         tab = self.active_tab()
         if tab == "assignments":
-            self.query_one("#home-assignment-list", ListView).focus()
+            lv = self.query_one("#home-assignment-list", ListView)
+            lv.focus()
+            if lv.highlighted_child is None and len(lv.children) > 0:
+                lv.index = 0
         else:
-            self.query_one("#home-student-list", ListView).focus()
+            lv = self.query_one("#home-student-list", ListView)
+            lv.focus()
+            if lv.highlighted_child is None and len(lv.children) > 0:
+                lv.index = 0
 
     def set_status(self, text: str) -> None:
         self.query_one("#home-status", Static).update(text)
@@ -222,7 +231,11 @@ class HomeScreen(Vertical):
     def _student_list_index(self, student: NavItem) -> int | None:
         lv = self.query_one("#home-student-list", ListView)
         for idx, child in enumerate(lv.children):
-            if isinstance(child, _NavListItem) and child.nav == student and not child.is_sub_item:
+            if (
+                isinstance(child, _NavListItem)
+                and child.nav == student
+                and not child.is_sub_item
+            ):
                 return idx
         return None
 
