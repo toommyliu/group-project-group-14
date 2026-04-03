@@ -1,16 +1,37 @@
 from __future__ import annotations
 
+import re
+import shutil
+import unicodedata
 from pathlib import Path
-from uuid import uuid4
 
-from opengrader.core import get_templates_dir
+from opengrader.core import get_data_dir
 from opengrader.core.courses.contracts.transaction import TransactionFactory
+from opengrader.core.courses.domain.entities import Course
 from opengrader.core.courses.domain.entities import AssignmentTemplate
 from opengrader.core.courses.domain.errors import (
     AssignmentNotFoundError,
     AssignmentTemplateNotFoundError,
     CourseNotFoundError,
 )
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = _SLUG_RE.sub("-", ascii_value.lower()).strip("-")
+    return slug or "item"
+
+
+def _course_directory_name(course: Course) -> str:
+    return f"{course.id}-{_slugify(course.name)}"
+
+
+def _template_directory_name(template_id: int, template_name: str) -> str:
+    return f"{template_id}-{_slugify(template_name)}"
 
 
 def _sha256_for(path: Path) -> str:
@@ -43,32 +64,45 @@ class AssignmentTemplateService:
             raise FileNotFoundError(f"spec JSON not found: {source_spec}")
 
         with self._transaction_factory() as transaction:
-            if transaction.courses.get_by_id(course_id) is None:
+            course = transaction.courses.get_by_id(course_id)
+            if course is None:
                 raise CourseNotFoundError(f"course {course_id} does not exist")
 
-            template_id = str(uuid4())
-            base_dir = get_templates_dir() / f"course_{course_id}" / template_id
+            created = transaction.assignment_templates.create(
+                course_id=course_id,
+                name=name,
+                template_pdf_relpath="pending/template.pdf",
+                spec_json_relpath="pending/spec.json",
+                template_sha256=_sha256_for(source_pdf),
+                spec_sha256=_sha256_for(source_spec),
+            )
+
+            data_dir = get_data_dir()
+            base_dir = (
+                data_dir
+                / "courses"
+                / _course_directory_name(course)
+                / "templates"
+                / _template_directory_name(created.id, name)
+            )
             base_dir.mkdir(parents=True, exist_ok=True)
 
             pdf_dest = base_dir / "template.pdf"
             spec_dest = base_dir / "spec.json"
 
-            pdf_dest.write_bytes(source_pdf.read_bytes())
-            spec_dest.write_bytes(source_spec.read_bytes())
+            shutil.copyfile(source_pdf, pdf_dest)
+            shutil.copyfile(source_spec, spec_dest)
 
-            rel_pdf = str(pdf_dest.relative_to(get_templates_dir()))
-            rel_spec = str(spec_dest.relative_to(get_templates_dir()))
+            rel_pdf = str(pdf_dest.relative_to(data_dir))
+            rel_spec = str(spec_dest.relative_to(data_dir))
 
-            created = transaction.assignment_templates.create(
-                course_id=course_id,
-                name=name,
+            transaction.assignment_templates.update_paths(
+                template_id=created.id,
                 template_pdf_relpath=rel_pdf,
                 spec_json_relpath=rel_spec,
-                template_sha256=_sha256_for(pdf_dest),
-                spec_sha256=_sha256_for(spec_dest),
             )
             transaction.commit()
-            return created
+            return transaction.assignment_templates.get_by_id(created.id) or created
 
     def list_templates_for_course(self, course_id: int) -> list[AssignmentTemplate]:
         with self._transaction_factory() as transaction:

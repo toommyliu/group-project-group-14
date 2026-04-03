@@ -309,3 +309,9 @@ def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None
     current = services.assignment_templates.get_assignment_template(assignment.id)
     assert current is not None
     assert current.id == created.id
+    assert current.template_pdf_relpath.startswith(
+        f"courses/{course.id}-senior-design/templates/{created.id}-template-a/"
+    )
+    assert current.spec_json_relpath.startswith(
+        f"courses/{course.id}-senior-design/templates/{created.id}-template-a/"
+    )

@@ -70,6 +70,14 @@ class AssignmentTemplateStore(Protocol):
 
     def get_by_id(self, template_id: int) -> AssignmentTemplate | None: ...
 
+    def update_paths(
+        self,
+        *,
+        template_id: int,
+        template_pdf_relpath: str,
+        spec_json_relpath: str,
+    ) -> None: ...
+
     def set_assignment_template(
         self,
         assignment_id: int,

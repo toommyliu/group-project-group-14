@@ -93,6 +93,23 @@ class SqliteAssignmentTemplateStore:
             return None
         return _row_to_assignment_template(row)
 
+    def update_paths(
+        self,
+        *,
+        template_id: int,
+        template_pdf_relpath: str,
+        spec_json_relpath: str,
+    ) -> None:
+        self._conn.execute(
+            """
+            UPDATE assignment_templates
+            SET template_pdf_relpath = ?,
+                spec_json_relpath = ?
+            WHERE id = ?
+            """,
+            (template_pdf_relpath, spec_json_relpath, template_id),
+        )
+
     def set_assignment_template(
         self,
         assignment_id: int,
