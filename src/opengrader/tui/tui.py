@@ -20,7 +20,7 @@ from opengrader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 class TuiApp(App):
     CSS_PATH = Path(__file__).parent / "tui.tcss"
     COMMAND_PALETTE_BINDING = "ctrl+backslash"
-    BINDINGS = InputController.all_bindings() # pyright: ignore[reportAssignmentType]
+    BINDINGS = InputController.all_bindings()  # pyright: ignore[reportAssignmentType]
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class TuiApp(App):
         default_image_path: str | None = None,
         data_provider: Provider | None = None,
         input_profile: InputProfileName | str | None = None,
-        db_path: str | Path = "courses.db",
+        db_path: str | Path | None = None,
     ) -> None:
         self._input_profile = InputController._coerce_profile_name(input_profile)
         super().__init__()

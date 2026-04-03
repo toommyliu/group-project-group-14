@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -8,6 +9,7 @@ from opengrader.tui.controllers.input_controller import (
     InputController,
     InputProfileName,
 )
+from opengrader.core import get_database_path
 from opengrader.tui.main import run_app
 from opengrader.tui.tui import TuiApp
 
@@ -223,3 +225,29 @@ def test_run_app_uses_runtime_default_profile() -> None:
     app_self = run_mock.call_args.args[0]
     assert isinstance(app_self, TuiApp)
     assert app_self.input_controller.profile_name() == expected_profile
+    assert app_self.data_provider._db_path == get_database_path()
+
+
+def test_run_app_uses_opengrader_home_for_db_default(monkeypatch) -> None:
+    monkeypatch.setenv("OPENGRADER_HOME", "~/grader-home")
+    with patch("opengrader.tui.main.TuiApp.run", autospec=True) as run_mock:
+        run_app()
+
+    app_self = run_mock.call_args.args[0]
+    assert isinstance(app_self, TuiApp)
+    assert (
+        app_self.data_provider._db_path
+        == Path("~/grader-home").expanduser() / "data" / "courses.db"
+    )
+
+
+def test_tui_app_explicit_db_path_overrides_opengrader_home(monkeypatch) -> None:
+    monkeypatch.setenv("OPENGRADER_HOME", "~/grader-home")
+
+    app = TuiApp(
+        default_image_path=DEFAULT_IMAGE_PATH,
+        data_provider=None,
+        db_path="~/explicit-courses.db",
+    )
+
+    assert app.data_provider._db_path == Path("~/explicit-courses.db").expanduser()

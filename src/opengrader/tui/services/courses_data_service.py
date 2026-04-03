@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from opengrader.core import resolve_database_path
 from opengrader.core.courses import (
     CourseNotFoundError,
     StudentInput,
@@ -16,10 +17,10 @@ class CoursesDataService:
         self,
         # default_image_path: str,
         *,
-        db_path: str | Path = "courses.db",
+        db_path: str | Path | None = None,
     ) -> None:
         super().__init__()
-        self._services = build_sqlite_course_services(db_path)
+        self._services = build_sqlite_course_services(resolve_database_path(db_path))
 
     def load_courses(self) -> list[NavItem]:
         courses = self._services.courses.list_courses()
