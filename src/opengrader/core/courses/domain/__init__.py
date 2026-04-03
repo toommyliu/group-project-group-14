@@ -1,6 +1,7 @@
 from .entities import (
     ALLOWED_ASSIGNMENT_TYPES,
     Assignment,
+    AssignmentTemplate,
     AssignmentType,
     Course,
     CourseGradebook,
@@ -14,6 +15,7 @@ from .entities import (
 )
 from .errors import (
     AssignmentNotFoundError,
+    AssignmentTemplateNotFoundError,
     CourseAlreadyExistsError,
     CourseNotFoundError,
     GradeConflictError,
@@ -27,6 +29,8 @@ __all__ = [
     "ALLOWED_ASSIGNMENT_TYPES",
     "Assignment",
     "AssignmentNotFoundError",
+    "AssignmentTemplate",
+    "AssignmentTemplateNotFoundError",
     "AssignmentType",
     "Course",
     "CourseAlreadyExistsError",

@@ -9,6 +9,7 @@ from opengrader.core import (
     get_database_path,
     get_data_dir,
     get_logs_dir,
+    get_templates_dir,
     resolve_database_path,
     get_settings_path,
 )
@@ -24,6 +25,7 @@ def test_default_paths_use_platformdirs(monkeypatch) -> None:
     assert get_config_dir() == expected_base / "config"
     assert get_cache_dir() == expected_base / "cache"
     assert get_logs_dir() == expected_base / "logs"
+    assert get_templates_dir() == expected_base / "data" / "templates"
     assert get_settings_path() == expected_base / "config" / "settings.toml"
     assert get_database_path() == expected_base / "data" / "courses.db"
 

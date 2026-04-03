@@ -14,6 +14,8 @@ def _drop_course_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         DROP TABLE IF EXISTS grades;
+        DROP TABLE IF EXISTS assignment_template_links;
+        DROP TABLE IF EXISTS assignment_templates;
         DROP TABLE IF EXISTS assignments;
         DROP TABLE IF EXISTS assignment_types;
         DROP TABLE IF EXISTS enrollments;
@@ -91,6 +93,28 @@ def _apply_v2_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS assignment_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            course_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            template_pdf_relpath TEXT NOT NULL,
+            spec_json_relpath TEXT NOT NULL,
+            template_sha256 TEXT NOT NULL,
+            spec_sha256 TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS assignment_template_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            assignment_id INTEGER NOT NULL,
+            template_id INTEGER NOT NULL,
+            is_current INTEGER NOT NULL DEFAULT 1,
+            linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+            FOREIGN KEY(template_id) REFERENCES assignment_templates(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_courses_catalog_code
             ON courses(catalog_code);
         CREATE INDEX IF NOT EXISTS idx_assignments_course_id
@@ -103,6 +127,15 @@ def _apply_v2_schema(conn: sqlite3.Connection) -> None:
             ON grades(student_id);
         CREATE INDEX IF NOT EXISTS idx_grades_assignment_id
             ON grades(assignment_id);
+        CREATE INDEX IF NOT EXISTS idx_assignment_templates_course_id
+            ON assignment_templates(course_id);
+        CREATE INDEX IF NOT EXISTS idx_assignment_template_links_assignment_id
+            ON assignment_template_links(assignment_id);
+        CREATE INDEX IF NOT EXISTS idx_assignment_template_links_template_id
+            ON assignment_template_links(template_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_assignment_template_links_current_unique
+            ON assignment_template_links(assignment_id)
+            WHERE is_current = 1;
         """
     )
 

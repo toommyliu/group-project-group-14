@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 
 import pytest
 
@@ -268,3 +269,43 @@ def test_assign_grade_rejects_unknown_assignment(tmp_path) -> None:
             student_id=1,
             points_awarded=1,
         )
+
+
+def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None:
+    services = build_sqlite_course_services(tmp_path / "courses.db")
+    course = services.courses.create_course(
+        code="CMPE-195",
+        name="Senior Design",
+        term="Spring 2026",
+        section="01",
+    )
+    assignment = services.assignments.create_assignment(
+        course_id=course.id,
+        assignment_type="assignment",
+        title="HW 1",
+        max_points=100,
+    )
+
+    source_pdf = tmp_path / "sample-template.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n% template")
+    source_spec = tmp_path / "sample-spec.json"
+    source_spec.write_text(json.dumps({"schema_version": "1.0", "pages": []}))
+
+    created = services.assignment_templates.create_template(
+        course_id=course.id,
+        name="Template A",
+        source_template_pdf=source_pdf,
+        source_spec_json=source_spec,
+    )
+
+    listed = services.assignment_templates.list_templates_for_course(course.id)
+    assert [t.id for t in listed] == [created.id]
+    assert listed[0].name == "Template A"
+
+    services.assignment_templates.set_assignment_template(
+        assignment_id=assignment.id,
+        template_id=created.id,
+    )
+    current = services.assignment_templates.get_assignment_template(assignment.id)
+    assert current is not None
+    assert current.id == created.id

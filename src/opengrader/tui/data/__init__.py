@@ -1,5 +1,6 @@
 from .models import (
     AssignmentSummary,
+    AssignmentTemplateSummary,
     CourseSummary,
     QuestionSeed,
     RubricOptionSeed,
@@ -10,6 +11,7 @@ from .sqlite_provider import SqliteProvider
 
 __all__ = [
     "AssignmentSummary",
+    "AssignmentTemplateSummary",
     "CourseSummary",
     "QuestionSeed",
     "RubricOptionSeed",

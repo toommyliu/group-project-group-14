@@ -6,6 +6,7 @@ from opengrader.core.courses.contracts.transaction import CoursesTransaction
 from opengrader.core.courses.adapters.sqlite.connection import create_sqlite_connection
 from opengrader.core.courses.adapters.sqlite.stores import (
     SqliteAssignmentStore,
+    SqliteAssignmentTemplateStore,
     SqliteCourseStore,
     SqliteEnrollmentStore,
     SqliteGradeStore,
@@ -23,6 +24,7 @@ class SqliteCoursesTransaction(CoursesTransaction):
         self.students = None
         self.enrollments = None
         self.assignments = None
+        self.assignment_templates = None
         self.grades = None
 
     def __enter__(self) -> "SqliteCoursesTransaction":
@@ -32,6 +34,7 @@ class SqliteCoursesTransaction(CoursesTransaction):
         self.students = SqliteStudentStore(self._conn)
         self.enrollments = SqliteEnrollmentStore(self._conn)
         self.assignments = SqliteAssignmentStore(self._conn)
+        self.assignment_templates = SqliteAssignmentTemplateStore(self._conn)
         self.grades = SqliteGradeStore(self._conn)
         return self
 

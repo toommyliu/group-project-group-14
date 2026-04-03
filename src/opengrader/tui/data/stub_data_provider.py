@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from opengrader.tui.data.models import (
     AssignmentSummary,
+    AssignmentTemplateSummary,
     CourseSummary,
     QuestionSeed,
     StudentSummary,
@@ -92,3 +93,58 @@ class StubDataProvider:
     ) -> StudentSummary:
         _ = (course_id, sid, middle_name, email)
         return StudentSummary(id=1, full_name=f"{first_name} {last_name}")
+
+    def create_assignment_template(
+        self,
+        *,
+        course_id: int,
+        name: str,
+        template_pdf_path: str,
+        spec_json_path: str,
+    ) -> AssignmentTemplateSummary:
+        _ = (template_pdf_path, spec_json_path)
+        return AssignmentTemplateSummary(
+            id=1,
+            course_id=course_id,
+            name=name,
+            template_pdf_relpath="course_1/template_1/template.pdf",
+            spec_json_relpath="course_1/template_1/spec.json",
+        )
+
+    def list_assignment_templates(
+        self,
+        course_id: int | None,
+    ) -> list[AssignmentTemplateSummary]:
+        if course_id is None:
+            return []
+        return [
+            AssignmentTemplateSummary(
+                id=1,
+                course_id=course_id,
+                name="Default Template",
+                template_pdf_relpath=f"course_{course_id}/template_1/template.pdf",
+                spec_json_relpath=f"course_{course_id}/template_1/spec.json",
+            )
+        ]
+
+    def set_assignment_template(
+        self,
+        *,
+        assignment_id: int,
+        template_id: int,
+    ) -> None:
+        _ = (assignment_id, template_id)
+
+    def get_assignment_template(
+        self,
+        assignment_id: int | None,
+    ) -> AssignmentTemplateSummary | None:
+        if assignment_id is None:
+            return None
+        return AssignmentTemplateSummary(
+            id=1,
+            course_id=1,
+            name="Default Template",
+            template_pdf_relpath="course_1/template_1/template.pdf",
+            spec_json_relpath="course_1/template_1/spec.json",
+        )

@@ -5,6 +5,7 @@ from typing import Protocol
 
 from .stores import (
     AssignmentStore,
+    AssignmentTemplateStore,
     CourseStore,
     EnrollmentStore,
     GradeStore,
@@ -17,6 +18,7 @@ class CoursesTransaction(Protocol):
     students: StudentStore
     enrollments: EnrollmentStore
     assignments: AssignmentStore
+    assignment_templates: AssignmentTemplateStore
     grades: GradeStore
 
     def commit(self) -> None: ...
