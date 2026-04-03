@@ -5,6 +5,11 @@ from opengrader.tui.widgets.nav_item import NavItem
 from .fakes import FakeDataProvider
 
 
+class FakeTabbedContent:
+    def __init__(self) -> None:
+        self.display = False
+
+
 class FakeHomeScreen:
     def __init__(self) -> None:
         self.status: str = ""
@@ -15,6 +20,12 @@ class FakeHomeScreen:
         self.expanded_assignments: list[NavItem] | None = None
         self._active_tab: str = "assignments"
         self._focused_list: str = "home-course-list"
+        self._tabs = FakeTabbedContent()
+
+    def query_one(self, selector: str, widget_type=None) -> FakeTabbedContent:
+        if "home-content-tabs" in selector:
+            return self._tabs
+        raise ValueError(f"Unknown selector: {selector}")
 
     def set_courses(self, courses: list[NavItem]) -> None:
         self.courses = courses
@@ -109,9 +120,7 @@ def test_assignment_selected_opens_grading() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
     opened_students: list[int] = []
-    controller = HomeController(
-        app, state, FakeDataProvider(), opened_students.append
-    )
+    controller = HomeController(app, state, FakeDataProvider(), opened_students.append)
     controller.initialize()
 
     controller.on_course_highlighted(NavItem("c1", "CMPE 195"))
@@ -144,9 +153,7 @@ def test_student_submission_selected_opens_grading() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
     opened_students: list[int] = []
-    controller = HomeController(
-        app, state, FakeDataProvider(), opened_students.append
-    )
+    controller = HomeController(app, state, FakeDataProvider(), opened_students.append)
     controller.initialize()
 
     controller.on_course_highlighted(NavItem("c1", "CMPE 195"))
