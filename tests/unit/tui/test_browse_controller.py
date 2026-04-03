@@ -43,6 +43,9 @@ class FakeHomeScreen:
     def focus_courses(self) -> None:
         self._focused_list = "home-course-list"
 
+    def show_content_tabs(self) -> None:
+        pass
+
     def focus_content(self) -> None:
         if self._active_tab == "assignments":
             self._focused_list = "home-assignment-list"
