@@ -163,9 +163,9 @@ class HomeScreen(Vertical):
 
     def focus_courses(self) -> None:
         lv = self.query_one("#home-course-list", ListView)
-        lv.focus()
-        if lv.highlighted_child is None and len(lv.children) > 0:
+        if len(lv.children) > 0:
             lv.index = 0
+        lv.focus()
 
     def focus_content(self) -> None:
         tab = self.active_tab()

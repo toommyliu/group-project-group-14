@@ -16,7 +16,8 @@ from opengrader.tui.screens import Dialog, DialogField, HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.widgets.nav_item import NavItem
 from opengrader.tui.screens.home_screen import _NavListItem
-from textual.widgets import ListView
+from textual.widgets import ListView, TabbedContent
+
 
 class HomeApp(Protocol):
     def get_home_screen(self) -> HomeScreen: ...
@@ -36,6 +37,8 @@ class HomeController:
         self._state = state
         self._data_provider = data_provider
         self._open_student = open_student
+        self._loaded_course_assignments: set[str] = set()
+        self._loaded_course_students: set[str] = set()
 
     def initialize(self) -> None:
         home_screen = self._app.get_home_screen()
@@ -45,10 +48,14 @@ class HomeController:
         home_screen.focus_courses()
 
     def on_course_highlighted(self, item: NavItem) -> None:
+        home = self._app.get_home_screen()
+        tabs = home.query_one("#home-content-tabs", TabbedContent)
+        if tabs.display:
+            return
+
         self._select_course(item)
         self._ensure_course_data_loaded(item)
 
-        home = self._app.get_home_screen()
         home.show_content_tabs()
         home.set_status(f"Course: {item.label}")
 
@@ -75,9 +82,7 @@ class HomeController:
             self._data_provider.list_assignments(course_id)
         )
         home.expand_student_assignments(item, assignments)
-        home.set_status(
-            f"{item.label} · Select an assignment to start grading"
-        )
+        home.set_status(f"{item.label} · Select an assignment to start grading")
 
     def on_student_submission_selected(
         self,
@@ -140,7 +145,6 @@ class HomeController:
             if item is not None:
                 self.on_assignment_selected(item)
         elif focused == "home-student-list":
-
             lv = home.query_one("#home-student-list", ListView)
             child = lv.highlighted_child
             if isinstance(child, _NavListItem) and child.is_sub_item:
@@ -221,7 +225,9 @@ class HomeController:
                 return
             self._open_create_student_dialog(course_item_id, course_id)
         else:
-            home.set_status("Press n on the course list, assignment list, or student list to create.")
+            home.set_status(
+                "Press n on the course list, assignment list, or student list to create."
+            )
 
     def _select_course(self, item: NavItem) -> None:
         selection = self._state.selection
@@ -267,9 +273,7 @@ class HomeController:
         )
         self._state.student_items = students
         if not students:
-            self._app.get_home_screen().set_status(
-                "No students found for this course."
-            )
+            self._app.get_home_screen().set_status("No students found for this course.")
             return
         student_index = self._first_ungraded_student_index() or 0
         if student_index is not None:
@@ -283,9 +287,13 @@ class HomeController:
     @staticmethod
     def _focused_list_id(home: HomeScreen) -> str | None:
         """Return the id of the focused ListView, or None."""
-        for list_id in ("home-course-list", "home-assignment-list", "home-student-list"):
-            from textual.widgets import ListView
+        from textual.widgets import ListView
 
+        for list_id in (
+            "home-course-list",
+            "home-assignment-list",
+            "home-student-list",
+        ):
             lv = home.query_one(f"#{list_id}", ListView)
             if lv.has_focus:
                 return list_id
@@ -296,7 +304,11 @@ class HomeController:
         """Move the cursor on whichever ListView has focus."""
         from textual.widgets import ListView
 
-        for list_id in ("home-course-list", "home-assignment-list", "home-student-list"):
+        for list_id in (
+            "home-course-list",
+            "home-assignment-list",
+            "home-student-list",
+        ):
             lv = home.query_one(f"#{list_id}", ListView)
             if lv.has_focus:
                 if direction < 0:
