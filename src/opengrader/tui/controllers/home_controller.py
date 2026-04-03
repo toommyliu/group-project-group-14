@@ -36,8 +36,6 @@ class HomeController:
         self._state = state
         self._data_provider = data_provider
         self._open_student = open_student
-        self._loaded_course_assignments: set[str] = set()
-        self._loaded_course_students: set[str] = set()
 
     def initialize(self) -> None:
         home_screen = self._app.get_home_screen()
@@ -255,19 +253,13 @@ class HomeController:
         course_id = self._numeric_id(course_item_id)
         home = self._app.get_home_screen()
 
-        if course_item_id not in self._loaded_course_assignments:
-            assignments = self._assignment_items(
-                self._data_provider.list_assignments(course_id)
-            )
-            home.set_assignments(assignments)
-            self._loaded_course_assignments.add(course_item_id)
+        assignments = self._assignment_items(
+            self._data_provider.list_assignments(course_id)
+        )
+        home.set_assignments(assignments)
 
-        if course_item_id not in self._loaded_course_students:
-            students = self._student_items(
-                self._data_provider.list_students(course_id)
-            )
-            home.set_students(students)
-            self._loaded_course_students.add(course_item_id)
+        students = self._student_items(self._data_provider.list_students(course_id))
+        home.set_students(students)
 
     def _start_grading_current_assignment(self) -> None:
         students = self._student_items(

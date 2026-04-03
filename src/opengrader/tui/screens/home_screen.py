@@ -12,6 +12,7 @@ from textual.widgets import (
     TabPane,
 )
 
+from opengrader.tui.widgets import tabs  # type: ignore -- applies monkeypatch to textual's Tab widget
 from opengrader.tui.widgets.nav_item import NavItem
 
 
@@ -189,7 +190,9 @@ class HomeScreen(Vertical):
             return
         list_id = event.list_view.id or ""
         nav = event.item.nav
-        if list_id == "home-assignment-list":
+        if list_id == "home-course-list":
+            self.post_message(self.CourseHighlighted(nav))
+        elif list_id == "home-assignment-list":
             self.post_message(self.AssignmentHighlighted(nav))
         elif list_id == "home-student-list":
             if not event.item.is_sub_item:
