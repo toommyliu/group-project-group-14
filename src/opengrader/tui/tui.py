@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.widgets import ContentSwitcher, Footer, Tree
+from textual.widgets import ContentSwitcher, Footer
 
 from opengrader.tui.controllers import (
     GradeController,
@@ -13,7 +13,7 @@ from opengrader.tui.controllers.input_controller import (
     InputProfileName,
 )
 from opengrader.tui.data import SqliteProvider, Provider
-from opengrader.tui.screens import GradeScreen, HomeNodeData, HomeScreen
+from opengrader.tui.screens import GradeScreen, HomeScreen
 from opengrader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 
@@ -93,17 +93,37 @@ class TuiApp(App):
             return False
         return self.input_controller.binding_available(profile_name, command)
 
-    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        data = event.node.data
-        if not isinstance(data, HomeNodeData):
-            return
-        self.home_controller.handle_node_selected(data)
+    def on_home_screen_course_highlighted(
+        self, event: HomeScreen.CourseHighlighted
+    ) -> None:
+        self.home_controller.on_course_highlighted(event.item)
 
-    def on_tree_node_expanded(self, event: Tree.NodeExpanded) -> None:
-        data = event.node.data
-        if not isinstance(data, HomeNodeData):
-            return
-        self.home_controller.handle_node_expanded(data)
+    def on_home_screen_assignment_highlighted(
+        self, event: HomeScreen.AssignmentHighlighted
+    ) -> None:
+        self.home_controller.on_assignment_highlighted(event.item)
+
+    def on_home_screen_student_highlighted(
+        self, event: HomeScreen.StudentHighlighted
+    ) -> None:
+        self.home_controller.on_student_highlighted(event.item)
+
+    def on_home_screen_assignment_selected(
+        self, event: HomeScreen.AssignmentSelected
+    ) -> None:
+        self.home_controller.on_assignment_selected(event.item)
+
+    def on_home_screen_student_selected(
+        self, event: HomeScreen.StudentSelected
+    ) -> None:
+        self.home_controller.on_student_selected(event.item)
+
+    def on_home_screen_student_submission_selected(
+        self, event: HomeScreen.StudentSubmissionSelected
+    ) -> None:
+        self.home_controller.on_student_submission_selected(
+            event.student, event.assignment
+        )
 
     def on_grade_screen_question_selected(
         self, event: GradeScreen.QuestionSelected
