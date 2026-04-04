@@ -42,11 +42,6 @@ def test_course_selection_populates_tabs() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            course_list.focus()
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
 
             assignment_list = app.get_home_screen().query_one(
                 "#home-assignment-list", ListView
@@ -56,6 +51,58 @@ def test_course_selection_populates_tabs() -> None:
             )
             assert len(assignment_list.children) == 2
             assert len(student_list.children) == 2
+
+    asyncio.run(run())
+
+
+def test_course_navigation_updates_content_without_enter() -> None:
+    class VariableCountsProvider(FakeDataProvider):
+        def list_assignments(self, course_id: int | None) -> list[AssignmentSummary]:
+            if course_id == 1:
+                return [
+                    AssignmentSummary(1, "HW 1", ""),
+                    AssignmentSummary(2, "HW 2", ""),
+                ]
+            if course_id == 2:
+                return [AssignmentSummary(3, "Quiz 1", "")]
+            return []
+
+        def list_students(self, course_id: int | None) -> list[StudentSummary]:
+            if course_id == 1:
+                return [
+                    StudentSummary(1, "Tommy Liu"),
+                    StudentSummary(2, "Andy Cortes"),
+                ]
+            if course_id == 2:
+                return [StudentSummary(3, "Ada Lovelace")]
+            return []
+
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=VariableCountsProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.workflow_state.selection.course_id == 1
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
+            )
+            assert len(assignment_list.children) == 2
+            assert len(student_list.children) == 2
+
+            await pilot.press("down")
+            await pilot.pause()
+
+            assert app.workflow_state.selection.course_id == 2
+            assert len(assignment_list.children) == 1
+            assert len(student_list.children) == 1
 
     asyncio.run(run())
 
