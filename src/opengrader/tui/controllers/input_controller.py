@@ -176,7 +176,7 @@ STANDARD_PROFILE = InputProfile(
             (InputContext.HOME,),
         ),
         CommandBindingSpec(
-            "4",
+            "0",
             InputCommand.HOME_FOCUS_DETAILS,
             "Focus Details",
             (InputContext.HOME,),

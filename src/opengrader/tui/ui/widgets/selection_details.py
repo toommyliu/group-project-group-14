@@ -2,8 +2,11 @@ from textual.widgets import Static
 
 from .nav_item import NavItem
 
-def make_title(prefix: str, label: str) -> str:
-    return f"[4] {prefix} · {label}"
+def make_title(prefix: str, label: str | None = None) -> str:
+    title = f"[0] {prefix}"
+    if label:
+        title += f" · {label}"
+    return title
 
 
 
@@ -33,7 +36,7 @@ class SelectionDetails(Static):
         self.show_welcome()
 
     def show_welcome(self) -> None:
-        self.border_title = "[4] Selection Details"
+        self.border_title = make_title("Selection details")
         self.update(
             "Select a course to get started.\n\n"
             "This panel shows details and available actions for the currently "
