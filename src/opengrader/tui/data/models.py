@@ -14,7 +14,7 @@ class CourseSummary:
 class AssignmentSummary:
     id: int
     title: str
-    assessment_type: str
+    assignment_type: str
 
 
 @dataclass(frozen=True)

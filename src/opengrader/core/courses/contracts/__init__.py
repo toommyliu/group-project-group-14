@@ -1,14 +1,8 @@
-from .stores import (
-    AssessmentStore,
-    CourseStore,
-    EnrollmentStore,
-    GradeStore,
-    StudentStore,
-)
+from .stores import AssignmentStore, CourseStore, EnrollmentStore, GradeStore, StudentStore
 from .transaction import CoursesTransaction, TransactionFactory
 
 __all__ = [
-    "AssessmentStore",
+    "AssignmentStore",
     "CourseStore",
     "CoursesTransaction",
     "EnrollmentStore",

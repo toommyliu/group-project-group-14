@@ -35,9 +35,9 @@ class StubDataProvider:
         if course_id is None:
             return []
         return [
-            AssignmentSummary(id=1, title="HW 1", assessment_type="assignment"),
-            AssignmentSummary(id=2, title="HW 2", assessment_type="assignment"),
-            AssignmentSummary(id=3, title="Midterm", assessment_type="exam"),
+            AssignmentSummary(id=1, title="HW 1", assignment_type="assignment"),
+            AssignmentSummary(id=2, title="HW 2", assignment_type="assignment"),
+            AssignmentSummary(id=3, title="Midterm", assignment_type="exam"),
         ]
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]:
@@ -73,12 +73,12 @@ class StubDataProvider:
         self,
         *,
         course_id: int,
-        assessment_type: str,
+        assignment_type: str,
         title: str,
         max_points: str,
     ) -> AssignmentSummary:
         _ = (course_id, max_points)
-        return AssignmentSummary(id=1, title=title, assessment_type=assessment_type)
+        return AssignmentSummary(id=1, title=title, assignment_type=assignment_type)
 
     def create_student(
         self,

@@ -13,7 +13,7 @@ from opengrader.core.courses.domain.entities import (
     normalize_points,
 )
 from opengrader.core.courses.domain.errors import (
-    AssessmentNotFoundError,
+    AssignmentNotFoundError,
     CourseNotFoundError,
     InvalidPointsError,
     StudentNotEnrolledError,
@@ -28,7 +28,7 @@ class GradingService:
 
     def assign_grade(
         self,
-        assessment_id: int,
+        assignment_id: int,
         student_id: int,
         points_awarded: Decimal | float | int | str,
         expected_version: int | None = None,
@@ -36,27 +36,27 @@ class GradingService:
         normalized_points = normalize_points(points_awarded)
 
         with self._transaction_factory() as transaction:
-            assessment = transaction.assessments.get_by_id(assessment_id)
-            if assessment is None:
-                raise AssessmentNotFoundError(
-                    f"assessment {assessment_id} does not exist"
+            assignment = transaction.assignments.get_by_id(assignment_id)
+            if assignment is None:
+                raise AssignmentNotFoundError(
+                    f"assignment {assignment_id} does not exist"
                 )
 
             if not transaction.enrollments.is_student_enrolled(
-                assessment.course_id, student_id
+                assignment.course_id, student_id
             ):
                 raise StudentNotEnrolledError(
-                    f"student {student_id} is not enrolled in course {assessment.course_id}"
+                    f"student {student_id} is not enrolled in course {assignment.course_id}"
                 )
 
-            if normalized_points > assessment.max_points:
+            if normalized_points > assignment.max_points:
                 raise InvalidPointsError(
-                    f"points_awarded {normalized_points} exceeds max_points {assessment.max_points}"
+                    f"points_awarded {normalized_points} exceeds max_points {assignment.max_points}"
                 )
 
             now = datetime.now(timezone.utc)
             grade = transaction.grades.upsert(
-                assessment_id=assessment_id,
+                assignment_id=assignment_id,
                 student_id=student_id,
                 points_awarded=normalized_points,
                 updated_at=now,
@@ -69,28 +69,28 @@ class GradingService:
         results: list[Grade] = []
         with self._transaction_factory() as transaction:
             for grade_input in grade_inputs:
-                assessment = transaction.assessments.get_by_id(
-                    grade_input.assessment_id
+                assignment = transaction.assignments.get_by_id(
+                    grade_input.assignment_id
                 )
-                if assessment is None:
-                    raise AssessmentNotFoundError(
-                        f"assessment {grade_input.assessment_id} does not exist"
+                if assignment is None:
+                    raise AssignmentNotFoundError(
+                        f"assignment {grade_input.assignment_id} does not exist"
                     )
                 if not transaction.enrollments.is_student_enrolled(
-                    assessment.course_id, grade_input.student_id
+                    assignment.course_id, grade_input.student_id
                 ):
                     raise StudentNotEnrolledError(
-                        f"student {grade_input.student_id} is not enrolled in course {assessment.course_id}"
+                        f"student {grade_input.student_id} is not enrolled in course {assignment.course_id}"
                     )
 
                 normalized_points = normalize_points(grade_input.points_awarded)
-                if normalized_points > assessment.max_points:
+                if normalized_points > assignment.max_points:
                     raise InvalidPointsError(
-                        f"points_awarded {normalized_points} exceeds max_points {assessment.max_points}"
+                        f"points_awarded {normalized_points} exceeds max_points {assignment.max_points}"
                     )
 
                 grade = transaction.grades.upsert(
-                    assessment_id=grade_input.assessment_id,
+                    assignment_id=grade_input.assignment_id,
                     student_id=grade_input.student_id,
                     points_awarded=normalized_points,
                     updated_at=datetime.now(timezone.utc),
@@ -107,16 +107,16 @@ class GradingService:
             if course is None:
                 raise CourseNotFoundError(f"course {course_id} does not exist")
 
-            assessments = transaction.assessments.list_for_course(course_id)
+            assignments = transaction.assignments.list_for_course(course_id)
             students = transaction.enrollments.list_students_for_course(course_id)
             grades = transaction.grades.list_for_course(course_id)
 
             grades_by_student: dict[int, dict[int, Grade]] = defaultdict(dict)
             for grade in grades:
-                grades_by_student[grade.student_id][grade.assessment_id] = grade
+                grades_by_student[grade.student_id][grade.assignment_id] = grade
 
             total_possible = sum(
-                (a.max_points for a in assessments), start=Decimal("0")
+                (a.max_points for a in assignments), start=Decimal("0")
             )
             rows: list[StudentGradeSummary] = []
             for student in students:
@@ -134,11 +134,11 @@ class GradingService:
                 rows.append(
                     StudentGradeSummary(
                         student=student,
-                        grades_by_assessment_id=student_grades,
+                        grades_by_assignment_id=student_grades,
                         total_awarded=total_awarded,
                         total_possible=total_possible,
                         percentage=percentage,
                     )
                 )
 
-            return CourseGradebook(course=course, assessments=assessments, rows=rows)
+            return CourseGradebook(course=course, assignments=assignments, rows=rows)

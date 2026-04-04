@@ -4,7 +4,7 @@ from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import Protocol
 
-from opengrader.core.courses import ALLOWED_ASSESSMENT_TYPES
+from opengrader.core.courses import ALLOWED_ASSIGNMENT_TYPES
 
 from opengrader.tui.data import (
     AssignmentSummary,
@@ -234,8 +234,8 @@ class HomeController:
         selection.course_item_id = item.item_id
         selection.course_id = self._numeric_id(item.item_id)
         self._state.selection_labels["course"] = item.label
-        selection.assessment_item_id = None
-        selection.assessment_id = None
+        selection.assignment_item_id = None
+        selection.assignment_id = None
         selection.student_item_id = None
         selection.student_id = None
         self._state.active_student_index = -1
@@ -244,8 +244,8 @@ class HomeController:
 
     def _select_assignment(self, item: NavItem) -> None:
         selection = self._state.selection
-        selection.assessment_item_id = item.item_id
-        selection.assessment_id = self._numeric_id(item.item_id)
+        selection.assignment_item_id = item.item_id
+        selection.assignment_id = self._numeric_id(item.item_id)
         self._state.selection_labels["assignment"] = item.label
 
     def _select_student(self, item: NavItem) -> None:
@@ -322,7 +322,7 @@ class HomeController:
     def _status_key(self, student_item_id: str) -> tuple[str, str, str]:
         return (
             str(self._state.selection.course_id or ""),
-            str(self._state.selection.assessment_id or ""),
+            str(self._state.selection.assignment_id or ""),
             student_item_id,
         )
 
@@ -372,7 +372,7 @@ class HomeController:
                 submit_label="Create",
                 fields=[
                     DialogField(
-                        "assessment_type",
+                        "assignment_type",
                         "Type",
                         placeholder="assignment/quiz/exam/other",
                         value="assignment",
@@ -452,7 +452,7 @@ class HomeController:
         try:
             created = self._data_provider.create_assignment(
                 course_id=course_id,
-                assessment_type=values["assessment_type"].lower(),
+                assignment_type=values["assignment_type"].lower(),
                 title=values["title"],
                 max_points=values["max_points"],
             )
@@ -498,9 +498,9 @@ class HomeController:
 
     @staticmethod
     def _validate_assignment_form(values: dict[str, str]) -> str | None:
-        assessment_type = values.get("assessment_type", "").strip().lower()
-        if assessment_type not in ALLOWED_ASSESSMENT_TYPES:
-            return "Type must be one of: " + ", ".join(ALLOWED_ASSESSMENT_TYPES) + "."
+        assignment_type = values.get("assignment_type", "").strip().lower()
+        if assignment_type not in ALLOWED_ASSIGNMENT_TYPES:
+            return "Type must be one of: " + ", ".join(ALLOWED_ASSIGNMENT_TYPES) + "."
         max_points_raw = values.get("max_points", "").strip()
         try:
             parsed = Decimal(max_points_raw)
@@ -525,7 +525,7 @@ class HomeController:
             NavItem(
                 item_id=f"a{assignment.id}",
                 label=assignment.title,
-                meta=assignment.assessment_type,
+                meta=assignment.assignment_type,
             )
             for assignment in assignments
         ]

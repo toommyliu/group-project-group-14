@@ -37,16 +37,16 @@ class CoursesDataService:
         if course_id is None:
             return []
         try:
-            assessments = self._services.assessments.list_assessments(course_id)
+            assignments = self._services.assignments.list_assignments(course_id)
         except CourseNotFoundError:
             return []
         return [
             NavItem(
-                item_id=f"a{assessment.id}",
-                label=assessment.title,
-                meta=str(assessment.type),
+                item_id=f"a{assignment.id}",
+                label=assignment.title,
+                meta=str(assignment.type),
             )
-            for assessment in assessments
+            for assignment in assignments
         ]
 
     def load_students(
@@ -93,20 +93,20 @@ class CoursesDataService:
         self,
         *,
         course_id: int,
-        assessment_type: str,
+        assignment_type: str,
         title: str,
         max_points: str,
     ) -> NavItem:
-        assessment = self._services.assessments.create_assessment(
+        assignment = self._services.assignments.create_assignment(
             course_id=course_id,
-            assessment_type=assessment_type,
+            assignment_type=assignment_type,
             title=title,
             max_points=max_points,
         )
         return NavItem(
-            item_id=f"a{assessment.id}",
-            label=assessment.title,
-            meta=str(assessment.type),
+            item_id=f"a{assignment.id}",
+            label=assignment.title,
+            meta=str(assignment.type),
         )
 
     def create_student(

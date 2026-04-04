@@ -32,7 +32,7 @@ class Provider(Protocol):
         self,
         *,
         course_id: int,
-        assessment_type: str,
+        assignment_type: str,
         title: str,
         max_points: str,
     ) -> AssignmentSummary: ...

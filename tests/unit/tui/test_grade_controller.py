@@ -54,7 +54,7 @@ def build_controller() -> tuple[FakeApp, TuiWorkflowState, GradeController]:
     app = FakeApp()
     state = TuiWorkflowState()
     state.selection.course_id = 1
-    state.selection.assessment_id = 1
+    state.selection.assignment_id = 1
     state.selection_labels["course"] = "CMPE 195"
     state.selection_labels["assignment"] = "HW 1"
     state.student_items = [
