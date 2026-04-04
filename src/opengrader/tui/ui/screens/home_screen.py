@@ -241,9 +241,10 @@ class HomeScreen(Vertical):
             return
         list_id = event.list_view.id or ""
         nav = event.item.nav
-        if list_id == "home-course-list":
-            self.post_message(self.CourseHighlighted(nav))
-        elif list_id == "home-assignment-list":
+        # if list_id == "home-course-list":
+            # return
+        # elif list_id == "home-assignment-list":
+        if list_id == "home-assignment-list":
             self._active_content = "assignments"
             self.post_message(self.AssignmentSelected(nav))
         elif list_id == "home-student-list":

@@ -57,8 +57,14 @@ class HomeController:
         home_screen = self._app.get_home_screen()
         courses = self._course_items(self._data_provider.list_courses())
         home_screen.set_courses(courses)
-        home_screen.set_status("Select a course to get started.")
         home_screen.focus_courses()
+
+        item = home_screen.selected_course()
+        if item is not None:
+            self.on_course_highlighted(item)
+            return
+
+        home_screen.set_status("Select a course to get started.")
 
     def on_course_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
@@ -211,7 +217,13 @@ class HomeController:
         if focused == "home-course-list":
             item = home.selected_course()
             if item is not None:
-                self.on_course_highlighted(item)
+                if (
+                    not home.content_visible()
+                    or self._state.selection.course_item_id != item.item_id
+                ):
+                    self.on_course_highlighted(item)
+                else:
+                    home.set_status(f"Course: {item.label}")
         elif focused == "home-assignment-list":
             item = home.selected_assignment()
             if item is not None:
