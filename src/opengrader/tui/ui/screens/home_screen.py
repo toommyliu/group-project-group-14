@@ -86,6 +86,7 @@ class HomeScreen(Vertical):
         course_list.clear()
         for item in courses:
             course_list.append(_NavListItem(item))
+        self._sidebar().refresh_index_subtitles()
 
     def set_assignments(self, assignments: list[NavItem]) -> None:
         self._assignment_items = list(assignments)
@@ -93,6 +94,7 @@ class HomeScreen(Vertical):
         assignment_list.clear()
         for item in assignments:
             assignment_list.append(_NavListItem(item))
+        self._sidebar().refresh_index_subtitles()
 
     def set_students(self, students: list[NavItem]) -> None:
         self._student_items = list(students)
@@ -102,6 +104,7 @@ class HomeScreen(Vertical):
         student_list.clear()
         for item in students:
             student_list.append(_NavListItem(item))
+        self._sidebar().refresh_index_subtitles()
 
     def expand_student_assignments(
         self,
@@ -121,6 +124,8 @@ class HomeScreen(Vertical):
             sub_item = _NavListItem(assignment, is_sub_item=True)
             sub_item.add_class("student-sub-item")
             student_list.insert(insert_after + 1 + offset, sub_item)
+
+        self._sidebar().refresh_index_subtitles()
 
     def collapse_student_assignments(self) -> None:
         self._collapse_expanded_student()
@@ -293,3 +298,4 @@ class HomeScreen(Vertical):
             child.remove()
         self._expanded_student = None
         self._expanded_student_assignments = []
+        self._sidebar().refresh_index_subtitles()

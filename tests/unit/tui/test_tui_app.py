@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import ContentSwitcher, ListView
+from textual.widgets import ContentSwitcher, ListView, Static
 
 from opengrader.tui.controllers.input_controller import (
     InputController,
@@ -12,7 +12,8 @@ from opengrader.tui.controllers.input_controller import (
 from opengrader.core import get_database_path
 from opengrader.tui.main import run_app
 from opengrader.tui.tui import TuiApp
-from opengrader.tui.ui.widgets import SelectionDetails
+from opengrader.tui.data import AssignmentSummary, StudentSummary
+from opengrader.tui.ui.widgets import ContentList, SelectionDetails
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -83,6 +84,70 @@ def test_course_selection_populates_tabs() -> None:
             )
             assert len(assignment_list.children) == 2
             assert len(student_list.children) == 2
+
+    asyncio.run(run())
+
+
+def test_sidebar_subtitles_show_current_index_out_of_total() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            course_list = app.get_home_screen().query_one(
+                "#home-course-list", ContentList
+            )
+            assert course_list.border_subtitle == "1 of 2"
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ContentList
+            )
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ContentList
+            )
+            assert assignment_list.border_subtitle == "0 of 2"
+            assert student_list.border_subtitle == "0 of 2"
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert assignment_list.border_subtitle == "1 of 2"
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert assignment_list.border_subtitle == "2 of 2"
+
+    asyncio.run(run())
+
+
+def test_switching_panes_updates_status_immediately() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            status = app.get_home_screen().query_one("#home-status", Static)
+            assert "Course:" in str(status.content)
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert "HW 1" in str(status.content)
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert "Student: Tommy Liu" in str(status.content)
 
     asyncio.run(run())
 
@@ -313,6 +378,58 @@ def test_tab_navigation_reaches_details_pane() -> None:
             await pilot.press("tab")
             await pilot.pause()
             assert details.has_focus
+
+    asyncio.run(run())
+
+
+def test_switching_course_updates_sidebar_totals() -> None:
+    class VariableCountsProvider(FakeDataProvider):
+        def list_assignments(self, course_id: int | None) -> list[AssignmentSummary]:
+            if course_id == 1:
+                return [
+                    AssignmentSummary(1, "HW 1", ""),
+                    AssignmentSummary(2, "HW 2", ""),
+                ]
+            if course_id == 2:
+                return [AssignmentSummary(3, "Quiz 1", "")]
+            return []
+
+        def list_students(self, course_id: int | None) -> list[StudentSummary]:
+            if course_id == 1:
+                return [
+                    StudentSummary(1, "Tommy Liu"),
+                    StudentSummary(2, "Andy Cortes"),
+                ]
+            if course_id == 2:
+                return [StudentSummary(3, "Ada Lovelace")]
+            return []
+
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=VariableCountsProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("2")
+            await pilot.pause()
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ContentList
+            )
+            assert assignment_list.border_subtitle.endswith("of 2")
+
+            await pilot.press("1")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+            await pilot.press("2")
+            await pilot.pause()
+
+            assert assignment_list.border_subtitle.endswith("of 1")
 
     asyncio.run(run())
 

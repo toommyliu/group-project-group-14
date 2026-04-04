@@ -2,9 +2,13 @@ from textual.widgets import Static
 
 from .nav_item import NavItem
 
+def make_title(prefix: str, label: str) -> str:
+    return f"[4] {prefix} · {label}"
+
+
 
 class SelectionDetails(Static):
-    can_focus = True
+    can_focus = True    
 
     DEFAULT_CSS = """
     SelectionDetails {
@@ -43,7 +47,7 @@ class SelectionDetails(Static):
         assignment_count: int,
         student_count: int,
     ) -> None:
-        self.border_title = f"[4] - Course · {course.label}"
+        self.border_title = make_title("Course", course.label)
         self.border_subtitle = "[n] New"
         self.update(
             f"Term/Section: {course.meta or 'N/A'}\n"
@@ -53,7 +57,7 @@ class SelectionDetails(Static):
         )
 
     def show_assignment(self, assignment: NavItem, *, template_hint: str) -> None:
-        self.border_title = f"[4] - Assignment · {assignment.label}"
+        self.border_title = make_title("Assignment", assignment.label)
         self.border_subtitle = "[g] Grade · [d] Details · [r] Rubric · [t] Template"
         self.update(
             f"Type: {assignment.meta or 'N/A'}\n"
@@ -62,7 +66,7 @@ class SelectionDetails(Static):
         )
 
     def show_student(self, student: NavItem, *, submission_count: int) -> None:
-        self.border_title = f"[4] - Student · {student.label}"
+        self.border_title = make_title("Student", student.label)
         self.border_subtitle = "[Enter] Show submissions"
         self.update(
             f"Status: {student.meta or 'N/A'}\n"
@@ -71,7 +75,7 @@ class SelectionDetails(Static):
         )
 
     def show_student_submission(self, student: NavItem, assignment: NavItem) -> None:
-        self.border_title = f"[4] - Submission · {student.label}"
+        self.border_title = make_title("Submission", student.label)
         self.border_subtitle = "[g] Grade"
         self.update(
             f"Assignment: {assignment.label}\n"

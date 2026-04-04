@@ -27,3 +27,23 @@ class ContentList(ListView):
     ) -> None:
         super().__init__(id=id)
         self.border_title = title
+        self.border_subtitle = "0 of 0"
+
+    def refresh_index_subtitle(self) -> None:
+        total = len(self.children)
+        if total == 0:
+            self.border_subtitle = "0 of 0"
+            return
+
+        current = 0
+        if self.highlighted_child is not None:
+            try:
+                current = list(self.children).index(self.highlighted_child) + 1
+            except ValueError:
+                current = 0
+        else:
+            index = self.index if isinstance(self.index, int) else -1
+            if 0 <= index < total:
+                current = index + 1
+
+        self.border_subtitle = f"{current} of {total}"

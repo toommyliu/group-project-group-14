@@ -170,7 +170,11 @@ class HomeController:
             self.focus_details_pane()
 
     def focus_courses_pane(self) -> None:
-        self._app.get_home_screen().focus_courses()
+        home = self._app.get_home_screen()
+        home.focus_courses()
+        item = home.selected_course()
+        if item is not None:
+            home.set_status(f"Course: {item.label}")
 
     def focus_assignments_pane(self) -> None:
         home = self._app.get_home_screen()
@@ -178,6 +182,9 @@ class HomeController:
             home.set_status("Select a course first.")
             return
         home.focus_assignments()
+        item = home.selected_assignment()
+        if item is not None:
+            self.on_assignment_highlighted(item)
 
     def focus_students_pane(self) -> None:
         home = self._app.get_home_screen()
@@ -185,6 +192,9 @@ class HomeController:
             home.set_status("Select a course first.")
             return
         home.focus_students()
+        item = home.selected_student()
+        if item is not None:
+            self.on_student_highlighted(item)
 
     def focus_details_pane(self) -> None:
         self._app.get_home_screen().focus_details()
