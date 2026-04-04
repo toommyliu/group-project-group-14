@@ -2,7 +2,7 @@ from pathlib import Path
 
 from opengrader.tui.controllers.home_controller import HomeController
 from opengrader.tui.state import TuiWorkflowState
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.data import AssignmentTemplateSummary
 
 from .fakes import FakeDataProvider

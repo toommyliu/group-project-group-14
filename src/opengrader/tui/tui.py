@@ -13,7 +13,7 @@ from opengrader.tui.controllers.input_controller import (
     InputProfileName,
 )
 from opengrader.tui.data import SqliteProvider, Provider
-from opengrader.tui.screens import GradeScreen, HomeScreen
+from opengrader.tui.ui.screens import GradeScreen, HomeScreen
 from opengrader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 

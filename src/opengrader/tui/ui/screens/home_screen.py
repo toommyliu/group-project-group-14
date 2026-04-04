@@ -12,8 +12,8 @@ from textual.widgets import (
     TabPane,
 )
 
-from opengrader.tui.widgets import tabs  # type: ignore -- applies monkeypatch to textual's Tab widget
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets import tabs  # type: ignore -- applies monkeypatch to textual's Tab widget
+from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 class _NavListItem(ListItem):

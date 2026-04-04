@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from opengrader.tui.state.grading_session import StudentGradingRun
 from opengrader.tui.state.route import PAGE_HOME
 from opengrader.tui.state.selection import GradingSelection
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 @dataclass

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from opengrader.tui.state import QuestionGrade
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 class TuiDataService(Protocol):

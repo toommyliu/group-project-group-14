@@ -9,7 +9,7 @@ from opengrader.core.courses import (
     StudentInput,
     build_sqlite_course_services,
 )
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 class CoursesDataService:

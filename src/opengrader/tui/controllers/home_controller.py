@@ -14,10 +14,10 @@ from opengrader.tui.data import (
     StudentSummary,
     Provider,
 )
-from opengrader.tui.screens import Dialog, DialogField, HomeScreen
+from opengrader.tui.ui.screens import Dialog, DialogField, HomeScreen
 from opengrader.tui.state import TuiWorkflowState
-from opengrader.tui.widgets.nav_item import NavItem
-from opengrader.tui.screens.home_screen import _NavListItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
+from opengrader.tui.ui.screens.home_screen import _NavListItem
 from textual.widgets import ListView, TabbedContent
 from textual_fspicker import FileOpen, Filters
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from opengrader.tui.controllers.grade_controller import GradeController
 from opengrader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
 
 from .fakes import FakeDataProvider
 
