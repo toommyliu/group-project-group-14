@@ -99,7 +99,7 @@ On macOS:
 curl -LsSf https://astral.sh/uv/install.sh | sh # or brew install uv
 
 # Install dependencies and sync virtual environment
-uv sync
+uv sync --all-groups
 ```
 
 #### Library Management
@@ -117,6 +117,11 @@ uv remove my-library
 ```bash
 # Run the TUI
 uv run tui
+
+# Run the TUI in dev mode
+uv run tui-dev
+# Run the textual console in another terminal
+uv run textual console
 
 # Executing CLI tools
 uv run pdf-splitter assets/sample.pdf assets/sample.pdf

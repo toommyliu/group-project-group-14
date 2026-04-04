@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 tui = "opengrader.tui.main:run_app"
+tui-dev = "opengrader.tui.main:run_app_dev"
 pdf-splitter = "opengrader.cli.pdf_splitter:run_cli"
 question-splitter = "opengrader.cli.question_splitter:run_cli"
 roster-reader = "opengrader.cli.roster_reader:run_cli"
@@ -47,3 +48,8 @@ addopts = "-v"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "textual-dev>=1.8.0",
+]
