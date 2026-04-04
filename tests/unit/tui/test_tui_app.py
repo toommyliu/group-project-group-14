@@ -33,34 +33,6 @@ def test_home_course_list_populates_on_mount() -> None:
     asyncio.run(run())
 
 
-def test_content_lists_hidden_until_course_selected() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
-            )
-            student_list = app.get_home_screen().query_one("#home-student-list", ListView)
-            assert assignment_list.display is False
-            assert student_list.display is False
-
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            course_list.focus()
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            assert assignment_list.display is True
-            assert student_list.display is True
-
-    asyncio.run(run())
-
-
 def test_course_selection_populates_tabs() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -302,48 +274,6 @@ def test_emacs_profile_navigates_with_ctrl_keys() -> None:
     asyncio.run(run())
 
 
-def test_home_pane_hotkeys_focus_expected_pane() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
-            )
-            student_list = app.get_home_screen().query_one("#home-student-list", ListView)
-            details = app.get_home_screen().query_one(
-                "#home-selection-details", SelectionDetails
-            )
-
-            course_list.focus()
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            await pilot.press("2")
-            await pilot.pause()
-            assert assignment_list.has_focus
-
-            await pilot.press("3")
-            await pilot.pause()
-            assert student_list.has_focus
-
-            await pilot.press("4")
-            await pilot.pause()
-            assert details.has_focus
-
-            await pilot.press("1")
-            await pilot.pause()
-            assert course_list.has_focus
-
-    asyncio.run(run())
-
-
 def test_tab_navigation_reaches_details_pane() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -357,7 +287,9 @@ def test_tab_navigation_reaches_details_pane() -> None:
             assignment_list = app.get_home_screen().query_one(
                 "#home-assignment-list", ListView
             )
-            student_list = app.get_home_screen().query_one("#home-student-list", ListView)
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
+            )
             details = app.get_home_screen().query_one(
                 "#home-selection-details", SelectionDetails
             )

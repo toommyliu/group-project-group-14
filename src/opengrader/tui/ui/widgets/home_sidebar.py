@@ -36,8 +36,6 @@ class HomeSidebar(Vertical):
         yield StudentList(id="home-student-list")
 
     def on_mount(self) -> None:
-        self.assignment_list().display = False
-        self.student_list().display = False
         self.refresh_index_subtitles()
 
     def course_list(self) -> ContentList:
@@ -49,10 +47,15 @@ class HomeSidebar(Vertical):
     def student_list(self) -> ContentList:
         return self.query_one("#home-student-list", ContentList)
 
+    def __init__(self, **kwargs: object) -> None:
+        self._content_shown = False
+        super().__init__(**kwargs) # pyright: ignore[reportArgumentType]
+
     def content_visible(self) -> bool:
-        return bool(self.assignment_list().display)
+        return self._content_shown
 
     def show_content_sections(self) -> None:
+        self._content_shown = True
         self.assignment_list().display = True
         self.student_list().display = True
         self.refresh_index_subtitles()

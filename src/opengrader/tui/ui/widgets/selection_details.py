@@ -32,15 +32,6 @@ class SelectionDetails(Static):
 
     def __init__(self, *, id: str | None = None) -> None:
         super().__init__(id=id)
-        self.show_welcome()
-
-    def show_welcome(self) -> None:
-        self.border_title = make_title("Selection details")
-        self.update(
-            "Select a course to get started.\n\n"
-            "This panel shows details and available actions for the currently "
-            "highlighted course, assignment, or student."
-        )
 
     def show_course(
         self,
