@@ -22,6 +22,10 @@ class InputCommand(str, Enum):
     HOME_ASSIGNMENT_EDIT_RUBRIC = "home_assignment_edit_rubric"
     HOME_ASSIGNMENT_EDIT_TEMPLATE = "home_assignment_edit_template"
     HOME_CREATE = "home_create"
+    HOME_FOCUS_COURSES = "home_focus_courses"
+    HOME_FOCUS_ASSIGNMENTS = "home_focus_assignments"
+    HOME_FOCUS_STUDENTS = "home_focus_students"
+    HOME_FOCUS_DETAILS = "home_focus_details"
     GRADE_NEXT_QUESTION = "grade_next_question"
     GRADE_PREVIOUS_QUESTION = "grade_previous_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
@@ -152,6 +156,30 @@ STANDARD_PROFILE = InputProfile(
             "Create",
             (InputContext.HOME,),
             show=True,
+        ),
+        CommandBindingSpec(
+            "1",
+            InputCommand.HOME_FOCUS_COURSES,
+            "Focus Courses",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "2",
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            "Focus Assignments",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "3",
+            InputCommand.HOME_FOCUS_STUDENTS,
+            "Focus Students",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "4",
+            InputCommand.HOME_FOCUS_DETAILS,
+            "Focus Details",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -319,6 +347,30 @@ VIM_PROFILE = InputProfile(
             "Create Course",
             (InputContext.HOME,),
             show=True,
+        ),
+        CommandBindingSpec(
+            "1",
+            InputCommand.HOME_FOCUS_COURSES,
+            "Focus Courses",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "2",
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            "Focus Assignments",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "3",
+            InputCommand.HOME_FOCUS_STUDENTS,
+            "Focus Students",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "4",
+            InputCommand.HOME_FOCUS_DETAILS,
+            "Focus Details",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -490,6 +542,30 @@ EMACS_PROFILE = InputProfile(
             "Create Course",
             (InputContext.HOME,),
             show=True,
+        ),
+        CommandBindingSpec(
+            "1",
+            InputCommand.HOME_FOCUS_COURSES,
+            "Focus Courses",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "2",
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            "Focus Assignments",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "3",
+            InputCommand.HOME_FOCUS_STUDENTS,
+            "Focus Students",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "4",
+            InputCommand.HOME_FOCUS_DETAILS,
+            "Focus Details",
+            (InputContext.HOME,),
         ),
         CommandBindingSpec(
             "ctrl+j",

@@ -126,38 +126,74 @@ class HomeController:
             self._open_student(student_index)
 
     def move_up(self) -> None:
-        self._ensure_focus()
         home = self._app.get_home_screen()
+        focused_pane = home.focused_pane()
+        if focused_pane == "details":
+            return
+        self._ensure_focus()
         self._move_list_cursor(home, -1)
 
     def move_down(self) -> None:
-        self._ensure_focus()
         home = self._app.get_home_screen()
+        focused_pane = home.focused_pane()
+        if focused_pane == "details":
+            return
+        self._ensure_focus()
         self._move_list_cursor(home, 1)
 
     def move_left(self) -> None:
         home = self._app.get_home_screen()
-        focused_list = self._focused_list_id(home)
-        if focused_list == "home-course-list":
+        focused_pane = home.focused_pane()
+        if focused_pane == "courses":
             return
-        if focused_list == "home-student-list":
-            home.switch_tab("assignments")
-            home.focus_content()
+        if focused_pane == "details":
+            if home.content_visible():
+                self.focus_students_pane()
+            else:
+                self.focus_courses_pane()
             return
-        home.focus_courses()
+        if focused_pane == "students":
+            self.focus_assignments_pane()
+            return
+        self.focus_courses_pane()
 
     def move_right(self) -> None:
         home = self._app.get_home_screen()
-        focused_list = self._focused_list_id(home)
-        if focused_list == "home-course-list":
-            home.switch_tab("assignments")
-            home.focus_content()
-        elif focused_list == "home-assignment-list":
-            home.switch_tab("students")
-            home.focus_content()
+        focused_pane = home.focused_pane()
+        if focused_pane == "courses":
+            if not home.content_visible():
+                return
+            self.focus_assignments_pane()
+        elif focused_pane == "assignments":
+            self.focus_students_pane()
+        elif focused_pane == "students":
+            self.focus_details_pane()
+
+    def focus_courses_pane(self) -> None:
+        self._app.get_home_screen().focus_courses()
+
+    def focus_assignments_pane(self) -> None:
+        home = self._app.get_home_screen()
+        if not home.content_visible():
+            home.set_status("Select a course first.")
+            return
+        home.focus_assignments()
+
+    def focus_students_pane(self) -> None:
+        home = self._app.get_home_screen()
+        if not home.content_visible():
+            home.set_status("Select a course first.")
+            return
+        home.focus_students()
+
+    def focus_details_pane(self) -> None:
+        self._app.get_home_screen().focus_details()
 
     def confirm(self) -> None:
         home = self._app.get_home_screen()
+        if home.focused_pane() == "details":
+            return
+
         focused = self._focused_list_id(home)
         if focused is None:
             self._ensure_focus()
@@ -349,6 +385,8 @@ class HomeController:
 
     def _ensure_focus(self) -> None:
         home = self._app.get_home_screen()
+        if home.focused_pane() == "details":
+            return
         if self._focused_list_id(home) is None:
             home.focus_courses()
 

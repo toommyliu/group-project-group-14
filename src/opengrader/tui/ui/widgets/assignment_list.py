@@ -7,4 +7,4 @@ class AssignmentList(ContentList):
         *,
         id: str | None = None,
     ) -> None:
-        super().__init__("[1] Assignments", id=id)
+        super().__init__("[2] Assignments", id=id)

@@ -189,6 +189,22 @@ class TuiApp(App):
             self.home_controller.create,
         )
         self.input_controller.register(
+            InputCommand.HOME_FOCUS_COURSES,
+            self.home_controller.focus_courses_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            self.home_controller.focus_assignments_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_STUDENTS,
+            self.home_controller.focus_students_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_DETAILS,
+            self.home_controller.focus_details_pane,
+        )
+        self.input_controller.register(
             InputCommand.GRADE_NEXT_QUESTION,
             self.grade_controller.next_question,
         )

@@ -171,17 +171,43 @@ class HomeScreen(Vertical):
             lv.index = 0
         lv.focus()
 
-    def focus_content(self) -> None:
-        target = "#home-assignment-list"
-        if self._active_content == "students":
-            target = "#home-student-list"
-
-        lv = self.query_one(target, ListView)
+    def focus_assignments(self) -> None:
+        self._active_content = "assignments"
+        lv = self.query_one("#home-assignment-list", ListView)
         if not lv.display:
             return
         lv.focus()
         if lv.highlighted_child is None and len(lv.children) > 0:
             lv.index = 0
+
+    def focus_students(self) -> None:
+        self._active_content = "students"
+        lv = self.query_one("#home-student-list", ListView)
+        if not lv.display:
+            return
+        lv.focus()
+        if lv.highlighted_child is None and len(lv.children) > 0:
+            lv.index = 0
+
+    def focus_details(self) -> None:
+        self.query_one("#home-selection-details", SelectionDetails).focus()
+
+    def focused_pane(self) -> str | None:
+        if self.query_one("#home-course-list", ListView).has_focus:
+            return "courses"
+        if self.query_one("#home-assignment-list", ListView).has_focus:
+            return "assignments"
+        if self.query_one("#home-student-list", ListView).has_focus:
+            return "students"
+        if self.query_one("#home-selection-details", SelectionDetails).has_focus:
+            return "details"
+        return None
+
+    def focus_content(self) -> None:
+        if self._active_content == "students":
+            self.focus_students()
+            return
+        self.focus_assignments()
 
     def show_course_details(
         self,
