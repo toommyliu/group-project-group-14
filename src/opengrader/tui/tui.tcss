@@ -14,38 +14,3 @@ $foreground: #E4E4E4EB;
 .student-sub-item {
     color: $text-muted;
 }
-
-FormDialog, Dialog, ModalScreen {
-    align: center middle;
-}
-
-#dialog-panel {
-    width: 64;
-    max-width: 90%;
-    height: auto;
-    padding: 1 2;
-    background: $panel;
-}
-
-#dialog-title {
-    margin-bottom: 1;
-}
-
-.dialog-field-label {
-    margin-top: 1;
-}
-
-#dialog-error {
-    margin-top: 1;
-    color: $error;
-    min-height: 1;
-}
-
-#dialog-actions {
-    align-horizontal: right;
-    height: auto;
-}
-
-#dialog-actions Button {
-    margin-left: 1;
-}

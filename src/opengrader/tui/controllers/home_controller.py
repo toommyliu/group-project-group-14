@@ -14,9 +14,10 @@ from opengrader.tui.data import (
     StudentSummary,
     Provider,
 )
-from opengrader.tui.ui.screens import Dialog, DialogField, HomeScreen
+from opengrader.tui.ui.screens import HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.dialog import Dialog, DialogField
 from opengrader.tui.ui.screens.home_screen import _NavListItem
 from textual.widgets import ListView
 from textual_fspicker import FileOpen, Filters
@@ -474,7 +475,8 @@ class HomeController:
         return int(digits)
 
     def _open_create_course_dialog(self) -> None:
-        self._app.push_screen(
+        Dialog.present(
+            self._app,
             Dialog(
                 title="Create Course",
                 submit_label="Create",
@@ -494,7 +496,8 @@ class HomeController:
         course_id: int,
     ) -> None:
         course_label = self._state.selection_labels.get("course", "")
-        self._app.push_screen(
+        Dialog.present(
+            self._app,
             Dialog(
                 title=f"Create Assignment ({course_label})",
                 submit_label="Create",
@@ -523,7 +526,8 @@ class HomeController:
         course_id: int,
     ) -> None:
         course_label = self._state.selection_labels.get("course", "")
-        self._app.push_screen(
+        Dialog.present(
+            self._app,
             Dialog(
                 title=f"Enroll Student ({course_label})",
                 submit_label="Enroll",
@@ -665,7 +669,8 @@ class HomeController:
         default_name = (
             linked_template.name if linked_template is not None else assignment_label
         )
-        self._app.push_screen(
+        Dialog.present(
+            self._app,
             Dialog(
                 title=f"Upload Template ({assignment_label})",
                 submit_label="Continue",

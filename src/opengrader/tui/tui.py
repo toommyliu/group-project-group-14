@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.widgets import ContentSwitcher, Footer
+from textual.widgets import ContentSwitcher, Footer, Input
 
 from opengrader.tui.controllers import (
     GradeController,
@@ -86,11 +86,20 @@ class TuiApp(App):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action != "dispatch_input":
             return True
+
         if len(parameters) != 2:
             return False
         profile_name, command = parameters
         if not isinstance(profile_name, str) or not isinstance(command, str):
             return False
+
+        if isinstance(self.focused, Input):
+            return False
+
+        # While any dialog is open, avoid dispatching keymaps to prevent unexpected interactions 
+        if len(self.screen_stack) > 1:
+            return False
+
         return self.input_controller.binding_available(profile_name, command)
 
     def on_home_screen_course_highlighted(

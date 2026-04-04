@@ -19,7 +19,7 @@ class SelectionDetails(Static):
         height: 1fr;
         background: $background;
         border: round $accent;
-        border-title-color: #ffffff;
+        border-title-color: white;
         border-title-align: left;
         border-subtitle-color: $text-muted;
         border-subtitle-align: right;
