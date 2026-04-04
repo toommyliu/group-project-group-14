@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Protocol
 
 from opengrader.core.courses import ALLOWED_ASSIGNMENT_TYPES
@@ -17,12 +19,22 @@ from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.widgets.nav_item import NavItem
 from opengrader.tui.screens.home_screen import _NavListItem
 from textual.widgets import ListView, TabbedContent
+from textual_fspicker import FileOpen, Filters
+
+
+@dataclass(frozen=True)
+class _TemplateUploadContext:
+    assignment_id: int
+    course_id: int
+    assignment_label: str
+    template_name: str
+    strategy: str
 
 
 class HomeApp(Protocol):
     def get_home_screen(self) -> HomeScreen: ...
 
-    def push_screen(self, screen: Dialog, callback=None) -> None: ...
+    def push_screen(self, screen: object, callback=None) -> None: ...
 
 
 class HomeController:
@@ -61,8 +73,18 @@ class HomeController:
 
     def on_assignment_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
+        template_hint = "[t] Upload Template"
+        assignment_id = self._numeric_id(item.item_id)
+        if assignment_id is not None:
+            linked_template = self._data_provider.get_assignment_template(assignment_id)
+            if linked_template is None:
+                template_hint = "[t] Upload Template (none linked)"
+            elif linked_template.spec_pending:
+                template_hint = f"[t] Template: {linked_template.name} (spec pending)"
+            else:
+                template_hint = f"[t] Template: {linked_template.name}"
         home.set_status(
-            f"{item.label} · [g] Grade  [d] Details  [r] Rubric  [t] Template  [n] New"
+            f"{item.label} · [g] Grade  [d] Details  [r] Rubric  {template_hint}  [n] New"
         )
 
     def on_assignment_selected(self, item: NavItem) -> None:
@@ -201,7 +223,18 @@ class HomeController:
         if item is None:
             home.set_status("Highlight an assignment to edit template.")
             return
-        home.set_status(f"Edit template: {item.label}")
+
+        course_id = self._state.selection.course_id
+        assignment_id = self._numeric_id(item.item_id)
+        if course_id is None or assignment_id is None:
+            home.set_status("Select a valid course and assignment first.")
+            return
+
+        self._open_template_upload_dialog(
+            course_id=course_id,
+            assignment_id=assignment_id,
+            assignment_label=item.label,
+        )
 
     def create(self) -> None:
         home = self._app.get_home_screen()
@@ -509,6 +542,213 @@ class HomeController:
         if parsed < Decimal("0"):
             return "Max Points must be 0 or greater."
         return None
+
+    @staticmethod
+    def _validate_template_upload_form(values: dict[str, str]) -> str | None:
+        template_name = values.get("name", "").strip()
+        if not template_name:
+            return "Template Name is required."
+
+        strategy = values.get("strategy", "").strip().lower()
+        if strategy not in ("pdf+spec", "pdf-only"):
+            return "Strategy must be one of: pdf+spec, pdf-only."
+        return None
+
+    def _open_template_upload_dialog(
+        self,
+        *,
+        course_id: int,
+        assignment_id: int,
+        assignment_label: str,
+    ) -> None:
+        linked_template = self._data_provider.get_assignment_template(assignment_id)
+        default_name = (
+            linked_template.name if linked_template is not None else assignment_label
+        )
+        self._app.push_screen(
+            Dialog(
+                title=f"Upload Template ({assignment_label})",
+                submit_label="Continue",
+                fields=[
+                    DialogField(
+                        "name",
+                        "Template Name",
+                        placeholder="HW 1 Template",
+                        value=default_name,
+                    ),
+                    DialogField(
+                        "version",
+                        "Version (Optional)",
+                        placeholder="A",
+                        required=False,
+                    ),
+                    DialogField(
+                        "strategy",
+                        "Upload Strategy",
+                        placeholder="pdf+spec or pdf-only",
+                        value="pdf+spec",
+                    ),
+                ],
+                validator=self._validate_template_upload_form,
+            ),
+            lambda values: self._on_template_upload_dialog_closed(
+                course_id=course_id,
+                assignment_id=assignment_id,
+                assignment_label=assignment_label,
+                values=values,
+            ),
+        )
+
+    def _on_template_upload_dialog_closed(
+        self,
+        *,
+        course_id: int,
+        assignment_id: int,
+        assignment_label: str,
+        values: dict[str, str] | None,
+    ) -> None:
+        if values is None:
+            self._app.get_home_screen().set_status("Template upload cancelled.")
+            return
+
+        base_name = values["name"].strip()
+        version = values.get("version", "").strip()
+        strategy = values["strategy"].strip().lower()
+        template_name = self._template_name_with_version(base_name, version)
+        context = _TemplateUploadContext(
+            assignment_id=assignment_id,
+            course_id=course_id,
+            assignment_label=assignment_label,
+            template_name=template_name,
+            strategy=strategy,
+        )
+        self._open_template_pdf_picker(context)
+
+    def _open_template_pdf_picker(self, context: _TemplateUploadContext) -> None:
+        self._app.push_screen(
+            FileOpen(
+                title="Select Template PDF",
+                open_button="Use PDF",
+                filters=Filters(
+                    (
+                        "PDF",
+                        lambda path: path.is_dir() or path.suffix.lower() == ".pdf",
+                    ),
+                    ("All", lambda _: True),
+                ),
+            ),
+            lambda selected_path: self._on_template_pdf_selected(
+                context=context,
+                selected_path=selected_path,
+            ),
+        )
+
+    def _on_template_pdf_selected(
+        self,
+        *,
+        context: _TemplateUploadContext,
+        selected_path: Path | None,
+    ) -> None:
+        home = self._app.get_home_screen()
+        if selected_path is None:
+            home.set_status("Template upload cancelled (no PDF selected).")
+            return
+
+        if context.strategy == "pdf-only":
+            self._finalize_template_upload(
+                context=context,
+                template_pdf_path=selected_path,
+                spec_json_path=None,
+            )
+            return
+
+        self._open_template_spec_picker(
+            context=context, template_pdf_path=selected_path
+        )
+
+    def _open_template_spec_picker(
+        self,
+        *,
+        context: _TemplateUploadContext,
+        template_pdf_path: Path,
+    ) -> None:
+        self._app.push_screen(
+            FileOpen(
+                title="Select Template Spec JSON",
+                open_button="Use Spec",
+                filters=Filters(
+                    (
+                        "JSON",
+                        lambda path: path.is_dir() or path.suffix.lower() == ".json",
+                    ),
+                    ("All", lambda _: True),
+                ),
+            ),
+            lambda selected_path: self._on_template_spec_selected(
+                context=context,
+                template_pdf_path=template_pdf_path,
+                selected_path=selected_path,
+            ),
+        )
+
+    def _on_template_spec_selected(
+        self,
+        *,
+        context: _TemplateUploadContext,
+        template_pdf_path: Path,
+        selected_path: Path | None,
+    ) -> None:
+        home = self._app.get_home_screen()
+        if selected_path is None:
+            home.set_status("Template upload cancelled (no spec selected).")
+            return
+
+        self._finalize_template_upload(
+            context=context,
+            template_pdf_path=template_pdf_path,
+            spec_json_path=selected_path,
+        )
+
+    def _finalize_template_upload(
+        self,
+        *,
+        context: _TemplateUploadContext,
+        template_pdf_path: Path,
+        spec_json_path: Path | None,
+    ) -> None:
+        home = self._app.get_home_screen()
+        try:
+            created = self._data_provider.create_assignment_template(
+                course_id=context.course_id,
+                name=context.template_name,
+                template_pdf_path=str(template_pdf_path),
+                spec_json_path=str(spec_json_path)
+                if spec_json_path is not None
+                else None,
+            )
+            self._data_provider.set_assignment_template(
+                assignment_id=context.assignment_id,
+                template_id=created.id,
+            )
+        except Exception as exc:
+            home.set_status(f"Upload template failed: {exc}")
+            return
+
+        if created.spec_pending:
+            home.set_status(
+                f"Linked template '{created.name}' to {context.assignment_label} (spec pending). "
+                "Generate or edit the spec later, then upload with pdf+spec."
+            )
+        else:
+            home.set_status(
+                f"Linked template '{created.name}' to {context.assignment_label}."
+            )
+
+    @staticmethod
+    def _template_name_with_version(base_name: str, version: str) -> str:
+        if not version:
+            return base_name
+        return f"{base_name} [v{version}]"
 
     def _course_items(self, courses: list[CourseSummary]) -> list[NavItem]:
         return [

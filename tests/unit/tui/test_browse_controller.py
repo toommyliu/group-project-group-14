@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from opengrader.tui.controllers.home_controller import HomeController
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.data import AssignmentTemplateSummary
 
 from .fakes import FakeDataProvider
 
@@ -85,6 +88,79 @@ class FakeApp:
 
     def get_home_screen(self) -> FakeHomeScreen:
         return self.home_screen
+
+
+class TemplateFlowHomeScreen(FakeHomeScreen):
+    def __init__(self) -> None:
+        super().__init__()
+        self._selected_assignment = NavItem("a1", "HW 1")
+
+    def selected_assignment(self) -> NavItem | None:
+        return self._selected_assignment
+
+
+class TemplateFlowProvider(FakeDataProvider):
+    def __init__(self) -> None:
+        self.created_template_args: dict[str, object] | None = None
+        self.linked_assignment: tuple[int, int] | None = None
+
+    def get_assignment_template(
+        self,
+        assignment_id: int | None,
+    ) -> AssignmentTemplateSummary | None:
+        _ = assignment_id
+        return None
+
+    def create_assignment_template(
+        self,
+        *,
+        course_id: int,
+        name: str,
+        template_pdf_path: str,
+        spec_json_path: str | None = None,
+    ) -> AssignmentTemplateSummary:
+        self.created_template_args = {
+            "course_id": course_id,
+            "name": name,
+            "template_pdf_path": template_pdf_path,
+            "spec_json_path": spec_json_path,
+        }
+        return AssignmentTemplateSummary(
+            id=42,
+            course_id=course_id,
+            name=name,
+            template_pdf_relpath="course_1/template_42/template.pdf",
+            spec_json_relpath=(
+                "course_1/template_42/spec.json"
+                if spec_json_path is not None
+                else "course_1/template_42/spec.pending.json"
+            ),
+            spec_pending=spec_json_path is None,
+        )
+
+    def set_assignment_template(
+        self,
+        *,
+        assignment_id: int,
+        template_id: int,
+    ) -> None:
+        self.linked_assignment = (assignment_id, template_id)
+
+
+class TemplateFlowApp:
+    def __init__(self, screen_results: list[object]) -> None:
+        self.home_screen = TemplateFlowHomeScreen()
+        self._screen_results = list(screen_results)
+
+    def get_home_screen(self) -> TemplateFlowHomeScreen:
+        return self.home_screen
+
+    def push_screen(self, screen: object, callback=None) -> None:
+        _ = screen
+        if callback is None:
+            return
+        result = self._screen_results.pop(0)
+        callback(result)
 
 
 def test_initialize_populates_courses() -> None:
@@ -186,3 +262,46 @@ def test_assignment_actions_update_status() -> None:
 
     controller.edit_assignment_template()
     assert "Highlight an assignment" in app.home_screen.status
+
+
+def test_edit_assignment_template_uploads_pdf_and_spec() -> None:
+    app = TemplateFlowApp(
+        [
+            {"name": "HW 1 Template", "version": "A", "strategy": "pdf+spec"},
+            Path("/tmp/template.pdf"),
+            Path("/tmp/spec.json"),
+        ]
+    )
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    provider = TemplateFlowProvider()
+    controller = HomeController(app, state, provider, lambda _: None)
+
+    controller.edit_assignment_template()
+
+    assert provider.created_template_args is not None
+    assert provider.created_template_args["name"] == "HW 1 Template [vA]"
+    assert provider.created_template_args["spec_json_path"] == "/tmp/spec.json"
+    assert provider.linked_assignment == (1, 42)
+    assert "Linked template 'HW 1 Template [vA]'" in app.home_screen.status
+
+
+def test_edit_assignment_template_supports_pdf_only_strategy() -> None:
+    app = TemplateFlowApp(
+        [
+            {"name": "HW 1 Template", "version": "", "strategy": "pdf-only"},
+            Path("/tmp/template.pdf"),
+        ]
+    )
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    provider = TemplateFlowProvider()
+    controller = HomeController(app, state, provider, lambda _: None)
+
+    controller.edit_assignment_template()
+
+    assert provider.created_template_args is not None
+    assert provider.created_template_args["name"] == "HW 1 Template"
+    assert provider.created_template_args["spec_json_path"] is None
+    assert provider.linked_assignment == (1, 42)
+    assert "spec pending" in app.home_screen.status

@@ -100,7 +100,7 @@ class StubDataProvider:
         course_id: int,
         name: str,
         template_pdf_path: str,
-        spec_json_path: str,
+        spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
         _ = (template_pdf_path, spec_json_path)
         return AssignmentTemplateSummary(
@@ -108,7 +108,12 @@ class StubDataProvider:
             course_id=course_id,
             name=name,
             template_pdf_relpath="course_1/template_1/template.pdf",
-            spec_json_relpath="course_1/template_1/spec.json",
+            spec_json_relpath=(
+                "course_1/template_1/spec.json"
+                if spec_json_path is not None
+                else "course_1/template_1/spec.pending.json"
+            ),
+            spec_pending=spec_json_path is None,
         )
 
     def list_assignment_templates(
@@ -124,6 +129,7 @@ class StubDataProvider:
                 name="Default Template",
                 template_pdf_relpath=f"course_{course_id}/template_1/template.pdf",
                 spec_json_relpath=f"course_{course_id}/template_1/spec.json",
+                spec_pending=False,
             )
         ]
 
@@ -147,4 +153,5 @@ class StubDataProvider:
             name="Default Template",
             template_pdf_relpath="course_1/template_1/template.pdf",
             spec_json_relpath="course_1/template_1/spec.json",
+            spec_pending=False,
         )

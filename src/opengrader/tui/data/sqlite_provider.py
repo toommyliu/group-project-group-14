@@ -29,6 +29,10 @@ class SqliteProvider:
         self._courses = build_sqlite_course_services(self._db_path)
         self._question_content = StubQuestionContent(default_image_path)
 
+    @staticmethod
+    def _spec_is_pending(spec_json_relpath: str) -> bool:
+        return spec_json_relpath.endswith(".pending.json")
+
     def list_courses(self) -> list[CourseSummary]:
         courses = self._courses.courses.list_courses()
         return [
@@ -148,7 +152,7 @@ class SqliteProvider:
         course_id: int,
         name: str,
         template_pdf_path: str,
-        spec_json_path: str,
+        spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
         template = self._courses.assignment_templates.create_template(
             course_id=course_id,
@@ -162,6 +166,7 @@ class SqliteProvider:
             name=template.name,
             template_pdf_relpath=template.template_pdf_relpath,
             spec_json_relpath=template.spec_json_relpath,
+            spec_pending=self._spec_is_pending(template.spec_json_relpath),
         )
 
     def list_assignment_templates(
@@ -183,6 +188,7 @@ class SqliteProvider:
                 name=template.name,
                 template_pdf_relpath=template.template_pdf_relpath,
                 spec_json_relpath=template.spec_json_relpath,
+                spec_pending=self._spec_is_pending(template.spec_json_relpath),
             )
             for template in templates
         ]
@@ -215,4 +221,5 @@ class SqliteProvider:
             name=template.name,
             template_pdf_relpath=template.template_pdf_relpath,
             spec_json_relpath=template.spec_json_relpath,
+            spec_pending=self._spec_is_pending(template.spec_json_relpath),
         )

@@ -315,3 +315,25 @@ def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None
     assert current.spec_json_relpath.startswith(
         f"courses/{course.id}-senior-design/templates/{created.id}-template-a/"
     )
+
+
+def test_assignment_template_can_be_created_without_spec(tmp_path) -> None:
+    services = build_sqlite_course_services(tmp_path / "courses.db")
+    course = services.courses.create_course(
+        code="CMPE-195",
+        name="Senior Design",
+        term="Spring 2026",
+        section="01",
+    )
+
+    source_pdf = tmp_path / "sample-template.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n% template")
+
+    created = services.assignment_templates.create_template(
+        course_id=course.id,
+        name="Template Pending Spec",
+        source_template_pdf=source_pdf,
+        source_spec_json=None,
+    )
+
+    assert created.spec_json_relpath.endswith("spec.pending.json")

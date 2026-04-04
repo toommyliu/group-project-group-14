@@ -23,6 +23,7 @@ dependencies = [
   "opencv-python>=4.13.0.92",
   "pytest>=9.0.2",
   "platformdirs>=4.0.0,<5.0.0",
+  "textual-fspicker>=1.0.0",
 ]
 
 [project.scripts]

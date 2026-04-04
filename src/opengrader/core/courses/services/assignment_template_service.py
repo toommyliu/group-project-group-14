@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import unicodedata
+import hashlib
 from pathlib import Path
 
 from opengrader.core import get_data_dir
@@ -35,13 +37,28 @@ def _template_directory_name(template_id: int, template_name: str) -> str:
 
 
 def _sha256_for(path: Path) -> str:
-    import hashlib
-
     hasher = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def _sha256_for_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _pending_spec_json(template_name: str) -> str:
+    payload = {
+        "schema_version": "1.0",
+        "unit_id": _slugify(template_name),
+        "pages": [],
+        "meta": {
+            "status": "pending_spec",
+            "message": "Spec not uploaded yet. Generate or edit a spec and replace this placeholder.",
+        },
+    }
+    return json.dumps(payload, indent=2) + "\n"
 
 
 class AssignmentTemplateService:
@@ -54,14 +71,24 @@ class AssignmentTemplateService:
         course_id: int,
         name: str,
         source_template_pdf: str | Path,
-        source_spec_json: str | Path,
+        source_spec_json: str | Path | None = None,
     ) -> AssignmentTemplate:
         source_pdf = Path(source_template_pdf).expanduser().resolve()
-        source_spec = Path(source_spec_json).expanduser().resolve()
         if not source_pdf.exists():
             raise FileNotFoundError(f"template PDF not found: {source_pdf}")
-        if not source_spec.exists():
-            raise FileNotFoundError(f"spec JSON not found: {source_spec}")
+
+        source_spec: Path | None = None
+        pending_spec_content: str | None = None
+        if source_spec_json is not None:
+            source_spec = Path(source_spec_json).expanduser().resolve()
+            if not source_spec.exists():
+                raise FileNotFoundError(f"spec JSON not found: {source_spec}")
+            spec_sha256 = _sha256_for(source_spec)
+            spec_filename = "spec.json"
+        else:
+            pending_spec_content = _pending_spec_json(name)
+            spec_sha256 = _sha256_for_bytes(pending_spec_content.encode("utf-8"))
+            spec_filename = "spec.pending.json"
 
         with self._transaction_factory() as transaction:
             course = transaction.courses.get_by_id(course_id)
@@ -74,7 +101,7 @@ class AssignmentTemplateService:
                 template_pdf_relpath="pending/template.pdf",
                 spec_json_relpath="pending/spec.json",
                 template_sha256=_sha256_for(source_pdf),
-                spec_sha256=_sha256_for(source_spec),
+                spec_sha256=spec_sha256,
             )
 
             data_dir = get_data_dir()
@@ -88,10 +115,14 @@ class AssignmentTemplateService:
             base_dir.mkdir(parents=True, exist_ok=True)
 
             pdf_dest = base_dir / "template.pdf"
-            spec_dest = base_dir / "spec.json"
+            spec_dest = base_dir / spec_filename
 
             shutil.copyfile(source_pdf, pdf_dest)
-            shutil.copyfile(source_spec, spec_dest)
+            if source_spec is not None:
+                shutil.copyfile(source_spec, spec_dest)
+            else:
+                assert pending_spec_content is not None
+                spec_dest.write_text(pending_spec_content, encoding="utf-8")
 
             rel_pdf = str(pdf_dest.relative_to(data_dir))
             rel_spec = str(spec_dest.relative_to(data_dir))
