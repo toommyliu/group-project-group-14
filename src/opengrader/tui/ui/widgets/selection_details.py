@@ -23,7 +23,6 @@ class SelectionDetails(Static):
         border-title-align: left;
         border-subtitle-color: $text-muted;
         border-subtitle-align: right;
-        padding: 1 2;
     }
 
     SelectionDetails:focus {
