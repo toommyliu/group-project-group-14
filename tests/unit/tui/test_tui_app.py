@@ -25,9 +25,7 @@ def test_home_course_list_populates_on_mount() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             assert len(course_list.children) == 2
 
     asyncio.run(run())
@@ -42,9 +40,7 @@ def test_course_selection_populates_tabs() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
@@ -72,12 +68,17 @@ def test_happy_path_opens_grading_via_assignment_tab() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
+            course_list.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+
             assignment_list = app.get_home_screen().query_one(
                 "#home-assignment-list", ListView
             )
-            assignment_list.focus()
-            await pilot.pause()
-
             assert len(assignment_list.children) == 2
             assert assignment_list.highlighted_child is not None
 
@@ -101,9 +102,7 @@ def test_finalize_loads_next_student() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
@@ -138,9 +137,7 @@ def test_vim_profile_navigates_with_j_k_h_l() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
@@ -168,9 +165,7 @@ def test_runtime_profile_switch_updates_live_bindings() -> None:
             app.set_input_profile(InputProfileName.VIM)
             await pilot.pause()
 
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
@@ -197,9 +192,7 @@ def test_emacs_profile_navigates_with_ctrl_keys() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
