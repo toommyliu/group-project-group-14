@@ -12,6 +12,9 @@ class ContentList(ListView):
         border-subtitle-color: $text-muted;
         border-subtitle-align: right;
     }
+    ContentList:focus {
+        border-title-color: $accent;
+    }
     """
 
     def __init__(
