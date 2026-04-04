@@ -18,7 +18,7 @@ from opengrader.tui.ui.screens import Dialog, DialogField, HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.screens.home_screen import _NavListItem
-from textual.widgets import ListView, TabbedContent
+from textual.widgets import ListView
 from textual_fspicker import FileOpen, Filters
 
 
@@ -62,45 +62,23 @@ class HomeController:
 
     def on_course_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
-        tabs = home.query_one("#home-content-tabs", TabbedContent)
-        if tabs.display:
-            return
 
         self._select_course(item)
-        self._ensure_course_data_loaded(item)
+        assignments, students = self._ensure_course_data_loaded(item)
 
-        home.show_content_tabs()
+        if not home.content_visible():
+            home.show_content_tabs()
+        home.show_course_details(
+            item,
+            assignment_count=len(assignments),
+            student_count=len(students),
+        )
         home.set_status(f"Course: {item.label}")
 
     def on_assignment_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
-        template_hint = "[t] Upload Template"
-        assignment_id = self._numeric_id(item.item_id)
-        if assignment_id is not None:
-            linked_template = self._data_provider.get_assignment_template(assignment_id)
-            linked_templates = (
-                self._data_provider.list_assignment_templates_for_assignment(
-                    assignment_id
-                )
-            )
-            version_count = len(linked_templates)
-            if linked_template is None or version_count == 0:
-                template_hint = "[t] Upload Template (none linked)"
-            elif linked_template.spec_pending:
-                if version_count > 1:
-                    template_hint = (
-                        f"[t] Template: {linked_template.name} "
-                        f"({version_count} versions, spec pending)"
-                    )
-                else:
-                    template_hint = (
-                        f"[t] Template: {linked_template.name} (spec pending)"
-                    )
-            else:
-                if version_count > 1:
-                    template_hint = f"[t] Template: {linked_template.name} ({version_count} versions)"
-                else:
-                    template_hint = f"[t] Template: {linked_template.name}"
+        template_hint = self._assignment_template_hint(item)
+        home.show_assignment_details(item, template_hint=template_hint)
         home.set_status(
             f"{item.label} · [g] Grade  [d] Details  [r] Rubric  {template_hint}  [n] New"
         )
@@ -111,6 +89,9 @@ class HomeController:
 
     def on_student_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
+        course_id = self._state.selection.course_id
+        submission_count = len(self._data_provider.list_assignments(course_id))
+        home.show_student_details(item, submission_count=submission_count)
         home.set_status(f"Student: {item.label} · [Enter] Show submissions")
 
     def on_student_selected(self, item: NavItem) -> None:
@@ -122,6 +103,7 @@ class HomeController:
             self._data_provider.list_assignments(course_id)
         )
         home.expand_student_assignments(item, assignments)
+        home.show_student_details(item, submission_count=len(assignments))
         home.set_status(f"{item.label} · Select an assignment to start grading")
 
     def on_student_submission_selected(
@@ -131,6 +113,9 @@ class HomeController:
     ) -> None:
         self._select_student(student)
         self._select_assignment(assignment)
+
+        home = self._app.get_home_screen()
+        home.show_student_submission_details(student, assignment)
 
         students = self._student_items(
             self._data_provider.list_students(self._state.selection.course_id)
@@ -155,18 +140,19 @@ class HomeController:
         focused_list = self._focused_list_id(home)
         if focused_list == "home-course-list":
             return
-        if home.active_tab() == "students":
+        if focused_list == "home-student-list":
             home.switch_tab("assignments")
             home.focus_content()
-        else:
-            home.focus_courses()
+            return
+        home.focus_courses()
 
     def move_right(self) -> None:
         home = self._app.get_home_screen()
         focused_list = self._focused_list_id(home)
         if focused_list == "home-course-list":
+            home.switch_tab("assignments")
             home.focus_content()
-        elif home.active_tab() == "assignments":
+        elif focused_list == "home-assignment-list":
             home.switch_tab("students")
             home.focus_content()
 
@@ -225,8 +211,11 @@ class HomeController:
         if item is None:
             home.set_status("Highlight an assignment to view details.")
             return
+        template_hint = self._assignment_template_hint(item)
         templates = self._data_provider.list_assignment_templates_for_assignment(
-            self._state.selection.assignment_id)
+            self._state.selection.assignment_id
+        )
+        home.show_assignment_details(item, template_hint=template_hint)
         home.set_status(f"Assignment details: {item.label} ({len(templates)} templates)")
 
     def edit_assignment_rubric(self) -> None:
@@ -257,19 +246,18 @@ class HomeController:
 
     def create(self) -> None:
         home = self._app.get_home_screen()
-        tab = home.active_tab()
         focused = self._focused_list_id(home)
 
         if focused == "home-course-list":
             self._open_create_course_dialog()
-        elif tab == "assignments":
+        elif focused == "home-assignment-list":
             course_item_id = self._state.selection.course_item_id
             course_id = self._state.selection.course_id
             if course_item_id is None or course_id is None:
                 home.set_status("Select a course first.")
                 return
             self._open_create_assignment_dialog(course_item_id, course_id)
-        elif tab == "students":
+        elif focused == "home-student-list":
             course_item_id = self._state.selection.course_item_id
             course_id = self._state.selection.course_id
             if course_item_id is None or course_id is None:
@@ -280,6 +268,31 @@ class HomeController:
             home.set_status(
                 "Press n on the course list, assignment list, or student list to create."
             )
+
+    def _assignment_template_hint(self, item: NavItem) -> str:
+        template_hint = "[t] Upload Template"
+        assignment_id = self._numeric_id(item.item_id)
+        if assignment_id is None:
+            return template_hint
+
+        linked_template = self._data_provider.get_assignment_template(assignment_id)
+        linked_templates = self._data_provider.list_assignment_templates_for_assignment(
+            assignment_id
+        )
+        version_count = len(linked_templates)
+
+        if linked_template is None or version_count == 0:
+            return "[t] Upload Template (none linked)"
+        if linked_template.spec_pending:
+            if version_count > 1:
+                return (
+                    f"[t] Template: {linked_template.name} "
+                    f"({version_count} versions, spec pending)"
+                )
+            return f"[t] Template: {linked_template.name} (spec pending)"
+        if version_count > 1:
+            return f"[t] Template: {linked_template.name} ({version_count} versions)"
+        return f"[t] Template: {linked_template.name}"
 
     def _select_course(self, item: NavItem) -> None:
         selection = self._state.selection
@@ -306,9 +319,11 @@ class HomeController:
         selection.student_id = self._numeric_id(item.item_id)
         self._state.selection_labels["student"] = item.label
 
-    def _ensure_course_data_loaded(self, item: NavItem) -> None:
-        course_item_id = item.item_id
-        course_id = self._numeric_id(course_item_id)
+    def _ensure_course_data_loaded(
+        self,
+        item: NavItem,
+    ) -> tuple[list[NavItem], list[NavItem]]:
+        course_id = self._numeric_id(item.item_id)
         home = self._app.get_home_screen()
 
         assignments = self._assignment_items(
@@ -318,6 +333,7 @@ class HomeController:
 
         students = self._student_items(self._data_provider.list_students(course_id))
         home.set_students(students)
+        return assignments, students
 
     def _start_grading_current_assignment(self) -> None:
         students = self._student_items(

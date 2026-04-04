@@ -1,16 +1,6 @@
-from textual.widgets import ListView
+from .content_list import ContentList
 
-
-class CourseList(ListView):
-    DEFAULT_CSS = """
-    CourseList {
-        width: 32;
-        border: round $accent;
-        border-title-color: #ffffff;
-        border-title-align: left;
-    }
-    """
-
+class CourseList(ContentList):
     def __init__(self, *, id: str | None = None) -> None:
-        super().__init__(id=id)
-        self.border_title = "[0] - Courses"
+        super().__init__(title="[0] Courses", id=id)
+        self.border_title = "[0] Courses"

@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from textual.widgets import ContentSwitcher, ListView, TabbedContent
+from textual.widgets import ContentSwitcher, ListView
 
 from opengrader.tui.controllers.input_controller import (
     InputController,
@@ -31,7 +31,7 @@ def test_home_course_list_populates_on_mount() -> None:
     asyncio.run(run())
 
 
-def test_tabs_hidden_until_course_selected() -> None:
+def test_content_lists_hidden_until_course_selected() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -40,14 +40,21 @@ def test_tabs_hidden_until_course_selected() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            student_list = app.get_home_screen().query_one("#home-student-list", ListView)
+            assert assignment_list.display is False
+            assert student_list.display is False
+
             course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             course_list.focus()
             await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
 
-            tabs = app.get_home_screen().query_one("#home-content-tabs", TabbedContent)
-            assert tabs.display is True
+            assert assignment_list.display is True
+            assert student_list.display is True
 
     asyncio.run(run())
 

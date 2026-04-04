@@ -8,11 +8,6 @@ from opengrader.tui.data import AssignmentTemplateSummary
 from .fakes import FakeDataProvider
 
 
-class FakeTabbedContent:
-    def __init__(self) -> None:
-        self.display = False
-
-
 class FakeHomeScreen:
     def __init__(self) -> None:
         self.status: str = ""
@@ -21,14 +16,10 @@ class FakeHomeScreen:
         self.students: list[NavItem] | None = None
         self.expanded_student: NavItem | None = None
         self.expanded_assignments: list[NavItem] | None = None
+        self.details: str = ""
         self._active_tab: str = "assignments"
         self._focused_list: str = "home-course-list"
-        self._tabs = FakeTabbedContent()
-
-    def query_one(self, selector: str, widget_type=None) -> FakeTabbedContent:
-        if "home-content-tabs" in selector:
-            return self._tabs
-        raise ValueError(f"Unknown selector: {selector}")
+        self._content_visible = False
 
     def set_courses(self, courses: list[NavItem]) -> None:
         self.courses = courses
@@ -57,8 +48,11 @@ class FakeHomeScreen:
     def focus_courses(self) -> None:
         self._focused_list = "home-course-list"
 
+    def content_visible(self) -> bool:
+        return self._content_visible
+
     def show_content_tabs(self) -> None:
-        pass
+        self._content_visible = True
 
     def focus_content(self) -> None:
         if self._active_tab == "assignments":
@@ -71,6 +65,28 @@ class FakeHomeScreen:
 
     def switch_tab(self, tab_id: str) -> None:
         self._active_tab = tab_id
+
+    def show_course_details(
+        self,
+        item: NavItem,
+        *,
+        assignment_count: int,
+        student_count: int,
+    ) -> None:
+        self.details = f"course:{item.label}:{assignment_count}:{student_count}"
+
+    def show_assignment_details(self, item: NavItem, *, template_hint: str) -> None:
+        self.details = f"assignment:{item.label}:{template_hint}"
+
+    def show_student_details(self, item: NavItem, *, submission_count: int) -> None:
+        self.details = f"student:{item.label}:{submission_count}"
+
+    def show_student_submission_details(
+        self,
+        student: NavItem,
+        assignment: NavItem,
+    ) -> None:
+        self.details = f"submission:{student.label}:{assignment.label}"
 
     def selected_course(self) -> NavItem | None:
         return None
