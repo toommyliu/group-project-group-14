@@ -84,6 +84,16 @@ class AssignmentTemplateStore(Protocol):
         template_id: int,
     ) -> None: ...
 
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None: ...
+
+    def list_for_assignment(self, assignment_id: int) -> list[AssignmentTemplate]: ...
+
     def get_current_for_assignment(
         self,
         assignment_id: int,

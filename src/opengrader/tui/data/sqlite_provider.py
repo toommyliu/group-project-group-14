@@ -149,13 +149,13 @@ class SqliteProvider:
     def create_assignment_template(
         self,
         *,
-        course_id: int,
+        assignment_id: int,
         name: str,
         template_pdf_path: str,
         spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
         template = self._courses.assignment_templates.create_template(
-            course_id=course_id,
+            assignment_id=assignment_id,
             name=name,
             source_template_pdf=template_pdf_path,
             source_spec_json=spec_json_path,
@@ -204,6 +204,19 @@ class SqliteProvider:
             template_id=template_id,
         )
 
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None:
+        self._courses.assignment_templates.replace_assignment_templates(
+            assignment_id=assignment_id,
+            template_ids=template_ids,
+            current_template_id=current_template_id,
+        )
+
     def get_assignment_template(
         self,
         assignment_id: int | None,
@@ -223,3 +236,24 @@ class SqliteProvider:
             spec_json_relpath=template.spec_json_relpath,
             spec_pending=self._spec_is_pending(template.spec_json_relpath),
         )
+
+    def list_assignment_templates_for_assignment(
+        self,
+        assignment_id: int | None,
+    ) -> list[AssignmentTemplateSummary]:
+        if assignment_id is None:
+            return []
+        templates = self._courses.assignment_templates.list_assignment_templates(
+            assignment_id
+        )
+        return [
+            AssignmentTemplateSummary(
+                id=template.id,
+                course_id=template.course_id,
+                name=template.name,
+                template_pdf_relpath=template.template_pdf_relpath,
+                spec_json_relpath=template.spec_json_relpath,
+                spec_pending=self._spec_is_pending(template.spec_json_relpath),
+            )
+            for template in templates
+        ]

@@ -25,10 +25,11 @@ from textual_fspicker import FileOpen, Filters
 @dataclass(frozen=True)
 class _TemplateUploadContext:
     assignment_id: int
-    course_id: int
     assignment_label: str
-    template_name: str
     strategy: str
+    template_names: tuple[str, ...]
+    current_index: int = 0
+    template_pdf_paths: tuple[Path, ...] = ()
 
 
 class HomeApp(Protocol):
@@ -77,12 +78,29 @@ class HomeController:
         assignment_id = self._numeric_id(item.item_id)
         if assignment_id is not None:
             linked_template = self._data_provider.get_assignment_template(assignment_id)
-            if linked_template is None:
+            linked_templates = (
+                self._data_provider.list_assignment_templates_for_assignment(
+                    assignment_id
+                )
+            )
+            version_count = len(linked_templates)
+            if linked_template is None or version_count == 0:
                 template_hint = "[t] Upload Template (none linked)"
             elif linked_template.spec_pending:
-                template_hint = f"[t] Template: {linked_template.name} (spec pending)"
+                if version_count > 1:
+                    template_hint = (
+                        f"[t] Template: {linked_template.name} "
+                        f"({version_count} versions, spec pending)"
+                    )
+                else:
+                    template_hint = (
+                        f"[t] Template: {linked_template.name} (spec pending)"
+                    )
             else:
-                template_hint = f"[t] Template: {linked_template.name}"
+                if version_count > 1:
+                    template_hint = f"[t] Template: {linked_template.name} ({version_count} versions)"
+                else:
+                    template_hint = f"[t] Template: {linked_template.name}"
         home.set_status(
             f"{item.label} · [g] Grade  [d] Details  [r] Rubric  {template_hint}  [n] New"
         )
@@ -207,7 +225,9 @@ class HomeController:
         if item is None:
             home.set_status("Highlight an assignment to view details.")
             return
-        home.set_status(f"Assignment details: {item.label}")
+        templates = self._data_provider.list_assignment_templates_for_assignment(
+            self._state.selection.assignment_id)
+        home.set_status(f"Assignment details: {item.label} ({len(templates)} templates)")
 
     def edit_assignment_rubric(self) -> None:
         home = self._app.get_home_screen()
@@ -231,7 +251,6 @@ class HomeController:
             return
 
         self._open_template_upload_dialog(
-            course_id=course_id,
             assignment_id=assignment_id,
             assignment_label=item.label,
         )
@@ -552,12 +571,17 @@ class HomeController:
         strategy = values.get("strategy", "").strip().lower()
         if strategy not in ("pdf+spec", "pdf-only"):
             return "Strategy must be one of: pdf+spec, pdf-only."
+
+        versions_raw = values.get("versions", "").strip()
+        if versions_raw:
+            labels = [part.strip() for part in versions_raw.split(",") if part.strip()]
+            if not labels:
+                return "Versions must be comma-separated labels, like A,B,C."
         return None
 
     def _open_template_upload_dialog(
         self,
         *,
-        course_id: int,
         assignment_id: int,
         assignment_label: str,
     ) -> None:
@@ -577,9 +601,9 @@ class HomeController:
                         value=default_name,
                     ),
                     DialogField(
-                        "version",
-                        "Version (Optional)",
-                        placeholder="A",
+                        "versions",
+                        "Versions (Optional)",
+                        placeholder="A,B,C",
                         required=False,
                     ),
                     DialogField(
@@ -592,7 +616,6 @@ class HomeController:
                 validator=self._validate_template_upload_form,
             ),
             lambda values: self._on_template_upload_dialog_closed(
-                course_id=course_id,
                 assignment_id=assignment_id,
                 assignment_label=assignment_label,
                 values=values,
@@ -602,7 +625,6 @@ class HomeController:
     def _on_template_upload_dialog_closed(
         self,
         *,
-        course_id: int,
         assignment_id: int,
         assignment_label: str,
         values: dict[str, str] | None,
@@ -612,22 +634,39 @@ class HomeController:
             return
 
         base_name = values["name"].strip()
-        version = values.get("version", "").strip()
+        versions_raw = values.get("versions", "").strip()
         strategy = values["strategy"].strip().lower()
-        template_name = self._template_name_with_version(base_name, version)
+
+        template_names: tuple[str, ...]
+        if versions_raw:
+            versions = [
+                part.strip() for part in versions_raw.split(",") if part.strip()
+            ]
+            template_names = tuple(
+                self._template_name_with_version(base_name, version)
+                for version in versions
+            )
+        else:
+            template_names = (base_name,)
+
         context = _TemplateUploadContext(
             assignment_id=assignment_id,
-            course_id=course_id,
             assignment_label=assignment_label,
-            template_name=template_name,
             strategy=strategy,
+            template_names=template_names,
         )
         self._open_template_pdf_picker(context)
 
     def _open_template_pdf_picker(self, context: _TemplateUploadContext) -> None:
+        template_name = context.template_names[context.current_index]
+        title_prefix = (
+            f"Select Template PDF ({context.current_index + 1}/{len(context.template_names)})"
+            if len(context.template_names) > 1
+            else "Select Template PDF"
+        )
         self._app.push_screen(
             FileOpen(
-                title="Select Template PDF",
+                title=f"{title_prefix}: {template_name}",
                 open_button="Use PDF",
                 filters=Filters(
                     (
@@ -654,27 +693,47 @@ class HomeController:
             home.set_status("Template upload cancelled (no PDF selected).")
             return
 
+        collected_pdf_paths = context.template_pdf_paths + (selected_path,)
+        next_index = context.current_index + 1
+        if next_index < len(context.template_names):
+            next_context = _TemplateUploadContext(
+                assignment_id=context.assignment_id,
+                assignment_label=context.assignment_label,
+                strategy=context.strategy,
+                template_names=context.template_names,
+                current_index=next_index,
+                template_pdf_paths=collected_pdf_paths,
+            )
+            home.set_status(
+                f"Saved template PDF {next_index}/{len(context.template_names)}."
+            )
+            self._open_template_pdf_picker(next_context)
+            return
+
+        final_context = _TemplateUploadContext(
+            assignment_id=context.assignment_id,
+            assignment_label=context.assignment_label,
+            strategy=context.strategy,
+            template_names=context.template_names,
+            template_pdf_paths=collected_pdf_paths,
+        )
         if context.strategy == "pdf-only":
-            self._finalize_template_upload(
-                context=context,
-                template_pdf_path=selected_path,
-                spec_json_path=None,
+            self._create_and_link_templates(
+                context=final_context,
+                shared_spec_json_path=None,
             )
             return
 
-        self._open_template_spec_picker(
-            context=context, template_pdf_path=selected_path
-        )
+        self._open_template_spec_picker(context=final_context)
 
     def _open_template_spec_picker(
         self,
         *,
         context: _TemplateUploadContext,
-        template_pdf_path: Path,
     ) -> None:
         self._app.push_screen(
             FileOpen(
-                title="Select Template Spec JSON",
+                title="Select Shared Template Spec JSON",
                 open_button="Use Spec",
                 filters=Filters(
                     (
@@ -686,7 +745,6 @@ class HomeController:
             ),
             lambda selected_path: self._on_template_spec_selected(
                 context=context,
-                template_pdf_path=template_pdf_path,
                 selected_path=selected_path,
             ),
         )
@@ -695,7 +753,6 @@ class HomeController:
         self,
         *,
         context: _TemplateUploadContext,
-        template_pdf_path: Path,
         selected_path: Path | None,
     ) -> None:
         home = self._app.get_home_screen()
@@ -703,46 +760,81 @@ class HomeController:
             home.set_status("Template upload cancelled (no spec selected).")
             return
 
-        self._finalize_template_upload(
+        self._create_and_link_templates(
             context=context,
-            template_pdf_path=template_pdf_path,
-            spec_json_path=selected_path,
+            shared_spec_json_path=selected_path,
         )
 
-    def _finalize_template_upload(
+    def _create_and_link_templates(
         self,
         *,
         context: _TemplateUploadContext,
-        template_pdf_path: Path,
-        spec_json_path: Path | None,
+        shared_spec_json_path: Path | None,
     ) -> None:
         home = self._app.get_home_screen()
+
+        if len(context.template_pdf_paths) != len(context.template_names):
+            home.set_status("Upload template failed: missing template PDFs.")
+            return
+
+        created_templates: list[tuple[int, str, bool]] = []
         try:
-            created = self._data_provider.create_assignment_template(
-                course_id=context.course_id,
-                name=context.template_name,
-                template_pdf_path=str(template_pdf_path),
-                spec_json_path=str(spec_json_path)
-                if spec_json_path is not None
-                else None,
-            )
-            self._data_provider.set_assignment_template(
-                assignment_id=context.assignment_id,
-                template_id=created.id,
-            )
+            for index, template_name in enumerate(context.template_names):
+                created = self._data_provider.create_assignment_template(
+                    assignment_id=context.assignment_id,
+                    name=template_name,
+                    template_pdf_path=str(context.template_pdf_paths[index]),
+                    spec_json_path=(
+                        str(shared_spec_json_path)
+                        if shared_spec_json_path is not None
+                        else None
+                    ),
+                )
+                created_templates.append(
+                    (created.id, created.name, created.spec_pending)
+                )
         except Exception as exc:
             home.set_status(f"Upload template failed: {exc}")
             return
 
-        if created.spec_pending:
-            home.set_status(
-                f"Linked template '{created.name}' to {context.assignment_label} (spec pending). "
-                "Generate or edit the spec later, then upload with pdf+spec."
+        created_template_ids = [template[0] for template in created_templates]
+        created_template_names = [template[1] for template in created_templates]
+        pending_count = sum(1 for template in created_templates if template[2])
+
+        current_template_id = created_template_ids[0]
+        try:
+            self._data_provider.replace_assignment_templates(
+                assignment_id=context.assignment_id,
+                template_ids=created_template_ids,
+                current_template_id=current_template_id,
             )
-        else:
+        except Exception as exc:
+            home.set_status(f"Link templates failed: {exc}")
+            return
+
+        total = len(created_template_ids)
+        if total == 1:
+            if pending_count > 0:
+                home.set_status(
+                    f"Linked template '{created_template_names[0]}' to {context.assignment_label} (spec pending). "
+                    "Generate or edit the spec later, then upload with pdf+spec."
+                )
+            else:
+                home.set_status(
+                    f"Linked template '{created_template_names[0]}' to {context.assignment_label}."
+                )
+            return
+
+        if pending_count > 0:
             home.set_status(
-                f"Linked template '{created.name}' to {context.assignment_label}."
+                f"Linked {total} template versions to {context.assignment_label} "
+                f"({pending_count} spec pending)."
             )
+            return
+
+        home.set_status(
+            f"Linked {total} template versions to {context.assignment_label}."
+        )
 
     @staticmethod
     def _template_name_with_version(base_name: str, version: str) -> str:

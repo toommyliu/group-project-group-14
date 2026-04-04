@@ -292,7 +292,7 @@ def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None
     source_spec.write_text(json.dumps({"schema_version": "1.0", "pages": []}))
 
     created = services.assignment_templates.create_template(
-        course_id=course.id,
+        assignment_id=assignment.id,
         name="Template A",
         source_template_pdf=source_pdf,
         source_spec_json=source_spec,
@@ -310,10 +310,12 @@ def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None
     assert current is not None
     assert current.id == created.id
     assert current.template_pdf_relpath.startswith(
-        f"courses/{course.id}-senior-design/templates/{created.id}-template-a/"
+        "courses/cmpe-195-senior-design-spring-2026-01/"
+        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}/"
     )
     assert current.spec_json_relpath.startswith(
-        f"courses/{course.id}-senior-design/templates/{created.id}-template-a/"
+        "courses/cmpe-195-senior-design-spring-2026-01/"
+        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}/"
     )
 
 
@@ -329,8 +331,15 @@ def test_assignment_template_can_be_created_without_spec(tmp_path) -> None:
     source_pdf = tmp_path / "sample-template.pdf"
     source_pdf.write_bytes(b"%PDF-1.4\n% template")
 
-    created = services.assignment_templates.create_template(
+    assignment = services.assignments.create_assignment(
         course_id=course.id,
+        assignment_type="assignment",
+        title="HW Pending",
+        max_points=100,
+    )
+
+    created = services.assignment_templates.create_template(
+        assignment_id=assignment.id,
         name="Template Pending Spec",
         source_template_pdf=source_pdf,
         source_spec_json=None,

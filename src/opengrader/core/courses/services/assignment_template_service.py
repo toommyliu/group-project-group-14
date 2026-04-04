@@ -29,11 +29,15 @@ def _slugify(value: str) -> str:
 
 
 def _course_directory_name(course: Course) -> str:
-    return f"{course.id}-{_slugify(course.name)}"
+    return _slugify(f"{course.code}-{course.name}-{course.term}-{course.section}")
+
+
+def _assignment_directory_name(assignment_id: int, assignment_title: str) -> str:
+    return f"{assignment_id}-{_slugify(assignment_title)}"
 
 
 def _template_directory_name(template_id: int, template_name: str) -> str:
-    return f"{template_id}-{_slugify(template_name)}"
+    return f"{_slugify(template_name)}-t{template_id}"
 
 
 def _sha256_for(path: Path) -> str:
@@ -68,7 +72,7 @@ class AssignmentTemplateService:
     def create_template(
         self,
         *,
-        course_id: int,
+        assignment_id: int,
         name: str,
         source_template_pdf: str | Path,
         source_spec_json: str | Path | None = None,
@@ -91,12 +95,20 @@ class AssignmentTemplateService:
             spec_filename = "spec.pending.json"
 
         with self._transaction_factory() as transaction:
-            course = transaction.courses.get_by_id(course_id)
+            assignment = transaction.assignments.get_by_id(assignment_id)
+            if assignment is None:
+                raise AssignmentNotFoundError(
+                    f"assignment {assignment_id} does not exist"
+                )
+
+            course = transaction.courses.get_by_id(assignment.course_id)
             if course is None:
-                raise CourseNotFoundError(f"course {course_id} does not exist")
+                raise CourseNotFoundError(
+                    f"course {assignment.course_id} does not exist"
+                )
 
             created = transaction.assignment_templates.create(
-                course_id=course_id,
+                course_id=assignment.course_id,
                 name=name,
                 template_pdf_relpath="pending/template.pdf",
                 spec_json_relpath="pending/spec.json",
@@ -109,6 +121,8 @@ class AssignmentTemplateService:
                 data_dir
                 / "courses"
                 / _course_directory_name(course)
+                / "assignments"
+                / _assignment_directory_name(assignment.id, assignment.title)
                 / "templates"
                 / _template_directory_name(created.id, name)
             )
@@ -166,6 +180,42 @@ class AssignmentTemplateService:
             )
             transaction.commit()
 
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None:
+        unique_template_ids = list(dict.fromkeys(template_ids))
+        if not unique_template_ids:
+            raise ValueError("at least one template is required")
+        if current_template_id not in unique_template_ids:
+            raise ValueError("current template must be included in template_ids")
+
+        with self._transaction_factory() as transaction:
+            assignment = transaction.assignments.get_by_id(assignment_id)
+            if assignment is None:
+                raise AssignmentNotFoundError(
+                    f"assignment {assignment_id} does not exist"
+                )
+
+            for template_id in unique_template_ids:
+                template = transaction.assignment_templates.get_by_id(template_id)
+                if template is None:
+                    raise AssignmentTemplateNotFoundError(
+                        f"template {template_id} does not exist"
+                    )
+                if template.course_id != assignment.course_id:
+                    raise ValueError("template course does not match assignment course")
+
+            transaction.assignment_templates.replace_assignment_templates(
+                assignment_id=assignment_id,
+                template_ids=unique_template_ids,
+                current_template_id=current_template_id,
+            )
+            transaction.commit()
+
     def get_assignment_template(self, assignment_id: int) -> AssignmentTemplate | None:
         with self._transaction_factory() as transaction:
             assignment = transaction.assignments.get_by_id(assignment_id)
@@ -176,3 +226,12 @@ class AssignmentTemplateService:
             return transaction.assignment_templates.get_current_for_assignment(
                 assignment_id
             )
+
+    def list_assignment_templates(self, assignment_id: int) -> list[AssignmentTemplate]:
+        with self._transaction_factory() as transaction:
+            assignment = transaction.assignments.get_by_id(assignment_id)
+            if assignment is None:
+                raise AssignmentNotFoundError(
+                    f"assignment {assignment_id} does not exist"
+                )
+            return transaction.assignment_templates.list_for_assignment(assignment_id)

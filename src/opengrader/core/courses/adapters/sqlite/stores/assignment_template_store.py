@@ -132,6 +132,44 @@ class SqliteAssignmentTemplateStore:
             (assignment_id, template_id),
         )
 
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None:
+        self._conn.execute(
+            "DELETE FROM assignment_template_links WHERE assignment_id = ?",
+            (assignment_id,),
+        )
+        for template_id in template_ids:
+            self._conn.execute(
+                """
+                INSERT INTO assignment_template_links(assignment_id, template_id, is_current)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    assignment_id,
+                    template_id,
+                    1 if template_id == current_template_id else 0,
+                ),
+            )
+
+    def list_for_assignment(self, assignment_id: int) -> list[AssignmentTemplate]:
+        rows = self._conn.execute(
+            """
+            SELECT t.id, t.course_id, t.name, t.template_pdf_relpath, t.spec_json_relpath,
+                   t.template_sha256, t.spec_sha256, t.created_at
+            FROM assignment_template_links l
+            INNER JOIN assignment_templates t ON t.id = l.template_id
+            WHERE l.assignment_id = ?
+            ORDER BY l.id ASC
+            """,
+            (assignment_id,),
+        ).fetchall()
+        return [_row_to_assignment_template(row) for row in rows]
+
     def get_current_for_assignment(
         self,
         assignment_id: int,

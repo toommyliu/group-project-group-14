@@ -52,7 +52,7 @@ class Provider(Protocol):
     def create_assignment_template(
         self,
         *,
-        course_id: int,
+        assignment_id: int,
         name: str,
         template_pdf_path: str,
         spec_json_path: str | None = None,
@@ -70,7 +70,20 @@ class Provider(Protocol):
         template_id: int,
     ) -> None: ...
 
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None: ...
+
     def get_assignment_template(
         self,
         assignment_id: int | None,
     ) -> AssignmentTemplateSummary | None: ...
+
+    def list_assignment_templates_for_assignment(
+        self,
+        assignment_id: int | None,
+    ) -> list[AssignmentTemplateSummary]: ...
