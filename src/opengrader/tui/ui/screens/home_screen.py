@@ -12,7 +12,7 @@ from textual.widgets import (
     TabPane,
 )
 
-from opengrader.tui.ui.widgets import tabs  # type: ignore -- applies monkeypatch to textual's Tab widget
+from opengrader.tui.ui.widgets import CourseList, tabs  # type: ignore
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
@@ -73,7 +73,7 @@ class HomeScreen(Vertical):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="home-workspace"):
-            yield ListView(id="home-course-list")
+            yield CourseList(id="home-course-list")
             with TabbedContent(id="home-content-tabs"):
                 with TabPane("Assignments", id="tab-assignments"):
                     yield ListView(id="home-assignment-list")

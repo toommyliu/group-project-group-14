@@ -1,10 +1,11 @@
+# https://textual.textualize.io/guide/design/#base-colors
+$accent: #81A1C1;
+$white: #ffffff;
+$background: #181818; 
+$foreground: #E4E4E4EB;
+
 #home-workspace {
     height: 1fr;
-}
-
-#home-course-list {
-    width: 32;
-    # border-right: solid $accent;
 }
 
 #home-content-tabs {
