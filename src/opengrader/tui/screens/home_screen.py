@@ -83,6 +83,12 @@ class HomeScreen(Vertical):
             id="home-status",
         )
 
+    def on_mount(self) -> None:
+        self.query_one("#home-content-tabs", TabbedContent).display = False
+
+    def show_content_tabs(self) -> None:
+        self.query_one("#home-content-tabs", TabbedContent).display = True
+
     def set_courses(self, courses: list[NavItem]) -> None:
         self._course_items = list(courses)
         course_list = self.query_one("#home-course-list", ListView)
@@ -183,14 +189,10 @@ class HomeScreen(Vertical):
             return
         list_id = event.list_view.id or ""
         nav = event.item.nav
-        if list_id == "home-course-list":
-            self.post_message(self.CourseHighlighted(nav))
-        elif list_id == "home-assignment-list":
+        if list_id == "home-assignment-list":
             self.post_message(self.AssignmentHighlighted(nav))
         elif list_id == "home-student-list":
-            if event.item.is_sub_item:
-                pass
-            else:
+            if not event.item.is_sub_item:
                 self.post_message(self.StudentHighlighted(nav))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

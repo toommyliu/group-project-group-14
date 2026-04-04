@@ -15,6 +15,7 @@ from opengrader.tui.data import (
 from opengrader.tui.screens import Dialog, DialogField, HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.screens.home_screen import _NavListItem
 
 from textual.widgets import ListView
 
@@ -43,9 +44,6 @@ class HomeController:
         home_screen = self._app.get_home_screen()
         courses = self._course_items(self._data_provider.list_courses())
         home_screen.set_courses(courses)
-        if courses:
-            self._select_course(courses[0])
-            self._ensure_course_data_loaded(courses[0])
         home_screen.set_status("Select a course to get started.")
         home_screen.focus_courses()
 
@@ -54,6 +52,7 @@ class HomeController:
         self._ensure_course_data_loaded(item)
 
         home = self._app.get_home_screen()
+        home.show_content_tabs()
         home.set_status(f"Course: {item.label}")
 
     def on_assignment_highlighted(self, item: NavItem) -> None:
@@ -130,7 +129,31 @@ class HomeController:
             home.focus_content()
 
     def confirm(self) -> None:
-        pass
+        home = self._app.get_home_screen()
+        focused = self._focused_list_id(home)
+        if focused is None:
+            self._ensure_focus()
+            return
+        if focused == "home-course-list":
+            item = home.selected_course()
+            if item is not None:
+                self.on_course_highlighted(item)
+        elif focused == "home-assignment-list":
+            item = home.selected_assignment()
+            if item is not None:
+                self.on_assignment_selected(item)
+        elif focused == "home-student-list":
+            lv = home.query_one("#home-student-list", ListView)
+            child = lv.highlighted_child
+            if isinstance(child, _NavListItem) and child.is_sub_item:
+                if self._expanded_student_item is not None:
+                    self.on_student_submission_selected(
+                        self._expanded_student_item, child.nav
+                    )
+            else:
+                item = home.selected_student()
+                if item is not None:
+                    self.on_student_selected(item)
 
     def refresh_students(self) -> None:
         selection = self._state.selection
