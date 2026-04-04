@@ -4,8 +4,7 @@ from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import Protocol
 
-from opengrader.core.courses import ALLOWED_ASSESSMENT_TYPES, OpenGraderDomainError
-from textual.widgets.tree import TreeNode
+from opengrader.core.courses import ALLOWED_ASSESSMENT_TYPES
 
 from opengrader.tui.data import (
     AssignmentSummary,
@@ -13,9 +12,11 @@ from opengrader.tui.data import (
     StudentSummary,
     Provider,
 )
-from opengrader.tui.screens import Dialog, DialogField, HomeNodeData, HomeScreen
+from opengrader.tui.screens import Dialog, DialogField, HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.screens.home_screen import _NavListItem
+from textual.widgets import ListView, TabbedContent
 
 
 class HomeApp(Protocol):
@@ -38,82 +39,123 @@ class HomeController:
         self._open_student = open_student
         self._loaded_course_assignments: set[str] = set()
         self._loaded_course_students: set[str] = set()
-        self._loaded_student_submissions: set[tuple[str, str]] = set()
 
     def initialize(self) -> None:
         home_screen = self._app.get_home_screen()
-        home_screen.set_courses(
-            self._course_items(self._data_provider.list_courses()),
-            highlight_first=True,
-        )
-        home_screen.set_status("Use arrows to navigate tree and Enter to select.")
-        home_screen.set_details(
-            "Select a course to access assignment-centric and student-centric workflows."
-        )
-        home_screen.focus_tree()
+        courses = self._course_items(self._data_provider.list_courses())
+        home_screen.set_courses(courses)
+        home_screen.set_status("Select a course to get started.")
+        home_screen.focus_courses()
 
-    def handle_node_selected(self, data: HomeNodeData) -> None:
-        kind = data.kind
-        if kind == "courses_section":
-            self._handle_courses_section(data)
+    def on_course_highlighted(self, item: NavItem) -> None:
+        home = self._app.get_home_screen()
+        tabs = home.query_one("#home-content-tabs", TabbedContent)
+        if tabs.display:
             return
-        if kind == "course":
-            self._handle_course(data)
-            return
-        if kind == "course_assignments_section":
-            self._handle_course_assignments_section(data)
-            return
-        if kind == "assignment":
-            self._handle_assignment(data)
-            return
-        if kind == "course_students_section":
-            self._handle_course_students_section(data)
-            return
-        if kind == "student":
-            self._handle_student(data)
-            return
-        if kind == "student_submissions_section":
-            self._handle_student_submissions_section(data)
-            return
-        if kind == "submission":
-            self._handle_submission(data)
 
-    def handle_node_expanded(self, data: HomeNodeData) -> None:
-        kind = data.kind
-        if kind == "course_assignments_section":
-            self._ensure_course_assignments_loaded(data)
-            return
-        if kind == "course_students_section":
-            self._ensure_course_students_loaded(data)
-            return
-        if kind == "student_submissions_section":
-            self._ensure_student_submissions_loaded(data)
+        self._select_course(item)
+        self._ensure_course_data_loaded(item)
+
+        home.show_content_tabs()
+        home.set_status(f"Course: {item.label}")
+
+    def on_assignment_highlighted(self, item: NavItem) -> None:
+        home = self._app.get_home_screen()
+        home.set_status(
+            f"{item.label} · [g] Grade  [d] Details  [r] Rubric  [t] Template  [n] New"
+        )
+
+    def on_assignment_selected(self, item: NavItem) -> None:
+        self._select_assignment(item)
+        self._start_grading_current_assignment()
+
+    def on_student_highlighted(self, item: NavItem) -> None:
+        home = self._app.get_home_screen()
+        home.set_status(f"Student: {item.label} · [Enter] Show submissions")
+
+    def on_student_selected(self, item: NavItem) -> None:
+        self._select_student(item)
+        home = self._app.get_home_screen()
+
+        course_id = self._state.selection.course_id
+        assignments = self._assignment_items(
+            self._data_provider.list_assignments(course_id)
+        )
+        home.expand_student_assignments(item, assignments)
+        home.set_status(f"{item.label} · Select an assignment to start grading")
+
+    def on_student_submission_selected(
+        self,
+        student: NavItem,
+        assignment: NavItem,
+    ) -> None:
+        self._select_student(student)
+        self._select_assignment(assignment)
+
+        students = self._student_items(
+            self._data_provider.list_students(self._state.selection.course_id)
+        )
+        self._state.student_items = students
+        student_index = self._student_index(student.item_id)
+        if student_index is not None:
+            self._open_student(student_index)
 
     def move_up(self) -> None:
         self._ensure_focus()
-        self._app.get_home_screen().move_cursor_up()
+        home = self._app.get_home_screen()
+        self._move_list_cursor(home, -1)
 
     def move_down(self) -> None:
         self._ensure_focus()
-        self._app.get_home_screen().move_cursor_down()
+        home = self._app.get_home_screen()
+        self._move_list_cursor(home, 1)
 
     def move_left(self) -> None:
-        self._ensure_focus()
-        self._app.get_home_screen().move_cursor_left()
+        home = self._app.get_home_screen()
+        focused_list = self._focused_list_id(home)
+        if focused_list == "home-course-list":
+            return
+        if home.active_tab() == "students":
+            home.switch_tab("assignments")
+            home.focus_content()
+        else:
+            home.focus_courses()
 
     def move_right(self) -> None:
-        self._ensure_focus()
-        self._app.get_home_screen().move_cursor_right()
+        home = self._app.get_home_screen()
+        focused_list = self._focused_list_id(home)
+        if focused_list == "home-course-list":
+            home.focus_content()
+        elif home.active_tab() == "assignments":
+            home.switch_tab("students")
+            home.focus_content()
 
     def confirm(self) -> None:
-        home_screen = self._app.get_home_screen()
-        if not home_screen.focused():
+        home = self._app.get_home_screen()
+        focused = self._focused_list_id(home)
+        if focused is None:
             self._ensure_focus()
             return
-        data = home_screen.highlighted_node_data()
-        if data is None:
-            return
-        self.handle_node_selected(data)
+        if focused == "home-course-list":
+            item = home.selected_course()
+            if item is not None:
+                self.on_course_highlighted(item)
+        elif focused == "home-assignment-list":
+            item = home.selected_assignment()
+            if item is not None:
+                self.on_assignment_selected(item)
+        elif focused == "home-student-list":
+            lv = home.query_one("#home-student-list", ListView)
+            child = lv.highlighted_child
+            if isinstance(child, _NavListItem) and child.is_sub_item:
+                if self._expanded_student_item is not None:
+                    self.on_student_submission_selected(
+                        self._expanded_student_item, child.nav
+                    )
+            else:
+                item = home.selected_student()
+                if item is not None:
+                    self.on_student_selected(item)
 
     def refresh_students(self) -> None:
         selection = self._state.selection
@@ -124,161 +166,108 @@ class HomeController:
         students = self._student_items(
             self._data_provider.list_students(selection.course_id)
         )
-
-        home_screen = self._app.get_home_screen()
-        home_screen.set_course_students(course_item_id, students)
+        home = self._app.get_home_screen()
+        home.set_students(students)
         self._loaded_course_students.add(course_item_id)
 
-        student_item_id = selection.student_item_id
-        if student_item_id is not None:
-            assignments = self._assignment_items(
-                self._data_provider.list_assignments(selection.course_id)
-            )
-            home_screen.set_student_submissions(
-                course_item_id,
-                student_item_id,
-                assignments,
-            )
-            self._loaded_student_submissions.add((course_item_id, student_item_id))
-
-    def _ensure_focus(self) -> None:
-        self._app.get_home_screen().focus_tree()
-
-    def _handle_courses_section(self, _data: HomeNodeData) -> None:
-        self._app.get_home_screen().set_status("Courses Section")
-        self._app.get_home_screen().set_details(
-            "Press n or right-click to add a new course."
-        )
-
-    def _handle_course(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        self._select_course(data)
-
-        home_screen = self._app.get_home_screen()
-        home_screen.set_status(f"Course: {data.course.label}")
-        home_screen.set_details(
-            "Choose Assignments for grading flow, or Students to inspect a student then open Submissions."
-        )
-
-    def _handle_course_assignments_section(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        self._ensure_course_assignments_loaded(data)
-        self._app.get_home_screen().focus_first_child()
-        self._app.get_home_screen().set_status(f"Assignments for {data.course.label}")
-        self._app.get_home_screen().set_details(
-            "Select an assignment to start grading, inspect details, edit rubric, or edit template."
-        )
-
-    def _handle_assignment(self, data: HomeNodeData) -> None:
-        if data.course is None or data.assignment is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        self._select_assignment(data)
-        self._app.get_home_screen().set_status(f"Assignment: {data.assignment.label}")
-        self._app.get_home_screen().set_details(
-            "Actions\n"
-            "- Enter: Start grading from first ungraded student\n"
-            "- d: View assignment details (planned)\n"
-            "- r: Edit rubric (planned)\n"
-            "- t: Edit template (planned)"
-        )
-
     def start_grading_selected_assignment(self) -> None:
-        data = self._app.get_home_screen().highlighted_node_data()
-        if data is None:
+        home = self._app.get_home_screen()
+        item = home.selected_assignment()
+        if item is None:
+            home.set_status("Highlight an assignment before starting grading.")
             return
-        if data.kind != "assignment":
-            self._app.get_home_screen().set_status(
-                "Highlight an assignment before starting grading."
-            )
-            return
-        self._start_grading_assignment(data)
+        self._select_assignment(item)
+        self._start_grading_current_assignment()
 
     def show_assignment_details(self) -> None:
-        data = self._app.get_home_screen().highlighted_node_data()
-        if data is None or data.kind != "assignment" or data.assignment is None:
-            self._app.get_home_screen().set_status(
-                "Highlight an assignment to view details."
-            )
+        home = self._app.get_home_screen()
+        item = home.selected_assignment()
+        if item is None:
+            home.set_status("Highlight an assignment to view details.")
             return
-        self._app.get_home_screen().set_status(
-            f"Assignment details: {data.assignment.label}"
-        )
-        self._app.get_home_screen().set_details(
-            "Details view coming soon. This will show assignment metadata and grading summary."
-        )
+        home.set_status(f"Assignment details: {item.label}")
 
     def edit_assignment_rubric(self) -> None:
-        data = self._app.get_home_screen().highlighted_node_data()
-        if data is None or data.kind != "assignment" or data.assignment is None:
-            self._app.get_home_screen().set_status(
-                "Highlight an assignment to edit rubric."
-            )
+        home = self._app.get_home_screen()
+        item = home.selected_assignment()
+        if item is None:
+            home.set_status("Highlight an assignment to edit rubric.")
             return
-        self._app.get_home_screen().set_status(f"Edit rubric: {data.assignment.label}")
-        self._app.get_home_screen().set_details(
-            "Rubric editor coming soon. This action is reserved for rubric configuration."
-        )
+        home.set_status(f"Edit rubric: {item.label}")
 
     def edit_assignment_template(self) -> None:
-        data = self._app.get_home_screen().highlighted_node_data()
-        if data is None or data.kind != "assignment" or data.assignment is None:
-            self._app.get_home_screen().set_status(
-                "Highlight an assignment to edit template."
-            )
+        home = self._app.get_home_screen()
+        item = home.selected_assignment()
+        if item is None:
+            home.set_status("Highlight an assignment to edit template.")
             return
-        self._app.get_home_screen().set_status(
-            f"Edit template: {data.assignment.label}"
-        )
-        self._app.get_home_screen().set_details(
-            "Template editor coming soon. This action is reserved for template setup."
-        )
+        home.set_status(f"Edit template: {item.label}")
 
     def create(self) -> None:
-        data = self._app.get_home_screen().highlighted_node_data()
-        if data is None:
-            self._app.get_home_screen().set_status(
-                "Select a section (Courses, Assignments, or Students) and press n to create."
-            )
-            return
+        home = self._app.get_home_screen()
+        tab = home.active_tab()
+        focused = self._focused_list_id(home)
 
-        kind = data.kind
-        if kind == "courses_section":
+        if focused == "home-course-list":
             self._open_create_course_dialog()
-        elif kind == "course_assignments_section" and data.course:
-            self._open_create_assignment_dialog(data)
-        elif kind == "course_students_section" and data.course:
-            self._open_create_student_dialog(data)
+        elif tab == "assignments":
+            course_item_id = self._state.selection.course_item_id
+            course_id = self._state.selection.course_id
+            if course_item_id is None or course_id is None:
+                home.set_status("Select a course first.")
+                return
+            self._open_create_assignment_dialog(course_item_id, course_id)
+        elif tab == "students":
+            course_item_id = self._state.selection.course_item_id
+            course_id = self._state.selection.course_id
+            if course_item_id is None or course_id is None:
+                home.set_status("Select a course first.")
+                return
+            self._open_create_student_dialog(course_item_id, course_id)
         else:
-            self._app.get_home_screen().set_status(
-                "Select a section (Courses, Assignments, or Students) and press n to create."
+            home.set_status(
+                "Press n on the course list, assignment list, or student list to create."
             )
 
-    def show_context_menu(
-        self,
-        _node: TreeNode[HomeNodeData],
-        data: HomeNodeData,
-    ) -> None:
-        if data.kind == "courses_section":
-            self._app.get_home_screen().set_status("Right-click: Add Course")
-        elif data.kind == "course_assignments_section" and data.course:
-            self._app.get_home_screen().set_status(
-                f"Right-click: Add Assignment to {data.course.label}"
-            )
-        elif data.kind == "course_students_section" and data.course:
-            self._app.get_home_screen().set_status(
-                f"Right-click: Add Student to {data.course.label}"
-            )
+    def _select_course(self, item: NavItem) -> None:
+        selection = self._state.selection
+        selection.course_item_id = item.item_id
+        selection.course_id = self._numeric_id(item.item_id)
+        self._state.selection_labels["course"] = item.label
+        selection.assessment_item_id = None
+        selection.assessment_id = None
+        selection.student_item_id = None
+        selection.student_id = None
+        self._state.active_student_index = -1
+        self._state.selection_labels["assignment"] = ""
+        self._state.selection_labels["student"] = ""
 
-    def _start_grading_assignment(self, data: HomeNodeData) -> None:
-        if data.course is None or data.assignment is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        self._select_assignment(data)
+    def _select_assignment(self, item: NavItem) -> None:
+        selection = self._state.selection
+        selection.assessment_item_id = item.item_id
+        selection.assessment_id = self._numeric_id(item.item_id)
+        self._state.selection_labels["assignment"] = item.label
 
+    def _select_student(self, item: NavItem) -> None:
+        selection = self._state.selection
+        selection.student_item_id = item.item_id
+        selection.student_id = self._numeric_id(item.item_id)
+        self._state.selection_labels["student"] = item.label
+
+    def _ensure_course_data_loaded(self, item: NavItem) -> None:
+        course_item_id = item.item_id
+        course_id = self._numeric_id(course_item_id)
+        home = self._app.get_home_screen()
+
+        assignments = self._assignment_items(
+            self._data_provider.list_assignments(course_id)
+        )
+        home.set_assignments(assignments)
+
+        students = self._student_items(self._data_provider.list_students(course_id))
+        home.set_students(students)
+
+    def _start_grading_current_assignment(self) -> None:
         students = self._student_items(
             self._data_provider.list_students(self._state.selection.course_id)
         )
@@ -290,156 +279,37 @@ class HomeController:
         if student_index is not None:
             self._open_student(student_index)
 
-    def _handle_course_students_section(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        self._ensure_course_students_loaded(data)
-        self._app.get_home_screen().focus_first_child()
-        self._app.get_home_screen().set_status(f"Students in {data.course.label}")
-        self._app.get_home_screen().set_details(
-            "Select a student, then open Submissions to inspect a specific submission."
-        )
+    def _ensure_focus(self) -> None:
+        home = self._app.get_home_screen()
+        if self._focused_list_id(home) is None:
+            home.focus_courses()
 
-    def _handle_student(self, data: HomeNodeData) -> None:
-        if data.course is None or data.student is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        selection = self._state.selection
-        selection.student_item_id = data.student.item_id
-        selection.student_id = self._numeric_id(data.student.item_id)
-        self._state.selection_labels["student"] = data.student.label
-        self._app.get_home_screen().set_status(f"Student: {data.student.label}")
-        self._app.get_home_screen().set_details(
-            "Open Submissions to choose an assignment for this student."
-        )
+    @staticmethod
+    def _focused_list_id(home: HomeScreen) -> str | None:
+        for list_id in (
+            "home-course-list",
+            "home-assignment-list",
+            "home-student-list",
+        ):
+            lv = home.query_one(f"#{list_id}", ListView)
+            if lv.has_focus:
+                return list_id
+        return None
 
-    def _handle_student_submissions_section(self, data: HomeNodeData) -> None:
-        if data.course is None or data.student is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        self._state.selection.student_item_id = data.student.item_id
-        self._state.selection.student_id = self._numeric_id(data.student.item_id)
-        self._state.selection_labels["student"] = data.student.label
-        self._ensure_student_submissions_loaded(data)
-        self._app.get_home_screen().focus_first_child()
-        self._app.get_home_screen().set_status(f"Submissions for {data.student.label}")
-        self._app.get_home_screen().set_details(
-            "Select a submission to open grading for that assignment/student pair."
-        )
-
-    def _ensure_course_assignments_loaded(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        course_item_id = data.course.item_id
-        if course_item_id in self._loaded_course_assignments:
-            return
-        home_screen = self._app.get_home_screen()
-        home_screen.set_course_assignments_loading(course_item_id)
-        home_screen.set_status(f"Loading assignments for {data.course.label}...")
-        home_screen.set_details("Fetching assignments...")
-        assignments = self._assignment_items(
-            self._data_provider.list_assignments(self._numeric_id(course_item_id))
-        )
-        home_screen.set_course_assignments(course_item_id, assignments)
-        self._loaded_course_assignments.add(course_item_id)
-
-    def _ensure_course_students_loaded(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        course_item_id = data.course.item_id
-        if course_item_id in self._loaded_course_students:
-            return
-        home_screen = self._app.get_home_screen()
-        home_screen.set_course_students_loading(course_item_id)
-        home_screen.set_status(f"Loading students for {data.course.label}...")
-        home_screen.set_details("Fetching students...")
-        students = self._student_items(
-            self._data_provider.list_students(self._numeric_id(course_item_id))
-        )
-        home_screen.set_course_students(course_item_id, students)
-        self._loaded_course_students.add(course_item_id)
-
-    def _ensure_student_submissions_loaded(self, data: HomeNodeData) -> None:
-        if data.course is None or data.student is None:
-            return
-        key = (data.course.item_id, data.student.item_id)
-        if key in self._loaded_student_submissions:
-            return
-        home_screen = self._app.get_home_screen()
-        home_screen.set_student_submissions_loading(
-            data.course.item_id,
-            data.student.item_id,
-        )
-        home_screen.set_status(f"Loading submissions for {data.student.label}...")
-        home_screen.set_details("Fetching submissions...")
-        assignments = self._assignment_items(
-            self._data_provider.list_assignments(self._numeric_id(data.course.item_id))
-        )
-        home_screen.set_student_submissions(
-            data.course.item_id,
-            data.student.item_id,
-            assignments,
-        )
-        self._loaded_student_submissions.add(key)
-
-    def _handle_submission(self, data: HomeNodeData) -> None:
-        if data.course is None or data.student is None or data.assignment is None:
-            return
-        self._select_course(data, clear_downstream=False)
-        self._select_assignment(data, clear_student=False)
-        selection = self._state.selection
-        selection.student_item_id = data.student.item_id
-        selection.student_id = self._numeric_id(data.student.item_id)
-        self._state.selection_labels["student"] = data.student.label
-
-        self._state.student_items = self._student_items(
-            self._data_provider.list_students(self._state.selection.course_id)
-        )
-        student_index = self._student_index(data.student.item_id)
-        if student_index is not None:
-            self._open_student(student_index)
-
-    def _select_course(
-        self,
-        data: HomeNodeData,
-        *,
-        clear_downstream: bool = True,
-    ) -> None:
-        if data.course is None:
-            return
-        selection = self._state.selection
-        selection.course_item_id = data.course.item_id
-        selection.course_id = self._numeric_id(data.course.item_id)
-        self._state.selection_labels["course"] = data.course.label
-        if not clear_downstream:
-            return
-        selection.assessment_item_id = None
-        selection.assessment_id = None
-        selection.student_item_id = None
-        selection.student_id = None
-        self._state.active_student_index = -1
-        self._state.selection_labels["assignment"] = ""
-        self._state.selection_labels["student"] = ""
-
-    def _select_assignment(
-        self,
-        data: HomeNodeData,
-        *,
-        clear_student: bool = True,
-    ) -> None:
-        if data.assignment is None:
-            return
-        selection = self._state.selection
-        selection.assessment_item_id = data.assignment.item_id
-        selection.assessment_id = self._numeric_id(data.assignment.item_id)
-        self._state.selection_labels["assignment"] = data.assignment.label
-        if not clear_student:
-            return
-        selection.student_item_id = None
-        selection.student_id = None
-        self._state.active_student_index = -1
-        self._state.selection_labels["student"] = ""
+    @staticmethod
+    def _move_list_cursor(home: HomeScreen, direction: int) -> None:
+        for list_id in (
+            "home-course-list",
+            "home-assignment-list",
+            "home-student-list",
+        ):
+            lv = home.query_one(f"#{list_id}", ListView)
+            if lv.has_focus:
+                if direction < 0:
+                    lv.action_cursor_up()
+                else:
+                    lv.action_cursor_down()
+                return
 
     def _first_ungraded_student_index(self) -> int | None:
         for index, item in enumerate(self._state.student_items):
@@ -490,18 +360,15 @@ class HomeController:
             self._on_create_course_dialog_closed,
         )
 
-    def _open_create_assignment_dialog(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        course_id = self._numeric_id(data.course.item_id)
-        if course_id is None:
-            self._app.get_home_screen().set_status(
-                "Unable to identify selected course."
-            )
-            return
+    def _open_create_assignment_dialog(
+        self,
+        course_item_id: str,
+        course_id: int,
+    ) -> None:
+        course_label = self._state.selection_labels.get("course", "")
         self._app.push_screen(
             Dialog(
-                title=f"Create Assignment ({data.course.label})",
+                title=f"Create Assignment ({course_label})",
                 submit_label="Create",
                 fields=[
                     DialogField(
@@ -516,24 +383,21 @@ class HomeController:
                 validator=self._validate_assignment_form,
             ),
             lambda values: self._on_create_assignment_dialog_closed(
-                data.course.item_id,
+                course_item_id,
                 course_id,
                 values,
             ),
         )
 
-    def _open_create_student_dialog(self, data: HomeNodeData) -> None:
-        if data.course is None:
-            return
-        course_id = self._numeric_id(data.course.item_id)
-        if course_id is None:
-            self._app.get_home_screen().set_status(
-                "Unable to identify selected course."
-            )
-            return
+    def _open_create_student_dialog(
+        self,
+        course_item_id: str,
+        course_id: int,
+    ) -> None:
+        course_label = self._state.selection_labels.get("course", "")
         self._app.push_screen(
             Dialog(
-                title=f"Enroll Student ({data.course.label})",
+                title=f"Enroll Student ({course_label})",
                 submit_label="Enroll",
                 fields=[
                     DialogField("sid", "Student ID", placeholder="100000001"),
@@ -544,13 +408,16 @@ class HomeController:
                 ],
             ),
             lambda values: self._on_create_student_dialog_closed(
-                data.course.item_id,
+                course_item_id,
                 course_id,
                 values,
             ),
         )
 
-    def _on_create_course_dialog_closed(self, values: dict[str, str] | None) -> None:
+    def _on_create_course_dialog_closed(
+        self,
+        values: dict[str, str] | None,
+    ) -> None:
         if values is None:
             return
         home = self._app.get_home_screen()
@@ -561,22 +428,17 @@ class HomeController:
                 term=values["term"],
                 section=values["section"],
             )
-        except OpenGraderDomainError as exc:
+        except Exception as exc:
             home.set_status(f"Create course failed: {exc}")
             return
 
         self._loaded_course_assignments.clear()
         self._loaded_course_students.clear()
-        self._loaded_student_submissions.clear()
         home.set_courses(
             self._course_items(self._data_provider.list_courses()),
-            highlight_first=True,
         )
         home.set_status(f"Created course: {created.code} {created.name}".strip())
-        home.set_details(
-            "Course created. Expand the course to add assignments and students."
-        )
-        home.focus_tree()
+        home.focus_courses()
 
     def _on_create_assignment_dialog_closed(
         self,
@@ -594,23 +456,17 @@ class HomeController:
                 title=values["title"],
                 max_points=values["max_points"],
             )
-        except OpenGraderDomainError as exc:
+        except Exception as exc:
             home.set_status(f"Create assignment failed: {exc}")
             return
 
         assignments = self._assignment_items(
             self._data_provider.list_assignments(course_id)
         )
-        home.set_course_assignments(course_item_id, assignments)
+        home.set_assignments(assignments)
         self._loaded_course_assignments.add(course_item_id)
-        stale_submission_keys = [
-            key for key in self._loaded_student_submissions if key[0] == course_item_id
-        ]
-        for key in stale_submission_keys:
-            self._loaded_student_submissions.discard(key)
         home.set_status(f"Created assignment: {created.title}")
-        home.set_details("Assignment created and loaded.")
-        home.focus_tree()
+        home.focus_content()
 
     def _on_create_student_dialog_closed(
         self,
@@ -630,16 +486,15 @@ class HomeController:
                 middle_name=values["middle_name"] or None,
                 email=values["email"] or None,
             )
-        except OpenGraderDomainError as exc:
+        except Exception as exc:
             home.set_status(f"Enroll student failed: {exc}")
             return
 
         students = self._student_items(self._data_provider.list_students(course_id))
-        home.set_course_students(course_item_id, students)
+        home.set_students(students)
         self._loaded_course_students.add(course_item_id)
         home.set_status(f"Enrolled student: {created.full_name}")
-        home.set_details("Student enrolled and loaded.")
-        home.focus_tree()
+        home.focus_content()
 
     @staticmethod
     def _validate_assignment_form(values: dict[str, str]) -> str | None:

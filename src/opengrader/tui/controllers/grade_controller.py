@@ -74,7 +74,7 @@ class GradeController:
 
     def return_to_home(self) -> None:
         self._app.switch_to(PAGE_HOME)
-        self._app.get_home_screen().focus_tree()
+        self._app.get_home_screen().focus_courses()
 
     def next_question(self) -> None:
         if not self._on_grade_page():
@@ -126,7 +126,7 @@ class GradeController:
         self._app.switch_to(PAGE_HOME)
         home_screen = self._app.get_home_screen()
         home_screen.set_status("All students finalized for this assignment.")
-        home_screen.focus_tree()
+        home_screen.focus_courses()
 
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
