@@ -5,12 +5,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Label, ListItem, ListView, Static
 
-from opengrader.tui.ui.widgets import (
-    AssignmentList,
-    CourseList,
-    SelectionDetails,
-    StudentList,
-)
+from opengrader.tui.ui.widgets import HomeSidebar, SelectionDetails
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
@@ -72,37 +67,29 @@ class HomeScreen(Vertical):
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="home-workspace"):
-            with Vertical(id="home-sidebar"):
-                yield CourseList(id="home-course-list")
-                yield AssignmentList(id="home-assignment-list")
-                yield StudentList(id="home-student-list")
+            yield HomeSidebar(id="home-sidebar")
             yield SelectionDetails(id="home-selection-details")
         yield Static(
             "Select a course to get started.",
             id="home-status",
         )
 
-    def on_mount(self) -> None:
-        self.query_one("#home-assignment-list", ListView).display = False
-        self.query_one("#home-student-list", ListView).display = False
-
     def content_visible(self) -> bool:
-        return bool(self.query_one("#home-assignment-list", ListView).display)
+        return self._sidebar().content_visible()
 
     def show_content_tabs(self) -> None:
-        self.query_one("#home-assignment-list", ListView).display = True
-        self.query_one("#home-student-list", ListView).display = True
+        self._sidebar().show_content_sections()
 
     def set_courses(self, courses: list[NavItem]) -> None:
         self._course_items = list(courses)
-        course_list = self.query_one("#home-course-list", ListView)
+        course_list = self._sidebar().course_list()
         course_list.clear()
         for item in courses:
             course_list.append(_NavListItem(item))
 
     def set_assignments(self, assignments: list[NavItem]) -> None:
         self._assignment_items = list(assignments)
-        assignment_list = self.query_one("#home-assignment-list", ListView)
+        assignment_list = self._sidebar().assignment_list()
         assignment_list.clear()
         for item in assignments:
             assignment_list.append(_NavListItem(item))
@@ -111,7 +98,7 @@ class HomeScreen(Vertical):
         self._student_items = list(students)
         self._expanded_student = None
         self._expanded_student_assignments = []
-        student_list = self.query_one("#home-student-list", ListView)
+        student_list = self._sidebar().student_list()
         student_list.clear()
         for item in students:
             student_list.append(_NavListItem(item))
@@ -151,11 +138,9 @@ class HomeScreen(Vertical):
         return item
 
     def active_tab(self) -> str:
-        assignment_list = self.query_one("#home-assignment-list", ListView)
-        student_list = self.query_one("#home-student-list", ListView)
-        if student_list.has_focus:
+        if self._sidebar().student_list().has_focus:
             return "students"
-        if assignment_list.has_focus:
+        if self._sidebar().assignment_list().has_focus:
             return "assignments"
         return self._active_content
 
@@ -166,39 +151,23 @@ class HomeScreen(Vertical):
             self._active_content = "students"
 
     def focus_courses(self) -> None:
-        lv = self.query_one("#home-course-list", ListView)
-        if len(lv.children) > 0:
-            lv.index = 0
-        lv.focus()
+        self._sidebar().focus_courses()
 
     def focus_assignments(self) -> None:
         self._active_content = "assignments"
-        lv = self.query_one("#home-assignment-list", ListView)
-        if not lv.display:
-            return
-        lv.focus()
-        if lv.highlighted_child is None and len(lv.children) > 0:
-            lv.index = 0
+        self._sidebar().focus_assignments()
 
     def focus_students(self) -> None:
         self._active_content = "students"
-        lv = self.query_one("#home-student-list", ListView)
-        if not lv.display:
-            return
-        lv.focus()
-        if lv.highlighted_child is None and len(lv.children) > 0:
-            lv.index = 0
+        self._sidebar().focus_students()
 
     def focus_details(self) -> None:
         self.query_one("#home-selection-details", SelectionDetails).focus()
 
     def focused_pane(self) -> str | None:
-        if self.query_one("#home-course-list", ListView).has_focus:
-            return "courses"
-        if self.query_one("#home-assignment-list", ListView).has_focus:
-            return "assignments"
-        if self.query_one("#home-student-list", ListView).has_focus:
-            return "students"
+        sidebar_focused = self._sidebar().focused_pane()
+        if sidebar_focused is not None:
+            return sidebar_focused
         if self.query_one("#home-selection-details", SelectionDetails).has_focus:
             return "details"
         return None
@@ -280,6 +249,9 @@ class HomeScreen(Vertical):
                 )
             else:
                 self.post_message(self.StudentSelected(nav))
+
+    def _sidebar(self) -> HomeSidebar:
+        return self.query_one("#home-sidebar", HomeSidebar)
 
     def _item_from_list(self, list_selector: str) -> NavItem | None:
         lv = self.query_one(list_selector, ListView)

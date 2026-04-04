@@ -10,6 +10,7 @@ class SelectionDetails(Static):
     SelectionDetails {
         width: 1fr;
         height: 1fr;
+        background: $background;
         border: round $accent;
         border-title-color: #ffffff;
         border-title-align: left;

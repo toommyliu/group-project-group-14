@@ -6,13 +6,15 @@ class ContentList(ListView):
     ContentList {
         width: 1fr;
         height: 1fr;
+        background: $background;
         border: round $accent;
-        border-title-color: #ffffff;
+        border-title-color: $foreground;
         border-title-align: left;
         border-subtitle-color: $text-muted;
         border-subtitle-align: right;
     }
     ContentList:focus {
+        background: transparent !important;
         border-title-color: $accent;
     }
     """
