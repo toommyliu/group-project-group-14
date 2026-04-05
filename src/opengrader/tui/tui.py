@@ -214,6 +214,22 @@ class TuiApp(App):
             self.home_controller.focus_details_pane,
         )
         self.input_controller.register(
+            InputCommand.HOME_DETAILS_NEXT_TAB,
+            self.home_controller.details_next_tab,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_PREV_TAB,
+            self.home_controller.details_prev_tab,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_NEXT_PAGE,
+            self.home_controller.details_next_page,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_PREV_PAGE,
+            self.home_controller.details_prev_page,
+        )
+        self.input_controller.register(
             InputCommand.GRADE_NEXT_QUESTION,
             self.grade_controller.next_question,
         )

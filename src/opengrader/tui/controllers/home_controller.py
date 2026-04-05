@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from opengrader.core.courses import ALLOWED_ASSIGNMENT_TYPES
+from opengrader.core.paths import get_data_dir
 
 from opengrader.tui.data import (
     AssignmentSummary,
@@ -86,7 +87,10 @@ class HomeController:
     def on_assignment_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
         template_hint = self._assignment_template_hint(item)
-        home.show_assignment_details(item, template_hint=template_hint)
+        template_tabs = self._build_template_tabs(item)
+        home.show_assignment_details(
+            item, template_hint=template_hint, template_tabs=template_tabs,
+        )
         home.set_status(
             f"{item.label} · [g] Grade  [d] Details  [r] Rubric  {template_hint}  [n] New"
         )
@@ -272,10 +276,13 @@ class HomeController:
             home.set_status("Highlight an assignment to view details.")
             return
         template_hint = self._assignment_template_hint(item)
+        template_tabs = self._build_template_tabs(item)
+        home.show_assignment_details(
+            item, template_hint=template_hint, template_tabs=template_tabs,
+        )
         templates = self._data_provider.list_assignment_templates_for_assignment(
             self._state.selection.assignment_id
         )
-        home.show_assignment_details(item, template_hint=template_hint)
         home.set_status(f"Assignment details: {item.label} ({len(templates)} templates)")
 
     def edit_assignment_rubric(self) -> None:
@@ -303,6 +310,30 @@ class HomeController:
             assignment_id=assignment_id,
             assignment_label=item.label,
         )
+
+    def details_next_tab(self) -> None:
+        home = self._app.get_home_screen()
+        details = home.query_one("#home-selection-details")
+        if hasattr(details, "next_tab"):
+            details.next_tab()
+
+    def details_prev_tab(self) -> None:
+        home = self._app.get_home_screen()
+        details = home.query_one("#home-selection-details")
+        if hasattr(details, "prev_tab"):
+            details.prev_tab()
+
+    def details_next_page(self) -> None:
+        home = self._app.get_home_screen()
+        details = home.query_one("#home-selection-details")
+        if hasattr(details, "next_page"):
+            details.next_page()
+
+    def details_prev_page(self) -> None:
+        home = self._app.get_home_screen()
+        details = home.query_one("#home-selection-details")
+        if hasattr(details, "prev_page"):
+            details.prev_page()
 
     def create(self) -> None:
         home = self._app.get_home_screen()
@@ -353,6 +384,34 @@ class HomeController:
         if version_count > 1:
             return f"[t] Template: {linked_template.name} ({version_count} versions)"
         return f"[t] Template: {linked_template.name}"
+
+    def _build_template_tabs(
+        self, item: NavItem,
+    ) -> list[tuple[str, Path | None]]:
+        assignment_id = self._numeric_id(item.item_id)
+        if assignment_id is None:
+            return []
+
+        templates = self._data_provider.list_assignment_templates_for_assignment(
+            assignment_id
+        )
+        if not templates:
+            return []
+
+        current = self._data_provider.get_assignment_template(assignment_id)
+        current_id = current.id if current is not None else None
+        data_dir = get_data_dir()
+
+        tabs: list[tuple[str, Path | None]] = []
+        for i, template in enumerate(templates):
+            version = chr(65 + i) if i < 26 else str(i + 1)
+            label = f"Template {version} - {template.name}"
+            # if template.id == current_id:
+                # label += " *"
+            pdf_path = data_dir / template.template_pdf_relpath
+            tabs.append((label, pdf_path))
+
+        return tabs
 
     def _select_course(self, item: NavItem) -> None:
         selection = self._state.selection

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
@@ -197,9 +199,19 @@ class HomeScreen(Vertical):
             student_count=student_count,
         )
 
-    def show_assignment_details(self, item: NavItem, *, template_hint: str) -> None:
+    def show_assignment_details(
+        self,
+        item: NavItem,
+        *,
+        template_hint: str,
+        template_tabs: list[tuple[str, Path | None]] | None = None,
+    ) -> None:
         details = self.query_one("#home-selection-details", SelectionDetails)
-        details.show_assignment(item, template_hint=template_hint)
+        details.show_assignment(
+            item,
+            template_hint=template_hint,
+            template_tabs=template_tabs,
+        )
 
     def show_student_details(self, item: NavItem, *, submission_count: int) -> None:
         details = self.query_one("#home-selection-details", SelectionDetails)

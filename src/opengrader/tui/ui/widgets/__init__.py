@@ -8,6 +8,7 @@ from .nav_item import NavItem
 from .response_viewer import ResponseViewer
 from .selection_details import SelectionDetails
 from .student_list import StudentList
+from .template_preview import TemplatePreview
 
 __all__ = [
     "NavItem",
@@ -19,5 +20,6 @@ __all__ = [
     "HomeSidebar",
     "SelectionDetails",
     "StudentList",
+    "TemplatePreview",
     "ResponseViewer",
 ]
