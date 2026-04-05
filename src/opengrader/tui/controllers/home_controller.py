@@ -17,11 +17,10 @@ from opengrader.tui.data import (
 from opengrader.tui.ui.screens import HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
-from opengrader.tui.ui.widgets.dialog import Dialog, DialogField
+from opengrader.tui.ui.widgets.dialog import AlertDialog, Dialog, DialogField
 from opengrader.tui.ui.widgets.file_picker import FilePicker
 from opengrader.tui.ui.screens.home_screen import _NavListItem
 from textual.widgets import ListView
-
 
 
 @dataclass(frozen=True)
@@ -671,39 +670,55 @@ class HomeController:
         default_name = (
             linked_template.name if linked_template is not None else assignment_label
         )
-        Dialog.present(
-            self._app,
-            Dialog(
-                title=f"Upload Template ({assignment_label})",
-                submit_label="Continue",
-                fields=[
-                    DialogField(
-                        "name",
-                        "Template Name",
-                        placeholder="HW 1 Template",
-                        value=default_name,
-                    ),
-                    DialogField(
-                        "versions",
-                        "Versions (Optional)",
-                        placeholder="A,B,C",
-                        required=False,
-                    ),
-                    DialogField(
-                        "strategy",
-                        "Upload Strategy",
-                        placeholder="pdf+spec or pdf-only",
-                        value="pdf+spec",
-                    ),
-                ],
-                validator=self._validate_template_upload_form,
-            ),
-            lambda values: self._on_template_upload_dialog_closed(
-                assignment_id=assignment_id,
-                assignment_label=assignment_label,
-                values=values,
-            ),
-        )
+
+        def proceed_with_upload() -> None:
+            Dialog.present(
+                self._app,
+                Dialog(
+                    title=f"Upload Template ({assignment_label})",
+                    submit_label="Continue",
+                    fields=[
+                        DialogField(
+                            "name",
+                            "Template Name",
+                            placeholder="HW 1 Template",
+                            value=default_name,
+                        ),
+                        DialogField(
+                            "versions",
+                            "Versions (Optional)",
+                            placeholder="A,B,C",
+                            required=False,
+                        ),
+                        DialogField(
+                            "strategy",
+                            "Upload Strategy",
+                            placeholder="pdf+spec or pdf-only",
+                            value="pdf+spec",
+                        ),
+                    ],
+                    validator=self._validate_template_upload_form,
+                ),
+                lambda values: self._on_template_upload_dialog_closed(
+                    assignment_id=assignment_id,
+                    assignment_label=assignment_label,
+                    values=values,
+                ),
+            )
+
+        if linked_template is not None:
+            AlertDialog.present(
+                self._app,
+                AlertDialog(
+                    title="Override Existing Template?",
+                    message=f"Continuing will overwrite the existing template for {assignment_label}.",
+                    confirm_label="Yes, overwrite",
+                    cancel_label="No, cancel",
+                ),
+                lambda confirmed: proceed_with_upload() if confirmed else self._app.get_home_screen().set_status("Template upload cancelled."),
+            )
+        else:
+            proceed_with_upload()
 
     def _on_template_upload_dialog_closed(
         self,

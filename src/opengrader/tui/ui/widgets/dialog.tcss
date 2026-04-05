@@ -1,4 +1,4 @@
-Dialog {
+Dialog, AlertDialog {
     align: center middle;
 }
 
@@ -57,4 +57,12 @@ Dialog {
 .dialog-action:focus {
     color: $foreground;
     border: round $accent;
+}
+
+.dialog-alert-message {
+    padding-top: 1;
+    color: $foreground;
+    height: auto;
+    width: 100%;
+    content-align: center middle;
 }

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from textual import events, on
 from textual.app import ComposeResult
@@ -34,15 +34,68 @@ class DialogField:
 
 
 @dataclass
-class _QueuedDialogRequest:
-    dialog: "Dialog"
-    callback: DialogCallback | None
+class _QueuedScreenRequest:
+    screen: ModalScreen[Any]
+    callback: Callable[[Any], None] | None
 
 
 @dataclass
 class _DialogQueueState:
-    pending: deque[_QueuedDialogRequest] = field(default_factory=deque)
+    pending: deque[_QueuedScreenRequest] = field(default_factory=deque)
     active: bool = False
+
+
+def _queue_state_for(app: object) -> _DialogQueueState:
+    queue_state = getattr(app, "_opengrader_dialog_queue_state", None)
+    if isinstance(queue_state, _DialogQueueState):
+        return queue_state
+
+    queue_state = _DialogQueueState()
+    setattr(app, "_opengrader_dialog_queue_state", queue_state)
+    return queue_state
+
+
+def _drain_queue(app: object) -> None:
+    queue_state = _queue_state_for(app)
+    if queue_state.active or not queue_state.pending:
+        return
+
+    request = queue_state.pending.popleft()
+    queue_state.active = True
+
+    def _on_closed(result: Any) -> None:
+        try:
+            if request.callback is not None:
+                request.callback(result)
+        finally:
+            queue_state.active = False
+            _drain_queue(app)
+
+    host = cast(_DialogHost, app)
+    try:
+        host.push_screen(request.screen, _on_closed)
+    except Exception:
+        queue_state.active = False
+        raise
+
+
+def _present_dialog(
+    app: object,
+    screen: ModalScreen[Any],
+    callback: Callable[[Any], None] | None = None,
+    *,
+    stack: bool = False,
+) -> None:
+    if stack:
+        host = cast(_DialogHost, app)
+        host.push_screen(screen, callback)
+        return
+
+    queue_state = _queue_state_for(app)
+    queue_state.pending.append(
+        _QueuedScreenRequest(screen=screen, callback=callback)
+    )
+    _drain_queue(app)
 
 
 class Dialog(ModalScreen[DialogResult]):
@@ -83,50 +136,12 @@ class Dialog(ModalScreen[DialogResult]):
         *,
         stack: bool = False,
     ) -> None:
-        host = cast(_DialogHost, app)
-        if stack:
-            host.push_screen(dialog, cast(Callable[[object], None] | None, callback))
-            return
-
-        queue_state = cls._queue_state_for(app)
-        queue_state.pending.append(
-            _QueuedDialogRequest(dialog=dialog, callback=callback)
+        _present_dialog(
+            app,
+            dialog,
+            cast(Callable[[Any], None] | None, callback),
+            stack=stack,
         )
-        cls._drain_queue(app)
-
-    @classmethod
-    def _queue_state_for(cls, app: object) -> _DialogQueueState:
-        queue_state = getattr(app, cls._QUEUE_STATE_ATTR, None)
-        if isinstance(queue_state, _DialogQueueState):
-            return queue_state
-
-        queue_state = _DialogQueueState()
-        setattr(app, cls._QUEUE_STATE_ATTR, queue_state)
-        return queue_state
-
-    @classmethod
-    def _drain_queue(cls, app: object) -> None:
-        queue_state = cls._queue_state_for(app)
-        if queue_state.active or not queue_state.pending:
-            return
-
-        request = queue_state.pending.popleft()
-        queue_state.active = True
-
-        def _on_closed(result: object) -> None:
-            try:
-                if request.callback is not None:
-                    request.callback(cast(DialogResult, result))
-            finally:
-                queue_state.active = False
-                cls._drain_queue(app)
-
-        host = cast(_DialogHost, app)
-        try:
-            host.push_screen(request.dialog, _on_closed)
-        except Exception:
-            queue_state.active = False
-            raise
 
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog-panel"):
@@ -266,3 +281,134 @@ class Dialog(ModalScreen[DialogResult]):
     @staticmethod
     def _input_id(field_key: str) -> str:
         return f"dialog-field-{field_key}"
+
+
+class AlertDialog(ModalScreen[bool]):
+    CSS_PATH = "dialog.tcss"
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("enter", "submit", "Submit", show=False),
+        Binding("left", "focus_left", "Focus Left", show=False),
+        Binding("right", "focus_right", "Focus Right", show=False),
+    ]
+
+    ESCAPE_TO_MINIMIZE = False
+
+    def __init__(
+        self,
+        *,
+        title: str,
+        message: str,
+        confirm_label: str = "Confirm",
+        cancel_label: str = "Cancel",
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._message = message
+        self._confirm_label = confirm_label
+        self._cancel_label = cancel_label
+
+    @classmethod
+    def present(
+        cls,
+        app: object,
+        dialog: "AlertDialog",
+        callback: Callable[[bool], None] | None = None,
+        *,
+        stack: bool = False,
+    ) -> None:
+        _present_dialog(
+            app,
+            dialog,
+            cast(Callable[[Any], None] | None, callback),
+            stack=stack,
+        )
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog-panel"):
+            yield Label(self._message, classes="dialog-alert-message")
+            with Horizontal(id="dialog-actions"):
+                # TODO: re-add key labels?
+                yield Label(
+                    f"{self._cancel_label}",
+                    id="dialog-cancel",
+                    classes="dialog-action",
+                )
+                yield Label(
+                    f"{self._confirm_label}",
+                    id="dialog-submit",
+                    classes="dialog-action",
+                )
+
+    def on_mount(self) -> None:
+        panel = self.query_one("#dialog-panel", Vertical)
+        panel.border_title = self._title
+
+        self.query_one("#dialog-cancel", Label).can_focus = True
+        self.query_one("#dialog-submit", Label).can_focus = True
+
+        self.query_one("#dialog-cancel", Label).focus()
+
+    def action_focus_left(self) -> None:
+        self.focus_previous()
+
+    def action_focus_right(self) -> None:
+        self.focus_next()
+
+    @on(events.Key)
+    def _on_key(self, event: events.Key) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        if event.key in ("tab", "shift+tab", "left", "right"):
+            event.stop()
+            event.prevent_default()
+            self._move_focus(reverse=event.key in ("shift+tab", "left"))
+            return
+
+        focused = self.focused
+        if event.key == "enter" and isinstance(focused, Label):
+            focused_id = focused.id
+            if focused_id == "dialog-cancel":
+                event.stop()
+                event.prevent_default()
+                self.action_cancel()
+                return
+            if focused_id == "dialog-submit":
+                event.stop()
+                event.prevent_default()
+                self.action_submit()
+                return
+        elif event.key == "enter":
+            self.action_submit()
+
+    def _move_focus(self, *, reverse: bool = False) -> None:
+        focus_chain: list[Widget] = [
+            self.query_one("#dialog-cancel", Label),
+            self.query_one("#dialog-submit", Label),
+        ]
+        if not focus_chain:
+            return
+
+        current_focus = self.focused
+        if current_focus in focus_chain:
+            current_index = focus_chain.index(current_focus)
+            next_index = (current_index - 1 if reverse else current_index + 1) % len(focus_chain)
+        else:
+            next_index = len(focus_chain) - 1 if reverse else 0
+
+        focus_chain[next_index].focus()
+
+    @on(events.Click, "#dialog-cancel")
+    def _on_cancel_clicked(self, event: events.Click) -> None:
+        event.stop()
+        self.action_cancel()
+
+    @on(events.Click, "#dialog-submit")
+    def _on_submit_clicked(self, event: events.Click) -> None:
+        event.stop()
+        self.action_submit()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def action_submit(self) -> None:
+        self.dismiss(True)
