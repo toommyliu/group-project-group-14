@@ -70,17 +70,21 @@ These capabilities will enable educators to visualize trends in grade statistics
   - If not using standalone installer, install [Homebrew](https://brew.sh/) first
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
 
-#### Terminal Compatibility
+#### Terminal Compatibility [^1]
 
-To render images in the TUI properly, you may need a terminal emulator that supports the [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
+To render images in the TUI properly, you may need a terminal emulator that supports the
+[Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
-Some recommendations include:
+On macOS, the following terminal emulators were successful in our tests:
+
 - [Ghostty](https://github.com/ghostty-org/ghostty)
 - [iTerm2](https://iterm2.com/)
 - [WezTerm](https://wezfurlong.org/wezterm/)
 
+[^1]: For more information, see [Textual Image Support](https://github.com/lnqs/textual-image#supported-terminals)
+
 > [!NOTE]
-Visual Studio Code's integrated terminal can work (as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol)), you will need to enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for compatibility details.
+> Visual Studio Code's integrated terminal can work (as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol)), you will need to enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
 
 ### Installation
 
