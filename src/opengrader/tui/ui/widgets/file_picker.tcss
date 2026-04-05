@@ -1,0 +1,58 @@
+FilePicker {
+    align: center middle;
+}
+
+#file-picker-panel {
+    width: 72;
+    min-width: 50;
+    max-width: 90%;
+    height: 60%;
+    max-height: 75%;
+    padding: 0 1;
+    background: $background;
+    border: round $accent;
+    border-title-color: $foreground;
+    border-title-align: left;
+    border-subtitle-color: $error;
+    border-subtitle-align: right;
+}
+
+#file-picker-path-input {
+    width: 1fr;
+    margin-top: 1;
+    margin-bottom: 0;
+}
+
+#file-picker-dir-list {
+    width: 1fr;
+    height: 1fr;
+    margin-top: 1;
+    background: $background;
+    border: round $accent;
+    border-title-color: $foreground;
+    border-title-align: left;
+    border-subtitle-color: $text-muted;
+    border-subtitle-align: right;
+    scrollbar-size: 1 1;
+}
+
+#file-picker-dir-list:focus {
+    background: transparent !important;
+    border-title-color: $accent;
+}
+
+#file-picker-actions {
+    align-horizontal: right;
+    height: auto;
+}
+
+.file-picker-action {
+    color: $text-muted;
+    border: round transparent;
+}
+
+.file-picker-action:hover,
+.file-picker-action:focus {
+    color: $foreground;
+    border: round $accent;
+}

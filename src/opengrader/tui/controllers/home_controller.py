@@ -18,9 +18,10 @@ from opengrader.tui.ui.screens import HomeScreen
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.widgets.dialog import Dialog, DialogField
+from opengrader.tui.ui.widgets.file_picker import FilePicker
 from opengrader.tui.ui.screens.home_screen import _NavListItem
 from textual.widgets import ListView
-from textual_fspicker import FileOpen, Filters
+
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class _TemplateUploadContext:
     template_names: tuple[str, ...]
     current_index: int = 0
     template_pdf_paths: tuple[Path, ...] = ()
+    last_pdf_directory: Path | None = None
 
 
 class HomeApp(Protocol):
@@ -745,17 +747,17 @@ class HomeController:
             if len(context.template_names) > 1
             else "Select Template PDF"
         )
+        start_location = (
+            str(context.last_pdf_directory)
+            if context.last_pdf_directory is not None
+            else "."
+        )
         self._app.push_screen(
-            FileOpen(
+            FilePicker(
                 title=f"{title_prefix}: {template_name}",
-                open_button="Use PDF",
-                filters=Filters(
-                    (
-                        "PDF",
-                        lambda path: path.is_dir() or path.suffix.lower() == ".pdf",
-                    ),
-                    ("All", lambda _: True),
-                ),
+                select_label="Use PDF",
+                file_filter=lambda path: path.suffix.lower() == ".pdf",
+                location=start_location,
             ),
             lambda selected_path: self._on_template_pdf_selected(
                 context=context,
@@ -775,6 +777,7 @@ class HomeController:
             return
 
         collected_pdf_paths = context.template_pdf_paths + (selected_path,)
+        last_dir = selected_path.parent
         next_index = context.current_index + 1
         if next_index < len(context.template_names):
             next_context = _TemplateUploadContext(
@@ -784,6 +787,7 @@ class HomeController:
                 template_names=context.template_names,
                 current_index=next_index,
                 template_pdf_paths=collected_pdf_paths,
+                last_pdf_directory=last_dir,
             )
             home.set_status(
                 f"Saved template PDF {next_index}/{len(context.template_names)}."
@@ -797,6 +801,7 @@ class HomeController:
             strategy=context.strategy,
             template_names=context.template_names,
             template_pdf_paths=collected_pdf_paths,
+            last_pdf_directory=last_dir,
         )
         if context.strategy == "pdf-only":
             self._create_and_link_templates(
@@ -813,15 +818,14 @@ class HomeController:
         context: _TemplateUploadContext,
     ) -> None:
         self._app.push_screen(
-            FileOpen(
+            FilePicker(
                 title="Select Shared Template Spec JSON",
-                open_button="Use Spec",
-                filters=Filters(
-                    (
-                        "JSON",
-                        lambda path: path.is_dir() or path.suffix.lower() == ".json",
-                    ),
-                    ("All", lambda _: True),
+                select_label="Use Spec",
+                file_filter=lambda path: path.suffix.lower() == ".json",
+                location=(
+                    str(context.last_pdf_directory)
+                    if context.last_pdf_directory is not None
+                    else "."
                 ),
             ),
             lambda selected_path: self._on_template_spec_selected(

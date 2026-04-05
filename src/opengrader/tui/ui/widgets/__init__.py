@@ -2,6 +2,7 @@ from .assignment_list import AssignmentList
 from .breadcrumb import Breadcrumb
 from .content_list import ContentList
 from .course_list import CourseList
+from .file_picker import FilePicker
 from .home_sidebar import HomeSidebar
 from .nav_item import NavItem
 from .response_viewer import ResponseViewer
@@ -14,6 +15,7 @@ __all__ = [
     "Breadcrumb",
     "ContentList",
     "CourseList",
+    "FilePicker",
     "HomeSidebar",
     "SelectionDetails",
     "StudentList",
