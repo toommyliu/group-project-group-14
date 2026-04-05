@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from opengrader.core.courses import (
-    AssessmentNotFoundError,
+    AssignmentNotFoundError,
     CourseAlreadyExistsError,
     GradeConflictError,
     InvalidPointsError,
@@ -75,7 +75,7 @@ def test_enroll_students_is_idempotent_by_sid(tmp_path) -> None:
     assert roster[0].full_name == "Ada L."
 
 
-def test_assessment_sorting_uses_due_date_with_nulls_last(tmp_path) -> None:
+def test_assignment_sorting_uses_due_date_with_nulls_last(tmp_path) -> None:
     services = build_sqlite_course_services(tmp_path / "courses.db")
     course = services.courses.create_course(
         code="ENGR-10",
@@ -84,29 +84,29 @@ def test_assessment_sorting_uses_due_date_with_nulls_last(tmp_path) -> None:
         section="1",
     )
 
-    no_due = services.assessments.create_assessment(
+    no_due = services.assignments.create_assignment(
         course_id=course.id,
-        assessment_type="assignment",
+        assignment_type="assignment",
         title="Homework",
         max_points=10,
         due_at=None,
     )
-    early_due = services.assessments.create_assessment(
+    early_due = services.assignments.create_assignment(
         course_id=course.id,
-        assessment_type="quiz",
+        assignment_type="quiz",
         title="Quiz 1",
         max_points=15,
         due_at=datetime(2026, 3, 1, 9, 0, tzinfo=timezone.utc),
     )
-    late_due = services.assessments.create_assessment(
+    late_due = services.assignments.create_assignment(
         course_id=course.id,
-        assessment_type="exam",
+        assignment_type="exam",
         title="Midterm",
         max_points=100,
         due_at=datetime(2026, 3, 21, 9, 0, tzinfo=timezone.utc),
     )
 
-    listed = services.assessments.list_assessments(course.id)
+    listed = services.assignments.list_assignments(course.id)
     assert [a.id for a in listed] == [early_due.id, late_due.id, no_due.id]
 
 
@@ -118,16 +118,16 @@ def test_assign_grade_requires_enrollment_and_honors_max_points(tmp_path) -> Non
         term="Fall 2026",
         section="2",
     )
-    assessment = services.assessments.create_assessment(
+    assignment = services.assignments.create_assignment(
         course_id=course.id,
-        assessment_type="quiz",
+        assignment_type="quiz",
         title="Quiz A",
         max_points=10,
     )
 
     with pytest.raises(StudentNotEnrolledError):
         services.grading.assign_grade(
-            assessment_id=assessment.id,
+            assignment_id=assignment.id,
             student_id=999,
             points_awarded=5,
         )
@@ -146,7 +146,7 @@ def test_assign_grade_requires_enrollment_and_honors_max_points(tmp_path) -> Non
 
     with pytest.raises(InvalidPointsError):
         services.grading.assign_grade(
-            assessment_id=assessment.id,
+            assignment_id=assignment.id,
             student_id=student.id,
             points_awarded=10.5,
         )
@@ -171,22 +171,22 @@ def test_assign_grade_uses_optimistic_locking_version(tmp_path) -> None:
             )
         ],
     )[0]
-    assessment = services.assessments.create_assessment(
+    assignment = services.assignments.create_assignment(
         course_id=course.id,
-        assessment_type="assignment",
+        assignment_type="assignment",
         title="Homework 1",
         max_points=20,
     )
 
     first = services.grading.assign_grade(
-        assessment_id=assessment.id,
+        assignment_id=assignment.id,
         student_id=student.id,
         points_awarded=18,
     )
     assert first.version == 1
 
     second = services.grading.assign_grade(
-        assessment_id=assessment.id,
+        assignment_id=assignment.id,
         student_id=student.id,
         points_awarded=19,
         expected_version=1,
@@ -195,7 +195,7 @@ def test_assign_grade_uses_optimistic_locking_version(tmp_path) -> None:
 
     with pytest.raises(GradeConflictError):
         services.grading.assign_grade(
-            assessment_id=assessment.id,
+            assignment_id=assignment.id,
             student_id=student.id,
             points_awarded=20,
             expected_version=1,
@@ -227,23 +227,23 @@ def test_get_course_gradebook_returns_totals_and_percentage(tmp_path) -> None:
             ),
         ],
     )
-    assessments = [
-        services.assessments.create_assessment(
+    assignments = [
+        services.assignments.create_assignment(
             course_id=course.id,
-            assessment_type="quiz",
+            assignment_type="quiz",
             title="Quiz",
             max_points=10,
         ),
-        services.assessments.create_assessment(
+        services.assignments.create_assignment(
             course_id=course.id,
-            assessment_type="exam",
+            assignment_type="exam",
             title="Final",
             max_points=20,
         ),
     ]
 
-    services.grading.assign_grade(assessments[0].id, students[0].id, 8)
-    services.grading.assign_grade(assessments[1].id, students[0].id, 10)
+    services.grading.assign_grade(assignments[0].id, students[0].id, 8)
+    services.grading.assign_grade(assignments[1].id, students[0].id, 10)
 
     gradebook = services.grading.get_course_gradebook(course.id)
     rows_by_sid = {row.student.sid: row for row in gradebook.rows}
@@ -259,12 +259,12 @@ def test_get_course_gradebook_returns_totals_and_percentage(tmp_path) -> None:
     assert second.percentage == Decimal("0.00")
 
 
-def test_assign_grade_rejects_unknown_assessment(tmp_path) -> None:
+def test_assign_grade_rejects_unknown_assignment(tmp_path) -> None:
     services = build_sqlite_course_services(tmp_path / "courses.db")
 
-    with pytest.raises(AssessmentNotFoundError):
+    with pytest.raises(AssignmentNotFoundError):
         services.grading.assign_grade(
-            assessment_id=999,
+            assignment_id=999,
             student_id=1,
             points_awarded=1,
         )

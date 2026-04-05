@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from .stores import (
-    AssessmentStore,
+    AssignmentStore,
     CourseStore,
     EnrollmentStore,
     GradeStore,
@@ -16,7 +16,7 @@ class CoursesTransaction(Protocol):
     courses: CourseStore
     students: StudentStore
     enrollments: EnrollmentStore
-    assessments: AssessmentStore
+    assignments: AssignmentStore
     grades: GradeStore
 
     def commit(self) -> None: ...

@@ -5,8 +5,8 @@ from decimal import Decimal
 from typing import Protocol
 
 from opengrader.core.courses.domain.entities import (
-    Assessment,
-    AssessmentType,
+    Assignment,
+    AssignmentType,
     Course,
     Enrollment,
     Grade,
@@ -39,27 +39,27 @@ class EnrollmentStore(Protocol):
     def list_students_for_course(self, course_id: int) -> list[Student]: ...
 
 
-class AssessmentStore(Protocol):
+class AssignmentStore(Protocol):
     def create(
         self,
         course_id: int,
-        assessment_type: AssessmentType,
+        assignment_type: AssignmentType,
         title: str,
         max_points: Decimal,
         due_at: datetime | None,
-    ) -> Assessment: ...
+    ) -> Assignment: ...
 
-    def get_by_id(self, assessment_id: int) -> Assessment | None: ...
+    def get_by_id(self, assignment_id: int) -> Assignment | None: ...
 
-    def list_for_course(self, course_id: int) -> list[Assessment]: ...
+    def list_for_course(self, course_id: int) -> list[Assignment]: ...
 
 
 class GradeStore(Protocol):
-    def get(self, assessment_id: int, student_id: int) -> Grade | None: ...
+    def get(self, assignment_id: int, student_id: int) -> Grade | None: ...
 
     def upsert(
         self,
-        assessment_id: int,
+        assignment_id: int,
         student_id: int,
         points_awarded: Decimal,
         updated_at: datetime,

@@ -45,16 +45,16 @@ class SqliteProvider:
         if course_id is None:
             return []
         try:
-            assessments = self._courses.assessments.list_assessments(course_id)
+            assignments = self._courses.assignments.list_assignments(course_id)
         except CourseNotFoundError:
             return []
         return [
             AssignmentSummary(
-                id=assessment.id,
-                title=assessment.title,
-                assessment_type=str(assessment.type),
+                id=assignment.id,
+                title=assignment.title,
+                assignment_type=str(assignment.type),
             )
-            for assessment in assessments
+            for assignment in assignments
         ]
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]:
@@ -101,20 +101,20 @@ class SqliteProvider:
         self,
         *,
         course_id: int,
-        assessment_type: str,
+        assignment_type: str,
         title: str,
         max_points: str,
     ) -> AssignmentSummary:
-        assessment = self._courses.assessments.create_assessment(
+        assignment = self._courses.assignments.create_assignment(
             course_id=course_id,
-            assessment_type=assessment_type,
+            assignment_type=assignment_type,
             title=title,
             max_points=max_points,
         )
         return AssignmentSummary(
-            id=assessment.id,
-            title=assessment.title,
-            assessment_type=str(assessment.type),
+            id=assignment.id,
+            title=assignment.title,
+            assignment_type=str(assignment.type),
         )
 
     def create_student(

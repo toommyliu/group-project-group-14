@@ -3,19 +3,19 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from opengrader.core.courses.domain.entities import ALLOWED_ASSESSMENT_TYPES
+from opengrader.core.courses.domain.entities import ALLOWED_ASSIGNMENT_TYPES
 
 from .connection import create_sqlite_connection
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _drop_course_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         DROP TABLE IF EXISTS grades;
-        DROP TABLE IF EXISTS assessments;
-        DROP TABLE IF EXISTS assessment_types;
+        DROP TABLE IF EXISTS assignments;
+        DROP TABLE IF EXISTS assignment_types;
         DROP TABLE IF EXISTS enrollments;
         DROP TABLE IF EXISTS students;
         DROP TABLE IF EXISTS courses;
@@ -24,7 +24,7 @@ def _drop_course_tables(conn: sqlite3.Connection) -> None:
     )
 
 
-def _apply_v1_schema(conn: sqlite3.Connection) -> None:
+def _apply_v2_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS course_catalogs (
@@ -63,11 +63,11 @@ def _apply_v1_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS assessment_types (
+        CREATE TABLE IF NOT EXISTS assignment_types (
             code TEXT PRIMARY KEY
         );
 
-        CREATE TABLE IF NOT EXISTS assessments (
+        CREATE TABLE IF NOT EXISTS assignments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             course_id INTEGER NOT NULL,
             type_code TEXT NOT NULL,
@@ -76,40 +76,40 @@ def _apply_v1_schema(conn: sqlite3.Connection) -> None:
             due_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE,
-            FOREIGN KEY(type_code) REFERENCES assessment_types(code)
+            FOREIGN KEY(type_code) REFERENCES assignment_types(code)
                 ON DELETE RESTRICT ON UPDATE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS grades (
-            assessment_id INTEGER NOT NULL,
+            assignment_id INTEGER NOT NULL,
             student_id INTEGER NOT NULL,
             points_awarded TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             version INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (assessment_id, student_id),
-            FOREIGN KEY(assessment_id) REFERENCES assessments(id) ON DELETE CASCADE,
+            PRIMARY KEY (assignment_id, student_id),
+            FOREIGN KEY(assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
             FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE
         );
 
         CREATE INDEX IF NOT EXISTS idx_courses_catalog_code
             ON courses(catalog_code);
-        CREATE INDEX IF NOT EXISTS idx_assessments_course_id
-            ON assessments(course_id);
-        CREATE INDEX IF NOT EXISTS idx_assessments_type_code
-            ON assessments(type_code);
+        CREATE INDEX IF NOT EXISTS idx_assignments_course_id
+            ON assignments(course_id);
+        CREATE INDEX IF NOT EXISTS idx_assignments_type_code
+            ON assignments(type_code);
         CREATE INDEX IF NOT EXISTS idx_enrollments_student_id
             ON enrollments(student_id);
         CREATE INDEX IF NOT EXISTS idx_grades_student_id
             ON grades(student_id);
-        CREATE INDEX IF NOT EXISTS idx_grades_assessment_id
-            ON grades(assessment_id);
+        CREATE INDEX IF NOT EXISTS idx_grades_assignment_id
+            ON grades(assignment_id);
         """
     )
 
-    # pre-populate assessment_types with allowed types
+    # pre-populate assignment_types with allowed types
     conn.executemany(
-        "INSERT OR IGNORE INTO assessment_types(code) VALUES (?)",
-        [(assessment_type,) for assessment_type in ALLOWED_ASSESSMENT_TYPES],
+        "INSERT OR IGNORE INTO assignment_types(code) VALUES (?)",
+        [(assignment_type,) for assignment_type in ALLOWED_ASSIGNMENT_TYPES],
     )
 
 
@@ -131,7 +131,7 @@ def initialize_sqlite_database(db_path: str | Path) -> None:
 
         if current_version < SCHEMA_VERSION:
             _drop_course_tables(conn)
-            _apply_v1_schema(conn)
+            _apply_v2_schema(conn)
             conn.execute("DELETE FROM schema_migrations")
             conn.execute(
                 "INSERT INTO schema_migrations(version) VALUES (?)",

@@ -127,7 +127,7 @@ def test_assignment_selected_opens_grading() -> None:
     controller.on_assignment_selected(NavItem("a2", "HW 2"))
 
     assert state.selection.course_id == 1
-    assert state.selection.assessment_id == 2
+    assert state.selection.assignment_id == 2
     assert state.selection_labels["assignment"] == "HW 2"
     assert [item.item_id for item in state.student_items] == ["s1", "s2"]
     assert opened_students == [0]
@@ -163,7 +163,7 @@ def test_student_submission_selected_opens_grading() -> None:
     )
 
     assert state.selection.course_id == 1
-    assert state.selection.assessment_id == 1
+    assert state.selection.assignment_id == 1
     assert state.selection.student_id == 1
     assert state.selection_labels["assignment"] == "HW 1"
     assert state.selection_labels["student"] == "Tommy Liu"

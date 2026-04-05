@@ -5,10 +5,10 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 
-from .errors import InvalidAssessmentTypeError, InvalidPointsError
+from .errors import InvalidAssignmentTypeError, InvalidPointsError
 
-AssessmentType = Literal["assignment", "quiz", "exam", "other"]
-ALLOWED_ASSESSMENT_TYPES: tuple[str, ...] = (
+AssignmentType = Literal["assignment", "quiz", "exam", "other"]
+ALLOWED_ASSIGNMENT_TYPES: tuple[str, ...] = (
     "assignment",
     "quiz",
     "exam",
@@ -29,11 +29,11 @@ def normalize_points(value: Decimal | float | int | str) -> Decimal:
     return points.quantize(_POINTS_QUANTUM, rounding=ROUND_HALF_UP)
 
 
-def normalize_assessment_type(value: str) -> AssessmentType:
+def normalize_assignment_type(value: str) -> AssignmentType:
     candidate = value.strip().lower()
-    if candidate not in ALLOWED_ASSESSMENT_TYPES:
-        raise InvalidAssessmentTypeError(
-            f"assessment type must be one of {ALLOWED_ASSESSMENT_TYPES}, got {value!r}"
+    if candidate not in ALLOWED_ASSIGNMENT_TYPES:
+        raise InvalidAssignmentTypeError(
+            f"assignment type must be one of {ALLOWED_ASSIGNMENT_TYPES}, got {value!r}"
         )
     return candidate  # type: ignore[return-value]
 
@@ -76,10 +76,10 @@ class Enrollment:
 
 
 @dataclass(frozen=True)
-class Assessment:
+class Assignment:
     id: int
     course_id: int
-    type: AssessmentType
+    type: AssignmentType
     title: str
     max_points: Decimal
     due_at: datetime | None
@@ -88,11 +88,11 @@ class Assessment:
 
 @dataclass(frozen=True)
 class Grade:
-    assessment_id: int
+    assignment_id: int
     student_id: int
     points_awarded: Decimal
     updated_at: datetime
-    version: int # optimistic offline concurrency control
+    version: int  # optimistic offline concurrency control
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ class StudentInput:
 
 @dataclass(frozen=True)
 class GradeInput:
-    assessment_id: int
+    assignment_id: int
     student_id: int
     points_awarded: Decimal
     expected_version: int | None = None
@@ -115,7 +115,7 @@ class GradeInput:
 @dataclass(frozen=True)
 class StudentGradeSummary:
     student: Student
-    grades_by_assessment_id: dict[int, Grade]
+    grades_by_assignment_id: dict[int, Grade]
     total_awarded: Decimal
     total_possible: Decimal
     percentage: Decimal | None
@@ -124,5 +124,5 @@ class StudentGradeSummary:
 @dataclass(frozen=True)
 class CourseGradebook:
     course: Course
-    assessments: list[Assessment]
+    assignments: list[Assignment]
     rows: list[StudentGradeSummary]

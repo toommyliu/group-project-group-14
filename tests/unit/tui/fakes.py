@@ -59,12 +59,12 @@ class FakeDataProvider:
         self,
         *,
         course_id: int,
-        assessment_type: str,
+        assignment_type: str,
         title: str,
         max_points: str,
     ) -> AssignmentSummary:
         _ = (course_id, max_points)
-        return AssignmentSummary(99, title, assessment_type)
+        return AssignmentSummary(99, title, assignment_type)
 
     def create_student(
         self,

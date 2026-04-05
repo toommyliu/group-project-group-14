@@ -146,7 +146,7 @@ class GradeController:
     def _status_key(self, student_item_id: str) -> tuple[str, str, str]:
         return (
             str(self._state.selection.course_id or ""),
-            str(self._state.selection.assessment_id or ""),
+            str(self._state.selection.assignment_id or ""),
             student_item_id,
         )
 

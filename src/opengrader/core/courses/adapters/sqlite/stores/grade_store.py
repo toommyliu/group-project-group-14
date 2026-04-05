@@ -12,7 +12,7 @@ from ._time import parse_datetime
 
 def _row_to_grade(row: sqlite3.Row) -> Grade:
     return Grade(
-        assessment_id=row["assessment_id"],
+        assignment_id=row["assignment_id"],
         student_id=row["student_id"],
         points_awarded=Decimal(row["points_awarded"]),
         updated_at=parse_datetime(row["updated_at"]),
@@ -24,15 +24,15 @@ class SqliteGradeStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    def get(self, assessment_id: int, student_id: int) -> Grade | None:
+    def get(self, assignment_id: int, student_id: int) -> Grade | None:
         row = self._conn.execute(
             """
-            SELECT assessment_id, student_id, points_awarded,
+            SELECT assignment_id, student_id, points_awarded,
                    updated_at, version
             FROM grades
-            WHERE assessment_id = ? AND student_id = ?
+            WHERE assignment_id = ? AND student_id = ?
             """,
-            (assessment_id, student_id),
+            (assignment_id, student_id),
         ).fetchone()
         if row is None:
             return None
@@ -40,29 +40,29 @@ class SqliteGradeStore:
 
     def upsert(
         self,
-        assessment_id: int,
+        assignment_id: int,
         student_id: int,
         points_awarded: Decimal,
         updated_at: datetime,
         expected_version: int | None,
     ) -> Grade:
-        existing = self.get(assessment_id=assessment_id, student_id=student_id)
+        existing = self.get(assignment_id=assignment_id, student_id=student_id)
         if existing is None:
             self._conn.execute(
                 """
                 INSERT INTO grades(
-                    assessment_id, student_id, points_awarded,
+                    assignment_id, student_id, points_awarded,
                     updated_at, version
                 ) VALUES (?, ?, ?, ?, 1)
                 """,
                 (
-                    assessment_id,
+                    assignment_id,
                     student_id,
                     str(points_awarded),
                     updated_at.isoformat(),
                 ),
             )
-            created = self.get(assessment_id=assessment_id, student_id=student_id)
+            created = self.get(assignment_id=assignment_id, student_id=student_id)
             if created is None:
                 raise RuntimeError("grade insert succeeded but row was not found")
             return created
@@ -79,13 +79,13 @@ class SqliteGradeStore:
             SET points_awarded = ?,
                 updated_at = ?,
                 version = ?
-            WHERE assessment_id = ? AND student_id = ? AND version = ?
+            WHERE assignment_id = ? AND student_id = ? AND version = ?
             """,
             (
                 str(points_awarded),
                 updated_at.isoformat(),
                 target_version,
-                assessment_id,
+                assignment_id,
                 student_id,
                 existing.version,
             ),
@@ -93,7 +93,7 @@ class SqliteGradeStore:
         if cursor.rowcount == 0:
             raise GradeConflictError("grade update conflict: row changed during update")
 
-        updated = self.get(assessment_id=assessment_id, student_id=student_id)
+        updated = self.get(assignment_id=assignment_id, student_id=student_id)
         if updated is None:
             raise RuntimeError("grade update succeeded but row was not found")
         return updated
@@ -101,12 +101,12 @@ class SqliteGradeStore:
     def list_for_course(self, course_id: int) -> list[Grade]:
         rows = self._conn.execute(
             """
-            SELECT g.assessment_id, g.student_id, g.points_awarded,
+            SELECT g.assignment_id, g.student_id, g.points_awarded,
                    g.updated_at, g.version
             FROM grades g
-            INNER JOIN assessments a ON a.id = g.assessment_id
+            INNER JOIN assignments a ON a.id = g.assignment_id
             WHERE a.course_id = ?
-            ORDER BY g.student_id ASC, g.assessment_id ASC
+            ORDER BY g.student_id ASC, g.assignment_id ASC
             """,
             (course_id,),
         ).fetchall()

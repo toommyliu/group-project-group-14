@@ -5,7 +5,7 @@ from typing import Optional
 
 from opengrader.core import get_database_path
 from opengrader.core.courses import (
-    AssessmentNotFoundError,
+    AssignmentNotFoundError,
     CourseAlreadyExistsError,
     GradeConflictError,
     InvalidPointsError,
@@ -64,22 +64,22 @@ def select_course_id(services) -> Optional[int]:
         return None
 
 
-def select_assessment_id(services, course_id: int) -> Optional[int]:
-    assessments = services.assessments.list_assessments(course_id)
-    if not assessments:
-        print("No assessments found for this course.")
+def select_assignment_id(services, course_id: int) -> Optional[int]:
+    assignments = services.assignments.list_assignments(course_id)
+    if not assignments:
+        print("No assignments found for this course.")
         return None
-    print("Assessments:")
-    for a in assessments:
+    print("Assignments:")
+    for a in assignments:
         due = a.due_at.isoformat() if a.due_at else "none"
         print(f"  {a.id}: {a.type} {a.title} (max {a.max_points}, due {due})")
-    aid = safe_input("Enter assessment ID: ")
+    aid = safe_input("Enter assignment ID: ")
     if not aid:
         return None
     try:
         return int(aid)
     except ValueError:
-        print("Invalid assessment id")
+        print("Invalid assignment id")
         return None
 
 
@@ -142,8 +142,8 @@ def run_cli() -> None:
             print("2) Create course")
             print("3) Enroll student(s)")
             print("4) List roster")
-            print("5) Create assessment")
-            print("6) List assessments")
+            print("5) Create assignment")
+            print("6) List assignments")
             print("7) Assign grade")
             print("8) Show gradebook")
             print("9) Exit")
@@ -204,7 +204,7 @@ def run_cli() -> None:
                 course_id = select_course_id(services)
                 if not course_id:
                     continue
-                assessment_type = safe_input("Assessment type: ")
+                assignment_type = safe_input("Assignment type: ")
                 title = safe_input("Title: ")
                 max_points_raw = safe_input("Max points: ")
                 due_raw = safe_input("Due date (ISO, blank for none): ")
@@ -214,28 +214,28 @@ def run_cli() -> None:
                     print("Invalid max points")
                     continue
                 due_at = parse_due_date(due_raw)
-                services.assessments.create_assessment(
+                services.assignments.create_assignment(
                     course_id=course_id,
-                    assessment_type=assessment_type,
+                    assignment_type=assignment_type,
                     title=title,
                     max_points=max_points,
                     due_at=due_at,
                 )
-                print("Assessment created.")
+                print("Assignment created.")
             elif choice == "6":
                 course_id = select_course_id(services)
                 if not course_id:
                     continue
-                assessments = services.assessments.list_assessments(course_id)
-                for a in assessments:
+                assignments = services.assignments.list_assignments(course_id)
+                for a in assignments:
                     due = a.due_at.isoformat() if a.due_at else "<unset>"
                     print(f"{a.id}: {a.type} {a.title} max {a.max_points} due {due}")
             elif choice == "7":
                 course_id = select_course_id(services)
                 if not course_id:
                     continue
-                assessment_id = select_assessment_id(services, course_id)
-                if not assessment_id:
+                assignment_id = select_assignment_id(services, course_id)
+                if not assignment_id:
                     continue
                 student_id = select_student_id(services, course_id)
                 if not student_id:
@@ -250,7 +250,7 @@ def run_cli() -> None:
                 expected_version = int(version_raw) if version_raw.isdigit() else None
                 try:
                     assigned = services.grading.assign_grade(
-                        assessment_id=assessment_id,
+                        assignment_id=assignment_id,
                         student_id=student_id,
                         points_awarded=points,
                         expected_version=expected_version,
@@ -258,8 +258,8 @@ def run_cli() -> None:
                     print(f"Grade assigned. version={assigned.version}")
                 except StudentNotEnrolledError:
                     print("Student not enrolled")
-                except AssessmentNotFoundError:
-                    print("Assessment not found")
+                except AssignmentNotFoundError:
+                    print("Assignment not found")
                 except InvalidPointsError:
                     print("Invalid points")
                 except GradeConflictError:

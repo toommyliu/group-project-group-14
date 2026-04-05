@@ -3,16 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from opengrader.core.courses.contracts.transaction import CoursesTransaction
-from opengrader.core.courses.adapters.sqlite.connection import (
-    create_sqlite_connection,
-)
+from opengrader.core.courses.adapters.sqlite.connection import create_sqlite_connection
 from opengrader.core.courses.adapters.sqlite.stores import (
-    SqliteAssessmentStore,
+    SqliteAssignmentStore,
     SqliteCourseStore,
     SqliteEnrollmentStore,
     SqliteGradeStore,
     SqliteStudentStore,
 )
+
 
 
 class SqliteCoursesTransaction(CoursesTransaction):
@@ -23,7 +22,7 @@ class SqliteCoursesTransaction(CoursesTransaction):
         self.courses = None
         self.students = None
         self.enrollments = None
-        self.assessments = None
+        self.assignments = None
         self.grades = None
 
     def __enter__(self) -> "SqliteCoursesTransaction":
@@ -32,7 +31,7 @@ class SqliteCoursesTransaction(CoursesTransaction):
         self.courses = SqliteCourseStore(self._conn)
         self.students = SqliteStudentStore(self._conn)
         self.enrollments = SqliteEnrollmentStore(self._conn)
-        self.assessments = SqliteAssessmentStore(self._conn)
+        self.assignments = SqliteAssignmentStore(self._conn)
         self.grades = SqliteGradeStore(self._conn)
         return self
 
