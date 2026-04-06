@@ -13,7 +13,7 @@ from opengrader.core import get_database_path
 from opengrader.tui.main import run_app
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.data import AssignmentSummary, StudentSummary
-from opengrader.tui.ui.widgets import ContentList, SelectionDetails
+from opengrader.tui.ui.widgets import IndexedListView, SelectionDetails
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -118,7 +118,7 @@ def test_sidebar_subtitles_show_current_index_out_of_total() -> None:
             await pilot.pause()
 
             course_list = app.get_home_screen().query_one(
-                "#home-course-list", ContentList
+                "#home-course-list", IndexedListView
             )
             assert course_list.border_subtitle == "1 of 2"
 
@@ -126,10 +126,10 @@ def test_sidebar_subtitles_show_current_index_out_of_total() -> None:
             await pilot.pause()
 
             assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ContentList
+                "#home-assignment-list", IndexedListView
             )
             student_list = app.get_home_screen().query_one(
-                "#home-student-list", ContentList
+                "#home-student-list", IndexedListView
             )
             assert assignment_list.border_subtitle == "0 of 2"
             assert student_list.border_subtitle == "0 of 2"
@@ -397,7 +397,7 @@ def test_switching_course_updates_sidebar_totals() -> None:
             await pilot.pause()
 
             assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ContentList
+                "#home-assignment-list", IndexedListView
             )
             assert assignment_list.border_subtitle.endswith("of 2")
 

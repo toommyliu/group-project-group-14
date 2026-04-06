@@ -2,10 +2,11 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import ListView
 
-from .assignment_list import AssignmentList
-from .content_list import ContentList
-from .course_list import CourseList
-from .student_list import StudentList
+from .assignment_pane import AssignmentPane
+from .tabbed_list_pane import IndexedListView, TabbedListPane
+from .course_pane import CoursePane
+from .tabbed_pane import TabbedPane
+from .student_pane import StudentPane
 
 
 class HomeSidebar(Vertical):
@@ -16,93 +17,121 @@ class HomeSidebar(Vertical):
         background: $background;
     }
 
-    HomeSidebar > ListView {
+    HomeSidebar > ListPane {
         width: 1fr;
     }
 
-    #home-course-list {
-        height: 1fr;
-    }
-
-    #home-assignment-list,
-    #home-student-list {
+    #home-course-pane,
+    #home-assignment-pane,
+    #home-student-pane {
         height: 1fr;
     }
     """
 
-    def compose(self) -> ComposeResult:
-        yield CourseList(id="home-course-list")
-        yield AssignmentList(id="home-assignment-list")
-        yield StudentList(id="home-student-list")
-
-    def on_mount(self) -> None:
-        self.refresh_index_subtitles()
-
-    def course_list(self) -> ContentList:
-        return self.query_one("#home-course-list", ContentList)
-
-    def assignment_list(self) -> ContentList:
-        return self.query_one("#home-assignment-list", ContentList)
-
-    def student_list(self) -> ContentList:
-        return self.query_one("#home-student-list", ContentList)
-
     def __init__(self, **kwargs: object) -> None:
         self._content_shown = False
-        super().__init__(**kwargs) # pyright: ignore[reportArgumentType]
+        super().__init__(**kwargs)  # pyright: ignore[reportArgumentType]
+
+    def compose(self) -> ComposeResult:
+        yield CoursePane(id="home-course-list", pane_id="home-course-pane")
+        yield AssignmentPane(id="home-assignment-list", pane_id="home-assignment-pane")
+        yield StudentPane(id="home-student-list", pane_id="home-student-pane")
+
+    def on_mount(self) -> None:
+        self.set_pane_size_units(courses=1, assignments=1, students=1)
+        self.refresh_index_subtitles()
+
+    def course_pane(self) -> CoursePane:
+        return self.query_one("#home-course-pane", CoursePane)
+
+    def assignment_pane(self) -> AssignmentPane:
+        return self.query_one("#home-assignment-pane", AssignmentPane)
+
+    def student_pane(self) -> StudentPane:
+        return self.query_one("#home-student-pane", StudentPane)
+
+    def course_list(self) -> IndexedListView:
+        return self.course_pane().primary_list()
+
+    def assignment_list(self) -> IndexedListView:
+        return self.assignment_pane().primary_list()
+
+    def student_list(self) -> IndexedListView:
+        return self.student_pane().primary_list()
 
     def content_visible(self) -> bool:
         return self._content_shown
 
     def show_content_sections(self) -> None:
         self._content_shown = True
-        self.assignment_list().display = True
-        self.student_list().display = True
+        self.assignment_pane().display = True
+        self.student_pane().display = True
         self.refresh_index_subtitles()
 
     def focus_courses(self) -> None:
-        lv = self.course_list()
-        if len(lv.children) > 0:
-            lv.index = 0
-        lv.focus()
-        self.refresh_index_subtitles()
+        self._focus_list(self.course_list(), set_first_row=True)
 
     def focus_assignments(self) -> None:
         lv = self.assignment_list()
         if not lv.display:
             return
-        lv.focus()
-        if lv.highlighted_child is None and len(lv.children) > 0:
-            lv.index = 0
-        self.refresh_index_subtitles()
+        self._focus_list(lv, set_first_row=False)
 
     def focus_students(self) -> None:
         lv = self.student_list()
         if not lv.display:
             return
-        lv.focus()
-        if lv.highlighted_child is None and len(lv.children) > 0:
-            lv.index = 0
-        self.refresh_index_subtitles()
+        self._focus_list(lv, set_first_row=False)
 
     def focused_pane(self) -> str | None:
-        if self.course_list().has_focus:
+        if self.course_pane().has_focus_within:
             return "courses"
-        if self.assignment_list().has_focus:
+        if self.assignment_pane().has_focus_within:
             return "assignments"
-        if self.student_list().has_focus:
+        if self.student_pane().has_focus_within:
             return "students"
         return None
+
+    def focused_tabbed_pane(self) -> TabbedPane | None:
+        for pane in (
+            self.course_pane(),
+            self.assignment_pane(),
+            self.student_pane(),
+        ):
+            if pane.has_focus_within:
+                return pane
+        return None
+
+    def set_pane_size_units(
+        self,
+        *,
+        courses: int,
+        assignments: int,
+        students: int,
+    ) -> None:
+        self.course_pane().set_size_units(courses)
+        self.assignment_pane().set_size_units(assignments)
+        self.student_pane().set_size_units(students)
 
     def refresh_index_subtitles(self) -> None:
         self.call_after_refresh(self._refresh_index_subtitles_now)
 
+    def sync_pane_focus_classes(self) -> None:
+        for pane in (self.course_pane(), self.assignment_pane(), self.student_pane()):
+            pane.sync_focus_class()
+
     def _refresh_index_subtitles_now(self) -> None:
-        for lv in (self.course_list(), self.assignment_list(), self.student_list()):
-            lv.refresh_index_subtitle()
+        for pane in (self.course_pane(), self.assignment_pane(), self.student_pane()):
+            pane.refresh_index_subtitle()
 
     def on_list_view_highlighted(self, _event: ListView.Highlighted) -> None:
         self.refresh_index_subtitles()
 
     def on_list_view_selected(self, _event: ListView.Selected) -> None:
+        self.refresh_index_subtitles()
+
+    def _focus_list(self, lv: IndexedListView, *, set_first_row: bool) -> None:
+        if len(lv.children) > 0 and (set_first_row or lv.highlighted_child is None):
+            lv.index = 0
+        lv.focus()
         self.refresh_index_subtitles()

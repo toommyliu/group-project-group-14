@@ -71,6 +71,21 @@ class HomeController:
 
     def on_course_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
+        course_id = self._numeric_id(item.item_id)
+
+        if (
+            home.content_visible()
+            and self._state.selection.course_item_id == item.item_id
+        ):
+            assignment_count = len(self._data_provider.list_assignments(course_id))
+            student_count = len(self._data_provider.list_students(course_id))
+            home.show_course_details(
+                item,
+                assignment_count=assignment_count,
+                student_count=student_count,
+            )
+            home.set_status(f"Course: {item.label}")
+            return
 
         self._select_course(item)
         assignments, students = self._ensure_course_data_loaded(item)
@@ -186,7 +201,7 @@ class HomeController:
         home.focus_courses()
         item = home.selected_course()
         if item is not None:
-            home.set_status(f"Course: {item.label}")
+            self.on_course_highlighted(item)
 
     def focus_assignments_pane(self) -> None:
         home = self._app.get_home_screen()
@@ -203,8 +218,18 @@ class HomeController:
         if not home.content_visible():
             home.set_status("Select a course first.")
             return
+
         home.focus_students()
         item = home.selected_student()
+        if item is None:
+            selected_student_id = self._state.selection.student_item_id
+            if selected_student_id is not None:
+                course_id = self._state.selection.course_id
+                candidates = self._student_items(
+                    self._data_provider.list_students(course_id)
+                )
+                item = next((student for student in candidates if student.item_id == selected_student_id), None)
+
         if item is not None:
             self.on_student_highlighted(item)
 
@@ -312,28 +337,31 @@ class HomeController:
         )
 
     def details_next_tab(self) -> None:
-        home = self._app.get_home_screen()
-        details = home.query_one("#home-selection-details")
-        if hasattr(details, "next_tab"):
-            details.next_tab()
+        pane = self._focused_tabbed_pane()
+        if pane is not None:
+            pane.next_tab()
 
     def details_prev_tab(self) -> None:
-        home = self._app.get_home_screen()
-        details = home.query_one("#home-selection-details")
-        if hasattr(details, "prev_tab"):
-            details.prev_tab()
+        pane = self._focused_tabbed_pane()
+        if pane is not None:
+            pane.prev_tab()
 
     def details_next_page(self) -> None:
-        home = self._app.get_home_screen()
-        details = home.query_one("#home-selection-details")
-        if hasattr(details, "next_page"):
-            details.next_page()
+        pane = self._focused_tabbed_pane()
+        if pane is not None:
+            pane.next_page()
 
     def details_prev_page(self) -> None:
+        pane = self._focused_tabbed_pane()
+        if pane is not None:
+            pane.prev_page()
+
+    def _focused_tabbed_pane(self):
         home = self._app.get_home_screen()
-        details = home.query_one("#home-selection-details")
-        if hasattr(details, "prev_page"):
-            details.prev_page()
+        getter = getattr(home, "focused_tabbed_pane", None)
+        if callable(getter):
+            return getter()
+        return None
 
     def create(self) -> None:
         home = self._app.get_home_screen()

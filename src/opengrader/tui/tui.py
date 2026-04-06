@@ -65,7 +65,7 @@ class TuiApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.home_controller.initialize()
+        self.call_after_refresh(self.home_controller.initialize)
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
