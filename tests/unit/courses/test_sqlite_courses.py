@@ -309,13 +309,13 @@ def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None
     current = services.assignment_templates.get_assignment_template(assignment.id)
     assert current is not None
     assert current.id == created.id
-    assert current.template_pdf_relpath.startswith(
+    assert current.template_pdf_relpath == (
         "courses/cmpe-195-senior-design-spring-2026-01/"
-        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}/"
+        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}.pdf"
     )
-    assert current.spec_json_relpath.startswith(
+    assert current.spec_json_relpath == (
         "courses/cmpe-195-senior-design-spring-2026-01/"
-        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}/"
+        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}.spec.json"
     )
 
 

@@ -36,7 +36,7 @@ def _assignment_directory_name(assignment_id: int, assignment_title: str) -> str
     return f"{assignment_id}-{_slugify(assignment_title)}"
 
 
-def _template_directory_name(template_id: int, template_name: str) -> str:
+def _template_storage_stem(template_id: int, template_name: str) -> str:
     return f"{_slugify(template_name)}-t{template_id}"
 
 
@@ -88,11 +88,11 @@ class AssignmentTemplateService:
             if not source_spec.exists():
                 raise FileNotFoundError(f"spec JSON not found: {source_spec}")
             spec_sha256 = _sha256_for(source_spec)
-            spec_filename = "spec.json"
+            spec_suffix = "spec.json"
         else:
             pending_spec_content = _pending_spec_json(name)
             spec_sha256 = _sha256_for_bytes(pending_spec_content.encode("utf-8"))
-            spec_filename = "spec.pending.json"
+            spec_suffix = "spec.pending.json"
 
         with self._transaction_factory() as transaction:
             assignment = transaction.assignments.get_by_id(assignment_id)
@@ -124,12 +124,12 @@ class AssignmentTemplateService:
                 / "assignments"
                 / _assignment_directory_name(assignment.id, assignment.title)
                 / "templates"
-                / _template_directory_name(created.id, name)
             )
             base_dir.mkdir(parents=True, exist_ok=True)
 
-            pdf_dest = base_dir / "template.pdf"
-            spec_dest = base_dir / spec_filename
+            template_stem = _template_storage_stem(created.id, name)
+            pdf_dest = base_dir / f"{template_stem}.pdf"
+            spec_dest = base_dir / f"{template_stem}.{spec_suffix}"
 
             shutil.copyfile(source_pdf, pdf_dest)
             if source_spec is not None:

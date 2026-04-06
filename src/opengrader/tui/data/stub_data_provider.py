@@ -107,11 +107,11 @@ class StubDataProvider:
             id=1,
             course_id=1,
             name=name,
-            template_pdf_relpath=f"courses/cmpe-195/assignments/{assignment_id}-hw-1/templates/{name.lower().replace(' ', '-')}-t1/template.pdf",
+            template_pdf_relpath=f"courses/cmpe-195/assignments/{assignment_id}-hw-1/templates/{name.lower().replace(' ', '-')}-t1.pdf",
             spec_json_relpath=(
-                f"courses/cmpe-195/assignments/{assignment_id}-hw-1/templates/{name.lower().replace(' ', '-')}-t1/spec.json"
+                f"courses/cmpe-195/assignments/{assignment_id}-hw-1/templates/{name.lower().replace(' ', '-')}-t1.spec.json"
                 if spec_json_path is not None
-                else f"courses/cmpe-195/assignments/{assignment_id}-hw-1/templates/{name.lower().replace(' ', '-')}-t1/spec.pending.json"
+                else f"courses/cmpe-195/assignments/{assignment_id}-hw-1/templates/{name.lower().replace(' ', '-')}-t1.spec.pending.json"
             ),
             spec_pending=spec_json_path is None,
         )
@@ -129,11 +129,11 @@ class StubDataProvider:
                 name="Default Template",
                 template_pdf_relpath=(
                     "courses/cmpe-195-spring-2026/"
-                    "assignments/1-hw-1/templates/default-template-t1/template.pdf"
+                    "assignments/1-hw-1/templates/default-template-t1.pdf"
                 ),
                 spec_json_relpath=(
                     "courses/cmpe-195-spring-2026/"
-                    "assignments/1-hw-1/templates/default-template-t1/spec.json"
+                    "assignments/1-hw-1/templates/default-template-t1.spec.json"
                 ),
                 spec_pending=False,
             )
@@ -168,11 +168,11 @@ class StubDataProvider:
             name="Default Template",
             template_pdf_relpath=(
                 "courses/cmpe-195-spring-2026/"
-                "assignments/1-hw-1/templates/default-template-t1/template.pdf"
+                "assignments/1-hw-1/templates/default-template-t1.pdf"
             ),
             spec_json_relpath=(
                 "courses/cmpe-195-spring-2026/"
-                "assignments/1-hw-1/templates/default-template-t1/spec.json"
+                "assignments/1-hw-1/templates/default-template-t1.spec.json"
             ),
             spec_pending=False,
         )
@@ -190,11 +190,11 @@ class StubDataProvider:
                 name="Default Template",
                 template_pdf_relpath=(
                     "courses/cmpe-195-spring-2026/"
-                    "assignments/1-hw-1/templates/default-template-t1/template.pdf"
+                    "assignments/1-hw-1/templates/default-template-t1.pdf"
                 ),
                 spec_json_relpath=(
                     "courses/cmpe-195-spring-2026/"
-                    "assignments/1-hw-1/templates/default-template-t1/spec.json"
+                    "assignments/1-hw-1/templates/default-template-t1.spec.json"
                 ),
                 spec_pending=False,
             )

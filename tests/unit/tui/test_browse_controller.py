@@ -152,17 +152,17 @@ class TemplateFlowProvider(FakeDataProvider):
             template_pdf_relpath=(
                 "courses/cmpe-195-spring-2026/"
                 f"assignments/{assignment_id}-hw-1/templates/"
-                f"{name.lower().replace(' ', '-')}-t{template_id}/template.pdf"
+                f"{name.lower().replace(' ', '-')}-t{template_id}.pdf"
             ),
             spec_json_relpath=(
                 "courses/cmpe-195-spring-2026/"
                 f"assignments/{assignment_id}-hw-1/templates/"
-                f"{name.lower().replace(' ', '-')}-t{template_id}/spec.json"
+                f"{name.lower().replace(' ', '-')}-t{template_id}.spec.json"
                 if spec_json_path is not None
                 else (
                     "courses/cmpe-195-spring-2026/"
                     f"assignments/{assignment_id}-hw-1/templates/"
-                    f"{name.lower().replace(' ', '-')}-t{template_id}/spec.pending.json"
+                    f"{name.lower().replace(' ', '-')}-t{template_id}.spec.pending.json"
                 )
             ),
             spec_pending=spec_json_path is None,
