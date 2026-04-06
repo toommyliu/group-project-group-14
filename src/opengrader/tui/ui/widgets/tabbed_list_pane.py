@@ -17,6 +17,7 @@ class IndexedListView(ListView):
         border-title-align: left;
         border-subtitle-color: $text-muted;
         border-subtitle-align: right;
+        scrollbar-size: 0 0;
     }
     IndexedListView:focus {
         background: transparent !important;
