@@ -53,7 +53,7 @@ class SelectionDetails(TabbedPane):
                 student_count=student_count,
             )
 
-        self.set_tabs([TabbedPaneTab(label="Details", build=_build_details)])
+        self.set_tabs([TabbedPaneTab(label="", build=_build_details)])
 
     def show_assignment(
         self,
@@ -67,7 +67,7 @@ class SelectionDetails(TabbedPane):
         def _build_details() -> Widget:
             return AssignmentDetail(assignment, template_hint=template_hint)
 
-        tabs: list[TabbedPaneTab] = [TabbedPaneTab(label="Details", build=_build_details)]
+        tabs: list[TabbedPaneTab] = [TabbedPaneTab(label="", build=_build_details)]
 
         if template_tabs:
             for tab_label, pdf_path in template_tabs:

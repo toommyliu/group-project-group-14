@@ -92,6 +92,11 @@ class TabbedPane(Vertical):
         self._sync_chrome()
 
     def set_tabs(self, tabs: list[TabbedPaneTab]) -> None:
+        if self.is_mounted:
+            content = self.query_one(".pane-tab-content", Container)
+            for child in list(content.children):
+                child.remove()
+
         self._tabs = list(tabs)
         self._tab_widgets.clear()
         self._active_tab_index = 0
@@ -173,21 +178,17 @@ class TabbedPane(Vertical):
 
         content = self.query_one(".pane-tab-content", Container)
         widget = self._active_widget()
-        children = list(content.children)
 
-        if widget is not None and len(children) == 1 and children[0] is widget:
-            self._sync_chrome()
-            self._sync_focus_class()
-            return
-
-        for child in children:
-            child.remove()
-
-        if widget is not None and widget.parent is not content:
+        if widget is not None and widget not in content.children:
             content.mount(widget)
+
+        for child in content.children:
+            child.display = child is widget
 
         self._sync_chrome()
         self._sync_focus_class()
+        # TODO: look into more efficient ways to update...
+        self.refresh(layout=True)
 
     def _sync_chrome(self) -> None:
         self.border_title = self._build_border_title()
@@ -199,16 +200,26 @@ class TabbedPane(Vertical):
     def _build_border_title(self) -> str:
         if not self._tabs:
             return self._title
+
         if len(self._tabs) == 1 and not self._show_single_tab:
-            return self._title + f" {escape(self._tabs[0].label)}"
+            label = escape(self._tabs[0].label)
+            return self._title if not label else self._title + f" {label}"
+
+        visible_tabs = [
+            (index, tab)
+            for index, tab in enumerate(self._tabs)
+            if tab.label
+        ]
+        if not visible_tabs:
+            return self._title
 
         tab_markup: list[str] = []
-        for index, tab in enumerate(self._tabs):
-            if index > 0:
+        for display_index, (index, tab) in enumerate(visible_tabs):
+            if display_index > 0:
                 tab_markup.append("[$text-muted] - [/]")
             tab_label = escape(tab.label)
             if index == self._active_tab_index:
-                tab_markup.append(f"{tab_label}")
+                tab_markup.append(tab_label)
             else:
                 tab_markup.append(f"[$text-muted]{tab_label}[/]")
 
