@@ -26,6 +26,18 @@ class IndexedListView(ListView):
         text-style: none;
     }
 
+    IndexedListView > ListItem.-hovered {
+        color: $foreground;
+        background: transparent !important;
+        text-style: none;
+    }
+
+    IndexedListView:focus > ListItem.-hovered {
+        color: $foreground;
+        background: transparent !important;
+        text-style: none;
+    }
+
     IndexedListView:focus {
         background: transparent !important;
         border-title-color: $accent;
@@ -61,14 +73,32 @@ class IndexedListView(ListView):
 
         if self.highlighted_child is not None:
             self.remember_highlighted_index()
+            self.normalize_highlight_classes()
             return
 
         if self._remembered_index is not None:
             self.index = min(self._remembered_index, len(self.children) - 1)
+            self.normalize_highlight_classes()
             return
 
         if fallback_first:
             self.index = 0
+            self.normalize_highlight_classes()
+
+    def normalize_highlight_classes(self) -> None:
+        # TODO: don't know how to repro this
+        # but the current child maintains highlight so
+        # we just force it to be correct based on the index or highlighted_child
+        if len(self.children) == 0:
+            return
+
+        target = self.highlighted_child
+        if target is None and isinstance(self.index, int):
+            if 0 <= self.index < len(self.children):
+                target = list(self.children)[self.index]
+
+        for child in self.children:
+            child.set_class(child is target, "-highlight")
 
     def current_index_subtitle(self) -> str:
         total = len(self.children)

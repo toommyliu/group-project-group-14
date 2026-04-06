@@ -288,6 +288,14 @@ class TabbedPane(Vertical):
             ):
                 active_widget.index = 0
 
+            normalize_highlight_classes = getattr(
+                active_widget,
+                "normalize_highlight_classes",
+                None,
+            )
+            if callable(normalize_highlight_classes):
+                normalize_highlight_classes()
+
         if (
             active_widget is not None
             and active_widget.can_focus

@@ -131,11 +131,13 @@ class HomeSidebar(Vertical):
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if isinstance(event.list_view, IndexedListView):
             event.list_view.remember_highlighted_index()
+            event.list_view.normalize_highlight_classes()
         self.refresh_index_subtitles()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.list_view, IndexedListView):
             event.list_view.remember_highlighted_index()
+            event.list_view.normalize_highlight_classes()
         self.refresh_index_subtitles()
 
     def _focus_list(
@@ -151,6 +153,7 @@ class HomeSidebar(Vertical):
                 if nav is not None and getattr(nav, "item_id", None) == item_id:
                     lv.index = index
                     lv.remember_highlighted_index()
+                    lv.normalize_highlight_classes()
                     lv.focus()
                     self.refresh_index_subtitles()
                     return
@@ -161,5 +164,6 @@ class HomeSidebar(Vertical):
             lv.ensure_focus_index(fallback_first=True)
 
         lv.remember_highlighted_index()
+        lv.normalize_highlight_classes()
         lv.focus()
         self.refresh_index_subtitles()

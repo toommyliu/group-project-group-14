@@ -176,6 +176,56 @@ def test_clicking_pane_title_selects_first_item_when_none_highlighted() -> None:
     asyncio.run(run())
 
 
+def test_course_list_never_has_multiple_highlighted_rows() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            course_list = app.get_home_screen().query_one(
+                "#home-course-list", ListView
+            )
+
+            def highlighted_count() -> int:
+                return sum(
+                    1
+                    for child in course_list.children
+                    if child.has_class("-highlight")
+                )
+
+            assert highlighted_count() <= 1
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert highlighted_count() <= 1
+
+            await pilot.press("up")
+            await pilot.pause()
+            assert highlighted_count() <= 1
+
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            await pilot.press("left")
+            await pilot.pause()
+            assert highlighted_count() <= 1
+
+            await pilot.press("2")
+            await pilot.pause()
+            await pilot.press("0")
+            await pilot.pause()
+            await pilot.press("1")
+            await pilot.pause()
+            assert highlighted_count() <= 1
+
+    asyncio.run(run())
+
+
 def test_refocusing_pane_restores_previous_highlighted_index() -> None:
     async def run() -> None:
         app = TuiApp(
