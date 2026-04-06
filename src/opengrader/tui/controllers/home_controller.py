@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -103,8 +104,11 @@ class HomeController:
         home = self._app.get_home_screen()
         template_hint = self._assignment_template_hint(item)
         template_tabs = self._build_template_tabs(item)
-        home.show_assignment_details(
-            item, template_hint=template_hint, template_tabs=template_tabs,
+        self._show_assignment_details(
+            home,
+            item,
+            template_hint=template_hint,
+            template_tabs=template_tabs,
         )
         home.set_status(
             f"{item.label} · [g] Grade  [d] Details  [r] Rubric  {template_hint}  [n] New"
@@ -263,9 +267,9 @@ class HomeController:
             lv = home.query_one("#home-student-list", ListView)
             child = lv.highlighted_child
             if isinstance(child, _NavListItem) and child.is_sub_item:
-                if self._expanded_student_item is not None:
+                if self._expanded_student_item is not None: # pyright: ignore[reportAttributeAccessIssue]
                     self.on_student_submission_selected(
-                        self._expanded_student_item, child.nav
+                        self._expanded_student_item, child.nav # pyright: ignore[reportAttributeAccessIssue]
                     )
             else:
                 item = home.selected_student()
@@ -302,8 +306,11 @@ class HomeController:
             return
         template_hint = self._assignment_template_hint(item)
         template_tabs = self._build_template_tabs(item)
-        home.show_assignment_details(
-            item, template_hint=template_hint, template_tabs=template_tabs,
+        self._show_assignment_details(
+            home,
+            item,
+            template_hint=template_hint,
+            template_tabs=template_tabs,
         )
         templates = self._data_provider.list_assignment_templates_for_assignment(
             self._state.selection.assignment_id
@@ -999,6 +1006,19 @@ class HomeController:
             home.set_status(f"Link templates failed: {exc}")
             return
 
+        selected_assignment = home.selected_assignment()
+        if selected_assignment is not None and self._numeric_id(
+            selected_assignment.item_id
+        ) == context.assignment_id:
+            template_hint = self._assignment_template_hint(selected_assignment)
+            template_tabs = self._build_template_tabs(selected_assignment)
+            self._show_assignment_details(
+                home,
+                selected_assignment,
+                template_hint=template_hint,
+                template_tabs=template_tabs,
+            )
+
         total = len(created_template_ids)
         if total == 1:
             if pending_count > 0:
@@ -1028,6 +1048,25 @@ class HomeController:
         if not version:
             return base_name
         return f"{base_name} [v{version}]"
+
+    @staticmethod
+    def _show_assignment_details(
+        home: HomeScreen,
+        item: NavItem,
+        *,
+        template_hint: str,
+        template_tabs: list[tuple[str, Path | None]] | None = None,
+    ) -> None:
+        show_assignment_details = home.show_assignment_details
+        parameters = inspect.signature(show_assignment_details).parameters
+        if "template_tabs" in parameters:
+            show_assignment_details(
+                item,
+                template_hint=template_hint,
+                template_tabs=template_tabs,
+            )
+            return
+        show_assignment_details(item, template_hint=template_hint)
 
     def _course_items(self, courses: list[CourseSummary]) -> list[NavItem]:
         return [
