@@ -19,11 +19,56 @@ class IndexedListView(ListView):
         border-subtitle-align: right;
         scrollbar-size: 0 0;
     }
+
+    IndexedListView > ListItem.-highlight {
+        color: $foreground;
+        background: transparent;
+        text-style: none;
+    }
+
     IndexedListView:focus {
         background: transparent !important;
         border-title-color: $accent;
     }
+
+    IndexedListView:focus > ListItem.-highlight {
+        color: $block-cursor-foreground;
+        background: $block-cursor-background;
+        text-style: $block-cursor-text-style;
+    }
     """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self._remembered_index: int | None = None
+
+    def remember_highlighted_index(self) -> None:
+        if self.highlighted_child is not None:
+            try:
+                self._remembered_index = list(self.children).index(
+                    self.highlighted_child
+                )
+                return
+            except ValueError:
+                pass
+
+        if isinstance(self.index, int) and self.index >= 0:
+            self._remembered_index = self.index
+
+    def ensure_focus_index(self, *, fallback_first: bool = True) -> None:
+        if len(self.children) == 0:
+            return
+
+        if self.highlighted_child is not None:
+            self.remember_highlighted_index()
+            return
+
+        if self._remembered_index is not None:
+            self.index = min(self._remembered_index, len(self.children) - 1)
+            return
+
+        if fallback_first:
+            self.index = 0
 
     def current_index_subtitle(self) -> str:
         total = len(self.children)

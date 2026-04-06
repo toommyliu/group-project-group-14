@@ -13,7 +13,7 @@ from opengrader.core import get_database_path
 from opengrader.tui.main import run_app
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.data import AssignmentSummary, StudentSummary
-from opengrader.tui.ui.widgets import IndexedListView, SelectionDetails
+from opengrader.tui.ui.widgets import AssignmentPane, IndexedListView, SelectionDetails
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -141,6 +141,83 @@ def test_sidebar_subtitles_show_current_index_out_of_total() -> None:
             await pilot.press("down")
             await pilot.pause()
             assert assignment_list.border_subtitle == "2 of 2"
+
+    asyncio.run(run())
+
+
+def test_clicking_pane_title_selects_first_item_when_none_highlighted() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            assignment_pane = app.get_home_screen().query_one(
+                "#home-assignment-pane", AssignmentPane
+            )
+
+            assert assignment_list.highlighted_child is None
+
+            assignment_pane.action_pane_activate_tab(0)
+            await pilot.pause()
+
+            assert assignment_list.has_focus
+            assert assignment_list.index == 0
+            assert assignment_list.highlighted_child is not None
+
+    asyncio.run(run())
+
+
+def test_refocusing_pane_restores_previous_highlighted_index() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            course_list = app.get_home_screen().query_one(
+                "#home-course-list", ListView
+            )
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert course_list.index == 1
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert assignment_list.has_focus
+            assert assignment_list.index == 0
+
+            await pilot.press("down")
+            await pilot.pause()
+            assert assignment_list.index == 1
+
+            await pilot.press("left")
+            await pilot.pause()
+            assert course_list.has_focus
+            assert course_list.index == 1
+
+            await pilot.press("right")
+            await pilot.pause()
+            assert assignment_list.has_focus
+            assert assignment_list.index == 1
 
     asyncio.run(run())
 

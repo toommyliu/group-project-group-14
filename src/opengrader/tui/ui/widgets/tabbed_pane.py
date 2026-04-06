@@ -8,6 +8,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.widget import Widget
+from textual.widgets import ListView
 from textual.reactive import reactive
 
 @dataclass
@@ -276,6 +277,16 @@ class TabbedPane(Vertical):
 
     def _focus_active_widget(self) -> None:
         active_widget = self._active_widget()
+
+        if isinstance(active_widget, ListView):
+            ensure_focus_index = getattr(active_widget, "ensure_focus_index", None)
+            if callable(ensure_focus_index):
+                ensure_focus_index(fallback_first=True)
+            elif (
+                active_widget.highlighted_child is None
+                and len(active_widget.children) > 0
+            ):
+                active_widget.index = 0
 
         if (
             active_widget is not None

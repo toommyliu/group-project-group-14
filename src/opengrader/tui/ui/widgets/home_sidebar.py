@@ -71,7 +71,7 @@ class HomeSidebar(Vertical):
     def focus_courses(self, item_id: str | None = None) -> None:
         self._focus_list(
             self.course_list(),
-            set_first_row=True,
+            set_first_row=False,
             item_id=item_id,
         )
 
@@ -128,10 +128,14 @@ class HomeSidebar(Vertical):
         for pane in (self.course_pane(), self.assignment_pane(), self.student_pane()):
             pane.refresh_index_subtitle()
 
-    def on_list_view_highlighted(self, _event: ListView.Highlighted) -> None:
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if isinstance(event.list_view, IndexedListView):
+            event.list_view.remember_highlighted_index()
         self.refresh_index_subtitles()
 
-    def on_list_view_selected(self, _event: ListView.Selected) -> None:
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if isinstance(event.list_view, IndexedListView):
+            event.list_view.remember_highlighted_index()
         self.refresh_index_subtitles()
 
     def _focus_list(
@@ -146,11 +150,16 @@ class HomeSidebar(Vertical):
                 nav = getattr(child, "nav", None)
                 if nav is not None and getattr(nav, "item_id", None) == item_id:
                     lv.index = index
+                    lv.remember_highlighted_index()
                     lv.focus()
                     self.refresh_index_subtitles()
                     return
 
-        if len(lv.children) > 0 and (set_first_row or lv.highlighted_child is None):
+        if set_first_row and len(lv.children) > 0:
             lv.index = 0
+        else:
+            lv.ensure_focus_index(fallback_first=True)
+
+        lv.remember_highlighted_index()
         lv.focus()
         self.refresh_index_subtitles()
