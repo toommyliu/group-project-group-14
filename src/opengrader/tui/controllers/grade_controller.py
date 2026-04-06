@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from opengrader.tui.data import QuestionSeed, Provider
-from opengrader.tui.screens import GradeScreen, HomeScreen
+from opengrader.tui.ui.screens import GradeScreen, HomeScreen
 from opengrader.tui.state import (
     PAGE_GRADE,
     PAGE_HOME,
@@ -12,7 +12,7 @@ from opengrader.tui.state import (
     RubricOption,
     TuiWorkflowState,
 )
-from opengrader.tui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 class GradeApp(Protocol):

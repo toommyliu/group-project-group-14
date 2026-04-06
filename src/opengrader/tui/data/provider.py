@@ -4,6 +4,7 @@ from typing import Protocol
 
 from opengrader.tui.data.models import (
     AssignmentSummary,
+    AssignmentTemplateSummary,
     CourseSummary,
     QuestionSeed,
     StudentSummary,
@@ -47,3 +48,42 @@ class Provider(Protocol):
         middle_name: str | None,
         email: str | None,
     ) -> StudentSummary: ...
+
+    def create_assignment_template(
+        self,
+        *,
+        assignment_id: int,
+        name: str,
+        template_pdf_path: str,
+        spec_json_path: str | None = None,
+    ) -> AssignmentTemplateSummary: ...
+
+    def list_assignment_templates(
+        self,
+        course_id: int | None,
+    ) -> list[AssignmentTemplateSummary]: ...
+
+    def set_assignment_template(
+        self,
+        *,
+        assignment_id: int,
+        template_id: int,
+    ) -> None: ...
+
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None: ...
+
+    def get_assignment_template(
+        self,
+        assignment_id: int | None,
+    ) -> AssignmentTemplateSummary | None: ...
+
+    def list_assignment_templates_for_assignment(
+        self,
+        assignment_id: int | None,
+    ) -> list[AssignmentTemplateSummary]: ...

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.widgets import ContentSwitcher, Footer
+from textual.widgets import ContentSwitcher, Footer, Input
 
 from opengrader.tui.controllers import (
     GradeController,
@@ -13,7 +13,7 @@ from opengrader.tui.controllers.input_controller import (
     InputProfileName,
 )
 from opengrader.tui.data import SqliteProvider, Provider
-from opengrader.tui.screens import GradeScreen, HomeScreen
+from opengrader.tui.ui.screens import GradeScreen, HomeScreen
 from opengrader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 
@@ -65,7 +65,7 @@ class TuiApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.home_controller.initialize()
+        self.call_after_refresh(self.home_controller.initialize)
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
@@ -86,11 +86,20 @@ class TuiApp(App):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action != "dispatch_input":
             return True
+
         if len(parameters) != 2:
             return False
         profile_name, command = parameters
         if not isinstance(profile_name, str) or not isinstance(command, str):
             return False
+
+        if isinstance(self.focused, Input):
+            return False
+
+        # While any dialog is open, avoid dispatching keymaps to prevent unexpected interactions 
+        if len(self.screen_stack) > 1:
+            return False
+
         return self.input_controller.binding_available(profile_name, command)
 
     def on_home_screen_course_highlighted(
@@ -187,6 +196,38 @@ class TuiApp(App):
         self.input_controller.register(
             InputCommand.HOME_CREATE,
             self.home_controller.create,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_COURSES,
+            self.home_controller.focus_courses_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            self.home_controller.focus_assignments_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_STUDENTS,
+            self.home_controller.focus_students_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_FOCUS_DETAILS,
+            self.home_controller.focus_details_pane,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_NEXT_TAB,
+            self.home_controller.details_next_tab,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_PREV_TAB,
+            self.home_controller.details_prev_tab,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_NEXT_PAGE,
+            self.home_controller.details_next_page,
+        )
+        self.input_controller.register(
+            InputCommand.HOME_DETAILS_PREV_PAGE,
+            self.home_controller.details_prev_page,
         )
         self.input_controller.register(
             InputCommand.GRADE_NEXT_QUESTION,

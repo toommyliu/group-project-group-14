@@ -6,6 +6,7 @@ from typing import Protocol
 
 from opengrader.core.courses.domain.entities import (
     Assignment,
+    AssignmentTemplate,
     AssignmentType,
     Course,
     Enrollment,
@@ -52,6 +53,51 @@ class AssignmentStore(Protocol):
     def get_by_id(self, assignment_id: int) -> Assignment | None: ...
 
     def list_for_course(self, course_id: int) -> list[Assignment]: ...
+
+
+class AssignmentTemplateStore(Protocol):
+    def create(
+        self,
+        course_id: int,
+        name: str,
+        template_pdf_relpath: str,
+        spec_json_relpath: str,
+        template_sha256: str,
+        spec_sha256: str,
+    ) -> AssignmentTemplate: ...
+
+    def list_for_course(self, course_id: int) -> list[AssignmentTemplate]: ...
+
+    def get_by_id(self, template_id: int) -> AssignmentTemplate | None: ...
+
+    def update_paths(
+        self,
+        *,
+        template_id: int,
+        template_pdf_relpath: str,
+        spec_json_relpath: str,
+    ) -> None: ...
+
+    def set_assignment_template(
+        self,
+        assignment_id: int,
+        template_id: int,
+    ) -> None: ...
+
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None: ...
+
+    def list_for_assignment(self, assignment_id: int) -> list[AssignmentTemplate]: ...
+
+    def get_current_for_assignment(
+        self,
+        assignment_id: int,
+    ) -> AssignmentTemplate | None: ...
 
 
 class GradeStore(Protocol):

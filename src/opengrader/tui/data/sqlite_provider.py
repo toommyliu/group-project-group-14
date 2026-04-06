@@ -10,6 +10,7 @@ from opengrader.core.courses import (
 )
 from opengrader.tui.data.models import (
     AssignmentSummary,
+    AssignmentTemplateSummary,
     CourseSummary,
     QuestionSeed,
     StudentSummary,
@@ -27,6 +28,10 @@ class SqliteProvider:
         self._db_path = resolve_database_path(db_path)
         self._courses = build_sqlite_course_services(self._db_path)
         self._question_content = StubQuestionContent(default_image_path)
+
+    @staticmethod
+    def _spec_is_pending(spec_json_relpath: str) -> bool:
+        return spec_json_relpath.endswith(".pending.json")
 
     def list_courses(self) -> list[CourseSummary]:
         courses = self._courses.courses.list_courses()
@@ -140,3 +145,115 @@ class SqliteProvider:
             ],
         )[0]
         return StudentSummary(id=student.id, full_name=student.full_name)
+
+    def create_assignment_template(
+        self,
+        *,
+        assignment_id: int,
+        name: str,
+        template_pdf_path: str,
+        spec_json_path: str | None = None,
+    ) -> AssignmentTemplateSummary:
+        template = self._courses.assignment_templates.create_template(
+            assignment_id=assignment_id,
+            name=name,
+            source_template_pdf=template_pdf_path,
+            source_spec_json=spec_json_path,
+        )
+        return AssignmentTemplateSummary(
+            id=template.id,
+            course_id=template.course_id,
+            name=template.name,
+            template_pdf_relpath=template.template_pdf_relpath,
+            spec_json_relpath=template.spec_json_relpath,
+            spec_pending=self._spec_is_pending(template.spec_json_relpath),
+        )
+
+    def list_assignment_templates(
+        self,
+        course_id: int | None,
+    ) -> list[AssignmentTemplateSummary]:
+        if course_id is None:
+            return []
+        try:
+            templates = self._courses.assignment_templates.list_templates_for_course(
+                course_id
+            )
+        except CourseNotFoundError:
+            return []
+        return [
+            AssignmentTemplateSummary(
+                id=template.id,
+                course_id=template.course_id,
+                name=template.name,
+                template_pdf_relpath=template.template_pdf_relpath,
+                spec_json_relpath=template.spec_json_relpath,
+                spec_pending=self._spec_is_pending(template.spec_json_relpath),
+            )
+            for template in templates
+        ]
+
+    def set_assignment_template(
+        self,
+        *,
+        assignment_id: int,
+        template_id: int,
+    ) -> None:
+        self._courses.assignment_templates.set_assignment_template(
+            assignment_id=assignment_id,
+            template_id=template_id,
+        )
+
+    def replace_assignment_templates(
+        self,
+        *,
+        assignment_id: int,
+        template_ids: list[int],
+        current_template_id: int,
+    ) -> None:
+        self._courses.assignment_templates.replace_assignment_templates(
+            assignment_id=assignment_id,
+            template_ids=template_ids,
+            current_template_id=current_template_id,
+        )
+
+    def get_assignment_template(
+        self,
+        assignment_id: int | None,
+    ) -> AssignmentTemplateSummary | None:
+        if assignment_id is None:
+            return None
+        template = self._courses.assignment_templates.get_assignment_template(
+            assignment_id
+        )
+        if template is None:
+            return None
+        return AssignmentTemplateSummary(
+            id=template.id,
+            course_id=template.course_id,
+            name=template.name,
+            template_pdf_relpath=template.template_pdf_relpath,
+            spec_json_relpath=template.spec_json_relpath,
+            spec_pending=self._spec_is_pending(template.spec_json_relpath),
+        )
+
+    def list_assignment_templates_for_assignment(
+        self,
+        assignment_id: int | None,
+    ) -> list[AssignmentTemplateSummary]:
+        if assignment_id is None:
+            return []
+        templates = self._courses.assignment_templates.list_assignment_templates(
+            assignment_id
+        )
+        return [
+            AssignmentTemplateSummary(
+                id=template.id,
+                course_id=template.course_id,
+                name=template.name,
+                template_pdf_relpath=template.template_pdf_relpath,
+                spec_json_relpath=template.spec_json_relpath,
+                spec_pending=self._spec_is_pending(template.spec_json_relpath),
+            )
+            for template in templates
+        ]

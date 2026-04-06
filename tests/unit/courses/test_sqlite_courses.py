@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 
 import pytest
 
@@ -268,3 +269,80 @@ def test_assign_grade_rejects_unknown_assignment(tmp_path) -> None:
             student_id=1,
             points_awarded=1,
         )
+
+
+def test_assignment_templates_can_be_created_linked_and_loaded(tmp_path) -> None:
+    services = build_sqlite_course_services(tmp_path / "courses.db")
+    course = services.courses.create_course(
+        code="CMPE-195",
+        name="Senior Design",
+        term="Spring 2026",
+        section="01",
+    )
+    assignment = services.assignments.create_assignment(
+        course_id=course.id,
+        assignment_type="assignment",
+        title="HW 1",
+        max_points=100,
+    )
+
+    source_pdf = tmp_path / "sample-template.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n% template")
+    source_spec = tmp_path / "sample-spec.json"
+    source_spec.write_text(json.dumps({"schema_version": "1.0", "pages": []}))
+
+    created = services.assignment_templates.create_template(
+        assignment_id=assignment.id,
+        name="Template A",
+        source_template_pdf=source_pdf,
+        source_spec_json=source_spec,
+    )
+
+    listed = services.assignment_templates.list_templates_for_course(course.id)
+    assert [t.id for t in listed] == [created.id]
+    assert listed[0].name == "Template A"
+
+    services.assignment_templates.set_assignment_template(
+        assignment_id=assignment.id,
+        template_id=created.id,
+    )
+    current = services.assignment_templates.get_assignment_template(assignment.id)
+    assert current is not None
+    assert current.id == created.id
+    assert current.template_pdf_relpath == (
+        "courses/cmpe-195-senior-design-spring-2026-01/"
+        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}.pdf"
+    )
+    assert current.spec_json_relpath == (
+        "courses/cmpe-195-senior-design-spring-2026-01/"
+        f"assignments/{assignment.id}-hw-1/templates/template-a-t{created.id}.spec.json"
+    )
+
+
+def test_assignment_template_can_be_created_without_spec(tmp_path) -> None:
+    services = build_sqlite_course_services(tmp_path / "courses.db")
+    course = services.courses.create_course(
+        code="CMPE-195",
+        name="Senior Design",
+        term="Spring 2026",
+        section="01",
+    )
+
+    source_pdf = tmp_path / "sample-template.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4\n% template")
+
+    assignment = services.assignments.create_assignment(
+        course_id=course.id,
+        assignment_type="assignment",
+        title="HW Pending",
+        max_points=100,
+    )
+
+    created = services.assignment_templates.create_template(
+        assignment_id=assignment.id,
+        name="Template Pending Spec",
+        source_template_pdf=source_pdf,
+        source_spec_json=None,
+    )
+
+    assert created.spec_json_relpath.endswith("spec.pending.json")

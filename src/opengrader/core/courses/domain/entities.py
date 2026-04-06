@@ -87,6 +87,18 @@ class Assignment:
 
 
 @dataclass(frozen=True)
+class AssignmentTemplate:
+    id: int
+    course_id: int
+    name: str
+    template_pdf_relpath: str
+    spec_json_relpath: str
+    template_sha256: str
+    spec_sha256: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
 class Grade:
     assignment_id: int
     student_id: int

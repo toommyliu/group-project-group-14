@@ -4,8 +4,8 @@ from textual.message import Message
 from textual.widgets import Input, Label, ListItem, ListView, Rule, Static
 
 from opengrader.tui.state import StudentGradingRun
-from opengrader.tui.widgets.breadcrumb import Breadcrumb
-from opengrader.tui.widgets.response_viewer import ResponseViewer
+from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
+from opengrader.tui.ui.widgets.response_viewer import ResponseViewer
 
 
 class GradeScreen(Vertical):

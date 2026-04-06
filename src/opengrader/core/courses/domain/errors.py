@@ -14,6 +14,10 @@ class AssignmentNotFoundError(OpenGraderDomainError):
     pass
 
 
+class AssignmentTemplateNotFoundError(OpenGraderDomainError):
+    pass
+
+
 class InvalidAssignmentTypeError(OpenGraderDomainError):
     pass
 

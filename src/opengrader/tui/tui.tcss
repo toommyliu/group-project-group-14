@@ -1,76 +1,16 @@
+# https://textual.textualize.io/guide/design/#base-colors
+$accent: #81A1C1;
+$background: #181818;
+$foreground: #E4E4E4EB;
+
 #home-workspace {
     height: 1fr;
 }
 
-#home-course-list {
-    width: 32;
-    # border-right: solid $accent;
-}
-
-#home-content-tabs {
-    width: 1fr;
-    overflow: hidden hidden;
-}
-
-#home-content-tabs Tabs {
-    # height: 3;
-}
-
-#home-content-tabs Tabs #tabs-list > Tab,
-#home-content-tabs Tabs #tabs-list > Tab.-active {
-    padding: 0 2;
-    min-width: 0;
-    margin: 0 !important;
-    border: none !important;
-    outline: none !important;
-    # background: transparent !important;
-}
-
-#home-content-tabs Tabs #tabs-list,
-#home-content-tabs Tabs #tabs-list-bar {
-    width: auto;
-    min-width: 0;
-}
-
-#home-content-tabs Tabs #tabs-list-bar > Underline {
-    background: $background;
+#home-selection-details {
+    margin-left: 1;
 }
 
 .student-sub-item {
     color: $text-muted;
-}
-
-FormDialog, Dialog, ModalScreen {
-    align: center middle;
-}
-
-#dialog-panel {
-    width: 64;
-    max-width: 90%;
-    height: auto;
-    padding: 1 2;
-    background: $panel;
-}
-
-#dialog-title {
-    margin-bottom: 1;
-}
-
-.dialog-field-label {
-    margin-top: 1;
-}
-
-#dialog-error {
-    margin-top: 1;
-    color: $error;
-    min-height: 1;
-}
-
-#dialog-actions {
-    align-horizontal: right;
-    height: auto;
-}
-
-#dialog-actions Button {
-    margin-left: 1;
 }

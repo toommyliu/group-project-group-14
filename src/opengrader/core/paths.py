@@ -32,6 +32,10 @@ def get_logs_dir() -> Path:
     return get_home_dir() / "logs"
 
 
+def get_templates_dir() -> Path:
+    return get_data_dir() / "templates"
+
+
 def get_settings_path() -> Path:
     return get_config_dir() / "settings.toml"
 

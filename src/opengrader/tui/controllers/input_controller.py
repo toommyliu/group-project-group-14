@@ -22,6 +22,14 @@ class InputCommand(str, Enum):
     HOME_ASSIGNMENT_EDIT_RUBRIC = "home_assignment_edit_rubric"
     HOME_ASSIGNMENT_EDIT_TEMPLATE = "home_assignment_edit_template"
     HOME_CREATE = "home_create"
+    HOME_FOCUS_COURSES = "home_focus_courses"
+    HOME_FOCUS_ASSIGNMENTS = "home_focus_assignments"
+    HOME_FOCUS_STUDENTS = "home_focus_students"
+    HOME_FOCUS_DETAILS = "home_focus_details"
+    HOME_DETAILS_NEXT_TAB = "home_details_next_tab"
+    HOME_DETAILS_PREV_TAB = "home_details_prev_tab"
+    HOME_DETAILS_NEXT_PAGE = "home_details_next_page"
+    HOME_DETAILS_PREV_PAGE = "home_details_prev_page"
     GRADE_NEXT_QUESTION = "grade_next_question"
     GRADE_PREVIOUS_QUESTION = "grade_previous_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
@@ -152,6 +160,58 @@ STANDARD_PROFILE = InputProfile(
             "Create",
             (InputContext.HOME,),
             show=True,
+        ),
+        CommandBindingSpec(
+            "1",
+            InputCommand.HOME_FOCUS_COURSES,
+            "Focus Courses",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "2",
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            "Focus Assignments",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "3",
+            InputCommand.HOME_FOCUS_STUDENTS,
+            "Focus Students",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "0",
+            InputCommand.HOME_FOCUS_DETAILS,
+            "Focus Details",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "right_square_bracket",
+            InputCommand.HOME_DETAILS_NEXT_TAB,
+            "Next Tab",
+            (InputContext.HOME,),
+            key_display="]",
+        ),
+        CommandBindingSpec(
+            "left_square_bracket",
+            InputCommand.HOME_DETAILS_PREV_TAB,
+            "Prev Tab",
+            (InputContext.HOME,),
+            key_display="[",
+        ),
+        CommandBindingSpec(
+            "full_stop",
+            InputCommand.HOME_DETAILS_NEXT_PAGE,
+            "Next Page",
+            (InputContext.HOME,),
+            key_display=".",
+        ),
+        CommandBindingSpec(
+            "comma",
+            InputCommand.HOME_DETAILS_PREV_PAGE,
+            "Prev Page",
+            (InputContext.HOME,),
+            key_display=",",
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -319,6 +379,58 @@ VIM_PROFILE = InputProfile(
             "Create Course",
             (InputContext.HOME,),
             show=True,
+        ),
+        CommandBindingSpec(
+            "1",
+            InputCommand.HOME_FOCUS_COURSES,
+            "Focus Courses",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "2",
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            "Focus Assignments",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "3",
+            InputCommand.HOME_FOCUS_STUDENTS,
+            "Focus Students",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "4",
+            InputCommand.HOME_FOCUS_DETAILS,
+            "Focus Details",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "right_square_bracket",
+            InputCommand.HOME_DETAILS_NEXT_TAB,
+            "Next Tab",
+            (InputContext.HOME,),
+            key_display="]",
+        ),
+        CommandBindingSpec(
+            "left_square_bracket",
+            InputCommand.HOME_DETAILS_PREV_TAB,
+            "Prev Tab",
+            (InputContext.HOME,),
+            key_display="[",
+        ),
+        CommandBindingSpec(
+            "full_stop",
+            InputCommand.HOME_DETAILS_NEXT_PAGE,
+            "Next Page",
+            (InputContext.HOME,),
+            key_display=".",
+        ),
+        CommandBindingSpec(
+            "comma",
+            InputCommand.HOME_DETAILS_PREV_PAGE,
+            "Prev Page",
+            (InputContext.HOME,),
+            key_display=",",
         ),
         CommandBindingSpec(
             "ctrl+j",
@@ -490,6 +602,58 @@ EMACS_PROFILE = InputProfile(
             "Create Course",
             (InputContext.HOME,),
             show=True,
+        ),
+        CommandBindingSpec(
+            "1",
+            InputCommand.HOME_FOCUS_COURSES,
+            "Focus Courses",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "2",
+            InputCommand.HOME_FOCUS_ASSIGNMENTS,
+            "Focus Assignments",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "3",
+            InputCommand.HOME_FOCUS_STUDENTS,
+            "Focus Students",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "4",
+            InputCommand.HOME_FOCUS_DETAILS,
+            "Focus Details",
+            (InputContext.HOME,),
+        ),
+        CommandBindingSpec(
+            "right_square_bracket",
+            InputCommand.HOME_DETAILS_NEXT_TAB,
+            "Next Tab",
+            (InputContext.HOME,),
+            key_display="]",
+        ),
+        CommandBindingSpec(
+            "left_square_bracket",
+            InputCommand.HOME_DETAILS_PREV_TAB,
+            "Prev Tab",
+            (InputContext.HOME,),
+            key_display="[",
+        ),
+        CommandBindingSpec(
+            "full_stop",
+            InputCommand.HOME_DETAILS_NEXT_PAGE,
+            "Next Page",
+            (InputContext.HOME,),
+            key_display=".",
+        ),
+        CommandBindingSpec(
+            "comma",
+            InputCommand.HOME_DETAILS_PREV_PAGE,
+            "Prev Page",
+            (InputContext.HOME,),
+            key_display=",",
         ),
         CommandBindingSpec(
             "ctrl+j",
