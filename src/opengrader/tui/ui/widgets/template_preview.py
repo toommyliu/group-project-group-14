@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 from PIL import Image as PILImage
+from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 from textual_image.widget import Image
@@ -38,6 +38,14 @@ class TemplatePreview(VerticalScroll):
         self._label = label
         self._current_page = 0
         self._total_pages = 0
+        self._header: Static | None = None
+        self._image: Image | None = None
+
+    def compose(self) -> ComposeResult:
+        self._header = Static("")
+        yield self._header
+        self._image = Image(None)
+        yield self._image
 
     def on_mount(self) -> None:
         if self._pdf_path and self._pdf_path.exists():
@@ -55,11 +63,12 @@ class TemplatePreview(VerticalScroll):
             self._render_template()
 
     def _render_template(self) -> None:
-        for child in list(self.children):
-            child.remove()
+        if self._header is None or self._image is None:
+            return
 
         if self._pdf_path is None or not self._pdf_path.exists():
-            self.mount(Static("No template PDF found."))
+            self._header.update("No template PDF found.")
+            self._image.display = False
             return
 
         cache_key = (str(self._pdf_path), self._current_page)
@@ -70,15 +79,19 @@ class TemplatePreview(VerticalScroll):
                 pil_image = pdf_page_to_image(self._pdf_path, page=self._current_page, dpi=96)
                 _preview_cache[cache_key] = pil_image
             except Exception as exc:
-                self.mount(Static(f"Failed to render template: {exc}"))
+                self._header.update(f"Failed to render template: {exc}")
+                self._image.display = False
                 return
 
         # TODO: move this to status_bar?
         if self._total_pages > 1:
             pagination_text = f"Page {self._current_page + 1} of {self._total_pages}"
-            self.mount(Static(pagination_text, classes="pagination-header"))
+            self._header.update(pagination_text)
         elif self._label:
-            self.mount(Static(self._label))
+            self._header.update(self._label)
+        else:
+            self._header.update("")
 
-        unique_id = f"template-preview-img-{uuid.uuid4().hex[:8]}"
-        self.mount(Image(pil_image, id=unique_id))
+        self._image.display = True
+        self._image.image = pil_image
+        self.scroll_home()
