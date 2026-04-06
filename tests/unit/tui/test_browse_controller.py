@@ -3,7 +3,7 @@ from pathlib import Path
 from opengrader.tui.controllers.home_controller import HomeController
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
-from opengrader.tui.data import AssignmentTemplateSummary
+from opengrader.tui.data import AssignmentTemplateSummary, CourseSummary
 
 from .fakes import FakeDataProvider
 
@@ -19,6 +19,7 @@ class FakeHomeScreen:
         self.details: str = ""
         self._active_tab: str = "assignments"
         self._focused_list: str = "home-course-list"
+        self.focused_course_item_id: str | None = None
         self._content_visible = False
 
     def set_courses(self, courses: list[NavItem]) -> None:
@@ -45,8 +46,9 @@ class FakeHomeScreen:
     def set_status(self, text: str) -> None:
         self.status = text
 
-    def focus_courses(self) -> None:
+    def focus_courses(self, item_id: str | None = None) -> None:
         self._focused_list = "home-course-list"
+        self.focused_course_item_id = item_id
 
     def content_visible(self) -> bool:
         return self._content_visible
@@ -104,6 +106,29 @@ class FakeApp:
 
     def get_home_screen(self) -> FakeHomeScreen:
         return self.home_screen
+
+
+class CreateCourseProvider(FakeDataProvider):
+    def __init__(self) -> None:
+        self._courses = [
+            CourseSummary(1, "CMPE", "195", "Spring 2026", ""),
+            CourseSummary(2, "CMPE", "102", "Spring 2026", ""),
+        ]
+
+    def list_courses(self) -> list[CourseSummary]:
+        return list(self._courses)
+
+    def create_course(
+        self,
+        *,
+        code: str,
+        name: str,
+        term: str,
+        section: str,
+    ) -> CourseSummary:
+        course = CourseSummary(99, code, name, term, section)
+        self._courses.append(course)
+        return course
 
 
 class TemplateFlowHomeScreen(FakeHomeScreen):
@@ -236,6 +261,32 @@ def test_course_highlighted_loads_assignments_and_students() -> None:
     assert len(app.home_screen.assignments) == 2
     assert app.home_screen.students is not None
     assert len(app.home_screen.students) == 2
+
+
+def test_create_course_focuses_new_course() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    provider = CreateCourseProvider()
+    controller = HomeController(app, state, provider, lambda _: None)
+    controller.initialize()
+
+    controller._on_create_course_dialog_closed(
+        {
+            "code": "CMPE",
+            "name": "196",
+            "term": "Spring 2026",
+            "section": "01",
+        }
+    )
+
+    assert state.selection.course_id == 99
+    assert state.selection_labels["course"] == "CMPE 196"
+    assert app.home_screen.courses is not None
+    assert app.home_screen.courses[-1].item_id == "c99"
+    assert app.home_screen.courses[-1].label == "CMPE 196"
+    assert app.home_screen.focused_course_item_id == "c99"
+    assert app.home_screen.details == "course:CMPE 196:2:2"
+    assert app.home_screen._content_visible is True
 
 
 def test_assignment_selected_opens_grading() -> None:

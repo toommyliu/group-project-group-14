@@ -664,8 +664,10 @@ class HomeController:
         home.set_courses(
             self._course_items(self._data_provider.list_courses()),
         )
-        home.set_status(f"Created course: {created.code} {created.name}".strip())
-        home.focus_courses()
+        created_item = self._course_items([created])[0]
+        self.on_course_highlighted(created_item)
+        home.focus_courses(created_item.item_id)
+        home.set_status(f"Created course: {created_item.label}".strip())
 
     def _on_create_assignment_dialog_closed(
         self,

@@ -68,8 +68,12 @@ class HomeSidebar(Vertical):
         self.student_pane().display = True
         self.refresh_index_subtitles()
 
-    def focus_courses(self) -> None:
-        self._focus_list(self.course_list(), set_first_row=True)
+    def focus_courses(self, item_id: str | None = None) -> None:
+        self._focus_list(
+            self.course_list(),
+            set_first_row=True,
+            item_id=item_id,
+        )
 
     def focus_assignments(self) -> None:
         lv = self.assignment_list()
@@ -130,7 +134,22 @@ class HomeSidebar(Vertical):
     def on_list_view_selected(self, _event: ListView.Selected) -> None:
         self.refresh_index_subtitles()
 
-    def _focus_list(self, lv: IndexedListView, *, set_first_row: bool) -> None:
+    def _focus_list(
+        self,
+        lv: IndexedListView,
+        *,
+        set_first_row: bool,
+        item_id: str | None = None,
+    ) -> None:
+        if item_id is not None:
+            for index, child in enumerate(lv.children):
+                nav = getattr(child, "nav", None)
+                if nav is not None and getattr(nav, "item_id", None) == item_id:
+                    lv.index = index
+                    lv.focus()
+                    self.refresh_index_subtitles()
+                    return
+
         if len(lv.children) > 0 and (set_first_row or lv.highlighted_child is None):
             lv.index = 0
         lv.focus()

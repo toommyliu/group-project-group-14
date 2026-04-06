@@ -159,8 +159,8 @@ class HomeScreen(Vertical):
         elif tab_id in ("students", "tab-students"):
             self._active_content = "students"
 
-    def focus_courses(self) -> None:
-        self._sidebar().focus_courses()
+    def focus_courses(self, item_id: str | None = None) -> None:
+        self._sidebar().focus_courses(item_id)
         self.call_after_refresh(self.sync_pane_focus_classes)
 
     def focus_assignments(self) -> None:
