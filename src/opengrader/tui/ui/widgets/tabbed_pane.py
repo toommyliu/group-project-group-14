@@ -8,7 +8,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.widget import Widget
-
+from textual.reactive import reactive
 
 @dataclass
 class TabbedPaneTab:
@@ -18,6 +18,8 @@ class TabbedPaneTab:
 
 
 class TabbedPane(Vertical):
+    auto_links = reactive(False)
+
     DEFAULT_CSS = """
     TabbedPane {
         width: 1fr;
@@ -105,14 +107,21 @@ class TabbedPane(Vertical):
     def next_tab(self) -> None:
         if len(self._tabs) <= 1:
             return
-        self._active_tab_index = (self._active_tab_index + 1) % len(self._tabs)
-        self._render_active_tab()
+        self._set_active_tab(
+            (self._active_tab_index + 1) % len(self._tabs),
+            focus=False,
+        )
 
     def prev_tab(self) -> None:
         if len(self._tabs) <= 1:
             return
-        self._active_tab_index = (self._active_tab_index - 1) % len(self._tabs)
-        self._render_active_tab()
+        self._set_active_tab(
+            (self._active_tab_index - 1) % len(self._tabs),
+            focus=False,
+        )
+
+    def action_pane_activate_tab(self, tab_index: int) -> None:
+        self._set_active_tab(tab_index, focus=True)
 
     def next_page(self) -> None:
         if not self._active_tab_supports_paging():
@@ -187,8 +196,8 @@ class TabbedPane(Vertical):
 
         self._sync_chrome()
         self._sync_focus_class()
-        # TODO: look into more efficient ways to update...
-        self.refresh(layout=True)
+        # TODO: might not be needed anymore?
+        # self.refresh(layout=True)
 
     def _sync_chrome(self) -> None:
         self.border_title = self._build_border_title()
@@ -203,27 +212,88 @@ class TabbedPane(Vertical):
 
         if len(self._tabs) == 1 and not self._show_single_tab:
             label = escape(self._tabs[0].label)
-            return self._title if not label else self._title + f" {label}"
+            if not label:
+                return self._title
+            return self._title + " " + self._tab_label_markup(
+                self._active_tab_index,
+                label,
+                active=True,
+            )
 
+        title_as_first_tab = len(self._tabs) > 1 and not self._tabs[0].label
         visible_tabs = [
             (index, tab)
             for index, tab in enumerate(self._tabs)
             if tab.label
         ]
+
+        if title_as_first_tab:
+            title_markup = self._title_tab_markup(active=self._active_tab_index == 0)
+            if not visible_tabs:
+                return title_markup
+            tab_markup = self._join_tab_markup(visible_tabs)
+            return title_markup + "[$text-muted] - [/]" + tab_markup
+
         if not visible_tabs:
             return self._title
 
+        return self._title + " " + self._join_tab_markup(visible_tabs)
+
+    def _join_tab_markup(self, visible_tabs: list[tuple[int, TabbedPaneTab]]) -> str:
         tab_markup: list[str] = []
         for display_index, (index, tab) in enumerate(visible_tabs):
             if display_index > 0:
                 tab_markup.append("[$text-muted] - [/]")
             tab_label = escape(tab.label)
-            if index == self._active_tab_index:
-                tab_markup.append(tab_label)
-            else:
-                tab_markup.append(f"[$text-muted]{tab_label}[/]")
+            tab_markup.append(
+                self._tab_label_markup(
+                    index,
+                    tab_label,
+                    active=index == self._active_tab_index,
+                )
+            )
+        return "".join(tab_markup)
 
-        return self._title + " " + ''.join(tab_markup)
+    def _title_tab_markup(self, *, active: bool) -> str:
+        clickable = f"[@click=pane_activate_tab(0)]{self._title}[/]"
+        if active:
+            return clickable
+        return f"[$text-muted]{clickable}[/]"
+
+    def _set_active_tab(self, tab_index: int, *, focus: bool) -> bool:
+        if tab_index < 0 or tab_index >= len(self._tabs):
+            return False
+
+        changed = tab_index != self._active_tab_index
+        if changed:
+            self._active_tab_index = tab_index
+            self._render_active_tab()
+
+        if focus:
+            self._focus_active_widget()
+
+        return changed
+
+    def _focus_active_widget(self) -> None:
+        active_widget = self._active_widget()
+
+        if (
+            active_widget is not None
+            and active_widget.can_focus
+            and not active_widget.disabled
+        ):
+            active_widget.focus()
+            return
+
+        if self.can_focus and not self.disabled:
+            self.focus()
+
+    @staticmethod
+    def _tab_label_markup(tab_index: int, tab_label: str, *, active: bool) -> str:
+        clickable = f"[@click=pane_activate_tab({tab_index})]{tab_label}[/]"
+        if active:
+            return clickable
+        return f"[$text-muted]{clickable}[/]"
 
     def sync_focus_class(self) -> None:
         self._sync_focus_class()

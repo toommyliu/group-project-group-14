@@ -89,6 +89,12 @@ class TabbedListPane(TabbedPane):
         if before != self.active_tab_index:
             self.refresh_index_subtitle()
 
+    def action_pane_activate_tab(self, tab_index: int) -> None:
+        before = self.active_tab_index
+        super().action_pane_activate_tab(tab_index)
+        if before != self.active_tab_index:
+            self.refresh_index_subtitle()
+
     def primary_list(self) -> IndexedListView:
         return self._list_tabs[0]
 
