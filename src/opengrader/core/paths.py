@@ -44,6 +44,12 @@ def get_database_path() -> Path:
     return get_data_dir() / _DB_FILE_NAME
 
 
+def resolve_data_dir(db_path: str | Path | None = None) -> Path:
+    if db_path is None:
+        return get_data_dir()
+    return resolve_database_path(db_path).parent
+
+
 def resolve_database_path(db_path: str | Path | None = None) -> Path:
     if db_path is None:
         return get_database_path()

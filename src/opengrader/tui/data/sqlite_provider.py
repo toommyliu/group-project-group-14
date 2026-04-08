@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from opengrader.core import resolve_database_path
+from opengrader.core import resolve_data_dir, resolve_database_path
 from opengrader.core.courses import (
     CourseNotFoundError,
     StudentInput,
@@ -26,15 +26,22 @@ class SqliteProvider:
         db_path: str | Path | None = None,
     ) -> None:
         self._db_path = resolve_database_path(db_path)
-        self._courses = build_sqlite_course_services(self._db_path)
+        self._data_dir = resolve_data_dir(self._db_path)
+        self._courses = None
         self._question_content = StubQuestionContent(default_image_path)
+
+    @property
+    def _services(self):
+        if self._courses is None:
+            self._courses = build_sqlite_course_services(self._db_path)
+        return self._courses
 
     @staticmethod
     def _spec_is_pending(spec_json_relpath: str) -> bool:
         return spec_json_relpath.endswith(".pending.json")
 
     def list_courses(self) -> list[CourseSummary]:
-        courses = self._courses.courses.list_courses()
+        courses = self._services.courses.list_courses()
         return [
             CourseSummary(
                 id=course.id,
@@ -50,7 +57,7 @@ class SqliteProvider:
         if course_id is None:
             return []
         try:
-            assignments = self._courses.assignments.list_assignments(course_id)
+            assignments = self._services.assignments.list_assignments(course_id)
         except CourseNotFoundError:
             return []
         return [
@@ -66,7 +73,7 @@ class SqliteProvider:
         if course_id is None:
             return []
         try:
-            roster = self._courses.enrollments.list_roster(course_id)
+            roster = self._services.enrollments.list_roster(course_id)
         except CourseNotFoundError:
             return []
         return [
@@ -88,7 +95,7 @@ class SqliteProvider:
         term: str,
         section: str,
     ) -> CourseSummary:
-        course = self._courses.courses.create_course(
+        course = self._services.courses.create_course(
             code=code,
             name=name,
             term=term,
@@ -110,7 +117,7 @@ class SqliteProvider:
         title: str,
         max_points: str,
     ) -> AssignmentSummary:
-        assignment = self._courses.assignments.create_assignment(
+        assignment = self._services.assignments.create_assignment(
             course_id=course_id,
             assignment_type=assignment_type,
             title=title,
@@ -132,7 +139,7 @@ class SqliteProvider:
         middle_name: str | None,
         email: str | None,
     ) -> StudentSummary:
-        student = self._courses.enrollments.enroll_students(
+        student = self._services.enrollments.enroll_students(
             course_id,
             [
                 StudentInput(
@@ -154,7 +161,7 @@ class SqliteProvider:
         template_pdf_path: str,
         spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
-        template = self._courses.assignment_templates.create_template(
+        template = self._services.assignment_templates.create_template(
             assignment_id=assignment_id,
             name=name,
             source_template_pdf=template_pdf_path,
@@ -176,7 +183,7 @@ class SqliteProvider:
         if course_id is None:
             return []
         try:
-            templates = self._courses.assignment_templates.list_templates_for_course(
+            templates = self._services.assignment_templates.list_templates_for_course(
                 course_id
             )
         except CourseNotFoundError:
@@ -199,7 +206,7 @@ class SqliteProvider:
         assignment_id: int,
         template_id: int,
     ) -> None:
-        self._courses.assignment_templates.set_assignment_template(
+        self._services.assignment_templates.set_assignment_template(
             assignment_id=assignment_id,
             template_id=template_id,
         )
@@ -211,7 +218,7 @@ class SqliteProvider:
         template_ids: list[int],
         current_template_id: int,
     ) -> None:
-        self._courses.assignment_templates.replace_assignment_templates(
+        self._services.assignment_templates.replace_assignment_templates(
             assignment_id=assignment_id,
             template_ids=template_ids,
             current_template_id=current_template_id,
@@ -223,7 +230,7 @@ class SqliteProvider:
     ) -> AssignmentTemplateSummary | None:
         if assignment_id is None:
             return None
-        template = self._courses.assignment_templates.get_assignment_template(
+        template = self._services.assignment_templates.get_assignment_template(
             assignment_id
         )
         if template is None:
@@ -243,7 +250,7 @@ class SqliteProvider:
     ) -> list[AssignmentTemplateSummary]:
         if assignment_id is None:
             return []
-        templates = self._courses.assignment_templates.list_assignment_templates(
+        templates = self._services.assignment_templates.list_assignment_templates(
             assignment_id
         )
         return [

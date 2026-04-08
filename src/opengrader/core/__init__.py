@@ -6,6 +6,7 @@ from .paths import (
     get_data_dir,
     get_logs_dir,
     get_templates_dir,
+    resolve_data_dir,
     resolve_database_path,
     get_settings_path,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "get_data_dir",
     "get_logs_dir",
     "get_templates_dir",
+    "resolve_data_dir",
     "resolve_database_path",
     "get_settings_path",
 ]

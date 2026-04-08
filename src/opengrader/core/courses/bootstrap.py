@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from opengrader.core import resolve_data_dir
 from opengrader.core.courses.adapters.sqlite.migrations import initialize_sqlite_database
 from opengrader.core.courses.adapters.sqlite.transaction import SqliteCoursesTransaction
 from opengrader.core.courses.services.assignment_service import AssignmentService
@@ -25,6 +26,7 @@ class CourseServices:
 
 def build_sqlite_course_services(db_path: str | Path) -> CourseServices:
     db_file = Path(db_path)
+    data_dir = resolve_data_dir(db_file)
     initialize_sqlite_database(db_file)
 
     def transaction_factory() -> SqliteCoursesTransaction:
@@ -35,7 +37,8 @@ def build_sqlite_course_services(db_path: str | Path) -> CourseServices:
         enrollments=EnrollmentService(transaction_factory=transaction_factory),
         assignments=AssignmentService(transaction_factory=transaction_factory),
         assignment_templates=AssignmentTemplateService(
-            transaction_factory=transaction_factory
+            transaction_factory=transaction_factory,
+            data_dir=data_dir,
         ),
         grading=GradingService(transaction_factory=transaction_factory),
     )

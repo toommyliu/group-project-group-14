@@ -118,7 +118,7 @@ class HomeSidebar(Vertical):
         self.student_pane().set_size_units(students)
 
     def refresh_index_subtitles(self) -> None:
-        self.call_after_refresh(self._refresh_index_subtitles_now)
+        self._refresh_index_subtitles_now()
 
     def sync_pane_focus_classes(self) -> None:
         for pane in (self.course_pane(), self.assignment_pane(), self.student_pane()):

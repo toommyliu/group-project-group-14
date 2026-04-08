@@ -10,6 +10,7 @@ from opengrader.core import (
     get_data_dir,
     get_logs_dir,
     get_templates_dir,
+    resolve_data_dir,
     resolve_database_path,
     get_settings_path,
 )
@@ -49,3 +50,10 @@ def test_resolve_database_path_prefers_explicit_argument(monkeypatch) -> None:
 
     assert resolve_database_path("/tmp/db.sqlite") == Path("/tmp/db.sqlite")
     assert resolve_database_path(Path("/tmp/explicit.db")) == Path("/tmp/explicit.db")
+
+
+def test_resolve_data_dir_follows_explicit_database_path(monkeypatch) -> None:
+    monkeypatch.setenv("OPENGRADER_HOME", "/tmp/custom-opengrader")
+
+    assert resolve_data_dir("/tmp/db.sqlite") == Path("/tmp")
+    assert resolve_data_dir(Path("/tmp/nested/explicit.db")) == Path("/tmp/nested")

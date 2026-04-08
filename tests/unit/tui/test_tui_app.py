@@ -542,19 +542,22 @@ def test_switching_course_updates_sidebar_totals() -> None:
 
 def test_run_app_uses_runtime_default_profile() -> None:
     expected_profile = InputController.profile().name
-    with patch("opengrader.tui.main.TuiApp.run", autospec=True) as run_mock:
-        run_app()
+    with patch("opengrader.tui.main._bootstrap_default_workspace") as bootstrap_mock:
+        with patch("opengrader.tui.main.TuiApp.run", autospec=True) as run_mock:
+            run_app()
 
     app_self = run_mock.call_args.args[0]
     assert isinstance(app_self, TuiApp)
     assert app_self.input_controller.profile_name() == expected_profile
     assert app_self.data_provider._db_path == get_database_path()
+    bootstrap_mock.assert_called_once()
 
 
 def test_run_app_uses_opengrader_home_for_db_default(monkeypatch) -> None:
     monkeypatch.setenv("OPENGRADER_HOME", "~/grader-home")
-    with patch("opengrader.tui.main.TuiApp.run", autospec=True) as run_mock:
-        run_app()
+    with patch("opengrader.tui.main._bootstrap_default_workspace") as bootstrap_mock:
+        with patch("opengrader.tui.main.TuiApp.run", autospec=True) as run_mock:
+            run_app()
 
     app_self = run_mock.call_args.args[0]
     assert isinstance(app_self, TuiApp)
@@ -562,6 +565,7 @@ def test_run_app_uses_opengrader_home_for_db_default(monkeypatch) -> None:
         app_self.data_provider._db_path
         == Path("~/grader-home").expanduser() / "data" / "courses.db"
     )
+    bootstrap_mock.assert_called_once()
 
 
 def test_tui_app_explicit_db_path_overrides_opengrader_home(monkeypatch) -> None:

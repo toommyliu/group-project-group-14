@@ -68,7 +68,7 @@ class HomeController:
             self.on_course_highlighted(item)
             return
 
-        home_screen.set_status("Select a course to get started.")
+        home_screen.set_status("No courses yet. Press n to create a course.")
 
     def on_course_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
@@ -979,9 +979,9 @@ class HomeController:
                 created = self._data_provider.create_assignment_template(
                     assignment_id=context.assignment_id,
                     name=template_name,
-                    template_pdf_path=str(context.template_pdf_paths[index]),
+                    template_pdf_path=context.template_pdf_paths[index].as_posix(),
                     spec_json_path=(
-                        str(shared_spec_json_path)
+                        shared_spec_json_path.as_posix()
                         if shared_spec_json_path is not None
                         else None
                     ),

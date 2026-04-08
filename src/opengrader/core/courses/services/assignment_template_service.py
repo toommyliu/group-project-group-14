@@ -66,8 +66,14 @@ def _pending_spec_json(template_name: str) -> str:
 
 
 class AssignmentTemplateService:
-    def __init__(self, transaction_factory: TransactionFactory) -> None:
+    def __init__(
+        self,
+        transaction_factory: TransactionFactory,
+        *,
+        data_dir: Path | None = None,
+    ) -> None:
         self._transaction_factory = transaction_factory
+        self._data_dir = data_dir
 
     def create_template(
         self,
@@ -116,7 +122,7 @@ class AssignmentTemplateService:
                 spec_sha256=spec_sha256,
             )
 
-            data_dir = get_data_dir()
+            data_dir = self._data_dir or get_data_dir()
             base_dir = (
                 data_dir
                 / "courses"
@@ -138,8 +144,8 @@ class AssignmentTemplateService:
                 assert pending_spec_content is not None
                 spec_dest.write_text(pending_spec_content, encoding="utf-8")
 
-            rel_pdf = str(pdf_dest.relative_to(data_dir))
-            rel_spec = str(spec_dest.relative_to(data_dir))
+            rel_pdf = pdf_dest.relative_to(data_dir).as_posix()
+            rel_spec = spec_dest.relative_to(data_dir).as_posix()
 
             transaction.assignment_templates.update_paths(
                 template_id=created.id,
