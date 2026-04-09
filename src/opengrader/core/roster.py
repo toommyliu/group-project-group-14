@@ -1,13 +1,17 @@
 import csv
+import sys
 from typing import List, Dict
 
-# reads the csv file and stores each row 
+# reads the csv file and stores each row
 def read_roster(filename: str) -> List[Dict[str, str]]:
     students = []
     with open(filename, newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)  # DictReader makes each row a dict so we can access by column name
         for row in reader:
-            students.append(row)
+            try:
+                students.append(dict(row))
+            except csv.Error as exc:
+                print(f"roster: skipping malformed row: {exc}", file=sys.stderr)
     return students
 
 # prints out the roster

@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from opengrader.core import get_database_path
@@ -45,11 +46,18 @@ def _load_bootstrap_students(roster_path: Path = _ROSTER_PATH) -> list[StudentIn
         rows = []
 
     students: list[StudentInput] = []
+    seen_sids: set[str] = set()
     for index, row in enumerate(rows):
+        line = index + 2  # account for header row
         sid = (row.get("sid") or "").strip()
         if not sid:
+            print(f"roster: line {line}: skipping row with missing sid", file=sys.stderr)
+            continue
+        if sid in seen_sids:
+            print(f"roster: line {line}: skipping duplicate sid {sid!r}", file=sys.stderr)
             continue
 
+        seen_sids.add(sid)
         first_name, last_name = _split_roster_name(row.get("name", ""))
         students.append(
             StudentInput(
@@ -60,9 +68,7 @@ def _load_bootstrap_students(roster_path: Path = _ROSTER_PATH) -> list[StudentIn
             )
         )
 
-    if students:
-        return students
-    return []
+    return students
 
 
 def _bootstrap_default_workspace(db_path: str | Path) -> None:

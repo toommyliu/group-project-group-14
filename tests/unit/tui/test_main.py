@@ -125,6 +125,39 @@ def test_split_roster_name_supports_comma_format() -> None:
     assert _split_roster_name("Lovelace, Ada") == ("Ada", "Lovelace")
 
 
+def test_load_bootstrap_students_skips_rows_with_missing_sid(tmp_path, capsys) -> None:
+    roster_path = tmp_path / "roster.csv"
+    roster_path.write_text(
+        "name,email,section,course,sid,grade\n"
+        "No SID Student,nosid@example.com,1,CMPE195,,A\n"
+        "Valid Student,valid@example.com,1,CMPE195,100000001,A\n",
+        encoding="utf-8",
+    )
+
+    students = _load_bootstrap_students(roster_path)
+
+    assert len(students) == 1
+    assert students[0].sid == "100000001"
+    assert "missing sid" in capsys.readouterr().err
+
+
+def test_load_bootstrap_students_skips_duplicate_sids(tmp_path, capsys) -> None:
+    roster_path = tmp_path / "roster.csv"
+    roster_path.write_text(
+        "name,email,section,course,sid,grade\n"
+        "Alice,alice@example.com,1,CMPE195,100000001,A\n"
+        "Alice Duplicate,alice2@example.com,1,CMPE195,100000001,A\n"
+        "Bob,bob@example.com,1,CMPE195,100000002,B\n",
+        encoding="utf-8",
+    )
+
+    students = _load_bootstrap_students(roster_path)
+
+    assert len(students) == 2
+    assert [s.sid for s in students] == ["100000001", "100000002"]
+    assert "duplicate sid" in capsys.readouterr().err
+
+
 def test_load_bootstrap_students_reads_repo_roster_format(tmp_path) -> None:
     roster_path = tmp_path / "roster.csv"
     roster_path.write_text(
