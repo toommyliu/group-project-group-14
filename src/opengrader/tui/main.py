@@ -62,7 +62,7 @@ def _load_bootstrap_students(roster_path: Path = _ROSTER_PATH) -> list[StudentIn
 
     if students:
         return students
-
+    return []
 
 
 def _bootstrap_default_workspace(db_path: str | Path) -> None:
@@ -77,11 +77,16 @@ def _bootstrap_default_workspace(db_path: str | Path) -> None:
     if services.courses.list_courses():
         return
 
-
-    services.enrollments.enroll_students(
-        course.id,
-        _load_bootstrap_students(),
+    course = services.courses.create_course(
+        code="XXX",
+        name="XXX",
+        term="XXX",
+        section="X",
     )
+
+    students = _load_bootstrap_students()
+    if students:
+        services.enrollments.enroll_students(course.id, students)
 
 
 def run_app() -> None:
