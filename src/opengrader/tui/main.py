@@ -78,11 +78,22 @@ def _bootstrap_default_workspace(db_path: str | Path) -> None:
         return
 
     course = services.courses.create_course(
-        code="XXX",
-        name="XXX",
-        term="XXX",
-        section="X",
+        code="CMPE-195",
+        name="Senior Design Project",
+        term="Spring 2026",
+        section="01",
     )
+
+    for title, assignment_type, max_points in [
+        ("HW 1", "assignment", 100),
+        ("Midterm", "exam", 100),
+    ]:
+        services.assignments.create_assignment(
+            course_id=course.id,
+            assignment_type=assignment_type,
+            title=title,
+            max_points=max_points,
+        )
 
     students = _load_bootstrap_students()
     if students:
