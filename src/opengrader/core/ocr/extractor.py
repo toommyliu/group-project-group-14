@@ -440,28 +440,6 @@ def process_submission_pdf(
             result.version_confidence = 0.0
             result.version_validated = False
             result.version_error = "anchor_version_not_detected"
-    # TODO: legacy code?
-    # else:
-    #     version_field = extract_version_field(spec)
-    #     version_result = next(
-    #         (
-    #             r
-    #             for r in all_field_results
-    #             if r.field_id == (version_field or {}).get("id")
-    #         ),
-    #         None,
-    #     )
-    #     if version_result:
-    #         result.version_id = (
-    #             version_result.ocr_result.text if version_result.ocr_result else None
-    #         )
-    #         result.version_confidence = (
-    #             version_result.ocr_result.confidence
-    #             if version_result.ocr_result
-    #             else None
-    #         )
-    #         result.version_validated = version_result.validated
-    #         result.version_error = version_result.error
 
     version_field = extract_version_field(spec)
     result.fields = [
