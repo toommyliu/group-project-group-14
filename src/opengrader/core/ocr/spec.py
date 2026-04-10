@@ -29,6 +29,17 @@ def validate_bbox(bbox: list[float], ctx: str) -> None:
         )
 
 
+def _bbox_within(parent: list[float], child: list[float], eps: float = 1e-6) -> bool:
+    px, py, pw, ph = parent
+    cx, cy, cw, ch = child
+    return (
+        cx >= px - eps
+        and cy >= py - eps
+        and (cx + cw) <= (px + pw) + eps
+        and (cy + ch) <= (py + ph) + eps
+    )
+
+
 def validate_field(field: dict, ctx: str) -> None:
     if "id" not in field:
         raise SpecError(f"{ctx}: missing required field 'id'")
@@ -64,7 +75,7 @@ def validate_field(field: dict, ctx: str) -> None:
             )
 
 
-def validate_question(question: dict, ctx: str) -> None:
+def _validate_question_core(question: dict, ctx: str) -> str:
     if "id" not in question:
         raise SpecError(f"{ctx}: missing required 'id'")
     q_ctx = f"{ctx}.question[{question['id']}]"
@@ -82,6 +93,36 @@ def validate_question(question: dict, ctx: str) -> None:
     points = question.get("points")
     if points is not None and not isinstance(points, (int, float)):
         raise SpecError(f"{q_ctx}: points must be numeric, got {points!r}")
+
+    return q_ctx
+
+
+def validate_question(question: dict, ctx: str) -> None:
+    q_ctx = _validate_question_core(question, ctx)
+
+    subquestions = question.get("subquestions")
+    if subquestions is None:
+        return
+    if not isinstance(subquestions, list):
+        raise SpecError(f"{q_ctx}: subquestions must be a list when provided")
+
+    for i, subquestion in enumerate(subquestions):
+        sq_ctx = f"{q_ctx}.subquestions[{i}]"
+        if not isinstance(subquestion, dict):
+            raise SpecError(f"{sq_ctx}: subquestion must be an object")
+        _validate_question_core(subquestion, sq_ctx)
+
+        if "subquestions" in subquestion:
+            raise SpecError(f"{sq_ctx}: nested subquestions are not supported")
+
+        label = subquestion.get("label")
+        if label is not None and not isinstance(label, str):
+            raise SpecError(f"{sq_ctx}: label must be a string")
+
+        if not _bbox_within(question["bbox"], subquestion["bbox"]):
+            raise SpecError(
+                f"{sq_ctx}: bbox must be fully inside parent question bbox"
+            )
 
 
 def validate_page(page: dict, page_idx: int) -> None:
@@ -142,6 +183,13 @@ def _validate_versions(versions: Any) -> list[SpecError]:
     return errors
 
 
+def _iter_question_ids(question: dict) -> list[str]:
+    ids: list[str] = [str(question["id"])]
+    for subquestion in question.get("subquestions", []):
+        ids.append(str(subquestion["id"]))
+    return ids
+
+
 def validate_spec(data: dict) -> list[SpecError]:
     errors: list[SpecError] = []
 
@@ -168,6 +216,7 @@ def validate_spec(data: dict) -> list[SpecError]:
         return errors
 
     seen_page_numbers: set[int] = set()
+    seen_question_page: dict[str, int] = {}
     for i, page in enumerate(pages):
         if not isinstance(page, dict):
             errors.append(SpecError(f"pages[{i}] must be an object"))
@@ -179,6 +228,20 @@ def validate_spec(data: dict) -> list[SpecError]:
         if pn in seen_page_numbers:
             errors.append(SpecError(f"pages[{i}]: duplicate page_number {pn}"))
         seen_page_numbers.add(pn)
+
+        for question in page.get("questions", []):
+            for qid in _iter_question_ids(question):
+                first_page = seen_question_page.get(qid)
+                if first_page is not None:
+                    errors.append(
+                        SpecError(
+                            "question/subquestion id "
+                            f"{qid!r} appears on multiple pages "
+                            f"({first_page} and {pn}); cross-page continuation is not supported"
+                        )
+                    )
+                    continue
+                seen_question_page[qid] = pn
 
     return errors
 
@@ -208,8 +271,17 @@ def page_by_number(spec: dict, page_number: int) -> dict | None:
 def all_questions(spec: dict) -> list[dict]:
     out = []
     for page in spec.get("pages", []):
+        page_number = page["page_number"]
         for q in page.get("questions", []):
-            out.append({**q, "page_number": page["page_number"]})
+            out.append({**q, "page_number": page_number})
+            for subquestion in q.get("subquestions", []):
+                out.append(
+                    {
+                        **subquestion,
+                        "page_number": page_number,
+                        "parent_question_id": q["id"],
+                    }
+                )
     return out
 
 

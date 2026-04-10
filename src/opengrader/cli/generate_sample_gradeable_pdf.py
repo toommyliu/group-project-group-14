@@ -32,6 +32,49 @@ SAMPLE_IDS = [
 ]
 
 
+def _build_sample_questions(prompts: list[str], question_count: int) -> list[tuple[str, int, str] | dict]:
+    questions: list[tuple[str, int, str] | dict] = []
+
+    for i in range(question_count):
+        qid = f"q{i + 1}"
+        points = random.randint(8, 20)
+        prompt = prompts[i]
+
+        # randomly introduce multipart questions
+        if i % 3 == 1:
+            part_count = 3 if i % 2 == 0 else 2
+            base = max(1, points // part_count)
+            part_points = [base] * part_count
+            part_points[-1] += max(0, points - sum(part_points))
+
+            subquestions = []
+            for part_idx in range(part_count):
+                letter = chr(ord("a") + part_idx)
+                sub_prompt = prompts[(i + part_idx) % len(prompts)]
+                subquestions.append(
+                    {
+                        "id": f"{qid}{letter}",
+                        "label": letter,
+                        "points": part_points[part_idx],
+                        "prompt": sub_prompt,
+                    }
+                )
+
+            questions.append(
+                {
+                    "id": qid,
+                    "points": points,
+                    "prompt": "Answer all parts.",
+                    "subquestions": subquestions,
+                }
+            )
+            continue
+
+        questions.append((qid, points, prompt))
+
+    return questions
+
+
 def run_cli() -> None:
     parser = ArgumentParser(
         description="Generate sample gradeable unit template and submission PDFs for testing.",
@@ -118,9 +161,7 @@ def run_cli() -> None:
         submissions_dir.mkdir(parents=True, exist_ok=True)
 
     prompts = generate_prompts(args.questions)
-    questions = [
-        (f"q{i + 1}", random.randint(5, 20), prompts[i]) for i in range(args.questions)
-    ]
+    questions = _build_sample_questions(prompts, args.questions)
 
     print(f"Generating templates for versions: {args.versions}")
     generated_specs = {}

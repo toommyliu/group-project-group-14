@@ -1,3 +1,6 @@
+from opengrader.core.pdf.templates.constants import QuestionType
+
+
 REQUIRED_SCHEMA_KEYS = {"schema_version", "unit_id", "pages"}
 VALID_FIELD_TYPES = {
     "text",
@@ -8,7 +11,7 @@ VALID_FIELD_TYPES = {
     "version_marker",
 }
 VALID_RESPONSE_TYPE_FIELDS = {
-    "free_response",
+    q.value for q in QuestionType
 }
 
 # TODO: this might be useless if we disregard backward compatibility
