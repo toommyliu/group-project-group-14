@@ -22,8 +22,8 @@ ANCHOR_POSITIONS = {
     Anchor.BottomRight: lambda m, s, pw, ph: (pw - m - s, ph - m - s),
 }
 
-QUESTION_FONTSIZE = 9
-SUBQUESTION_FONTSIZE = 8.4
+QUESTION_FONTSIZE = 11
+SUBQUESTION_FONTSIZE = 9
 
 def _draw_centered_text(
     page: fitz.Page,
