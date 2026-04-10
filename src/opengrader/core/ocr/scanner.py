@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 
 from opengrader.core.pdf.templates.anchor import anchor_entries_norm
-from .constants import REQUIRED_SCHEMA_KEYS, SCHEMA_VERSION
+from .constants import QuestionType, SCHEMA_VERSION
 from .utils import apply_grayscale
 
 @dataclass
@@ -210,7 +210,7 @@ def regions_to_spec_draft(
                 {
                     "id": region.label or f"q{question_counter}",
                     "bbox": region.bbox,
-                    "response_type": "free_response",
+                    "response_type": QuestionType.FREE_RESPONSE.value,
                     "points": 10,
                 }
             )

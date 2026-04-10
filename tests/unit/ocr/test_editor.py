@@ -10,6 +10,7 @@ from opengrader.core.ocr.editor import (
     spec_to_editor_regions,
 )
 from opengrader.cli.ocr_preview_pdf import LiveRegionEditor
+from opengrader.core.pdf.templates.constants import QuestionType, LETTER_W, LETTER_H
 
 
 def _sample_spec() -> dict:
@@ -34,7 +35,7 @@ def _sample_spec() -> dict:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.3, 0.8, 0.2],
-                        "response_type": "free_response",
+                        "response_type": QuestionType.FREE_RESPONSE.value,
                     }
                 ],
             }
@@ -99,7 +100,7 @@ def test_border_strip_rects_returns_four_nonempty_edges() -> None:
 
 def test_live_region_editor_version_status_text() -> None:
     doc = fitz.open()
-    doc.new_page(width=612, height=792)
+    doc.new_page(width=LETTER_W, height=LETTER_H)
 
     regions = [
         EditorRegion(
@@ -136,7 +137,7 @@ def test_master_template_pdf_has_no_overlay_labels(tmp_path) -> None:
     master_pdf = tmp_path / "master.pdf"
 
     doc = fitz.open()
-    page = doc.new_page(width=612, height=792)
+    page = doc.new_page(width=LETTER_W, height=LETTER_H)
     page.insert_text((72, 72), "Template page", fontsize=12)
     page.draw_rect(fitz.Rect(100, 120, 260, 170), color=(0, 0, 0), width=0.8)
     doc.save(input_pdf)
@@ -147,7 +148,7 @@ def test_master_template_pdf_has_no_overlay_labels(tmp_path) -> None:
             page_number=1,
             region_id="student_name",
             region_type="field",
-            bbox_norm=[100 / 612, 120 / 792, 160 / 612, 50 / 792],
+            bbox_norm=[100 / LETTER_W, 120 / LETTER_H, 160 / LETTER_W, 50 / LETTER_H],
             locked=False,
             source_index=0,
         )

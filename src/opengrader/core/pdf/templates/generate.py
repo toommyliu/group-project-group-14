@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 import fitz
 
@@ -13,6 +14,8 @@ from .draw import (
 )
 from .fonts import register_page_fonts, resolve_template_fonts
 from .spec import VERSION_ANCHOR_MAP, build_layout_spec
+
+QuestionInput = tuple[str, int, str] | dict[str, Any]
 
 
 def _filled_anchors_for_version(version: str) -> set[Anchor]:
@@ -31,10 +34,130 @@ def _resolve_continued_page_header(title: str, override: str | None) -> str:
     return "Quiz"
 
 
+def _normalize_points(value: Any, *, context: str) -> int:
+    if not isinstance(value, (int, float)):
+        raise TypeError(f"{context}: points must be numeric, got {value!r}")
+    return int(value)
+
+
+def _default_subquestion_label(index: int) -> str:
+    if 0 <= index < 26:
+        return chr(ord("a") + index)
+    return str(index + 1)
+
+
+def _normalize_subquestions(
+    parent_id: str,
+    raw_subquestions: Any,
+    seen_ids: set[str],
+) -> list[dict[str, Any]]:
+    if raw_subquestions is None:
+        return []
+    if not isinstance(raw_subquestions, list):
+        raise TypeError(
+            f"question[{parent_id!r}].subquestions must be a list, got {type(raw_subquestions).__name__}"
+        )
+
+    normalized: list[dict[str, Any]] = []
+    for i, raw_sub in enumerate(raw_subquestions):
+        default_label = _default_subquestion_label(i)
+
+        if isinstance(raw_sub, tuple):
+            if len(raw_sub) != 3:
+                raise ValueError(
+                    "subquestion tuples must be (id, points, prompt); "
+                    f"got {raw_sub!r}"
+                )
+            sid, points, prompt = raw_sub
+            label = default_label
+        elif isinstance(raw_sub, dict):
+            if "id" not in raw_sub:
+                raise ValueError(f"question[{parent_id!r}].subquestions[{i}] missing 'id'")
+            sid = raw_sub["id"]
+            points = raw_sub.get("points", 0)
+            prompt = raw_sub.get("prompt", "")
+            label = raw_sub.get("label", default_label)
+        else:
+            raise TypeError(
+                "subquestions entries must be a tuple or object; "
+                f"got {type(raw_sub).__name__}"
+            )
+
+        sid_str = str(sid).strip()
+        if not sid_str:
+            raise ValueError(f"question[{parent_id!r}].subquestions[{i}]: empty 'id'")
+        if sid_str in seen_ids:
+            raise ValueError(f"duplicate question/subquestion id detected: {sid_str!r}")
+        seen_ids.add(sid_str)
+
+        normalized.append(
+            {
+                "id": sid_str,
+                "label": str(label).strip() or default_label,
+                "points": _normalize_points(
+                    points,
+                    context=f"question[{parent_id!r}].subquestions[{sid_str!r}]",
+                ),
+                "prompt": str(prompt).strip(),
+            }
+        )
+
+    return normalized
+
+
+def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for i, raw_question in enumerate(questions):
+        if isinstance(raw_question, tuple):
+            if len(raw_question) != 3:
+                raise ValueError(
+                    "question tuples must be (id, points, prompt); "
+                    f"got {raw_question!r}"
+                )
+            qid, points, prompt = raw_question
+            subquestions_raw = []
+        elif isinstance(raw_question, dict):
+            if "id" not in raw_question:
+                raise ValueError(f"questions[{i}] missing 'id'")
+            qid = raw_question["id"]
+            points = raw_question.get("points", 0)
+            prompt = raw_question.get("prompt", "")
+            subquestions_raw = raw_question.get("subquestions", [])
+        else:
+            raise TypeError(
+                "questions entries must be tuples or objects; "
+                f"got {type(raw_question).__name__}"
+            )
+
+        qid_str = str(qid).strip()
+        if not qid_str:
+            raise ValueError(f"questions[{i}]: empty 'id'")
+        if qid_str in seen_ids:
+            raise ValueError(f"duplicate question/subquestion id detected: {qid_str!r}")
+        seen_ids.add(qid_str)
+
+        normalized.append(
+            {
+                "id": qid_str,
+                "points": _normalize_points(points, context=f"question[{qid_str!r}]"),
+                "prompt": str(prompt).strip(),
+                "subquestions": _normalize_subquestions(
+                    qid_str,
+                    subquestions_raw,
+                    seen_ids,
+                ),
+            }
+        )
+
+    return normalized
+
+
 def generate_template_pdf(
     output_path: Path,
     version: str,
-    questions: list[tuple[str, int, str]],
+    questions: list[QuestionInput],
     title: str,
     instructions: str | None = None,
     continued_page_header: str | None = None,
@@ -51,6 +174,8 @@ def generate_template_pdf(
     if fonts.warning:
         print(fonts.warning, file=sys.stderr)
 
+    normalized_questions = _normalize_questions(questions)
+
     filled = _filled_anchors_for_version(version)
     continued_header_text = _resolve_continued_page_header(title, continued_page_header)
     doc = fitz.Document()
@@ -66,7 +191,7 @@ def generate_template_pdf(
         fonts,
     )
 
-    remaining = questions[:]
+    remaining = normalized_questions[:]
     page_number = 1
     current_page = page
     current_start_y = start_y
@@ -84,9 +209,7 @@ def generate_template_pdf(
             fonts=fonts,
         )
 
-    question_meta: list[
-        tuple[str, tuple[float, float, float, float], int, int, str]
-    ] = []
+    question_meta: list[dict[str, Any]] = []
 
     while remaining:
         drawn_count, drawn_meta = draw_questions_on_page(
@@ -98,6 +221,8 @@ def generate_template_pdf(
             current_start_y,
             fonts,
         )
+        if drawn_count <= 0:
+            raise ValueError("No questions could be drawn on the current page")
         question_meta.extend(drawn_meta)
         remaining = remaining[drawn_count:]
         if not remaining:
@@ -133,7 +258,7 @@ def generate_submission_pdf(
     version: str,
     name: str,
     student_id: str,
-    questions: list[tuple[str, int, str]],
+    questions: list[QuestionInput],
     title: str,
     instructions: str | None = None,
     continued_page_header: str | None = None,
@@ -148,6 +273,8 @@ def generate_submission_pdf(
     )
     if fonts.warning:
         print(fonts.warning, file=sys.stderr)
+
+    normalized_questions = _normalize_questions(questions)
 
     filled = _filled_anchors_for_version(version)
     continued_header_text = _resolve_continued_page_header(title, continued_page_header)
@@ -164,7 +291,7 @@ def generate_submission_pdf(
         fonts,
     )
 
-    remaining = questions[:]
+    remaining = normalized_questions[:]
     page_number = 1
     current_page = page
     current_start_y = start_y
@@ -192,6 +319,8 @@ def generate_submission_pdf(
             current_start_y,
             fonts,
         )
+        if drawn_count <= 0:
+            raise ValueError("No questions could be drawn on the current page")
         remaining = remaining[drawn_count:]
         if not remaining:
             break

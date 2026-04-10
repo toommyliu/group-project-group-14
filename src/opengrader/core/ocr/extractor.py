@@ -293,6 +293,27 @@ def extract_version_field(spec: dict) -> dict | None:
     return None
 
 
+def _extract_question_crop(
+    page_image: Image.Image,
+    question: dict,
+    page_w: int,
+    page_h: int,
+    page_num: int,
+    response_format: Literal["png", "pdf"],
+    sub_dir: Path,
+) -> QuestionExtractionResult:
+    qid = str(question["id"])
+    bbox_px = _bbox_norm_to_px(question["bbox"], page_w, page_h)
+    region = crop_region(page_image, bbox_px)
+    out_path = sub_dir / f"{qid}.{response_format}"
+    region.save(out_path)
+    return QuestionExtractionResult(
+        question_id=qid,
+        page_number=page_num,
+        output_path=str(out_path),
+    )
+
+
 def detect_version_from_anchors(
     page_image: Image.Image,
     page_anchors: list[dict],
@@ -373,18 +394,34 @@ def process_submission_pdf(
             all_field_results.extend(field_results)
 
             questions = page_dict.get("questions", [])
-            for q in questions:
-                qid = q["id"]
-                bbox_px = _bbox_norm_to_px(q["bbox"], page_w, page_h)
-                region = crop_region(page_image, bbox_px)
-                sub_dir = Path(output_dir) / "responses" / path.stem
-                sub_dir.mkdir(parents=True, exist_ok=True)
-                ext = response_format
-                out_path = sub_dir / f"{qid}.{ext}"
-                region.save(out_path)
+            sub_dir = Path(output_dir) / "responses" / path.stem
+            sub_dir.mkdir(parents=True, exist_ok=True)
+            for question in questions:
+                subquestions = question.get("subquestions", [])
+                if subquestions:
+                    for subquestion in subquestions:
+                        all_question_results.append(
+                            _extract_question_crop(
+                                page_image=page_image,
+                                question=subquestion,
+                                page_w=page_w,
+                                page_h=page_h,
+                                page_num=page_num,
+                                response_format=response_format,
+                                sub_dir=sub_dir,
+                            )
+                        )
+                    continue
+
                 all_question_results.append(
-                    QuestionExtractionResult(
-                        question_id=qid, page_number=page_num, output_path=str(out_path)
+                    _extract_question_crop(
+                        page_image=page_image,
+                        question=question,
+                        page_w=page_w,
+                        page_h=page_h,
+                        page_num=page_num,
+                        response_format=response_format,
+                        sub_dir=sub_dir,
                     )
                 )
     finally:
@@ -403,28 +440,6 @@ def process_submission_pdf(
             result.version_confidence = 0.0
             result.version_validated = False
             result.version_error = "anchor_version_not_detected"
-    # TODO: legacy code?
-    # else:
-    #     version_field = extract_version_field(spec)
-    #     version_result = next(
-    #         (
-    #             r
-    #             for r in all_field_results
-    #             if r.field_id == (version_field or {}).get("id")
-    #         ),
-    #         None,
-    #     )
-    #     if version_result:
-    #         result.version_id = (
-    #             version_result.ocr_result.text if version_result.ocr_result else None
-    #         )
-    #         result.version_confidence = (
-    #             version_result.ocr_result.confidence
-    #             if version_result.ocr_result
-    #             else None
-    #         )
-    #         result.version_validated = version_result.validated
-    #         result.version_error = version_result.error
 
     version_field = extract_version_field(spec)
     result.fields = [

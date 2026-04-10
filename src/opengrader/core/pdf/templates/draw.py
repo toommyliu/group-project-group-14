@@ -2,12 +2,16 @@ import fitz
 
 from .anchor import Anchor
 from .constants import (
-    ANCHOR_MARGIN,
+    ANCHOR_PADDING,
     ANCHOR_SIZE,
     BOX_LINE,
-    CONTENT_MARGIN,
+    CONTENT_PADDING,
     MIN_QUESTION_BOX_HEIGHT,
     QUESTION_GAP,
+    QUESTION_HEADER_HEIGHT,
+    QUESTION_INNER_PADDING,
+    SUBQUESTION_GAP,
+    SUBQUESTION_MIN_HEIGHT,
 )
 from .fonts import ResolvedTemplateFonts, measure_text_width
 
@@ -18,6 +22,8 @@ ANCHOR_POSITIONS = {
     Anchor.BottomRight: lambda m, s, pw, ph: (pw - m - s, ph - m - s),
 }
 
+QUESTION_FONTSIZE = 11
+SUBQUESTION_FONTSIZE = 9
 
 def _draw_centered_text(
     page: fitz.Page,
@@ -84,6 +90,50 @@ def _wrap_text(
         current = word
     lines.append(current)
     return lines
+
+
+def _truncate_text_to_width(
+    text: str,
+    *,
+    max_width: float,
+    fontsize: float,
+    bold: bool,
+    fonts: ResolvedTemplateFonts,
+) -> str:
+    clean = " ".join(text.split())
+    if not clean:
+        return ""
+
+    if measure_text_width(clean, fontsize, bold=bold, fonts=fonts) <= max_width:
+        return clean
+
+    words = clean.split(" ")
+    out = ""
+    for word in words:
+        candidate = word if not out else f"{out} {word}"
+        if (
+            measure_text_width(candidate + "...", fontsize, bold=bold, fonts=fonts)
+            <= max_width
+        ):
+            out = candidate
+            continue
+        break
+
+    if out:
+        return out + "..."
+
+    # Fallback: trim by characters when even one word is too wide.
+    chars = ""
+    for ch in clean:
+        candidate = chars + ch
+        if (
+            measure_text_width(candidate + "...", fontsize, bold=bold, fonts=fonts)
+            <= max_width
+        ):
+            chars = candidate
+            continue
+        break
+    return (chars + "...") if chars else ""
 
 
 def _instruction_layout(
@@ -167,7 +217,7 @@ def create_page_with_anchors(
     filled_anchors: set[Anchor] | None = None,
 ) -> fitz.Page:
     page = doc.new_page(width=page_w, height=page_h)
-    margin = ANCHOR_MARGIN
+    margin = ANCHOR_PADDING
     if filled_anchors is None:
         filled_anchors = {
             Anchor.TopLeft,
@@ -225,7 +275,7 @@ def draw_page_number(
         page,
         text=str(page_number),
         center_x=page_w / 2.0,
-        baseline_y=page_h - ANCHOR_MARGIN - 8,
+        baseline_y=page_h - ANCHOR_PADDING - 8,
         fontsize=11,
         bold=True,
         fonts=fonts,
@@ -238,8 +288,8 @@ def draw_continued_page_header(
     header_text: str,
     fonts: ResolvedTemplateFonts,
 ) -> float:
-    content_x0 = CONTENT_MARGIN
-    content_x1 = page_w - CONTENT_MARGIN
+    content_x0 = CONTENT_PADDING
+    content_x1 = page_w - CONTENT_PADDING
     text = header_text.strip() or "Quiz"
 
     header_baseline_y = 39.0
@@ -272,6 +322,28 @@ def draw_continued_page_header(
     return underline_y + 24
 
 
+def _display_question_id(qid: str) -> str:
+    clean = qid.strip()
+    if clean.lower().startswith("q") and len(clean) > 1:
+        return clean[1:]
+    return clean
+
+
+def _question_min_height(question: dict) -> float:
+    subquestions = question.get("subquestions", [])
+    if not subquestions:
+        return MIN_QUESTION_BOX_HEIGHT
+
+    sub_count = len(subquestions)
+    sub_block_height = (
+        sub_count * SUBQUESTION_MIN_HEIGHT + max(0, sub_count - 1) * SUBQUESTION_GAP
+    )
+    return max(
+        MIN_QUESTION_BOX_HEIGHT,
+        QUESTION_HEADER_HEIGHT + 2 * QUESTION_INNER_PADDING + sub_block_height,
+    )
+
+
 def draw_question_box(
     page: fitz.Page,
     x0: float,
@@ -282,16 +354,102 @@ def draw_question_box(
     points: int,
     prompt: str,
     fonts: ResolvedTemplateFonts,
-) -> None:
+    subquestions: list[dict] | None = None,
+) -> list[dict]:
     page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=(0.0, 0.0, 0.0), width=BOX_LINE)
-    header = f"{qid.upper().replace('Q', '')}.  ({points} pts)  {prompt}"
-    page.insert_textbox(
-        fitz.Rect(x0 + 4, y0 + 5, x1 - 4, y0 + 30),
-        header,
-        fontsize=11,
+
+    header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
+    header_y = y0 + 16
+    page.insert_text(
+        fitz.Point(x0 + 8, header_y),
+        header_prefix,
+        fontsize=QUESTION_FONTSIZE,
         fontname=fonts.bold_name,
         color=(0.2, 0.2, 0.2),
     )
+
+    prefix_w = measure_text_width(header_prefix, QUESTION_FONTSIZE, bold=True, fonts=fonts)
+    prompt_space_w = max(24.0, (x1 - x0) - (prefix_w + 22))
+    prompt_text = _truncate_text_to_width(
+        prompt,
+        max_width=prompt_space_w,
+        fontsize=QUESTION_FONTSIZE,
+        bold=False,
+        fonts=fonts,
+    )
+    if prompt_text:
+        page.insert_text(
+            fitz.Point(x0 + 8 + prefix_w + 6, header_y),
+            prompt_text,
+            fontsize=QUESTION_FONTSIZE,
+            fontname=fonts.regular_name,
+            color=(0.2, 0.2, 0.2),
+        )
+
+    if not subquestions:
+        return []
+
+    sub_area_top = y0 + QUESTION_HEADER_HEIGHT + QUESTION_INNER_PADDING
+    sub_area_bottom = y1 - QUESTION_INNER_PADDING
+    sub_count = len(subquestions)
+    available = sub_area_bottom - sub_area_top - max(0, sub_count - 1) * SUBQUESTION_GAP
+    if available <= 0:
+        return []
+
+    sub_height = available / sub_count
+    drawn_subquestions: list[dict] = []
+
+    for i, subquestion in enumerate(subquestions):
+        sub_y0 = sub_area_top + i * (sub_height + SUBQUESTION_GAP)
+        sub_y1 = sub_y0 + sub_height
+        page.draw_rect(
+            fitz.Rect(x0 + 8, sub_y0, x1 - 8, sub_y1),
+            color=(0.0, 0.0, 0.0),
+            width=BOX_LINE,
+        )
+
+        raw_label = str(subquestion.get("label", chr(ord("a") + i))).strip()
+        label = raw_label if raw_label.endswith(")") else f"{raw_label})"
+        sub_points = int(subquestion.get("points", 0))
+        sub_prompt = str(subquestion.get("prompt", ""))
+        sub_prefix = f"{label} ({sub_points} pts)"
+        sub_header_y = sub_y0 + 13
+        page.insert_text(
+            fitz.Point(x0 + 12, sub_header_y),
+            sub_prefix,
+            fontsize=SUBQUESTION_FONTSIZE,
+            fontname=fonts.regular_name,
+            color=(0.25, 0.25, 0.25),
+        )
+
+        sub_prefix_w = measure_text_width(sub_prefix, SUBQUESTION_FONTSIZE, bold=False, fonts=fonts)
+        sub_prompt_space = max(20.0, (x1 - x0) - (sub_prefix_w + 30))
+        sub_prompt_text = _truncate_text_to_width(
+            sub_prompt,
+            max_width=sub_prompt_space,
+            fontsize=SUBQUESTION_FONTSIZE,
+            bold=False,
+            fonts=fonts,
+        )
+        if sub_prompt_text:
+            page.insert_text(
+                fitz.Point(x0 + 12 + sub_prefix_w + 5, sub_header_y),
+                sub_prompt_text,
+                fontsize=SUBQUESTION_FONTSIZE,
+                fontname=fonts.regular_name,
+                color=(0.25, 0.25, 0.25),
+            )
+        drawn_subquestions.append(
+            {
+                "id": str(subquestion["id"]),
+                "label": raw_label,
+                "rect": (x0 + 8, sub_y0, x1 - 8, sub_y1),
+                "points": sub_points,
+                "prompt": sub_prompt,
+            }
+        )
+
+    return drawn_subquestions
 
 
 def build_info_section(
@@ -303,8 +461,8 @@ def build_info_section(
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
-    content_x0 = CONTENT_MARGIN
-    content_x1 = page_w - CONTENT_MARGIN
+    content_x0 = CONTENT_PADDING
+    content_x1 = page_w - CONTENT_PADDING
 
     lines = [line.strip() for line in title.strip().split("\n") if line.strip()]
     if not lines:
@@ -461,39 +619,57 @@ def build_info_section(
 def draw_questions_on_page(
     page: fitz.Page,
     page_number: int,
-    questions: list[tuple[str, int, str]],
+    questions: list[dict],
     page_w: float,
     page_h: float,
     start_y: float,
     fonts: ResolvedTemplateFonts,
-) -> tuple[int, list[tuple[str, tuple[float, float, float, float], int, int, str]]]:
-    content_x0 = CONTENT_MARGIN
-    content_x1 = page_w - CONTENT_MARGIN
+) -> tuple[int, list[dict]]:
+    content_x0 = CONTENT_PADDING
+    content_x1 = page_w - CONTENT_PADDING
     content_top = start_y
-    content_bottom = page_h - ANCHOR_MARGIN - ANCHOR_SIZE - 32
+    content_bottom = page_h - ANCHOR_PADDING - ANCHOR_SIZE - 32
     if content_bottom <= content_top:
         draw_page_number(page, page_number, page_w, page_h, fonts)
         return 0, []
 
+    available_height = content_bottom - content_top
     max_fit = 0
-    max_fit_height = 0.0
+    min_heights: list[float] = []
+
     for candidate in range(1, len(questions) + 1):
-        available = content_bottom - content_top - (candidate - 1) * QUESTION_GAP
-        h = available / candidate
-        if h >= MIN_QUESTION_BOX_HEIGHT:
+        q = questions[candidate - 1]
+        min_heights.append(_question_min_height(q))
+        required = sum(min_heights) + (candidate - 1) * QUESTION_GAP
+        if required <= available_height:
             max_fit = candidate
-            max_fit_height = h
+        else:
+            break
 
     if max_fit == 0:
-        max_fit = 1
-        max_fit_height = content_bottom - content_top
+        question_id = str(questions[0].get("id", "unknown")) if questions else "unknown"
+        raise ValueError(
+            "Question "
+            f"{question_id!r} does not fit on page {page_number}; "
+            "reduce prompt length or number of subquestions."
+        )
 
-    drawn_meta: list[tuple[str, tuple[float, float, float, float], int, int, str]] = []
+    question_min_heights = min_heights[:max_fit]
+    required_height = sum(question_min_heights) + (max_fit - 1) * QUESTION_GAP
+    extra_per_question = max(0.0, available_height - required_height) / max_fit
+
+    drawn_meta: list[dict] = []
+    y = content_top
     for i in range(max_fit):
-        qid, points, prompt = questions[i]
-        y0 = content_top + i * (max_fit_height + QUESTION_GAP)
-        y1 = y0 + max_fit_height
-        draw_question_box(
+        question = questions[i]
+        qid = str(question["id"])
+        points = int(question["points"])
+        prompt = str(question["prompt"])
+        question_height = question_min_heights[i] + extra_per_question
+        y0 = y
+        y1 = y0 + question_height
+
+        drawn_subquestions = draw_question_box(
             page,
             content_x0,
             y0,
@@ -503,10 +679,19 @@ def draw_questions_on_page(
             points,
             prompt,
             fonts,
+            subquestions=question.get("subquestions", []),
         )
         drawn_meta.append(
-            (qid, (content_x0, y0, content_x1, y1), page_number, points, prompt)
+            {
+                "id": qid,
+                "rect": (content_x0, y0, content_x1, y1),
+                "page_number": page_number,
+                "points": points,
+                "prompt": prompt,
+                "subquestions": drawn_subquestions,
+            }
         )
+        y = y1 + QUESTION_GAP
 
     draw_page_number(page, page_number, page_w, page_h, fonts)
 

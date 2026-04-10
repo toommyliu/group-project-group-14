@@ -1,3 +1,5 @@
+from opengrader.core.pdf.templates.constants import QuestionType
+
 from .anchor import ANCHOR_LOCATIONS, Anchor, anchor_entries_norm
 
 # version -> list of anchors that should be filled
@@ -36,7 +38,7 @@ def build_layout_spec(
     page_w: float,
     page_h: float,
     field_rects: dict[str, tuple[float, float, float, float]],
-    question_meta: list[tuple[str, tuple[float, float, float, float], int, int, str]],
+    question_meta: list[dict],
 ) -> dict:
     """
     Build the layout specification of the PDF template.
@@ -76,18 +78,37 @@ def build_layout_spec(
         },
     ]
 
-    for qid, rect, page_number, points, prompt in question_meta:
+    for question in question_meta:
+        qid = str(question["id"])
+        rect = question["rect"]
+        page_number = int(question["page_number"])
+        points = question["points"]
+        prompt = question["prompt"]
+
         page = page_entry(page_number)
-        page["questions"].append(
-            {
-                "id": qid,
-                "bbox": _bbox_norm(rect, page_w, page_h),
-                # TODO: support multiple response types?
-                "response_type": "free_response",
-                "points": points,
-                "prompt": prompt,
-            }
-        )
+        question_spec = {
+            "id": qid,
+            "bbox": _bbox_norm(rect, page_w, page_h),
+            "response_type": QuestionType.FREE_RESPONSE.value,
+            "points": points,
+            "prompt": prompt,
+        }
+
+        subquestions = question.get("subquestions", [])
+        if subquestions:
+            question_spec["subquestions"] = [
+                {
+                    "id": str(subquestion["id"]),
+                    "label": str(subquestion.get("label", "")),
+                    "bbox": _bbox_norm(subquestion["rect"], page_w, page_h),
+                    "response_type": QuestionType.FREE_RESPONSE.value,
+                    "points": subquestion.get("points", 0),
+                    "prompt": subquestion.get("prompt", ""),
+                }
+                for subquestion in subquestions
+            ]
+
+        page["questions"].append(question_spec)
 
     versions_map = {}
     for v in versions:

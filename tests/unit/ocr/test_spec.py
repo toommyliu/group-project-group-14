@@ -5,6 +5,7 @@ from opengrader.core.ocr.spec import (
     lookup_version_by_anchors,
     validate_spec,
 )
+from opengrader.core.pdf.templates.constants import QuestionType
 
 
 def test_validate_spec_accepts_minimal_valid_spec() -> None:
@@ -187,3 +188,138 @@ def test_lookup_version_by_anchors_returns_none_on_ambiguous_tie() -> None:
     }
 
     assert lookup_version_by_anchors({"tl", "tr"}, spec) is None
+
+
+def test_validate_spec_accepts_multipart_questions() -> None:
+    spec = {
+        "schema_version": "1.0",
+        "unit_id": "unit-1",
+        "pages": [
+            {
+                "page_number": 1,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "fields": [],
+                "questions": [
+                    {
+                        "id": "q1",
+                        "bbox": [0.1, 0.2, 0.8, 0.5],
+                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "points": 20,
+                        "subquestions": [
+                            {
+                                "id": "q1a",
+                                "label": "a",
+                                "bbox": [0.12, 0.28, 0.76, 0.18],
+                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "points": 10,
+                            },
+                            {
+                                "id": "q1b",
+                                "label": "b",
+                                "bbox": [0.12, 0.48, 0.76, 0.18],
+                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "points": 10,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_spec(spec) == []
+
+
+def test_validate_spec_rejects_cross_page_question_or_subquestion_ids() -> None:
+    spec = {
+        "schema_version": "1.0",
+        "unit_id": "unit-1",
+        "pages": [
+            {
+                "page_number": 1,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "fields": [],
+                "questions": [
+                    {
+                        "id": "q1",
+                        "bbox": [0.1, 0.2, 0.8, 0.3],
+                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "points": 10,
+                        "subquestions": [
+                            {
+                                "id": "q1a",
+                                "bbox": [0.12, 0.24, 0.76, 0.12],
+                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "points": 5,
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "page_number": 2,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "fields": [],
+                "questions": [
+                    {
+                        "id": "q1",
+                        "bbox": [0.1, 0.2, 0.8, 0.3],
+                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "points": 10,
+                    },
+                    {
+                        "id": "q2",
+                        "bbox": [0.1, 0.55, 0.8, 0.3],
+                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "points": 10,
+                        "subquestions": [
+                            {
+                                "id": "q1a",
+                                "bbox": [0.12, 0.6, 0.76, 0.12],
+                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "points": 5,
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    errors = validate_spec(spec)
+    assert len(errors) == 2
+    assert "cross-page continuation is not supported" in str(errors[0])
+    assert "cross-page continuation is not supported" in str(errors[1])
+
+
+def test_validate_spec_rejects_subquestion_outside_parent_bbox() -> None:
+    spec = {
+        "schema_version": "1.0",
+        "unit_id": "unit-1",
+        "pages": [
+            {
+                "page_number": 1,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "fields": [],
+                "questions": [
+                    {
+                        "id": "q1",
+                        "bbox": [0.1, 0.2, 0.5, 0.2],
+                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "points": 10,
+                        "subquestions": [
+                            {
+                                "id": "q1a",
+                                "bbox": [0.65, 0.2, 0.2, 0.1],
+                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "points": 5,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(SpecError, match="bbox must be fully inside parent question bbox"):
+        validate_spec(spec)
