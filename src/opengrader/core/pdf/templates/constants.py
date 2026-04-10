@@ -1,8 +1,8 @@
 from enum import Enum
 
 ANCHOR_SIZE = 9
-ANCHOR_MARGIN = 24
-CONTENT_MARGIN = ANCHOR_MARGIN + 50 # instructions, questions, sequential page header 
+ANCHOR_PADDING = 24
+CONTENT_PADDING = ANCHOR_PADDING + 50 # instructions, questions, sequential page header 
 
 BOX_LINE = 0.75
 

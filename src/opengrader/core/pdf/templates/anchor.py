@@ -1,6 +1,6 @@
 from enum import Enum
 
-from .constants import ANCHOR_MARGIN, ANCHOR_SIZE, LETTER_H, LETTER_W
+from .constants import ANCHOR_PADDING, ANCHOR_SIZE, LETTER_H, LETTER_W
 
 
 class Anchor(Enum):
@@ -18,8 +18,8 @@ def anchor_bbox_map_norm(
     page_h: float = LETTER_H,
     precision: int = 3,
 ) -> dict[str, list[float]]:
-    margin_x = ANCHOR_MARGIN / page_w
-    margin_y = ANCHOR_MARGIN / page_h
+    margin_x = ANCHOR_PADDING / page_w
+    margin_y = ANCHOR_PADDING / page_h
     size_x = ANCHOR_SIZE / page_w
     size_y = ANCHOR_SIZE / page_h
 

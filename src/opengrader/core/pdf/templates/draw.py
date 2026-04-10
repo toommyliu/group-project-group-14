@@ -2,10 +2,10 @@ import fitz
 
 from .anchor import Anchor
 from .constants import (
-    ANCHOR_MARGIN,
+    ANCHOR_PADDING,
     ANCHOR_SIZE,
     BOX_LINE,
-    CONTENT_MARGIN,
+    CONTENT_PADDING,
     MIN_QUESTION_BOX_HEIGHT,
     QUESTION_GAP,
     QUESTION_HEADER_HEIGHT,
@@ -217,7 +217,7 @@ def create_page_with_anchors(
     filled_anchors: set[Anchor] | None = None,
 ) -> fitz.Page:
     page = doc.new_page(width=page_w, height=page_h)
-    margin = ANCHOR_MARGIN
+    margin = ANCHOR_PADDING
     if filled_anchors is None:
         filled_anchors = {
             Anchor.TopLeft,
@@ -275,7 +275,7 @@ def draw_page_number(
         page,
         text=str(page_number),
         center_x=page_w / 2.0,
-        baseline_y=page_h - ANCHOR_MARGIN - 8,
+        baseline_y=page_h - ANCHOR_PADDING - 8,
         fontsize=11,
         bold=True,
         fonts=fonts,
@@ -288,8 +288,8 @@ def draw_continued_page_header(
     header_text: str,
     fonts: ResolvedTemplateFonts,
 ) -> float:
-    content_x0 = CONTENT_MARGIN
-    content_x1 = page_w - CONTENT_MARGIN
+    content_x0 = CONTENT_PADDING
+    content_x1 = page_w - CONTENT_PADDING
     text = header_text.strip() or "Quiz"
 
     header_baseline_y = 39.0
@@ -461,8 +461,8 @@ def build_info_section(
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
-    content_x0 = CONTENT_MARGIN
-    content_x1 = page_w - CONTENT_MARGIN
+    content_x0 = CONTENT_PADDING
+    content_x1 = page_w - CONTENT_PADDING
 
     lines = [line.strip() for line in title.strip().split("\n") if line.strip()]
     if not lines:
@@ -625,10 +625,10 @@ def draw_questions_on_page(
     start_y: float,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[int, list[dict]]:
-    content_x0 = CONTENT_MARGIN
-    content_x1 = page_w - CONTENT_MARGIN
+    content_x0 = CONTENT_PADDING
+    content_x1 = page_w - CONTENT_PADDING
     content_top = start_y
-    content_bottom = page_h - ANCHOR_MARGIN - ANCHOR_SIZE - 32
+    content_bottom = page_h - ANCHOR_PADDING - ANCHOR_SIZE - 32
     if content_bottom <= content_top:
         draw_page_number(page, page_number, page_w, page_h, fonts)
         return 0, []
