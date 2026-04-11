@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from enum import Enum
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,27 @@ from .utils import default_subquestion_label
 _MARKER_RE = re.compile(r"^===([A-Z_]+)===$")
 # "(10 points) Question prompt" -> points=10, prompt="Question prompt"
 _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGNORECASE)
+
+class Marker(str, Enum):
+    TITLE = "TITLE"
+    INSTRUCTIONS = "INSTRUCTIONS"
+    CONTINUED_PAGE_HEADER = "CONTINUED_PAGE_HEADER"
+    VERSIONS = "VERSIONS"
+    QUESTIONS_START_PAGE = "QUESTIONS_START_PAGE"
+    QUESTION = "QUESTION"
+    PROMPT = "PROMPT"
+    QUESTION_ID = "QUESTION_ID"
+    ID = "ID"
+    POSSIBLE_POINTS = "POSSIBLE_POINTS"
+    POINTS = "POINTS"
+    ANSWER = "ANSWER"
+    IMAGE = "IMAGE"
+    LABEL = "LABEL"
+    SUBQUESTION = "SUBQUESTION"
+    SUBQUESTION_PROMPT = "SUBQUESTION_PROMPT"
+    SUBQUESTION_ID = "SUBQUESTION_ID"
+    ENDSUBQUESTION = "ENDSUBQUESTION"
+    END = "END"
 
 
 @dataclass
@@ -86,6 +108,7 @@ def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
     cleaned = matched.group(2).strip()
     return cleaned, points
 
+
 def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tuple[QASubquestion, int]:
     sub_id = ""
     label: str | None = None
@@ -106,25 +129,25 @@ def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tupl
             )
 
         # a SUBQUESTION or END marker is encountered ends the current subquestion block
-        if current_marker in {"SUBQUESTION", "END"}:
+        if current_marker in {Marker.SUBQUESTION, Marker.END}:
             break
 
         i += 1
-        if current_marker == "ENDSUBQUESTION":
+        if current_marker == Marker.ENDSUBQUESTION:
             break
 
         body, i = _read_until_next_marker(lines, i)
-        if current_marker in {"QUESTION", "PROMPT", "SUBQUESTION_PROMPT"}:
+        if current_marker in {Marker.QUESTION, Marker.PROMPT, Marker.SUBQUESTION_PROMPT}:
             prompt = body
-        elif current_marker in {"QUESTION_ID", "ID", "SUBQUESTION_ID"}:
+        elif current_marker in {Marker.QUESTION_ID, Marker.ID, Marker.SUBQUESTION_ID}:
             sub_id = body.strip()
-        elif current_marker in {"POSSIBLE_POINTS", "POINTS"}:
+        elif current_marker in {Marker.POSSIBLE_POINTS, Marker.POINTS}:
             points_raw = body
-        elif current_marker == "ANSWER":
+        elif current_marker == Marker.ANSWER:
             answers.append(body)
-        elif current_marker == "IMAGE":
+        elif current_marker == Marker.IMAGE:
             image_markdown = body
-        elif current_marker == "LABEL":
+        elif current_marker == Marker.LABEL:
             label = body.strip() or None
         else:
             raise ValueError(f"unsupported subquestion marker: ==={current_marker}===")
@@ -177,24 +200,24 @@ def _parse_question(lines: list[str], start: int, default_index: int) -> tuple[Q
             )
 
         i += 1
-        if current_marker == "END":
+        if current_marker == Marker.END:
             ended = True
             break
-        if current_marker == "SUBQUESTION":
+        if current_marker == Marker.SUBQUESTION:
             subquestion, i = _parse_subquestion(lines, i, len(subquestions))
             subquestions.append(subquestion)
             continue
 
         body, i = _read_until_next_marker(lines, i)
-        if current_marker in {"QUESTION", "PROMPT"}:
+        if current_marker in {Marker.QUESTION, Marker.PROMPT}:
             prompt = body
-        elif current_marker in {"QUESTION_ID", "ID"}:
+        elif current_marker in {Marker.QUESTION_ID, Marker.ID}:
             qid = body.strip()
-        elif current_marker in {"POSSIBLE_POINTS", "POINTS"}:
+        elif current_marker in {Marker.POSSIBLE_POINTS, Marker.POINTS}:
             points_raw = body
-        elif current_marker == "ANSWER":
+        elif current_marker == Marker.ANSWER:
             answers.append(body)
-        elif current_marker == "IMAGE":
+        elif current_marker == Marker.IMAGE:
             image_markdown = body
         else:
             raise ValueError(f"unsupported question marker: ==={current_marker}===")
@@ -268,21 +291,21 @@ def parse_qa_markdown(content: str) -> QADocument:
             continue
 
         i += 1
-        if current_marker == "QUESTION":
+        if current_marker == Marker.QUESTION:
             question, i = _parse_question(lines, i, len(questions) + 1)
             questions.append(question)
             continue
 
         body, i = _read_until_next_marker(lines, i)
-        if current_marker == "TITLE":
+        if current_marker == Marker.TITLE:
             title = body
-        elif current_marker == "INSTRUCTIONS":
+        elif current_marker == Marker.INSTRUCTIONS:
             instructions = body
-        elif current_marker == "CONTINUED_PAGE_HEADER":
+        elif current_marker == Marker.CONTINUED_PAGE_HEADER:
             continued_page_header = body
-        elif current_marker == "VERSIONS":
+        elif current_marker == Marker.VERSIONS:
             versions = _parse_versions(body)
-        elif current_marker == "QUESTIONS_START_PAGE":
+        elif current_marker == Marker.QUESTIONS_START_PAGE:
             parsed = _parse_points(body)
             if parsed not in (1, 2):
                 raise ValueError("QUESTIONS_START_PAGE must be 1 or 2")
@@ -339,53 +362,53 @@ def _render_prompt_with_points(prompt: str, points: int) -> str:
 def render_qa_markdown(document: QADocument) -> str:
     lines: list[str] = []
 
-    _append_block(lines, "TITLE", document.title)
-    _append_block(lines, "INSTRUCTIONS", document.instructions)
-    _append_block(lines, "CONTINUED_PAGE_HEADER", document.continued_page_header)
+    _append_block(lines, Marker.TITLE, document.title)
+    _append_block(lines, Marker.INSTRUCTIONS, document.instructions)
+    _append_block(lines, Marker.CONTINUED_PAGE_HEADER, document.continued_page_header)
     if document.versions:
-        _append_block(lines, "VERSIONS", "\n".join(document.versions))
-    _append_block(lines, "QUESTIONS_START_PAGE", str(document.questions_start_page))
+        _append_block(lines, Marker.VERSIONS, "\n".join(document.versions))
+    _append_block(lines, Marker.QUESTIONS_START_PAGE, str(document.questions_start_page))
 
     for q_idx, question in enumerate(document.questions, start=1):
-        lines.append("===QUESTION===")
+        lines.append(f"==={Marker.QUESTION}===")
         lines.append(_render_prompt_with_points(question.prompt, question.points))
 
         default_qid = f"q{q_idx}"
         if question.id != default_qid:
-            lines.append("===QUESTION_ID===")
+            lines.append(f"==={Marker.QUESTION_ID}===")
             lines.append(question.id)
 
         for answer in question.answers:
-            lines.append("===ANSWER===")
+            lines.append(f"==={Marker.ANSWER}===")
             lines.append(answer)
 
         if question.image_markdown:
-            lines.append("===IMAGE===")
+            lines.append(f"==={Marker.IMAGE}===")
             lines.append(question.image_markdown)
 
         for sub_idx, subquestion in enumerate(question.subquestions):
-            lines.append("===SUBQUESTION===")
+            lines.append(f"==={Marker.SUBQUESTION}===")
             lines.append(_render_prompt_with_points(subquestion.prompt, subquestion.points))
 
             default_label = default_subquestion_label(sub_idx)
             if (subquestion.label or default_label) != default_label:
-                lines.append("===LABEL===")
+                lines.append(f"==={Marker.LABEL}===")
                 lines.append(subquestion.label or "")
 
             default_sub_id = f"{question.id}{default_label}"
             if subquestion.id != default_sub_id:
-                lines.append("===QUESTION_ID===")
+                lines.append(f"==={Marker.QUESTION_ID}===")
                 lines.append(subquestion.id)
 
             for answer in subquestion.answers:
-                lines.append("===ANSWER===")
+                lines.append(f"==={Marker.ANSWER}===")
                 lines.append(answer)
 
             if subquestion.image_markdown:
-                lines.append("===IMAGE===")
+                lines.append(f"==={Marker.IMAGE}===")
                 lines.append(subquestion.image_markdown)
 
-        lines.append("===END===")
+        lines.append(f"==={Marker.END}===")
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
