@@ -17,8 +17,6 @@ A, B, C
 (50 points) What is the capital of France?
 ===ANSWER===
 Paris
-===IMAGE===
-![q1](base-64-image-data-here)
 ===END===
 
 ===QUESTION===
@@ -29,8 +27,6 @@ Paris
 0b10
 ===ANSWER===
 10_2 (10 with superscript 2)
-===IMAGE===
-![q2a](base-64-image-data-here)
 ===SUBQUESTION===
 (15 points) What is 8 in hexadecimal?
 ===ANSWER===
