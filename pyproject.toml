@@ -36,6 +36,7 @@ ocr-pdf = "opengrader.cli.ocr_pdf:run_cli"
 ocr-preview-pdf = "opengrader.cli.ocr_preview_pdf:run_cli"
 course-demo = "opengrader.cli.course_core_cli:run_cli"
 seed-db = "opengrader.cli.seed_db:run_cli"
+qa-file = "opengrader.cli.qa_file:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opengrader"]
