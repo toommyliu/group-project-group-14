@@ -84,7 +84,7 @@ def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
         return text, None
     points = int(float(matched.group(1)))
     cleaned = matched.group(2).strip()
-
+    return cleaned, points
 
 def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tuple[QASubquestion, int]:
     sub_id = ""
