@@ -3,14 +3,14 @@ from enum import Enum
 from .constants import ANCHOR_PADDING, ANCHOR_SIZE, LETTER_H, LETTER_W
 
 
-class Anchor(Enum):
+class Anchor(str, Enum):
     TopLeft = "tl"
     TopRight = "tr"
     Bottomleft = "bl"
     BottomRight = "br"
 
 
-ANCHOR_LOCATIONS = set(a.value for a in Anchor)
+ANCHOR_LOCATIONS = set(Anchor)
 
 
 def anchor_bbox_map_norm(
@@ -24,25 +24,25 @@ def anchor_bbox_map_norm(
     size_y = ANCHOR_SIZE / page_h
 
     return {
-        Anchor.TopLeft.value: [
+        Anchor.TopLeft: [
             round(margin_x, precision),
             round(margin_y, precision),
             round(size_x, precision),
             round(size_y, precision),
         ],
-        Anchor.TopRight.value: [
+        Anchor.TopRight: [
             round(1.0 - margin_x - size_x, precision),
             round(margin_y, precision),
             round(size_x, precision),
             round(size_y, precision),
         ],
-        Anchor.Bottomleft.value: [
+        Anchor.Bottomleft: [
             round(margin_x, precision),
             round(1.0 - margin_y - size_y, precision),
             round(size_x, precision),
             round(size_y, precision),
         ],
-        Anchor.BottomRight.value: [
+        Anchor.BottomRight: [
             round(1.0 - margin_x - size_x, precision),
             round(1.0 - margin_y - size_y, precision),
             round(size_x, precision),
@@ -58,8 +58,8 @@ def anchor_entries_norm(
 ) -> list[dict[str, list[float] | str]]:
     bbox_map = anchor_bbox_map_norm(page_w=page_w, page_h=page_h, precision=precision)
     return [
-        {"id": Anchor.TopLeft.value, "bbox": bbox_map[Anchor.TopLeft.value]},
-        {"id": Anchor.TopRight.value, "bbox": bbox_map[Anchor.TopRight.value]},
-        {"id": Anchor.Bottomleft.value, "bbox": bbox_map[Anchor.Bottomleft.value]},
-        {"id": Anchor.BottomRight.value, "bbox": bbox_map[Anchor.BottomRight.value]},
+        {"id": Anchor.TopLeft, "bbox": bbox_map[Anchor.TopLeft]},
+        {"id": Anchor.TopRight, "bbox": bbox_map[Anchor.TopRight]},
+        {"id": Anchor.Bottomleft, "bbox": bbox_map[Anchor.Bottomleft]},
+        {"id": Anchor.BottomRight, "bbox": bbox_map[Anchor.BottomRight]},
     ]

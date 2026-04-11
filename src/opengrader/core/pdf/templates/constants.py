@@ -17,5 +17,5 @@ QUESTION_INNER_PADDING = 10
 SUBQUESTION_GAP = 6
 SUBQUESTION_MIN_HEIGHT = 68
 
-class QuestionType(Enum):
+class QuestionType(str, Enum):
   FREE_RESPONSE = "free_response"

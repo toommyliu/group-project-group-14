@@ -89,7 +89,7 @@ def build_layout_spec(
         question_spec = {
             "id": qid,
             "bbox": _bbox_norm(rect, page_w, page_h),
-            "response_type": QuestionType.FREE_RESPONSE.value,
+            "response_type": QuestionType.FREE_RESPONSE,
             "points": points,
             "prompt": prompt,
         }
@@ -101,7 +101,7 @@ def build_layout_spec(
                     "id": str(subquestion["id"]),
                     "label": str(subquestion.get("label", "")),
                     "bbox": _bbox_norm(subquestion["rect"], page_w, page_h),
-                    "response_type": QuestionType.FREE_RESPONSE.value,
+                    "response_type": QuestionType.FREE_RESPONSE,
                     "points": subquestion.get("points", 0),
                     "prompt": subquestion.get("prompt", ""),
                 }

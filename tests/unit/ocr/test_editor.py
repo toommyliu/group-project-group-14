@@ -35,7 +35,7 @@ def _sample_spec() -> dict:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.3, 0.8, 0.2],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                     }
                 ],
             }
