@@ -10,6 +10,7 @@ from typing import Any
 import fitz
 
 from .generate import QuestionInput
+from .utils import default_subquestion_label
 
 _MARKER_RE = re.compile(r"^===([A-Z_]+)===$")
 # "(10 points) Question prompt" -> points=10, prompt="Question prompt"
@@ -83,13 +84,6 @@ def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
         return text, None
     points = int(float(matched.group(1)))
     cleaned = matched.group(2).strip()
-    return cleaned, points
-
-
-def _default_subquestion_label(index: int) -> str:
-    if 0 <= index < 26:
-        return chr(ord("a") + index)
-    return str(index + 1)
 
 
 def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tuple[QASubquestion, int]:
@@ -147,7 +141,7 @@ def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tupl
         points = inline_points or 0
 
     if label is None:
-        label = _default_subquestion_label(default_index)
+        label = default_subquestion_label(default_index)
 
     return (
         QASubquestion(
@@ -221,7 +215,7 @@ def _parse_question(lines: list[str], start: int, default_index: int) -> tuple[Q
     labels_seen: set[str] = set()
     for idx, sub in enumerate(subquestions):
         if sub.label is None:
-            sub.label = _default_subquestion_label(idx)
+            sub.label = default_subquestion_label(idx)
         if sub.label in labels_seen:
             raise ValueError(
                 f"duplicate subquestion label in question {qid!r}: {sub.label!r}; "
@@ -373,7 +367,7 @@ def render_qa_markdown(document: QADocument) -> str:
             lines.append("===SUBQUESTION===")
             lines.append(_render_prompt_with_points(subquestion.prompt, subquestion.points))
 
-            default_label = _default_subquestion_label(sub_idx)
+            default_label = default_subquestion_label(sub_idx)
             if (subquestion.label or default_label) != default_label:
                 lines.append("===LABEL===")
                 lines.append(subquestion.label or "")

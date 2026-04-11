@@ -14,6 +14,7 @@ from .draw import (
 )
 from .fonts import register_page_fonts, resolve_template_fonts
 from .spec import VERSION_ANCHOR_MAP, build_layout_spec
+from .utils import default_subquestion_label
 
 QuestionInput = tuple[str, int, str] | dict[str, Any]
 
@@ -40,12 +41,6 @@ def _normalize_points(value: Any, *, context: str) -> int:
     return int(value)
 
 
-def _default_subquestion_label(index: int) -> str:
-    if 0 <= index < 26:
-        return chr(ord("a") + index)
-    return str(index + 1)
-
-
 def _normalize_subquestions(
     parent_id: str,
     raw_subquestions: Any,
@@ -60,7 +55,7 @@ def _normalize_subquestions(
 
     normalized: list[dict[str, Any]] = []
     for i, raw_sub in enumerate(raw_subquestions):
-        default_label = _default_subquestion_label(i)
+        default_label = default_subquestion_label(i)
 
         if isinstance(raw_sub, tuple):
             if len(raw_sub) != 3:
