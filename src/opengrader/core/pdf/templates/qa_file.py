@@ -24,18 +24,10 @@ class Marker(str, Enum):
     VERSIONS = "VERSIONS"
     QUESTIONS_START_PAGE = "QUESTIONS_START_PAGE"
     QUESTION = "QUESTION"
-    PROMPT = "PROMPT"
-    QUESTION_ID = "QUESTION_ID"
-    ID = "ID"
-    POSSIBLE_POINTS = "POSSIBLE_POINTS"
     POINTS = "POINTS"
     ANSWER = "ANSWER"
     IMAGE = "IMAGE"
-    LABEL = "LABEL"
     SUBQUESTION = "SUBQUESTION"
-    SUBQUESTION_PROMPT = "SUBQUESTION_PROMPT"
-    SUBQUESTION_ID = "SUBQUESTION_ID"
-    ENDSUBQUESTION = "ENDSUBQUESTION"
     END = "END"
 
 
@@ -133,22 +125,16 @@ def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tupl
             break
 
         i += 1
-        if current_marker == Marker.ENDSUBQUESTION:
-            break
 
         body, i = _read_until_next_marker(lines, i)
-        if current_marker in {Marker.QUESTION, Marker.PROMPT, Marker.SUBQUESTION_PROMPT}:
+        if current_marker == Marker.QUESTION:
             prompt = body
-        elif current_marker in {Marker.QUESTION_ID, Marker.ID, Marker.SUBQUESTION_ID}:
-            sub_id = body.strip()
-        elif current_marker in {Marker.POSSIBLE_POINTS, Marker.POINTS}:
+        elif current_marker == Marker.POINTS:
             points_raw = body
         elif current_marker == Marker.ANSWER:
             answers.append(body)
         elif current_marker == Marker.IMAGE:
             image_markdown = body
-        elif current_marker == Marker.LABEL:
-            label = body.strip() or None
         else:
             raise ValueError(f"unsupported subquestion marker: ==={current_marker}===")
 
@@ -209,11 +195,9 @@ def _parse_question(lines: list[str], start: int, default_index: int) -> tuple[Q
             continue
 
         body, i = _read_until_next_marker(lines, i)
-        if current_marker in {Marker.QUESTION, Marker.PROMPT}:
+        if current_marker == Marker.QUESTION:
             prompt = body
-        elif current_marker in {Marker.QUESTION_ID, Marker.ID}:
-            qid = body.strip()
-        elif current_marker in {Marker.POSSIBLE_POINTS, Marker.POINTS}:
+        elif current_marker == Marker.POINTS:
             points_raw = body
         elif current_marker == Marker.ANSWER:
             answers.append(body)
@@ -373,11 +357,6 @@ def render_qa_markdown(document: QADocument) -> str:
         lines.append(f"==={Marker.QUESTION}===")
         lines.append(_render_prompt_with_points(question.prompt, question.points))
 
-        default_qid = f"q{q_idx}"
-        if question.id != default_qid:
-            lines.append(f"==={Marker.QUESTION_ID}===")
-            lines.append(question.id)
-
         for answer in question.answers:
             lines.append(f"==={Marker.ANSWER}===")
             lines.append(answer)
@@ -389,16 +368,6 @@ def render_qa_markdown(document: QADocument) -> str:
         for sub_idx, subquestion in enumerate(question.subquestions):
             lines.append(f"==={Marker.SUBQUESTION}===")
             lines.append(_render_prompt_with_points(subquestion.prompt, subquestion.points))
-
-            default_label = default_subquestion_label(sub_idx)
-            if (subquestion.label or default_label) != default_label:
-                lines.append(f"==={Marker.LABEL}===")
-                lines.append(subquestion.label or "")
-
-            default_sub_id = f"{question.id}{default_label}"
-            if subquestion.id != default_sub_id:
-                lines.append(f"==={Marker.QUESTION_ID}===")
-                lines.append(subquestion.id)
 
             for answer in subquestion.answers:
                 lines.append(f"==={Marker.ANSWER}===")
