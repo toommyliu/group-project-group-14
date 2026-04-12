@@ -84,13 +84,17 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
 
     i = 1
     frontmatter_lines: list[str] = []
-
+    found_end = False
     while i < len(lines):
         if _FRONTMATTER_RE.match(lines[i].strip()):
             i += 1
+            found_end = True
             break
         frontmatter_lines.append(lines[i])
         i += 1
+
+    if not found_end:
+        return {}, 0
 
     frontmatter: Frontmatter = {}
     key: str | None = None
@@ -100,9 +104,10 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
     for line in frontmatter_lines:
         stripped = line.rstrip()
 
+        # Check if this line starts a new key-value pair
         if ":" in stripped and not stripped.startswith(" ") and not stripped.startswith("\t"):
             if key is not None:
-                value = "\n".join(value_lines).strip()
+                value = "\n".join(value_lines).rstrip()
                 if is_literal_block:
                     value = "\n".join(ln.rstrip() for ln in value_lines)
                 frontmatter[key] = value
@@ -117,6 +122,7 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
                 frontmatter[key] = val_part
                 key = None
         elif key is not None:
+            # Continuation of the current value
             value_lines.append(stripped)
 
     if key is not None:
