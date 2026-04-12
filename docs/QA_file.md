@@ -4,16 +4,32 @@ This document outlines the structure and format for the question answer file (QA
 
 ## Structure
 
-A QA file is just a markdown file that uses special delimiters to separate sections or components of a template file. Think of it as a DSL for describing templates.
+A QA file is a markdown file that uses YAML frontmatter for metadata and special delimiters for questions and answers. Think of it as a DSL for describing templates.
+
+### Frontmatter
+
+Metadata is defined in the YAML frontmatter at the top of the file, delimited by `---` lines.
+
+Supported frontmatter fields:
+- `title` - The assignment title
+- `instructions` - The assignment instructions
+- `continued_page_header` - Optional header text for continued pages
+- `versions` - List of version identifiers (e.g., A, B, C)
+- `questions_start_page` - Page number where questions should start (1 or 2)
+
+> [!NOTE]
+> All fields are optional except for `title`.
+
+> [!TIP]
+> Use `|` for multi-line text.
+
+> [!TIP]
+> `versions` can be comma-separated or a list.
 
 ### Delimiters
 
-The following delimiters are used in QA files:
+The following delimiters are used in QA files for questions and answers:
 
-- `===TITLE===` - Marks the beginning of the title section
-- `===INSTRUCTIONS===` - Marks the beginning of the instructions section
-- `===VERSIONS===` - Marks the beginning of the versions section
-- `===QUESTIONS_START_PAGE===` - Marks the page number where questions should start (e.g, 1 or 2)
 - `===QUESTION===` - Marks the beginning of a question
 - `===SUBQUESTION===` - Marks the beginning of a subquestion
 - `===ANSWER===` - Marks the beginning of an answer
@@ -39,20 +55,19 @@ Do not mix both patterns. If a question has subquestions, answers should only ap
 ### Example
 
 ```md
-===TITLE===
-Quiz 1: Shell/Linux Commands
-CMPE195A: Senior Design Project I
-San Jose State University
-Friday, March 22, 2026
-
-===INSTRUCTIONS===
-Closed book, closed notes. Show your work for full credit.
-
-===VERSIONS===
-A, B, C
-
-===QUESTIONS_START_PAGE===
-1
+---
+title: |
+  Quiz 1: Shell/Linux Commands
+  CMPE195A: Senior Design Project I
+  San Jose State University
+  Friday, March 22, 2026
+instructions: Closed book, closed notes. Show your work for full credit.
+versions:
+  - A
+  - B
+  - C
+questions_start_page: 1
+---
 
 ===QUESTION===
 (50 points) What is the capital of France?
@@ -76,10 +91,10 @@ Paris
 ```
 
 This is represented as:
-- `TITLE`: Quiz 1: Shell/Linux Commands\nCMPE195A: Senior Design Project I\nSan Jose State University\nFriday, March 22, 2026
-- `INSTRUCTIONS`: Closed book, closed notes. Show your work for full credit.
-- `VERSIONS`: A, B, C
-- `QUESTIONS_START_PAGE`: 1
+- `title`: Quiz 1: Shell/Linux Commands\nCMPE195A: Senior Design Project I\nSan Jose State University\nFriday, March 22, 2026
+- `instructions`: Closed book, closed notes. Show your work for full credit.
+- `versions`: A, B, C
+- `questions_start_page`: 1
 - `QUESTION`: (50 points) What is the capital of France?
 - `ANSWER`: Paris
 - `QUESTION`: (30 points) Answer all parts.

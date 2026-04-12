@@ -112,7 +112,7 @@ def _run_generate_template(args: object) -> None:
 
     title = getattr(args, "title") or qa_doc.title
     if title is None or not title.strip():
-        raise ValueError("title is required (provide ===TITLE=== in QA file or pass --title)")
+        raise ValueError("title is required (provide title in frontmatter or pass --title)")
 
     instructions = getattr(args, "instructions")
     if instructions is None:

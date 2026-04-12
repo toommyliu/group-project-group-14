@@ -1,17 +1,16 @@
-===TITLE===
-Quiz 1: Shell/Linux Commands
-CMPE195A: Senior Design Project I
-San Jose State University
-Friday, March 22, 2026
-
-===INSTRUCTIONS===
-Closed book, closed notes. Show your work for full credit.
-
-===VERSIONS===
-A, B, C
-
-===QUESTIONS_START_PAGE===
-1
+---
+title: |
+  Quiz 1: Shell/Linux Commands
+  CMPE195A: Senior Design Project I
+  San Jose State University
+  Friday, March 22, 2026
+instructions: Closed book, closed notes. Show your work for full credit.
+versions:
+  - A
+  - B
+  - C
+questions_start_page: 2
+---
 
 ===QUESTION===
 (50 points) What is the capital of France?

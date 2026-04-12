@@ -6,7 +6,7 @@ import re
 from enum import Enum
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import fitz
 
@@ -16,13 +16,24 @@ from .utils import default_subquestion_label
 _MARKER_RE = re.compile(r"^===([A-Z_]+)===$")
 # "(10 points) Question prompt" -> points=10, prompt="Question prompt"
 _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGNORECASE)
+_FRONTMATTER_RE = re.compile(r"^---$")
+
+@dataclass
+class Frontmatter(TypedDict, total=False):
+    title: str
+    instructions: str
+    continued_page_header: str
+    versions: list[str]
+    questions_start_page: int
+
+class FrontMatterMarker(str, Enum):
+    TITLE = "title"
+    INSTRUCTIONS = "instructions"
+    CONTINUED_PAGE_HEADER = "continued_page_header"
+    VERSIONS = "versions"
+    QUESTIONS_START_PAGE = "questions_start_page"
 
 class Marker(str, Enum):
-    TITLE = "TITLE"
-    INSTRUCTIONS = "INSTRUCTIONS"
-    CONTINUED_PAGE_HEADER = "CONTINUED_PAGE_HEADER"
-    VERSIONS = "VERSIONS"
-    QUESTIONS_START_PAGE = "QUESTIONS_START_PAGE"
     QUESTION = "QUESTION"
     POINTS = "POINTS"
     ANSWER = "ANSWER"
@@ -60,12 +71,100 @@ class QADocument:
     versions: list[str] = field(default_factory=list)
     questions_start_page: int = 1
 
-
 def _marker(line: str) -> str | None:
     matched = _MARKER_RE.match(line.strip())
     if matched is None:
         return None
     return matched.group(1)
+
+
+def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
+    if len(lines) < 2 or not _FRONTMATTER_RE.match(lines[0].strip()):
+        return {}, 0
+
+    i = 1
+    frontmatter_lines: list[str] = []
+
+    while i < len(lines):
+        if _FRONTMATTER_RE.match(lines[i].strip()):
+            i += 1
+            break
+        frontmatter_lines.append(lines[i])
+        i += 1
+
+    frontmatter: Frontmatter = {}
+    key: str | None = None
+    value_lines: list[str] = []
+    is_literal_block = False
+
+    for line in frontmatter_lines:
+        stripped = line.rstrip()
+
+        if ":" in stripped and not stripped.startswith(" ") and not stripped.startswith("\t"):
+            if key is not None:
+                value = "\n".join(value_lines).strip()
+                if is_literal_block:
+                    value = "\n".join(ln.rstrip() for ln in value_lines)
+                frontmatter[key] = value
+
+            key_part, val_part = stripped.split(":", 1)
+            key = key_part.strip()
+            val_part = val_part.strip()
+            is_literal_block = val_part == "|"
+            value_lines = []
+
+            if val_part and not is_literal_block:
+                frontmatter[key] = val_part
+                key = None
+        elif key is not None:
+            value_lines.append(stripped)
+
+    if key is not None:
+        value = "\n".join(value_lines).rstrip()
+        if is_literal_block:
+            value = "\n".join(ln.rstrip() for ln in value_lines)
+        frontmatter[key] = value
+
+    # For convenience, support csv format for versions too
+    if "versions" in frontmatter and isinstance(frontmatter["versions"], str):
+        frontmatter["versions"] = _parse_versions(frontmatter["versions"])
+
+    return frontmatter, i
+
+def _render_frontmatter_field(lines: list[str], key: str, value: str) -> None:
+    is_multiline = "\n" in value
+    lines.append(f"{key}: {'|' if is_multiline else ''}")
+    if is_multiline:
+        for line in value.split("\n"):
+            lines.append(f"  {line}")
+    else:
+        lines.append(f"  {value}")
+
+
+def _render_frontmatter(document: QADocument) -> str:
+    lines = ["---"]
+
+    if document.title:
+        _render_frontmatter_field(lines, FrontmatterMarker.TITLE, document.title)
+
+    if document.instructions:
+        _render_frontmatter_field(lines, FrontmatterMarker.INSTRUCTIONS, document.instructions)
+
+    if document.continued_page_header:
+        lines.append(f"{FrontmatterMarker.CONTINUED_PAGE_HEADER}: {document.continued_page_header}")
+
+    if document.versions:
+        lines.append(f"{FrontmatterMarker.VERSIONS}:")
+        for version in document.versions:
+            lines.append(f"  - {version}")
+
+    if document.questions_start_page is not None:
+        lines.append(f"{FrontmatterMarker.QUESTIONS_START_PAGE}: {document.questions_start_page}")
+
+    lines.append("---")
+    lines.append("")
+
+    return "\n".join(lines)
 
 
 def _read_until_next_marker(lines: list[str], start: int) -> tuple[str, int]:
@@ -255,14 +354,18 @@ def _parse_versions(raw: str) -> list[str]:
 
 def parse_qa_markdown(content: str) -> QADocument:
     lines = content.splitlines()
-    i = 0
-    questions: list[QAQuestion] = []
+    frontmatter, i = _parse_frontmatter(lines)
 
-    title: str | None = None
-    instructions: str | None = None
-    continued_page_header: str | None = None
-    versions: list[str] = []
-    questions_start_page = 1
+    title = frontmatter.get("title")
+    instructions = frontmatter.get("instructions")
+    continued_page_header = frontmatter.get("continued_page_header")
+    versions = frontmatter.get("versions", [])
+    questions_start_page = int(frontmatter.get("questions_start_page", 1))
+
+    if questions_start_page not in (1, 2):
+        raise ValueError("questions_start_page must be 1 or 2")
+
+    questions: list[QAQuestion] = []
 
     while i < len(lines):
         current_marker = _marker(lines[i])
@@ -281,20 +384,7 @@ def parse_qa_markdown(content: str) -> QADocument:
             continue
 
         body, i = _read_until_next_marker(lines, i)
-        if current_marker == Marker.TITLE:
-            title = body
-        elif current_marker == Marker.INSTRUCTIONS:
-            instructions = body
-        elif current_marker == Marker.CONTINUED_PAGE_HEADER:
-            continued_page_header = body
-        elif current_marker == Marker.VERSIONS:
-            versions = _parse_versions(body)
-        elif current_marker == Marker.QUESTIONS_START_PAGE:
-            parsed = _parse_points(body)
-            if parsed not in (1, 2):
-                raise ValueError("QUESTIONS_START_PAGE must be 1 or 2")
-            questions_start_page = parsed
-        else:
+        if current_marker not in {Marker.QUESTION}:
             raise ValueError(f"unsupported top-level marker: ==={current_marker}===")
 
     seen_ids: set[str] = set()
@@ -346,12 +436,7 @@ def _render_prompt_with_points(prompt: str, points: int) -> str:
 def render_qa_markdown(document: QADocument) -> str:
     lines: list[str] = []
 
-    _append_block(lines, Marker.TITLE, document.title)
-    _append_block(lines, Marker.INSTRUCTIONS, document.instructions)
-    _append_block(lines, Marker.CONTINUED_PAGE_HEADER, document.continued_page_header)
-    if document.versions:
-        _append_block(lines, Marker.VERSIONS, "\n".join(document.versions))
-    _append_block(lines, Marker.QUESTIONS_START_PAGE, str(document.questions_start_page))
+    lines.append(_render_frontmatter(document))
 
     for q_idx, question in enumerate(document.questions, start=1):
         lines.append(f"==={Marker.QUESTION}===")
