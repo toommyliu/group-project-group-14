@@ -356,11 +356,11 @@ def parse_qa_markdown(content: str) -> QADocument:
     lines = content.splitlines()
     frontmatter, i = _parse_frontmatter(lines)
 
-    title = frontmatter.get("title")
-    instructions = frontmatter.get("instructions")
-    continued_page_header = frontmatter.get("continued_page_header")
-    versions = frontmatter.get("versions", [])
-    questions_start_page = int(frontmatter.get("questions_start_page", 1))
+    title = frontmatter.get(FrontMatterMarker.TITLE)
+    instructions = frontmatter.get(FrontMatterMarker.INSTRUCTIONS)
+    continued_page_header = frontmatter.get(FrontMatterMarker.CONTINUED_PAGE_HEADER)
+    versions = frontmatter.get(FrontMatterMarker.VERSIONS, [])
+    questions_start_page = int(frontmatter.get(FrontMatterMarker.QUESTIONS_START_PAGE, 1))
 
     if questions_start_page not in (1, 2):
         raise ValueError("questions_start_page must be 1 or 2")
