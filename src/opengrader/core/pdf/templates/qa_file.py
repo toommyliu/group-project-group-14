@@ -26,7 +26,7 @@ class Frontmatter(TypedDict, total=False):
     versions: list[str]
     questions_start_page: int
 
-class FrontMatterMarker(str, Enum):
+class FrontmatterMarker(str, Enum):
     TITLE = "title"
     INSTRUCTIONS = "instructions"
     CONTINUED_PAGE_HEADER = "continued_page_header"
@@ -356,11 +356,11 @@ def parse_qa_markdown(content: str) -> QADocument:
     lines = content.splitlines()
     frontmatter, i = _parse_frontmatter(lines)
 
-    title = frontmatter.get(FrontMatterMarker.TITLE)
-    instructions = frontmatter.get(FrontMatterMarker.INSTRUCTIONS)
-    continued_page_header = frontmatter.get(FrontMatterMarker.CONTINUED_PAGE_HEADER)
-    versions = frontmatter.get(FrontMatterMarker.VERSIONS, [])
-    questions_start_page = int(frontmatter.get(FrontMatterMarker.QUESTIONS_START_PAGE, 1))
+    title = frontmatter.get(FrontmatterMarker.TITLE)
+    instructions = frontmatter.get(FrontmatterMarker.INSTRUCTIONS)
+    continued_page_header = frontmatter.get(FrontmatterMarker.CONTINUED_PAGE_HEADER)
+    versions = frontmatter.get(FrontmatterMarker.VERSIONS, [])
+    questions_start_page = int(frontmatter.get(FrontmatterMarker.QUESTIONS_START_PAGE, 1))
 
     if questions_start_page not in (1, 2):
         raise ValueError("questions_start_page must be 1 or 2")
