@@ -105,9 +105,9 @@ def _build_parser() -> ArgumentParser:
 
 def _run_generate_template(args: object) -> None:
     qa_doc = load_qa_markdown(getattr(args, "qa_file"))
-    questions = qa_to_template_questions(qa_doc)
 
     version = getattr(args, "version") or (qa_doc.versions[0] if qa_doc.versions else "A")
+    questions = qa_to_template_questions(qa_doc, version=version)
     all_versions = getattr(args, "all_versions") or (qa_doc.versions if qa_doc.versions else [version])
 
     title = getattr(args, "title") or qa_doc.title

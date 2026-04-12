@@ -3,8 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import re
-from enum import Enum
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -13,33 +13,25 @@ import fitz
 from .generate import QuestionInput
 from .utils import default_subquestion_label
 
-_MARKER_RE = re.compile(r"^===([A-Z_]+)===$")
 # "(10 points) Question prompt" -> points=10, prompt="Question prompt"
 _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGNORECASE)
 _FRONTMATTER_RE = re.compile(r"^---$")
+_VERSION_HEADER_RE = re.compile(r"^\s*##\s+(.+?)\s*$")
+_LIST_ITEM_RE = re.compile(r"^([ \t]*)-\s+(.*)$")
 
-@dataclass
+
 class Frontmatter(TypedDict, total=False):
     title: str
     instructions: str
     continued_page_header: str
-    versions: list[str]
     questions_start_page: int
+
 
 class FrontmatterMarker(str, Enum):
     TITLE = "title"
     INSTRUCTIONS = "instructions"
     CONTINUED_PAGE_HEADER = "continued_page_header"
-    VERSIONS = "versions"
     QUESTIONS_START_PAGE = "questions_start_page"
-
-class Marker(str, Enum):
-    QUESTION = "QUESTION"
-    POINTS = "POINTS"
-    ANSWER = "ANSWER"
-    IMAGE = "IMAGE"
-    SUBQUESTION = "SUBQUESTION"
-    END = "END"
 
 
 @dataclass
@@ -69,13 +61,20 @@ class QADocument:
     instructions: str | None = None
     continued_page_header: str | None = None
     versions: list[str] = field(default_factory=list)
+    version_questions: dict[str, list[QAQuestion]] = field(default_factory=dict)
     questions_start_page: int = 1
 
-def _marker(line: str) -> str | None:
-    matched = _MARKER_RE.match(line.strip())
-    if matched is None:
-        return None
-    return matched.group(1)
+
+@dataclass
+class _BulletItem:
+    text: str
+    indent: int
+    line_no: int
+    children: list["_BulletItem"] = field(default_factory=list)
+
+
+def _indent_width(prefix: str) -> int:
+    return len(prefix.expandtabs(4))
 
 
 def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
@@ -84,58 +83,74 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
 
     i = 1
     frontmatter_lines: list[str] = []
-    found_end = False
     while i < len(lines):
         if _FRONTMATTER_RE.match(lines[i].strip()):
             i += 1
-            found_end = True
             break
         frontmatter_lines.append(lines[i])
         i += 1
-
-    if not found_end:
+    else:
+        # Still haven't found a closing delimiter...
         return {}, 0
 
     frontmatter: Frontmatter = {}
     key: str | None = None
     value_lines: list[str] = []
-    is_literal_block = False
+    literal_block = False
 
-    for line in frontmatter_lines:
-        stripped = line.rstrip()
+    def flush_key() -> None:
+        nonlocal key, value_lines, literal_block
+        if key is None:
+            return
 
-        # Check if this line starts a new key-value pair
-        if ":" in stripped and not stripped.startswith(" ") and not stripped.startswith("\t"):
-            if key is not None:
-                value = "\n".join(value_lines).rstrip()
-                if is_literal_block:
-                    value = "\n".join(ln.rstrip() for ln in value_lines)
-                frontmatter[key] = value
+        if literal_block:
+            normalized = [line[2:] if line.startswith("  ") else line for line in value_lines]
+            frontmatter[key] = "\n".join(line.rstrip() for line in normalized).rstrip()
+        else:
+            stripped = [line.strip() for line in value_lines if line.strip()]
+            if stripped and all(line.startswith("- ") for line in stripped):
+                frontmatter[key] = [line[2:].strip() for line in stripped]
+            else:
+                frontmatter[key] = "\n".join(stripped).rstrip()
 
-            key_part, val_part = stripped.split(":", 1)
-            key = key_part.strip()
-            val_part = val_part.strip()
-            is_literal_block = val_part == "|"
-            value_lines = []
+        key = None
+        value_lines = []
+        literal_block = False
 
-            if val_part and not is_literal_block:
-                frontmatter[key] = val_part
-                key = None
-        elif key is not None:
-            # Continuation of the current value
-            value_lines.append(stripped)
+    for raw in frontmatter_lines:
+        line = raw.rstrip("\n")
 
-    if key is not None:
-        value = "\n".join(value_lines).rstrip()
-        if is_literal_block:
-            value = "\n".join(ln.rstrip() for ln in value_lines)
-        frontmatter[key] = value
+        # Start of a new key must be at indentation level 0.
+        if line == line.lstrip() and ":" in line:
+            name, value = line.split(":", 1)
+            name = name.strip()
+            if name:
+                flush_key()
+                key = name
+                value = value.strip()
 
-    # For convenience, support csv format for versions too
-    if "versions" in frontmatter and isinstance(frontmatter["versions"], str):
-        frontmatter["versions"] = _parse_versions(frontmatter["versions"])
+                if value == "|":
+                    literal_block = True
+                    value_lines = []
+                    continue
 
+                if value:
+                    frontmatter[key] = value
+                    key = None
+                    value_lines = []
+                    literal_block = False
+                    continue
+
+                literal_block = False
+                value_lines = []
+                continue
+
+        if key is not None:
+            value_lines.append(line)
+
+    flush_key()
     return frontmatter, i
+
 
 def _render_frontmatter_field(lines: list[str], key: str, value: str) -> None:
     is_multiline = "\n" in value
@@ -159,29 +174,12 @@ def _render_frontmatter(document: QADocument) -> str:
     if document.continued_page_header:
         lines.append(f"{FrontmatterMarker.CONTINUED_PAGE_HEADER}: {document.continued_page_header}")
 
-    if document.versions:
-        lines.append(f"{FrontmatterMarker.VERSIONS}:")
-        for version in document.versions:
-            lines.append(f"  - {version}")
-
     if document.questions_start_page is not None:
         lines.append(f"{FrontmatterMarker.QUESTIONS_START_PAGE}: {document.questions_start_page}")
 
     lines.append("---")
     lines.append("")
-
     return "\n".join(lines)
-
-
-def _read_until_next_marker(lines: list[str], start: int) -> tuple[str, int]:
-    i = start
-    chunk: list[str] = []
-    while i < len(lines):
-        if _marker(lines[i]) is not None:
-            break
-        chunk.append(lines[i])
-        i += 1
-    return "\n".join(chunk).strip(), i
 
 
 def _parse_points(raw: str | None) -> int | None:
@@ -206,156 +204,238 @@ def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
     return cleaned, points
 
 
-def _parse_subquestion(lines: list[str], start: int, default_index: int) -> tuple[QASubquestion, int]:
-    sub_id = ""
-    label: str | None = None
-    prompt = ""
-    points_raw: str | None = None
-    answers: list[str] = []
-    image_markdown: str | None = None
-    i = start
-
-    if i < len(lines) and _marker(lines[i]) is None:
-        prompt, i = _read_until_next_marker(lines, i)
-
-    while i < len(lines):
-        current_marker = _marker(lines[i])
-        if current_marker is None:
-            raise ValueError(
-                f"expected marker inside subquestion block at line {i + 1}, got: {lines[i]!r}"
-            )
-
-        # a SUBQUESTION or END marker is encountered ends the current subquestion block
-        if current_marker in {Marker.SUBQUESTION, Marker.END}:
-            break
-
-        i += 1
-
-        body, i = _read_until_next_marker(lines, i)
-        if current_marker == Marker.QUESTION:
-            prompt = body
-        elif current_marker == Marker.POINTS:
-            points_raw = body
-        elif current_marker == Marker.ANSWER:
-            answers.append(body)
-        elif current_marker == Marker.IMAGE:
-            image_markdown = body
-        else:
-            raise ValueError(f"unsupported subquestion marker: ==={current_marker}===")
-
-    prompt, inline_points = _strip_inline_points(prompt)
-    if not prompt.strip():
-        raise ValueError(
-            "subquestion is missing prompt text; add text after ===SUBQUESTION=== "
-            "or an explicit ===QUESTION=== block"
-        )
-
-    points = _parse_points(points_raw)
-    if points is None:
-        points = inline_points or 0
-
-    if label is None:
-        label = default_subquestion_label(default_index)
-
-    return (
-        QASubquestion(
-            id=sub_id,
-            prompt=prompt,
-            points=points,
-            label=label,
-            answers=answers,
-            image_markdown=image_markdown,
-        ),
-        i,
-    )
+def _normalize_section_name(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("**") and cleaned.endswith("**") and len(cleaned) >= 4:
+        cleaned = cleaned[2:-2].strip()
+    return cleaned.rstrip(":").strip().lower()
 
 
-def _parse_question(lines: list[str], start: int, default_index: int) -> tuple[QAQuestion, int]:
-    qid = ""
-    prompt = ""
-    points_raw: str | None = None
-    answers: list[str] = []
-    image_markdown: str | None = None
-    subquestions: list[QASubquestion] = []
-    i = start
-    ended = False
+def _parse_version_label(header_text: str) -> str:
+    label = header_text.strip()
+    matched = re.match(r"(?i)^version\s+(.+)$", label)
+    if matched is not None:
+        label = matched.group(1).strip()
+    if not label:
+        raise ValueError("empty version header")
+    return label
 
-    if i < len(lines) and _marker(lines[i]) is None:
-        prompt, i = _read_until_next_marker(lines, i)
 
-    while i < len(lines):
-        current_marker = _marker(lines[i])
-        if current_marker is None:
-            raise ValueError(
-                f"expected marker inside question block at line {i + 1}, got: {lines[i]!r}"
-            )
+def _split_version_sections(
+    lines: list[str], *, start_line: int
+) -> tuple[list[tuple[str | None, list[str], int]], bool]:
+    sections: list[tuple[str | None, list[str], int]] = []
+    current_label: str | None = None
+    current_lines: list[str] = []
+    current_start = start_line
+    saw_header = False
 
-        i += 1
-        if current_marker == Marker.END:
-            ended = True
-            break
-        if current_marker == Marker.SUBQUESTION:
-            subquestion, i = _parse_subquestion(lines, i, len(subquestions))
-            subquestions.append(subquestion)
+    for offset, line in enumerate(lines):
+        line_no = start_line + offset
+        matched = _VERSION_HEADER_RE.match(line)
+        if matched is None:
+            current_lines.append(line)
             continue
 
-        body, i = _read_until_next_marker(lines, i)
-        if current_marker == Marker.QUESTION:
-            prompt = body
-        elif current_marker == Marker.POINTS:
-            points_raw = body
-        elif current_marker == Marker.ANSWER:
-            answers.append(body)
-        elif current_marker == Marker.IMAGE:
-            image_markdown = body
-        else:
-            raise ValueError(f"unsupported question marker: ==={current_marker}===")
+        saw_header = True
+        if current_label is not None or current_lines:
+            sections.append((current_label, current_lines, current_start))
 
-    if not ended:
+        current_label = _parse_version_label(matched.group(1))
+        current_lines = []
+        current_start = line_no + 1
+
+    if current_label is not None or current_lines:
+        sections.append((current_label, current_lines, current_start))
+
+    if not saw_header:
+        return [(None, lines, start_line)], False
+
+    cleaned: list[tuple[str | None, list[str], int]] = []
+    for label, section_lines, section_start in sections:
+        if label is None:
+            if any(line.strip() for line in section_lines):
+                raise ValueError(
+                    "content found before the first version header; "
+                    "start versioned QA files with '## Version X'"
+                )
+            continue
+        cleaned.append((label, section_lines, section_start))
+
+    return cleaned, True
+
+
+def _parse_bullet_items(lines: list[str], *, start_line: int) -> list[_BulletItem]:
+    roots: list[_BulletItem] = []
+    stack: list[_BulletItem] = []
+
+    for offset, raw_line in enumerate(lines):
+        line_no = start_line + offset
+
+        if not raw_line.strip():
+            continue
+
+        matched = _LIST_ITEM_RE.match(raw_line)
+        if matched is not None:
+            indent = _indent_width(matched.group(1))
+            text = matched.group(2).strip()
+            item = _BulletItem(text=text, indent=indent, line_no=line_no)
+
+            while stack and stack[-1].indent >= indent:
+                stack.pop()
+
+            if stack:
+                stack[-1].children.append(item)
+            else:
+                roots.append(item)
+
+            stack.append(item)
+            continue
+
+        if not stack:
+            raise ValueError(f"expected list item ('- ...') at line {line_no}, got: {raw_line!r}")
+
+        current_indent = _indent_width(raw_line[: len(raw_line) - len(raw_line.lstrip(" \t"))])
+        if current_indent <= stack[-1].indent:
+            raise ValueError(f"expected list item ('- ...') at line {line_no}, got: {raw_line!r}")
+
+        continuation = raw_line.strip()
+        if continuation:
+            if stack[-1].text:
+                stack[-1].text += "\n" + continuation
+            else:
+                stack[-1].text = continuation
+
+    return roots
+
+
+def _section_values(item: _BulletItem) -> list[str]:
+    values: list[str] = []
+    for child in item.children:
+        if child.text.strip():
+            values.append(child.text.strip())
+    return values
+
+
+def _parse_subquestion_item(item: _BulletItem, *, parent_id: str, index: int) -> QASubquestion:
+    prompt, inline_points = _strip_inline_points(item.text)
+    if not prompt:
+        raise ValueError(f"subquestion at line {item.line_no} is missing prompt text")
+
+    answers: list[str] = []
+    image_markdown: str | None = None
+    unknown_nested: list[_BulletItem] = []
+
+    for child in item.children:
+        section_name = _normalize_section_name(child.text)
+
+        if section_name in {"correct", "answer", "answers"}:
+            answers.extend(_section_values(child))
+            continue
+
+        if section_name == "image":
+            values = _section_values(child)
+            if values:
+                image_markdown = "\n".join(values)
+            continue
+
+        if section_name in {"expected", "partial", "wrong", "ungraded"}:
+            continue
+
+        unknown_nested.append(child)
+
+    if unknown_nested:
         raise ValueError(
-            "question block is missing ===END===; each ===QUESTION=== must be terminated"
+            f"nested subquestions are not supported (line {unknown_nested[0].line_no})"
         )
 
-    prompt, inline_points = _strip_inline_points(prompt)
-    points = _parse_points(points_raw)
-    if points is None:
-        points = inline_points or 0
-
-    if not qid:
-        qid = f"q{default_index}"
-
-    labels_seen: set[str] = set()
-    for idx, sub in enumerate(subquestions):
-        if sub.label is None:
-            sub.label = default_subquestion_label(idx)
-        if sub.label in labels_seen:
-            raise ValueError(
-                f"duplicate subquestion label in question {qid!r}: {sub.label!r}; "
-                "labels must be unique within a question"
-            )
-        labels_seen.add(sub.label)
-
-        if not sub.id:
-            sub.id = f"{qid}{sub.label}"
-
-    return (
-        QAQuestion(
-            id=qid,
-            prompt=prompt,
-            points=points,
-            answers=answers,
-            image_markdown=image_markdown,
-            subquestions=subquestions,
-        ),
-        i,
+    label = default_subquestion_label(index)
+    return QASubquestion(
+        id=f"{parent_id}{label}",
+        prompt=prompt,
+        points=inline_points or 0,
+        label=label,
+        answers=answers,
+        image_markdown=image_markdown,
     )
 
 
-def _parse_versions(raw: str) -> list[str]:
-    tokens = [token.strip() for token in re.split(r"[\s,]+", raw) if token.strip()]
-    if not tokens:
-        return []
-    return list(dict.fromkeys(tokens))
+def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
+    prompt, inline_points = _strip_inline_points(item.text)
+    if not prompt:
+        raise ValueError(f"question at line {item.line_no} is missing prompt text")
+
+    qid = f"q{index}"
+    answers: list[str] = []
+    image_markdown: str | None = None
+    subquestion_items: list[_BulletItem] = []
+
+    for child in item.children:
+        section_name = _normalize_section_name(child.text)
+
+        if section_name in {"correct", "answer", "answers"}:
+            answers.extend(_section_values(child))
+            continue
+
+        if section_name == "image":
+            values = _section_values(child)
+            if values:
+                image_markdown = "\n".join(values)
+            continue
+
+        if section_name in {"expected", "partial", "wrong", "ungraded"}:
+            continue
+
+        subquestion_items.append(child)
+
+    if answers and subquestion_items:
+        raise ValueError(
+            f"question {qid!r} mixes direct answers and subquestions; choose one structure"
+        )
+
+    subquestions = [
+        _parse_subquestion_item(sub, parent_id=qid, index=sub_idx)
+        for sub_idx, sub in enumerate(subquestion_items)
+    ]
+
+    return QAQuestion(
+        id=qid,
+        prompt=prompt,
+        points=inline_points or 0,
+        answers=answers,
+        image_markdown=image_markdown,
+        subquestions=subquestions,
+    )
+
+
+def _parse_questions_from_bullets(lines: list[str], *, start_line: int) -> list[QAQuestion]:
+    items = _parse_bullet_items(lines, start_line=start_line)
+    return [_parse_question_item(item, index=i + 1) for i, item in enumerate(items)]
+
+
+def _parse_frontmatter_questions_start_page(frontmatter: Frontmatter) -> int:
+    raw_value = frontmatter.get(FrontmatterMarker.QUESTIONS_START_PAGE, 1)
+    points = _parse_points(str(raw_value))
+    if points is None or points not in (1, 2):
+        raise ValueError("questions_start_page must be 1 or 2")
+    return points
+
+
+def _validate_unique_ids(questions: list[QAQuestion], *, context: str | None = None) -> None:
+    seen_ids: set[str] = set()
+    prefix = f"{context}: " if context else ""
+
+    for question in questions:
+        if question.id in seen_ids:
+            raise ValueError(f"{prefix}duplicate question/subquestion id detected: {question.id!r}")
+        seen_ids.add(question.id)
+
+        for subquestion in question.subquestions:
+            if subquestion.id in seen_ids:
+                raise ValueError(
+                    f"{prefix}duplicate question/subquestion id detected: {subquestion.id!r}"
+                )
+            seen_ids.add(subquestion.id)
 
 
 def parse_qa_markdown(content: str) -> QADocument:
@@ -365,53 +445,47 @@ def parse_qa_markdown(content: str) -> QADocument:
     title = frontmatter.get(FrontmatterMarker.TITLE)
     instructions = frontmatter.get(FrontmatterMarker.INSTRUCTIONS)
     continued_page_header = frontmatter.get(FrontmatterMarker.CONTINUED_PAGE_HEADER)
-    versions = frontmatter.get(FrontmatterMarker.VERSIONS, [])
-    questions_start_page = int(frontmatter.get(FrontmatterMarker.QUESTIONS_START_PAGE, 1))
+    questions_start_page = _parse_frontmatter_questions_start_page(frontmatter)
 
-    if questions_start_page not in (1, 2):
-        raise ValueError("questions_start_page must be 1 or 2")
+    sections, has_version_headers = _split_version_sections(lines[i:], start_line=i + 1)
 
-    questions: list[QAQuestion] = []
+    if has_version_headers:
+        version_questions: dict[str, list[QAQuestion]] = {}
+        versions: list[str] = []
 
-    while i < len(lines):
-        current_marker = _marker(lines[i])
-        if current_marker is None:
-            if lines[i].strip():
-                raise ValueError(
-                    f"expected marker at line {i + 1}, got: {lines[i]!r}"
-                )
-            i += 1
-            continue
+        for label, section_lines, section_start in sections:
+            if label is None:
+                continue
+            if label in version_questions:
+                raise ValueError(f"duplicate version section: {label!r}")
 
-        i += 1
-        if current_marker == Marker.QUESTION:
-            question, i = _parse_question(lines, i, len(questions) + 1)
-            questions.append(question)
-            continue
+            parsed = _parse_questions_from_bullets(section_lines, start_line=section_start)
+            _validate_unique_ids(parsed, context=f"version {label}")
+            version_questions[label] = parsed
+            versions.append(label)
 
-        body, i = _read_until_next_marker(lines, i)
-        if current_marker not in {Marker.QUESTION}:
-            raise ValueError(f"unsupported top-level marker: ==={current_marker}===")
+        if not versions:
+            raise ValueError("no version sections found")
 
-    seen_ids: set[str] = set()
-    for question in questions:
-        if question.id in seen_ids:
-            raise ValueError(f"duplicate question/subquestion id detected: {question.id!r}")
-        seen_ids.add(question.id)
+        first = versions[0]
+        return QADocument(
+            questions=version_questions[first],
+            title=title,
+            instructions=instructions,
+            continued_page_header=continued_page_header,
+            versions=versions,
+            version_questions=version_questions,
+            questions_start_page=questions_start_page,
+        )
 
-        for subquestion in question.subquestions:
-            if subquestion.id in seen_ids:
-                raise ValueError(
-                    f"duplicate question/subquestion id detected: {subquestion.id!r}"
-                )
-            seen_ids.add(subquestion.id)
+    questions = _parse_questions_from_bullets(lines[i:], start_line=i + 1)
+    _validate_unique_ids(questions)
 
     return QADocument(
         questions=questions,
         title=title,
         instructions=instructions,
         continued_page_header=continued_page_header,
-        versions=versions,
         questions_start_page=questions_start_page,
     )
 
@@ -422,16 +496,6 @@ def load_qa_markdown(path: str | Path) -> QADocument:
         return parse_qa_markdown(f.read())
 
 
-def _append_block(lines: list[str], marker: str, body: str | None) -> None:
-    if body is None:
-        return
-    if not body.strip():
-        return
-    lines.append(f"==={marker}===")
-    lines.append(body.rstrip())
-    lines.append("")
-
-
 def _render_prompt_with_points(prompt: str, points: int) -> str:
     text = prompt.strip()
     if not text:
@@ -439,44 +503,96 @@ def _render_prompt_with_points(prompt: str, points: int) -> str:
     return f"({points} points) {text}"
 
 
+def _append_bullet(lines: list[str], *, indent: int, text: str) -> None:
+    stripped = text.strip()
+    if not stripped:
+        return
+
+    parts = stripped.splitlines()
+    lines.append(f"{' ' * indent}- {parts[0].rstrip()}")
+    for continuation in parts[1:]:
+        lines.append(f"{' ' * (indent + 2)}{continuation.rstrip()}")
+
+
+def _render_answers(lines: list[str], answers: list[str], *, indent: int) -> None:
+    if not answers:
+        return
+
+    _append_bullet(lines, indent=indent, text="**Correct**")
+    for answer in answers:
+        _append_bullet(lines, indent=indent + 2, text=answer)
+
+
+def _render_image(lines: list[str], image_markdown: str | None, *, indent: int) -> None:
+    if image_markdown is None or not image_markdown.strip():
+        return
+
+    _append_bullet(lines, indent=indent, text="**Image**")
+    _append_bullet(lines, indent=indent + 2, text=image_markdown)
+
+
+def _render_subquestion(lines: list[str], subquestion: QASubquestion, *, indent: int) -> None:
+    _append_bullet(
+        lines,
+        indent=indent,
+        text=_render_prompt_with_points(subquestion.prompt, subquestion.points),
+    )
+    _render_answers(lines, subquestion.answers, indent=indent + 2)
+    _render_image(lines, subquestion.image_markdown, indent=indent + 2)
+
+
+def _render_question(lines: list[str], question: QAQuestion, *, indent: int = 0) -> None:
+    _append_bullet(lines, indent=indent, text=_render_prompt_with_points(question.prompt, question.points))
+    _render_answers(lines, question.answers, indent=indent + 2)
+    _render_image(lines, question.image_markdown, indent=indent + 2)
+
+    for subquestion in question.subquestions:
+        _render_subquestion(lines, subquestion, indent=indent + 2)
+
+
+def _render_questions(lines: list[str], questions: list[QAQuestion]) -> None:
+    for idx, question in enumerate(questions):
+        _render_question(lines, question)
+        if idx < len(questions) - 1:
+            lines.append("")
+
+
 def render_qa_markdown(document: QADocument) -> str:
     lines: list[str] = []
-
     lines.append(_render_frontmatter(document))
 
-    for q_idx, question in enumerate(document.questions, start=1):
-        lines.append(f"==={Marker.QUESTION}===")
-        lines.append(_render_prompt_with_points(question.prompt, question.points))
-
-        for answer in question.answers:
-            lines.append(f"==={Marker.ANSWER}===")
-            lines.append(answer)
-
-        if question.image_markdown:
-            lines.append(f"==={Marker.IMAGE}===")
-            lines.append(question.image_markdown)
-
-        for sub_idx, subquestion in enumerate(question.subquestions):
-            lines.append(f"==={Marker.SUBQUESTION}===")
-            lines.append(_render_prompt_with_points(subquestion.prompt, subquestion.points))
-
-            for answer in subquestion.answers:
-                lines.append(f"==={Marker.ANSWER}===")
-                lines.append(answer)
-
-            if subquestion.image_markdown:
-                lines.append(f"==={Marker.IMAGE}===")
-                lines.append(subquestion.image_markdown)
-
-        lines.append(f"==={Marker.END}===")
-        lines.append("")
+    if document.version_questions:
+        version_order = document.versions or list(document.version_questions.keys())
+        for i, version in enumerate(version_order):
+            lines.append(f"## Version {version}")
+            lines.append("")
+            _render_questions(lines, document.version_questions.get(version, []))
+            if i < len(version_order) - 1:
+                lines.append("")
+    else:
+        _render_questions(lines, document.questions)
 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def qa_to_template_questions(document: QADocument) -> list[QuestionInput]:
+def _questions_for_version(document: QADocument, version: str | None) -> list[QAQuestion]:
+    if not document.version_questions:
+        return document.questions
+
+    selected = version
+    if selected is None:
+        selected = document.versions[0] if document.versions else next(iter(document.version_questions))
+
+    if selected not in document.version_questions:
+        available = ", ".join(document.version_questions.keys())
+        raise ValueError(f"version {selected!r} not found in QA file. Available versions: {available}")
+
+    return document.version_questions[selected]
+
+
+def qa_to_template_questions(document: QADocument, version: str | None = None) -> list[QuestionInput]:
     questions: list[QuestionInput] = []
-    for question in document.questions:
+    for question in _questions_for_version(document, version):
         if not question.subquestions:
             questions.append((question.id, question.points, question.prompt))
             continue
@@ -497,6 +613,7 @@ def qa_to_template_questions(document: QADocument) -> list[QuestionInput]:
                 ],
             }
         )
+
     return questions
 
 

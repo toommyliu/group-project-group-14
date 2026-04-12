@@ -4,18 +4,20 @@ This document outlines the structure and format for the question answer file (QA
 
 ## Structure
 
-A QA file is a markdown file that uses YAML frontmatter for metadata and special delimiters for questions and answers. Think of it as a DSL for describing templates.
+A QA file is a markdown that uses YAML frontmatter for metadata and bullets for question content. 
 
-### Frontmatter
+---
 
-Metadata is defined in the YAML frontmatter at the top of the file, delimited by `---` lines.
+## Frontmatter
 
-Supported frontmatter fields:
-- `title` - The assignment title
-- `instructions` - The assignment instructions
-- `continued_page_header` - Optional header text for continued pages
-- `versions` - List of version identifiers (e.g., A, B, C)
-- `questions_start_page` - Page number where questions should start (1 or 2)
+Use standard `---` delimiters.
+
+Supported fields:
+
+- `title` - Assignment title
+- `instructions` - Assignment instructions
+- `continued_page_header` - Optional text for continued pages
+- `questions_start_page` - `1` or `2`
 
 > [!NOTE]
 > All fields are optional except for `title`.
@@ -23,84 +25,86 @@ Supported frontmatter fields:
 > [!TIP]
 > Use `|` for multi-line text.
 
-> [!TIP]
-> `versions` can be comma-separated or a list.
+---
 
-### Delimiters
+## Version Sections
 
-The following delimiters are used in QA files for questions and answers:
+To define multiple versions, group each version under an `##` header:
 
-- `===QUESTION===` - Marks the beginning of a question
-- `===SUBQUESTION===` - Marks the beginning of a subquestion
-- `===ANSWER===` - Marks the beginning of an answer
-- `===IMAGE===` - Marks the beginning of an image
-- `===END===` - Marks the end of a question
+- `## Version A`
+- `## Version B`
 
-### On Question Structure
+The `Version` prefix is optional in parsing, but recommended for readability.
 
-`===QUESTION===` starts a new question block. A question block can contain:
-- Direct answers (no subquestions)
-- Subquestions with their own answers (no question-level answers)
+If there is only one version, the `##` header is optional.
 
-Do not mix both patterns. If a question has subquestions, answers should only appear at the subquestion level. The parser infers context from delimiter order, so precise ordering is required.
+---
 
-### Helpful Tips
+## Question Format (Indentation-Based)
 
-1. Each question MUST end with `===END===`.
+Each top-level bullet (`- ...`) is a question.
 
-2. `===IMAGE===` delimiters can be omitted initially, they're auto-inserted during template generation in a second pass.
+Use inline points in the question text:
 
-3. Use multiple `===ANSWER===` delimiters for questions with multiple correct answers.
+- `(10 points) What is ...?`
 
-### Example
+### Subquestions
+
+Subquestions are nested bullets directly under a question (and are treated as question parts).
+
+### Correct Answers
+
+Use a `**Correct**` section under a question or subquestion. Multiple correct answers are supported.
+
+- `- **Correct**`
+  - `- answer 1`
+  - `- answer 2`
+
+---
+
+## Example: Single Version
 
 ```md
 ---
 title: |
   Quiz 1: Shell/Linux Commands
   CMPE195A: Senior Design Project I
-  San Jose State University
-  Friday, March 22, 2026
-instructions: Closed book, closed notes. Show your work for full credit.
-versions:
-  - A
-  - B
-  - C
+instructions: Closed book, closed notes.
 questions_start_page: 1
 ---
 
-===QUESTION===
-(50 points) What is the capital of France?
-===ANSWER===
-Paris
-===END===
+- (50 points) What is the capital of France?
+  - **Correct**
+    - Paris
 
-===QUESTION===
-(30 points) Answer all parts.
-===SUBQUESTION===
-(15 points) What is 2 in binary?
-===ANSWER===
-0b10
-===ANSWER===
-10_2 (10 with superscript 2)
-===SUBQUESTION===
-(15 points) What is 8 in hexadecimal?
-===ANSWER===
-0x8
-===END===
+- (30 points) Answer all parts.
+  - (15 points) What is 2 in binary?
+    - **Correct**
+      - 0b10
+      - 10_2
+  - (15 points) What is 8 in hexadecimal?
+    - **Correct**
+      - 0x8
 ```
 
-This is represented as:
-- `title`: Quiz 1: Shell/Linux Commands\nCMPE195A: Senior Design Project I\nSan Jose State University\nFriday, March 22, 2026
-- `instructions`: Closed book, closed notes. Show your work for full credit.
-- `versions`: A, B, C
-- `questions_start_page`: 1
-- `QUESTION`: (50 points) What is the capital of France?
-- `ANSWER`: Paris
-- `QUESTION`: (30 points) Answer all parts.
-- `SUBQUESTION`: (15 points) What is 2 in binary?
-- `ANSWER`: 0b10
-- `ANSWER`: 10_2 (10 with superscript 2)
-- `SUBQUESTION`: (15 points) What is 8 in hexadecimal?
-- `ANSWER`: 0x8
+## Example: Multiple Versions
 
+```md
+---
+title: Quiz 1
+instructions: Closed book, closed notes.
+questions_start_page: 1
+---
+
+## Version A
+
+- (10 points) Convert decimal 5 to binary.
+  - **Correct**
+    - 101
+
+## Version B
+
+- (10 points) Convert decimal 6 to binary.
+  - **Correct**
+    - 110
+```
