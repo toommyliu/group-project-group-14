@@ -166,16 +166,20 @@ def _render_frontmatter(document: QADocument) -> str:
     lines = ["---"]
 
     if document.title:
-        _render_frontmatter_field(lines, FrontmatterMarker.TITLE, document.title)
+        _render_frontmatter_field(lines, FrontmatterMarker.TITLE.value, document.title)
 
     if document.instructions:
-        _render_frontmatter_field(lines, FrontmatterMarker.INSTRUCTIONS, document.instructions)
+        _render_frontmatter_field(lines, FrontmatterMarker.INSTRUCTIONS.value, document.instructions)
 
     if document.continued_page_header:
-        lines.append(f"{FrontmatterMarker.CONTINUED_PAGE_HEADER}: {document.continued_page_header}")
+        lines.append(
+            f"{FrontmatterMarker.CONTINUED_PAGE_HEADER.value}: {document.continued_page_header}"
+        )
 
     if document.questions_start_page is not None:
-        lines.append(f"{FrontmatterMarker.QUESTIONS_START_PAGE}: {document.questions_start_page}")
+        lines.append(
+            f"{FrontmatterMarker.QUESTIONS_START_PAGE.value}: {document.questions_start_page}"
+        )
 
     lines.append("---")
     lines.append("")
