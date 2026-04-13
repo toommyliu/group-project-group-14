@@ -18,6 +18,10 @@ _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGN
 _FRONTMATTER_RE = re.compile(r"^---$")
 _VERSION_HEADER_RE = re.compile(r"^\s*##\s+(.+?)\s*$")
 _LIST_ITEM_RE = re.compile(r"^([ \t]*)-\s+(.*)$")
+_RUBRIC_OPTION_RE = re.compile(
+    r"^(?P<label>.+?)\s*(?:\(\s*(?P<paren>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?\s*\)|:\s*(?P<colon>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?)\s*$",
+    re.IGNORECASE,
+)
 
 
 class Frontmatter(TypedDict, total=False):
@@ -35,12 +39,21 @@ class FrontmatterMarker(str, Enum):
 
 
 @dataclass
+class QARubricItem:
+    label: str
+    points_delta: float | None = None
+    notes: list[str] = field(default_factory=list)
+    subitems: list["QARubricItem"] = field(default_factory=list)
+
+
+@dataclass
 class QASubquestion:
     id: str
     prompt: str
     points: int
     label: str | None = None
     answers: list[str] = field(default_factory=list)
+    rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
 
 
@@ -50,6 +63,7 @@ class QAQuestion:
     prompt: str
     points: int
     answers: list[str] = field(default_factory=list)
+    rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
     subquestions: list[QASubquestion] = field(default_factory=list)
 
@@ -331,6 +345,203 @@ def _section_values(item: _BulletItem) -> list[str]:
     return values
 
 
+def _strip_bold(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("**") and cleaned.endswith("**") and len(cleaned) >= 4:
+        cleaned = cleaned[2:-2].strip()
+    return cleaned
+
+
+def _parse_rubric_label_and_delta(
+    text: str, *, line_no: int, require_delta: bool
+) -> tuple[str, float | None]:
+    matched = _RUBRIC_OPTION_RE.match(text.strip())
+    if matched is not None:
+        label = _strip_bold(matched.group("label") or "")
+        if not label:
+            raise ValueError(f"rubric option at line {line_no} is missing a label")
+
+        delta_raw = matched.group("paren") or matched.group("colon")
+        if delta_raw is None:
+            raise ValueError(f"rubric option at line {line_no} is missing points")
+        return label, float(delta_raw)
+
+    label = _strip_bold(text)
+    if not label:
+        raise ValueError(f"rubric option at line {line_no} is missing a label")
+    if require_delta:
+        raise ValueError(
+            "invalid rubric option at "
+            f"line {line_no}: {text!r}. "
+            "Use 'Label (+/-N)' or 'Label: +/-N'."
+        )
+    return label, None
+
+
+def _canonical_rubric_category(label: str) -> str | None:
+    normalized = " ".join(label.strip().lower().split())
+    mapping = {
+        "correct": "Correct",
+        "partially correct": "Partially Correct",
+        "partially incorrect": "Partially Correct",
+        "partial": "Partially Correct",
+        "incorrect": "Incorrect",
+        "wrong": "Incorrect",
+    }
+    return mapping.get(normalized)
+
+
+def _parse_rubric_subitem(item: _BulletItem) -> QARubricItem:
+    label, points_delta = _parse_rubric_label_and_delta(
+        item.text,
+        line_no=item.line_no,
+        require_delta=True,
+    )
+    return QARubricItem(
+        label=label,
+        points_delta=points_delta,
+        notes=_section_values(item),
+    )
+
+
+def _parse_rubric_category(item: _BulletItem) -> QARubricItem:
+    label, points_delta = _parse_rubric_label_and_delta(
+        item.text,
+        line_no=item.line_no,
+        require_delta=False,
+    )
+
+    canonical = _canonical_rubric_category(label)
+    if canonical is None:
+        raise ValueError(
+            "invalid rubric category at "
+            f"line {item.line_no}: {item.text!r}. "
+            "Top-level rubric categories must be Correct, Partially Correct, or Incorrect."
+        )
+
+    notes: list[str] = []
+    subitems: list[QARubricItem] = []
+    for child in item.children:
+        if _RUBRIC_OPTION_RE.match(child.text.strip()):
+            subitems.append(_parse_rubric_subitem(child))
+            continue
+
+        if child.text.strip():
+            notes.append(child.text.strip())
+        notes.extend(_section_values(child))
+
+    return QARubricItem(
+        label=canonical,
+        points_delta=points_delta,
+        notes=notes,
+        subitems=subitems,
+    )
+
+
+def _parse_rubric_section(item: _BulletItem) -> list[QARubricItem]:
+    if not item.children:
+        raise ValueError(
+            f"rubric section at line {item.line_no} must contain at least one rubric option"
+        )
+
+    rubric = [_parse_rubric_category(child) for child in item.children]
+
+    counts = {"Correct": 0, "Partially Correct": 0, "Incorrect": 0}
+    for rubric_item in rubric:
+        counts[rubric_item.label] += 1
+
+    duplicates = [label for label, count in counts.items() if count > 1]
+    if duplicates:
+        raise ValueError(
+            "rubric section must contain exactly one top-level "
+            "Correct, Partially Correct, and Incorrect item; duplicates: "
+            + ", ".join(duplicates)
+        )
+
+    missing = [label for label, count in counts.items() if count == 0]
+    if missing:
+        raise ValueError(
+            "rubric section must contain exactly one top-level "
+            "Correct, Partially Correct, and Incorrect item; missing: "
+            + ", ".join(missing)
+        )
+
+    return rubric
+
+
+def _rubric_deductions_reach_points(deltas: list[float], points: int) -> bool:
+    if points <= 0:
+        return True
+
+    scale = 1000
+    target = points * scale
+    deductions = [int(round(abs(delta) * scale)) for delta in deltas if delta < 0]
+    if not deductions:
+        return False
+
+    reachable: set[int] = {0}
+    for deduction in deductions:
+        next_reachable: set[int] = set(reachable)
+        for partial in reachable:
+            candidate = partial + deduction
+            if candidate <= target:
+                next_reachable.add(candidate)
+        reachable = next_reachable
+        if target in reachable:
+            return True
+
+    return target in reachable
+
+
+def _rubric_effective_deltas(rubric: list[QARubricItem], *, context: str) -> list[float]:
+    deltas: list[float] = []
+
+    for item in rubric:
+        if item.subitems:
+            sub_deltas: list[float] = []
+            for sub in item.subitems:
+                if sub.points_delta is None:
+                    raise ValueError(
+                        f"{context} rubric subitem {sub.label!r} is missing points"
+                    )
+                sub_deltas.append(sub.points_delta)
+
+            if item.points_delta is not None:
+                total = sum(sub_deltas)
+                if abs(total - item.points_delta) > 1e-6:
+                    raise ValueError(
+                        f"{context} rubric item {item.label!r} has points "
+                        f"{item.points_delta:+g} but subitems sum to {total:+g}"
+                    )
+
+            deltas.extend(sub_deltas)
+            continue
+
+        if item.points_delta is None:
+            raise ValueError(
+                f"{context} rubric item {item.label!r} must include points or weighted subitems"
+            )
+        deltas.append(item.points_delta)
+
+    return deltas
+
+
+def _validate_rubric_points(
+    rubric: list[QARubricItem], *, points: int, context: str
+) -> None:
+    if not rubric:
+        return
+
+    deltas = _rubric_effective_deltas(rubric, context=context)
+    if _rubric_deductions_reach_points(deltas, points):
+        return
+
+    raise ValueError(
+        f"{context} rubric deductions must accumulate to -{points} points. "
+        "Include an item (or combination of weighted items) that sums to full deduction."
+    )
+
+
 def _parse_subquestion_item(
     item: _BulletItem, *, parent_id: str, index: int
 ) -> QASubquestion:
@@ -339,6 +550,7 @@ def _parse_subquestion_item(
         raise ValueError(f"subquestion at line {item.line_no} is missing prompt text")
 
     answers: list[str] = []
+    rubric: list[QARubricItem] = []
     image_markdown: str | None = None
     unknown_nested: list[_BulletItem] = []
 
@@ -355,6 +567,10 @@ def _parse_subquestion_item(
                 image_markdown = "\n".join(values)
             continue
 
+        if section_name == "rubric":
+            rubric.extend(_parse_rubric_section(child))
+            continue
+
         if section_name in {"expected", "partial", "wrong", "ungraded"}:
             continue
 
@@ -366,12 +582,21 @@ def _parse_subquestion_item(
         )
 
     label = default_subquestion_label(index)
+    subquestion_id = f"{parent_id}{label}"
+    points = inline_points or 0
+    _validate_rubric_points(
+        rubric,
+        points=points,
+        context=f"subquestion {subquestion_id!r}",
+    )
+
     return QASubquestion(
-        id=f"{parent_id}{label}",
+        id=subquestion_id,
         prompt=prompt,
-        points=inline_points or 0,
+        points=points,
         label=label,
         answers=answers,
+        rubric=rubric,
         image_markdown=image_markdown,
     )
 
@@ -383,6 +608,7 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
 
     qid = f"q{index}"
     answers: list[str] = []
+    rubric: list[QARubricItem] = []
     image_markdown: str | None = None
     subquestion_items: list[_BulletItem] = []
 
@@ -397,6 +623,10 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
             values = _section_values(child)
             if values:
                 image_markdown = "\n".join(values)
+            continue
+
+        if section_name == "rubric":
+            rubric.extend(_parse_rubric_section(child))
             continue
 
         if section_name in {"expected", "partial", "wrong", "ungraded"}:
@@ -414,11 +644,15 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
         for sub_idx, sub in enumerate(subquestion_items)
     ]
 
+    points = inline_points or 0
+    _validate_rubric_points(rubric, points=points, context=f"question {qid!r}")
+
     return QAQuestion(
         id=qid,
         prompt=prompt,
-        points=inline_points or 0,
+        points=points,
         answers=answers,
+        rubric=rubric,
         image_markdown=image_markdown,
         subquestions=subquestions,
     )
@@ -547,6 +781,41 @@ def _render_answers(lines: list[str], answers: list[str], *, indent: int) -> Non
         _append_bullet(lines, indent=indent + 2, text=answer)
 
 
+def _render_points_delta(points_delta: float) -> str:
+    rendered = f"{points_delta:g}"
+    if not rendered.startswith("-"):
+        rendered = f"+{rendered}"
+    return rendered
+
+
+def _render_rubric(
+    lines: list[str], rubric_items: list[QARubricItem], *, indent: int
+) -> None:
+    if not rubric_items:
+        return
+
+    _append_bullet(lines, indent=indent, text="**Rubric**")
+    for item in rubric_items:
+        item_text = item.label
+        if item.points_delta is not None:
+            item_text = f"{item.label} ({_render_points_delta(item.points_delta)})"
+        _append_bullet(lines, indent=indent + 2, text=item_text)
+
+        for note in item.notes:
+            _append_bullet(lines, indent=indent + 4, text=note)
+
+        for subitem in item.subitems:
+            if subitem.points_delta is None:
+                continue
+            _append_bullet(
+                lines,
+                indent=indent + 4,
+                text=f"{subitem.label} ({_render_points_delta(subitem.points_delta)})",
+            )
+            for note in subitem.notes:
+                _append_bullet(lines, indent=indent + 6, text=note)
+
+
 def _render_image(lines: list[str], image_markdown: str | None, *, indent: int) -> None:
     if image_markdown is None or not image_markdown.strip():
         return
@@ -565,6 +834,7 @@ def _render_subquestion(
     )
     _render_image(lines, subquestion.image_markdown, indent=indent + 2)
     _render_answers(lines, subquestion.answers, indent=indent + 2)
+    _render_rubric(lines, subquestion.rubric, indent=indent + 2)
 
 
 def _render_question(
@@ -577,6 +847,7 @@ def _render_question(
     )
     _render_image(lines, question.image_markdown, indent=indent + 2)
     _render_answers(lines, question.answers, indent=indent + 2)
+    _render_rubric(lines, question.rubric, indent=indent + 2)
 
     for subquestion in question.subquestions:
         _render_subquestion(lines, subquestion, indent=indent + 2)

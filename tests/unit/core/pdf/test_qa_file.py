@@ -51,6 +51,7 @@ questions_start_page: 2
     assert q1.points == 5
     assert q1.prompt == "What does OS stand for?"
     assert q1.answers == ["Operating System", "operating system"]
+    assert q1.rubric == []
     assert q1.subquestions == []
 
     q2 = document.questions[1]
@@ -68,6 +69,7 @@ questions_start_page: 2
         "What is 2 in binary?",
         ["10", "0b10"],
     )
+    assert q2a.rubric == []
     assert (q2b.id, q2b.label, q2b.points, q2b.prompt, q2b.answers) == (
         "q2b",
         "b",
@@ -75,6 +77,48 @@ questions_start_page: 2
         "What is 15 in hexadecimal?",
         ["0xF"],
     )
+    assert q2b.rubric == []
+
+
+def test_parse_rubric_items_with_positive_negative_and_partial_credit_notes() -> None:
+    content = """
+- (10 points) Solve for x.
+  - **Correct**
+    - x = 4
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-4)
+      - Correct setup but arithmetic mistake
+      - Close to final answer
+    - Incorrect: -10
+
+- (8 points) Multi-part scoring
+  - (8 points) Show your work
+    - **Rubric**
+      - Correct (+2)
+      - Partially Correct (-3)
+      - Incorrect (-8)
+"""
+
+    document = parse_qa_markdown(content)
+
+    q1 = document.questions[0]
+    assert [(item.label, item.points_delta) for item in q1.rubric] == [
+        ("Correct", 0.0),
+        ("Partially Correct", -4.0),
+        ("Incorrect", -10.0),
+    ]
+    assert q1.rubric[1].notes == [
+        "Correct setup but arithmetic mistake",
+        "Close to final answer",
+    ]
+
+    q2a = document.questions[1].subquestions[0]
+    assert [(item.label, item.points_delta) for item in q2a.rubric] == [
+        ("Correct", 2.0),
+        ("Partially Correct", -3.0),
+        ("Incorrect", -8.0),
+    ]
 
 
 def test_parse_indentation_multiple_versions_and_template_selection() -> None:
@@ -162,6 +206,60 @@ def test_parse_rejects_nested_subquestions() -> None:
         parse_qa_markdown(content)
 
 
+def test_parse_weighted_partial_credit_items_can_accumulate_to_full_deduction() -> None:
+    content = """
+- (4 points) Explain the process.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct
+      - Major conceptual error (-3)
+      - Minor notation issue (-1)
+    - Incorrect (-4)
+"""
+
+    document = parse_qa_markdown(content)
+    rubric = document.questions[0].rubric
+    assert [(item.label, item.points_delta) for item in rubric] == [
+        ("Correct", 0.0),
+        ("Partially Correct", None),
+        ("Incorrect", -4.0),
+    ]
+    assert [
+        (sub.label, sub.points_delta) for sub in rubric[1].subitems
+    ] == [
+        ("Major conceptual error", -3.0),
+        ("Minor notation issue", -1.0),
+    ]
+
+
+def test_parse_rejects_rubric_deductions_that_do_not_reach_question_points() -> None:
+    content = """
+- (5 points) Parent
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct
+      - Major conceptual error (-3)
+      - Minor notation issue (-1)
+    - Incorrect (-6)
+"""
+
+    with pytest.raises(ValueError, match="must accumulate to -5 points"):
+        parse_qa_markdown(content)
+
+
+def test_parse_rejects_invalid_rubric_top_level_structure() -> None:
+    content = """
+- (5 points) Parent
+  - **Rubric**
+    - Correct (+0)
+    - Partial Credit (-2)
+    - Incorrect (-5)
+"""
+
+    with pytest.raises(ValueError, match="Top-level rubric categories"):
+        parse_qa_markdown(content)
+
+
 def test_render_round_trip_preserves_versions_and_question_structure() -> None:
     content = """---
 title: Round Trip Quiz
@@ -172,6 +270,10 @@ questions_start_page: 1
 ## Version A
 
 - (6 points) A root question
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-2)
+    - Incorrect (-6)
   - (3 points) A part one
     - **Correct**
       - alpha
@@ -198,6 +300,14 @@ questions_start_page: 1
     assert [q.prompt for q in reparsed.version_questions["A"]] == ["A root question"]
     assert reparsed.version_questions["A"][0].subquestions[0].prompt == "A part one"
     assert reparsed.version_questions["A"][0].subquestions[1].prompt == "A part two"
+    assert [
+        (item.label, item.points_delta)
+        for item in reparsed.version_questions["A"][0].rubric
+    ] == [
+        ("Correct", 0.0),
+        ("Partially Correct", -2.0),
+        ("Incorrect", -6.0),
+    ]
 
     assert [q.prompt for q in reparsed.version_questions["B"]] == ["B root question"]
     assert reparsed.version_questions["B"][0].answers == ["gamma"]
