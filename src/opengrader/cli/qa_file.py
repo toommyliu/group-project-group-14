@@ -4,7 +4,11 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from opengrader.core.ocr.spec import load_spec
-from opengrader.core.pdf.templates import CMU_BOLD_FILE, CMU_REGULAR_FILE, generate_template_pdf
+from opengrader.core.pdf.templates import (
+    CMU_BOLD_FILE,
+    CMU_REGULAR_FILE,
+    generate_template_pdf,
+)
 from opengrader.core.pdf.templates.qa_file import (
     embed_prompt_snippets,
     load_qa_markdown,
@@ -36,15 +40,27 @@ def _build_parser() -> ArgumentParser:
     generate_parser = subparsers.add_parser(
         "generate-template", help="Generate template PDF from a QA markdown file."
     )
-    generate_parser.add_argument("--qa-file", required=True, help="Path to QA markdown file.")
-    generate_parser.add_argument("--output-pdf", required=True, help="Output path for generated template PDF.")
-    generate_parser.add_argument("--output-spec", required=False, help="Optional output path for generated spec JSON.")
-    generate_parser.add_argument("--version", default=None, help="Template version ID (default: first QA version or 'A').")
+    generate_parser.add_argument(
+        "--qa-file", required=True, help="Path to QA markdown file."
+    )
+    generate_parser.add_argument(
+        "--output-pdf", required=True, help="Output path for generated template PDF."
+    )
+    generate_parser.add_argument(
+        "--output-spec",
+        required=False,
+        help="Optional output path for generated spec JSON.",
+    )
+    generate_parser.add_argument(
+        "--version",
+        default=None,
+        help="Template version ID (default: first QA version or 'A').",
+    )
     generate_parser.add_argument(
         "--all-versions",
-        nargs="+",
+        action="store_true",
         default=None,
-        help="All version IDs for spec metadata and anchor options.",
+        help="Generate templates for all versions from the QA file (default: True if QA has versions, False otherwise).",
     )
     generate_parser.add_argument(
         "--title",
@@ -83,10 +99,20 @@ def _build_parser() -> ArgumentParser:
         "embed-snippets",
         help="Embed prompt bbox snippets as base64 markdown images in the QA file.",
     )
-    embed_parser.add_argument("--qa-file", required=True, help="Path to input QA markdown file.")
-    embed_parser.add_argument("--source-pdf", required=True, help="Source PDF used for prompt snippets.")
-    embed_parser.add_argument("--source-spec", required=True, help="Spec JSON containing question bbox or prompt_bbox.")
-    embed_parser.add_argument("--output-qa", required=True, help="Output QA markdown file.")
+    embed_parser.add_argument(
+        "--qa-file", required=True, help="Path to input QA markdown file."
+    )
+    embed_parser.add_argument(
+        "--source-pdf", required=True, help="Source PDF used for prompt snippets."
+    )
+    embed_parser.add_argument(
+        "--source-spec",
+        required=True,
+        help="Spec JSON containing question bbox or prompt_bbox.",
+    )
+    embed_parser.add_argument(
+        "--output-qa", required=True, help="Output QA markdown file."
+    )
     embed_parser.add_argument(
         "--image-format",
         choices=["png", "jpg", "jpeg"],
@@ -106,13 +132,23 @@ def _build_parser() -> ArgumentParser:
 def _run_generate_template(args: object) -> None:
     qa_doc = load_qa_markdown(getattr(args, "qa_file"))
 
-    version = getattr(args, "version") or (qa_doc.versions[0] if qa_doc.versions else "A")
-    questions = qa_to_template_questions(qa_doc, version=version)
-    all_versions = getattr(args, "all_versions") or (qa_doc.versions if qa_doc.versions else [version])
+    use_all_versions = getattr(args, "all_versions")
+    if use_all_versions is None:
+        use_all_versions = len(qa_doc.versions) > 1
+
+    if use_all_versions and qa_doc.version_questions:
+        versions_to_generate = qa_doc.versions
+    else:
+        single_version = getattr(args, "version") or (
+            qa_doc.versions[0] if qa_doc.versions else "A"
+        )
+        versions_to_generate = [single_version]
 
     title = getattr(args, "title") or qa_doc.title
     if title is None or not title.strip():
-        raise ValueError("title is required (provide title in frontmatter or pass --title)")
+        raise ValueError(
+            "title is required (provide title in frontmatter or pass --title)"
+        )
 
     instructions = getattr(args, "instructions")
     if instructions is None:
@@ -126,28 +162,43 @@ def _run_generate_template(args: object) -> None:
     if questions_start_page is None:
         questions_start_page = qa_doc.questions_start_page
 
-    output_pdf = Path(getattr(args, "output_pdf"))
-    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    all_versions = qa_doc.versions if qa_doc.versions else versions_to_generate
 
-    spec = generate_template_pdf(
-        output_path=output_pdf,
-        version=version,
-        questions=questions,
-        title=title,
-        instructions=instructions,
-        continued_page_header=continued_page_header,
-        all_versions=all_versions,
-        font_regular_file=getattr(args, "font_regular_file"),
-        font_bold_file=getattr(args, "font_bold_file"),
-        start_questions_on_first_page=(questions_start_page == 1),
-    )
+    for version in versions_to_generate:
+        questions = qa_to_template_questions(qa_doc, version=version)
 
-    output_spec = getattr(args, "output_spec")
-    if output_spec:
-        save_spec_json(spec, output_spec)
-        print(f"Wrote spec: {output_spec}")
+        output_pdf = Path(getattr(args, "output_pdf"))
+        if len(versions_to_generate) > 1:
+            stem = output_pdf.stem
+            suffix = output_pdf.suffix
+            output_pdf = output_pdf.parent / f"{stem}-v{version}{suffix}"
 
-    print(f"Wrote template: {output_pdf}")
+        output_pdf.parent.mkdir(parents=True, exist_ok=True)
+
+        spec = generate_template_pdf(
+            output_path=output_pdf,
+            version=version,
+            questions=questions,
+            title=title,
+            instructions=instructions,
+            continued_page_header=continued_page_header,
+            all_versions=all_versions,
+            font_regular_file=getattr(args, "font_regular_file"),
+            font_bold_file=getattr(args, "font_bold_file"),
+            start_questions_on_first_page=(questions_start_page == 1),
+        )
+
+        output_spec = getattr(args, "output_spec")
+        if output_spec:
+            spec_path = Path(output_spec)
+            if len(versions_to_generate) > 1:
+                stem = spec_path.stem
+                suffix = spec_path.suffix
+                spec_path = spec_path.parent / f"{stem}-v{version}{suffix}"
+            save_spec_json(spec, spec_path)
+            print(f"Wrote spec: {spec_path}")
+
+        print(f"Wrote template: {output_pdf}")
 
 
 def _run_embed_snippets(args: object) -> None:
