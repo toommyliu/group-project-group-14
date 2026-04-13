@@ -104,7 +104,9 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
             return
 
         if literal_block:
-            normalized = [line[2:] if line.startswith("  ") else line for line in value_lines]
+            normalized = [
+                line[2:] if line.startswith("  ") else line for line in value_lines
+            ]
             frontmatter[key] = "\n".join(line.rstrip() for line in normalized).rstrip()
         else:
             stripped = [line.strip() for line in value_lines if line.strip()]
@@ -169,7 +171,9 @@ def _render_frontmatter(document: QADocument) -> str:
         _render_frontmatter_field(lines, FrontmatterMarker.TITLE.value, document.title)
 
     if document.instructions:
-        _render_frontmatter_field(lines, FrontmatterMarker.INSTRUCTIONS.value, document.instructions)
+        _render_frontmatter_field(
+            lines, FrontmatterMarker.INSTRUCTIONS.value, document.instructions
+        )
 
     if document.continued_page_header:
         lines.append(
@@ -297,11 +301,17 @@ def _parse_bullet_items(lines: list[str], *, start_line: int) -> list[_BulletIte
             continue
 
         if not stack:
-            raise ValueError(f"expected list item ('- ...') at line {line_no}, got: {raw_line!r}")
+            raise ValueError(
+                f"expected list item ('- ...') at line {line_no}, got: {raw_line!r}"
+            )
 
-        current_indent = _indent_width(raw_line[: len(raw_line) - len(raw_line.lstrip(" \t"))])
+        current_indent = _indent_width(
+            raw_line[: len(raw_line) - len(raw_line.lstrip(" \t"))]
+        )
         if current_indent <= stack[-1].indent:
-            raise ValueError(f"expected list item ('- ...') at line {line_no}, got: {raw_line!r}")
+            raise ValueError(
+                f"expected list item ('- ...') at line {line_no}, got: {raw_line!r}"
+            )
 
         continuation = raw_line.strip()
         if continuation:
@@ -321,7 +331,9 @@ def _section_values(item: _BulletItem) -> list[str]:
     return values
 
 
-def _parse_subquestion_item(item: _BulletItem, *, parent_id: str, index: int) -> QASubquestion:
+def _parse_subquestion_item(
+    item: _BulletItem, *, parent_id: str, index: int
+) -> QASubquestion:
     prompt, inline_points = _strip_inline_points(item.text)
     if not prompt:
         raise ValueError(f"subquestion at line {item.line_no} is missing prompt text")
@@ -412,7 +424,9 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
     )
 
 
-def _parse_questions_from_bullets(lines: list[str], *, start_line: int) -> list[QAQuestion]:
+def _parse_questions_from_bullets(
+    lines: list[str], *, start_line: int
+) -> list[QAQuestion]:
     items = _parse_bullet_items(lines, start_line=start_line)
     return [_parse_question_item(item, index=i + 1) for i, item in enumerate(items)]
 
@@ -425,13 +439,17 @@ def _parse_frontmatter_questions_start_page(frontmatter: Frontmatter) -> int:
     return points
 
 
-def _validate_unique_ids(questions: list[QAQuestion], *, context: str | None = None) -> None:
+def _validate_unique_ids(
+    questions: list[QAQuestion], *, context: str | None = None
+) -> None:
     seen_ids: set[str] = set()
     prefix = f"{context}: " if context else ""
 
     for question in questions:
         if question.id in seen_ids:
-            raise ValueError(f"{prefix}duplicate question/subquestion id detected: {question.id!r}")
+            raise ValueError(
+                f"{prefix}duplicate question/subquestion id detected: {question.id!r}"
+            )
         seen_ids.add(question.id)
 
         for subquestion in question.subquestions:
@@ -463,7 +481,9 @@ def parse_qa_markdown(content: str) -> QADocument:
             if label in version_questions:
                 raise ValueError(f"duplicate version section: {label!r}")
 
-            parsed = _parse_questions_from_bullets(section_lines, start_line=section_start)
+            parsed = _parse_questions_from_bullets(
+                section_lines, start_line=section_start
+            )
             _validate_unique_ids(parsed, context=f"version {label}")
             version_questions[label] = parsed
             versions.append(label)
@@ -535,7 +555,9 @@ def _render_image(lines: list[str], image_markdown: str | None, *, indent: int) 
     _append_bullet(lines, indent=indent + 2, text=image_markdown)
 
 
-def _render_subquestion(lines: list[str], subquestion: QASubquestion, *, indent: int) -> None:
+def _render_subquestion(
+    lines: list[str], subquestion: QASubquestion, *, indent: int
+) -> None:
     _append_bullet(
         lines,
         indent=indent,
@@ -545,8 +567,14 @@ def _render_subquestion(lines: list[str], subquestion: QASubquestion, *, indent:
     _render_image(lines, subquestion.image_markdown, indent=indent + 2)
 
 
-def _render_question(lines: list[str], question: QAQuestion, *, indent: int = 0) -> None:
-    _append_bullet(lines, indent=indent, text=_render_prompt_with_points(question.prompt, question.points))
+def _render_question(
+    lines: list[str], question: QAQuestion, *, indent: int = 0
+) -> None:
+    _append_bullet(
+        lines,
+        indent=indent,
+        text=_render_prompt_with_points(question.prompt, question.points),
+    )
     _render_answers(lines, question.answers, indent=indent + 2)
     _render_image(lines, question.image_markdown, indent=indent + 2)
 
@@ -579,22 +607,32 @@ def render_qa_markdown(document: QADocument) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _questions_for_version(document: QADocument, version: str | None) -> list[QAQuestion]:
+def _questions_for_version(
+    document: QADocument, version: str | None
+) -> list[QAQuestion]:
     if not document.version_questions:
         return document.questions
 
     selected = version
     if selected is None:
-        selected = document.versions[0] if document.versions else next(iter(document.version_questions))
+        selected = (
+            document.versions[0]
+            if document.versions
+            else next(iter(document.version_questions))
+        )
 
     if selected not in document.version_questions:
         available = ", ".join(document.version_questions.keys())
-        raise ValueError(f"version {selected!r} not found in QA file. Available versions: {available}")
+        raise ValueError(
+            f"version {selected!r} not found in QA file. Available versions: {available}"
+        )
 
     return document.version_questions[selected]
 
 
-def qa_to_template_questions(document: QADocument, version: str | None = None) -> list[QuestionInput]:
+def qa_to_template_questions(
+    document: QADocument, version: str | None = None
+) -> list[QuestionInput]:
     questions: list[QuestionInput] = []
     for question in _questions_for_version(document, version):
         if not question.subquestions:
@@ -621,7 +659,9 @@ def qa_to_template_questions(document: QADocument, version: str | None = None) -
     return questions
 
 
-def _collect_question_regions(spec: dict[str, Any]) -> dict[str, tuple[int, list[float]]]:
+def _collect_question_regions(
+    spec: dict[str, Any],
+) -> dict[str, tuple[int, list[float]]]:
     regions: dict[str, tuple[int, list[float]]] = {}
 
     for page in spec.get("pages", []):
@@ -681,11 +721,21 @@ def embed_prompt_snippets(
     *,
     image_format: str = "png",
     dpi: int = 200,
+    version: str | None = None,
 ) -> int:
     regions = _collect_question_regions(spec)
 
+    questions_to_process = document.questions
+    if document.version_questions:
+        if version is None:
+            version = document.versions[0] if document.versions else None
+        if version and version in document.version_questions:
+            questions_to_process = document.version_questions[version]
+        elif version:
+            raise ValueError(f"version {version!r} not found in QA document")
+
     ids: list[str] = []
-    for question in document.questions:
+    for question in questions_to_process:
         ids.append(question.id)
         ids.extend(sub.id for sub in question.subquestions)
 
@@ -698,7 +748,7 @@ def embed_prompt_snippets(
 
     updated = 0
     with fitz.open(str(source_pdf)) as doc:
-        for question in document.questions:
+        for question in questions_to_process:
             page_number, bbox = regions[question.id]
             uri = _crop_bbox_to_data_uri(
                 doc,

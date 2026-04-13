@@ -21,7 +21,8 @@ EPILOG = """
 examples:
   uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf --title "Quiz 1"
   uv run qa-file generate-template --qa-file qa.md --output-pdf out/template.pdf --output-spec out/template.spec.json
-  uv run qa-file embed-snippets --qa-file qa.md --source-pdf template.pdf --source-spec template.spec.json --output-qa qa.with-images.md
+  uv run qa-file embed-snippets --qa-file qa-multi.md --source-pdf multi-vA.pdf --source-spec spec-vA.json --version A --output-qa qa-vA.md
+  uv run qa-file embed-snippets --qa-file qa-multi.md --source-pdf multi-vB.pdf --source-spec spec-vB.json --version B --output-qa qa-vB.md
 """
 
 
@@ -109,6 +110,11 @@ def _build_parser() -> ArgumentParser:
         "--source-spec",
         required=True,
         help="Spec JSON containing question bbox or prompt_bbox.",
+    )
+    embed_parser.add_argument(
+        "--version",
+        default=None,
+        help="QA version to embed snippets into (default: first version or 'A').",
     )
     embed_parser.add_argument(
         "--output-qa", required=True, help="Output QA markdown file."
@@ -215,6 +221,13 @@ def _run_embed_snippets(args: object) -> None:
 
     qa_doc = load_qa_markdown(qa_path)
     spec = load_spec(source_spec)
+    version = getattr(args, "version")
+
+    if version is None:
+        if qa_doc.version_questions:
+            version = qa_doc.versions[0] if qa_doc.versions else "A"
+        else:
+            version = None
 
     updated = embed_prompt_snippets(
         qa_doc,
@@ -222,6 +235,7 @@ def _run_embed_snippets(args: object) -> None:
         spec=spec,
         image_format=getattr(args, "image_format"),
         dpi=getattr(args, "dpi"),
+        version=version,
     )
 
     output_qa = Path(getattr(args, "output_qa"))
