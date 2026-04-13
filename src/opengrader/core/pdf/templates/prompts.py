@@ -1,5 +1,6 @@
 import random
 
+
 def generate_prompts(num_questions: int) -> list[str]:
     templates = [
         "Explain your reasoning clearly.",

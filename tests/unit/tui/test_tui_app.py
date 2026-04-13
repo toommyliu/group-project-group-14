@@ -186,15 +186,11 @@ def test_course_list_never_has_multiple_highlighted_rows() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
 
             def highlighted_count() -> int:
                 return sum(
-                    1
-                    for child in course_list.children
-                    if child.has_class("-highlight")
+                    1 for child in course_list.children if child.has_class("-highlight")
                 )
 
             assert highlighted_count() <= 1
@@ -236,9 +232,7 @@ def test_refocusing_pane_restores_previous_highlighted_index() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            course_list = app.get_home_screen().query_one(
-                "#home-course-list", ListView
-            )
+            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             assignment_list = app.get_home_screen().query_one(
                 "#home-assignment-list", ListView
             )

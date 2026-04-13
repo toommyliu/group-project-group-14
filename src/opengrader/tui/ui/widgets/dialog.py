@@ -20,7 +20,9 @@ DialogCallback = Callable[[DialogResult], None]
 
 
 class _DialogHost(Protocol):
-    def push_screen(self, screen: object, callback: Callable[[object], None] | None = None) -> None: ...
+    def push_screen(
+        self, screen: object, callback: Callable[[object], None] | None = None
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -92,9 +94,7 @@ def _present_dialog(
         return
 
     queue_state = _queue_state_for(app)
-    queue_state.pending.append(
-        _QueuedScreenRequest(screen=screen, callback=callback)
-    )
+    queue_state.pending.append(_QueuedScreenRequest(screen=screen, callback=callback))
     _drain_queue(app)
 
 
@@ -179,7 +179,7 @@ class Dialog(ModalScreen[DialogResult]):
         self.query_one(f"#{self._input_id(self._fields[0].key)}", Input).focus()
 
     @on(events.Key)
-    def _on_key(self, event: events.Key) -> None: # pyright: ignore[reportIncompatibleMethodOverride]
+    def _on_key(self, event: events.Key) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         if event.key in ("tab", "shift+tab"):
             event.stop()
             event.prevent_default()
@@ -200,7 +200,7 @@ class Dialog(ModalScreen[DialogResult]):
                 self.action_submit()
                 return
 
-    def _move_focus(self, *, reverse: bool = False) -> None: # pyright: ignore[reportIncompatibleMethodOverride]
+    def _move_focus(self, *, reverse: bool = False) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
         focus_chain = self._focus_chain()
         if not focus_chain:
             return
@@ -208,7 +208,9 @@ class Dialog(ModalScreen[DialogResult]):
         current_focus = self.focused
         if current_focus in focus_chain:
             current_index = focus_chain.index(current_focus)
-            next_index = (current_index - 1 if reverse else current_index + 1) % len(focus_chain)
+            next_index = (current_index - 1 if reverse else current_index + 1) % len(
+                focus_chain
+            )
         else:
             next_index = len(focus_chain) - 1 if reverse else 0
 
@@ -218,7 +220,9 @@ class Dialog(ModalScreen[DialogResult]):
         focus_chain: list[Widget] = [*self.query(Input)]
         focus_chain.append(self.query_one("#dialog-cancel", Label))
         focus_chain.append(self.query_one("#dialog-submit", Label))
-        return [widget for widget in focus_chain if widget.can_focus and not widget.disabled]
+        return [
+            widget for widget in focus_chain if widget.can_focus and not widget.disabled
+        ]
 
     @on(events.Click, "#dialog-cancel")
     def _on_cancel_clicked(self, event: events.Click) -> None:
@@ -391,7 +395,9 @@ class AlertDialog(ModalScreen[bool]):
         current_focus = self.focused
         if current_focus in focus_chain:
             current_index = focus_chain.index(current_focus)
-            next_index = (current_index - 1 if reverse else current_index + 1) % len(focus_chain)
+            next_index = (current_index - 1 if reverse else current_index + 1) % len(
+                focus_chain
+            )
         else:
             next_index = len(focus_chain) - 1 if reverse else 0
 

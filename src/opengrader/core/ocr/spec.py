@@ -3,11 +3,16 @@ import re
 from pathlib import Path
 from typing import Any
 
-from opengrader.core.ocr.constants import VALID_FIELD_TYPES, REQUIRED_SCHEMA_KEYS, VALID_RESPONSE_TYPE_FIELDS
+from opengrader.core.ocr.constants import (
+    VALID_FIELD_TYPES,
+    REQUIRED_SCHEMA_KEYS,
+    VALID_RESPONSE_TYPE_FIELDS,
+)
 
 
 class SpecError(Exception):
     pass
+
 
 # TODO: refactor to use pydantic?
 
@@ -120,9 +125,7 @@ def validate_question(question: dict, ctx: str) -> None:
             raise SpecError(f"{sq_ctx}: label must be a string")
 
         if not _bbox_within(question["bbox"], subquestion["bbox"]):
-            raise SpecError(
-                f"{sq_ctx}: bbox must be fully inside parent question bbox"
-            )
+            raise SpecError(f"{sq_ctx}: bbox must be fully inside parent question bbox")
 
 
 def validate_page(page: dict, page_idx: int) -> None:

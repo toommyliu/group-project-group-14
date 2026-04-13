@@ -51,10 +51,14 @@ def _load_bootstrap_students(roster_path: Path = _ROSTER_PATH) -> list[StudentIn
         line = index + 2  # account for header row
         sid = (row.get("sid") or "").strip()
         if not sid:
-            print(f"roster: line {line}: skipping row with missing sid", file=sys.stderr)
+            print(
+                f"roster: line {line}: skipping row with missing sid", file=sys.stderr
+            )
             continue
         if sid in seen_sids:
-            print(f"roster: line {line}: skipping duplicate sid {sid!r}", file=sys.stderr)
+            print(
+                f"roster: line {line}: skipping duplicate sid {sid!r}", file=sys.stderr
+            )
             continue
 
         seen_sids.add(sid)

@@ -128,7 +128,10 @@ def test_live_region_editor_version_status_text() -> None:
         detected_version=None,
         expected_versions=[],
     )
-    assert editor_detect_none._version_status_text() == "version=(none detected) expected=(none)"
+    assert (
+        editor_detect_none._version_status_text()
+        == "version=(none detected) expected=(none)"
+    )
 
 
 def test_master_template_pdf_has_no_overlay_labels(tmp_path) -> None:

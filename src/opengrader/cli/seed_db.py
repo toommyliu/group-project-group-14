@@ -27,6 +27,7 @@ DEFAULT_ASSIGNMENTS = [
     ("assignment", "Project 1"),
 ]
 
+
 def prepare_database_path(db_path: Path, clean: bool) -> Path:
     if clean and db_path.exists():
         print(f"Removing existing database at {db_path}")
@@ -80,6 +81,7 @@ def fetch_students_from_api(count: int = 100) -> list[StudentInput]:
 
     return students
 
+
 def load_student_inputs(count: int = 100) -> list[StudentInput]:
     try:
         return fetch_students_from_api(count)
@@ -88,7 +90,7 @@ def load_student_inputs(count: int = 100) -> list[StudentInput]:
             "Warning: failed to fetch student names from the randomuser API; using placeholder names.",
             file=sys.stderr,
         )
-        students = [] 
+        students = []
 
 
 def _create_seed_courses(services) -> list:

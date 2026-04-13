@@ -11,6 +11,7 @@ from textual.widget import Widget
 from textual.widgets import ListView
 from textual.reactive import reactive
 
+
 @dataclass
 class TabbedPaneTab:
     label: str
@@ -215,17 +216,19 @@ class TabbedPane(Vertical):
             label = escape(self._tabs[0].label)
             if not label:
                 return self._title
-            return self._title + " " + self._tab_label_markup(
-                self._active_tab_index,
-                label,
-                active=True,
+            return (
+                self._title
+                + " "
+                + self._tab_label_markup(
+                    self._active_tab_index,
+                    label,
+                    active=True,
+                )
             )
 
         title_as_first_tab = len(self._tabs) > 1 and not self._tabs[0].label
         visible_tabs = [
-            (index, tab)
-            for index, tab in enumerate(self._tabs)
-            if tab.label
+            (index, tab) for index, tab in enumerate(self._tabs) if tab.label
         ]
 
         if title_as_first_tab:

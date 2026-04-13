@@ -7,7 +7,9 @@ from opengrader.core.pdf.templates.qa_file import (
 )
 
 
-def test_parse_indentation_single_version_with_subquestions_and_correct_answers() -> None:
+def test_parse_indentation_single_version_with_subquestions_and_correct_answers() -> (
+    None
+):
     content = """---
 title: Quiz 1
 instructions: Keep answers concise.
@@ -177,7 +179,9 @@ def test_parse_rejects_content_before_first_version_header() -> None:
 - (1 points) question
 """
 
-    with pytest.raises(ValueError, match="content found before the first version header"):
+    with pytest.raises(
+        ValueError, match="content found before the first version header"
+    ):
         parse_qa_markdown(content)
 
 
@@ -224,9 +228,7 @@ def test_parse_weighted_partial_credit_items_can_accumulate_to_full_deduction() 
         ("Partially Correct", None),
         ("Incorrect", -4.0),
     ]
-    assert [
-        (sub.label, sub.points_delta) for sub in rubric[1].subitems
-    ] == [
+    assert [(sub.label, sub.points_delta) for sub in rubric[1].subitems] == [
         ("Major conceptual error", -3.0),
         ("Minor notation issue", -1.0),
     ]

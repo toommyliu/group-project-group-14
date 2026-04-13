@@ -1,6 +1,7 @@
 from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
+
 def format_output_filename(filename: str, start_page: int, end_page: int) -> str:
     if start_page == end_page:
         return f"{filename}-page_{start_page}.pdf"
@@ -17,14 +18,16 @@ def pdf_splitter(path: Path, pages_per_chunk: int = 1) -> None:
 
     for i in range(0, len(pdf.pages), pages_per_chunk):
         pdf_writer = PdfWriter()
-        for page in pdf.pages[i:i + pages_per_chunk]:
+        for page in pdf.pages[i : i + pages_per_chunk]:
             pdf_writer.add_page(page)
 
         start_page_number = i + 1
         # cap the end page number to the total number of pages in the PDF
         # if the last chunk has fewer pages than pages_per_chunk
         end_page_number = min(i + pages_per_chunk, len(pdf.pages))
-        output_filename = format_output_filename(filename, start_page_number, end_page_number)
+        output_filename = format_output_filename(
+            filename, start_page_number, end_page_number
+        )
 
         with open(output_filename, "wb") as out:
             pdf_writer.write(out)

@@ -7,6 +7,7 @@ from PIL import Image
 
 from .utils import apply_grayscale
 
+
 @dataclass
 class AnchorRegion:
     id: str

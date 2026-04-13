@@ -223,6 +223,7 @@ def _draw_region_overlay(page: fitz.Page, region: EditorRegion) -> None:
             align=0,
         )
 
+
 # TODO: reconsider how we strip borders
 # 1. regenerate the spec and then re-generate the PDF while excluding the border from the spec
 # 2. or just improve this

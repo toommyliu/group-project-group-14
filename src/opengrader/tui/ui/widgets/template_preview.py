@@ -76,7 +76,9 @@ class TemplatePreview(VerticalScroll):
 
         if pil_image is None:
             try:
-                pil_image = pdf_page_to_image(self._pdf_path, page=self._current_page, dpi=96)
+                pil_image = pdf_page_to_image(
+                    self._pdf_path, page=self._current_page, dpi=96
+                )
                 _preview_cache[cache_key] = pil_image
             except Exception as exc:
                 self._header.update(f"Failed to render template: {exc}")

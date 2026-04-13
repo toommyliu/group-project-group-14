@@ -14,7 +14,6 @@ from opengrader.core.courses.adapters.sqlite.stores import (
 )
 
 
-
 class SqliteCoursesTransaction(CoursesTransaction):
     def __init__(self, db_path: str | Path, immediate: bool = False) -> None:
         self._db_path = Path(db_path)

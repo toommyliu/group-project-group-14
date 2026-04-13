@@ -20,7 +20,10 @@ from opengrader.core.ocr.editor import (
     render_review_pdf,
     spec_to_editor_regions,
 )
-from opengrader.core.ocr.extractor import detect_version_from_anchors, render_page_to_image
+from opengrader.core.ocr.extractor import (
+    detect_version_from_anchors,
+    render_page_to_image,
+)
 from opengrader.core.ocr.spec import load_spec, version_anchor_map
 
 EPILOG = """
@@ -216,7 +219,11 @@ class LiveRegionEditor:
                 return
 
     def _version_status_text(self) -> str:
-        detected = self.detected_version if self.detected_version is not None else "(none detected)"
+        detected = (
+            self.detected_version
+            if self.detected_version is not None
+            else "(none detected)"
+        )
 
         if self.detected_version:
             expected = self.detected_version
@@ -616,8 +623,12 @@ def run_cli() -> None:
     try:
         if expected_versions and len(doc) > 0:
             page_image, _, _ = render_page_to_image(doc, 0, dpi=args.dpi)
-            first_page_anchors = spec.get("pages", [])[0].get("anchors", []) if spec.get("pages") else []
-            detected_version = detect_version_from_anchors(page_image, first_page_anchors, spec)
+            first_page_anchors = (
+                spec.get("pages", [])[0].get("anchors", []) if spec.get("pages") else []
+            )
+            detected_version = detect_version_from_anchors(
+                page_image, first_page_anchors, spec
+            )
 
         editor = LiveRegionEditor(
             doc,

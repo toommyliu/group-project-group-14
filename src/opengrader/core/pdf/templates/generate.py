@@ -60,14 +60,15 @@ def _normalize_subquestions(
         if isinstance(raw_sub, tuple):
             if len(raw_sub) != 3:
                 raise ValueError(
-                    "subquestion tuples must be (id, points, prompt); "
-                    f"got {raw_sub!r}"
+                    f"subquestion tuples must be (id, points, prompt); got {raw_sub!r}"
                 )
             sid, points, prompt = raw_sub
             label = default_label
         elif isinstance(raw_sub, dict):
             if "id" not in raw_sub:
-                raise ValueError(f"question[{parent_id!r}].subquestions[{i}] missing 'id'")
+                raise ValueError(
+                    f"question[{parent_id!r}].subquestions[{i}] missing 'id'"
+                )
             sid = raw_sub["id"]
             points = raw_sub.get("points", 0)
             prompt = raw_sub.get("prompt", "")

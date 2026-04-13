@@ -9,6 +9,7 @@ from opengrader.core.pdf.templates.anchor import anchor_entries_norm
 from .constants import QuestionType, SCHEMA_VERSION
 from .utils import apply_grayscale
 
+
 @dataclass
 class DetectedRegion:
     """A rectangular region detected in a template scan."""

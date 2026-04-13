@@ -86,6 +86,7 @@ def test_validate_spec_rejects_invalid_field_overrides() -> None:
     with pytest.raises(SpecError):
         validate_spec(spec)
 
+
 # TODO: remove useless test
 def test_validate_spec_rejects_deprecated_response_type() -> None:
     spec = {
@@ -321,5 +322,7 @@ def test_validate_spec_rejects_subquestion_outside_parent_bbox() -> None:
         ],
     }
 
-    with pytest.raises(SpecError, match="bbox must be fully inside parent question bbox"):
+    with pytest.raises(
+        SpecError, match="bbox must be fully inside parent question bbox"
+    ):
         validate_spec(spec)

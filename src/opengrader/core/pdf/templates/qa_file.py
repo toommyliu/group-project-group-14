@@ -493,7 +493,9 @@ def _rubric_deductions_reach_points(deltas: list[float], points: int) -> bool:
     return target in reachable
 
 
-def _rubric_effective_deltas(rubric: list[QARubricItem], *, context: str) -> list[float]:
+def _rubric_effective_deltas(
+    rubric: list[QARubricItem], *, context: str
+) -> list[float]:
     deltas: list[float] = []
 
     for item in rubric:
