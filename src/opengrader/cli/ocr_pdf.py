@@ -212,7 +212,9 @@ def run_cli() -> None:
             version_conf = (
                 res.version_confidence if res.version_confidence is not None else 0.0
             )
-            detected_version = res.version_id if res.version_id is not None else "(none detected)"
+            detected_version = (
+                res.version_id if res.version_id is not None else "(none detected)"
+            )
             print(
                 f"  detected version: {detected_version!r} (confidence {version_conf:.1f})"
             )

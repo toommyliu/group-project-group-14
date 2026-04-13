@@ -232,7 +232,14 @@ class HomeController:
                 candidates = self._student_items(
                     self._data_provider.list_students(course_id)
                 )
-                item = next((student for student in candidates if student.item_id == selected_student_id), None)
+                item = next(
+                    (
+                        student
+                        for student in candidates
+                        if student.item_id == selected_student_id
+                    ),
+                    None,
+                )
 
         if item is not None:
             self.on_student_highlighted(item)
@@ -267,9 +274,10 @@ class HomeController:
             lv = home.query_one("#home-student-list", ListView)
             child = lv.highlighted_child
             if isinstance(child, _NavListItem) and child.is_sub_item:
-                if self._expanded_student_item is not None: # pyright: ignore[reportAttributeAccessIssue]
+                if self._expanded_student_item is not None:  # pyright: ignore[reportAttributeAccessIssue]
                     self.on_student_submission_selected(
-                        self._expanded_student_item, child.nav # pyright: ignore[reportAttributeAccessIssue]
+                        self._expanded_student_item,
+                        child.nav,  # pyright: ignore[reportAttributeAccessIssue]
                     )
             else:
                 item = home.selected_student()
@@ -315,7 +323,9 @@ class HomeController:
         templates = self._data_provider.list_assignment_templates_for_assignment(
             self._state.selection.assignment_id
         )
-        home.set_status(f"Assignment details: {item.label} ({len(templates)} templates)")
+        home.set_status(
+            f"Assignment details: {item.label} ({len(templates)} templates)"
+        )
 
     def edit_assignment_rubric(self) -> None:
         home = self._app.get_home_screen()
@@ -421,7 +431,8 @@ class HomeController:
         return f"[t] Template: {linked_template.name}"
 
     def _build_template_tabs(
-        self, item: NavItem,
+        self,
+        item: NavItem,
     ) -> list[tuple[str, Path | None]]:
         assignment_id = self._numeric_id(item.item_id)
         if assignment_id is None:
@@ -442,7 +453,7 @@ class HomeController:
             version = chr(65 + i) if i < 26 else str(i + 1)
             label = f"Template {version} - {template.name}"
             # if template.id == current_id:
-                # label += " *"
+            # label += " *"
             pdf_path = data_dir / template.template_pdf_relpath
             tabs.append((label, pdf_path))
 
@@ -811,7 +822,13 @@ class HomeController:
                     confirm_label="Yes, overwrite",
                     cancel_label="No, cancel",
                 ),
-                lambda confirmed: proceed_with_upload() if confirmed else self._app.get_home_screen().set_status("Template upload cancelled."),
+                lambda confirmed: (
+                    proceed_with_upload()
+                    if confirmed
+                    else self._app.get_home_screen().set_status(
+                        "Template upload cancelled."
+                    )
+                ),
             )
         else:
             proceed_with_upload()
@@ -1009,9 +1026,10 @@ class HomeController:
             return
 
         selected_assignment = home.selected_assignment()
-        if selected_assignment is not None and self._numeric_id(
-            selected_assignment.item_id
-        ) == context.assignment_id:
+        if (
+            selected_assignment is not None
+            and self._numeric_id(selected_assignment.item_id) == context.assignment_id
+        ):
             template_hint = self._assignment_template_hint(selected_assignment)
             template_tabs = self._build_template_tabs(selected_assignment)
             self._show_assignment_details(

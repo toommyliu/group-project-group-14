@@ -32,7 +32,9 @@ SAMPLE_IDS = [
 ]
 
 
-def _build_sample_questions(prompts: list[str], question_count: int) -> list[tuple[str, int, str] | dict]:
+def _build_sample_questions(
+    prompts: list[str], question_count: int
+) -> list[tuple[str, int, str] | dict]:
     questions: list[tuple[str, int, str] | dict] = []
 
     for i in range(question_count):

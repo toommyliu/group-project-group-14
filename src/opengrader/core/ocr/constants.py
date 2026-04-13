@@ -10,9 +10,7 @@ VALID_FIELD_TYPES = {
     "custom",
     "version_marker",
 }
-VALID_RESPONSE_TYPE_FIELDS = {
-    q.value for q in QuestionType
-}
+VALID_RESPONSE_TYPE_FIELDS = {q.value for q in QuestionType}
 
 # TODO: this might be useless if we disregard backward compatibility
 SCHEMA_VERSION = "1.0"

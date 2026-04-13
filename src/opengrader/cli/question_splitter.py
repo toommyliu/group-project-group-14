@@ -9,15 +9,17 @@ DEFAULT_QUESTIONS = {
     "question_7": (0, 100, 440, 550, 480),
     "question_8": (0, 100, 480, 550, 515),
     "question_9": (0, 100, 515, 550, 580),
-    "question_10": (0, 100, 575, 550, 620)
+    "question_10": (0, 100, 575, 550, 620),
 }
+
 
 def run_cli():
     # In the future, these could be arguments
     input_pdf = "assets/sample2.pdf"
     output_dir = "tests/question_split_output"
-    
+
     split_pdf_by_rectangles(input_pdf, output_dir, DEFAULT_QUESTIONS)
+
 
 if __name__ == "__main__":
     run_cli()

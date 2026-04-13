@@ -231,7 +231,6 @@ def validate_field_result(
             )
         return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
 
-
     if ftype == "version_marker":
         expected = field.get("expected", "")
         normalized = text.upper().strip()

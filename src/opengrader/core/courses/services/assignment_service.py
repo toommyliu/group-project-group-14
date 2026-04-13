@@ -4,7 +4,11 @@ from datetime import datetime
 from decimal import Decimal
 
 from opengrader.core.courses.contracts.transaction import TransactionFactory
-from opengrader.core.courses.domain.entities import Assignment, normalize_assignment_type, normalize_points
+from opengrader.core.courses.domain.entities import (
+    Assignment,
+    normalize_assignment_type,
+    normalize_points,
+)
 from opengrader.core.courses.domain.errors import CourseNotFoundError
 
 

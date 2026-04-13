@@ -2,6 +2,7 @@ from pathlib import Path
 from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from opengrader.core.pdf import pdf_splitter
 
+
 def setup_args() -> Namespace:
     parser = ArgumentParser(
         description="Split a PDF into smaller chunks.",
@@ -10,11 +11,12 @@ def setup_args() -> Namespace:
             " python -m opengrader.cli.pdf_splitter assets/sample.pdf\n"
             " python -m opengrader.cli.pdf_splitter assets/sample.pdf --chunk 5\n"
         ),
-        formatter_class=RawDescriptionHelpFormatter
+        formatter_class=RawDescriptionHelpFormatter,
     )
-    parser.add_argument("path", type=str,
-                        help="Path to the PDF file.")
-    parser.add_argument("--chunk", type=int, default=1, help="Number of pages per chunk (default: 1).")
+    parser.add_argument("path", type=str, help="Path to the PDF file.")
+    parser.add_argument(
+        "--chunk", type=int, default=1, help="Number of pages per chunk (default: 1)."
+    )
     return parser.parse_args()
 
 

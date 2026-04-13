@@ -35,7 +35,7 @@ def _sample_spec() -> dict:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.3, 0.8, 0.2],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                     }
                 ],
             }
@@ -128,7 +128,10 @@ def test_live_region_editor_version_status_text() -> None:
         detected_version=None,
         expected_versions=[],
     )
-    assert editor_detect_none._version_status_text() == "version=(none detected) expected=(none)"
+    assert (
+        editor_detect_none._version_status_text()
+        == "version=(none detected) expected=(none)"
+    )
 
 
 def test_master_template_pdf_has_no_overlay_labels(tmp_path) -> None:

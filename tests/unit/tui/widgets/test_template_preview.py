@@ -20,7 +20,9 @@ def _create_dummy_pdf(path: Path, pages: int = 3) -> None:
     doc.close()
 
 
-def test_template_preview_reuses_the_same_image_widget_when_paging(tmp_path: Path) -> None:
+def test_template_preview_reuses_the_same_image_widget_when_paging(
+    tmp_path: Path,
+) -> None:
     pdf_path = tmp_path / "template.pdf"
     _create_dummy_pdf(pdf_path, pages=3)
 

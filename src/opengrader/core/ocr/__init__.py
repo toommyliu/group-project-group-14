@@ -9,7 +9,12 @@ from .spec import (
     version_anchor_map,
     lookup_version_by_anchors,
 )
-from .alignment import preprocess_for_ocr, align_image, AnchorRegion, detect_anchor_presence
+from .alignment import (
+    preprocess_for_ocr,
+    align_image,
+    AnchorRegion,
+    detect_anchor_presence,
+)
 from .extractor import (
     OcrConfig,
     OcrResult,

@@ -86,6 +86,7 @@ def test_validate_spec_rejects_invalid_field_overrides() -> None:
     with pytest.raises(SpecError):
         validate_spec(spec)
 
+
 # TODO: remove useless test
 def test_validate_spec_rejects_deprecated_response_type() -> None:
     spec = {
@@ -203,21 +204,21 @@ def test_validate_spec_accepts_multipart_questions() -> None:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.2, 0.8, 0.5],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 20,
                         "subquestions": [
                             {
                                 "id": "q1a",
                                 "label": "a",
                                 "bbox": [0.12, 0.28, 0.76, 0.18],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 10,
                             },
                             {
                                 "id": "q1b",
                                 "label": "b",
                                 "bbox": [0.12, 0.48, 0.76, 0.18],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 10,
                             },
                         ],
@@ -243,13 +244,13 @@ def test_validate_spec_rejects_cross_page_question_or_subquestion_ids() -> None:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.2, 0.8, 0.3],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 10,
                         "subquestions": [
                             {
                                 "id": "q1a",
                                 "bbox": [0.12, 0.24, 0.76, 0.12],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 5,
                             }
                         ],
@@ -264,19 +265,19 @@ def test_validate_spec_rejects_cross_page_question_or_subquestion_ids() -> None:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.2, 0.8, 0.3],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 10,
                     },
                     {
                         "id": "q2",
                         "bbox": [0.1, 0.55, 0.8, 0.3],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 10,
                         "subquestions": [
                             {
                                 "id": "q1a",
                                 "bbox": [0.12, 0.6, 0.76, 0.12],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 5,
                             }
                         ],
@@ -305,13 +306,13 @@ def test_validate_spec_rejects_subquestion_outside_parent_bbox() -> None:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.2, 0.5, 0.2],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 10,
                         "subquestions": [
                             {
                                 "id": "q1a",
                                 "bbox": [0.65, 0.2, 0.2, 0.1],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 5,
                             }
                         ],
@@ -321,5 +322,7 @@ def test_validate_spec_rejects_subquestion_outside_parent_bbox() -> None:
         ],
     }
 
-    with pytest.raises(SpecError, match="bbox must be fully inside parent question bbox"):
+    with pytest.raises(
+        SpecError, match="bbox must be fully inside parent question bbox"
+    ):
         validate_spec(spec)

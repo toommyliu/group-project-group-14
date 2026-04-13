@@ -25,6 +25,7 @@ ANCHOR_POSITIONS = {
 QUESTION_FONTSIZE = 11
 SUBQUESTION_FONTSIZE = 9
 
+
 def _draw_centered_text(
     page: fitz.Page,
     *,
@@ -368,7 +369,9 @@ def draw_question_box(
         color=(0.2, 0.2, 0.2),
     )
 
-    prefix_w = measure_text_width(header_prefix, QUESTION_FONTSIZE, bold=True, fonts=fonts)
+    prefix_w = measure_text_width(
+        header_prefix, QUESTION_FONTSIZE, bold=True, fonts=fonts
+    )
     prompt_space_w = max(24.0, (x1 - x0) - (prefix_w + 22))
     prompt_text = _truncate_text_to_width(
         prompt,
@@ -422,7 +425,9 @@ def draw_question_box(
             color=(0.25, 0.25, 0.25),
         )
 
-        sub_prefix_w = measure_text_width(sub_prefix, SUBQUESTION_FONTSIZE, bold=False, fonts=fonts)
+        sub_prefix_w = measure_text_width(
+            sub_prefix, SUBQUESTION_FONTSIZE, bold=False, fonts=fonts
+        )
         sub_prompt_space = max(20.0, (x1 - x0) - (sub_prefix_w + 30))
         sub_prompt_text = _truncate_text_to_width(
             sub_prompt,

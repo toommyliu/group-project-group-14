@@ -162,7 +162,7 @@ def test_load_bootstrap_students_reads_repo_roster_format(tmp_path) -> None:
     roster_path = tmp_path / "roster.csv"
     roster_path.write_text(
         "name,email,section,course,sid,grade\n"
-        "\"Lovelace, Ada\",ada@example.com,1,CMPE195,100000001,A\n"
+        '"Lovelace, Ada",ada@example.com,1,CMPE195,100000001,A\n'
         "Grace Hopper,grace@example.com,1,CMPE195,100000002,A\n",
         encoding="utf-8",
     )

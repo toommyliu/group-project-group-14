@@ -29,19 +29,19 @@ def test_process_submission_pdf_extracts_subquestions(tmp_path: Path) -> None:
                     {
                         "id": "q1",
                         "bbox": [0.1, 0.1, 0.8, 0.45],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 20,
                         "subquestions": [
                             {
                                 "id": "q1a",
                                 "bbox": [0.12, 0.18, 0.76, 0.18],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 10,
                             },
                             {
                                 "id": "q1b",
                                 "bbox": [0.12, 0.38, 0.76, 0.15],
-                                "response_type": QuestionType.FREE_RESPONSE.value,
+                                "response_type": QuestionType.FREE_RESPONSE,
                                 "points": 10,
                             },
                         ],
@@ -49,7 +49,7 @@ def test_process_submission_pdf_extracts_subquestions(tmp_path: Path) -> None:
                     {
                         "id": "q2",
                         "bbox": [0.1, 0.6, 0.8, 0.25],
-                        "response_type": QuestionType.FREE_RESPONSE.value,
+                        "response_type": QuestionType.FREE_RESPONSE,
                         "points": 10,
                     },
                 ],

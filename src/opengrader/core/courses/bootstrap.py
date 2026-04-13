@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from opengrader.core import resolve_data_dir
-from opengrader.core.courses.adapters.sqlite.migrations import initialize_sqlite_database
+from opengrader.core.courses.adapters.sqlite.migrations import (
+    initialize_sqlite_database,
+)
 from opengrader.core.courses.adapters.sqlite.transaction import SqliteCoursesTransaction
 from opengrader.core.courses.services.assignment_service import AssignmentService
 from opengrader.core.courses.services.assignment_template_service import (

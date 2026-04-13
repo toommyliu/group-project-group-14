@@ -96,7 +96,7 @@ class TuiApp(App):
         if isinstance(self.focused, Input):
             return False
 
-        # While any dialog is open, avoid dispatching keymaps to prevent unexpected interactions 
+        # While any dialog is open, avoid dispatching keymaps to prevent unexpected interactions
         if len(self.screen_stack) > 1:
             return False
 

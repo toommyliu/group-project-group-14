@@ -9,6 +9,7 @@ from opengrader.core.pdf.templates.anchor import anchor_entries_norm
 from .constants import QuestionType, SCHEMA_VERSION
 from .utils import apply_grayscale
 
+
 @dataclass
 class DetectedRegion:
     """A rectangular region detected in a template scan."""
@@ -210,7 +211,7 @@ def regions_to_spec_draft(
                 {
                     "id": region.label or f"q{question_counter}",
                     "bbox": region.bbox,
-                    "response_type": QuestionType.FREE_RESPONSE.value,
+                    "response_type": QuestionType.FREE_RESPONSE,
                     "points": 10,
                 }
             )
