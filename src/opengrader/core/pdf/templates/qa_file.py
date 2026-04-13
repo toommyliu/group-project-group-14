@@ -563,8 +563,8 @@ def _render_subquestion(
         indent=indent,
         text=_render_prompt_with_points(subquestion.prompt, subquestion.points),
     )
-    _render_answers(lines, subquestion.answers, indent=indent + 2)
     _render_image(lines, subquestion.image_markdown, indent=indent + 2)
+    _render_answers(lines, subquestion.answers, indent=indent + 2)
 
 
 def _render_question(
@@ -575,8 +575,8 @@ def _render_question(
         indent=indent,
         text=_render_prompt_with_points(question.prompt, question.points),
     )
-    _render_answers(lines, question.answers, indent=indent + 2)
     _render_image(lines, question.image_markdown, indent=indent + 2)
+    _render_answers(lines, question.answers, indent=indent + 2)
 
     for subquestion in question.subquestions:
         _render_subquestion(lines, subquestion, indent=indent + 2)
