@@ -17,14 +17,13 @@
 
 ## Problem Statement
 
-Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. They aren't able to grade efficiently and provide students quality feedback in a timely manner.
+Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently.
 Timely, quality feedback helps improve student learning outcomes, and yet, today's tools failure to meet these needs.
 
 ## Solution
 
 The application will ingest scanned PDF submissions that are split by assignment.
-Graders can create and customize rubrics per assignment, manage course rosters, and annotate PDFs directly.
-These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them.
+Graders can create and customize rubrics per assignment, manage course rosters, and annotate PDFs directly. These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them.
 
 ### Key Features
 
@@ -75,7 +74,7 @@ These capabilities will enable educators to visualize trends in grade statistics
 To render images in the TUI properly, you may need a terminal emulator that supports the
 [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
-On macOS, the following terminal emulators were successful in our tests:
+On macOS, the following (stock) terminal emulators were successful in our tests:
 
 - [Ghostty](https://github.com/ghostty-org/ghostty)
 - [iTerm2](https://iterm2.com/)
@@ -106,16 +105,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh # or brew install uv
 uv sync --all-groups
 ```
 
-#### Library Management
-
-```bash
-# install a library
-uv add my-library
-
-# remove a library
-uv remove my-library
-```
-
 ### Running Locally
 
 ```bash
@@ -138,59 +127,22 @@ uv run ocr-pdf --template spec.json --input submission.pdf ...
 uv run pytest
 ```
 
----
 
-## API Reference
-
-<details>
-<summary>Click to expand API endpoints</summary>
-
-| Method | Endpoint            | Description         |
-| ------ | ------------------- | ------------------- |
-| GET    | `/api/resource`     | Get all resources   |
-| GET    | `/api/resource/:id` | Get resource by ID  |
-| POST   | `/api/resource`     | Create new resource |
-| PUT    | `/api/resource/:id` | Update resource     |
-| DELETE | `/api/resource/:id` | Delete resource     |
-
-</details>
-
----
 
 ## Project Structure
 
 ```
 .
-├── [folder]/           # Description
-├── src/                # Source code files
-├── tests/              # Test files
-├── docs/               # Documentation files
+├── src/opengrader/
+│   ├── core/           # Shared code
+│   ├── cli/            # Standalone CLI scripts
+│   └── tui/            # Main TUI application
+├── tests/
+│   ├── unit/           # Unit tests
+├── docs/               # Documentation
+├── pyproject.toml      # Project configuration
 └── README.md
 ```
-
----
-
-## Contributing
-
-1. Create a feature branch (`git checkout -b feature/amazing-feature`)
-2. Commit your changes (`git commit -m 'Add amazing feature'`)
-3. Push to the branch (`git push origin feature/amazing-feature`)
-4. Open a Pull Request
-
-### Branch Naming
-
-- `feature/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation updates
-- `refactor/` - Code refactoring
-
-### Commit Messages
-
-Use clear, descriptive commit messages:
-
-- `Add user authentication endpoint`
-- `Fix database connection timeout issue`
-- `Update README with setup instructions`
 
 ---
 

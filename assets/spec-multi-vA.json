@@ -11,6 +11,11 @@
       "tl",
       "tr",
       "br"
+    ],
+    "C": [
+      "tl",
+      "bl",
+      "br"
     ]
   },
   "pages": [
@@ -84,44 +89,7 @@
           "confidence_threshold": 70
         }
       ],
-      "questions": [
-        {
-          "id": "q1",
-          "bbox": [
-            0.121,
-            0.416,
-            0.758,
-            0.16
-          ],
-          "response_type": "free_response",
-          "points": 15,
-          "prompt": "Explain your reasoning clearly."
-        },
-        {
-          "id": "q2",
-          "bbox": [
-            0.121,
-            0.587,
-            0.758,
-            0.16
-          ],
-          "response_type": "free_response",
-          "points": 20,
-          "prompt": "Show all intermediate steps and calculation details."
-        },
-        {
-          "id": "q3",
-          "bbox": [
-            0.121,
-            0.757,
-            0.758,
-            0.16
-          ],
-          "response_type": "free_response",
-          "points": 12,
-          "prompt": "State assumptions and justify your chosen approach."
-        }
-      ]
+      "questions": []
     },
     {
       "page_number": 2,
@@ -166,40 +134,124 @@
       "fields": [],
       "questions": [
         {
-          "id": "q4",
+          "id": "q1",
           "bbox": [
+            0.131,
+            0.089,
+            0.739,
+            0.039
+          ],
+          "prompt_bbox": [
+            0.131,
+            0.089,
+            0.739,
+            0.039
+          ],
+          "full_bbox": [
             0.121,
             0.086,
             0.758,
-            0.271
+            0.201
           ],
           "response_type": "free_response",
-          "points": 11,
-          "prompt": "Compare two valid solutions and discuss their trade-offs."
+          "points": 10,
+          "prompt": "Convert decimal 5 to binary [A].",
+          "answer_bbox": [
+            0.134,
+            0.126,
+            0.732,
+            0.147
+          ]
         },
         {
-          "id": "q5",
+          "id": "q2",
           "bbox": [
+            0.131,
+            0.3,
+            0.739,
+            0.039
+          ],
+          "prompt_bbox": [
+            0.131,
+            0.3,
+            0.739,
+            0.039
+          ],
+          "full_bbox": [
             0.121,
-            0.366,
+            0.296,
             0.758,
-            0.271
+            0.201
           ],
           "response_type": "free_response",
-          "points": 12,
-          "prompt": "Provide a concise argument followed by your final answer."
+          "points": 10,
+          "prompt": "Which of these are valid Python integer literals? [A]",
+          "answer_bbox": [
+            0.134,
+            0.337,
+            0.732,
+            0.147
+          ]
         },
         {
-          "id": "q6",
+          "id": "q3",
           "bbox": [
+            0.131,
+            0.511,
+            0.739,
+            0.039
+          ],
+          "prompt_bbox": [
+            0.131,
+            0.511,
+            0.739,
+            0.039
+          ],
+          "full_bbox": [
             0.121,
-            0.647,
+            0.507,
             0.758,
-            0.271
+            0.201
           ],
           "response_type": "free_response",
-          "points": 8,
-          "prompt": "Draw a diagram or visual representation if it helps clarify your explanation."
+          "points": 10,
+          "prompt": "What is the most significant bit (MSB) of the binary number 1010 [A]?",
+          "answer_bbox": [
+            0.134,
+            0.547,
+            0.732,
+            0.147
+          ]
+        },
+        {
+          "id": "q4",
+          "bbox": [
+            0.131,
+            0.721,
+            0.739,
+            0.039
+          ],
+          "prompt_bbox": [
+            0.131,
+            0.721,
+            0.739,
+            0.039
+          ],
+          "full_bbox": [
+            0.121,
+            0.717,
+            0.758,
+            0.201
+          ],
+          "response_type": "free_response",
+          "points": 10,
+          "prompt": "Which of these numbers are even? [A]",
+          "answer_bbox": [
+            0.134,
+            0.758,
+            0.732,
+            0.147
+          ]
         }
       ]
     }
