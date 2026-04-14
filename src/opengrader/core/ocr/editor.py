@@ -8,7 +8,16 @@ from typing import Literal
 import fitz
 
 
-RegionType = Literal["anchor", "field", "question"]
+RegionType = Literal[
+    "anchor",
+    "field",
+    "question",
+    "question_answer",
+    "question_full",
+    "subquestion",
+    "subquestion_answer",
+    "subquestion_full",
+]
 
 
 @dataclass
@@ -19,6 +28,7 @@ class EditorRegion:
     bbox_norm: list[float]
     locked: bool
     source_index: int
+    parent_source_index: int | None = None
 
 
 def clamp_bbox_norm(
@@ -74,6 +84,13 @@ def bbox_pixels_to_norm(
     return clamp_bbox_norm([x, y, w, h])
 
 
+def _optional_bbox(region: dict, key: str) -> list[float] | None:
+    bbox = region.get(key)
+    if isinstance(bbox, list) and len(bbox) == 4:
+        return bbox
+    return None
+
+
 def spec_to_editor_regions(spec: dict) -> list[EditorRegion]:
     regions: list[EditorRegion] = []
     for page in spec.get("pages", []):
@@ -104,18 +121,101 @@ def spec_to_editor_regions(spec: dict) -> list[EditorRegion]:
             )
 
         for idx, question in enumerate(page.get("questions", [])):
+            qid = str(question["id"])
+            prompt_bbox = _optional_bbox(question, "prompt_bbox") or question["bbox"]
             regions.append(
                 EditorRegion(
                     page_number=page_number,
-                    region_id=str(question["id"]),
+                    region_id=qid,
                     region_type="question",
-                    bbox_norm=clamp_bbox_norm(question["bbox"]),
+                    bbox_norm=clamp_bbox_norm(prompt_bbox),
                     locked=False,
                     source_index=idx,
                 )
             )
 
+            full_bbox = _optional_bbox(question, "full_bbox")
+            if full_bbox is not None:
+                regions.append(
+                    EditorRegion(
+                        page_number=page_number,
+                        region_id=qid,
+                        region_type="question_full",
+                        bbox_norm=clamp_bbox_norm(full_bbox),
+                        locked=False,
+                        source_index=idx,
+                    )
+                )
+
+            answer_bbox = _optional_bbox(question, "answer_bbox")
+            if answer_bbox is not None:
+                regions.append(
+                    EditorRegion(
+                        page_number=page_number,
+                        region_id=qid,
+                        region_type="question_answer",
+                        bbox_norm=clamp_bbox_norm(answer_bbox),
+                        locked=False,
+                        source_index=idx,
+                    )
+                )
+
+            for sub_idx, subquestion in enumerate(question.get("subquestions", [])):
+                sub_id = str(subquestion["id"])
+                sub_prompt_bbox = (
+                    _optional_bbox(subquestion, "prompt_bbox") or subquestion["bbox"]
+                )
+                regions.append(
+                    EditorRegion(
+                        page_number=page_number,
+                        region_id=sub_id,
+                        region_type="subquestion",
+                        bbox_norm=clamp_bbox_norm(sub_prompt_bbox),
+                        locked=False,
+                        source_index=sub_idx,
+                        parent_source_index=idx,
+                    )
+                )
+
+                sub_full_bbox = _optional_bbox(subquestion, "full_bbox")
+                if sub_full_bbox is not None:
+                    regions.append(
+                        EditorRegion(
+                            page_number=page_number,
+                            region_id=sub_id,
+                            region_type="subquestion_full",
+                            bbox_norm=clamp_bbox_norm(sub_full_bbox),
+                            locked=False,
+                            source_index=sub_idx,
+                            parent_source_index=idx,
+                        )
+                    )
+
+                sub_answer_bbox = _optional_bbox(subquestion, "answer_bbox")
+                if sub_answer_bbox is not None:
+                    regions.append(
+                        EditorRegion(
+                            page_number=page_number,
+                            region_id=sub_id,
+                            region_type="subquestion_answer",
+                            bbox_norm=clamp_bbox_norm(sub_answer_bbox),
+                            locked=False,
+                            source_index=sub_idx,
+                            parent_source_index=idx,
+                        )
+                    )
+
     return regions
+
+
+def _rounded_bbox(bbox_norm: list[float], precision: int) -> list[float]:
+    clamped = clamp_bbox_norm(bbox_norm)
+    return [
+        round(clamped[0], precision),
+        round(clamped[1], precision),
+        round(clamped[2], precision),
+        round(clamped[3], precision),
+    ]
 
 
 def apply_editor_regions_to_spec(
@@ -134,18 +234,46 @@ def apply_editor_regions_to_spec(
         if page is None:
             continue
 
-        collection_key = "fields" if region.region_type == "field" else "questions"
-        collection = page.get(collection_key, [])
-        if region.source_index < 0 or region.source_index >= len(collection):
+        rounded = _rounded_bbox(region.bbox_norm, precision)
+
+        if region.region_type == "field":
+            fields = page.get("fields", [])
+            if 0 <= region.source_index < len(fields):
+                fields[region.source_index]["bbox"] = rounded
             continue
 
-        clamped = clamp_bbox_norm(region.bbox_norm)
-        collection[region.source_index]["bbox"] = [
-            round(clamped[0], precision),
-            round(clamped[1], precision),
-            round(clamped[2], precision),
-            round(clamped[3], precision),
-        ]
+        questions = page.get("questions", [])
+
+        if region.region_type in {
+            "question",
+            "question_answer",
+            "question_full",
+        }:
+            if region.source_index < 0 or region.source_index >= len(questions):
+                continue
+            target = questions[region.source_index]
+        elif region.region_type in {
+            "subquestion",
+            "subquestion_answer",
+            "subquestion_full",
+        }:
+            q_idx = region.parent_source_index
+            if q_idx is None or q_idx < 0 or q_idx >= len(questions):
+                continue
+            subquestions = questions[q_idx].get("subquestions", [])
+            if region.source_index < 0 or region.source_index >= len(subquestions):
+                continue
+            target = subquestions[region.source_index]
+        else:
+            continue
+
+        if region.region_type in {"question", "subquestion"}:
+            target["bbox"] = rounded
+            target["prompt_bbox"] = rounded
+        elif region.region_type in {"question_answer", "subquestion_answer"}:
+            target["answer_bbox"] = rounded
+        elif region.region_type in {"question_full", "subquestion_full"}:
+            target["full_bbox"] = rounded
 
     return updated
 
@@ -181,8 +309,12 @@ def border_strip_rects(rect: fitz.Rect, thickness: float = 1.5) -> list[fitz.Rec
 def _pdf_region_color(region_type: RegionType) -> tuple[float, float, float]:
     if region_type == "field":
         return (0.22, 0.55, 0.95)
-    if region_type == "question":
+    if region_type in {"question", "subquestion"}:
         return (0.20, 0.65, 0.30)
+    if region_type in {"question_answer", "subquestion_answer"}:
+        return (0.55, 0.30, 0.80)
+    if region_type in {"question_full", "subquestion_full"}:
+        return (0.10, 0.62, 0.72)
     return (0.88, 0.52, 0.16)
 
 
@@ -232,10 +364,42 @@ def _apply_outline_removal(
     page_regions: list[EditorRegion],
     erase_border_width: float,
 ) -> None:
+    question_full_indices = {
+        region.source_index
+        for region in page_regions
+        if region.region_type == "question_full"
+    }
+    subquestion_full_indices = {
+        (region.parent_source_index, region.source_index)
+        for region in page_regions
+        if region.region_type == "subquestion_full"
+    }
+
     has_redactions = False
     for region in page_regions:
         if region.region_type == "anchor":
             continue
+
+        should_redact = False
+        if region.region_type in {"field", "question_full", "subquestion_full"}:
+            should_redact = True
+        elif (
+            region.region_type == "question"
+            and region.source_index not in question_full_indices
+        ):
+            # Backward compatibility for specs that only have question bbox.
+            should_redact = True
+        elif (
+            region.region_type == "subquestion"
+            and (region.parent_source_index, region.source_index)
+            not in subquestion_full_indices
+        ):
+            # Backward compatibility for specs that only have subquestion bbox.
+            should_redact = True
+
+        if not should_redact:
+            continue
+
         rect = bbox_norm_to_fitz_rect(region.bbox_norm, page.rect)
         for strip in border_strip_rects(rect, erase_border_width):
             page.add_redact_annot(strip, fill=(1.0, 1.0, 1.0))
