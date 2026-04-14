@@ -326,3 +326,37 @@ def test_validate_spec_rejects_subquestion_outside_parent_bbox() -> None:
         SpecError, match="bbox must be fully inside parent question bbox"
     ):
         validate_spec(spec)
+
+
+def test_validate_spec_accepts_prompt_bbox_with_full_bbox_container() -> None:
+    spec = {
+        "schema_version": "1.0",
+        "unit_id": "unit-1",
+        "pages": [
+            {
+                "page_number": 1,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "fields": [],
+                "questions": [
+                    {
+                        "id": "q1",
+                        "bbox": [0.1, 0.2, 0.8, 0.08],
+                        "full_bbox": [0.1, 0.2, 0.8, 0.6],
+                        "response_type": QuestionType.FREE_RESPONSE,
+                        "points": 10,
+                        "subquestions": [
+                            {
+                                "id": "q1a",
+                                "bbox": [0.12, 0.38, 0.76, 0.05],
+                                "full_bbox": [0.12, 0.35, 0.76, 0.18],
+                                "response_type": QuestionType.FREE_RESPONSE,
+                                "points": 5,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_spec(spec) == []
