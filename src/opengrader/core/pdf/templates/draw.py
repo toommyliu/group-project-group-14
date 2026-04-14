@@ -345,6 +345,46 @@ def _question_min_height(question: dict) -> float:
     )
 
 
+def _question_prompt_rect(
+    x0: float, y0: float, x1: float, y1: float
+) -> tuple[float, float, float, float]:
+    prompt_top = y0 + 3
+    prompt_bottom = min(y1 - 2, y0 + QUESTION_HEADER_HEIGHT + 4)
+    if prompt_bottom <= prompt_top:
+        prompt_bottom = min(y1, prompt_top + 1)
+    return (x0 + 6, prompt_top, x1 - 6, prompt_bottom)
+
+
+def _question_answer_rect(
+    x0: float, y0: float, x1: float, y1: float
+) -> tuple[float, float, float, float] | None:
+    answer_top = min(y1, y0 + QUESTION_HEADER_HEIGHT + 2)
+    answer_bottom = y1 - QUESTION_INNER_PADDING
+    if answer_bottom <= answer_top:
+        return None
+    return (x0 + 8, answer_top, x1 - 8, answer_bottom)
+
+
+def _subquestion_prompt_rect(
+    x0: float, sub_y0: float, x1: float, sub_y1: float
+) -> tuple[float, float, float, float]:
+    prompt_top = sub_y0 + 2
+    prompt_bottom = min(sub_y1 - 1, sub_y0 + 18)
+    if prompt_bottom <= prompt_top:
+        prompt_bottom = min(sub_y1, prompt_top + 1)
+    return (x0 + 10, prompt_top, x1 - 10, prompt_bottom)
+
+
+def _subquestion_answer_rect(
+    x0: float, sub_y0: float, x1: float, sub_y1: float
+) -> tuple[float, float, float, float] | None:
+    answer_top = min(sub_y1, sub_y0 + 18)
+    answer_bottom = sub_y1 - 4
+    if answer_bottom <= answer_top:
+        return None
+    return (x0 + 10, answer_top, x1 - 10, answer_bottom)
+
+
 def draw_question_box(
     page: fitz.Page,
     x0: float,
@@ -405,8 +445,9 @@ def draw_question_box(
     for i, subquestion in enumerate(subquestions):
         sub_y0 = sub_area_top + i * (sub_height + SUBQUESTION_GAP)
         sub_y1 = sub_y0 + sub_height
+        sub_rect = (x0 + 8, sub_y0, x1 - 8, sub_y1)
         page.draw_rect(
-            fitz.Rect(x0 + 8, sub_y0, x1 - 8, sub_y1),
+            fitz.Rect(*sub_rect),
             color=(0.0, 0.0, 0.0),
             width=BOX_LINE,
         )
@@ -444,15 +485,20 @@ def draw_question_box(
                 fontname=fonts.regular_name,
                 color=(0.25, 0.25, 0.25),
             )
-        drawn_subquestions.append(
-            {
-                "id": str(subquestion["id"]),
-                "label": raw_label,
-                "rect": (x0 + 8, sub_y0, x1 - 8, sub_y1),
-                "points": sub_points,
-                "prompt": sub_prompt,
-            }
-        )
+
+        subquestion_meta = {
+            "id": str(subquestion["id"]),
+            "label": raw_label,
+            "rect": sub_rect,
+            "prompt_rect": _subquestion_prompt_rect(x0, sub_y0, x1, sub_y1),
+            "points": sub_points,
+            "prompt": sub_prompt,
+        }
+        sub_answer_rect = _subquestion_answer_rect(x0, sub_y0, x1, sub_y1)
+        if sub_answer_rect is not None:
+            subquestion_meta["answer_rect"] = sub_answer_rect
+
+        drawn_subquestions.append(subquestion_meta)
 
     return drawn_subquestions
 
@@ -674,6 +720,7 @@ def draw_questions_on_page(
         y0 = y
         y1 = y0 + question_height
 
+        subquestions = question.get("subquestions", [])
         drawn_subquestions = draw_question_box(
             page,
             content_x0,
@@ -684,18 +731,24 @@ def draw_questions_on_page(
             points,
             prompt,
             fonts,
-            subquestions=question.get("subquestions", []),
+            subquestions=subquestions,
         )
-        drawn_meta.append(
-            {
-                "id": qid,
-                "rect": (content_x0, y0, content_x1, y1),
-                "page_number": page_number,
-                "points": points,
-                "prompt": prompt,
-                "subquestions": drawn_subquestions,
-            }
-        )
+
+        question_meta = {
+            "id": qid,
+            "rect": (content_x0, y0, content_x1, y1),
+            "prompt_rect": _question_prompt_rect(content_x0, y0, content_x1, y1),
+            "page_number": page_number,
+            "points": points,
+            "prompt": prompt,
+            "subquestions": drawn_subquestions,
+        }
+        if not subquestions:
+            answer_rect = _question_answer_rect(content_x0, y0, content_x1, y1)
+            if answer_rect is not None:
+                question_meta["answer_rect"] = answer_rect
+
+        drawn_meta.append(question_meta)
         y = y1 + QUESTION_GAP
 
     draw_page_number(page, page_number, page_w, page_h, fonts)

@@ -80,7 +80,9 @@ def build_layout_spec(
 
     for question in question_meta:
         qid = str(question["id"])
-        rect = question["rect"]
+        full_rect = question["rect"]
+        prompt_rect = question.get("prompt_rect") or full_rect
+        answer_rect = question.get("answer_rect")
         page_number = int(question["page_number"])
         points = question["points"]
         prompt = question["prompt"]
@@ -88,25 +90,42 @@ def build_layout_spec(
         page = page_entry(page_number)
         question_spec = {
             "id": qid,
-            "bbox": _bbox_norm(rect, page_w, page_h),
+            "bbox": _bbox_norm(prompt_rect, page_w, page_h),
+            "prompt_bbox": _bbox_norm(prompt_rect, page_w, page_h),
+            "full_bbox": _bbox_norm(full_rect, page_w, page_h),
             "response_type": QuestionType.FREE_RESPONSE,
             "points": points,
             "prompt": prompt,
         }
+        if isinstance(answer_rect, (tuple, list)) and len(answer_rect) == 4:
+            question_spec["answer_bbox"] = _bbox_norm(tuple(answer_rect), page_w, page_h)
 
         subquestions = question.get("subquestions", [])
         if subquestions:
-            question_spec["subquestions"] = [
-                {
+            subquestion_specs: list[dict] = []
+            for subquestion in subquestions:
+                sub_full_rect = subquestion["rect"]
+                sub_prompt_rect = subquestion.get("prompt_rect") or sub_full_rect
+                sub_answer_rect = subquestion.get("answer_rect")
+
+                subquestion_spec = {
                     "id": str(subquestion["id"]),
                     "label": str(subquestion.get("label", "")),
-                    "bbox": _bbox_norm(subquestion["rect"], page_w, page_h),
+                    "bbox": _bbox_norm(sub_prompt_rect, page_w, page_h),
+                    "prompt_bbox": _bbox_norm(sub_prompt_rect, page_w, page_h),
+                    "full_bbox": _bbox_norm(sub_full_rect, page_w, page_h),
                     "response_type": QuestionType.FREE_RESPONSE,
                     "points": subquestion.get("points", 0),
                     "prompt": subquestion.get("prompt", ""),
                 }
-                for subquestion in subquestions
-            ]
+                if isinstance(sub_answer_rect, (tuple, list)) and len(sub_answer_rect) == 4:
+                    subquestion_spec["answer_bbox"] = _bbox_norm(
+                        tuple(sub_answer_rect), page_w, page_h
+                    )
+
+                subquestion_specs.append(subquestion_spec)
+
+            question_spec["subquestions"] = subquestion_specs
 
         page["questions"].append(question_spec)
 

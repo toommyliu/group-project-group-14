@@ -105,6 +105,20 @@ def _validate_question_core(question: dict, ctx: str) -> str:
 def validate_question(question: dict, ctx: str) -> None:
     q_ctx = _validate_question_core(question, ctx)
 
+    parent_bbox = question["bbox"]
+    parent_container_bbox = parent_bbox
+
+    full_bbox = question.get("full_bbox")
+    if full_bbox is not None:
+        validate_bbox(full_bbox, f"{q_ctx}.full_bbox")
+        if not _bbox_within(full_bbox, parent_bbox):
+            raise SpecError(f"{q_ctx}: bbox must be fully inside full_bbox")
+        parent_container_bbox = full_bbox
+
+    answer_bbox = question.get("answer_bbox")
+    if answer_bbox is not None:
+        validate_bbox(answer_bbox, f"{q_ctx}.answer_bbox")
+
     subquestions = question.get("subquestions")
     if subquestions is None:
         return
@@ -124,7 +138,19 @@ def validate_question(question: dict, ctx: str) -> None:
         if label is not None and not isinstance(label, str):
             raise SpecError(f"{sq_ctx}: label must be a string")
 
-        if not _bbox_within(question["bbox"], subquestion["bbox"]):
+        sub_container_bbox = subquestion["bbox"]
+        sub_full_bbox = subquestion.get("full_bbox")
+        if sub_full_bbox is not None:
+            validate_bbox(sub_full_bbox, f"{sq_ctx}.full_bbox")
+            if not _bbox_within(sub_full_bbox, subquestion["bbox"]):
+                raise SpecError(f"{sq_ctx}: bbox must be fully inside full_bbox")
+            sub_container_bbox = sub_full_bbox
+
+        sub_answer_bbox = subquestion.get("answer_bbox")
+        if sub_answer_bbox is not None:
+            validate_bbox(sub_answer_bbox, f"{sq_ctx}.answer_bbox")
+
+        if not _bbox_within(parent_container_bbox, sub_container_bbox):
             raise SpecError(f"{sq_ctx}: bbox must be fully inside parent question bbox")
 
 

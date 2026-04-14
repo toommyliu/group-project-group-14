@@ -34,8 +34,21 @@ def _sample_spec() -> dict:
                 "questions": [
                     {
                         "id": "q1",
-                        "bbox": [0.1, 0.3, 0.8, 0.2],
+                        "bbox": [0.1, 0.3, 0.8, 0.08],
+                        "prompt_bbox": [0.1, 0.3, 0.8, 0.08],
+                        "full_bbox": [0.1, 0.3, 0.8, 0.28],
+                        "answer_bbox": [0.12, 0.39, 0.76, 0.18],
                         "response_type": QuestionType.FREE_RESPONSE,
+                        "subquestions": [
+                            {
+                                "id": "q1a",
+                                "bbox": [0.13, 0.5, 0.74, 0.05],
+                                "prompt_bbox": [0.13, 0.5, 0.74, 0.05],
+                                "full_bbox": [0.12, 0.49, 0.76, 0.16],
+                                "answer_bbox": [0.13, 0.55, 0.74, 0.09],
+                                "response_type": QuestionType.FREE_RESPONSE,
+                            }
+                        ],
                     }
                 ],
             }
@@ -55,24 +68,64 @@ def test_spec_to_editor_regions_locks_anchors() -> None:
     assert all(not r.locked for r in non_anchors)
 
 
+def test_spec_to_editor_regions_includes_question_answer_and_subquestion_regions() -> None:
+    regions = spec_to_editor_regions(_sample_spec())
+
+    region_types = {region.region_type for region in regions}
+    assert "question" in region_types
+    assert "question_answer" in region_types
+    assert "question_full" in region_types
+    assert "subquestion" in region_types
+    assert "subquestion_answer" in region_types
+    assert "subquestion_full" in region_types
+
+
 def test_apply_editor_regions_updates_only_editable_regions() -> None:
     spec = _sample_spec()
     regions = spec_to_editor_regions(spec)
 
     field_region = next(r for r in regions if r.region_type == "field")
     question_region = next(r for r in regions if r.region_type == "question")
+    question_answer_region = next(
+        r for r in regions if r.region_type == "question_answer"
+    )
+    question_full_region = next(r for r in regions if r.region_type == "question_full")
+    subquestion_region = next(r for r in regions if r.region_type == "subquestion")
+    subquestion_answer_region = next(
+        r for r in regions if r.region_type == "subquestion_answer"
+    )
+    subquestion_full_region = next(
+        r for r in regions if r.region_type == "subquestion_full"
+    )
     anchor_region = next(r for r in regions if r.region_type == "anchor")
 
     original_anchor_bbox = spec["pages"][0]["anchors"][0]["bbox"]
 
     field_region.bbox_norm = [0.2, 0.12, 0.25, 0.07]
-    question_region.bbox_norm = [0.12, 0.34, 0.74, 0.19]
+    question_region.bbox_norm = [0.12, 0.34, 0.74, 0.05]
+    question_answer_region.bbox_norm = [0.14, 0.41, 0.70, 0.15]
+    question_full_region.bbox_norm = [0.11, 0.33, 0.77, 0.27]
+    subquestion_region.bbox_norm = [0.14, 0.52, 0.70, 0.04]
+    subquestion_answer_region.bbox_norm = [0.14, 0.56, 0.70, 0.08]
+    subquestion_full_region.bbox_norm = [0.13, 0.51, 0.72, 0.14]
     anchor_region.bbox_norm = [0.40, 0.40, 0.10, 0.10]
 
     updated = apply_editor_regions_to_spec(spec, regions)
 
+    q1 = updated["pages"][0]["questions"][0]
+    q1a = q1["subquestions"][0]
+
     assert updated["pages"][0]["fields"][0]["bbox"] == [0.2, 0.12, 0.25, 0.07]
-    assert updated["pages"][0]["questions"][0]["bbox"] == [0.12, 0.34, 0.74, 0.19]
+    assert q1["bbox"] == [0.12, 0.34, 0.74, 0.05]
+    assert q1["prompt_bbox"] == [0.12, 0.34, 0.74, 0.05]
+    assert q1["answer_bbox"] == [0.14, 0.41, 0.7, 0.15]
+    assert q1["full_bbox"] == [0.11, 0.33, 0.77, 0.27]
+
+    assert q1a["bbox"] == [0.14, 0.52, 0.7, 0.04]
+    assert q1a["prompt_bbox"] == [0.14, 0.52, 0.7, 0.04]
+    assert q1a["answer_bbox"] == [0.14, 0.56, 0.7, 0.08]
+    assert q1a["full_bbox"] == [0.13, 0.51, 0.72, 0.14]
+
     assert updated["pages"][0]["anchors"][0]["bbox"] == original_anchor_bbox
 
 
