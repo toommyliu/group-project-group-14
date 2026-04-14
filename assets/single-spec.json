@@ -1,0 +1,204 @@
+{
+  "schema_version": "1.0",
+  "unit_id": "cmpe195-exam1-sp26",
+  "versions": {
+    "A": [
+      "tl",
+      "tr",
+      "bl"
+    ]
+  },
+  "pages": [
+    {
+      "page_number": 1,
+      "anchors": [
+        {
+          "id": "tl",
+          "bbox": [
+            0.039,
+            0.03,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "tr",
+          "bbox": [
+            0.946,
+            0.03,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "bl",
+          "bbox": [
+            0.039,
+            0.958,
+            0.015,
+            0.011
+          ]
+        },
+        {
+          "id": "br",
+          "bbox": [
+            0.946,
+            0.958,
+            0.015,
+            0.011
+          ]
+        }
+      ],
+      "fields": [
+        {
+          "id": "student_name",
+          "bbox": [
+            0.349,
+            0.218,
+            0.392,
+            0.043
+          ],
+          "type": "name",
+          "required": true,
+          "psm": 7,
+          "confidence_threshold": 70
+        },
+        {
+          "id": "student_id",
+          "bbox": [
+            0.349,
+            0.281,
+            0.392,
+            0.043
+          ],
+          "type": "sid",
+          "required": true,
+          "regex": "^\\d{9}$",
+          "whitelist": "0123456789",
+          "psm": 7,
+          "confidence_threshold": 70
+        }
+      ],
+      "questions": [
+        {
+          "id": "q1",
+          "bbox": [
+            0.131,
+            0.377,
+            0.739,
+            0.039
+          ],
+          "prompt_bbox": [
+            0.131,
+            0.377,
+            0.739,
+            0.039
+          ],
+          "full_bbox": [
+            0.121,
+            0.373,
+            0.758,
+            0.222
+          ],
+          "response_type": "free_response",
+          "points": 50,
+          "prompt": "What is the capital of France?",
+          "answer_bbox": [
+            0.134,
+            0.413,
+            0.732,
+            0.169
+          ]
+        },
+        {
+          "id": "q2",
+          "bbox": [
+            0.131,
+            0.609,
+            0.739,
+            0.039
+          ],
+          "prompt_bbox": [
+            0.131,
+            0.609,
+            0.739,
+            0.039
+          ],
+          "full_bbox": [
+            0.121,
+            0.605,
+            0.758,
+            0.313
+          ],
+          "response_type": "free_response",
+          "points": 30,
+          "prompt": "Answer all parts.",
+          "subquestions": [
+            {
+              "id": "q2a",
+              "label": "a",
+              "bbox": [
+                0.137,
+                0.658,
+                0.725,
+                0.02
+              ],
+              "prompt_bbox": [
+                0.137,
+                0.658,
+                0.725,
+                0.02
+              ],
+              "full_bbox": [
+                0.134,
+                0.656,
+                0.732,
+                0.121
+              ],
+              "response_type": "free_response",
+              "points": 15,
+              "prompt": "What is 2 in binary?",
+              "answer_bbox": [
+                0.137,
+                0.678,
+                0.725,
+                0.093
+              ]
+            },
+            {
+              "id": "q2b",
+              "label": "b",
+              "bbox": [
+                0.137,
+                0.787,
+                0.725,
+                0.02
+              ],
+              "prompt_bbox": [
+                0.137,
+                0.787,
+                0.725,
+                0.02
+              ],
+              "full_bbox": [
+                0.134,
+                0.784,
+                0.732,
+                0.121
+              ],
+              "response_type": "free_response",
+              "points": 15,
+              "prompt": "What is 8 in hexadecimal?",
+              "answer_bbox": [
+                0.137,
+                0.807,
+                0.725,
+                0.093
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
