@@ -16,6 +16,7 @@ def test_validate_spec_accepts_minimal_valid_spec() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [
                     {
                         "id": "student_id",
@@ -36,6 +37,55 @@ def test_validate_spec_accepts_minimal_valid_spec() -> None:
     assert errors == []
 
 
+def test_validate_spec_rejects_missing_title_bbox_on_first_page() -> None:
+    spec = {
+        "schema_version": "1.0",
+        "unit_id": "unit-1",
+        "pages": [
+            {
+                "page_number": 1,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "fields": [
+                    {
+                        "id": "student_id",
+                        "bbox": [0.1, 0.1, 0.2, 0.05],
+                        "type": "sid",
+                    }
+                ],
+                "questions": [],
+            }
+        ],
+    }
+
+    with pytest.raises(SpecError, match="title_bbox"):
+        validate_spec(spec)
+
+
+def test_validate_spec_rejects_invalid_title_bbox() -> None:
+    spec = {
+        "schema_version": "1.0",
+        "unit_id": "unit-1",
+        "pages": [
+            {
+                "page_number": 1,
+                "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [1.1, 0.05, 0.6, 0.08],
+                "fields": [
+                    {
+                        "id": "student_id",
+                        "bbox": [0.1, 0.1, 0.2, 0.05],
+                        "type": "sid",
+                    }
+                ],
+                "questions": [],
+            }
+        ],
+    }
+
+    with pytest.raises(SpecError, match="title_bbox"):
+        validate_spec(spec)
+
+
 def test_validate_spec_rejects_invalid_bbox() -> None:
     spec = {
         "schema_version": "1.0",
@@ -44,6 +94,7 @@ def test_validate_spec_rejects_invalid_bbox() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [
                     {
                         "id": "student_name",
@@ -69,6 +120,7 @@ def test_validate_spec_rejects_invalid_field_overrides() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [
                     {
                         "id": "version",
@@ -96,6 +148,7 @@ def test_validate_spec_rejects_deprecated_response_type() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [],
                 "questions": [
                     {
@@ -120,6 +173,7 @@ def test_validate_spec_accepts_all_field_types() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [
                     {
                         "id": "student_name",
@@ -157,6 +211,7 @@ def test_validate_spec_rejects_unknown_field_type() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [
                     {"id": "unknown", "bbox": [0.1, 0.1, 0.2, 0.05], "type": "unknown"}
                 ],
@@ -199,6 +254,7 @@ def test_validate_spec_accepts_multipart_questions() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [],
                 "questions": [
                     {
@@ -239,6 +295,7 @@ def test_validate_spec_rejects_cross_page_question_or_subquestion_ids() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [],
                 "questions": [
                     {
@@ -260,6 +317,7 @@ def test_validate_spec_rejects_cross_page_question_or_subquestion_ids() -> None:
             {
                 "page_number": 2,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [],
                 "questions": [
                     {
@@ -301,6 +359,7 @@ def test_validate_spec_rejects_subquestion_outside_parent_bbox() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [],
                 "questions": [
                     {
@@ -336,6 +395,7 @@ def test_validate_spec_accepts_prompt_bbox_with_full_bbox_container() -> None:
             {
                 "page_number": 1,
                 "anchors": [{"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]}],
+                "title_bbox": [0.2, 0.05, 0.6, 0.08],
                 "fields": [],
                 "questions": [
                     {

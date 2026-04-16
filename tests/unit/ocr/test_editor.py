@@ -24,6 +24,7 @@ def _sample_spec() -> dict:
                     {"id": "tl", "bbox": [0.02, 0.02, 0.03, 0.03]},
                     {"id": "tr", "bbox": [0.95, 0.02, 0.03, 0.03]},
                 ],
+                "title_bbox": [0.2, 0.06, 0.6, 0.08],
                 "fields": [
                     {
                         "id": "student_name",
@@ -72,6 +73,7 @@ def test_spec_to_editor_regions_includes_question_answer_and_subquestion_regions
     regions = spec_to_editor_regions(_sample_spec())
 
     region_types = {region.region_type for region in regions}
+    assert "title" in region_types
     assert "question" in region_types
     assert "question_answer" in region_types
     assert "question_full" in region_types
@@ -84,6 +86,7 @@ def test_apply_editor_regions_updates_only_editable_regions() -> None:
     spec = _sample_spec()
     regions = spec_to_editor_regions(spec)
 
+    title_region = next(r for r in regions if r.region_type == "title")
     field_region = next(r for r in regions if r.region_type == "field")
     question_region = next(r for r in regions if r.region_type == "question")
     question_answer_region = next(
@@ -101,6 +104,7 @@ def test_apply_editor_regions_updates_only_editable_regions() -> None:
 
     original_anchor_bbox = spec["pages"][0]["anchors"][0]["bbox"]
 
+    title_region.bbox_norm = [0.21, 0.07, 0.58, 0.07]
     field_region.bbox_norm = [0.2, 0.12, 0.25, 0.07]
     question_region.bbox_norm = [0.12, 0.34, 0.74, 0.05]
     question_answer_region.bbox_norm = [0.14, 0.41, 0.70, 0.15]
@@ -115,6 +119,7 @@ def test_apply_editor_regions_updates_only_editable_regions() -> None:
     q1 = updated["pages"][0]["questions"][0]
     q1a = q1["subquestions"][0]
 
+    assert updated["pages"][0]["title_bbox"] == [0.21, 0.07, 0.58, 0.07]
     assert updated["pages"][0]["fields"][0]["bbox"] == [0.2, 0.12, 0.25, 0.07]
     assert q1["bbox"] == [0.12, 0.34, 0.74, 0.05]
     assert q1["prompt_bbox"] == [0.12, 0.34, 0.74, 0.05]
