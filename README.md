@@ -56,7 +56,6 @@ Graders can create and customize rubrics per assignment, manage course rosters, 
 | Frontend   | Python     |
 | Backend    | Python     |
 | Database   |            |
-| Deployment |            |
 
 ---
 
@@ -85,40 +84,46 @@ On macOS, the following (stock) terminal emulators were successful in our tests:
 > [!NOTE]
 > Visual Studio Code's integrated terminal can work (as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol)), you will need to enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
 
-### Installation
+### Usage Guide 
 
+Clone the repository:
 ```bash
-# Clone the repository
-git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git my-folder-name
-cd my-folder-name
+git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git opengrader
+cd opengrader
 ```
 
-#### Installing UV
-
-On macOS:
-
+Set up a Python virtual environment and install packages:
 ```bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh # or brew install uv
-
-# Install dependencies and sync virtual environment
 uv sync --all-groups
 ```
 
-### Running Locally
+Executing a script
+```bash
+uv run <script_name> [arguments]
+
+# Examples
+uv run tui
+uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf
+uv run ocr-pdf --help
+```
+
+> [!TIP]
+> Use `--help` flag to see the available options for each script.
+
+If you want to run the project without installing it globally, you can use the `uv run` command.
+
+#### Global Installation
+
+If you want to access the CLI tools globally:
 
 ```bash
-# Run the TUI
-uv run tui
+$ uv tool install .
+Installed 11 executables: ...
 
-# Run the TUI in dev mode
-uv run tui-dev
-# Run the textual console in another terminal
-uv run textual console
-
-# Executing CLI tools
-uv run pdf-splitter assets/sample.pdf assets/sample.pdf
-uv run ocr-pdf --template spec.json --input submission.pdf ...
+# List available "tools" / executables
+$ uv tool list
+opengrader v1.0
+- ...
 ```
 
 ### Running Tests
@@ -126,8 +131,6 @@ uv run ocr-pdf --template spec.json --input submission.pdf ...
 ```bash
 uv run pytest
 ```
-
-
 
 ## Project Structure
 
@@ -137,8 +140,7 @@ uv run pytest
 │   ├── core/           # Shared code
 │   ├── cli/            # Standalone CLI scripts
 │   └── tui/            # Main TUI application
-├── tests/
-│   ├── unit/           # Unit tests
+├── tests/              # Test suite
 ├── docs/               # Documentation
 ├── pyproject.toml      # Project configuration
 └── README.md
