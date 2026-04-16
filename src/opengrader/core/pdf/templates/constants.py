@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import TypeAlias
 
 ANCHOR_SIZE = 9
 ANCHOR_PADDING = 24
@@ -16,6 +17,12 @@ QUESTION_HEADER_HEIGHT = 30
 QUESTION_INNER_PADDING = 10
 SUBQUESTION_GAP = 6
 SUBQUESTION_MIN_HEIGHT = 68
+
+ColorType: TypeAlias = tuple[float, float, float]
+COLOR_BLACK: ColorType = (0.0, 0.0, 0.0)
+COLOR_QUESTION_TEXT: ColorType = (0.2, 0.2, 0.2)
+COLOR_SUBQUESTION_TEXT: ColorType = (0.25, 0.25, 0.25)
+COLOR_FIELD_LABEL: ColorType = (0.15, 0.15, 0.15)
 
 
 class QuestionType(str, Enum):

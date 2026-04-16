@@ -12,6 +12,11 @@ from .constants import (
     QUESTION_INNER_PADDING,
     SUBQUESTION_GAP,
     SUBQUESTION_MIN_HEIGHT,
+    COLOR_BLACK,
+    COLOR_QUESTION_TEXT,
+    COLOR_SUBQUESTION_TEXT,
+    COLOR_FIELD_LABEL,
+    ColorType,
 )
 from .fonts import ResolvedTemplateFonts, measure_text_width
 
@@ -35,7 +40,7 @@ def _draw_centered_text(
     fontsize: float,
     bold: bool,
     fonts: ResolvedTemplateFonts,
-    color: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    color: ColorType = COLOR_BLACK,
 ) -> None:
     width = measure_text_width(text, fontsize, bold=bold, fonts=fonts)
     fontname = fonts.bold_name if bold else fonts.regular_name
@@ -194,19 +199,19 @@ def draw_anchor(
     """
     r = fitz.Rect(x, y, x + size, y + size)
     if filled:
-        page.draw_rect(r, color=(0.0, 0.0, 0.0), fill=(0.0, 0.0, 0.0), width=BOX_LINE)
+        page.draw_rect(r, color=COLOR_BLACK, fill=COLOR_BLACK, width=BOX_LINE)
     else:
-        page.draw_rect(r, color=(0.0, 0.0, 0.0), width=BOX_LINE)
+        page.draw_rect(r, color=COLOR_BLACK, width=BOX_LINE)
         page.draw_line(
             fitz.Point(x + 2, y + 2),
             fitz.Point(x + size - 2, y + size - 2),
-            color=(0.0, 0.0, 0.0),
+            color=COLOR_BLACK,
             width=0.3,
         )
         page.draw_line(
             fitz.Point(x + size - 2, y + 2),
             fitz.Point(x + 2, y + size - 2),
-            color=(0.0, 0.0, 0.0),
+            color=COLOR_BLACK,
             width=0.3,
         )
 
@@ -241,7 +246,7 @@ def draw_field_box(
     value: str,
     fonts: ResolvedTemplateFonts,
 ) -> None:
-    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=(0.0, 0.0, 0.0), width=BOX_LINE)
+    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
 
     center_x = (x0 + x1) / 2.0
 
@@ -249,7 +254,7 @@ def draw_field_box(
     page.draw_line(
         fitz.Point(x0 + 14, underline_y),
         fitz.Point(x1 - 14, underline_y),
-        color=(0.0, 0.0, 0.0),
+        color=COLOR_BLACK,
         width=0.55,
     )
 
@@ -316,7 +321,7 @@ def draw_continued_page_header(
     page.draw_line(
         fitz.Point(content_x0, underline_y),
         fitz.Point(content_x1, underline_y),
-        color=(0.0, 0.0, 0.0),
+        color=COLOR_BLACK,
         width=BOX_LINE,
     )
 
@@ -397,7 +402,7 @@ def draw_question_box(
     fonts: ResolvedTemplateFonts,
     subquestions: list[dict] | None = None,
 ) -> list[dict]:
-    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=(0.0, 0.0, 0.0), width=BOX_LINE)
+    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
 
     header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
     header_y = y0 + 16
@@ -406,7 +411,7 @@ def draw_question_box(
         header_prefix,
         fontsize=QUESTION_FONTSIZE,
         fontname=fonts.bold_name,
-        color=(0.2, 0.2, 0.2),
+        color=COLOR_QUESTION_TEXT,
     )
 
     prefix_w = measure_text_width(
@@ -426,7 +431,7 @@ def draw_question_box(
             prompt_text,
             fontsize=QUESTION_FONTSIZE,
             fontname=fonts.regular_name,
-            color=(0.2, 0.2, 0.2),
+            color=COLOR_QUESTION_TEXT,
         )
 
     if not subquestions:
@@ -448,7 +453,7 @@ def draw_question_box(
         sub_rect = (x0 + 8, sub_y0, x1 - 8, sub_y1)
         page.draw_rect(
             fitz.Rect(*sub_rect),
-            color=(0.0, 0.0, 0.0),
+            color=COLOR_BLACK,
             width=BOX_LINE,
         )
 
@@ -463,7 +468,7 @@ def draw_question_box(
             sub_prefix,
             fontsize=SUBQUESTION_FONTSIZE,
             fontname=fonts.regular_name,
-            color=(0.25, 0.25, 0.25),
+            color=COLOR_SUBQUESTION_TEXT,
         )
 
         sub_prefix_w = measure_text_width(
@@ -483,7 +488,7 @@ def draw_question_box(
                 sub_prompt_text,
                 fontsize=SUBQUESTION_FONTSIZE,
                 fontname=fonts.regular_name,
-                color=(0.25, 0.25, 0.25),
+                color=COLOR_SUBQUESTION_TEXT,
             )
 
         subquestion_meta = {
@@ -612,14 +617,14 @@ def build_info_section(
         "Name",
         fontsize=11,
         fontname=fonts.regular_name,
-        color=(0.15, 0.15, 0.15),
+        color=COLOR_FIELD_LABEL,
     )
     page.insert_text(
         fitz.Point(start_x, sid_row_y + label_baseline_offset),
         "Student ID",
         fontsize=11,
         fontname=fonts.regular_name,
-        color=(0.15, 0.15, 0.15),
+        color=COLOR_FIELD_LABEL,
     )
 
     draw_field_box(
@@ -664,7 +669,7 @@ def build_info_section(
             label,
             fontsize=instruction_size,
             fontname=fonts.bold_name,
-            color=(0.0, 0.0, 0.0),
+            color=COLOR_BLACK,
         )
         if first_line:
             page.insert_text(
@@ -672,7 +677,7 @@ def build_info_section(
                 first_line,
                 fontsize=instruction_size,
                 fontname=fonts.regular_name,
-                color=(0.0, 0.0, 0.0),
+                color=COLOR_BLACK,
             )
 
         y += line_height
@@ -682,7 +687,7 @@ def build_info_section(
                 line,
                 fontsize=instruction_size,
                 fontname=fonts.regular_name,
-                color=(0.0, 0.0, 0.0),
+                color=COLOR_BLACK,
             )
             y += line_height
         q_start_y = y + 4
