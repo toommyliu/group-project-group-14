@@ -9,8 +9,8 @@ from textual.message import Message
 from textual.widgets import Label, ListItem, ListView, Static
 
 from opengrader.tui.ui.widgets import HomeSidebar, SelectionDetails
-from opengrader.tui.ui.widgets.tabbed_pane import TabbedPane
 from opengrader.tui.ui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.tabbed_pane import TabbedPane
 
 
 class _NavListItem(ListItem):
@@ -67,9 +67,11 @@ class HomeScreen(Vertical):
         self._expanded_student: NavItem | None = None
         self._expanded_student_assignments: list[NavItem] = []
         self._active_content = "assignments"
+        self._selected_course: NavItem | None = None
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
+        yield Static("Course: not selected", id="home-course-banner")
         with Horizontal(id="home-workspace"):
             yield HomeSidebar(id="home-sidebar")
             yield SelectionDetails(id="home-selection-details")
@@ -83,6 +85,15 @@ class HomeScreen(Vertical):
 
     def show_content_tabs(self) -> None:
         self._sidebar().show_content_sections()
+
+    def lock_course_selection(self, course: NavItem) -> None:
+        self._selected_course = course
+        meta = f" [{course.meta}]" if course.meta else ""
+        self.query_one("#home-course-banner", Static).update(
+            f"Course: {course.label}{meta}"
+        )
+        self._sidebar().lock_course_pane()
+        self.call_after_refresh(self.sync_pane_focus_classes)
 
     def set_courses(self, courses: list[NavItem]) -> None:
         self._course_items = list(courses)
@@ -298,9 +309,6 @@ class HomeScreen(Vertical):
             return
         list_id = event.list_view.id or ""
         nav = event.item.nav
-        # if list_id == "home-course-list":
-        # return
-        # elif list_id == "home-assignment-list":
         if list_id == "home-assignment-list":
             self._active_content = "assignments"
             self.post_message(self.AssignmentSelected(nav))

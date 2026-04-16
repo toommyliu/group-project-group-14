@@ -21,6 +21,10 @@ class HomeSidebar(Vertical):
         width: 1fr;
     }
 
+    HomeSidebar.-course-locked #home-course-pane {
+        display: none;
+    }
+
     #home-course-pane,
     #home-assignment-pane,
     #home-student-pane {
@@ -30,6 +34,7 @@ class HomeSidebar(Vertical):
 
     def __init__(self, **kwargs: object) -> None:
         self._content_shown = False
+        self._course_locked = False
         super().__init__(**kwargs)  # pyright: ignore[reportArgumentType]
 
     def compose(self) -> ComposeResult:
@@ -39,6 +44,14 @@ class HomeSidebar(Vertical):
 
     def on_mount(self) -> None:
         self.set_pane_size_units(courses=1, assignments=1, students=1)
+        self.refresh_index_subtitles()
+
+    def lock_course_pane(self) -> None:
+        self._course_locked = True
+        self.add_class("-course-locked")
+        self._content_shown = True
+        self.assignment_pane().display = True
+        self.student_pane().display = True
         self.refresh_index_subtitles()
 
     def course_pane(self) -> CoursePane:
@@ -69,6 +82,8 @@ class HomeSidebar(Vertical):
         self.refresh_index_subtitles()
 
     def focus_courses(self, item_id: str | None = None) -> None:
+        if self._course_locked:
+            return
         self._focus_list(
             self.course_list(),
             set_first_row=False,
@@ -88,7 +103,7 @@ class HomeSidebar(Vertical):
         self._focus_list(lv, set_first_row=False)
 
     def focused_pane(self) -> str | None:
-        if self.course_pane().has_focus_within:
+        if not self._course_locked and self.course_pane().has_focus_within:
             return "courses"
         if self.assignment_pane().has_focus_within:
             return "assignments"
@@ -97,11 +112,12 @@ class HomeSidebar(Vertical):
         return None
 
     def focused_tabbed_pane(self) -> TabbedPane | None:
-        for pane in (
-            self.course_pane(),
-            self.assignment_pane(),
-            self.student_pane(),
-        ):
+        panes: tuple[TabbedListPane, ...]
+        if self._course_locked:
+            panes = (self.assignment_pane(), self.student_pane())
+        else:
+            panes = (self.course_pane(), self.assignment_pane(), self.student_pane())
+        for pane in panes:
             if pane.has_focus_within:
                 return pane
         return None
@@ -121,7 +137,12 @@ class HomeSidebar(Vertical):
         self._refresh_index_subtitles_now()
 
     def sync_pane_focus_classes(self) -> None:
-        for pane in (self.course_pane(), self.assignment_pane(), self.student_pane()):
+        panes: tuple[TabbedListPane, ...]
+        if self._course_locked:
+            panes = (self.assignment_pane(), self.student_pane())
+        else:
+            panes = (self.course_pane(), self.assignment_pane(), self.student_pane())
+        for pane in panes:
             pane.sync_focus_class()
 
     def _refresh_index_subtitles_now(self) -> None:

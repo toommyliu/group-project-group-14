@@ -13,7 +13,7 @@ from opengrader.core import get_database_path
 from opengrader.tui.main import run_app
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.data import AssignmentSummary, StudentSummary
-from opengrader.tui.ui.widgets import AssignmentPane, IndexedListView, SelectionDetails
+from opengrader.tui.ui.widgets import AssignmentPane, IndexedListView, SelectionDetails, StudentPane
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -131,16 +131,16 @@ def test_sidebar_subtitles_show_current_index_out_of_total() -> None:
             student_list = app.get_home_screen().query_one(
                 "#home-student-list", IndexedListView
             )
-            assert assignment_list.border_subtitle == "0 of 2"
+            assert assignment_list.border_subtitle == "1 of 2"
             assert student_list.border_subtitle == "0 of 2"
 
             await pilot.press("right")
             await pilot.pause()
-            assert assignment_list.border_subtitle == "1 of 2"
+            assert student_list.border_subtitle == "1 of 2"
 
             await pilot.press("down")
             await pilot.pause()
-            assert assignment_list.border_subtitle == "2 of 2"
+            assert student_list.border_subtitle == "2 of 2"
 
     asyncio.run(run())
 
@@ -157,21 +157,21 @@ def test_clicking_pane_title_selects_first_item_when_none_highlighted() -> None:
             await pilot.press("enter")
             await pilot.pause()
 
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
             )
-            assignment_pane = app.get_home_screen().query_one(
-                "#home-assignment-pane", AssignmentPane
+            student_pane = app.get_home_screen().query_one(
+                "#home-student-pane", StudentPane
             )
 
-            assert assignment_list.highlighted_child is None
+            assert student_list.highlighted_child is None
 
-            assignment_pane.action_pane_activate_tab(0)
+            student_pane.action_pane_activate_tab(0)
             await pilot.pause()
 
-            assert assignment_list.has_focus
-            assert assignment_list.index == 0
-            assert assignment_list.highlighted_child is not None
+            assert student_list.has_focus
+            assert student_list.index == 0
+            assert student_list.highlighted_child is not None
 
     asyncio.run(run())
 
@@ -231,21 +231,16 @@ def test_refocusing_pane_restores_previous_highlighted_index() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
-            )
-
-            await pilot.press("down")
-            await pilot.pause()
-            assert course_list.index == 1
-
             await pilot.press("enter")
             await pilot.pause()
 
-            await pilot.press("right")
-            await pilot.pause()
+            assignment_list = app.get_home_screen().query_one(
+                "#home-assignment-list", ListView
+            )
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
+            )
+
             assert assignment_list.has_focus
             assert assignment_list.index == 0
 
@@ -253,12 +248,12 @@ def test_refocusing_pane_restores_previous_highlighted_index() -> None:
             await pilot.pause()
             assert assignment_list.index == 1
 
-            await pilot.press("left")
-            await pilot.pause()
-            assert course_list.has_focus
-            assert course_list.index == 1
-
             await pilot.press("right")
+            await pilot.pause()
+            assert student_list.has_focus
+            assert student_list.index == 0
+
+            await pilot.press("left")
             await pilot.pause()
             assert assignment_list.has_focus
             assert assignment_list.index == 1
@@ -279,10 +274,6 @@ def test_switching_panes_updates_status_immediately() -> None:
             await pilot.pause()
 
             status = app.get_home_screen().query_one("#home-status", Static)
-            assert "Course:" in str(status.content)
-
-            await pilot.press("right")
-            await pilot.pause()
             assert "HW 1" in str(status.content)
 
             await pilot.press("right")
@@ -370,19 +361,15 @@ def test_vim_profile_navigates_with_j_k_h_l() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            course_list.focus()
-            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
             await pilot.press("l")
             await pilot.pause()
 
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
             )
-            assert assignment_list.has_focus
+            assert student_list.has_focus
 
     asyncio.run(run())
 
@@ -398,19 +385,15 @@ def test_runtime_profile_switch_updates_live_bindings() -> None:
             await pilot.pause()
             app.set_input_profile(InputProfileName.VIM)
             await pilot.pause()
-
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            course_list.focus()
-            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
             await pilot.press("l")
             await pilot.pause()
 
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
             )
-            assert assignment_list.has_focus
+            assert student_list.has_focus
 
     asyncio.run(run())
 
@@ -425,19 +408,15 @@ def test_emacs_profile_navigates_with_ctrl_keys() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
-            course_list.focus()
-            await pilot.pause()
             await pilot.press("enter")
             await pilot.pause()
             await pilot.press("ctrl+f")
             await pilot.pause()
 
-            assignment_list = app.get_home_screen().query_one(
-                "#home-assignment-list", ListView
+            student_list = app.get_home_screen().query_one(
+                "#home-student-list", ListView
             )
-            assert assignment_list.has_focus
+            assert student_list.has_focus
 
     asyncio.run(run())
 
@@ -451,7 +430,6 @@ def test_tab_navigation_reaches_details_pane() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            course_list = app.get_home_screen().query_one("#home-course-list", ListView)
             assignment_list = app.get_home_screen().query_one(
                 "#home-assignment-list", ListView
             )
@@ -462,12 +440,7 @@ def test_tab_navigation_reaches_details_pane() -> None:
                 "#home-selection-details", SelectionDetails
             )
 
-            course_list.focus()
-            await pilot.pause()
             await pilot.press("enter")
-            await pilot.pause()
-
-            await pilot.press("tab")
             await pilot.pause()
             assert assignment_list.has_focus
 

@@ -16,8 +16,8 @@ from opengrader.tui.data import (
     StudentSummary,
     Provider,
 )
-from opengrader.tui.ui.screens import HomeScreen
-from opengrader.tui.state import TuiWorkflowState
+from opengrader.tui.ui.screens import CoursePickerScreen, HomeScreen
+from opengrader.tui.state import PAGE_COURSE_PICKER, PAGE_HOME, TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.widgets.dialog import AlertDialog, Dialog, DialogField
 from opengrader.tui.ui.widgets.file_picker import FilePicker
@@ -37,7 +37,11 @@ class _TemplateUploadContext:
 
 
 class HomeApp(Protocol):
+    def get_course_picker_screen(self) -> CoursePickerScreen: ...
+
     def get_home_screen(self) -> HomeScreen: ...
+
+    def switch_to(self, page_id: str) -> None: ...
 
     def push_screen(self, screen: object, callback=None) -> None: ...
 
@@ -58,17 +62,44 @@ class HomeController:
         self._loaded_course_students: set[str] = set()
 
     def initialize(self) -> None:
-        home_screen = self._app.get_home_screen()
         courses = self._course_items(self._data_provider.list_courses())
-        home_screen.set_courses(courses)
-        home_screen.focus_courses()
 
-        item = home_screen.selected_course()
+        picker = self._picker_screen()
+        picker.set_courses(courses)
+        picker.focus_courses()
+
+        home_screen = self._app.get_home_screen()
+        home_screen.set_courses(courses)
+
+        item = picker.selected_course()
         if item is not None:
+            home_screen.focus_courses(item.item_id)
             self.on_course_highlighted(item)
+            self.on_picker_course_highlighted(item)
             return
 
-        home_screen.set_status("No courses yet. Press n to create a course.")
+        picker.set_status("No courses yet. Press n to create a course.")
+
+    def on_picker_course_highlighted(self, item: NavItem) -> None:
+        picker = self._picker_screen()
+        course_id = self._numeric_id(item.item_id)
+        assignments = self._assignment_items(self._data_provider.list_assignments(course_id))
+        students = self._student_items(self._data_provider.list_students(course_id))
+        picker.show_course_details(
+            item,
+            assignment_count=len(assignments),
+            student_count=len(students),
+        )
+        picker.set_status(f"Course: {item.label} · Press Enter to continue")
+
+    def on_picker_course_selected(self, item: NavItem) -> None:
+        home = self._app.get_home_screen()
+        home.focus_courses(item.item_id)
+        self.on_course_highlighted(item)
+        home.lock_course_selection(item)
+        home.set_status(f"{item.label} · Select an assignment or student")
+        self._app.switch_to(PAGE_HOME)
+        home.focus_assignments()
 
     def on_course_highlighted(self, item: NavItem) -> None:
         home = self._app.get_home_screen()
@@ -157,6 +188,10 @@ class HomeController:
             self._open_student(student_index)
 
     def move_up(self) -> None:
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            self._move_picker_cursor(-1)
+            return
+
         home = self._app.get_home_screen()
         focused_pane = home.focused_pane()
         if focused_pane == "details":
@@ -165,6 +200,10 @@ class HomeController:
         self._move_list_cursor(home, -1)
 
     def move_down(self) -> None:
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            self._move_picker_cursor(1)
+            return
+
         home = self._app.get_home_screen()
         focused_pane = home.focused_pane()
         if focused_pane == "details":
@@ -173,6 +212,9 @@ class HomeController:
         self._move_list_cursor(home, 1)
 
     def move_left(self) -> None:
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            return
+
         home = self._app.get_home_screen()
         focused_pane = home.focused_pane()
         if focused_pane == "courses":
@@ -189,6 +231,9 @@ class HomeController:
         self.focus_courses_pane()
 
     def move_right(self) -> None:
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            return
+
         home = self._app.get_home_screen()
         focused_pane = home.focused_pane()
         if focused_pane == "courses":
@@ -201,13 +246,17 @@ class HomeController:
             self.focus_details_pane()
 
     def focus_courses_pane(self) -> None:
-        home = self._app.get_home_screen()
-        home.focus_courses()
-        item = home.selected_course()
+        picker = self._picker_screen()
+        self._app.switch_to(PAGE_COURSE_PICKER)
+        picker.focus_courses(self._state.selection.course_item_id)
+        item = picker.selected_course()
         if item is not None:
-            self.on_course_highlighted(item)
+            self.on_picker_course_highlighted(item)
 
     def focus_assignments_pane(self) -> None:
+        if self._state.current_page != PAGE_HOME:
+            return
+
         home = self._app.get_home_screen()
         if not home.content_visible():
             home.set_status("Select a course first.")
@@ -218,6 +267,9 @@ class HomeController:
             self.on_assignment_highlighted(item)
 
     def focus_students_pane(self) -> None:
+        if self._state.current_page != PAGE_HOME:
+            return
+
         home = self._app.get_home_screen()
         if not home.content_visible():
             home.set_status("Select a course first.")
@@ -245,9 +297,17 @@ class HomeController:
             self.on_student_highlighted(item)
 
     def focus_details_pane(self) -> None:
+        if self._state.current_page != PAGE_HOME:
+            return
         self._app.get_home_screen().focus_details()
 
     def confirm(self) -> None:
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            item = self._app.get_course_picker_screen().selected_course()
+            if item is not None:
+                self.on_picker_course_selected(item)
+            return
+
         home = self._app.get_home_screen()
         if home.focused_pane() == "details":
             return
@@ -381,6 +441,10 @@ class HomeController:
         return None
 
     def create(self) -> None:
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            self._open_create_course_dialog()
+            return
+
         home = self._app.get_home_screen()
         focused = self._focused_list_id(home)
 
@@ -531,6 +595,26 @@ class HomeController:
                 return list_id
         return None
 
+    def _move_picker_cursor(self, direction: int) -> None:
+        picker = self._picker_screen()
+        if not hasattr(picker, "query_one"):
+            return
+        lv = picker.query_one("#course-picker-list", ListView)
+        if direction < 0:
+            lv.action_cursor_up()
+        else:
+            lv.action_cursor_down()
+        item = getattr(picker, "selected_course", lambda: None)()
+        if item is not None:
+            self.on_course_highlighted(item)
+            self.on_picker_course_highlighted(item)
+
+    def _picker_screen(self):
+        getter = getattr(self._app, "get_course_picker_screen", None)
+        if callable(getter):
+            return getter()
+        return self._app.get_home_screen()
+
     @staticmethod
     def _move_list_cursor(home: HomeScreen, direction: int) -> None:
         for list_id in (
@@ -658,6 +742,7 @@ class HomeController:
     ) -> None:
         if values is None:
             return
+        picker = self._picker_screen()
         home = self._app.get_home_screen()
         try:
             created = self._data_provider.create_course(
@@ -667,18 +752,22 @@ class HomeController:
                 section=values["section"],
             )
         except Exception as exc:
-            home.set_status(f"Create course failed: {exc}")
+            picker.set_status(f"Create course failed: {exc}")
             return
 
         self._loaded_course_assignments.clear()
         self._loaded_course_students.clear()
-        home.set_courses(
-            self._course_items(self._data_provider.list_courses()),
-        )
+        courses = self._course_items(self._data_provider.list_courses())
+        picker.set_courses(courses)
+        home.set_courses(courses)
         created_item = self._course_items([created])[0]
-        self.on_course_highlighted(created_item)
-        home.focus_courses(created_item.item_id)
-        home.set_status(f"Created course: {created_item.label}".strip())
+        picker.focus_courses(created_item.item_id)
+        if picker is home:
+            self.on_course_highlighted(created_item)
+            home.set_status(f"Created course: {created_item.label}".strip())
+            return
+        self.on_picker_course_highlighted(created_item)
+        picker.set_status(f"Created course: {created_item.label}".strip())
 
     def _on_create_assignment_dialog_closed(
         self,

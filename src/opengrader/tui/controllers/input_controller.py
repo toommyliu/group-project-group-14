@@ -6,7 +6,7 @@ from enum import Enum
 
 from textual.binding import Binding
 
-from opengrader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
+from opengrader.tui.state import PAGE_COURSE_PICKER, PAGE_GRADE, PAGE_HOME, TuiWorkflowState
 
 
 class InputCommand(str, Enum):
@@ -812,7 +812,7 @@ class InputController:
     def current_context(self) -> InputContext:
         if self._state.current_page == PAGE_GRADE:
             return InputContext.GRADE
-        if self._state.current_page == PAGE_HOME:
+        if self._state.current_page in (PAGE_COURSE_PICKER, PAGE_HOME):
             return InputContext.HOME
         return InputContext.GLOBAL
 

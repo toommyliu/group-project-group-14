@@ -12,9 +12,14 @@ from opengrader.tui.controllers.input_controller import (
     InputCommand,
     InputProfileName,
 )
-from opengrader.tui.data import SqliteProvider, Provider
-from opengrader.tui.ui.screens import GradeScreen, HomeScreen
-from opengrader.tui.state import PAGE_GRADE, PAGE_HOME, TuiWorkflowState
+from opengrader.tui.data import Provider, SqliteProvider
+from opengrader.tui.state import (
+    PAGE_COURSE_PICKER,
+    PAGE_GRADE,
+    PAGE_HOME,
+    TuiWorkflowState,
+)
+from opengrader.tui.ui.screens import CoursePickerScreen, GradeScreen, HomeScreen
 
 
 class TuiApp(App):
@@ -59,7 +64,8 @@ class TuiApp(App):
         self._register_input_handlers()
 
     def compose(self) -> ComposeResult:
-        with ContentSwitcher(initial=PAGE_HOME, id="workspace-switcher"):
+        with ContentSwitcher(initial=PAGE_COURSE_PICKER, id="workspace-switcher"):
+            yield CoursePickerScreen(id=PAGE_COURSE_PICKER)
             yield HomeScreen(id=PAGE_HOME)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield Footer()
@@ -71,6 +77,9 @@ class TuiApp(App):
         self.workflow_state.current_page = page_id
         self.query_one(ContentSwitcher).current = page_id
         self.refresh_bindings()
+
+    def get_course_picker_screen(self) -> CoursePickerScreen:
+        return self.query_one(f"#{PAGE_COURSE_PICKER}", CoursePickerScreen)
 
     def get_home_screen(self) -> HomeScreen:
         return self.query_one(f"#{PAGE_HOME}", HomeScreen)
@@ -96,11 +105,20 @@ class TuiApp(App):
         if isinstance(self.focused, Input):
             return False
 
-        # While any dialog is open, avoid dispatching keymaps to prevent unexpected interactions
         if len(self.screen_stack) > 1:
             return False
 
         return self.input_controller.binding_available(profile_name, command)
+
+    def on_course_picker_screen_course_highlighted(
+        self, event: CoursePickerScreen.CourseHighlighted
+    ) -> None:
+        self.home_controller.on_picker_course_highlighted(event.item)
+
+    def on_course_picker_screen_course_selected(
+        self, event: CoursePickerScreen.CourseSelected
+    ) -> None:
+        self.home_controller.on_picker_course_selected(event.item)
 
     def on_home_screen_course_highlighted(
         self, event: HomeScreen.CourseHighlighted

@@ -3,6 +3,28 @@ $accent: #81A1C1;
 $background: #181818;
 $foreground: #E4E4E4EB;
 
+#course-picker-title {
+    margin: 1 1 0 1;
+    text-style: bold;
+}
+
+#course-picker-subtitle {
+    margin: 0 1 1 1;
+    color: $text-muted;
+}
+
+#course-picker-workspace {
+    height: 1fr;
+}
+
+#course-picker-sidebar {
+    width: 38;
+}
+
+#course-picker-details {
+    margin-left: 1;
+}
+
 #home-workspace {
     height: 1fr;
 }

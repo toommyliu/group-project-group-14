@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from opengrader.tui.state.grading_session import StudentGradingRun
-from opengrader.tui.state.route import PAGE_HOME
+from opengrader.tui.state.route import PAGE_COURSE_PICKER
 from opengrader.tui.state.selection import GradingSelection
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 @dataclass
 class TuiWorkflowState:
-    current_page: str = PAGE_HOME
+    current_page: str = PAGE_COURSE_PICKER
     selection: GradingSelection = field(default_factory=GradingSelection)
     grading_run: StudentGradingRun = field(
         default_factory=lambda: StudentGradingRun(
