@@ -45,6 +45,8 @@ HandleType = Literal["tl", "tr", "bl", "br"]
 def _color_for_region(region_type: str) -> tuple[int, int, int]:
     if region_type == "field":
         return (235, 140, 60)
+    if region_type == "title":
+        return (90, 180, 245)
     if region_type in {"question", "subquestion"}:
         return (65, 185, 90)
     if region_type in {"question_answer", "subquestion_answer"}:

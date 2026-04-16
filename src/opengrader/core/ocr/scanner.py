@@ -219,6 +219,8 @@ def regions_to_spec_draft(
     page_spec: dict = {
         "page_number": 1,
         "anchors": anchor_entries_norm(),
+        # Placeholder
+        "title_bbox": [0.2, 0.05, 0.6, 0.08],
         "fields": fields,
         "questions": questions,
     }

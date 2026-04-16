@@ -10,6 +10,7 @@ import fitz
 
 RegionType = Literal[
     "anchor",
+    "title",
     "field",
     "question",
     "question_answer",
@@ -105,6 +106,19 @@ def spec_to_editor_regions(spec: dict) -> list[EditorRegion]:
                     bbox_norm=clamp_bbox_norm(anchor["bbox"]),
                     locked=True,
                     source_index=idx,
+                )
+            )
+
+        title_bbox = _optional_bbox(page, "title_bbox")
+        if title_bbox is not None:
+            regions.append(
+                EditorRegion(
+                    page_number=page_number,
+                    region_id="title",
+                    region_type="title",
+                    bbox_norm=clamp_bbox_norm(title_bbox),
+                    locked=False,
+                    source_index=-1,
                 )
             )
 
@@ -236,6 +250,10 @@ def apply_editor_regions_to_spec(
 
         rounded = _rounded_bbox(region.bbox_norm, precision)
 
+        if region.region_type == "title":
+            page["title_bbox"] = rounded
+            continue
+
         if region.region_type == "field":
             fields = page.get("fields", [])
             if 0 <= region.source_index < len(fields):
@@ -309,6 +327,8 @@ def border_strip_rects(rect: fitz.Rect, thickness: float = 1.5) -> list[fitz.Rec
 def _pdf_region_color(region_type: RegionType) -> tuple[float, float, float]:
     if region_type == "field":
         return (0.22, 0.55, 0.95)
+    if region_type == "title":
+        return (0.95, 0.6, 0.2)
     if region_type in {"question", "subquestion"}:
         return (0.20, 0.65, 0.30)
     if region_type in {"question_answer", "subquestion_answer"}:
