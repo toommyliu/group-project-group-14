@@ -531,6 +531,30 @@ def build_info_section(
         bold=True,
         fonts=fonts,
     )
+
+    title_bbox_left = float("inf")
+    title_bbox_top = float("inf")
+    title_bbox_right = float("-inf")
+    title_bbox_bottom = float("-inf")
+
+    def include_title_line_bbox(
+        text: str,
+        baseline_y: float,
+        fontsize: float,
+        *,
+        bold: bool,
+    ) -> None:
+        nonlocal title_bbox_left, title_bbox_top, title_bbox_right, title_bbox_bottom
+        line_w = measure_text_width(text, fontsize, bold=bold, fonts=fonts)
+        line_left = center_x - (line_w / 2.0)
+        line_right = center_x + (line_w / 2.0)
+        line_top = baseline_y - fontsize
+        line_bottom = baseline_y + fontsize * 0.3
+        title_bbox_left = min(title_bbox_left, line_left)
+        title_bbox_top = min(title_bbox_top, line_top)
+        title_bbox_right = max(title_bbox_right, line_right)
+        title_bbox_bottom = max(title_bbox_bottom, line_bottom)
+
     # header_top_y = 232.0
     header_top_y = 116.0
     cursor_y = header_top_y + title_size
@@ -543,6 +567,7 @@ def build_info_section(
         bold=True,
         fonts=fonts,
     )
+    include_title_line_bbox(title_line, cursor_y, title_size, bold=True)
     cursor_y += title_size * 1.45
 
     for line in subtitle_lines:
@@ -563,6 +588,7 @@ def build_info_section(
             bold=False,
             fonts=fonts,
         )
+        include_title_line_bbox(line, cursor_y, subtitle_size, bold=False)
         cursor_y += subtitle_size * 1.32
 
     row_y = cursor_y
@@ -661,7 +687,15 @@ def build_info_section(
             y += line_height
         q_start_y = y + 4
 
+    title_box = (
+        max(content_x0, title_bbox_left - 6),
+        max(ANCHOR_PADDING, title_bbox_top - 3),
+        min(content_x1, title_bbox_right + 6),
+        min(row_y - 4, title_bbox_bottom + 3),
+    )
+
     return q_start_y, {
+        "title": title_box,
         "student_name": name_box,
         "student_id": sid_box,
     }
