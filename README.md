@@ -65,26 +65,26 @@ Graders can create and customize rubrics per assignment, manage course rosters, 
 
 - [Python v3.13+](https://www.python.org/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
-  - If not using standalone installer, install [Homebrew](https://brew.sh/) first
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+- Compatible Terminal Emulator
 
-#### Terminal Compatibility [^1]
+#### Terminal Compatibility
 
-To render images in the TUI properly, you may need a terminal emulator that supports the
+For images to render in the TUI correctly [^1], you may need a terminal emulator that supports the
 [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
-On macOS, the following (stock) terminal emulators were successful in our tests:
+On macOS, the following terminal emulators were tested and work correctly:
 
 - [Ghostty](https://github.com/ghostty-org/ghostty)
 - [iTerm2](https://iterm2.com/)
 - [WezTerm](https://wezfurlong.org/wezterm/)
 
-[^1]: For more information, see [Textual Image Support](https://github.com/lnqs/textual-image#supported-terminals)
-
 > [!NOTE]
-> Visual Studio Code's integrated terminal can work (as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol)), you will need to enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
+> Visual Studio Code's integrated terminal works as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol). Enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
 
-### Usage Guide 
+[^1]: https://github.com/lnqs/textual-image#supported-terminals
+
+### Installation
 
 Clone the repository:
 ```bash
@@ -97,12 +97,18 @@ Set up a Python virtual environment and install packages:
 uv sync --all-groups
 ```
 
-Executing a script:
+### Usage
+
+Run the TUI:
+```bash
+uv run tui
+```
+
+Run CLI tools:
 ```bash
 uv run <script_name> [arguments]
 
 # Examples
-uv run tui
 uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf
 uv run ocr-pdf --help
 ```
@@ -110,20 +116,17 @@ uv run ocr-pdf --help
 > [!TIP]
 > Scripts that take flags support `--help` to show available options.
 
-If you want to run the project without installing it globally, you can use the `uv run` command.
+#### Global Installation (Optional)
 
-#### Global Installation
-
-If you want to access the CLI tools globally:
+To use the TUI or CLI tools from anywhere on your system:
 
 ```bash
-$ uv tool install .
-Installed 11 executables: ...
+uv tool install .
+```
 
-# List available "tools" / executables
-$ uv tool list
-opengrader v1.0
-- ...
+List available executables:
+```bash
+uv tool list
 ```
 
 ### Running Tests
