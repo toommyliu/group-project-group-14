@@ -70,7 +70,7 @@ Graders can create and customize rubrics per assignment, manage course rosters, 
 
 #### Terminal Compatibility
 
-For images to render in the TUI correctly [^1], you may need a terminal emulator that supports the
+For images to render in the TUI correctly[^1], you may need a terminal emulator that supports the
 [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
 On macOS, the following terminal emulators were tested and work correctly:
@@ -80,7 +80,7 @@ On macOS, the following terminal emulators were tested and work correctly:
 - [WezTerm](https://wezfurlong.org/wezterm/)
 
 > [!NOTE]
-> Visual Studio Code's integrated terminal works as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol). Enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
+> Visual Studio Code's integrated terminal should work as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol). Enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
 
 [^1]: https://github.com/lnqs/textual-image#supported-terminals
 
