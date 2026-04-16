@@ -182,7 +182,7 @@ def generate_template_pdf(
         "",
         "",
         page_w,
-        title,
+        f"{title} ({version})",
         instructions,
         fonts,
     )
