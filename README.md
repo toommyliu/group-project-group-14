@@ -148,6 +148,12 @@ List available executables:
 uv tool list
 ```
 
+Execute:
+```bash
+tui
+qa-file --help
+```
+
 ### Running Tests
 
 ```bash
