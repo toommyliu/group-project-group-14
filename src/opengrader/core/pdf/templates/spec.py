@@ -55,8 +55,10 @@ def build_layout_spec(
             }
         return pages[page_number]
 
-    # first page is special: it contains the fields for student name and id
+    # first page is special: it contains the header title and info fields
     first_page = page_entry(1)
+    first_page["title_bbox"] = _bbox_norm(field_rects["title"], page_w, page_h)
+
     first_page["fields"] = [
         {
             "id": "student_name",

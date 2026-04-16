@@ -171,6 +171,13 @@ def validate_page(page: dict, page_idx: int) -> None:
             raise SpecError(f"{a_ctx}: missing required 'bbox'")
         validate_bbox(anchor["bbox"], a_ctx)
 
+    if page["page_number"] == 1 and "title_bbox" not in page:
+        raise SpecError(f"{ctx}: missing required 'title_bbox' on first page")
+
+    title_bbox = page.get("title_bbox")
+    if title_bbox is not None:
+        validate_bbox(title_bbox, f"{ctx}.title_bbox")
+
     for i, field in enumerate(page.get("fields", [])):
         validate_field(field, ctx)
 

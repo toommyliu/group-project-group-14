@@ -6,7 +6,7 @@ title: |
   March 15, 2024
 instructions: Closed book, closed notes.
 continued_page_header: Quiz 1: Mixed Topics
-questions_start_page: 2
+questions_start_page: 1
 ---
 
 ## Version A

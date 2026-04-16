@@ -9,6 +9,7 @@ def test_build_layout_spec_uses_prompt_bbox_and_keeps_full_and_answer_bboxes() -
         page_w=100.0,
         page_h=200.0,
         field_rects={
+            "title": (20.0, 4.0, 80.0, 16.0),
             "student_name": (10.0, 10.0, 50.0, 20.0),
             "student_id": (10.0, 30.0, 50.0, 40.0),
         },
@@ -26,6 +27,8 @@ def test_build_layout_spec_uses_prompt_bbox_and_keeps_full_and_answer_bboxes() -
         ],
     )
 
+    assert spec["pages"][0]["title_bbox"] == [0.2, 0.02, 0.6, 0.06]
+
     q1 = spec["pages"][0]["questions"][0]
     assert q1["bbox"] == [0.1, 0.25, 0.8, 0.1]
     assert q1["prompt_bbox"] == [0.1, 0.25, 0.8, 0.1]
@@ -41,6 +44,7 @@ def test_build_layout_spec_uses_subquestion_prompt_bbox() -> None:
         page_w=100.0,
         page_h=100.0,
         field_rects={
+            "title": (10.0, 2.0, 90.0, 12.0),
             "student_name": (1.0, 1.0, 10.0, 4.0),
             "student_id": (1.0, 5.0, 10.0, 8.0),
         },
@@ -66,6 +70,8 @@ def test_build_layout_spec_uses_subquestion_prompt_bbox() -> None:
             }
         ],
     )
+
+    assert spec["pages"][0]["title_bbox"] == [0.1, 0.02, 0.8, 0.1]
 
     q2 = spec["pages"][0]["questions"][0]
     q2a = q2["subquestions"][0]
