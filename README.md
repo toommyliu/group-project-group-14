@@ -56,7 +56,6 @@ Graders can create and customize rubrics per assignment, manage course rosters, 
 | Frontend   | Python     |
 | Backend    | Python     |
 | Database   |            |
-| Deployment |            |
 
 ---
 
@@ -66,59 +65,87 @@ Graders can create and customize rubrics per assignment, manage course rosters, 
 
 - [Python v3.13+](https://www.python.org/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
-  - If not using standalone installer, install [Homebrew](https://brew.sh/) first
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+- Compatible Terminal Emulator
 
-#### Terminal Compatibility [^1]
+#### Terminal Compatibility
 
-To render images in the TUI properly, you may need a terminal emulator that supports the
+For images to render in the TUI correctly[^1], you may need a terminal emulator that supports the
 [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
-On macOS, the following (stock) terminal emulators were successful in our tests:
+On macOS, the following terminal emulators were tested and work correctly:
 
 - [Ghostty](https://github.com/ghostty-org/ghostty)
 - [iTerm2](https://iterm2.com/)
 - [WezTerm](https://wezfurlong.org/wezterm/)
 
-[^1]: For more information, see [Textual Image Support](https://github.com/lnqs/textual-image#supported-terminals)
-
 > [!NOTE]
-> Visual Studio Code's integrated terminal can work (as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol)), you will need to enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
+> Visual Studio Code's integrated terminal should work as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol). Enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
+
+[^1]: https://github.com/lnqs/textual-image#supported-terminals
 
 ### Installation
 
+Clone the repository:
 ```bash
-# Clone the repository
-git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git my-folder-name
-cd my-folder-name
+git clone https://github.com/SJSU-CMPE-195/group-project-group-14.git opengrader
+cd opengrader
 ```
 
-#### Installing UV
-
-On macOS:
-
+Set up a Python virtual environment and install packages:
 ```bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh # or brew install uv
-
-# Install dependencies and sync virtual environment
 uv sync --all-groups
 ```
 
-### Running Locally
+### Usage
+
+Run the TUI:
+```bash
+uv run tui
+```
+
+Run CLI tools:
+```bash
+uv run <script_name> [arguments]
+
+# Examples
+uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf
+uv run ocr-pdf --help
+```
+
+<details>
+<summary>Available Scripts</summary>
+
+- `tui` / `tui-dev`: The TUI application
+- `qa-file`
+  - `generate-template`: Generate templates from QA files
+  - `embed-snippets`: Embed question images into QA files
+- `ocr-pdf`: Extract text from PDFs using OCR
+- `ocr-preview-pdf`: Preview and adjust OCR detection regions from a spec.json
+
+Helper/bootstrapping scripts:
+- `pdf-splitter`:  Split PDFs
+- `question-splitter`: Split PDFs by question regions
+- `roster-reader`: Read course roster from csv file
+- `sample-pdf`: Generate sample gradeable PDFs for testing
+- `course-demo`: CLI for creating demo course data
+- `seed-db`: Seed database with test data
+</details>
+
+> [!TIP]
+> Scripts that take flags support `--help` to show available options.
+
+#### Global Installation (Optional)
+
+To use the TUI or CLI tools from anywhere on your system:
 
 ```bash
-# Run the TUI
-uv run tui
+uv tool install .
+```
 
-# Run the TUI in dev mode
-uv run tui-dev
-# Run the textual console in another terminal
-uv run textual console
-
-# Executing CLI tools
-uv run pdf-splitter assets/sample.pdf assets/sample.pdf
-uv run ocr-pdf --template spec.json --input submission.pdf ...
+List available executables:
+```bash
+uv tool list
 ```
 
 ### Running Tests
@@ -126,8 +153,6 @@ uv run ocr-pdf --template spec.json --input submission.pdf ...
 ```bash
 uv run pytest
 ```
-
-
 
 ## Project Structure
 
@@ -137,8 +162,7 @@ uv run pytest
 │   ├── core/           # Shared code
 │   ├── cli/            # Standalone CLI scripts
 │   └── tui/            # Main TUI application
-├── tests/
-│   ├── unit/           # Unit tests
+├── tests/              # Test suite
 ├── docs/               # Documentation
 ├── pyproject.toml      # Project configuration
 └── README.md
