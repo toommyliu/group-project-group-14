@@ -302,7 +302,8 @@ def _extract_question_crop(
     sub_dir: Path,
 ) -> QuestionExtractionResult:
     qid = str(question["id"])
-    bbox_px = _bbox_norm_to_px(question["bbox"], page_w, page_h)
+    crop_bbox = question.get("full_bbox") or question["bbox"]
+    bbox_px = _bbox_norm_to_px(crop_bbox, page_w, page_h)
     region = crop_region(page_image, bbox_px)
     out_path = sub_dir / f"{qid}.{response_format}"
     region.save(out_path)
