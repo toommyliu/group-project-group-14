@@ -97,7 +97,7 @@ Set up a Python virtual environment and install packages:
 uv sync --all-groups
 ```
 
-Executing a script
+Executing a script:
 ```bash
 uv run <script_name> [arguments]
 
@@ -108,7 +108,7 @@ uv run ocr-pdf --help
 ```
 
 > [!TIP]
-> Use `--help` flag to see the available options for each script.
+> Use the `--help` flag to see the available options for each script.
 
 If you want to run the project without installing it globally, you can use the `uv run` command.
 
