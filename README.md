@@ -108,7 +108,7 @@ uv run ocr-pdf --help
 ```
 
 > [!TIP]
-> Use the `--help` flag to see the available options for each script.
+> Scripts that take flags support `--help` to show available options.
 
 If you want to run the project without installing it globally, you can use the `uv run` command.
 
