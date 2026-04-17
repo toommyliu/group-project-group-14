@@ -65,18 +65,12 @@ def build_layout_spec(
             "bbox": _bbox_norm(field_rects["student_name"], page_w, page_h),
             "type": "name",
             "required": True,
-            "psm": 7,  # "Treat the image as a single text line."
-            "confidence_threshold": 70,
         },
         {
             "id": "student_id",
             "bbox": _bbox_norm(field_rects["student_id"], page_w, page_h),
             "type": "sid",
             "required": True,
-            "regex": "^\\d{9}$",
-            "whitelist": "0123456789",
-            "psm": 7,
-            "confidence_threshold": 70,
         },
     ]
 

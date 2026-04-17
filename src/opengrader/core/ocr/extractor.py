@@ -21,7 +21,6 @@ ConfidenceThreshold = float
 DEFAULT_CONFIDENCE_THRESHOLD = 60.0
 MIN_TEXT_LENGTH = 1
 MAX_TEXT_LENGTH = 1000
-DEFAULT_SID_REGEX = r"^\d{9}$"
 
 QUESTION_START_MARGIN_NORM = 0.012
 QUESTION_END_MARGIN_NORM = 0.006
@@ -148,6 +147,10 @@ def _normalize_name_text(raw: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"^(?i:name)\s+", "", text)
     return text
+
+
+def _normalize_sid_text(raw: str) -> str:
+    return "".join(re.findall(r"\d", raw))
 
 
 def _pytesseract_string(image: Image.Image, *, lang: str, config: str) -> str:
@@ -278,8 +281,7 @@ def _short_text_from_result(text: str, field: dict) -> str:
     if ftype == "name":
         return _normalize_name_text(text)
     if ftype == "sid":
-        digits = re.findall(r"\d", text)
-        return "".join(digits)
+        return _normalize_sid_text(text)
     if ftype == "version_marker":
         letters = re.findall(r"[A-Za-z]", text.upper())
         expected = str(field.get("expected", "")).upper()
@@ -909,13 +911,13 @@ def validate_field_result(
             )
 
     if ftype == "sid":
-        pattern = field.get("regex", DEFAULT_SID_REGEX)
-        if not re.fullmatch(pattern, text):
+        digit_count = len(_normalize_sid_text(text))
+        if digit_count < 5:
             return FieldExtractionResult(
                 field_id=fid,
                 ocr_result=result,
                 validated=False,
-                error=f"invalid_sid_format(got={text!r}, pattern={pattern!r})",
+                error=f"invalid_sid_format(got={text!r})",
             )
 
     return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
@@ -1154,9 +1156,183 @@ def _split_dynamic_bbox_for_subquestion(
     return _clamp_bbox_norm([px + pw * rx, py + ph * ry, pw * rw, ph * rh])
 
 
+def _normalized_label_token(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _words_bbox(words: list[_OcrWord]) -> tuple[int, int, int, int]:
+    if not words:
+        return (0, 0, 0, 0)
+    return (
+        min(w.left for w in words),
+        min(w.top for w in words),
+        max(w.right for w in words),
+        max(w.bottom for w in words),
+    )
+
+
+def _extract_name_from_line(line_words: list[_OcrWord]) -> tuple[str, float, tuple[int, int, int, int]] | None:
+    if not line_words:
+        return None
+
+    tokens = [w.text for w in line_words]
+    norms = [_normalized_label_token(token) for token in tokens]
+
+    label_idx: int | None = None
+    for i, norm in enumerate(norms):
+        if norm == "name" or norm.startswith("name"):
+            label_idx = i
+            break
+    if label_idx is None:
+        return None
+
+    value_words: list[_OcrWord] = []
+    label_token = tokens[label_idx]
+    if ":" in label_token:
+        suffix = label_token.split(":", 1)[1].strip()
+        if suffix:
+            value_words.append(
+                _OcrWord(
+                    text=suffix,
+                    conf=line_words[label_idx].conf,
+                    left=line_words[label_idx].left,
+                    top=line_words[label_idx].top,
+                    width=line_words[label_idx].width,
+                    height=line_words[label_idx].height,
+                    line_id=line_words[label_idx].line_id,
+                )
+            )
+
+    for i in range(label_idx + 1, len(line_words)):
+        norm = norms[i]
+        if norm in {"student", "studentid", "sid", "id"}:
+            break
+        value_words.append(line_words[i])
+
+    if not value_words:
+        return None
+
+    candidate = _normalize_name_text(" ".join(w.text for w in value_words))
+    letters = len(re.findall(r"[A-Za-z]", candidate))
+    if letters < 2:
+        return None
+
+    avg_conf = sum(w.conf for w in value_words) / len(value_words)
+    conf = max(avg_conf, 72.0 if letters >= 4 else avg_conf)
+    return candidate, conf, _words_bbox(value_words)
+
+
+def _extract_sid_from_line(line_words: list[_OcrWord]) -> tuple[str, float, tuple[int, int, int, int]] | None:
+    if not line_words:
+        return None
+
+    tokens = [w.text for w in line_words]
+    norms = [_normalized_label_token(token) for token in tokens]
+
+    label_end_idx: int | None = None
+    for i, norm in enumerate(norms):
+        if norm == "student" and i + 1 < len(norms) and norms[i + 1] in {
+            "id",
+            "studentid",
+            "sid",
+        }:
+            label_end_idx = i + 1
+            break
+        if norm in {"studentid", "sid", "id"}:
+            label_end_idx = i
+            break
+
+    if label_end_idx is None:
+        return None
+
+    value_words: list[_OcrWord] = []
+    label_token = tokens[label_end_idx]
+    if ":" in label_token:
+        suffix = label_token.split(":", 1)[1].strip()
+        if suffix:
+            value_words.append(
+                _OcrWord(
+                    text=suffix,
+                    conf=line_words[label_end_idx].conf,
+                    left=line_words[label_end_idx].left,
+                    top=line_words[label_end_idx].top,
+                    width=line_words[label_end_idx].width,
+                    height=line_words[label_end_idx].height,
+                    line_id=line_words[label_end_idx].line_id,
+                )
+            )
+
+    for i in range(label_end_idx + 1, len(line_words)):
+        norm = norms[i]
+        if norm == "name":
+            break
+        value_words.append(line_words[i])
+
+    if not value_words:
+        return None
+
+    digits = _normalize_sid_text(" ".join(w.text for w in value_words))
+    if len(digits) < 5:
+        return None
+
+    avg_conf = sum(w.conf for w in value_words) / len(value_words)
+    conf = max(avg_conf, 78.0 if len(digits) >= 8 else avg_conf)
+    return digits, conf, _words_bbox(value_words)
+
+
+def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
+    if not words:
+        return {}
+
+    line_map = _group_words_by_line(words)
+    ordered_lines = sorted(
+        line_map.values(),
+        key=lambda line_words: (
+            min(w.top for w in line_words),
+            min(w.left for w in line_words),
+        ),
+    )
+
+    top_cutoff = max(w.bottom for w in words) * 0.42
+
+    best_name: tuple[float, OcrResult] | None = None
+    best_sid: tuple[float, OcrResult] | None = None
+
+    for line_words in ordered_lines:
+        line_top = min(w.top for w in line_words)
+        if line_top > top_cutoff:
+            continue
+        name_candidate = _extract_name_from_line(line_words)
+        if name_candidate is not None:
+            text, conf, bbox = name_candidate
+            score = conf + len(re.findall(r"[A-Za-z]", text)) * 2.0
+            if " " in text:
+                score += 6.0
+            candidate = OcrResult(text=text, confidence=conf, bbox_px=bbox)
+            if best_name is None or score > best_name[0]:
+                best_name = (score, candidate)
+
+        sid_candidate = _extract_sid_from_line(line_words)
+        if sid_candidate is not None:
+            text, conf, bbox = sid_candidate
+            score = conf + min(12, len(text)) * 4.0
+            if len(text) >= 8:
+                score += 12.0
+            candidate = OcrResult(text=text, confidence=conf, bbox_px=bbox)
+            if best_sid is None or score > best_sid[0]:
+                best_sid = (score, candidate)
+
+    out: dict[str, OcrResult] = {}
+    if best_name is not None:
+        out["name"] = best_name[1]
+    if best_sid is not None:
+        out["sid"] = best_sid[1]
+    return out
+
+
 def _find_label_word(words: list[_OcrWord], target: str) -> _OcrWord | None:
     normalized_target = target.lower()
-    candidates = [w for w in words if w.text.lower() == normalized_target]
+    candidates = [w for w in words if _normalized_label_token(w.text) == normalized_target]
     if not candidates:
         return None
     candidates.sort(key=lambda w: (w.top, w.left))
@@ -1166,12 +1342,12 @@ def _find_label_word(words: list[_OcrWord], target: str) -> _OcrWord | None:
 def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] | None:
     line_map = _group_words_by_line(words)
     for line_words in line_map.values():
-        texts = [w.text.lower() for w in line_words]
+        texts = [_normalized_label_token(w.text) for w in line_words]
         for i, txt in enumerate(texts):
             if txt != "student":
                 continue
             for j in range(i + 1, min(i + 4, len(line_words))):
-                if texts[j] in {"id", "id:"}:
+                if texts[j] in {"id", "studentid", "sid"}:
                     left = min(line_words[i].left, line_words[j].left)
                     top = min(line_words[i].top, line_words[j].top)
                     right = max(line_words[i].right, line_words[j].right)
@@ -1179,7 +1355,7 @@ def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] |
                     return left, top, right, bottom
 
     for w in words:
-        if w.text.lower() in {"id", "id:"}:
+        if _normalized_label_token(w.text) in {"id", "studentid", "sid"}:
             return w.left, w.top, w.right, w.bottom
 
     return None
@@ -1286,17 +1462,11 @@ def _default_auto_fields() -> list[dict]:
             "id": "student_name",
             "type": "name",
             "required": False,
-            "psm": 7,
-            "confidence_threshold": 0,
         },
         {
             "id": "student_id",
             "type": "sid",
             "required": False,
-            "regex": DEFAULT_SID_REGEX,
-            "whitelist": "0123456789",
-            "psm": 7,
-            "confidence_threshold": 0,
         },
     ]
 
@@ -1457,6 +1627,8 @@ def process_submission_pdf(
         int(page.get("page_number", 0)): page for page in spec_pages
     }
 
+    header_field_candidates = _extract_header_field_values(page_words.get(1, []))
+
     for page_number in sorted(rendered_pages):
         page_image, page_w, page_h = rendered_pages[page_number]
         page_dict = page_dict_by_number.get(page_number, {})
@@ -1480,6 +1652,18 @@ def process_submission_pdf(
             field_type = field_def.get("type", "text")
             field_config = _override_config(config, field_def)
 
+            if page_number == 1 and field_type in {"name", "sid"}:
+                header_result = header_field_candidates.get(field_type)
+                if header_result is not None:
+                    validated_header = validate_field_result(
+                        header_result,
+                        field_def,
+                        field_config,
+                    )
+                    if validated_header.validated:
+                        all_field_results.append(validated_header)
+                        continue
+
             dynamic_bbox = dynamic_regions_by_type.get(field_type)
             if dynamic_bbox is not None and page_number == 1 and field_type in {"name", "sid"}:
                 ocr_result = _ocr_field_from_dynamic_region(
@@ -1502,6 +1686,14 @@ def process_submission_pdf(
                     validate_field_result(ocr_result, field_def, field_config)
                 )
                 continue
+
+            if page_number == 1 and field_type in {"name", "sid"}:
+                header_result = header_field_candidates.get(field_type)
+                if header_result is not None:
+                    all_field_results.append(
+                        validate_field_result(header_result, field_def, field_config)
+                    )
+                    continue
 
             validated = not bool(field_def.get("required", False))
             err = None if validated else "field_region_not_detected"

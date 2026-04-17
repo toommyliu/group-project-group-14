@@ -185,6 +185,7 @@ def generate_template_pdf(
         f"{title} ({version})",
         instructions,
         fonts,
+        draw_field_borders=False,
     )
 
     remaining = normalized_questions[:]
@@ -216,6 +217,7 @@ def generate_template_pdf(
             page_h,
             current_start_y,
             fonts,
+            draw_borders=False,
         )
         if drawn_count <= 0:
             raise ValueError("No questions could be drawn on the current page")

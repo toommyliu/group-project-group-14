@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,7 +38,7 @@ class StudentSubmissionQuestion:
     question_id: str
     prompt: str
     possible_points: float | None
-    response_image_data_url: str | None
+    response_image_path: str | None
     response_text: str
     points_awarded: float | None = None
     analysis: str = ""
@@ -227,20 +226,6 @@ def extract_title_text_from_submission(
     return best
 
 
-def image_path_to_data_url(path: str | Path) -> str:
-    image_path = Path(path)
-    ext = image_path.suffix.lower()
-
-    mime = "image/png"
-    if ext in {".jpg", ".jpeg"}:
-        mime = "image/jpeg"
-
-    with open(image_path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode("ascii")
-
-    return f"data:{mime};base64,{encoded}"
-
-
 def _relative_bbox(parent_bbox: list[float], child_bbox: list[float]) -> list[float] | None:
     if len(parent_bbox) != 4 or len(child_bbox) != 4:
         return None
@@ -345,9 +330,9 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
         lines.append(f"- {question.question_id}:")
         lines.append(f"  - Prompt: {points_label}{question.prompt}")
 
-        if question.response_image_data_url:
+        if question.response_image_path:
             lines.append(
-                f"  - Response image: ![{question.question_id} response]({question.response_image_data_url})"
+                f"  - Response image: ![{question.question_id} response]({question.response_image_path})"
             )
         else:
             lines.append("  - Response image: ")
@@ -419,12 +404,16 @@ def build_student_submission_document(
         points_raw = spec_question.get("points")
         possible_points = float(points_raw) if isinstance(points_raw, (int, float)) else None
 
-        image_data_url: str | None = None
+        response_image_path: str | None = None
         response_text = ""
         if extracted_question.output_path:
             image_path = Path(extracted_question.output_path)
             if image_path.exists():
-                image_data_url = image_path_to_data_url(image_path)
+                try:
+                    response_image_path = str(image_path.relative_to(out_dir))
+                except ValueError:
+                    response_image_path = str(image_path)
+
                 response_text = ocr_image_text(
                     image_path,
                     text_ocr_config,
@@ -438,7 +427,7 @@ def build_student_submission_document(
                 question_id=qid,
                 prompt=prompt,
                 possible_points=possible_points,
-                response_image_data_url=image_data_url,
+                response_image_path=response_image_path,
                 response_text=response_text,
             )
         )

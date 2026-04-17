@@ -245,8 +245,11 @@ def draw_field_box(
     y1: float,
     value: str,
     fonts: ResolvedTemplateFonts,
+    *,
+    draw_border: bool = True,
 ) -> None:
-    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
+    if draw_border:
+        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
 
     center_x = (x0 + x1) / 2.0
 
@@ -401,8 +404,11 @@ def draw_question_box(
     prompt: str,
     fonts: ResolvedTemplateFonts,
     subquestions: list[dict] | None = None,
+    *,
+    draw_borders: bool = True,
 ) -> list[dict]:
-    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
+    if draw_borders:
+        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
 
     header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
     header_y = y0 + 16
@@ -451,11 +457,12 @@ def draw_question_box(
         sub_y0 = sub_area_top + i * (sub_height + SUBQUESTION_GAP)
         sub_y1 = sub_y0 + sub_height
         sub_rect = (x0 + 8, sub_y0, x1 - 8, sub_y1)
-        page.draw_rect(
-            fitz.Rect(*sub_rect),
-            color=COLOR_BLACK,
-            width=BOX_LINE,
-        )
+        if draw_borders:
+            page.draw_rect(
+                fitz.Rect(*sub_rect),
+                color=COLOR_BLACK,
+                width=BOX_LINE,
+            )
 
         raw_label = str(subquestion.get("label", chr(ord("a") + i))).strip()
         label = raw_label if raw_label.endswith(")") else f"{raw_label})"
@@ -516,6 +523,8 @@ def build_info_section(
     title: str,
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
+    *,
+    draw_field_borders: bool = True,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
     content_x0 = CONTENT_PADDING
     content_x1 = page_w - CONTENT_PADDING
@@ -635,6 +644,7 @@ def build_info_section(
         name_box[3],
         name,
         fonts,
+        draw_border=draw_field_borders,
     )
     draw_field_box(
         page,
@@ -644,6 +654,7 @@ def build_info_section(
         sid_box[3],
         student_id,
         fonts,
+        draw_border=draw_field_borders,
     )
 
     q_start_y = sid_box[3] + 22
@@ -714,6 +725,8 @@ def draw_questions_on_page(
     page_h: float,
     start_y: float,
     fonts: ResolvedTemplateFonts,
+    *,
+    draw_borders: bool = True,
 ) -> tuple[int, list[dict]]:
     content_x0 = CONTENT_PADDING
     content_x1 = page_w - CONTENT_PADDING
@@ -771,6 +784,7 @@ def draw_questions_on_page(
             prompt,
             fonts,
             subquestions=subquestions,
+            draw_borders=draw_borders,
         )
 
         question_meta = {
