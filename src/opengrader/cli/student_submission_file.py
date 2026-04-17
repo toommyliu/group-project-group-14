@@ -3,14 +3,14 @@ from __future__ import annotations
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
-from opengrader.core.ocr import OcrConfig, SpecError, load_spec
+from opengrader.core.ocr import OcrConfig
 from opengrader.core.submissions import build_student_submission_document
 
 EPILOG = """
 examples:
-  uv run student-submission-file --template samples/spec-vA.json --input split/ --output out/submissions/
-  uv run student-submission-file --template samples/spec-vA.json --input split/student-0001.pdf --output out/submissions/ --dpi 200
-  uv run student-submission-file --input split/ --output out/submissions/  # OCR-only layout detection (no template)
+  uv run student-submission-file --input split/ --output out/submissions/
+  uv run student-submission-file --input split/student-0001.pdf --output out/submissions/ --dpi 200
+  uv run student-submission-file --template old-template.json --input split/ --output out/submissions/  # accepted but ignored
 """
 
 
@@ -27,8 +27,7 @@ def _build_parser() -> ArgumentParser:
         "--template",
         required=False,
         help=(
-            "Optional path to template spec JSON. If omitted, the command uses "
-            "OCR-only question/field detection without template bounding boxes."
+            "Deprecated and ignored. Kept only for backward-compatible CLI usage."
         ),
     )
     parser.add_argument(
@@ -99,24 +98,10 @@ def run_cli() -> None:
     args = parser.parse_args()
 
     if args.template:
-        try:
-            spec = load_spec(args.template)
-        except SpecError as exc:
-            raise ValueError(f"invalid template spec: {exc}") from exc
-    else:
-        spec = {
-            "schema_version": "1.0",
-            "unit_id": "autodetected",
-            "pages": [
-                {
-                    "page_number": 1,
-                    "anchors": [],
-                    "fields": [],
-                    "questions": [],
-                    "title_bbox": [0.15, 0.05, 0.7, 0.2],
-                }
-            ],
-        }
+        template_path = Path(args.template)
+        if not template_path.exists():
+            raise FileNotFoundError(f"template file not found: {template_path}")
+        print(f"Ignoring deprecated --template argument: {template_path}")
 
     input_pdfs = _collect_input_pdfs(args.input)
     output_dir = Path(args.output)
@@ -130,17 +115,13 @@ def run_cli() -> None:
         confidence_threshold=args.confidence_threshold,
     )
 
-    if args.template:
-        print(f"Loaded template spec: {args.template}")
-    else:
-        print("No template spec provided; using OCR-only extraction mode.")
+    print("Using OCR-only extraction mode.")
     print(f"Found {len(input_pdfs)} submission PDF(s)")
 
     for i, pdf_path in enumerate(input_pdfs, 1):
         print(f"[{i}/{len(input_pdfs)}] Converting: {pdf_path.name}")
         build_result = build_student_submission_document(
             pdf_path=pdf_path,
-            spec=spec,
             output_dir=output_dir,
             ocr_config=config,
             dpi=args.dpi,

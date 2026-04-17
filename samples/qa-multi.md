@@ -1,9 +1,6 @@
 ---
 title: |
   Quiz 1: Mixed Topics
-  CMPE195A: Senior Design Project
-  San Jose State University
-  March 15, 2024
 instructions: Closed book, closed notes.
 continued_page_header: Quiz 1: Mixed Topics
 questions_start_page: 1

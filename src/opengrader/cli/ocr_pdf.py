@@ -1,5 +1,6 @@
 import csv
 import json
+import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
@@ -157,7 +158,6 @@ def run_cli() -> None:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    spec = {}
 
     input_paths = collect_input_paths(args.input)
     print(f"Found {len(input_paths)} PDF(s) to process")
@@ -182,7 +182,6 @@ def run_cli() -> None:
         try:
             res = process_submission_pdf(
                 pdf_path=str(pdf_path),
-                spec=spec,
                 config=ocr_config,
                 output_dir=output_dir,
                 response_format=args.response_format,
