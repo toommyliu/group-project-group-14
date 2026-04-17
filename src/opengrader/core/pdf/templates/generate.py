@@ -141,39 +141,6 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
     return normalized
 
 
-def _build_template_manifest(
-    *,
-    unit_id: str,
-    version: str,
-    questions: list[dict[str, Any]],
-) -> dict[str, Any]:
-    serialized_questions: list[dict[str, Any]] = []
-    for question in questions:
-        item: dict[str, Any] = {
-            "id": question["id"],
-            "points": question["points"],
-            "prompt": question["prompt"],
-        }
-        subquestions = question.get("subquestions", [])
-        if subquestions:
-            item["subquestions"] = [
-                {
-                    "id": subquestion["id"],
-                    "label": subquestion["label"],
-                    "points": subquestion["points"],
-                    "prompt": subquestion["prompt"],
-                }
-                for subquestion in subquestions
-            ]
-        serialized_questions.append(item)
-
-    return {
-        "unit_id": unit_id,
-        "version": version,
-        "questions": serialized_questions,
-    }
-
-
 def generate_template_pdf(
     output_path: Path,
     version: str,
@@ -186,7 +153,7 @@ def generate_template_pdf(
     font_regular_file: str | Path | None = None,
     font_bold_file: str | Path | None = None,
     start_questions_on_first_page: bool = True,
-) -> dict[str, Any]:
+) -> None:
     fonts = resolve_template_fonts(
         regular_file=font_regular_file, bold_file=font_bold_file
     )
@@ -255,12 +222,6 @@ def generate_template_pdf(
 
     doc.save(str(output_path), garbage=4, deflate=True)
     doc.close()
-
-    return _build_template_manifest(
-        unit_id="cmpe195-exam1-sp26",
-        version=version,
-        questions=normalized_questions,
-    )
 
 
 def generate_submission_pdf(

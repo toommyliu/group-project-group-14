@@ -62,11 +62,6 @@ def _build_parser() -> ArgumentParser:
         "--output-pdf", required=True, help="Output path for generated template PDF."
     )
     generate_parser.add_argument(
-        "--output-spec",
-        required=False,
-        help="Optional output path for generated template manifest JSON.",
-    )
-    generate_parser.add_argument(
         "--version",
         default=None,
         help="Template version ID (default: first QA version or 'A').",
@@ -169,9 +164,6 @@ def _run_generate_template(args: object) -> None:
         questions_start_page = qa_doc.questions_start_page
 
     output_pdf_base = Path(getattr(args, "output_pdf"))
-    output_spec_base = (
-        Path(getattr(args, "output_spec")) if getattr(args, "output_spec") else None
-    )
     use_version_suffix = len(versions_to_generate) > 1
 
     for version in versions_to_generate:
@@ -183,7 +175,7 @@ def _run_generate_template(args: object) -> None:
         )
         output_pdf.parent.mkdir(parents=True, exist_ok=True)
 
-        manifest = generate_template_pdf(
+        generate_template_pdf(
             output_path=output_pdf,
             version=version,
             questions=questions,
@@ -194,16 +186,6 @@ def _run_generate_template(args: object) -> None:
             font_bold_file=getattr(args, "font_bold_file"),
             start_questions_on_first_page=(questions_start_page == 1),
         )
-
-        if output_spec_base is not None:
-            output_spec = _versioned_path(
-                output_spec_base,
-                version=version,
-                use_suffix=use_version_suffix,
-            )
-            output_spec.parent.mkdir(parents=True, exist_ok=True)
-            output_spec.write_text(json.dumps(manifest, indent=2) + "\n")
-            print(f"Wrote template manifest: {output_spec}")
 
         print(f"Wrote template: {output_pdf}")
 
