@@ -12,9 +12,8 @@ import numpy as np
 import pytesseract
 from PIL import Image
 
-from .alignment import AnchorRegion, detect_anchor_presence, preprocess_for_ocr
+from .alignment import preprocess_for_ocr
 from .scanner import scan_template
-from .spec import lookup_version_by_anchors, version_anchor_map
 
 ConfidenceThreshold = float
 
@@ -30,8 +29,6 @@ QUESTION_DEFAULT_X0_NORM = 0.11
 QUESTION_DEFAULT_X1_NORM = 0.89
 QUESTION_SPAN_TRIGGER_Y_NORM = 0.84
 QUESTION_SPAN_NEXT_PAGE_START_NORM = 0.04
-PROMPT_EXPAND_UP_NORM = 0.02
-ANSWER_EXPAND_DOWN_NORM = 0.01
 
 _QUESTION_MARKER_RE = re.compile(r"^(\d{1,3})[\.)]$")
 _QUESTION_NUM_ONLY_RE = re.compile(r"^\d{1,3}$")
@@ -58,7 +55,6 @@ class QuestionExtractionResult:
     question_id: str
     page_number: int
     output_path: str | None = None
-    crop_bbox_norm: list[float] | None = None
     skipped: bool = False
     error: str | None = None
 
@@ -161,7 +157,9 @@ def _pytesseract_string(image: Image.Image, *, lang: str, config: str) -> str:
 
 
 def _ocr_sid_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
-    resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    resample = (
+        Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    )
     variants = [region]
     if region.width < 1600 and region.height < 500:
         variants.append(region.resize((region.width * 2, region.height * 2), resample))
@@ -214,7 +212,9 @@ def _ocr_sid_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
 
 
 def _ocr_name_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
-    resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    resample = (
+        Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    )
     variants = [region]
     if region.width < 2000 and region.height < 650:
         variants.append(region.resize((region.width * 2, region.height * 2), resample))
@@ -235,7 +235,9 @@ def _ocr_name_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
             cleaned = _normalize_name_text(ocr.text)
             if cleaned:
                 letters = len(re.findall(r"[A-Za-z]", cleaned))
-                score = ocr.confidence + letters * 3.0 + (8.0 if " " in cleaned else 0.0)
+                score = (
+                    ocr.confidence + letters * 3.0 + (8.0 if " " in cleaned else 0.0)
+                )
                 candidates.append((score, cleaned, ocr.confidence))
 
         raw = _pytesseract_string(image_variant, lang=config.lang, config="--psm 7")
@@ -340,37 +342,8 @@ def _bbox_norm_to_px(
     return x0, y0, x1, y1
 
 
-def _bbox_px_to_norm(
-    bbox_px: tuple[int, int, int, int], page_w: int, page_h: int
-) -> list[float]:
-    x0, y0, x1, y1 = bbox_px
-    if page_w <= 0 or page_h <= 0:
-        return [0.0, 0.0, 1.0, 1.0]
-    x = x0 / page_w
-    y = y0 / page_h
-    w = (x1 - x0) / page_w
-    h = (y1 - y0) / page_h
-    return _clamp_bbox_norm([x, y, w, h])
-
-
 def _bbox_area_norm(bbox: list[float]) -> float:
     return max(0.0, bbox[2]) * max(0.0, bbox[3])
-
-
-def _relative_bbox(parent_bbox: list[float], child_bbox: list[float]) -> list[float] | None:
-    if len(parent_bbox) != 4 or len(child_bbox) != 4:
-        return None
-    px, py, pw, ph = parent_bbox
-    cx, cy, cw, ch = child_bbox
-    if pw <= 0 or ph <= 0:
-        return None
-    rx = (cx - px) / pw
-    ry = (cy - py) / ph
-    rw = cw / pw
-    rh = ch / ph
-    if rw <= 0 or rh <= 0:
-        return None
-    return _clamp_bbox_norm([rx, ry, rw, rh])
 
 
 def render_page_to_image(
@@ -563,7 +536,9 @@ def _ocr_page_words(page_image: Image.Image, config: OcrConfig) -> list[_OcrWord
     return words
 
 
-def _group_words_by_line(words: list[_OcrWord]) -> dict[tuple[int, int, int], list[_OcrWord]]:
+def _group_words_by_line(
+    words: list[_OcrWord],
+) -> dict[tuple[int, int, int], list[_OcrWord]]:
     lines: dict[tuple[int, int, int], list[_OcrWord]] = {}
     for w in words:
         lines.setdefault(w.line_id, []).append(w)
@@ -648,7 +623,9 @@ def _extract_question_markers_for_page(
     return sorted(best_by_key.values(), key=lambda m: (m.page_number, m.y_px, m.x_px))
 
 
-def _filter_markers_by_left_margin(markers: list[_QuestionMarker]) -> list[_QuestionMarker]:
+def _filter_markers_by_left_margin(
+    markers: list[_QuestionMarker],
+) -> list[_QuestionMarker]:
     if not markers:
         return []
     x_values = [m.x_px for m in markers]
@@ -755,14 +732,15 @@ def _next_question_marker(
         and (
             marker.page_number > current.page_number
             or (
-                marker.page_number == current.page_number
-                and marker.y_px > current.y_px
+                marker.page_number == current.page_number and marker.y_px > current.y_px
             )
         )
     ]
     if not candidates:
         return None
-    return min(candidates, key=lambda marker: (marker.page_number, marker.y_px, marker.x_px))
+    return min(
+        candidates, key=lambda marker: (marker.page_number, marker.y_px, marker.x_px)
+    )
 
 
 def _detect_question_regions(
@@ -773,7 +751,9 @@ def _detect_question_regions(
     markers: list[_QuestionMarker] = []
     for page_number, words in page_words.items():
         page_w, page_h = page_dims[page_number]
-        markers.extend(_extract_question_markers_for_page(page_number, words, page_w, page_h))
+        markers.extend(
+            _extract_question_markers_for_page(page_number, words, page_w, page_h)
+        )
 
     if not markers:
         return []
@@ -797,7 +777,9 @@ def _detect_question_regions(
             marker_y_norm = marker.y_px / page_h if page_h else 0.0
             start_y = max(0.0, marker_y_norm - QUESTION_START_MARGIN_NORM)
 
-            next_same_page = markers_on_page[idx + 1] if idx + 1 < len(markers_on_page) else None
+            next_same_page = (
+                markers_on_page[idx + 1] if idx + 1 < len(markers_on_page) else None
+            )
             next_question = _next_question_marker(markers, marker)
             spans_next_page = (
                 next_same_page is None
@@ -923,45 +905,6 @@ def validate_field_result(
     return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
 
 
-def extract_fields_from_page(
-    page_image: Image.Image,
-    fields: list[dict],
-    config: OcrConfig,
-    page_w: int,
-    page_h: int,
-) -> list[FieldExtractionResult]:
-    results = []
-    for f in fields:
-        if "bbox" not in f:
-            validated = not bool(f.get("required", False))
-            err = None if validated else "missing_bbox"
-            results.append(
-                FieldExtractionResult(
-                    field_id=f["id"],
-                    ocr_result=None,
-                    validated=validated,
-                    error=err,
-                )
-            )
-            continue
-        bbox_px = _bbox_norm_to_px(f["bbox"], page_w, page_h)
-        region = crop_region(page_image, bbox_px)
-        field_config = _override_config(config, f)
-        ocr_result = _ocr_field_with_heuristics(region, f, field_config)
-        ocr_result.text = _short_text_from_result(ocr_result.text, f)
-        field_result = validate_field_result(ocr_result, f, field_config)
-        results.append(field_result)
-    return results
-
-
-def extract_version_field(spec: dict) -> dict | None:
-    for page_dict in spec.get("pages", []):
-        for f in page_dict.get("fields", []):
-            if f.get("type") == "version_marker":
-                return f
-    return None
-
-
 def _extract_question_crop_norm(
     page_image: Image.Image,
     question_id: str,
@@ -986,7 +929,6 @@ def _extract_question_crop_norm(
         question_id=question_id,
         page_number=page_num,
         output_path=str(out_path),
-        crop_bbox_norm=_bbox_px_to_norm(bbox_px, page_w, page_h),
     )
 
 
@@ -1008,8 +950,6 @@ def _extract_question_crop_segments(
 
     crops: list[Image.Image] = []
     first_page_number = segments[0][0]
-    first_crop_bbox_norm: list[float] | None = None
-
     for page_number, bbox_norm in segments:
         if page_number not in rendered_pages:
             continue
@@ -1020,8 +960,6 @@ def _extract_question_crop_segments(
         if region.width <= 0 or region.height <= 0:
             continue
         crops.append(region.convert("RGB"))
-        if first_crop_bbox_norm is None:
-            first_crop_bbox_norm = _bbox_px_to_norm(bbox_px, page_w, page_h)
 
     if not crops:
         return QuestionExtractionResult(
@@ -1054,106 +992,7 @@ def _extract_question_crop_segments(
         question_id=question_id,
         page_number=first_page_number,
         output_path=str(out_path),
-        crop_bbox_norm=first_crop_bbox_norm,
     )
-
-
-def _compute_spec_question_crop_bbox(question: dict) -> list[float]:
-    container_bbox = question.get("full_bbox") or question.get("bbox")
-    if not isinstance(container_bbox, list) or len(container_bbox) != 4:
-        return [0.0, 0.0, 1.0, 1.0]
-
-    x, y, w, h = container_bbox
-    y0 = y
-    y1 = y + h
-
-    prompt_bbox = question.get("prompt_bbox")
-    if isinstance(prompt_bbox, list) and len(prompt_bbox) == 4:
-        y0 = min(y0, prompt_bbox[1] - PROMPT_EXPAND_UP_NORM)
-
-    answer_bbox = question.get("answer_bbox")
-    if isinstance(answer_bbox, list) and len(answer_bbox) == 4:
-        y1 = min(1.0, answer_bbox[1] + answer_bbox[3] + ANSWER_EXPAND_DOWN_NORM)
-
-    return _clamp_bbox_norm([x, max(0.0, y0), w, max(0.01, y1 - max(0.0, y0))])
-
-
-def _iter_top_level_questions(spec: dict) -> list[tuple[int, dict]]:
-    ordered: list[tuple[int, dict]] = []
-    for page in spec.get("pages", []):
-        page_number = int(page.get("page_number", 0))
-        for question in page.get("questions", []):
-            ordered.append((page_number, question))
-    return ordered
-
-
-def _question_number_from_id(question_id: str) -> int | None:
-    m = re.search(r"(\d+)", question_id)
-    if not m:
-        return None
-    return int(m.group(1))
-
-
-def _map_dynamic_regions_to_spec_questions(
-    dynamic_regions: list[_DetectedQuestionRegion],
-    spec: dict,
-) -> dict[str, _DetectedQuestionRegion]:
-    if not dynamic_regions:
-        return {}
-
-    by_number: dict[int, _DetectedQuestionRegion] = {}
-    for region in dynamic_regions:
-        by_number.setdefault(region.question_number, region)
-
-    mapping: dict[str, _DetectedQuestionRegion] = {}
-    ordered_questions = _iter_top_level_questions(spec)
-    used_keys: set[tuple[int, int]] = set()
-
-    # First pass: numeric match by question id.
-    for _, question in ordered_questions:
-        qid = str(question.get("id", ""))
-        qnum = _question_number_from_id(qid)
-        if qnum is None:
-            continue
-        region = by_number.get(qnum)
-        if region is None:
-            continue
-        mapping[qid] = region
-        used_keys.add((region.page_number, region.question_number))
-
-    # Second pass: sequential fallback for unresolved ids.
-    remaining_regions = [
-        r
-        for r in sorted(dynamic_regions, key=lambda v: (v.question_number, v.page_number))
-        if (r.page_number, r.question_number) not in used_keys
-    ]
-    unresolved_qids = [
-        str(q.get("id", ""))
-        for _, q in ordered_questions
-        if str(q.get("id", "")) not in mapping
-    ]
-    for qid, region in zip(unresolved_qids, remaining_regions):
-        mapping[qid] = region
-
-    return mapping
-
-
-def _split_dynamic_bbox_for_subquestion(
-    parent_dynamic_bbox: list[float],
-    parent_spec_bbox: list[float],
-    subquestion: dict,
-) -> list[float]:
-    sub_container = subquestion.get("full_bbox") or subquestion.get("bbox")
-    if not isinstance(sub_container, list) or len(sub_container) != 4:
-        return parent_dynamic_bbox
-
-    rel = _relative_bbox(parent_spec_bbox, sub_container)
-    if rel is None:
-        return parent_dynamic_bbox
-
-    px, py, pw, ph = parent_dynamic_bbox
-    rx, ry, rw, rh = rel
-    return _clamp_bbox_norm([px + pw * rx, py + ph * ry, pw * rw, ph * rh])
 
 
 def _normalized_label_token(text: str) -> str:
@@ -1171,7 +1010,9 @@ def _words_bbox(words: list[_OcrWord]) -> tuple[int, int, int, int]:
     )
 
 
-def _extract_name_from_line(line_words: list[_OcrWord]) -> tuple[str, float, tuple[int, int, int, int]] | None:
+def _extract_name_from_line(
+    line_words: list[_OcrWord],
+) -> tuple[str, float, tuple[int, int, int, int]] | None:
     if not line_words:
         return None
 
@@ -1222,7 +1063,9 @@ def _extract_name_from_line(line_words: list[_OcrWord]) -> tuple[str, float, tup
     return candidate, conf, _words_bbox(value_words)
 
 
-def _extract_sid_from_line(line_words: list[_OcrWord]) -> tuple[str, float, tuple[int, int, int, int]] | None:
+def _extract_sid_from_line(
+    line_words: list[_OcrWord],
+) -> tuple[str, float, tuple[int, int, int, int]] | None:
     if not line_words:
         return None
 
@@ -1231,11 +1074,16 @@ def _extract_sid_from_line(line_words: list[_OcrWord]) -> tuple[str, float, tupl
 
     label_end_idx: int | None = None
     for i, norm in enumerate(norms):
-        if norm == "student" and i + 1 < len(norms) and norms[i + 1] in {
-            "id",
-            "studentid",
-            "sid",
-        }:
+        if (
+            norm == "student"
+            and i + 1 < len(norms)
+            and norms[i + 1]
+            in {
+                "id",
+                "studentid",
+                "sid",
+            }
+        ):
             label_end_idx = i + 1
             break
         if norm in {"studentid", "sid", "id"}:
@@ -1332,7 +1180,9 @@ def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
 
 def _find_label_word(words: list[_OcrWord], target: str) -> _OcrWord | None:
     normalized_target = target.lower()
-    candidates = [w for w in words if _normalized_label_token(w.text) == normalized_target]
+    candidates = [
+        w for w in words if _normalized_label_token(w.text) == normalized_target
+    ]
     if not candidates:
         return None
     candidates.sort(key=lambda w: (w.top, w.left))
@@ -1471,7 +1321,7 @@ def _default_auto_fields() -> list[dict]:
     ]
 
 
-def _guess_version_from_text(first_page_words: list[_OcrWord], spec: dict) -> str | None:
+def _guess_version_from_text(first_page_words: list[_OcrWord]) -> str | None:
     if not first_page_words:
         return None
 
@@ -1489,42 +1339,7 @@ def _guess_version_from_text(first_page_words: list[_OcrWord], spec: dict) -> st
     if not candidates:
         return None
 
-    versions = version_anchor_map(spec)
-    if versions:
-        for c in candidates:
-            if c in versions:
-                return c
-        return None
-
     return candidates[0]
-
-
-def detect_version_from_anchors(
-    page_image: Image.Image,
-    page_anchors: list[dict],
-    spec: dict,
-) -> str | None:
-    if not version_anchor_map(spec):
-        return None
-    if not page_anchors:
-        return None
-
-    arr = np.array(page_image)
-    page_h, page_w = arr.shape[:2]
-    detected_ids: set[str] = set()
-
-    for anchor_dict in page_anchors:
-        anchor = AnchorRegion(
-            id=anchor_dict["id"],
-            x_norm=anchor_dict["bbox"][0],
-            y_norm=anchor_dict["bbox"][1],
-            w_norm=anchor_dict["bbox"][2],
-            h_norm=anchor_dict["bbox"][3],
-        )
-        if detect_anchor_presence(arr, anchor, page_w, page_h):
-            detected_ids.add(anchor.id)
-
-    return lookup_version_by_anchors(detected_ids, spec)
 
 
 def make_review_reason(result: SubmissionResult, config: OcrConfig) -> None:
@@ -1545,7 +1360,6 @@ def make_review_reason(result: SubmissionResult, config: OcrConfig) -> None:
 
 def process_submission_pdf(
     pdf_path: str | Path,
-    spec: dict | None,
     config: OcrConfig,
     output_dir: str | Path,
     response_format: Literal["png", "pdf"] = "png",
@@ -1553,11 +1367,6 @@ def process_submission_pdf(
 ) -> SubmissionResult:
     path = Path(pdf_path)
     result = SubmissionResult(filename=path.name)
-
-    normalized_spec = spec or {}
-    spec_pages = normalized_spec.get("pages", [])
-    has_spec_fields = any(page.get("fields") for page in spec_pages)
-    has_spec_questions = any(page.get("questions") for page in spec_pages)
 
     doc = fitz.open(str(path))
 
@@ -1584,88 +1393,40 @@ def process_submission_pdf(
     }
     dynamic_regions = _detect_question_regions(page_words, page_dims, page_boxes)
 
-    # Version detection (anchor-based when available, OCR fallback otherwise).
-    anchor_version_id: str | None = None
-    if version_anchor_map(normalized_spec):
-        first_spec_page = None
-        for page_dict in spec_pages:
-            if page_dict.get("page_number") == 1:
-                first_spec_page = page_dict
-                break
-        if first_spec_page is not None and 1 in rendered_pages:
-            first_img, _, _ = rendered_pages[1]
-            anchor_version_id = detect_version_from_anchors(
-                first_img,
-                first_spec_page.get("anchors", []),
-                normalized_spec,
-            )
-
-    text_version_id = _guess_version_from_text(page_words.get(1, []), normalized_spec)
-
-    versions = version_anchor_map(normalized_spec)
-    if versions:
-        result.version_id = anchor_version_id or text_version_id
-        if result.version_id is not None:
-            result.version_confidence = 100.0 if result.version_id == anchor_version_id else 80.0
-            result.version_validated = True
-            result.version_error = None
-        else:
-            result.version_confidence = 0.0
-            result.version_validated = False
-            result.version_error = "version_not_detected"
-    else:
-        result.version_id = text_version_id
-        result.version_confidence = 80.0 if text_version_id else None
-        result.version_validated = True
-        result.version_error = None
-
-    # Field extraction
+    text_version_id = _guess_version_from_text(page_words.get(1, []))
+    result.version_id = text_version_id
+    result.version_confidence = 80.0 if text_version_id else None
+    result.version_validated = True
+    result.version_error = None
 
     all_field_results: list[FieldExtractionResult] = []
-
-    page_dict_by_number: dict[int, dict] = {
-        int(page.get("page_number", 0)): page for page in spec_pages
-    }
-
-    header_field_candidates = _extract_header_field_values(page_words.get(1, []))
-
-    for page_number in sorted(rendered_pages):
-        page_image, page_w, page_h = rendered_pages[page_number]
-        page_dict = page_dict_by_number.get(page_number, {})
-
-        fields = page_dict.get("fields", [])
-        if not fields and not has_spec_fields and page_number == 1:
-            fields = _default_auto_fields()
-
-        if not fields:
-            continue
-
+    if 1 in rendered_pages:
+        page_image, page_w, page_h = rendered_pages[1]
+        header_field_candidates = _extract_header_field_values(page_words.get(1, []))
         dynamic_regions_by_type = _detect_dynamic_field_regions(
-            page_words.get(page_number, []),
+            page_words.get(1, []),
             page_w,
             page_h,
-            page_boxes.get(page_number, []),
+            page_boxes.get(1, []),
         )
 
-        for field_def in fields:
-            fid = field_def["id"]
+        for field_def in _default_auto_fields():
             field_type = field_def.get("type", "text")
             field_config = _override_config(config, field_def)
 
-            if page_number == 1 and field_type in {"name", "sid"}:
-                header_result = header_field_candidates.get(field_type)
-                if header_result is not None:
-                    validated_header = validate_field_result(
-                        header_result,
-                        field_def,
-                        field_config,
-                    )
-                    if validated_header.validated:
-                        all_field_results.append(validated_header)
-                        continue
+            header_result = header_field_candidates.get(field_type)
+            if header_result is not None:
+                validated_header = validate_field_result(
+                    header_result,
+                    field_def,
+                    field_config,
+                )
+                if validated_header.validated:
+                    all_field_results.append(validated_header)
+                    continue
 
             dynamic_bbox = dynamic_regions_by_type.get(field_type)
-            if dynamic_bbox is not None and page_number == 1 and field_type in {"name", "sid"}:
+            if dynamic_bbox is not None:
                 ocr_result = _ocr_field_from_dynamic_region(
                     page_image,
                     dynamic_bbox,
@@ -1677,160 +1438,58 @@ def process_submission_pdf(
                 )
                 continue
 
-            if "bbox" in field_def:
-                bbox_px = _bbox_norm_to_px(field_def["bbox"], page_w, page_h)
-                region = crop_region(page_image, bbox_px)
-                ocr_result = _ocr_field_with_heuristics(region, field_def, field_config)
-                ocr_result.text = _short_text_from_result(ocr_result.text, field_def)
-                all_field_results.append(
-                    validate_field_result(ocr_result, field_def, field_config)
-                )
-                continue
-
-            if page_number == 1 and field_type in {"name", "sid"}:
-                header_result = header_field_candidates.get(field_type)
-                if header_result is not None:
-                    all_field_results.append(
-                        validate_field_result(header_result, field_def, field_config)
-                    )
-                    continue
-
-            validated = not bool(field_def.get("required", False))
-            err = None if validated else "field_region_not_detected"
             all_field_results.append(
                 FieldExtractionResult(
-                    field_id=fid,
+                    field_id=field_def["id"],
                     ocr_result=None,
-                    validated=validated,
-                    error=err,
+                    validated=True,
                 )
             )
-
-    # Question extraction
 
     all_question_results: list[QuestionExtractionResult] = []
     sub_dir = Path(output_dir) / "responses" / path.stem
     sub_dir.mkdir(parents=True, exist_ok=True)
 
-    if has_spec_questions:
-        dynamic_by_qid = _map_dynamic_regions_to_spec_questions(dynamic_regions, normalized_spec)
+    dynamic_regions_sorted = sorted(
+        dynamic_regions,
+        key=lambda r: (r.question_number, r.page_number, r.bbox_norm[1]),
+    )
 
-        for page_number, question in _iter_top_level_questions(normalized_spec):
-            if page_number not in rendered_pages:
-                continue
-            page_image, page_w, page_h = rendered_pages[page_number]
-            qid = str(question["id"])
-            subquestions = question.get("subquestions", [])
+    used_ids: set[str] = set()
+    for i, region in enumerate(dynamic_regions_sorted, start=1):
+        page_number = region.page_number
+        page_image, page_w, page_h = rendered_pages[page_number]
+        qid = f"q{region.question_number}"
+        if qid in used_ids:
+            qid = f"q{region.question_number}_{i}"
+        used_ids.add(qid)
 
-            dynamic_region = dynamic_by_qid.get(qid)
-            parent_crop_bbox = (
-                dynamic_region.bbox_norm
-                if dynamic_region is not None
-                else _compute_spec_question_crop_bbox(question)
+        if region.continuation is not None:
+            all_question_results.append(
+                _extract_question_crop_segments(
+                    rendered_pages=rendered_pages,
+                    question_id=qid,
+                    segments=[(page_number, region.bbox_norm), region.continuation],
+                    response_format=response_format,
+                    sub_dir=sub_dir,
+                )
             )
+            continue
 
-            if subquestions:
-                parent_spec_bbox = question.get("full_bbox") or question.get("bbox") or [
-                    0.0,
-                    0.0,
-                    1.0,
-                    1.0,
-                ]
-                for subquestion in subquestions:
-                    sqid = str(subquestion["id"])
-                    if dynamic_region is not None:
-                        crop_bbox = _split_dynamic_bbox_for_subquestion(
-                            parent_crop_bbox,
-                            parent_spec_bbox,
-                            subquestion,
-                        )
-                    else:
-                        crop_bbox = _compute_spec_question_crop_bbox(subquestion)
-
-                    all_question_results.append(
-                        _extract_question_crop_norm(
-                            page_image=page_image,
-                            question_id=sqid,
-                            bbox_norm=crop_bbox,
-                            page_w=page_w,
-                            page_h=page_h,
-                            page_num=page_number,
-                            response_format=response_format,
-                            sub_dir=sub_dir,
-                        )
-                    )
-                continue
-
-            if dynamic_region is not None and dynamic_region.continuation is not None:
-                segments: list[tuple[int, list[float]]] = [
-                    (page_number, parent_crop_bbox),
-                    dynamic_region.continuation,
-                ]
-                all_question_results.append(
-                    _extract_question_crop_segments(
-                        rendered_pages=rendered_pages,
-                        question_id=qid,
-                        segments=segments,
-                        response_format=response_format,
-                        sub_dir=sub_dir,
-                    )
-                )
-            else:
-                all_question_results.append(
-                    _extract_question_crop_norm(
-                        page_image=page_image,
-                        question_id=qid,
-                        bbox_norm=parent_crop_bbox,
-                        page_w=page_w,
-                        page_h=page_h,
-                        page_num=page_number,
-                        response_format=response_format,
-                        sub_dir=sub_dir,
-                    )
-                )
-    else:
-        dynamic_regions_sorted = sorted(
-            dynamic_regions,
-            key=lambda r: (r.question_number, r.page_number, r.bbox_norm[1]),
+        all_question_results.append(
+            _extract_question_crop_norm(
+                page_image=page_image,
+                question_id=qid,
+                bbox_norm=region.bbox_norm,
+                page_w=page_w,
+                page_h=page_h,
+                page_num=page_number,
+                response_format=response_format,
+                sub_dir=sub_dir,
+            )
         )
 
-        used_ids: set[str] = set()
-        for i, region in enumerate(dynamic_regions_sorted, start=1):
-            page_number = region.page_number
-            page_image, page_w, page_h = rendered_pages[page_number]
-            qid = f"q{region.question_number}"
-            if qid in used_ids:
-                qid = f"q{region.question_number}_{i}"
-            used_ids.add(qid)
-
-            if region.continuation is not None:
-                all_question_results.append(
-                    _extract_question_crop_segments(
-                        rendered_pages=rendered_pages,
-                        question_id=qid,
-                        segments=[(page_number, region.bbox_norm), region.continuation],
-                        response_format=response_format,
-                        sub_dir=sub_dir,
-                    )
-                )
-            else:
-                all_question_results.append(
-                    _extract_question_crop_norm(
-                        page_image=page_image,
-                        question_id=qid,
-                        bbox_norm=region.bbox_norm,
-                        page_w=page_w,
-                        page_h=page_h,
-                        page_num=page_number,
-                        response_format=response_format,
-                        sub_dir=sub_dir,
-                    )
-                )
-
-    version_field = extract_version_field(normalized_spec) if normalized_spec else None
-    result.fields = [
-        fr for fr in all_field_results if fr.field_id != (version_field or {}).get("id")
-    ]
+    result.fields = all_field_results
     result.questions = all_question_results
 
     make_review_reason(result, config)
@@ -1861,7 +1520,6 @@ def results_to_dict(result: SubmissionResult) -> dict:
                 "question_id": q.question_id,
                 "page_number": q.page_number,
                 "output_path": q.output_path,
-                "crop_bbox_norm": q.crop_bbox_norm,
                 "skipped": q.skipped,
                 "error": q.error,
             }

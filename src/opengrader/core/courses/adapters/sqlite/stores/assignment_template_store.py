@@ -13,9 +13,7 @@ def _row_to_assignment_template(row: sqlite3.Row) -> AssignmentTemplate:
         course_id=row["course_id"],
         name=row["name"],
         template_pdf_relpath=row["template_pdf_relpath"],
-        spec_json_relpath=row["spec_json_relpath"],
         template_sha256=row["template_sha256"],
-        spec_sha256=row["spec_sha256"],
         created_at=parse_datetime(row["created_at"]),
     )
 
@@ -29,9 +27,7 @@ class SqliteAssignmentTemplateStore:
         course_id: int,
         name: str,
         template_pdf_relpath: str,
-        spec_json_relpath: str,
         template_sha256: str,
-        spec_sha256: str,
     ) -> AssignmentTemplate:
         cursor = self._conn.execute(
             """
@@ -39,26 +35,22 @@ class SqliteAssignmentTemplateStore:
                 course_id,
                 name,
                 template_pdf_relpath,
-                spec_json_relpath,
-                template_sha256,
-                spec_sha256
+                template_sha256
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?)
             """,
             (
                 course_id,
                 name,
                 template_pdf_relpath,
-                spec_json_relpath,
                 template_sha256,
-                spec_sha256,
             ),
         )
         template_id = int(cursor.lastrowid)
         row = self._conn.execute(
             """
-            SELECT id, course_id, name, template_pdf_relpath, spec_json_relpath,
-                   template_sha256, spec_sha256, created_at
+            SELECT id, course_id, name, template_pdf_relpath,
+                   template_sha256, created_at
             FROM assignment_templates
             WHERE id = ?
             """,
@@ -69,8 +61,8 @@ class SqliteAssignmentTemplateStore:
     def list_for_course(self, course_id: int) -> list[AssignmentTemplate]:
         rows = self._conn.execute(
             """
-            SELECT id, course_id, name, template_pdf_relpath, spec_json_relpath,
-                   template_sha256, spec_sha256, created_at
+            SELECT id, course_id, name, template_pdf_relpath,
+                   template_sha256, created_at
             FROM assignment_templates
             WHERE course_id = ?
             ORDER BY created_at DESC, id DESC
@@ -82,8 +74,8 @@ class SqliteAssignmentTemplateStore:
     def get_by_id(self, template_id: int) -> AssignmentTemplate | None:
         row = self._conn.execute(
             """
-            SELECT id, course_id, name, template_pdf_relpath, spec_json_relpath,
-                   template_sha256, spec_sha256, created_at
+            SELECT id, course_id, name, template_pdf_relpath,
+                   template_sha256, created_at
             FROM assignment_templates
             WHERE id = ?
             """,
@@ -98,16 +90,14 @@ class SqliteAssignmentTemplateStore:
         *,
         template_id: int,
         template_pdf_relpath: str,
-        spec_json_relpath: str,
     ) -> None:
         self._conn.execute(
             """
             UPDATE assignment_templates
-            SET template_pdf_relpath = ?,
-                spec_json_relpath = ?
+            SET template_pdf_relpath = ?
             WHERE id = ?
             """,
-            (template_pdf_relpath, spec_json_relpath, template_id),
+            (template_pdf_relpath, template_id),
         )
 
     def set_assignment_template(
@@ -159,8 +149,8 @@ class SqliteAssignmentTemplateStore:
     def list_for_assignment(self, assignment_id: int) -> list[AssignmentTemplate]:
         rows = self._conn.execute(
             """
-            SELECT t.id, t.course_id, t.name, t.template_pdf_relpath, t.spec_json_relpath,
-                   t.template_sha256, t.spec_sha256, t.created_at
+            SELECT t.id, t.course_id, t.name, t.template_pdf_relpath,
+                   t.template_sha256, t.created_at
             FROM assignment_template_links l
             INNER JOIN assignment_templates t ON t.id = l.template_id
             WHERE l.assignment_id = ?
@@ -176,8 +166,8 @@ class SqliteAssignmentTemplateStore:
     ) -> AssignmentTemplate | None:
         row = self._conn.execute(
             """
-            SELECT t.id, t.course_id, t.name, t.template_pdf_relpath, t.spec_json_relpath,
-                   t.template_sha256, t.spec_sha256, t.created_at
+            SELECT t.id, t.course_id, t.name, t.template_pdf_relpath,
+                   t.template_sha256, t.created_at
             FROM assignment_template_links l
             INNER JOIN assignment_templates t ON t.id = l.template_id
             WHERE l.assignment_id = ?

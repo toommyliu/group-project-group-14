@@ -20,15 +20,6 @@ def _sanitize_filename(value: str) -> str:
     return cleaned or "submission"
 
 
-def infer_pages_per_submission_from_template_spec(spec: dict) -> int:
-    pages = spec.get("pages")
-    if not isinstance(pages, list) or not pages:
-        raise ValueError(
-            "template spec must include a non-empty 'pages' list to infer pages per submission"
-        )
-    return len(pages)
-
-
 def plan_submission_ranges(
     *,
     total_pages: int,

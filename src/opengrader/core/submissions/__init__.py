@@ -1,6 +1,5 @@
 from .splitter import (
     SubmissionPageRange,
-    infer_pages_per_submission_from_template_spec,
     plan_submission_ranges,
     split_scanned_submission_pdf,
 )
@@ -16,7 +15,6 @@ from .student_file import (
 
 __all__ = [
     "SubmissionPageRange",
-    "infer_pages_per_submission_from_template_spec",
     "plan_submission_ranges",
     "split_scanned_submission_pdf",
     "AssignmentTitleMetadata",

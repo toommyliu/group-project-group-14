@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import base64
-import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypedDict
-
-import fitz
+from typing import TypedDict
 
 from .generate import QuestionInput
 from .utils import default_subquestion_label
@@ -932,131 +928,8 @@ def qa_to_template_questions(
     return questions
 
 
-def _collect_question_regions(
-    spec: dict[str, Any],
-) -> dict[str, tuple[int, list[float]]]:
-    regions: dict[str, tuple[int, list[float]]] = {}
-
-    for page in spec.get("pages", []):
-        page_number = int(page["page_number"])
-        for question in page.get("questions", []):
-            question_id = str(question["id"])
-            bbox = question.get("prompt_bbox") or question.get("bbox")
-            if isinstance(bbox, list) and len(bbox) == 4:
-                regions[question_id] = (page_number, bbox)
-
-            for subquestion in question.get("subquestions", []):
-                sub_id = str(subquestion["id"])
-                sub_bbox = subquestion.get("prompt_bbox") or subquestion.get("bbox")
-                if isinstance(sub_bbox, list) and len(sub_bbox) == 4:
-                    regions[sub_id] = (page_number, sub_bbox)
-
-    return regions
-
-
-def _crop_bbox_to_data_uri(
-    doc: fitz.Document,
-    page_number: int,
-    bbox_norm: list[float],
-    *,
-    image_format: str,
-    dpi: int,
-) -> str:
-    page = doc[page_number - 1]
-    page_rect = page.rect
-
-    x, y, w, h = bbox_norm
-    clip = fitz.Rect(
-        page_rect.x0 + x * page_rect.width,
-        page_rect.y0 + y * page_rect.height,
-        page_rect.x0 + (x + w) * page_rect.width,
-        page_rect.y0 + (y + h) * page_rect.height,
-    )
-
-    pix = page.get_pixmap(clip=clip, dpi=dpi, alpha=False)
-
-    fmt = image_format.lower()
-    if fmt in {"jpg", "jpeg"}:
-        encoded = pix.tobytes("jpg")
-        mime = "image/jpeg"
-    else:
-        encoded = pix.tobytes("png")
-        mime = "image/png"
-
-    b64 = base64.b64encode(encoded).decode("ascii")
-    return f"data:{mime};base64,{b64}"
-
-
-def embed_prompt_snippets(
-    document: QADocument,
-    source_pdf: str | Path,
-    spec: dict[str, Any],
-    *,
-    image_format: str = "png",
-    dpi: int = 200,
-    version: str | None = None,
-) -> int:
-    regions = _collect_question_regions(spec)
-
-    questions_to_process = document.questions
-    if document.version_questions:
-        if version is None:
-            version = document.versions[0] if document.versions else None
-        if version and version in document.version_questions:
-            questions_to_process = document.version_questions[version]
-        elif version:
-            raise ValueError(f"version {version!r} not found in QA document")
-
-    ids: list[str] = []
-    for question in questions_to_process:
-        ids.append(question.id)
-        ids.extend(sub.id for sub in question.subquestions)
-
-    missing = [qid for qid in ids if qid not in regions]
-    if missing:
-        raise ValueError(
-            "could not find bbox regions in spec for question ids: "
-            + ", ".join(sorted(set(missing)))
-        )
-
-    updated = 0
-    with fitz.open(str(source_pdf)) as doc:
-        for question in questions_to_process:
-            page_number, bbox = regions[question.id]
-            uri = _crop_bbox_to_data_uri(
-                doc,
-                page_number,
-                bbox,
-                image_format=image_format,
-                dpi=dpi,
-            )
-            question.image_markdown = f"![{question.id}]({uri})"
-            updated += 1
-
-            for subquestion in question.subquestions:
-                sub_page, sub_bbox = regions[subquestion.id]
-                sub_uri = _crop_bbox_to_data_uri(
-                    doc,
-                    sub_page,
-                    sub_bbox,
-                    image_format=image_format,
-                    dpi=dpi,
-                )
-                subquestion.image_markdown = f"![{subquestion.id}]({sub_uri})"
-                updated += 1
-
-    return updated
-
-
 def save_qa_markdown(document: QADocument, path: str | Path) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         f.write(render_qa_markdown(document))
-
-
-def save_spec_json(spec: dict[str, Any], path: str | Path) -> None:
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(spec, f, indent=2)

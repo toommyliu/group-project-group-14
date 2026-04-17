@@ -4,26 +4,17 @@ from typing import Any
 
 import fitz
 
-from .anchor import ANCHOR_LOCATIONS, Anchor
 from .constants import LETTER_H, LETTER_W
 from .draw import (
     build_info_section,
-    create_page_with_anchors,
+    create_page,
     draw_continued_page_header,
     draw_questions_on_page,
 )
 from .fonts import register_page_fonts, resolve_template_fonts
-from .spec import VERSION_ANCHOR_MAP, build_layout_spec
 from .utils import default_subquestion_label
 
 QuestionInput = tuple[str, int, str] | dict[str, Any]
-
-
-def _filled_anchors_for_version(version: str) -> set[Anchor]:
-    configured = VERSION_ANCHOR_MAP.get(version)
-    if configured is not None:
-        return set(configured)
-    return {Anchor(anchor_id) for anchor_id in ANCHOR_LOCATIONS}
 
 
 def _resolve_continued_page_header(title: str, override: str | None) -> str:
@@ -150,6 +141,39 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
     return normalized
 
 
+def _build_template_manifest(
+    *,
+    unit_id: str,
+    version: str,
+    questions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    serialized_questions: list[dict[str, Any]] = []
+    for question in questions:
+        item: dict[str, Any] = {
+            "id": question["id"],
+            "points": question["points"],
+            "prompt": question["prompt"],
+        }
+        subquestions = question.get("subquestions", [])
+        if subquestions:
+            item["subquestions"] = [
+                {
+                    "id": subquestion["id"],
+                    "label": subquestion["label"],
+                    "points": subquestion["points"],
+                    "prompt": subquestion["prompt"],
+                }
+                for subquestion in subquestions
+            ]
+        serialized_questions.append(item)
+
+    return {
+        "unit_id": unit_id,
+        "version": version,
+        "questions": serialized_questions,
+    }
+
+
 def generate_template_pdf(
     output_path: Path,
     version: str,
@@ -157,13 +181,12 @@ def generate_template_pdf(
     title: str,
     instructions: str | None = None,
     continued_page_header: str | None = None,
-    all_versions: list[str] | None = None,
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
     font_regular_file: str | Path | None = None,
     font_bold_file: str | Path | None = None,
     start_questions_on_first_page: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     fonts = resolve_template_fonts(
         regular_file=font_regular_file, bold_file=font_bold_file
     )
@@ -172,12 +195,11 @@ def generate_template_pdf(
 
     normalized_questions = _normalize_questions(questions)
 
-    filled = _filled_anchors_for_version(version)
     continued_header_text = _resolve_continued_page_header(title, continued_page_header)
     doc = fitz.Document()
-    page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
+    page = create_page(doc, page_w, page_h)
     register_page_fonts(page, fonts)
-    start_y, field_rects = build_info_section(
+    start_y, _ = build_info_section(
         page,
         "",
         "",
@@ -195,9 +217,7 @@ def generate_template_pdf(
 
     if not start_questions_on_first_page and remaining:
         page_number = 2
-        current_page = create_page_with_anchors(
-            doc, page_w, page_h, filled_anchors=filled
-        )
+        current_page = create_page(doc, page_w, page_h)
         register_page_fonts(current_page, fonts)
         current_start_y = draw_continued_page_header(
             page=current_page,
@@ -206,10 +226,8 @@ def generate_template_pdf(
             fonts=fonts,
         )
 
-    question_meta: list[dict[str, Any]] = []
-
     while remaining:
-        drawn_count, drawn_meta = draw_questions_on_page(
+        drawn_count, _ = draw_questions_on_page(
             current_page,
             page_number,
             remaining,
@@ -221,15 +239,12 @@ def generate_template_pdf(
         )
         if drawn_count <= 0:
             raise ValueError("No questions could be drawn on the current page")
-        question_meta.extend(drawn_meta)
         remaining = remaining[drawn_count:]
         if not remaining:
             break
 
         page_number += 1
-        current_page = create_page_with_anchors(
-            doc, page_w, page_h, filled_anchors=filled
-        )
+        current_page = create_page(doc, page_w, page_h)
         register_page_fonts(current_page, fonts)
         current_start_y = draw_continued_page_header(
             page=current_page,
@@ -241,13 +256,10 @@ def generate_template_pdf(
     doc.save(str(output_path), garbage=4, deflate=True)
     doc.close()
 
-    return build_layout_spec(
+    return _build_template_manifest(
         unit_id="cmpe195-exam1-sp26",
-        versions=all_versions or [version],
-        page_w=page_w,
-        page_h=page_h,
-        field_rects=field_rects,
-        question_meta=question_meta,
+        version=version,
+        questions=normalized_questions,
     )
 
 
@@ -274,10 +286,9 @@ def generate_submission_pdf(
 
     normalized_questions = _normalize_questions(questions)
 
-    filled = _filled_anchors_for_version(version)
     continued_header_text = _resolve_continued_page_header(title, continued_page_header)
     doc = fitz.Document()
-    page = create_page_with_anchors(doc, page_w, page_h, filled_anchors=filled)
+    page = create_page(doc, page_w, page_h)
     register_page_fonts(page, fonts)
     start_y, _ = build_info_section(
         page,
@@ -296,9 +307,7 @@ def generate_submission_pdf(
 
     if not start_questions_on_first_page and remaining:
         page_number = 2
-        current_page = create_page_with_anchors(
-            doc, page_w, page_h, filled_anchors=filled
-        )
+        current_page = create_page(doc, page_w, page_h)
         register_page_fonts(current_page, fonts)
         current_start_y = draw_continued_page_header(
             page=current_page,
@@ -324,9 +333,7 @@ def generate_submission_pdf(
             break
 
         page_number += 1
-        current_page = create_page_with_anchors(
-            doc, page_w, page_h, filled_anchors=filled
-        )
+        current_page = create_page(doc, page_w, page_h)
         register_page_fonts(current_page, fonts)
         current_start_y = draw_continued_page_header(
             page=current_page,

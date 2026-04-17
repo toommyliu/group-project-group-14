@@ -3,9 +3,7 @@ from __future__ import annotations
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
-from opengrader.core.ocr import SpecError, load_spec
 from opengrader.core.submissions import (
-    infer_pages_per_submission_from_template_spec,
     plan_submission_ranges,
     split_scanned_submission_pdf,
 )
@@ -14,9 +12,9 @@ from pypdf import PdfReader
 
 EPILOG = """
 examples:
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --template-spec samples/spec-vA.json
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --template-spec samples/spec-vA.json --start-page 3
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --start-page 3
 """
 
 
@@ -36,21 +34,10 @@ def _build_parser() -> ArgumentParser:
         help="Directory where split PDF files will be written.",
     )
     parser.add_argument(
-        "--template-spec",
-        default=None,
-        help=(
-            "Path to template spec JSON (for example samples/spec-vA.json). "
-            "If provided, pages-per-submission defaults to the number of pages in the template spec."
-        ),
-    )
-    parser.add_argument(
         "--pages-per-submission",
         type=int,
-        default=None,
-        help=(
-            "Fixed number of pages per student submission. "
-            "If omitted, this is inferred from --template-spec."
-        ),
+        required=True,
+        help="Fixed number of pages per student submission.",
     )
     parser.add_argument(
         "--start-page",
@@ -97,21 +84,7 @@ def run_cli() -> None:
     if total_pages <= 0:
         raise ValueError(f"input PDF has no pages: {input_pdf}")
 
-    inferred_pages_per_submission: int | None = None
-    if args.template_spec:
-        try:
-            template_spec = load_spec(args.template_spec)
-        except SpecError as exc:
-            raise ValueError(f"invalid template spec: {exc}") from exc
-        inferred_pages_per_submission = infer_pages_per_submission_from_template_spec(
-            template_spec
-        )
-
-    pages_per_submission = args.pages_per_submission or inferred_pages_per_submission
-    if pages_per_submission is None:
-        raise ValueError(
-            "provide --pages-per-submission or --template-spec to determine split size"
-        )
+    pages_per_submission = args.pages_per_submission
 
     ranges = plan_submission_ranges(
         total_pages=total_pages,
@@ -123,13 +96,7 @@ def run_cli() -> None:
     )
 
     print(f"Input: {input_pdf} ({total_pages} pages)")
-    if inferred_pages_per_submission is not None and args.pages_per_submission is None:
-        print(
-            "Split size: "
-            f"{pages_per_submission} page(s) per submission (inferred from {args.template_spec})"
-        )
-    else:
-        print(f"Split size: {pages_per_submission} page(s) per submission")
+    print(f"Split size: {pages_per_submission} page(s) per submission")
 
     print(f"Planned student splits: {len(ranges)}")
     for page_range in ranges:

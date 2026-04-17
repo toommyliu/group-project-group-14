@@ -1,13 +1,10 @@
 import csv
 import json
-import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from opengrader.core.ocr import (
     OcrConfig,
-    SpecError,
-    load_spec,
     process_submission_pdf,
     results_to_dict,
 )
@@ -15,22 +12,17 @@ from opengrader.core.ocr import (
 
 EPILOG = """
 examples:
-  uv run ocr-pdf --template spec.json --input submissions/ --output out/
-  uv run ocr-pdf --template spec.json --input submission1.pdf --output out/
-  uv run ocr-pdf --template spec.json --input submissions/ --output out/ --response-format pdf --dpi 200
+  uv run ocr-pdf --input submissions/ --output out/
+  uv run ocr-pdf --input submission1.pdf --output out/
+  uv run ocr-pdf --input submissions/ --output out/ --response-format pdf --dpi 200
 """
 
 
 def setup_args() -> ArgumentParser:
     parser = ArgumentParser(
-        description="OCR extraction from gradeable unit PDFs using a template spec.",
+        description="OCR extraction from gradeable unit PDFs.",
         epilog=EPILOG,
         formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--template",
-        required=True,
-        help="Path to template JSON spec file.",
     )
     parser.add_argument(
         "--input",
@@ -90,7 +82,7 @@ def setup_args() -> ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Validate spec and list input files without running OCR.",
+        help="List input files without running OCR.",
     )
     return parser
 
@@ -165,18 +157,7 @@ def run_cli() -> None:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"Loading spec: {args.template}")
-    try:
-        spec = load_spec(args.template)
-    except SpecError as e:
-        print(f"SpecError: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    unit_id = spec.get("unit_id", "unknown")
-    print(
-        f"Spec loaded: unit_id={unit_id!r}, schema_version={spec.get('schema_version', '?')}"
-    )
+    spec = {}
 
     input_paths = collect_input_paths(args.input)
     print(f"Found {len(input_paths)} PDF(s) to process")

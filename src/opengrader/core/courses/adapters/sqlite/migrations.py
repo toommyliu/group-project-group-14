@@ -7,7 +7,7 @@ from opengrader.core.courses.domain.entities import ALLOWED_ASSIGNMENT_TYPES
 
 from .connection import create_sqlite_connection
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _drop_course_tables(conn: sqlite3.Connection) -> None:
@@ -26,7 +26,7 @@ def _drop_course_tables(conn: sqlite3.Connection) -> None:
     )
 
 
-def _apply_v2_schema(conn: sqlite3.Connection) -> None:
+def _apply_v3_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS course_catalogs (
@@ -98,9 +98,7 @@ def _apply_v2_schema(conn: sqlite3.Connection) -> None:
             course_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             template_pdf_relpath TEXT NOT NULL,
-            spec_json_relpath TEXT NOT NULL,
             template_sha256 TEXT NOT NULL,
-            spec_sha256 TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
         );
@@ -164,7 +162,7 @@ def initialize_sqlite_database(db_path: str | Path) -> None:
 
         if current_version < SCHEMA_VERSION:
             _drop_course_tables(conn)
-            _apply_v2_schema(conn)
+            _apply_v3_schema(conn)
             conn.execute("DELETE FROM schema_migrations")
             conn.execute(
                 "INSERT INTO schema_migrations(version) VALUES (?)",

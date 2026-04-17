@@ -55,7 +55,6 @@ class Provider(Protocol):
         assignment_id: int,
         name: str,
         template_pdf_path: str,
-        spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary: ...
 
     def list_assignment_templates(

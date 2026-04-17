@@ -159,14 +159,12 @@ class TemplateFlowProvider(FakeDataProvider):
         assignment_id: int,
         name: str,
         template_pdf_path: str,
-        spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
         self.created_template_args.append(
             {
                 "assignment_id": assignment_id,
                 "name": name,
                 "template_pdf_path": template_pdf_path,
-                "spec_json_path": spec_json_path,
             }
         )
         template_id = 41 + len(self.created_template_args)
@@ -179,18 +177,6 @@ class TemplateFlowProvider(FakeDataProvider):
                 f"assignments/{assignment_id}-hw-1/templates/"
                 f"{name.lower().replace(' ', '-')}-t{template_id}.pdf"
             ),
-            spec_json_relpath=(
-                "courses/cmpe-195-spring-2026/"
-                f"assignments/{assignment_id}-hw-1/templates/"
-                f"{name.lower().replace(' ', '-')}-t{template_id}.spec.json"
-                if spec_json_path is not None
-                else (
-                    "courses/cmpe-195-spring-2026/"
-                    f"assignments/{assignment_id}-hw-1/templates/"
-                    f"{name.lower().replace(' ', '-')}-t{template_id}.spec.pending.json"
-                )
-            ),
-            spec_pending=spec_json_path is None,
         )
 
     def set_assignment_template(
@@ -361,12 +347,12 @@ def test_assignment_actions_update_status() -> None:
     assert "Highlight an assignment" in app.home_screen.status
 
 
-def test_edit_assignment_template_uploads_pdf_and_spec() -> None:
+def test_edit_assignment_template_uploads_pdf() -> None:
     app = TemplateFlowApp(
         [
-            {"name": "HW 1 Template", "versions": "A", "strategy": "pdf+spec"},
+            {"name": "HW 1 Template", "versions": "A"},
             Path("/tmp/template.pdf"),
-            Path("/tmp/spec.json"),
+            None,
         ]
     )
     state = TuiWorkflowState()
@@ -379,16 +365,16 @@ def test_edit_assignment_template_uploads_pdf_and_spec() -> None:
     assert len(provider.created_template_args) == 1
     assert provider.created_template_args[0]["name"] == "HW 1 Template [vA]"
     assert provider.created_template_args[0]["assignment_id"] == 1
-    assert provider.created_template_args[0]["spec_json_path"] == "/tmp/spec.json"
     assert provider.replaced_assignment == (1, [42], 42)
     assert "Linked template 'HW 1 Template [vA]'" in app.home_screen.status
 
 
-def test_edit_assignment_template_supports_pdf_only_strategy() -> None:
+def test_edit_assignment_template_supports_single_version() -> None:
     app = TemplateFlowApp(
         [
-            {"name": "HW 1 Template", "versions": "", "strategy": "pdf-only"},
+            {"name": "HW 1 Template", "versions": ""},
             Path("/tmp/template.pdf"),
+            None,
         ]
     )
     state = TuiWorkflowState()
@@ -401,9 +387,8 @@ def test_edit_assignment_template_supports_pdf_only_strategy() -> None:
     assert len(provider.created_template_args) == 1
     assert provider.created_template_args[0]["name"] == "HW 1 Template"
     assert provider.created_template_args[0]["assignment_id"] == 1
-    assert provider.created_template_args[0]["spec_json_path"] is None
     assert provider.replaced_assignment == (1, [42], 42)
-    assert "spec pending" in app.home_screen.status
+    assert "Linked template 'HW 1 Template'" in app.home_screen.status
 
 
 def test_edit_assignment_template_supports_multiple_versions() -> None:
@@ -412,11 +397,10 @@ def test_edit_assignment_template_supports_multiple_versions() -> None:
             {
                 "name": "HW 1 Template",
                 "versions": "A,B",
-                "strategy": "pdf+spec",
             },
             Path("/tmp/template-a.pdf"),
             Path("/tmp/template-b.pdf"),
-            Path("/tmp/spec-shared.json"),
+            None,
         ]
     )
     state = TuiWorkflowState()
@@ -429,11 +413,5 @@ def test_edit_assignment_template_supports_multiple_versions() -> None:
     assert len(provider.created_template_args) == 2
     assert provider.created_template_args[0]["name"] == "HW 1 Template [vA]"
     assert provider.created_template_args[1]["name"] == "HW 1 Template [vB]"
-    assert (
-        provider.created_template_args[0]["spec_json_path"] == "/tmp/spec-shared.json"
-    )
-    assert (
-        provider.created_template_args[1]["spec_json_path"] == "/tmp/spec-shared.json"
-    )
     assert provider.replaced_assignment == (1, [42, 43], 42)
     assert "Linked 2 template versions" in app.home_screen.status

@@ -64,7 +64,9 @@ class StudentSubmissionBuildResult:
 
 
 def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
-    normalized = "\n".join(line.strip() for line in raw_title.splitlines() if line.strip())
+    normalized = "\n".join(
+        line.strip() for line in raw_title.splitlines() if line.strip()
+    )
 
     canonical_match = _TITLE_CANONICAL_RE.search(normalized)
     if canonical_match is not None:
@@ -119,38 +121,8 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
     )
 
 
-def index_spec_questions(spec: dict) -> dict[str, dict]:
-    indexed: dict[str, dict] = {}
-    for page in spec.get("pages", []):
-        for question in page.get("questions", []):
-            indexed[str(question["id"])] = question
-            for subquestion in question.get("subquestions", []):
-                indexed[str(subquestion["id"])] = subquestion
-    return indexed
-
-
-def _norm_bbox_to_px(
-    bbox_norm: list[float], page_w: int, page_h: int
-) -> tuple[int, int, int, int]:
-    x, y, w, h = bbox_norm
-    x = max(0.0, min(1.0, x))
-    y = max(0.0, min(1.0, y))
-    w = max(0.0, min(1.0 - x, w))
-    h = max(0.0, min(1.0 - y, h))
-    x0 = int(round(x * page_w))
-    y0 = int(round(y * page_h))
-    x1 = int(round((x + w) * page_w))
-    y1 = int(round((y + h) * page_h))
-    x0 = max(0, min(page_w, x0))
-    y0 = max(0, min(page_h, y0))
-    x1 = max(0, min(page_w, x1))
-    y1 = max(0, min(page_h, y1))
-    return x0, y0, x1, y1
-
-
 def extract_title_text_from_submission(
     pdf_path: str | Path,
-    spec: dict,
     config: OcrConfig,
     dpi: int,
 ) -> str:
@@ -167,34 +139,11 @@ def extract_title_text_from_submission(
 
         page_image, page_w, page_h = render_page_to_image(doc, page_idx=0, dpi=dpi)
 
-    page_one = None
-    for page in spec.get("pages", []):
-        if page.get("page_number") == 1:
-            page_one = page
-            break
-
-    # Use a generous top crop and union with spec title bbox when available.
-    default_bbox = [0.05, 0.02, 0.9, 0.30]
-    title_bbox = page_one.get("title_bbox") if page_one is not None else None
-
-    if isinstance(title_bbox, list) and len(title_bbox) == 4:
-        tx, ty, tw, th = title_bbox
-        expanded = [
-            max(0.0, tx - 0.08),
-            max(0.0, ty - 0.04),
-            min(1.0, tw + 0.16),
-            min(1.0, th + 0.12),
-        ]
-        x0 = min(default_bbox[0], expanded[0])
-        y0 = min(default_bbox[1], expanded[1])
-        x1 = max(default_bbox[0] + default_bbox[2], expanded[0] + expanded[2])
-        y1 = max(default_bbox[1] + default_bbox[3], expanded[1] + expanded[3])
-        merged_bbox = [x0, y0, max(0.05, x1 - x0), max(0.05, y1 - y0)]
-    else:
-        merged_bbox = default_bbox
-
-    bbox_px = _norm_bbox_to_px(merged_bbox, page_w, page_h)
-    region = page_image.crop(bbox_px)
+    x0 = int(round(page_w * 0.05))
+    y0 = int(round(page_h * 0.02))
+    x1 = int(round(page_w * 0.95))
+    y1 = int(round(page_h * 0.32))
+    region = page_image.crop((x0, y0, x1, y1))
 
     primary = ocr_region(region, config).text.strip()
     secondary = ocr_region(
@@ -226,48 +175,10 @@ def extract_title_text_from_submission(
     return best
 
 
-def _relative_bbox(parent_bbox: list[float], child_bbox: list[float]) -> list[float] | None:
-    if len(parent_bbox) != 4 or len(child_bbox) != 4:
-        return None
-
-    px, py, pw, ph = parent_bbox
-    cx, cy, cw, ch = child_bbox
-    if pw <= 0 or ph <= 0:
-        return None
-
-    rx = (cx - px) / pw
-    ry = (cy - py) / ph
-    rw = cw / pw
-    rh = ch / ph
-
-    if rw <= 0 or rh <= 0:
-        return None
-
-    # Clamp to image bounds to guard against tiny floating-point drift.
-    rx = max(0.0, min(1.0, rx))
-    ry = max(0.0, min(1.0, ry))
-    rw = max(0.0, min(1.0 - rx, rw))
-    rh = max(0.0, min(1.0 - ry, rh))
-    return [rx, ry, rw, rh]
-
-
-def ocr_image_text(
-    path: str | Path,
-    config: OcrConfig,
-    *,
-    answer_bbox: list[float] | None = None,
-    container_bbox: list[float] | None = None,
-) -> str:
+def ocr_image_text(path: str | Path, config: OcrConfig) -> str:
     image_path = Path(path)
     with Image.open(image_path) as image:
-        region = image
-        if answer_bbox is not None and container_bbox is not None:
-            relative = _relative_bbox(container_bbox, answer_bbox)
-            if relative is not None:
-                bbox_px = _norm_bbox_to_px(relative, image.width, image.height)
-                region = image.crop(bbox_px)
-
-        result = ocr_region(region, config)
+        result = ocr_region(image, config)
 
     return result.text.strip()
 
@@ -358,7 +269,6 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
 def build_student_submission_document(
     *,
     pdf_path: str | Path,
-    spec: dict,
     output_dir: str | Path,
     ocr_config: OcrConfig,
     dpi: int = 300,
@@ -369,7 +279,6 @@ def build_student_submission_document(
 
     extraction_result = process_submission_pdf(
         pdf_path=pdf,
-        spec=spec,
         config=ocr_config,
         output_dir=out_dir,
         response_format="png",
@@ -388,21 +297,15 @@ def build_student_submission_document(
 
     title_text = extract_title_text_from_submission(
         pdf_path=pdf,
-        spec=spec,
         config=text_ocr_config,
         dpi=dpi,
     )
     title_meta = parse_assignment_metadata_from_title(title_text)
 
-    spec_questions = index_spec_questions(spec)
     questions: list[StudentSubmissionQuestion] = []
 
     for extracted_question in extraction_result.questions:
         qid = extracted_question.question_id
-        spec_question = spec_questions.get(qid, {})
-        prompt = str(spec_question.get("prompt", ""))
-        points_raw = spec_question.get("points")
-        possible_points = float(points_raw) if isinstance(points_raw, (int, float)) else None
 
         response_image_path: str | None = None
         response_text = ""
@@ -414,19 +317,13 @@ def build_student_submission_document(
                 except ValueError:
                     response_image_path = str(image_path)
 
-                response_text = ocr_image_text(
-                    image_path,
-                    text_ocr_config,
-                    answer_bbox=spec_question.get("answer_bbox"),
-                    container_bbox=spec_question.get("full_bbox")
-                    or spec_question.get("bbox"),
-                )
+                response_text = ocr_image_text(image_path, text_ocr_config)
 
         questions.append(
             StudentSubmissionQuestion(
                 question_id=qid,
-                prompt=prompt,
-                possible_points=possible_points,
+                prompt="",
+                possible_points=None,
                 response_image_path=response_image_path,
                 response_text=response_text,
             )
