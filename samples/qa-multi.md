@@ -1,6 +1,5 @@
 ---
-title: |
-  Quiz 1: Mixed Topics
+title: CS146: Quiz 1
 instructions: Closed book, closed notes.
 continued_page_header: Quiz 1: Mixed Topics
 questions_start_page: 1
