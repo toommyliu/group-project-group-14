@@ -31,6 +31,7 @@ tui-dev = "opengrader.tui.main:run_app_dev"
 ocr-pdf = "opengrader.cli.ocr_pdf:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
 student-submission-file = "opengrader.cli.student_submission_file:run_cli"
+student-submission-splitter = "opengrader.cli.student_submission_splitter:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opengrader"]
