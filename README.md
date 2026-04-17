@@ -122,14 +122,6 @@ uv run ocr-pdf --help
   - `embed-snippets`: Embed question images into QA files
 - `ocr-pdf`: Extract text from PDFs using OCR
 - `ocr-preview-pdf`: Preview and adjust OCR detection regions from a spec.json
-
-Helper/bootstrapping scripts:
-- `pdf-splitter`:  Split PDFs
-- `question-splitter`: Split PDFs by question regions
-- `roster-reader`: Read course roster from csv file
-- `sample-pdf`: Generate sample gradeable PDFs for testing
-- `course-demo`: CLI for creating demo course data
-- `seed-db`: Seed database with test data
 </details>
 
 > [!TIP]
