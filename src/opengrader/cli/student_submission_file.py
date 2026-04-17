@@ -10,6 +10,7 @@ EPILOG = """
 examples:
   uv run student-submission-file --template samples/spec-vA.json --input split/ --output out/submissions/
   uv run student-submission-file --template samples/spec-vA.json --input split/student-0001.pdf --output out/submissions/ --dpi 200
+  uv run student-submission-file --input split/ --output out/submissions/  # OCR-only layout detection (no template)
 """
 
 
@@ -24,8 +25,11 @@ def _build_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "--template",
-        required=True,
-        help="Path to template spec JSON used for OCR fields/question regions.",
+        required=False,
+        help=(
+            "Optional path to template spec JSON. If omitted, the command uses "
+            "OCR-only question/field detection without template bounding boxes."
+        ),
     )
     parser.add_argument(
         "--input",
@@ -94,10 +98,25 @@ def run_cli() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    try:
-        spec = load_spec(args.template)
-    except SpecError as exc:
-        raise ValueError(f"invalid template spec: {exc}") from exc
+    if args.template:
+        try:
+            spec = load_spec(args.template)
+        except SpecError as exc:
+            raise ValueError(f"invalid template spec: {exc}") from exc
+    else:
+        spec = {
+            "schema_version": "1.0",
+            "unit_id": "autodetected",
+            "pages": [
+                {
+                    "page_number": 1,
+                    "anchors": [],
+                    "fields": [],
+                    "questions": [],
+                    "title_bbox": [0.15, 0.05, 0.7, 0.2],
+                }
+            ],
+        }
 
     input_pdfs = _collect_input_pdfs(args.input)
     output_dir = Path(args.output)
@@ -111,7 +130,10 @@ def run_cli() -> None:
         confidence_threshold=args.confidence_threshold,
     )
 
-    print(f"Loaded template spec: {args.template}")
+    if args.template:
+        print(f"Loaded template spec: {args.template}")
+    else:
+        print("No template spec provided; using OCR-only extraction mode.")
     print(f"Found {len(input_pdfs)} submission PDF(s)")
 
     for i, pdf_path in enumerate(input_pdfs, 1):
