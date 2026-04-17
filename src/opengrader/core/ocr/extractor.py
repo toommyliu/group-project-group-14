@@ -25,7 +25,12 @@ DEFAULT_SID_REGEX = r"^\d{9}$"
 
 QUESTION_START_MARGIN_NORM = 0.012
 QUESTION_END_MARGIN_NORM = 0.006
-QUESTION_DEFAULT_PAGE_END_NORM = 0.968
+QUESTION_DEFAULT_PAGE_END_NORM = 0.965
+QUESTION_MAX_END_NORM = 0.988
+QUESTION_DEFAULT_X0_NORM = 0.11
+QUESTION_DEFAULT_X1_NORM = 0.89
+QUESTION_SPAN_TRIGGER_Y_NORM = 0.84
+QUESTION_SPAN_NEXT_PAGE_START_NORM = 0.04
 PROMPT_EXPAND_UP_NORM = 0.02
 ANSWER_EXPAND_DOWN_NORM = 0.01
 
@@ -116,6 +121,7 @@ class _DetectedQuestionRegion:
     page_number: int
     question_number: int
     bbox_norm: list[float]
+    continuation: tuple[int, list[float]] | None = None
 
 
 def _override_config(base: OcrConfig, field: dict) -> OcrConfig:
@@ -135,8 +141,142 @@ def _normalize_text(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip()
 
 
+def _normalize_name_text(raw: str) -> str:
+    text = raw.replace("|", " ").replace("_", " ")
+    text = text.replace("“", " ").replace("”", " ").replace("`", " ")
+    text = re.sub(r"[^A-Za-z\s\-'\.]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^(?i:name)\s+", "", text)
+    return text
+
+
+def _pytesseract_string(image: Image.Image, *, lang: str, config: str) -> str:
+    try:
+        return pytesseract.image_to_string(image, lang=lang, config=config)
+    except Exception:
+        return ""
+
+
+def _ocr_sid_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
+    resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    variants = [region]
+    if region.width < 1600 and region.height < 500:
+        variants.append(region.resize((region.width * 2, region.height * 2), resample))
+
+    psm_values = [7, 8, 6, 11]
+    candidates: list[tuple[float, str, float]] = []
+
+    for image_variant in variants:
+        for psm in psm_values:
+            local_config = OcrConfig(
+                lang=config.lang,
+                psm=psm,
+                whitelist="0123456789",
+                deskew=False,
+                confidence_threshold=0,
+                text_cleanup_fn=config.text_cleanup_fn,
+            )
+            ocr = ocr_region(image_variant, local_config)
+            processed_digits = "".join(re.findall(r"\d", ocr.text))
+
+            raw = _pytesseract_string(
+                image_variant,
+                lang=config.lang,
+                config=f"--psm {psm} -c tessedit_char_whitelist=0123456789",
+            )
+            raw_digits = "".join(re.findall(r"\d", raw))
+
+            for digits, conf in [
+                (processed_digits, ocr.confidence),
+                (raw_digits, max(42.0, ocr.confidence * 0.65)),
+            ]:
+                if not digits:
+                    continue
+                exact = re.search(r"\d{9}", digits)
+                normalized = exact.group(0) if exact else digits[:9]
+                score = conf + (55.0 if exact else 0.0) - abs(9 - len(normalized)) * 7.0
+                candidates.append((score, normalized, conf))
+
+    if not candidates:
+        return OcrResult(text="", confidence=0.0, bbox_px=(0, 0, 0, 0))
+
+    best = max(candidates, key=lambda item: item[0])
+    if len(best[1]) < 5:
+        return OcrResult(text="", confidence=max(0.0, best[2]), bbox_px=(0, 0, 0, 0))
+
+    final_conf = max(0.0, best[2])
+    if len(best[1]) == 9:
+        final_conf = max(final_conf, 82.0)
+    return OcrResult(text=best[1], confidence=final_conf, bbox_px=(0, 0, 0, 0))
+
+
+def _ocr_name_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
+    resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    variants = [region]
+    if region.width < 2000 and region.height < 650:
+        variants.append(region.resize((region.width * 2, region.height * 2), resample))
+
+    candidates: list[tuple[float, str, float]] = []
+
+    for image_variant in variants:
+        for psm in [7, 6, 11]:
+            local_config = OcrConfig(
+                lang=config.lang,
+                psm=psm,
+                whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -'.",
+                deskew=False,
+                confidence_threshold=0,
+                text_cleanup_fn=config.text_cleanup_fn,
+            )
+            ocr = ocr_region(image_variant, local_config)
+            cleaned = _normalize_name_text(ocr.text)
+            if cleaned:
+                letters = len(re.findall(r"[A-Za-z]", cleaned))
+                score = ocr.confidence + letters * 3.0 + (8.0 if " " in cleaned else 0.0)
+                candidates.append((score, cleaned, ocr.confidence))
+
+        raw = _pytesseract_string(image_variant, lang=config.lang, config="--psm 7")
+        cleaned_raw = _normalize_name_text(raw)
+        if cleaned_raw:
+            letters = len(re.findall(r"[A-Za-z]", cleaned_raw))
+            score = 32.0 + letters * 2.5 + (8.0 if " " in cleaned_raw else 0.0)
+            candidates.append((score, cleaned_raw, 40.0))
+
+    if not candidates:
+        base = ocr_region(region, config)
+        return OcrResult(
+            text=_normalize_name_text(base.text),
+            confidence=base.confidence,
+            bbox_px=base.bbox_px,
+        )
+
+    best = max(candidates, key=lambda item: item[0])
+    final_conf = max(0.0, best[2])
+    letter_count = len(re.findall(r"[A-Za-z]", best[1]))
+    if letter_count < 2:
+        return OcrResult(text="", confidence=final_conf, bbox_px=(0, 0, 0, 0))
+    if letter_count >= 4:
+        final_conf = max(final_conf, 72.0)
+    return OcrResult(text=best[1], confidence=final_conf, bbox_px=(0, 0, 0, 0))
+
+
+def _ocr_field_with_heuristics(
+    region: Image.Image,
+    field: dict,
+    config: OcrConfig,
+) -> OcrResult:
+    ftype = field.get("type", "text")
+    if ftype == "sid":
+        return _ocr_sid_robust(region, config)
+    if ftype == "name":
+        return _ocr_name_robust(region, config)
+    return ocr_region(region, config)
+
+
 def _short_text_from_result(text: str, field: dict) -> str:
     ftype = field.get("type", "text")
+    if ftype == "name":
+        return _normalize_name_text(text)
     if ftype == "sid":
         digits = re.findall(r"\d", text)
         return "".join(digits)
@@ -247,6 +387,40 @@ def render_page_to_image(
 def crop_region(image: Image.Image, bbox_px: tuple[int, int, int, int]) -> Image.Image:
     x0, y0, x1, y1 = bbox_px
     return image.crop((x0, y0, x1, y1))
+
+
+def _trim_question_region(region: Image.Image, *, margin_px: int = 12) -> Image.Image:
+    """Trim excess white border while preserving response content."""
+    gray = np.array(region.convert("L"))
+    if gray.size == 0:
+        return region
+
+    dark_mask = gray < 238
+    coords = np.argwhere(dark_mask)
+    if coords.size == 0:
+        return region
+
+    y0, x0 = coords.min(axis=0)
+    y1, x1 = coords.max(axis=0)
+
+    x0 = max(0, int(x0) - margin_px)
+    y0 = max(0, int(y0) - margin_px)
+    x1 = min(region.width, int(x1) + margin_px + 1)
+    y1 = min(region.height, int(y1) + margin_px + 1)
+
+    if x1 <= x0 or y1 <= y0:
+        return region
+
+    trimmed = region.crop((x0, y0, x1, y1))
+    original_area = max(1, region.width * region.height)
+    trimmed_area = trimmed.width * trimmed.height
+    area_ratio = trimmed_area / original_area
+
+    # Guardrails: avoid over-trimming on sparse/noisy scans.
+    if area_ratio < 0.12 or area_ratio > 0.995:
+        return region
+
+    return trimmed
 
 
 def _safe_image_to_data(
@@ -541,6 +715,54 @@ def _match_box_for_marker(
     return expanded
 
 
+def _estimate_question_column_bounds(
+    page_boxes: dict[int, list[list[float]]],
+) -> tuple[float, float]:
+    x0_values: list[float] = []
+    x1_values: list[float] = []
+
+    for boxes in page_boxes.values():
+        for box in boxes:
+            x, y, w, h = box
+            if w < 0.45 or h < 0.08:
+                continue
+            if y < 0.12:
+                continue
+            x0_values.append(x)
+            x1_values.append(x + w)
+
+    if not x0_values or not x1_values:
+        return QUESTION_DEFAULT_X0_NORM, QUESTION_DEFAULT_X1_NORM
+
+    x0 = max(0.02, float(median(x0_values)) - 0.004)
+    x1 = min(0.98, float(median(x1_values)) + 0.004)
+    if x1 - x0 < 0.30:
+        return QUESTION_DEFAULT_X0_NORM, QUESTION_DEFAULT_X1_NORM
+    return x0, x1
+
+
+def _next_question_marker(
+    markers: list[_QuestionMarker],
+    current: _QuestionMarker,
+) -> _QuestionMarker | None:
+    wanted = current.question_number + 1
+    candidates = [
+        marker
+        for marker in markers
+        if marker.question_number == wanted
+        and (
+            marker.page_number > current.page_number
+            or (
+                marker.page_number == current.page_number
+                and marker.y_px > current.y_px
+            )
+        )
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda marker: (marker.page_number, marker.y_px, marker.x_px))
+
+
 def _detect_question_regions(
     page_words: dict[int, list[_OcrWord]],
     page_dims: dict[int, tuple[int, int]],
@@ -555,11 +777,13 @@ def _detect_question_regions(
         return []
 
     markers = _filter_markers_by_left_margin(markers)
-    markers.sort(key=lambda m: (m.page_number, m.y_px, m.x_px))
+    markers.sort(key=lambda marker: (marker.page_number, marker.y_px, marker.x_px))
 
     by_page: dict[int, list[_QuestionMarker]] = {}
     for marker in markers:
         by_page.setdefault(marker.page_number, []).append(marker)
+
+    default_x0, default_x1 = _estimate_question_column_bounds(page_boxes)
 
     regions: list[_DetectedQuestionRegion] = []
     for page_number in sorted(by_page):
@@ -571,38 +795,67 @@ def _detect_question_regions(
             marker_y_norm = marker.y_px / page_h if page_h else 0.0
             start_y = max(0.0, marker_y_norm - QUESTION_START_MARGIN_NORM)
 
-            if idx + 1 < len(markers_on_page):
-                next_y = markers_on_page[idx + 1].y_px / page_h
+            next_same_page = markers_on_page[idx + 1] if idx + 1 < len(markers_on_page) else None
+            next_question = _next_question_marker(markers, marker)
+            spans_next_page = (
+                next_same_page is None
+                and next_question is not None
+                and next_question.page_number > page_number
+                and marker_y_norm >= QUESTION_SPAN_TRIGGER_Y_NORM
+            )
+
+            if next_same_page is not None:
+                next_y = next_same_page.y_px / page_h
                 end_y = max(start_y + 0.02, next_y - QUESTION_END_MARGIN_NORM)
+            elif spans_next_page:
+                end_y = QUESTION_MAX_END_NORM
             else:
                 end_y = QUESTION_DEFAULT_PAGE_END_NORM
 
-            x0 = max(0.05, (marker.x_px / page_w) - 0.03)
-            x1 = 0.92
-
-            bbox = _clamp_bbox_norm([x0, start_y, max(0.05, x1 - x0), end_y - start_y])
+            x0 = default_x0
+            x1 = default_x1
 
             matched_box = _match_box_for_marker(marker, page_w, page_h, boxes_norm)
             if matched_box is not None and _bbox_area_norm(matched_box) > 0.015:
                 mbx, mby, mbw, mbh = matched_box
-                merged_y0 = min(bbox[1], mby)
-                merged_y1 = max(bbox[1] + bbox[3], mby + mbh)
-                merged_x0 = min(bbox[0], mbx)
-                merged_x1 = max(bbox[0] + bbox[2], mbx + mbw)
-                bbox = _clamp_bbox_norm(
-                    [
-                        merged_x0,
-                        merged_y0,
-                        merged_x1 - merged_x0,
-                        merged_y1 - merged_y0,
-                    ]
-                )
+                box_x0 = max(0.02, mbx + 0.002)
+                box_x1 = min(0.98, mbx + mbw - 0.002)
+                x0 = min(x0, box_x0)
+                x1 = max(x1, box_x1)
+                start_y = min(start_y, max(0.0, mby - 0.005))
+
+                box_end = min(QUESTION_MAX_END_NORM, mby + mbh + 0.012)
+                if not spans_next_page and end_y - box_end > 0.06:
+                    end_y = max(start_y + 0.03, box_end)
+
+            end_y = min(QUESTION_MAX_END_NORM, max(start_y + 0.03, end_y))
+            bbox = _clamp_bbox_norm([x0, start_y, max(0.05, x1 - x0), end_y - start_y])
+
+            continuation: tuple[int, list[float]] | None = None
+            if spans_next_page and next_question is not None:
+                next_page_num = next_question.page_number
+                next_dims = page_dims.get(next_page_num)
+                if next_dims is not None:
+                    _, next_h = next_dims
+                    next_end = (next_question.y_px / next_h) - QUESTION_END_MARGIN_NORM
+                    next_start = QUESTION_SPAN_NEXT_PAGE_START_NORM
+                    if next_end - next_start >= 0.03:
+                        continuation_bbox = _clamp_bbox_norm(
+                            [
+                                x0,
+                                next_start,
+                                max(0.05, x1 - x0),
+                                next_end - next_start,
+                            ]
+                        )
+                        continuation = (next_page_num, continuation_bbox)
 
             regions.append(
                 _DetectedQuestionRegion(
                     page_number=page_number,
                     question_number=marker.question_number,
                     bbox_norm=bbox,
+                    continuation=continuation,
                 )
             )
 
@@ -692,7 +945,7 @@ def extract_fields_from_page(
         bbox_px = _bbox_norm_to_px(f["bbox"], page_w, page_h)
         region = crop_region(page_image, bbox_px)
         field_config = _override_config(config, f)
-        ocr_result = ocr_region(region, field_config)
+        ocr_result = _ocr_field_with_heuristics(region, f, field_config)
         ocr_result.text = _short_text_from_result(ocr_result.text, f)
         field_result = validate_field_result(ocr_result, f, field_config)
         results.append(field_result)
@@ -719,10 +972,11 @@ def _extract_question_crop_norm(
 ) -> QuestionExtractionResult:
     bbox_px = _bbox_norm_to_px(bbox_norm, page_w, page_h)
     region = crop_region(page_image, bbox_px)
+    region = _trim_question_region(region)
     out_path = sub_dir / f"{question_id}.{response_format}"
 
     if response_format == "pdf":
-        region.save(out_path, format="PDF")
+        region.convert("RGB").save(out_path, format="PDF")
     else:
         region.save(out_path)
 
@@ -731,6 +985,74 @@ def _extract_question_crop_norm(
         page_number=page_num,
         output_path=str(out_path),
         crop_bbox_norm=_bbox_px_to_norm(bbox_px, page_w, page_h),
+    )
+
+
+def _extract_question_crop_segments(
+    *,
+    rendered_pages: dict[int, tuple[Image.Image, int, int]],
+    question_id: str,
+    segments: list[tuple[int, list[float]]],
+    response_format: Literal["png", "pdf"],
+    sub_dir: Path,
+) -> QuestionExtractionResult:
+    if not segments:
+        return QuestionExtractionResult(
+            question_id=question_id,
+            page_number=1,
+            skipped=True,
+            error="missing_segments",
+        )
+
+    crops: list[Image.Image] = []
+    first_page_number = segments[0][0]
+    first_crop_bbox_norm: list[float] | None = None
+
+    for page_number, bbox_norm in segments:
+        if page_number not in rendered_pages:
+            continue
+        page_image, page_w, page_h = rendered_pages[page_number]
+        bbox_px = _bbox_norm_to_px(bbox_norm, page_w, page_h)
+        region = crop_region(page_image, bbox_px)
+        region = _trim_question_region(region)
+        if region.width <= 0 or region.height <= 0:
+            continue
+        crops.append(region.convert("RGB"))
+        if first_crop_bbox_norm is None:
+            first_crop_bbox_norm = _bbox_px_to_norm(bbox_px, page_w, page_h)
+
+    if not crops:
+        return QuestionExtractionResult(
+            question_id=question_id,
+            page_number=first_page_number,
+            skipped=True,
+            error="empty_crop",
+        )
+
+    if len(crops) == 1:
+        stitched = crops[0]
+    else:
+        width = max(crop.width for crop in crops)
+        height = sum(crop.height for crop in crops)
+        stitched = Image.new("RGB", (width, height), color=(255, 255, 255))
+        y = 0
+        for crop in crops:
+            x = (width - crop.width) // 2
+            stitched.paste(crop, (x, y))
+            y += crop.height
+        stitched = _trim_question_region(stitched, margin_px=8)
+
+    out_path = sub_dir / f"{question_id}.{response_format}"
+    if response_format == "pdf":
+        stitched.save(out_path, format="PDF")
+    else:
+        stitched.save(out_path)
+
+    return QuestionExtractionResult(
+        question_id=question_id,
+        page_number=first_page_number,
+        output_path=str(out_path),
+        crop_bbox_norm=first_crop_bbox_norm,
     )
 
 
@@ -920,6 +1242,28 @@ def _detect_dynamic_field_regions(
     if sid_label is not None:
         out["sid"] = _label_to_field_bbox_px(sid_label, page_w, page_h, boxes_norm)
 
+    # Fallback: infer header field boxes directly from detected rectangles,
+    # useful when label OCR fails on noisy scans.
+    candidate_boxes: list[list[float]] = []
+    for box in boxes_norm:
+        x, y, w, h = box
+        if y > 0.45:
+            continue
+        if w < 0.20 or w > 0.75:
+            continue
+        if h < 0.02 or h > 0.10:
+            continue
+        candidate_boxes.append(box)
+
+    candidate_boxes.sort(key=lambda box: (box[1], box[0]))
+    if len(candidate_boxes) >= 2:
+        name_box = candidate_boxes[0]
+        sid_box = candidate_boxes[1]
+        if "name" not in out:
+            out["name"] = _bbox_norm_to_px(name_box, page_w, page_h)
+        if "sid" not in out:
+            out["sid"] = _bbox_norm_to_px(sid_box, page_w, page_h)
+
     return out
 
 
@@ -931,7 +1275,7 @@ def _ocr_field_from_dynamic_region(
 ) -> OcrResult:
     region = crop_region(page_image, bbox_px)
     field_config = _override_config(base_config, field)
-    result = ocr_region(region, field_config)
+    result = _ocr_field_with_heuristics(region, field, field_config)
     result.text = _short_text_from_result(result.text, field)
     return result
 
@@ -1152,7 +1496,7 @@ def process_submission_pdf(
             if "bbox" in field_def:
                 bbox_px = _bbox_norm_to_px(field_def["bbox"], page_w, page_h)
                 region = crop_region(page_image, bbox_px)
-                ocr_result = ocr_region(region, field_config)
+                ocr_result = _ocr_field_with_heuristics(region, field_def, field_config)
                 ocr_result.text = _short_text_from_result(ocr_result.text, field_def)
                 all_field_results.append(
                     validate_field_result(ocr_result, field_def, field_config)
@@ -1225,18 +1569,33 @@ def process_submission_pdf(
                     )
                 continue
 
-            all_question_results.append(
-                _extract_question_crop_norm(
-                    page_image=page_image,
-                    question_id=qid,
-                    bbox_norm=parent_crop_bbox,
-                    page_w=page_w,
-                    page_h=page_h,
-                    page_num=page_number,
-                    response_format=response_format,
-                    sub_dir=sub_dir,
+            if dynamic_region is not None and dynamic_region.continuation is not None:
+                segments: list[tuple[int, list[float]]] = [
+                    (page_number, parent_crop_bbox),
+                    dynamic_region.continuation,
+                ]
+                all_question_results.append(
+                    _extract_question_crop_segments(
+                        rendered_pages=rendered_pages,
+                        question_id=qid,
+                        segments=segments,
+                        response_format=response_format,
+                        sub_dir=sub_dir,
+                    )
                 )
-            )
+            else:
+                all_question_results.append(
+                    _extract_question_crop_norm(
+                        page_image=page_image,
+                        question_id=qid,
+                        bbox_norm=parent_crop_bbox,
+                        page_w=page_w,
+                        page_h=page_h,
+                        page_num=page_number,
+                        response_format=response_format,
+                        sub_dir=sub_dir,
+                    )
+                )
     else:
         dynamic_regions_sorted = sorted(
             dynamic_regions,
@@ -1252,18 +1611,29 @@ def process_submission_pdf(
                 qid = f"q{region.question_number}_{i}"
             used_ids.add(qid)
 
-            all_question_results.append(
-                _extract_question_crop_norm(
-                    page_image=page_image,
-                    question_id=qid,
-                    bbox_norm=region.bbox_norm,
-                    page_w=page_w,
-                    page_h=page_h,
-                    page_num=page_number,
-                    response_format=response_format,
-                    sub_dir=sub_dir,
+            if region.continuation is not None:
+                all_question_results.append(
+                    _extract_question_crop_segments(
+                        rendered_pages=rendered_pages,
+                        question_id=qid,
+                        segments=[(page_number, region.bbox_norm), region.continuation],
+                        response_format=response_format,
+                        sub_dir=sub_dir,
+                    )
                 )
-            )
+            else:
+                all_question_results.append(
+                    _extract_question_crop_norm(
+                        page_image=page_image,
+                        question_id=qid,
+                        bbox_norm=region.bbox_norm,
+                        page_w=page_w,
+                        page_h=page_h,
+                        page_num=page_number,
+                        response_format=response_format,
+                        sub_dir=sub_dir,
+                    )
+                )
 
     version_field = extract_version_field(normalized_spec) if normalized_spec else None
     result.fields = [

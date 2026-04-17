@@ -16,8 +16,11 @@ from opengrader.core.ocr.extractor import (
 )
 
 
-_TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b") # CMPE195, CS146 
-_TITLE_VERSION_EXPLICIT_RE = re.compile(r"(?i)\bversion\s*([A-Z0-9]+)\b") # version A, version 1
+_TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b")
+_TITLE_CANONICAL_RE = re.compile(
+    r"(?i)\b(?P<course>[A-Z]{2,}\s*\d{1,4}[A-Z]?)\s*:\s*(?P<assignment>[^\n()]{1,80}?)\s*\((?P<version>[A-Z0-9])\)"
+)
+_TITLE_VERSION_EXPLICIT_RE = re.compile(r"(?i)\bversion\s*([A-Z0-9]+)\b")
 _TITLE_VERSION_SUFFIX_RE = re.compile(
     r"(?i)\b(?:midterm|exam|quiz|final|assignment|hw|homework)\s*\d*\s*([A-Z])\b"
 )
@@ -63,6 +66,20 @@ class StudentSubmissionBuildResult:
 
 def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
     normalized = "\n".join(line.strip() for line in raw_title.splitlines() if line.strip())
+
+    canonical_match = _TITLE_CANONICAL_RE.search(normalized)
+    if canonical_match is not None:
+        course_code = canonical_match.group("course").replace(" ", "")
+        assignment_title = re.sub(
+            r"\s+", " ", canonical_match.group("assignment")
+        ).strip()
+        assignment_version = canonical_match.group("version").upper()
+        return AssignmentTitleMetadata(
+            raw_title=normalized,
+            course_code=course_code,
+            assignment_title=assignment_title,
+            assignment_version=assignment_version,
+        )
 
     first_line = ""
     if normalized:
@@ -117,10 +134,18 @@ def _norm_bbox_to_px(
     bbox_norm: list[float], page_w: int, page_h: int
 ) -> tuple[int, int, int, int]:
     x, y, w, h = bbox_norm
-    x0 = int(x * page_w)
-    y0 = int(y * page_h)
-    x1 = int((x + w) * page_w)
-    y1 = int((y + h) * page_h)
+    x = max(0.0, min(1.0, x))
+    y = max(0.0, min(1.0, y))
+    w = max(0.0, min(1.0 - x, w))
+    h = max(0.0, min(1.0 - y, h))
+    x0 = int(round(x * page_w))
+    y0 = int(round(y * page_h))
+    x1 = int(round((x + w) * page_w))
+    y1 = int(round((y + h) * page_h))
+    x0 = max(0, min(page_w, x0))
+    y0 = max(0, min(page_h, y0))
+    x1 = max(0, min(page_w, x1))
+    y1 = max(0, min(page_h, y1))
     return x0, y0, x1, y1
 
 
@@ -130,28 +155,76 @@ def extract_title_text_from_submission(
     config: OcrConfig,
     dpi: int,
 ) -> str:
+    with fitz.open(str(pdf_path)) as doc:
+        if len(doc) == 0:
+            return ""
+
+        # If searchable text exists, prefer it.
+        embedded_text = doc[0].get_text().strip()
+        if embedded_text:
+            return "\n".join(
+                line.strip() for line in embedded_text.splitlines() if line.strip()
+            )
+
+        page_image, page_w, page_h = render_page_to_image(doc, page_idx=0, dpi=dpi)
+
     page_one = None
     for page in spec.get("pages", []):
         if page.get("page_number") == 1:
             page_one = page
             break
 
-    if page_one is None:
+    # Use a generous top crop and union with spec title bbox when available.
+    default_bbox = [0.05, 0.02, 0.9, 0.30]
+    title_bbox = page_one.get("title_bbox") if page_one is not None else None
+
+    if isinstance(title_bbox, list) and len(title_bbox) == 4:
+        tx, ty, tw, th = title_bbox
+        expanded = [
+            max(0.0, tx - 0.08),
+            max(0.0, ty - 0.04),
+            min(1.0, tw + 0.16),
+            min(1.0, th + 0.12),
+        ]
+        x0 = min(default_bbox[0], expanded[0])
+        y0 = min(default_bbox[1], expanded[1])
+        x1 = max(default_bbox[0] + default_bbox[2], expanded[0] + expanded[2])
+        y1 = max(default_bbox[1] + default_bbox[3], expanded[1] + expanded[3])
+        merged_bbox = [x0, y0, max(0.05, x1 - x0), max(0.05, y1 - y0)]
+    else:
+        merged_bbox = default_bbox
+
+    bbox_px = _norm_bbox_to_px(merged_bbox, page_w, page_h)
+    region = page_image.crop(bbox_px)
+
+    primary = ocr_region(region, config).text.strip()
+    secondary = ocr_region(
+        region,
+        OcrConfig(
+            lang=config.lang,
+            psm=11,
+            whitelist=None,
+            deskew=config.deskew,
+            confidence_threshold=config.confidence_threshold,
+        ),
+    ).text.strip()
+
+    candidates = [text for text in [primary, secondary] if text]
+    if not candidates:
         return ""
 
-    with fitz.open(str(pdf_path)) as doc:
-        page_image, page_w, page_h = render_page_to_image(doc, page_idx=0, dpi=dpi)
+    def _title_score(text: str) -> float:
+        score = float(len(text))
+        if ":" in text:
+            score += 30.0
+        if "(" in text and ")" in text:
+            score += 25.0
+        if _TITLE_COURSE_RE.search(text):
+            score += 35.0
+        return score
 
-    title_bbox_norm = page_one.get("title_bbox")
-    if title_bbox_norm is None:
-        fallback_bbox = [0.15, 0.05, 0.7, 0.2]
-        bbox_px = _norm_bbox_to_px(fallback_bbox, page_w, page_h)
-    else:
-        bbox_px = _norm_bbox_to_px(title_bbox_norm, page_w, page_h)
-
-    region = page_image.crop(bbox_px)
-    result = ocr_region(region, config)
-    return result.text.strip()
+    best = max(candidates, key=_title_score)
+    return best
 
 
 def image_path_to_data_url(path: str | Path) -> str:
