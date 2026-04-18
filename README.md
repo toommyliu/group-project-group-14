@@ -145,10 +145,12 @@ qa-file --help
 
 ## Screenshots
 
-| Feature     | Screenshot                                   |
-| ----------- | -------------------------------------------- |
-| [Feature 1] | ![Screenshot](docs/screenshots/feature1.png) |
-| [Feature 2] | ![Screenshot](docs/screenshots/feature2.png) |
+| Feature                              | Screenshot                                               |
+| ------------------------------------ | -------------------------------------------------------- |
+| Template generation from QA file     | ![QA Template](docs/screenshots/qa-file.png)             |
+| Scan splitting into student PDFs      | ![Submission Splitter](docs/screenshots/submission-splitter.png) |
+| OCR-based submission markdown export | ![Submission File](docs/screenshots/submission-file.png) |
+| TUI    | ![TUI](docs/screenshots/tui.png)                         |
 
 ---
 
@@ -161,8 +163,11 @@ qa-file --help
 
 ## What's Next (195B)
 
----
+- Website syncing: Sync local data to the web information securely.
 
+- Automated grading: Speed up grading for certain questions with an automated evaluator. 
+
+- Assignment variety: Support the capability to grade Programming or Group assignments.
 
 
 ---
