@@ -45,20 +45,65 @@ score: ""
   - Points: 
   - Analysis: 
 
-- q5:
+- q5a:
   - Prompt: 
-  - Response image: ![q5 response](responses/submission-0001/q5.png)
+  - Response image: ![q5a response](responses/submission-0001/q5a.png)
   - Response text: |
-    5. (25 pts) Answer all parts about finding the second largest number [A]. a) (8 pts) What algorithm would you use to find the second largest distinct number in a list? Vows b) (9 pts) What is the second largest distinct number in [5, 2, 8. 1, 8, 3]? c) (8 pts) What should the algorithm return for a list with only one element? ovr ee eee eee eee
+    a) (8 pts) What algorithm would you use to find the second largest distinct number in a list? Vows
   - Possible points: 
   - Points: 
   - Analysis: 
 
-- q6:
+- q5b:
   - Prompt: 
-  - Response image: ![q6 response](responses/submission-0001/q6.png)
+  - Response image: ![q5b response](responses/submission-0001/q5b.png)
   - Response text: |
-    6. (20 pts) Answer the following questions about data structures [A]. a) (5 pts) What is the time complexity of inserting at the beginning of a linked list? b) (5 pts) What is the time complexity of searching in a balanced binary search tree? OC log w) c) (5 pts} Which data structure uses LIFO (Last In. First Out)? yack d) (5 pts} Which data structure uses FIFO (First In, First Out)? Qu AWA eee ee ee
+    b) (9 pts) What is the second largest distinct number in [5, 2. 8. 1, 8, 3]?
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q5c:
+  - Prompt: 
+  - Response image: ![q5c response](responses/submission-0001/q5c.png)
+  - Response text: |
+    c) (8 pts) What should the algorithm return for a list with only one element? for eee
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6a:
+  - Prompt: 
+  - Response image: ![q6a response](responses/submission-0001/q6a.png)
+  - Response text: |
+    a) (5 pts) What is the time complexity of inserting at. the beginning of a linked list?
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6b:
+  - Prompt: 
+  - Response image: ![q6b response](responses/submission-0001/q6b.png)
+  - Response text: |
+    b) (5 pts) What is the time complexity of searching in a balanced binary search tree? OC Log
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6c:
+  - Prompt: 
+  - Response image: ![q6c response](responses/submission-0001/q6c.png)
+  - Response text: |
+    c) (5 pts) V Vhich data structure uses LIF O (Last In. First Out)? Sack
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6d:
+  - Prompt: 
+  - Response image: ![q6d response](responses/submission-0001/q6d.png)
+  - Response text: |
+    .5 pts} Which data structure uses FIFO (First In. First Out)? re 4 IM AAfe®e eee
   - Possible points: 
   - Points: 
   - Analysis:

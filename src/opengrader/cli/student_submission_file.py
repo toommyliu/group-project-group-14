@@ -74,6 +74,14 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help="Disable automatic deskewing before OCR.",
     )
+    parser.add_argument(
+        "--no-split-subquestions",
+        action="store_true",
+        help=(
+            "Keep each detected question as a single response image even when "
+            "nested subquestion boxes are detected."
+        ),
+    )
     return parser
 
 
@@ -125,6 +133,7 @@ def run_cli() -> None:
             output_dir=output_dir,
             ocr_config=config,
             dpi=args.dpi,
+            split_subquestions=not args.no_split_subquestions,
         )
         print(f"  Wrote {build_result.markdown_path}")
 

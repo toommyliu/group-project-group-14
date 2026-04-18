@@ -45,20 +45,65 @@ score: ""
   - Points: 
   - Analysis: 
 
-- q5:
+- q5a:
   - Prompt: 
-  - Response image: ![q5 response](responses/submission-0002/q5.png)
+  - Response image: ![q5a response](responses/submission-0002/q5a.png)
   - Response text: |
-    5. (25 pts) Answer all parts about array inversions |B]. a) (8 pts) What is an inversion in an array? Wd b) (9 pts) How many inversions are in the array [3, 1, 4, 1. 5]? c) (& pts) What is the time complexity of counting inversions using nested loops? eS
+    a) (8 pts) What is an inversion in an array? Wd
   - Possible points: 
   - Points: 
   - Analysis: 
 
-- q6:
+- q5b:
   - Prompt: 
-  - Response image: ![q6 response](responses/submission-0002/q6.png)
+  - Response image: ![q5b response](responses/submission-0002/q5b.png)
   - Response text: |
-    6. (20 pts) Answer the following questions about number systems [B]. a) (5 pts) Convert hexadecimal 0x2F to decimal. b) (5 pts) Convert decimal 255 to hexadecimal. c) (5 pts) What. is the binary representation of hexadecimal 0xA? c J d) (5 pts) What is the decimal value of octal 17? err ee eee a
+    b) (9 pts) How many inversions are in the array (3, 1. 4, 1. 5]?
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q5c:
+  - Prompt: 
+  - Response image: ![q5c response](responses/submission-0002/q5c.png)
+  - Response text: |
+    c) (& pts) What is the time complexity of counting inversions using nested loops? [Xsa ee eee ee eee eer eee ee ee aS
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6a:
+  - Prompt: 
+  - Response image: ![q6a response](responses/submission-0002/q6a.png)
+  - Response text: |
+    a) (5 pts) Convert hexadecimal 0x2F to decimal.
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6b:
+  - Prompt: 
+  - Response image: ![q6b response](responses/submission-0002/q6b.png)
+  - Response text: |
+    b) (5 pts) Convert decimal 255 to hexadecimal.
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6c:
+  - Prompt: 
+  - Response image: ![q6c response](responses/submission-0002/q6c.png)
+  - Response text: |
+    c) (5 pts) What is the binary representation of hexadecimal 0xA?
+  - Possible points: 
+  - Points: 
+  - Analysis: 
+
+- q6d:
+  - Prompt: 
+  - Response image: ![q6d response](responses/submission-0002/q6d.png)
+  - Response text: |
+    d) (5 pts) What is the decimal value of octal 17? ee ee eee eee eee eee eee eee a
   - Possible points: 
   - Points: 
   - Analysis:
