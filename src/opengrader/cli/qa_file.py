@@ -18,7 +18,6 @@ from opengrader.core.pdf.templates.qa_file import (
 EPILOG = """
 examples:
   uv run qa-file validate --qa-file samples/qa-single.md
-  uv run qa-file normalize --qa-file samples/qa-single.md --output-qa out/qa-single.normalized.md
   uv run qa-file generate-template --qa-file samples/qa-single.md --output-pdf out/template-single.pdf
   uv run qa-file generate-template --qa-file samples/qa-multi.md --output-pdf out/template-multi.pdf --all-versions
 """
@@ -39,17 +38,6 @@ def _build_parser() -> ArgumentParser:
     )
     validate_parser.add_argument(
         "--qa-file", required=True, help="Path to QA markdown file."
-    )
-
-    normalize_parser = subparsers.add_parser(
-        "normalize",
-        help="Normalize QA markdown formatting.",
-    )
-    normalize_parser.add_argument(
-        "--qa-file", required=True, help="Path to input QA markdown file."
-    )
-    normalize_parser.add_argument(
-        "--output-qa", required=True, help="Output QA markdown file."
     )
 
     generate_parser = subparsers.add_parser(
@@ -122,17 +110,6 @@ def _run_validate(args: object) -> None:
     print(f"QA file is valid: {qa_path}")
 
 
-def _run_normalize(args: object) -> None:
-    qa_path = Path(getattr(args, "qa_file"))
-    if not qa_path.exists():
-        raise FileNotFoundError(f"QA file not found: {qa_path}")
-
-    qa_doc = load_qa_markdown(qa_path)
-    output_qa = Path(getattr(args, "output_qa"))
-    output_qa.parent.mkdir(parents=True, exist_ok=True)
-    output_qa.write_text(render_qa_markdown(qa_doc))
-    print(f"Wrote normalized QA file: {output_qa}")
-
 
 def _run_generate_template(args: object) -> None:
     qa_doc = load_qa_markdown(getattr(args, "qa_file"))
@@ -196,9 +173,6 @@ def run_cli() -> None:
 
     if args.command == "validate":
         _run_validate(args)
-        return
-    if args.command == "normalize":
-        _run_normalize(args)
         return
     if args.command == "generate-template":
         _run_generate_template(args)
