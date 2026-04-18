@@ -8,6 +8,7 @@ from textual.widgets import Label, ListItem, ListView, Static
 
 from opengrader.tui.ui.widgets import SelectionDetails
 from opengrader.tui.ui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.home_sidebar import CoursePane
 
 
 class _NavListItem(ListItem):
@@ -37,23 +38,34 @@ class CoursePickerScreen(Vertical):
     def compose(self) -> ComposeResult:
         yield Static("Choose a course", id="course-picker-title")
         yield Static(
-            "Pick the class you want to grade, then enter the workspace.",
+            "Pick the class you want to grade, then enter the workspace. Use arrow keys to navigate",
             id="course-picker-subtitle",
         )
         with Horizontal(id="course-picker-workspace"):
             with Vertical(id="course-picker-sidebar"):
-                yield ListView(id="course-picker-list")
+                yield CoursePane(id="course-picker-list", pane_id="course-picker-pane")
             yield SelectionDetails(id="course-picker-details")
         yield Static("Select a course to get started.", id="course-picker-status")
 
     def set_courses(self, courses: list[NavItem]) -> None:
-        course_list = self.query_one("#course-picker-list", ListView)
+        pane = self.query_one("#course-picker-pane", CoursePane)
+        course_list = pane.primary_list()
+
         course_list.clear()
         for item in courses:
             course_list.append(_NavListItem(item))
 
+        # Force the list to select the first item if one exists
+        if courses:
+            course_list.index = 0 
+            course_list.ensure_focus_index()
+        
+        # Update the border text
+        pane.refresh_index_subtitle()
+
     def selected_course(self) -> NavItem | None:
-        lv = self.query_one("#course-picker-list", ListView)
+        pane = self.query_one("#course-picker-pane", CoursePane)
+        lv = pane.primary_list()
         child = lv.highlighted_child
         if isinstance(child, _NavListItem):
             return child.nav
@@ -101,6 +113,12 @@ class CoursePickerScreen(Vertical):
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if event.item is None or not isinstance(event.item, _NavListItem):
             return
+        
+        # Add this logic to update the border subtitle manually
+        lv = event.list_view
+        if lv.index is not None:
+            lv.border_subtitle = f"{lv.index + 1} of {len(lv.children)}"
+            
         self.post_message(self.CourseHighlighted(event.item.nav))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

@@ -17,7 +17,7 @@ class IndexedListView(ListView):
         border-title-align: left;
         border-subtitle-color: $text-muted;
         border-subtitle-align: right;
-        scrollbar-size: 0 0;
+        scrollbar-size: 1 1;
     }
 
     IndexedListView > ListItem.-highlight {

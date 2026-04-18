@@ -105,24 +105,28 @@ STANDARD_PROFILE = InputProfile(
             InputCommand.HOME_MOVE_UP,
             "Navigate Up",
             (InputContext.HOME,),
+            show=False,
         ),
         CommandBindingSpec(
             "down",
             InputCommand.HOME_MOVE_DOWN,
             "Navigate Down",
             (InputContext.HOME,),
+            show=False,
         ),
         CommandBindingSpec(
             "left",
             InputCommand.HOME_MOVE_LEFT,
             "Navigate Left",
             (InputContext.HOME,),
+            show=False,
         ),
         CommandBindingSpec(
             "right",
             InputCommand.HOME_MOVE_RIGHT,
             "Navigate Right",
             (InputContext.HOME,),
+            show=False,
         ),
         CommandBindingSpec(
             "enter",
