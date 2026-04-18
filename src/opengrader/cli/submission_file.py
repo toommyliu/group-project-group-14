@@ -8,9 +8,8 @@ from opengrader.core.submissions import build_student_submission_document
 
 EPILOG = """
 examples:
-  uv run student-submission-file --input split/ --output out/submissions/
-  uv run student-submission-file --input split/student-0001.pdf --output out/submissions/ --dpi 200
-  uv run student-submission-file --template old-template.json --input split/ --output out/submissions/  # accepted but ignored
+  uv run submission-file --input split/ --output out/submissions/
+  uv run submission-file --input split/student-0001.pdf --output out/submissions/ --dpi 200
 """
 
 
@@ -22,13 +21,6 @@ def _build_parser() -> ArgumentParser:
         ),
         epilog=EPILOG,
         formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--template",
-        required=False,
-        help=(
-            "Deprecated and ignored. Kept only for backward-compatible CLI usage."
-        ),
     )
     parser.add_argument(
         "--input",
@@ -104,12 +96,6 @@ def _collect_input_pdfs(input_path: str) -> list[Path]:
 def run_cli() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-
-    if args.template:
-        template_path = Path(args.template)
-        if not template_path.exists():
-            raise FileNotFoundError(f"template file not found: {template_path}")
-        print(f"Ignoring deprecated --template argument: {template_path}")
 
     input_pdfs = _collect_input_pdfs(args.input)
     output_dir = Path(args.output)
