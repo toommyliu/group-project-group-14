@@ -17,7 +17,7 @@
 
 ## Project Description
 
-Opengrader is a set of Python scripts to orchestrate an efficient grading workflow. Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. Timely, quality feedback helps improve student learning outcomes, and yet, today's tools failure to meet these needs.
+Opengrader is a set of Python scripts to orchestrate an efficient grading workflow. Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. Timely, quality feedback helps improve student learning outcomes, and yet, today's tools fail to meet these needs.
 
 ## Proof of Concept Scope
 
@@ -137,9 +137,9 @@ qa-file --help
 
 ## Demo
 
-[Link to demo video or GIF]
 
-**Live Demo:** [URL if deployed]
+https://github.com/user-attachments/assets/f8938fa9-d64f-4d88-a8e4-62a48111a471
+
 
 ---
 
