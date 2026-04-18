@@ -175,8 +175,7 @@ https://github.com/user-attachments/assets/f8938fa9-d64f-4d88-a8e4-62a48111a471
 ## Acknowledgments
 
 -  Dr. Carlos Rojas - Advisor, for guidance and support throughout the project
--  Dr. Ben Reed - For inspiration and ideas for the project
-
+-  Dr. Ben Reed - For sharing ideas and experiences, and providing feedback
 ---
 
 ## License
