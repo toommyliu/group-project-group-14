@@ -15,60 +15,23 @@
 
 ---
 
-## Problem Statement
+## Project Description
 
-Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently.
-Timely, quality feedback helps improve student learning outcomes, and yet, today's tools failure to meet these needs.
+Opengrader is a set of Python scripts to orchestrate an efficient grading workflow. Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. Timely, quality feedback helps improve student learning outcomes, and yet, today's tools failure to meet these needs.
 
-## Solution
+## Proof of Concept Scope
 
-The application will ingest scanned PDF submissions that are split by assignment.
-Graders can create and customize rubrics per assignment, manage course rosters, and annotate PDFs directly. These capabilities will enable educators to visualize trends in grade statistics and questions, revealing revelations into the learning progress of students. Finally, marked PDFs are returned to students with comments from graders and rubric learning outcomes, optimizing feedback pathways into actionable insights for them.
+The PoC demonstrates the start of the workflow: generating templates, processing scans into structured markdown files, and a mocked TUI application. The PoC lacks the cohension of the artifact files to be used in the TUI, as most of the TUI inputs is hardcoded.
 
-### Key Features
-
-- Local/offline-first grading tool
-- TUI-based workflow(s)
-
----
-
-## Demo
-
-[Link to demo video or GIF]
-
-**Live Demo:** [URL if deployed]
-
----
-
-## Screenshots
-
-| Feature     | Screenshot                                   |
-| ----------- | -------------------------------------------- |
-| [Feature 1] | ![Screenshot](docs/screenshots/feature1.png) |
-| [Feature 2] | ![Screenshot](docs/screenshots/feature2.png) |
-
----
-
-## Tech Stack
-
-| Category   | Technology |
-| ---------- | ---------- |
-| Frontend   | Python     |
-| Backend    | Python     |
-| Database   |            |
-
----
-
-## Getting Started
-
-### Prerequisites
+## Prerequisites
 
 - [Python v3.13+](https://www.python.org/)
+- [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
 - Compatible Terminal Emulator
 
-#### Terminal Compatibility
+### Terminal Compatibility
 
 For images to render in the TUI correctly[^1], you may need a terminal emulator that supports the
 [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
@@ -84,7 +47,15 @@ On macOS, the following terminal emulators were tested and work correctly:
 
 [^1]: https://github.com/lnqs/textual-image#supported-terminals
 
-### Installation
+## Installation
+
+Install homebrew and dependencies:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install tesseract
+brew install uv
+brew install python@3.13
+```
 
 Clone the repository:
 ```bash
@@ -97,7 +68,7 @@ Set up a Python virtual environment and install packages:
 uv sync --all-groups
 ```
 
-### Usage
+## Running the PoC
 
 Run the TUI:
 ```bash
@@ -127,8 +98,6 @@ uv run ocr-pdf --help
 
 > [!TIP]
 > Scripts that take flags support `--help` to show available options.
-
-<details>
 
 #### Example Usage Flow
 
@@ -160,38 +129,48 @@ List available executables:
 uv tool list
 ```
 
-Execute:
+Then you can execute any of the commands from anywhere on your system:
 ```bash
 tui
 qa-file --help
 ```
 
-### Running Tests
+## Demo
 
-```bash
-uv run pytest
-```
+[Link to demo video or GIF]
 
-## Project Structure
+**Live Demo:** [URL if deployed]
 
-```
-.
-├── src/opengrader/
-│   ├── core/           # Shared code
-│   ├── cli/            # Standalone CLI scripts
-│   └── tui/            # Main TUI application
-├── tests/              # Test suite
-├── docs/               # Documentation
-├── pyproject.toml      # Project configuration
-└── README.md
-```
+---
+
+## Screenshots
+
+| Feature     | Screenshot                                   |
+| ----------- | -------------------------------------------- |
+| [Feature 1] | ![Screenshot](docs/screenshots/feature1.png) |
+| [Feature 2] | ![Screenshot](docs/screenshots/feature2.png) |
+
+---
+
+## Technical Stack
+
+| Category   | Technology |
+| ---------- | ---------- |
+| Frontend   | Python     |
+| Backend    | Python     |
+
+## What's Next (195B)
+
+---
+
+
 
 ---
 
 ## Acknowledgments
 
-- [Resource/Library/Person]
-- [Resource/Library/Person]
+-  Dr. Carlos Rojas - Advisor, for guidance and support throughout the project
+-  Dr. Ben Reed - For inspiration and ideas for the project
 
 ---
 
