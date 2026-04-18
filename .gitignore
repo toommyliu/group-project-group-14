@@ -163,3 +163,4 @@ docker-data/
 # ===========================
 # Add project-specific ignores below
 .envs
+.tui_cache/
