@@ -36,10 +36,6 @@ class SqliteProvider:
             self._courses = build_sqlite_course_services(self._db_path)
         return self._courses
 
-    @staticmethod
-    def _spec_is_pending(spec_json_relpath: str) -> bool:
-        return spec_json_relpath.endswith(".pending.json")
-
     def list_courses(self) -> list[CourseSummary]:
         courses = self._services.courses.list_courses()
         return [
@@ -159,21 +155,17 @@ class SqliteProvider:
         assignment_id: int,
         name: str,
         template_pdf_path: str,
-        spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
         template = self._services.assignment_templates.create_template(
             assignment_id=assignment_id,
             name=name,
             source_template_pdf=template_pdf_path,
-            source_spec_json=spec_json_path,
         )
         return AssignmentTemplateSummary(
             id=template.id,
             course_id=template.course_id,
             name=template.name,
             template_pdf_relpath=template.template_pdf_relpath,
-            spec_json_relpath=template.spec_json_relpath,
-            spec_pending=self._spec_is_pending(template.spec_json_relpath),
         )
 
     def list_assignment_templates(
@@ -194,8 +186,6 @@ class SqliteProvider:
                 course_id=template.course_id,
                 name=template.name,
                 template_pdf_relpath=template.template_pdf_relpath,
-                spec_json_relpath=template.spec_json_relpath,
-                spec_pending=self._spec_is_pending(template.spec_json_relpath),
             )
             for template in templates
         ]
@@ -240,8 +230,6 @@ class SqliteProvider:
             course_id=template.course_id,
             name=template.name,
             template_pdf_relpath=template.template_pdf_relpath,
-            spec_json_relpath=template.spec_json_relpath,
-            spec_pending=self._spec_is_pending(template.spec_json_relpath),
         )
 
     def list_assignment_templates_for_assignment(
@@ -259,8 +247,6 @@ class SqliteProvider:
                 course_id=template.course_id,
                 name=template.name,
                 template_pdf_relpath=template.template_pdf_relpath,
-                spec_json_relpath=template.spec_json_relpath,
-                spec_pending=self._spec_is_pending(template.spec_json_relpath),
             )
             for template in templates
         ]

@@ -23,8 +23,6 @@ class AssignmentTemplateSummary:
     course_id: int
     name: str
     template_pdf_relpath: str
-    spec_json_relpath: str
-    spec_pending: bool = False
 
 
 @dataclass(frozen=True)

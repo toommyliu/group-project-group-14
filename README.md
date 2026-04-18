@@ -116,24 +116,36 @@ uv run ocr-pdf --help
 <details>
 <summary>Available Scripts</summary>
 
-- `tui` / `tui-dev`: The TUI application
+- `tui`: The TUI application
 - `qa-file`
+  - `validate`: Validate QA markdown structure
   - `generate-template`: Generate templates from QA files
-  - `embed-snippets`: Embed question images into QA files
-- `ocr-pdf`: Extract text from PDFs using OCR
-- `ocr-preview-pdf`: Preview and adjust OCR detection regions from a spec.json
+- `submission-splitter`: Split a scan into individual student submission PDFs
+- `submission-file`: Process student submission PDFs into structured markdown
 
-Helper/bootstrapping scripts:
-- `pdf-splitter`:  Split PDFs
-- `question-splitter`: Split PDFs by question regions
-- `roster-reader`: Read course roster from csv file
-- `sample-pdf`: Generate sample gradeable PDFs for testing
-- `course-demo`: CLI for creating demo course data
-- `seed-db`: Seed database with test data
 </details>
 
 > [!TIP]
 > Scripts that take flags support `--help` to show available options.
+
+<details>
+
+#### Example Usage Flow
+
+1. Generate a template from a QA file:
+```bash
+qa-file generate-template --qa-file /path/to/qa.md --output-pdf /path/to/template.pdf
+```
+
+2. Process scan into individual student submissions:
+```bash
+submission-splitter --input /path/to/scan.pdf --output /path/to/output --pages-per-submission N
+```
+
+3. Process student submissions into structured markdown:
+```bash
+submission-file --input /path/to/output --output /path/to/markdown
+```
 
 #### Global Installation (Optional)
 

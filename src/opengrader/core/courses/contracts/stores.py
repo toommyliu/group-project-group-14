@@ -61,9 +61,7 @@ class AssignmentTemplateStore(Protocol):
         course_id: int,
         name: str,
         template_pdf_relpath: str,
-        spec_json_relpath: str,
         template_sha256: str,
-        spec_sha256: str,
     ) -> AssignmentTemplate: ...
 
     def list_for_course(self, course_id: int) -> list[AssignmentTemplate]: ...
@@ -75,7 +73,6 @@ class AssignmentTemplateStore(Protocol):
         *,
         template_id: int,
         template_pdf_relpath: str,
-        spec_json_relpath: str,
     ) -> None: ...
 
     def set_assignment_template(

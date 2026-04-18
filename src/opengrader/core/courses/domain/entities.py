@@ -92,9 +92,7 @@ class AssignmentTemplate:
     course_id: int
     name: str
     template_pdf_relpath: str
-    spec_json_relpath: str
     template_sha256: str
-    spec_sha256: str
     created_at: datetime
 
 

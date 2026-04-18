@@ -86,9 +86,8 @@ class FakeDataProvider:
         assignment_id: int,
         name: str,
         template_pdf_path: str,
-        spec_json_path: str | None = None,
     ) -> AssignmentTemplateSummary:
-        _ = (template_pdf_path, spec_json_path)
+        _ = template_pdf_path
         return AssignmentTemplateSummary(
             id=1,
             course_id=1,
@@ -98,18 +97,6 @@ class FakeDataProvider:
                 f"assignments/{assignment_id}-hw-1/templates/"
                 f"{name.lower().replace(' ', '-')}-t1.pdf"
             ),
-            spec_json_relpath=(
-                f"courses/cmpe-195-senior-design-spring-2026-01/"
-                f"assignments/{assignment_id}-hw-1/templates/"
-                f"{name.lower().replace(' ', '-')}-t1.spec.json"
-                if spec_json_path is not None
-                else (
-                    f"courses/cmpe-195-senior-design-spring-2026-01/"
-                    f"assignments/{assignment_id}-hw-1/templates/"
-                    f"{name.lower().replace(' ', '-')}-t1.spec.pending.json"
-                )
-            ),
-            spec_pending=spec_json_path is None,
         )
 
     def list_assignment_templates(
@@ -127,11 +114,6 @@ class FakeDataProvider:
                     "courses/cmpe-195-senior-design-spring-2026-01/"
                     "assignments/1-hw-1/templates/default-template-t1.pdf"
                 ),
-                spec_json_relpath=(
-                    "courses/cmpe-195-senior-design-spring-2026-01/"
-                    "assignments/1-hw-1/templates/default-template-t1.spec.json"
-                ),
-                spec_pending=False,
             )
         ]
 
@@ -166,11 +148,6 @@ class FakeDataProvider:
                 "courses/cmpe-195-senior-design-spring-2026-01/"
                 "assignments/1-hw-1/templates/default-template-t1.pdf"
             ),
-            spec_json_relpath=(
-                "courses/cmpe-195-senior-design-spring-2026-01/"
-                "assignments/1-hw-1/templates/default-template-t1.spec.json"
-            ),
-            spec_pending=False,
         )
 
     def list_assignment_templates_for_assignment(
@@ -188,10 +165,5 @@ class FakeDataProvider:
                     "courses/cmpe-195-senior-design-spring-2026-01/"
                     "assignments/1-hw-1/templates/default-template-t1.pdf"
                 ),
-                spec_json_relpath=(
-                    "courses/cmpe-195-senior-design-spring-2026-01/"
-                    "assignments/1-hw-1/templates/default-template-t1.spec.json"
-                ),
-                spec_pending=False,
             )
         ]

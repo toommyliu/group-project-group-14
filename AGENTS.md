@@ -6,13 +6,12 @@
 
 ## Project Overview
 
-Opengrader is a TUI application for efficient grading workflows. Think GradeScope but local and offline-first, with a focus on keyboard-driven workflows.
+Opengrader is a set of utility scripts to power an efficient grading workflow. Think GradeScope, but local and offline-first. Scripts compose together to form the complete workflow.
 
 ## Core Priorities
 
-1. Unix philosophy: to do one thing and do it well.
-2. Performance first.
-3. Reliability first.
+1. Performance first.
+2. Reliability first.
 
 ## Maintainabilty
 
@@ -20,6 +19,6 @@ Long term maintainability is a core priority. Prefer extracting shared logic int
 
 ## Packages
 
-- `src/opengrader/core`: Shared logic and models (PDF, Courses, etc...) that can be consumed by other packages.
-- `src/opengrader/cli`: Standalone CLI tools for PDF splitting, question splitting, and roster reading. These tools are meant to be called by the TUI or independently.
-- `src/opengrader/tui`: The main TUI application built with Textual. Orchestrates the grading workflow by using `core` and `cli` packages.
+- `src/opengrader/core`: Core data models and utilities for PDF processing, OCR, submissions, and grading workflow primitives
+- `src/opengrader/cli`: Standalone CLI tools for template generation, submission splitting, OCR extraction, and converting PDFs to markdown format
+- `src/opengrader/tui`: The main TUI application. Orchestrates grading by ingesting parsed student submission markdown files and enabling question-by-question grading.

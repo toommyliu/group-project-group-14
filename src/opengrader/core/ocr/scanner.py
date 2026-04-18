@@ -5,8 +5,6 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from opengrader.core.pdf.templates.anchor import anchor_entries_norm
-from .constants import QuestionType, SCHEMA_VERSION
 from .utils import apply_grayscale
 
 
@@ -180,53 +178,3 @@ def scan_template(
         )
 
     return regions
-
-
-def regions_to_spec_draft(
-    regions: list[DetectedRegion],
-    unit_id: str,
-) -> dict:
-    """
-    Convert detected regions into a draft template spec JSON.
-    """
-    fields: list[dict] = []
-    questions: list[dict] = []
-    field_counter = 0
-    question_counter = 0
-
-    for region in regions:
-        if region.region_type == "header_field":
-            field_counter += 1
-            fields.append(
-                {
-                    "id": region.label or f"field_{field_counter}",
-                    "bbox": region.bbox,
-                    "type": "text",
-                    "required": True,
-                }
-            )
-        elif region.region_type == "question":
-            question_counter += 1
-            questions.append(
-                {
-                    "id": region.label or f"q{question_counter}",
-                    "bbox": region.bbox,
-                    "response_type": QuestionType.FREE_RESPONSE,
-                    "points": 10,
-                }
-            )
-
-    page_spec: dict = {
-        "page_number": 1,
-        "anchors": anchor_entries_norm(),
-        # Placeholder
-        "title_bbox": [0.2, 0.05, 0.6, 0.08],
-        "fields": fields,
-        "questions": questions,
-    }
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "unit_id": unit_id,
-        "pages": [page_spec],
-    }

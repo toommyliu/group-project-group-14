@@ -1,7 +1,6 @@
 import numpy as np
 
 from opengrader.core.ocr.alignment import AnchorRegion, detect_anchor_presence
-from opengrader.core.pdf.templates.anchor import anchor_bbox_map_norm
 
 
 def _anchor_region() -> AnchorRegion:
@@ -50,11 +49,3 @@ def test_detect_anchor_presence_false_for_x_marker() -> None:
     image[y0 + ys, x1 - 1 - ys] = 0
 
     assert not detect_anchor_presence(image, anchor, page_w, page_h)
-
-
-def test_anchor_bbox_map_norm_matches_expected_letter_geometry() -> None:
-    bbox_map = anchor_bbox_map_norm()
-    assert bbox_map["tl"] == [0.039, 0.03, 0.015, 0.011]
-    assert bbox_map["tr"] == [0.946, 0.03, 0.015, 0.011]
-    assert bbox_map["bl"] == [0.039, 0.958, 0.015, 0.011]
-    assert bbox_map["br"] == [0.946, 0.958, 0.015, 0.011]

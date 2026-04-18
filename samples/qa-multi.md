@@ -1,9 +1,5 @@
 ---
-title: |
-  Quiz 1: Mixed Topics
-  CMPE195A: Senior Design Project
-  San Jose State University
-  March 15, 2024
+title: CS146: Quiz 1
 instructions: Closed book, closed notes.
 continued_page_header: Quiz 1: Mixed Topics
 questions_start_page: 1
@@ -50,6 +46,63 @@ questions_start_page: 1
       - Multiple selection mistakes (-6)
     - Incorrect (-10)
 
+- (25 points) Answer all parts about finding the second largest number [A].
+  - (8 points) What algorithm would you use to find the second largest distinct number in a list?
+    - **Correct**
+      - Track the largest and second largest while iterating once
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Identifies it finds a second value but not distinct (-3)
+        - Vague description of finding values (-5)
+      - Incorrect (-8)
+  - (9 points) What is the second largest distinct number in [5, 2, 8, 1, 8, 3]?
+    - **Correct**
+      - 5
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Returns 8 (didn't account for distinct) (-4)
+        - Process identified but calculation wrong (-6)
+      - Incorrect (-9)
+  - (8 points) What should the algorithm return for a list with only one element?
+    - **Correct**
+      - None
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-4)
+      - Incorrect (-8)
+
+- (20 points) Answer the following questions about data structures [A].
+  - (5 points) What is the time complexity of inserting at the beginning of a linked list?
+    - **Correct**
+      - O(1)
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+  - (5 points) What is the time complexity of searching in a balanced binary search tree?
+    - **Correct**
+      - O(log n)
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+  - (5 points) Which data structure uses LIFO (Last In, First Out)?
+    - **Correct**
+      - Stack
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+  - (5 points) Which data structure uses FIFO (First In, First Out)?
+    - **Correct**
+      - Queue
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+
 ## Version B
 
 - (10 points) Convert decimal 6 to binary [B].
@@ -90,6 +143,66 @@ questions_start_page: 1
       - Multiple selection mistakes (-5)
     - Incorrect (-10)
 
+- (25 points) Answer all parts about array inversions [B].
+  - (8 points) What is an inversion in an array?
+    - **Correct**
+      - A pair of indices where the earlier element is greater than the later element
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Identifies it counts comparisons but not inversions (-3)
+        - Vague description of nested loop behavior (-5)
+      - Incorrect (-8)
+  - (9 points) How many inversions are in the array [3, 1, 4, 1, 5]?
+    - **Correct**
+      - 4
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Close but incorrect value (-4)
+        - Process identified but calculation wrong (-6)
+      - Incorrect (-9)
+  - (8 points) What is the time complexity of counting inversions using nested loops?
+    - **Correct**
+      - O(n²)
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-4)
+      - Incorrect (-8)
+
+- (20 points) Answer the following questions about number systems [B].
+  - (5 points) Convert hexadecimal 0x2F to decimal.
+    - **Correct**
+      - 47
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - One digit error (-3)
+        - Process correct but calculation wrong (-4)
+      - Incorrect (-5)
+  - (5 points) Convert decimal 255 to hexadecimal.
+    - **Correct**
+      - 0xFF
+      - FF
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+  - (5 points) What is the binary representation of hexadecimal 0xA?
+    - **Correct**
+      - 1010
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+  - (5 points) What is the decimal value of octal 17?
+    - **Correct**
+      - 15
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+
 ## Version C
 
 - (10 points) Convert decimal 9 to binary [C].
@@ -128,3 +241,67 @@ questions_start_page: 1
     - Correct (+0)
     - Partially Correct (-5)
     - Incorrect (-10)
+
+- (25 points) Answer all parts about the Fibonacci sequence [C].
+  - (8 points) What is the definition of the Fibonacci sequence?
+    - **Correct**
+      - Each number is the sum of the two preceding ones, starting from 0 and 1
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Identifies it's recursive but not Fibonacci (-3)
+        - Vague description of recursive behavior (-5)
+      - Incorrect (-8)
+  - (9 points) What is the 5th Fibonacci number (starting from F0=0)?
+    - **Correct**
+      - 5
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Close but incorrect value (-4)
+        - Process identified but calculation wrong (-6)
+      - Incorrect (-9)
+  - (8 points) What is the time complexity of the naive recursive Fibonacci implementation?
+    - **Correct**
+      - O(2^n)
+      - Exponential
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Identifies as inefficient but not exponential (-4)
+        - O(n) or O(n²) (-6)
+      - Incorrect (-8)
+
+- (20 points) Answer the following questions about memory management [C].
+  - (5 points) What is a memory leak?
+    - **Correct**
+      - When a program allocates memory but never frees it
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Partial understanding of the concept (-3)
+        - Confuses with other memory issues (-4)
+      - Incorrect (-5)
+  - (5 points) What is a stack overflow?
+    - **Correct**
+      - When the call stack exceeds its allocated memory
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)
+  - (5 points) What is the difference between stack and heap memory?
+    - **Correct**
+      - Stack is for function calls and local variables, heap is for dynamic allocation
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct
+        - Identifies one aspect correctly (-3)
+        - Vague or incomplete distinction (-4)
+      - Incorrect (-5)
+  - (5 points) What is dynamic memory allocation?
+    - **Correct**
+      - Allocating memory at runtime using functions like malloc or new
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-5)

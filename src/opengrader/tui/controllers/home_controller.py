@@ -29,7 +29,6 @@ from textual.widgets import ListView
 class _TemplateUploadContext:
     assignment_id: int
     assignment_label: str
-    strategy: str
     template_names: tuple[str, ...]
     current_index: int = 0
     template_pdf_paths: tuple[Path, ...] = ()
@@ -83,7 +82,9 @@ class HomeController:
     def on_picker_course_highlighted(self, item: NavItem) -> None:
         picker = self._picker_screen()
         course_id = self._numeric_id(item.item_id)
-        assignments = self._assignment_items(self._data_provider.list_assignments(course_id))
+        assignments = self._assignment_items(
+            self._data_provider.list_assignments(course_id)
+        )
         students = self._student_items(self._data_provider.list_students(course_id))
         picker.show_course_details(
             item,
@@ -483,13 +484,6 @@ class HomeController:
 
         if linked_template is None or version_count == 0:
             return "[t] Upload Template (none linked)"
-        if linked_template.spec_pending:
-            if version_count > 1:
-                return (
-                    f"[t] Template: {linked_template.name} "
-                    f"({version_count} versions, spec pending)"
-                )
-            return f"[t] Template: {linked_template.name} (spec pending)"
         if version_count > 1:
             return f"[t] Template: {linked_template.name} ({version_count} versions)"
         return f"[t] Template: {linked_template.name}"
@@ -845,10 +839,6 @@ class HomeController:
         if not template_name:
             return "Template Name is required."
 
-        strategy = values.get("strategy", "").strip().lower()
-        if strategy not in ("pdf+spec", "pdf-only"):
-            return "Strategy must be one of: pdf+spec, pdf-only."
-
         versions_raw = values.get("versions", "").strip()
         if versions_raw:
             labels = [part.strip() for part in versions_raw.split(",") if part.strip()]
@@ -885,12 +875,6 @@ class HomeController:
                             "Versions (Optional)",
                             placeholder="A,B,C",
                             required=False,
-                        ),
-                        DialogField(
-                            "strategy",
-                            "Upload Strategy",
-                            placeholder="pdf+spec or pdf-only",
-                            value="pdf+spec",
                         ),
                     ],
                     validator=self._validate_template_upload_form,
@@ -935,7 +919,6 @@ class HomeController:
 
         base_name = values["name"].strip()
         versions_raw = values.get("versions", "").strip()
-        strategy = values["strategy"].strip().lower()
 
         template_names: tuple[str, ...]
         if versions_raw:
@@ -952,7 +935,6 @@ class HomeController:
         context = _TemplateUploadContext(
             assignment_id=assignment_id,
             assignment_label=assignment_label,
-            strategy=strategy,
             template_names=template_names,
         )
         self._open_template_pdf_picker(context)
@@ -1000,7 +982,6 @@ class HomeController:
             next_context = _TemplateUploadContext(
                 assignment_id=context.assignment_id,
                 assignment_label=context.assignment_label,
-                strategy=context.strategy,
                 template_names=context.template_names,
                 current_index=next_index,
                 template_pdf_paths=collected_pdf_paths,
@@ -1015,63 +996,16 @@ class HomeController:
         final_context = _TemplateUploadContext(
             assignment_id=context.assignment_id,
             assignment_label=context.assignment_label,
-            strategy=context.strategy,
             template_names=context.template_names,
             template_pdf_paths=collected_pdf_paths,
             last_pdf_directory=last_dir,
         )
-        if context.strategy == "pdf-only":
-            self._create_and_link_templates(
-                context=final_context,
-                shared_spec_json_path=None,
-            )
-            return
-
-        self._open_template_spec_picker(context=final_context)
-
-    def _open_template_spec_picker(
-        self,
-        *,
-        context: _TemplateUploadContext,
-    ) -> None:
-        self._app.push_screen(
-            FilePicker(
-                title="Select Shared Template Spec JSON",
-                select_label="Use Spec",
-                file_filter=lambda path: path.suffix.lower() == ".json",
-                location=(
-                    str(context.last_pdf_directory)
-                    if context.last_pdf_directory is not None
-                    else "."
-                ),
-            ),
-            lambda selected_path: self._on_template_spec_selected(
-                context=context,
-                selected_path=selected_path,
-            ),
-        )
-
-    def _on_template_spec_selected(
-        self,
-        *,
-        context: _TemplateUploadContext,
-        selected_path: Path | None,
-    ) -> None:
-        home = self._app.get_home_screen()
-        if selected_path is None:
-            home.set_status("Template upload cancelled (no spec selected).")
-            return
-
-        self._create_and_link_templates(
-            context=context,
-            shared_spec_json_path=selected_path,
-        )
+        self._create_and_link_templates(context=final_context)
 
     def _create_and_link_templates(
         self,
         *,
         context: _TemplateUploadContext,
-        shared_spec_json_path: Path | None,
     ) -> None:
         home = self._app.get_home_screen()
 
@@ -1079,29 +1013,21 @@ class HomeController:
             home.set_status("Upload template failed: missing template PDFs.")
             return
 
-        created_templates: list[tuple[int, str, bool]] = []
+        created_templates: list[tuple[int, str]] = []
         try:
             for index, template_name in enumerate(context.template_names):
                 created = self._data_provider.create_assignment_template(
                     assignment_id=context.assignment_id,
                     name=template_name,
                     template_pdf_path=context.template_pdf_paths[index].as_posix(),
-                    spec_json_path=(
-                        shared_spec_json_path.as_posix()
-                        if shared_spec_json_path is not None
-                        else None
-                    ),
                 )
-                created_templates.append(
-                    (created.id, created.name, created.spec_pending)
-                )
+                created_templates.append((created.id, created.name))
         except Exception as exc:
             home.set_status(f"Upload template failed: {exc}")
             return
 
         created_template_ids = [template[0] for template in created_templates]
         created_template_names = [template[1] for template in created_templates]
-        pending_count = sum(1 for template in created_templates if template[2])
 
         current_template_id = created_template_ids[0]
         try:
@@ -1130,21 +1056,8 @@ class HomeController:
 
         total = len(created_template_ids)
         if total == 1:
-            if pending_count > 0:
-                home.set_status(
-                    f"Linked template '{created_template_names[0]}' to {context.assignment_label} (spec pending). "
-                    "Generate or edit the spec later, then upload with pdf+spec."
-                )
-            else:
-                home.set_status(
-                    f"Linked template '{created_template_names[0]}' to {context.assignment_label}."
-                )
-            return
-
-        if pending_count > 0:
             home.set_status(
-                f"Linked {total} template versions to {context.assignment_label} "
-                f"({pending_count} spec pending)."
+                f"Linked template '{created_template_names[0]}' to {context.assignment_label}."
             )
             return
 

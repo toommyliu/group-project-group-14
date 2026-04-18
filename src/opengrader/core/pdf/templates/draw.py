@@ -1,9 +1,7 @@
 import fitz
 
-from .anchor import Anchor
 from .constants import (
     ANCHOR_PADDING,
-    ANCHOR_SIZE,
     BOX_LINE,
     CONTENT_PADDING,
     MIN_QUESTION_BOX_HEIGHT,
@@ -19,13 +17,6 @@ from .constants import (
     ColorType,
 )
 from .fonts import ResolvedTemplateFonts, measure_text_width
-
-ANCHOR_POSITIONS = {
-    Anchor.TopLeft: lambda m, s, pw, ph: (m, m),
-    Anchor.TopRight: lambda m, s, pw, ph: (pw - m - s, m),
-    Anchor.Bottomleft: lambda m, s, pw, ph: (m, ph - m - s),
-    Anchor.BottomRight: lambda m, s, pw, ph: (pw - m - s, ph - m - s),
-}
 
 QUESTION_FONTSIZE = 11
 SUBQUESTION_FONTSIZE = 9
@@ -142,7 +133,7 @@ def _truncate_text_to_width(
     return (chars + "...") if chars else ""
 
 
-def _instruction_layout(
+def _instruction_wrap(
     instruction_text: str,
     *,
     label: str,
@@ -183,58 +174,8 @@ def _instruction_layout(
     return prefix_width, first_line, wrapped_remaining
 
 
-def draw_anchor(
-    page: fitz.Page, x: float, y: float, size: float, filled: bool = False
-) -> None:
-    """
-    Draws an anchor box at the specified position.
-
-    Args:
-        page: The fitz.Page object to draw on.
-        x: The x-coordinate of the top-left corner of the anchor box.
-        y: The y-coordinate of the top-left corner of the anchor box.
-        size: The width and height of the anchor box.
-        filled: If True, the anchor box will be filled; otherwise, it will be an
-            empty box with an "X" inside.
-    """
-    r = fitz.Rect(x, y, x + size, y + size)
-    if filled:
-        page.draw_rect(r, color=COLOR_BLACK, fill=COLOR_BLACK, width=BOX_LINE)
-    else:
-        page.draw_rect(r, color=COLOR_BLACK, width=BOX_LINE)
-        page.draw_line(
-            fitz.Point(x + 2, y + 2),
-            fitz.Point(x + size - 2, y + size - 2),
-            color=COLOR_BLACK,
-            width=0.3,
-        )
-        page.draw_line(
-            fitz.Point(x + size - 2, y + 2),
-            fitz.Point(x + 2, y + size - 2),
-            color=COLOR_BLACK,
-            width=0.3,
-        )
-
-
-def create_page_with_anchors(
-    doc: fitz.Document,
-    page_w: float,
-    page_h: float,
-    filled_anchors: set[Anchor] | None = None,
-) -> fitz.Page:
-    page = doc.new_page(width=page_w, height=page_h)
-    margin = ANCHOR_PADDING
-    if filled_anchors is None:
-        filled_anchors = {
-            Anchor.TopLeft,
-            Anchor.TopRight,
-            Anchor.Bottomleft,
-            Anchor.BottomRight,
-        }
-    for aid, pos_fn in ANCHOR_POSITIONS.items():
-        x, y = pos_fn(margin, ANCHOR_SIZE, page_w, page_h)
-        draw_anchor(page, x, y, ANCHOR_SIZE, filled=aid in filled_anchors)
-    return page
+def create_page(doc: fitz.Document, page_w: float, page_h: float) -> fitz.Page:
+    return doc.new_page(width=page_w, height=page_h)
 
 
 def draw_field_box(
@@ -245,8 +186,11 @@ def draw_field_box(
     y1: float,
     value: str,
     fonts: ResolvedTemplateFonts,
+    *,
+    draw_border: bool = True,
 ) -> None:
-    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
+    if draw_border:
+        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
 
     center_x = (x0 + x1) / 2.0
 
@@ -401,8 +345,11 @@ def draw_question_box(
     prompt: str,
     fonts: ResolvedTemplateFonts,
     subquestions: list[dict] | None = None,
+    *,
+    draw_borders: bool = True,
 ) -> list[dict]:
-    page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
+    if draw_borders:
+        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
 
     header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
     header_y = y0 + 16
@@ -451,11 +398,12 @@ def draw_question_box(
         sub_y0 = sub_area_top + i * (sub_height + SUBQUESTION_GAP)
         sub_y1 = sub_y0 + sub_height
         sub_rect = (x0 + 8, sub_y0, x1 - 8, sub_y1)
-        page.draw_rect(
-            fitz.Rect(*sub_rect),
-            color=COLOR_BLACK,
-            width=BOX_LINE,
-        )
+        if draw_borders:
+            page.draw_rect(
+                fitz.Rect(*sub_rect),
+                color=COLOR_BLACK,
+                width=BOX_LINE,
+            )
 
         raw_label = str(subquestion.get("label", chr(ord("a") + i))).strip()
         label = raw_label if raw_label.endswith(")") else f"{raw_label})"
@@ -516,6 +464,8 @@ def build_info_section(
     title: str,
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
+    *,
+    draw_field_borders: bool = True,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
     content_x0 = CONTENT_PADDING
     content_x1 = page_w - CONTENT_PADDING
@@ -537,28 +487,28 @@ def build_info_section(
         fonts=fonts,
     )
 
-    title_bbox_left = float("inf")
-    title_bbox_top = float("inf")
-    title_bbox_right = float("-inf")
-    title_bbox_bottom = float("-inf")
+    title_bounds_left = float("inf")
+    title_bounds_top = float("inf")
+    title_bounds_right = float("-inf")
+    title_bounds_bottom = float("-inf")
 
-    def include_title_line_bbox(
+    def include_title_line_bounds(
         text: str,
         baseline_y: float,
         fontsize: float,
         *,
         bold: bool,
     ) -> None:
-        nonlocal title_bbox_left, title_bbox_top, title_bbox_right, title_bbox_bottom
+        nonlocal title_bounds_left, title_bounds_top, title_bounds_right, title_bounds_bottom
         line_w = measure_text_width(text, fontsize, bold=bold, fonts=fonts)
         line_left = center_x - (line_w / 2.0)
         line_right = center_x + (line_w / 2.0)
         line_top = baseline_y - fontsize
         line_bottom = baseline_y + fontsize * 0.3
-        title_bbox_left = min(title_bbox_left, line_left)
-        title_bbox_top = min(title_bbox_top, line_top)
-        title_bbox_right = max(title_bbox_right, line_right)
-        title_bbox_bottom = max(title_bbox_bottom, line_bottom)
+        title_bounds_left = min(title_bounds_left, line_left)
+        title_bounds_top = min(title_bounds_top, line_top)
+        title_bounds_right = max(title_bounds_right, line_right)
+        title_bounds_bottom = max(title_bounds_bottom, line_bottom)
 
     # header_top_y = 232.0
     header_top_y = 116.0
@@ -572,7 +522,7 @@ def build_info_section(
         bold=True,
         fonts=fonts,
     )
-    include_title_line_bbox(title_line, cursor_y, title_size, bold=True)
+    include_title_line_bounds(title_line, cursor_y, title_size, bold=True)
     cursor_y += title_size * 1.45
 
     for line in subtitle_lines:
@@ -593,7 +543,7 @@ def build_info_section(
             bold=False,
             fonts=fonts,
         )
-        include_title_line_bbox(line, cursor_y, subtitle_size, bold=False)
+        include_title_line_bounds(line, cursor_y, subtitle_size, bold=False)
         cursor_y += subtitle_size * 1.32
 
     row_y = cursor_y
@@ -635,6 +585,7 @@ def build_info_section(
         name_box[3],
         name,
         fonts,
+        draw_border=draw_field_borders,
     )
     draw_field_box(
         page,
@@ -644,6 +595,7 @@ def build_info_section(
         sid_box[3],
         student_id,
         fonts,
+        draw_border=draw_field_borders,
     )
 
     q_start_y = sid_box[3] + 22
@@ -655,7 +607,7 @@ def build_info_section(
         line_height = instruction_size * 1.25
         block_width = content_x1 - content_x0
 
-        prefix_width, first_line, remainder_lines = _instruction_layout(
+        prefix_width, first_line, remainder_lines = _instruction_wrap(
             instruction_text,
             label=label,
             max_width=block_width,
@@ -693,10 +645,10 @@ def build_info_section(
         q_start_y = y + 4
 
     title_box = (
-        max(content_x0, title_bbox_left - 6),
-        max(ANCHOR_PADDING, title_bbox_top - 3),
-        min(content_x1, title_bbox_right + 6),
-        min(row_y - 4, title_bbox_bottom + 3),
+        max(content_x0, title_bounds_left - 6),
+        max(ANCHOR_PADDING, title_bounds_top - 3),
+        min(content_x1, title_bounds_right + 6),
+        min(row_y - 4, title_bounds_bottom + 3),
     )
 
     return q_start_y, {
@@ -714,11 +666,13 @@ def draw_questions_on_page(
     page_h: float,
     start_y: float,
     fonts: ResolvedTemplateFonts,
+    *,
+    draw_borders: bool = True,
 ) -> tuple[int, list[dict]]:
     content_x0 = CONTENT_PADDING
     content_x1 = page_w - CONTENT_PADDING
     content_top = start_y
-    content_bottom = page_h - ANCHOR_PADDING - ANCHOR_SIZE - 32
+    content_bottom = page_h - ANCHOR_PADDING - 32
     if content_bottom <= content_top:
         draw_page_number(page, page_number, page_w, page_h, fonts)
         return 0, []
@@ -771,6 +725,7 @@ def draw_questions_on_page(
             prompt,
             fonts,
             subquestions=subquestions,
+            draw_borders=draw_borders,
         )
 
         question_meta = {
