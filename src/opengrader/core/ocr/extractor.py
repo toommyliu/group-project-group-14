@@ -7,6 +7,7 @@ from pathlib import Path
 from statistics import median
 from typing import Callable, Literal
 
+import cv2
 import fitz
 import numpy as np
 import pytesseract
@@ -30,12 +31,27 @@ QUESTION_DEFAULT_X1_NORM = 0.89
 QUESTION_SPAN_TRIGGER_Y_NORM = 0.84
 QUESTION_SPAN_NEXT_PAGE_START_NORM = 0.04
 
-FIELD_SLICE_LEFT_MARGIN_NORM = 0.045
-FIELD_SLICE_RIGHT_MARGIN_NORM = 0.965
-FIELD_SLICE_MIN_WIDTH_NORM = 0.68
-FIELD_SLICE_VERTICAL_PAD_FACTOR = 1.35
-FIELD_SLICE_MIN_HEIGHT_NORM = 0.026
-FIELD_SLICE_MAX_HEIGHT_NORM = 0.12
+FIELD_SLICE_MIN_WIDTH_NORM = 0.42
+FIELD_SLICE_MAX_WIDTH_NORM = 0.82
+FIELD_SLICE_PAD_LEFT_NORM = 0.02
+FIELD_SLICE_PAD_RIGHT_NORM = 0.15
+FIELD_SLICE_TOP_PAD_FACTOR = 1.9
+FIELD_SLICE_BOTTOM_PAD_FACTOR = 1.45
+FIELD_SLICE_MIN_HEIGHT_NORM = 0.03
+FIELD_SLICE_MAX_HEIGHT_NORM = 0.145
+HEADER_UNDERLINE_SCAN_END_NORM = 0.42
+HEADER_UNDERLINE_MIN_WIDTH_NORM = 0.18
+HEADER_UNDERLINE_MAX_WIDTH_NORM = 0.88
+HEADER_UNDERLINE_MAX_HEIGHT_NORM = 0.012
+HEADER_UNDERLINE_MIN_Y_NORM = 0.06
+HEADER_CONTEXT_LEFT_PAD_NORM = 0.18
+HEADER_CONTEXT_RIGHT_PAD_NORM = 0.04
+HEADER_CONTEXT_TOP_PAD_NORM = 0.065
+HEADER_CONTEXT_BOTTOM_PAD_NORM = 0.018
+HEADER_FOCUS_LEFT_PAD_NORM = 0.002
+HEADER_FOCUS_RIGHT_PAD_NORM = 0.002
+HEADER_FOCUS_TOP_PAD_NORM = 0.002
+HEADER_FOCUS_BOTTOM_PAD_NORM = 0.002
 
 _QUESTION_MARKER_RE = re.compile(r"^(\d{1,3})[\.)]$")
 _QUESTION_NUM_ONLY_RE = re.compile(r"^\d{1,3}$")
@@ -983,6 +999,20 @@ def _normalized_label_token(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
+def _looks_like_name_label(token_norm: str) -> bool:
+    if token_norm in {"name", "nane", "naine", "narne"}:
+        return True
+    return token_norm.startswith("name") or token_norm.startswith("narn")
+
+
+def _looks_like_sid_label(token_norm: str) -> bool:
+    if token_norm in {"studentid", "sid", "id", "studentld"}:
+        return True
+    if token_norm.startswith("student") and ("id" in token_norm or "ld" in token_norm):
+        return True
+    return False
+
+
 def _words_bbox(words: list[_OcrWord]) -> tuple[int, int, int, int]:
     if not words:
         return (0, 0, 0, 0)
@@ -996,6 +1026,8 @@ def _words_bbox(words: list[_OcrWord]) -> tuple[int, int, int, int]:
 
 def _extract_name_from_line(
     line_words: list[_OcrWord],
+    *,
+    page_w_est: int,
 ) -> tuple[str, float, tuple[int, int, int, int]] | None:
     if not line_words:
         return None
@@ -1005,10 +1037,13 @@ def _extract_name_from_line(
 
     label_idx: int | None = None
     for i, norm in enumerate(norms):
-        if norm == "name" or norm.startswith("name"):
+        if _looks_like_name_label(norm):
             label_idx = i
             break
     if label_idx is None:
+        return None
+
+    if page_w_est > 0 and (line_words[label_idx].left / page_w_est) > 0.42:
         return None
 
     value_words: list[_OcrWord] = []
@@ -1030,7 +1065,7 @@ def _extract_name_from_line(
 
     for i in range(label_idx + 1, len(line_words)):
         norm = norms[i]
-        if norm in {"student", "studentid", "sid", "id"}:
+        if _looks_like_sid_label(norm) or norm == "student":
             break
         value_words.append(line_words[i])
 
@@ -1042,6 +1077,10 @@ def _extract_name_from_line(
     if letters < 2:
         return None
 
+    parts = [part for part in candidate.split(" ") if part]
+    if len(parts) > 6:
+        return None
+
     avg_conf = sum(w.conf for w in value_words) / len(value_words)
     conf = max(avg_conf, 72.0 if letters >= 4 else avg_conf)
     return candidate, conf, _words_bbox(value_words)
@@ -1049,6 +1088,8 @@ def _extract_name_from_line(
 
 def _extract_sid_from_line(
     line_words: list[_OcrWord],
+    *,
+    page_w_est: int,
 ) -> tuple[str, float, tuple[int, int, int, int]] | None:
     if not line_words:
         return None
@@ -1061,20 +1102,18 @@ def _extract_sid_from_line(
         if (
             norm == "student"
             and i + 1 < len(norms)
-            and norms[i + 1]
-            in {
-                "id",
-                "studentid",
-                "sid",
-            }
+            and _looks_like_sid_label(norms[i + 1])
         ):
             label_end_idx = i + 1
             break
-        if norm in {"studentid", "sid", "id"}:
+        if _looks_like_sid_label(norm):
             label_end_idx = i
             break
 
     if label_end_idx is None:
+        return None
+
+    if page_w_est > 0 and (line_words[label_end_idx].left / page_w_est) > 0.42:
         return None
 
     value_words: list[_OcrWord] = []
@@ -1096,7 +1135,7 @@ def _extract_sid_from_line(
 
     for i in range(label_end_idx + 1, len(line_words)):
         norm = norms[i]
-        if norm == "name":
+        if _looks_like_name_label(norm):
             break
         value_words.append(line_words[i])
 
@@ -1104,7 +1143,7 @@ def _extract_sid_from_line(
         return None
 
     digits = _normalize_sid_text(" ".join(w.text for w in value_words))
-    if len(digits) < 5:
+    if len(digits) < 5 or len(digits) > 12:
         return None
 
     avg_conf = sum(w.conf for w in value_words) / len(value_words)
@@ -1125,16 +1164,17 @@ def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
         ),
     )
 
-    top_cutoff = max(w.bottom for w in words) * 0.42
+    page_w_est = max(w.right for w in words)
 
     best_name: tuple[float, OcrResult] | None = None
     best_sid: tuple[float, OcrResult] | None = None
 
     for line_words in ordered_lines:
-        line_top = min(w.top for w in line_words)
-        if line_top > top_cutoff:
+        line_left = min(w.left for w in line_words)
+        if page_w_est > 0 and (line_left / page_w_est) > 0.48:
             continue
-        name_candidate = _extract_name_from_line(line_words)
+
+        name_candidate = _extract_name_from_line(line_words, page_w_est=page_w_est)
         if name_candidate is not None:
             text, conf, bbox = name_candidate
             score = conf + len(re.findall(r"[A-Za-z]", text)) * 2.0
@@ -1144,7 +1184,7 @@ def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
             if best_name is None or score > best_name[0]:
                 best_name = (score, candidate)
 
-        sid_candidate = _extract_sid_from_line(line_words)
+        sid_candidate = _extract_sid_from_line(line_words, page_w_est=page_w_est)
         if sid_candidate is not None:
             text, conf, bbox = sid_candidate
             score = conf + min(12, len(text)) * 4.0
@@ -1164,9 +1204,14 @@ def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
 
 def _find_label_word(words: list[_OcrWord], target: str) -> _OcrWord | None:
     normalized_target = target.lower()
-    candidates = [
-        w for w in words if _normalized_label_token(w.text) == normalized_target
-    ]
+    if normalized_target == "name":
+        candidates = [
+            w for w in words if _looks_like_name_label(_normalized_label_token(w.text))
+        ]
+    else:
+        candidates = [
+            w for w in words if _normalized_label_token(w.text) == normalized_target
+        ]
     if not candidates:
         return None
     candidates.sort(key=lambda w: (w.top, w.left))
@@ -1178,10 +1223,10 @@ def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] |
     for line_words in line_map.values():
         texts = [_normalized_label_token(w.text) for w in line_words]
         for i, txt in enumerate(texts):
-            if txt != "student":
+            if txt != "student" and not txt.startswith("student"):
                 continue
             for j in range(i + 1, min(i + 4, len(line_words))):
-                if texts[j] in {"id", "studentid", "sid"}:
+                if _looks_like_sid_label(texts[j]):
                     left = min(line_words[i].left, line_words[j].left)
                     top = min(line_words[i].top, line_words[j].top)
                     right = max(line_words[i].right, line_words[j].right)
@@ -1189,7 +1234,7 @@ def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] |
                     return left, top, right, bottom
 
     for w in words:
-        if _normalized_label_token(w.text) in {"id", "studentid", "sid"}:
+        if _looks_like_sid_label(_normalized_label_token(w.text)):
             return w.left, w.top, w.right, w.bottom
 
     return None
@@ -1220,22 +1265,50 @@ def _value_bbox_to_field_slice_px(
     page_h: int,
 ) -> tuple[int, int, int, int]:
     vx0, vy0, vx1, vy1 = value_bbox_px
+    value_w = max(1, vx1 - vx0)
     value_h = max(1, vy1 - vy0)
 
-    x0 = int(round(page_w * FIELD_SLICE_LEFT_MARGIN_NORM))
-    x1 = int(round(page_w * FIELD_SLICE_RIGHT_MARGIN_NORM))
-    min_width_px = int(round(page_w * FIELD_SLICE_MIN_WIDTH_NORM))
-    if x1 - x0 < min_width_px:
-        x0 = max(0, page_w - min_width_px)
-        x1 = page_w
+    pad_left = max(int(round(page_w * FIELD_SLICE_PAD_LEFT_NORM)), int(round(value_w * 0.20)))
+    pad_right = max(int(round(page_w * FIELD_SLICE_PAD_RIGHT_NORM)), int(round(value_w * 0.42)))
 
-    center_y = (vy0 + vy1) / 2.0
-    pad_y = int(round(value_h * FIELD_SLICE_VERTICAL_PAD_FACTOR))
+    x0 = vx0 - pad_left
+    x1 = vx1 + pad_right
+
+    min_width_px = int(round(page_w * FIELD_SLICE_MIN_WIDTH_NORM))
+    max_width_px = int(round(page_w * FIELD_SLICE_MAX_WIDTH_NORM))
+    width = x1 - x0
+
+    if width < min_width_px:
+        grow = min_width_px - width
+        x0 -= int(round(grow * 0.35))
+        x1 += int(round(grow * 0.65))
+    elif width > max_width_px:
+        center_x = (vx0 + vx1) / 2.0
+        half = max_width_px / 2.0
+        x0 = int(round(center_x - half * 0.95))
+        x1 = int(round(center_x + half * 1.05))
+
+    top_pad = max(int(round(value_h * FIELD_SLICE_TOP_PAD_FACTOR)), int(round(page_h * 0.01)))
+    bottom_pad = max(
+        int(round(value_h * FIELD_SLICE_BOTTOM_PAD_FACTOR)),
+        int(round(page_h * 0.008)),
+    )
+    y0 = vy0 - top_pad
+    y1 = vy1 + bottom_pad
+
     min_height_px = int(round(page_h * FIELD_SLICE_MIN_HEIGHT_NORM))
     max_height_px = int(round(page_h * FIELD_SLICE_MAX_HEIGHT_NORM))
-    target_h = min(max(max(value_h + 2 * pad_y, min_height_px), value_h + 2), max_height_px)
-    y0 = int(round(center_y - target_h / 2.0))
-    y1 = y0 + target_h
+    height = y1 - y0
+
+    if height < min_height_px:
+        grow = min_height_px - height
+        y0 -= int(round(grow * 0.58))
+        y1 += int(round(grow * 0.42))
+    elif height > max_height_px:
+        center_y = (vy0 + vy1) / 2.0
+        half_h = max_height_px / 2.0
+        y0 = int(round(center_y - half_h * 1.08))
+        y1 = int(round(center_y + half_h * 0.92))
 
     return _clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
 
@@ -1280,33 +1353,277 @@ def _label_to_field_bbox_px(
     return _value_bbox_to_field_slice_px(label_bbox_px, page_w=page_w, page_h=page_h)
 
 
-def _detect_dynamic_field_regions(
+def _detect_header_underlines(page_image: Image.Image) -> list[tuple[int, int, int, int]]:
+    gray = np.array(page_image.convert("L"))
+    page_h, page_w = gray.shape[:2]
+    if page_h <= 0 or page_w <= 0:
+        return []
+
+    scan_end = max(1, int(round(page_h * HEADER_UNDERLINE_SCAN_END_NORM)))
+    header = gray[:scan_end, :]
+
+    _, inv = cv2.threshold(header, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    kernel_width = max(25, int(round(page_w * 0.08)))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_width, 1))
+    hlines = cv2.morphologyEx(inv, cv2.MORPH_OPEN, kernel)
+    contours, _ = cv2.findContours(hlines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    raw_lines: list[tuple[int, int, int, int]] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        width_norm = w / page_w
+        height_norm = h / page_h
+        y_norm = y / page_h
+        if width_norm < HEADER_UNDERLINE_MIN_WIDTH_NORM:
+            continue
+        if width_norm > HEADER_UNDERLINE_MAX_WIDTH_NORM:
+            continue
+        if height_norm > HEADER_UNDERLINE_MAX_HEIGHT_NORM:
+            continue
+        if y_norm < HEADER_UNDERLINE_MIN_Y_NORM:
+            continue
+        raw_lines.append((x, y, x + w, y + h))
+
+    if not raw_lines:
+        return []
+
+    raw_lines.sort(key=lambda bbox: (bbox[1], bbox[0]))
+    merged: list[tuple[int, int, int, int]] = []
+    for bbox in raw_lines:
+        if not merged:
+            merged.append(bbox)
+            continue
+
+        px0, py0, px1, py1 = merged[-1]
+        x0, y0, x1, y1 = bbox
+        same_row = abs(((py0 + py1) // 2) - ((y0 + y1) // 2)) <= max(10, int(page_h * 0.01))
+        overlaps_horizontally = x0 <= px1 + max(20, int(page_w * 0.02))
+        if same_row and overlaps_horizontally:
+            merged[-1] = (min(px0, x0), min(py0, y0), max(px1, x1), max(py1, y1))
+            continue
+
+        merged.append(bbox)
+
+    return merged
+
+
+def _find_matching_underline(
+    underlines: list[tuple[int, int, int, int]],
+    label_bbox_px: tuple[int, int, int, int],
+    *,
+    page_w: int,
+    page_h: int,
+    used_indices: set[int] | None = None,
+) -> int | None:
+    lx0, ly0, lx1, ly1 = label_bbox_px
+    label_center_y = (ly0 + ly1) / 2.0
+    best_idx: int | None = None
+    best_score: float | None = None
+
+    for idx, underline_bbox in enumerate(underlines):
+        if used_indices is not None and idx in used_indices:
+            continue
+
+        ux0, uy0, ux1, uy1 = underline_bbox
+        if ux1 <= lx1 + int(page_w * 0.04):
+            continue
+
+        underline_center_y = (uy0 + uy1) / 2.0
+        y_distance = abs(underline_center_y - label_center_y)
+        if y_distance > page_h * 0.09:
+            continue
+
+        score = y_distance + max(0.0, (ux0 - lx1) * 0.2)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_idx = idx
+
+    return best_idx
+
+
+def _underline_to_field_slice_px(
+    underline_bbox_px: tuple[int, int, int, int],
+    *,
+    page_w: int,
+    page_h: int,
+    focus: bool,
+) -> tuple[int, int, int, int]:
+    ux0, uy0, ux1, uy1 = underline_bbox_px
+    if focus:
+        x0 = ux0 - int(round(page_w * HEADER_FOCUS_LEFT_PAD_NORM))
+        x1 = ux1 + int(round(page_w * HEADER_FOCUS_RIGHT_PAD_NORM))
+        y0 = uy0 - int(round(page_h * HEADER_FOCUS_TOP_PAD_NORM))
+        y1 = uy1 + int(round(page_h * HEADER_FOCUS_BOTTOM_PAD_NORM))
+    else:
+        x0 = ux0 - int(round(page_w * HEADER_CONTEXT_LEFT_PAD_NORM))
+        x1 = ux1 + int(round(page_w * HEADER_CONTEXT_RIGHT_PAD_NORM))
+        y0 = uy0 - int(round(page_h * HEADER_CONTEXT_TOP_PAD_NORM))
+        y1 = uy1 + int(round(page_h * HEADER_CONTEXT_BOTTOM_PAD_NORM))
+
+    return _clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
+
+
+def _set_field_slices_from_underline(
+    out: dict[str, dict[str, tuple[int, int, int, int]]],
+    *,
+    field_type: str,
+    underline_bbox_px: tuple[int, int, int, int],
+    page_w: int,
+    page_h: int,
+) -> None:
+    out[field_type] = {
+        "primary": _underline_to_field_slice_px(
+            underline_bbox_px,
+            page_w=page_w,
+            page_h=page_h,
+            focus=False,
+        ),
+        "focus": _underline_to_field_slice_px(
+            underline_bbox_px,
+            page_w=page_w,
+            page_h=page_h,
+            focus=True,
+        ),
+    }
+
+
+def _detect_dynamic_field_slices(
     page_words: list[_OcrWord],
     page_w: int,
     page_h: int,
     boxes_norm: list[list[float]],
-) -> dict[str, tuple[int, int, int, int]]:
-    out: dict[str, tuple[int, int, int, int]] = {}
+    *,
+    page_image: Image.Image | None = None,
+) -> dict[str, dict[str, tuple[int, int, int, int]]]:
+    out: dict[str, dict[str, tuple[int, int, int, int]]] = {}
+    underlines = _detect_header_underlines(page_image) if page_image is not None else []
+    used_underline_indices: set[int] = set()
 
     name_word = _find_label_word(page_words, "name")
     if name_word is not None:
         label_bbox = (name_word.left, name_word.top, name_word.right, name_word.bottom)
-        out["name"] = _label_to_field_bbox_px(label_bbox, page_w, page_h, boxes_norm)
+        underline_idx = _find_matching_underline(
+            underlines,
+            label_bbox,
+            page_w=page_w,
+            page_h=page_h,
+            used_indices=used_underline_indices,
+        )
+        if underline_idx is not None:
+            _set_field_slices_from_underline(
+                out,
+                field_type="name",
+                underline_bbox_px=underlines[underline_idx],
+                page_w=page_w,
+                page_h=page_h,
+            )
+            used_underline_indices.add(underline_idx)
+        else:
+            out["name"] = {
+                "primary": _label_to_field_bbox_px(label_bbox, page_w, page_h, boxes_norm)
+            }
 
     sid_label = _find_student_id_label(page_words)
     if sid_label is not None:
-        out["sid"] = _label_to_field_bbox_px(sid_label, page_w, page_h, boxes_norm)
+        underline_idx = _find_matching_underline(
+            underlines,
+            sid_label,
+            page_w=page_w,
+            page_h=page_h,
+            used_indices=used_underline_indices,
+        )
+        if underline_idx is not None:
+            _set_field_slices_from_underline(
+                out,
+                field_type="sid",
+                underline_bbox_px=underlines[underline_idx],
+                page_w=page_w,
+                page_h=page_h,
+            )
+            used_underline_indices.add(underline_idx)
+        else:
+            out["sid"] = {
+                "primary": _label_to_field_bbox_px(sid_label, page_w, page_h, boxes_norm)
+            }
 
-    # Fallback: infer header field boxes directly from detected rectangles,
-    # useful when label OCR fails on noisy scans.
+    parsed_fields = _extract_header_field_values(page_words)
+    for field_type in ("name", "sid"):
+        if field_type in out:
+            continue
+        parsed = parsed_fields.get(field_type)
+        if parsed is None or parsed.bbox_px == (0, 0, 0, 0):
+            continue
+        out[field_type] = {
+            "primary": _value_bbox_to_field_slice_px(
+                parsed.bbox_px,
+                page_w=page_w,
+                page_h=page_h,
+            )
+        }
+
+    if underlines:
+        ordered_underlines = sorted(
+            [
+                (idx, bbox)
+                for idx, bbox in enumerate(underlines)
+                if idx not in used_underline_indices
+            ],
+            key=lambda item: (item[1][1], item[1][0]),
+        )
+
+        if "name" not in out:
+            name_candidate: tuple[int, tuple[int, int, int, int]] | None = None
+            if "sid" in out:
+                sid_primary = out["sid"]["primary"]
+                sid_center_y = (sid_primary[1] + sid_primary[3]) / 2.0
+                for idx, bbox in ordered_underlines:
+                    underline_center_y = (bbox[1] + bbox[3]) / 2.0
+                    if underline_center_y < sid_center_y - page_h * 0.015:
+                        name_candidate = (idx, bbox)
+            if name_candidate is None and ordered_underlines:
+                name_candidate = ordered_underlines[0]
+            if name_candidate is not None:
+                idx, bbox = name_candidate
+                _set_field_slices_from_underline(
+                    out,
+                    field_type="name",
+                    underline_bbox_px=bbox,
+                    page_w=page_w,
+                    page_h=page_h,
+                )
+                used_underline_indices.add(idx)
+                ordered_underlines = [item for item in ordered_underlines if item[0] != idx]
+
+        if "sid" not in out:
+            sid_candidate: tuple[int, tuple[int, int, int, int]] | None = None
+            if "name" in out:
+                name_primary = out["name"]["primary"]
+                name_center_y = (name_primary[1] + name_primary[3]) / 2.0
+                for idx, bbox in ordered_underlines:
+                    underline_center_y = (bbox[1] + bbox[3]) / 2.0
+                    if underline_center_y > name_center_y + page_h * 0.015:
+                        sid_candidate = (idx, bbox)
+                        break
+            if sid_candidate is None and ordered_underlines:
+                sid_candidate = ordered_underlines[-1]
+            if sid_candidate is not None:
+                idx, bbox = sid_candidate
+                _set_field_slices_from_underline(
+                    out,
+                    field_type="sid",
+                    underline_bbox_px=bbox,
+                    page_w=page_w,
+                    page_h=page_h,
+                )
+
     candidate_boxes: list[list[float]] = []
     for box in boxes_norm:
         x, y, w, h = box
-        if y > 0.45:
+        if w < 0.18 or w > 0.88:
             continue
-        if w < 0.20 or w > 0.75:
+        if h < 0.015 or h > 0.16:
             continue
-        if h < 0.02 or h > 0.10:
+        if x > 0.65:
             continue
         candidate_boxes.append(box)
 
@@ -1315,19 +1632,44 @@ def _detect_dynamic_field_regions(
         name_box = candidate_boxes[0]
         sid_box = candidate_boxes[1]
         if "name" not in out:
-            out["name"] = _value_bbox_to_field_slice_px(
-                _bbox_norm_to_px(name_box, page_w, page_h),
-                page_w=page_w,
-                page_h=page_h,
-            )
+            out["name"] = {
+                "primary": _value_bbox_to_field_slice_px(
+                    _bbox_norm_to_px(name_box, page_w, page_h),
+                    page_w=page_w,
+                    page_h=page_h,
+                )
+            }
         if "sid" not in out:
-            out["sid"] = _value_bbox_to_field_slice_px(
-                _bbox_norm_to_px(sid_box, page_w, page_h),
-                page_w=page_w,
-                page_h=page_h,
-            )
+            out["sid"] = {
+                "primary": _value_bbox_to_field_slice_px(
+                    _bbox_norm_to_px(sid_box, page_w, page_h),
+                    page_w=page_w,
+                    page_h=page_h,
+                )
+            }
 
     return out
+
+
+def _detect_dynamic_field_regions(
+    page_words: list[_OcrWord],
+    page_w: int,
+    page_h: int,
+    boxes_norm: list[list[float]],
+    page_image: Image.Image | None = None,
+) -> dict[str, tuple[int, int, int, int]]:
+    slices = _detect_dynamic_field_slices(
+        page_words,
+        page_w,
+        page_h,
+        boxes_norm,
+        page_image=page_image,
+    )
+    return {
+        field_type: field_slices["primary"]
+        for field_type, field_slices in slices.items()
+        if "primary" in field_slices
+    }
 
 
 def _ocr_field_from_dynamic_region(
@@ -1349,13 +1691,15 @@ def _save_field_crop(
     bbox_px: tuple[int, int, int, int],
     field_type: str,
     field_crop_dir: Path,
+    page_number: int,
+    suffix: str = "",
 ) -> str | None:
     crop = crop_region(page_image, bbox_px)
     if crop.width <= 0 or crop.height <= 0:
         return None
 
     field_crop_dir.mkdir(parents=True, exist_ok=True)
-    out_path = field_crop_dir / f"{field_type}.png"
+    out_path = field_crop_dir / f"{field_type}_p{page_number}{suffix}.png"
     crop.save(out_path)
     return str(out_path)
 
@@ -1412,6 +1756,21 @@ def make_review_reason(result: SubmissionResult, config: OcrConfig) -> None:
         result.review_reasons.append(f"{fr.field_id}: {fr.error or 'unknown'}")
 
 
+def _field_result_score(field_result: FieldExtractionResult) -> float:
+    if field_result.ocr_result is None:
+        return -1.0
+
+    text = field_result.ocr_result.text.strip()
+    base = field_result.ocr_result.confidence
+    if field_result.validated:
+        base += 35.0
+    if text:
+        base += min(20.0, float(len(text)) * 1.1)
+    if field_result.crop_path:
+        base += 4.0
+    return base
+
+
 def process_submission_pdf(
     pdf_path: str | Path,
     config: OcrConfig,
@@ -1455,14 +1814,20 @@ def process_submission_pdf(
 
     all_field_results: list[FieldExtractionResult] = []
     field_crop_dir = Path(output_dir) / "field_crops" / path.stem
-    if 1 in rendered_pages:
-        page_image, page_w, page_h = rendered_pages[1]
-        header_field_candidates = _extract_header_field_values(page_words.get(1, []))
-        dynamic_regions_by_type = _detect_dynamic_field_regions(
-            page_words.get(1, []),
+    best_field_by_id: dict[str, tuple[float, FieldExtractionResult]] = {}
+
+    for page_number in sorted(rendered_pages):
+        if page_number != 1:
+            continue
+        page_image, page_w, page_h = rendered_pages[page_number]
+        page_word_list = page_words.get(page_number, [])
+        header_field_candidates = _extract_header_field_values(page_word_list)
+        dynamic_slices_by_type = _detect_dynamic_field_slices(
+            page_word_list,
             page_w,
             page_h,
-            page_boxes.get(1, []),
+            page_boxes.get(page_number, []),
+            page_image=page_image,
         )
 
         for field_def in _default_auto_fields():
@@ -1470,7 +1835,8 @@ def process_submission_pdf(
             field_config = _override_config(config, field_def)
 
             header_result = header_field_candidates.get(field_type)
-            dynamic_bbox = dynamic_regions_by_type.get(field_type)
+            dynamic_slice_set = dynamic_slices_by_type.get(field_type, {})
+            dynamic_bbox = dynamic_slice_set.get("primary")
             if (
                 dynamic_bbox is None
                 and header_result is not None
@@ -1490,19 +1856,43 @@ def process_submission_pdf(
                     bbox_px=dynamic_bbox,
                     field_type=field_type,
                     field_crop_dir=field_crop_dir,
+                    page_number=page_number,
                 )
-                dynamic_ocr = _ocr_field_from_dynamic_region(
-                    page_image,
-                    dynamic_bbox,
-                    config,
-                    field_def,
-                )
-                dynamic_validated = validate_field_result(
-                    dynamic_ocr,
-                    field_def,
-                    field_config,
-                )
-                dynamic_validated.crop_path = crop_path
+                focus_bbox = dynamic_slice_set.get("focus")
+                # TODO: this seems horrible
+                # if focus_bbox is not None:
+                #     _save_field_crop(
+                #         page_image=page_image,
+                #         bbox_px=focus_bbox,
+                #         field_type=field_type,
+                #         field_crop_dir=field_crop_dir,
+                #         page_number=page_number,
+                #         suffix="_focus",
+                #     )
+
+                dynamic_candidates: list[FieldExtractionResult] = []
+                for candidate_bbox in [dynamic_bbox, focus_bbox]:
+                    if candidate_bbox is None:
+                        continue
+                    dynamic_ocr = _ocr_field_from_dynamic_region(
+                        page_image,
+                        candidate_bbox,
+                        config,
+                        field_def,
+                    )
+                    candidate = validate_field_result(
+                        dynamic_ocr,
+                        field_def,
+                        field_config,
+                    )
+                    candidate.crop_path = crop_path
+                    dynamic_candidates.append(candidate)
+
+                if dynamic_candidates:
+                    dynamic_validated = max(
+                        dynamic_candidates,
+                        key=_field_result_score,
+                    )
 
             header_validated: FieldExtractionResult | None = None
             if header_result is not None:
@@ -1513,7 +1903,7 @@ def process_submission_pdf(
                 )
                 header_validated.crop_path = crop_path
 
-            selected: FieldExtractionResult
+            selected: FieldExtractionResult | None = None
             if dynamic_validated is not None and dynamic_validated.validated:
                 selected = dynamic_validated
             elif header_validated is not None and header_validated.validated:
@@ -1522,15 +1912,31 @@ def process_submission_pdf(
                 selected = dynamic_validated
             elif header_validated is not None:
                 selected = header_validated
-            else:
-                selected = FieldExtractionResult(
-                    field_id=field_def["id"],
-                    ocr_result=None,
-                    validated=True,
-                    crop_path=crop_path,
-                )
 
-            all_field_results.append(selected)
+            if selected is None:
+                continue
+
+            field_id = field_def["id"]
+            score = _field_result_score(selected)
+            prev = best_field_by_id.get(field_id)
+            if prev is None or score > prev[0]:
+                best_field_by_id[field_id] = (score, selected)
+
+    for field_def in _default_auto_fields():
+        field_id = field_def["id"]
+        chosen = best_field_by_id.get(field_id)
+        if chosen is not None:
+            all_field_results.append(chosen[1])
+            continue
+
+        all_field_results.append(
+            FieldExtractionResult(
+                field_id=field_id,
+                ocr_result=None,
+                validated=True,
+                crop_path=None,
+            )
+        )
 
     all_question_results: list[QuestionExtractionResult] = []
     sub_dir = Path(output_dir) / "responses" / path.stem

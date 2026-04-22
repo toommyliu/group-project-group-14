@@ -1,6 +1,6 @@
 ---
-name: "VOU Gary"
-student_id: ""
+name: "Bill Gates"
+student_id: "784659321"
 course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "B"

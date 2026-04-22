@@ -264,3 +264,90 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         student_file.extract_title_text_from_submission = original_extract_title
         student_file.extract_field_text = original_extract_field_text
         student_file.extract_question_prompt_and_answer = original_extract_qa
+
+
+def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "out"
+    response_dir = output_dir / "responses" / "student-0003"
+    field_dir = output_dir / "field_crops" / "student-0003"
+    response_dir.mkdir(parents=True, exist_ok=True)
+    field_dir.mkdir(parents=True, exist_ok=True)
+
+    q1 = response_dir / "q1.png"
+    name_crop = field_dir / "name_p1.png"
+    name_focus_crop = field_dir / "name_p1_focus.png"
+    sid_crop = field_dir / "sid_p1.png"
+
+    Image.new("RGB", (300, 160), color=(255, 255, 255)).save(q1)
+    Image.new("RGB", (500, 120), color=(255, 255, 255)).save(name_crop)
+    Image.new("RGB", (360, 120), color=(255, 255, 255)).save(name_focus_crop)
+    Image.new("RGB", (500, 120), color=(255, 255, 255)).save(sid_crop)
+
+    def _fake_process_submission_pdf(*_args: object, **_kwargs: object) -> SubmissionResult:
+        return SubmissionResult(
+            filename="student-0003.pdf",
+            version_validated=True,
+            fields=[
+                FieldExtractionResult(
+                    field_id="student_name",
+                    ocr_result=OcrResult(text="", confidence=0.0, bbox_px=(0, 0, 0, 0)),
+                    validated=True,
+                    crop_path=str(name_crop),
+                ),
+                FieldExtractionResult(
+                    field_id="student_id",
+                    ocr_result=OcrResult(text="", confidence=0.0, bbox_px=(0, 0, 0, 0)),
+                    validated=True,
+                    crop_path=str(sid_crop),
+                ),
+            ],
+            questions=[
+                QuestionExtractionResult(
+                    question_id="q1",
+                    page_number=1,
+                    output_path=str(q1),
+                )
+            ],
+        )
+
+    def _fake_extract_field_text(
+        *,
+        image_path: str | Path,
+        field_kind: str,
+        config: OllamaVisionConfig,
+    ) -> str:
+        _ = field_kind, config
+        if Path(image_path).name.endswith("_focus.png"):
+            return "Taylor Student"
+        return "name"
+
+    original_process = student_file.process_submission_pdf
+    original_extract_title = student_file.extract_title_text_from_submission
+    original_extract_field_text = student_file.extract_field_text
+    original_extract_qa = student_file.extract_question_prompt_and_answer
+    try:
+        student_file.process_submission_pdf = _fake_process_submission_pdf
+        student_file.extract_title_text_from_submission = (
+            lambda *_args, **_kwargs: "CMPE 195: Homework 3 (C)"
+        )
+        student_file.extract_field_text = _fake_extract_field_text
+        student_file.extract_question_prompt_and_answer = (
+            lambda **_kwargs: ("Question prompt", "Answer text")
+        )
+
+        result = student_file.build_student_submission_document(
+            pdf_path=tmp_path / "student-0003.pdf",
+            output_dir=output_dir,
+            ocr_config=OcrConfig(),
+            text_backend="ollama",
+            ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+        )
+
+        assert result.document.student_name == "Taylor Student"
+    finally:
+        student_file.process_submission_pdf = original_process
+        student_file.extract_title_text_from_submission = original_extract_title
+        student_file.extract_field_text = original_extract_field_text
+        student_file.extract_question_prompt_and_answer = original_extract_qa

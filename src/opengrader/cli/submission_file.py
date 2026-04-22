@@ -86,8 +86,9 @@ def _build_parser() -> ArgumentParser:
         choices=["tesseract", "ollama"],
         default="tesseract",
         help=(
-            "Text extraction backend for name/ID and question text "
-            "(default: tesseract)."
+            "Text extraction backend for name/ID and question text. "
+            "The ollama backend evaluates multiple header crop variants for "
+            "student fields (default: tesseract)."
         ),
     )
     parser.add_argument(
@@ -141,7 +142,7 @@ def run_cli() -> None:
         confidence_threshold=args.confidence_threshold,
     )
 
-    print(f"Using text backend: {args.text_backend}")
+    print(f"Using text backend: {args.text_backend} {'' if args.text_backend == 'tesseract' else f'(model: {args.ollama_model})'}")
     print(f"Found {len(input_pdfs)} submission PDF(s)")
 
     ollama_config = OllamaVisionConfig(

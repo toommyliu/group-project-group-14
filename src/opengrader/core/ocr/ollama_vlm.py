@@ -97,12 +97,13 @@ def _generate_with_image(
     try:
         with request.urlopen(req, timeout=config.timeout_seconds) as response:
             raw = response.read().decode("utf-8", errors="replace")
-            print(f"Raw response: {raw}")
+            print(f"DEBUG: Raw response: {raw}")
     except error.URLError as exc:
         raise OllamaVisionError(f"failed to call Ollama at {endpoint}: {exc}") from exc
 
     try:
         parsed = json.loads(raw)
+        print(f"DEBUG: Parsed response: {parsed}")
     except json.JSONDecodeError as exc:
         raise OllamaVisionError(f"invalid JSON response from Ollama: {exc}") from exc
 

@@ -211,6 +211,81 @@ def _general_text_ocr_config(base: OcrConfig) -> OcrConfig:
     )
 
 
+def _iter_field_crop_candidates(crop_path: Path) -> list[Path]:
+    candidates: list[Path] = []
+
+    focus_path = crop_path.with_name(f"{crop_path.stem}_focus{crop_path.suffix}")
+    for candidate in [focus_path, crop_path]:
+        if candidate.exists() and candidate not in candidates:
+            candidates.append(candidate)
+
+    return candidates
+
+
+def _score_ollama_field_value(value: str, field_kind: Literal["name", "sid"]) -> float:
+    text = value.strip()
+    if not text:
+        return -1.0
+
+    if field_kind == "sid":
+        digits = re.sub(r"\D", "", text)
+        score = float(len(digits) * 10)
+        if len(digits) == 9:
+            score += 60.0
+        elif 7 <= len(digits) <= 10:
+            score += 20.0
+        else:
+            score -= 30.0
+        return score
+
+    lowered = text.lower()
+    letters = len(re.findall(r"[a-z]", lowered))
+    parts = [part for part in re.split(r"\s+", text) if part]
+    score = float(letters * 2)
+    if 2 <= len(parts) <= 4:
+        score += 14.0
+    elif len(parts) == 1:
+        score += 4.0
+    elif len(parts) > 5:
+        score -= 12.0
+    if any(token in lowered for token in ["name", "student id", "student"]):
+        score -= 20.0
+    return score
+
+
+def _extract_best_ollama_field_text(
+    *,
+    crop_path: Path,
+    field_kind: Literal["name", "sid"],
+    config: OllamaVisionConfig,
+    fallback_value: str,
+) -> str:
+    best_value = fallback_value.strip()
+    best_score = _score_ollama_field_value(best_value, field_kind)
+
+    for candidate_path in _iter_field_crop_candidates(crop_path):
+        try:
+            extracted = extract_field_text(
+                image_path=candidate_path,
+                field_kind=field_kind,
+                config=config,
+            ).strip()
+        except Exception:
+            continue
+
+        candidate_score = _score_ollama_field_value(extracted, field_kind)
+        if candidate_score > best_score:
+            best_value = extracted
+            best_score = candidate_score
+
+        if field_kind == "sid" and len(re.sub(r"\D", "", extracted)) == 9:
+            break
+        if field_kind == "name" and candidate_score >= 24.0:
+            break
+
+    return best_value
+
+
 def _bbox_norm_to_px(
     bbox_norm: list[float],
     image_w: int,
@@ -654,14 +729,12 @@ def build_student_submission_document(
             crop_path = field_crop_by_id.get(field_id)
             if crop_path is None or not crop_path.exists():
                 continue
-            try:
-                extracted = extract_field_text(
-                    image_path=crop_path,
-                    field_kind=field_kind,
-                    config=active_ollama_config,
-                ).strip()
-            except Exception:
-                extracted = ""
+            extracted = _extract_best_ollama_field_text(
+                crop_path=crop_path,
+                field_kind=field_kind,
+                config=active_ollama_config,
+                fallback_value=fields_by_id.get(field_id, ""),
+            )
             if extracted:
                 fields_by_id[field_id] = extracted
 
@@ -709,14 +782,15 @@ def build_student_submission_document(
                 except ValueError:
                     response_image_path = str(image_path)
 
-                if use_ollama:
-                    try:
-                        prompt_text, response_text = extract_question_prompt_and_answer(
-                            image_path=image_path,
-                            config=active_ollama_config,
-                        )
-                    except Exception:
-                        prompt_text, response_text = "", ""
+                # TO
+                # if use_ollama:
+                #     try:
+                #         prompt_text, response_text = extract_question_prompt_and_answer(
+                #             image_path=image_path,
+                #             config=active_ollama_config,
+                #         )
+                #     except Exception:
+                #         prompt_text, response_text = "", ""
 
                 if not response_text:
                     response_text = ocr_image_text(image_path, text_ocr_config)
