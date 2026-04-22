@@ -152,6 +152,45 @@ class GradeController:
             return
         self._app.get_qa_picker_screen().move_cursor(1)
 
+    def qa_jump_ungraded_question(self) -> None:
+        """
+        Jumps the QA picker UI to the first question that is not fully graded for all students on the current assignment.
+        Updates the QA picker status. No action is taken if not on the QA picker page or if there are no students.
+        """
+        if self._state.current_page != PAGE_QA_PICKER:
+            return
+        
+        # Count of students to compare against graded counts
+        total_students = len(self._state.student_items)
+        if total_students == 0:
+            return
+
+        # Loop through all questions available for this assignment
+        for index, question in enumerate(self._state.grading_run.questions):
+            
+            # Tally how many students have a 'graded' status for this question
+            graded_countForThisQA = 0
+            for student in self._state.student_items:
+                status_key = (
+                    str(self._state.selection.course_id or ""),
+                    str(self._state.selection.assignment_id or ""),
+                    question.question_id,
+                    student.item_id,
+                )
+                if self._state.qa_student_status.get(status_key) == "graded":
+                    graded_countForThisQA += 1
+
+            # If any student is missing a grade for this question, jump to it
+            if graded_countForThisQA < total_students:
+                self._app.get_qa_picker_screen().move_to_index(index)
+                self._app.get_qa_picker_screen().set_status(
+                    f"Jumped to {question.question_id} ({graded_countForThisQA}/{total_students} graded)"
+                )
+                return
+            
+        # All questions are fully graded
+        self._app.get_qa_picker_screen().set_status("All questions are fully graded for all students!")
+
     def qa_confirm(self) -> None:
         if self._state.current_page != PAGE_QA_PICKER:
             return

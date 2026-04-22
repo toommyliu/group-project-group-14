@@ -79,7 +79,7 @@ $foreground: #E4E4E4EB;
 }
 
 #course-picker-status {
-    background: $accent;
+    background: transparent;
     color: $foreground;
     padding: 0 1;
     height: 1;
@@ -136,7 +136,7 @@ $foreground: #E4E4E4EB;
 }
 
 #qa-status {
-    background: $accent;
+    background: transparent;
     color: $foreground;
     padding: 0 1;
     height: 1;

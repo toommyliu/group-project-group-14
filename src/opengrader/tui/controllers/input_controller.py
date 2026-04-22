@@ -39,6 +39,7 @@ class InputCommand(str, Enum):
     QA_MOVE_UP = "qa_move_up"
     QA_MOVE_DOWN = "qa_move_down"
     QA_CONFIRM = "qa_confirm"
+    QA_JUMP_UNGRADED = "qa_jump_ungraded_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
     GRADE_PREVIOUS_STUDENT = "grade_previous_student"
     GRADE_NEXT_UNGRADED_STUDENT = "grade_next_ungraded_student"
@@ -50,6 +51,7 @@ class InputContext(str, Enum):
     HOME = "home"
     QA = "qa"
     GRADE = "grade"
+    COURSE = "course"
     GLOBAL = "global"
 
 
@@ -107,21 +109,21 @@ STANDARD_PROFILE = InputProfile(
             "escape",
             InputCommand.APP_BACK,
             "Back",
-            (InputContext.GLOBAL,),
+            (InputContext.GRADE, InputContext.HOME, InputContext.QA),
             show=True,
         ),
         CommandBindingSpec(
             "up",
             InputCommand.HOME_MOVE_UP,
             "Navigate Up",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=False,
         ),
         CommandBindingSpec(
             "down",
             InputCommand.HOME_MOVE_DOWN,
             "Navigate Down",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=False,
         ),
         CommandBindingSpec(
@@ -142,7 +144,7 @@ STANDARD_PROFILE = InputProfile(
             "enter",
             InputCommand.HOME_CONFIRM,
             "Select",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
         ),
         CommandBindingSpec(
             "g",
@@ -172,7 +174,7 @@ STANDARD_PROFILE = InputProfile(
             "n",
             InputCommand.HOME_CREATE,
             "Create",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=True,
         ),
         CommandBindingSpec(
@@ -260,6 +262,13 @@ STANDARD_PROFILE = InputProfile(
             InputCommand.QA_CONFIRM,
             "Grade QA",
             (InputContext.QA,),
+        ),
+        CommandBindingSpec(
+            "u",
+            InputCommand.QA_JUMP_UNGRADED,
+            "Jump Ungraded",
+            (InputContext.QA,),
+            show=True,
         ),
         CommandBindingSpec(
             "ctrl+right_square_bracket",
@@ -936,8 +945,10 @@ class InputController:
             return InputContext.GRADE
         if self._state.current_page == PAGE_QA_PICKER:
             return InputContext.QA
-        if self._state.current_page in (PAGE_COURSE_PICKER, PAGE_HOME):
+        if self._state.current_page == PAGE_HOME:
             return InputContext.HOME
+        if self._state.current_page == PAGE_COURSE_PICKER:
+            return InputContext.COURSE
         return InputContext.GLOBAL
 
     @staticmethod

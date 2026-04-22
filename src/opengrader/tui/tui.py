@@ -305,6 +305,10 @@ class TuiApp(App):
             self.home_controller.details_prev_page,
         )
         self.input_controller.register(
+            InputCommand.QA_JUMP_UNGRADED,
+            self.grade_controller.qa_jump_ungraded_question,
+        )
+        self.input_controller.register(
             InputCommand.QA_MOVE_UP,
             self.grade_controller.qa_move_up,
         )

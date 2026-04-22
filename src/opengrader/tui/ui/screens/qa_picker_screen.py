@@ -101,6 +101,22 @@ class QAPickerScreen(Vertical):
             f"{item.label}\n\nSelect this QA to grade it for all students.{status}"
         )
 
+    # Moves the UI selection in the QA list to the given index and updates the preview panel.
+    def move_to_index(self, index: int) -> None:
+
+        # Locate the QA list UI component by its selector and expected type
+        qa_list = self.query_one("#qa-list", ListView)
+
+        # Validate the provided index is within the current list bounds
+        if 0 <= index < len(qa_list._nodes):
+            qa_list.index = index
+
+            # This ensures the preview panel on the right updates too
+            item = self.selected_question()
+            if item:
+                self.show_question_details(item)
+
+
     def set_status(self, text: str) -> None:
         self.query_one("#qa-status", Static).update(text)
 
