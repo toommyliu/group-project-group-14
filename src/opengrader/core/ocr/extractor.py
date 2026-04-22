@@ -30,6 +30,13 @@ QUESTION_DEFAULT_X1_NORM = 0.89
 QUESTION_SPAN_TRIGGER_Y_NORM = 0.84
 QUESTION_SPAN_NEXT_PAGE_START_NORM = 0.04
 
+FIELD_SLICE_LEFT_MARGIN_NORM = 0.045
+FIELD_SLICE_RIGHT_MARGIN_NORM = 0.965
+FIELD_SLICE_MIN_WIDTH_NORM = 0.68
+FIELD_SLICE_VERTICAL_PAD_FACTOR = 1.35
+FIELD_SLICE_MIN_HEIGHT_NORM = 0.026
+FIELD_SLICE_MAX_HEIGHT_NORM = 0.12
+
 _QUESTION_MARKER_RE = re.compile(r"^(\d{1,3})[\.)]$")
 _QUESTION_NUM_ONLY_RE = re.compile(r"^\d{1,3}$")
 
@@ -48,6 +55,7 @@ class FieldExtractionResult:
     expected: str | None = None
     validated: bool = False
     error: str | None = None
+    crop_path: str | None = None
 
 
 @dataclass
@@ -284,30 +292,6 @@ def _short_text_from_result(text: str, field: dict) -> str:
         return _normalize_name_text(text)
     if ftype == "sid":
         return _normalize_sid_text(text)
-    if ftype == "version_marker":
-        letters = re.findall(r"[A-Za-z]", text.upper())
-        expected = str(field.get("expected", "")).upper()
-        if expected and expected in text.upper():
-            return expected
-        if expected and letters:
-            expected_char = expected[0]
-            for ch in letters:
-                if ch == expected_char:
-                    return expected_char
-            ambiguous_map = {
-                "B": {"B", "8"},
-                "A": {"A", "4"},
-                "C": {"C", "G", "0"},
-                "D": {"D", "0"},
-                "E": {"E", "F"},
-            }
-            candidate_set = ambiguous_map.get(expected_char, {expected_char})
-            for ch in text.upper():
-                if ch in candidate_set:
-                    return expected_char
-        if letters:
-            return letters[0]
-    return text
 
 
 def _is_empty(text: str) -> bool:
@@ -1211,6 +1195,51 @@ def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] |
     return None
 
 
+def _clamp_bbox_px(
+    bbox_px: tuple[int, int, int, int],
+    *,
+    page_w: int,
+    page_h: int,
+) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = bbox_px
+    x0 = max(0, min(page_w - 1, x0))
+    y0 = max(0, min(page_h - 1, y0))
+    x1 = max(1, min(page_w, x1))
+    y1 = max(1, min(page_h, y1))
+    if x1 <= x0:
+        x1 = min(page_w, x0 + 1)
+    if y1 <= y0:
+        y1 = min(page_h, y0 + 1)
+    return x0, y0, x1, y1
+
+
+def _value_bbox_to_field_slice_px(
+    value_bbox_px: tuple[int, int, int, int],
+    *,
+    page_w: int,
+    page_h: int,
+) -> tuple[int, int, int, int]:
+    vx0, vy0, vx1, vy1 = value_bbox_px
+    value_h = max(1, vy1 - vy0)
+
+    x0 = int(round(page_w * FIELD_SLICE_LEFT_MARGIN_NORM))
+    x1 = int(round(page_w * FIELD_SLICE_RIGHT_MARGIN_NORM))
+    min_width_px = int(round(page_w * FIELD_SLICE_MIN_WIDTH_NORM))
+    if x1 - x0 < min_width_px:
+        x0 = max(0, page_w - min_width_px)
+        x1 = page_w
+
+    center_y = (vy0 + vy1) / 2.0
+    pad_y = int(round(value_h * FIELD_SLICE_VERTICAL_PAD_FACTOR))
+    min_height_px = int(round(page_h * FIELD_SLICE_MIN_HEIGHT_NORM))
+    max_height_px = int(round(page_h * FIELD_SLICE_MAX_HEIGHT_NORM))
+    target_h = min(max(max(value_h + 2 * pad_y, min_height_px), value_h + 2), max_height_px)
+    y0 = int(round(center_y - target_h / 2.0))
+    y1 = y0 + target_h
+
+    return _clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
+
+
 def _label_to_field_bbox_px(
     label_bbox_px: tuple[int, int, int, int],
     page_w: int,
@@ -1225,30 +1254,30 @@ def _label_to_field_bbox_px(
         x0, y0, x1, y1 = _bbox_norm_to_px(box, page_w, page_h)
         if x0 < lx1 - int(page_w * 0.02):
             continue
-        if abs(((y0 + y1) / 2.0) - label_center_y) > page_h * 0.08:
+        if abs(((y0 + y1) / 2.0) - label_center_y) > page_h * 0.09:
             continue
         if (x1 - x0) < page_w * 0.12:
             continue
-        if (y1 - y0) < page_h * 0.012 or (y1 - y0) > page_h * 0.09:
+        if (y1 - y0) < page_h * 0.012 or (y1 - y0) > page_h * 0.12:
             continue
         score = abs(((y0 + y1) / 2.0) - label_center_y) - (x1 - x0) * 0.001
         candidates.append((score, (x0, y0, x1, y1)))
 
     if candidates:
         candidates.sort(key=lambda item: item[0])
-        return candidates[0][1]
+        _, value_bbox = candidates[0]
+        ux0 = min(lx0, value_bbox[0])
+        uy0 = min(ly0, value_bbox[1])
+        ux1 = max(lx1, value_bbox[2])
+        uy1 = max(ly1, value_bbox[3])
+        return _value_bbox_to_field_slice_px(
+            (ux0, uy0, ux1, uy1),
+            page_w=page_w,
+            page_h=page_h,
+        )
 
-    # Heuristic fallback.
-    label_h = max(1, ly1 - ly0)
-    x0 = min(page_w - 1, lx1 + int(page_w * 0.012))
-    x1 = min(page_w, x0 + int(page_w * 0.50))
-    y0 = max(0, ly0 - int(label_h * 0.30))
-    y1 = min(page_h, ly1 + int(label_h * 1.30))
-    if x1 <= x0:
-        x1 = min(page_w, x0 + 1)
-    if y1 <= y0:
-        y1 = min(page_h, y0 + 1)
-    return (x0, y0, x1, y1)
+    # Heuristic fallback: use the label line and return a wide horizontal slice.
+    return _value_bbox_to_field_slice_px(label_bbox_px, page_w=page_w, page_h=page_h)
 
 
 def _detect_dynamic_field_regions(
@@ -1286,9 +1315,17 @@ def _detect_dynamic_field_regions(
         name_box = candidate_boxes[0]
         sid_box = candidate_boxes[1]
         if "name" not in out:
-            out["name"] = _bbox_norm_to_px(name_box, page_w, page_h)
+            out["name"] = _value_bbox_to_field_slice_px(
+                _bbox_norm_to_px(name_box, page_w, page_h),
+                page_w=page_w,
+                page_h=page_h,
+            )
         if "sid" not in out:
-            out["sid"] = _bbox_norm_to_px(sid_box, page_w, page_h)
+            out["sid"] = _value_bbox_to_field_slice_px(
+                _bbox_norm_to_px(sid_box, page_w, page_h),
+                page_w=page_w,
+                page_h=page_h,
+            )
 
     return out
 
@@ -1304,6 +1341,23 @@ def _ocr_field_from_dynamic_region(
     result = _ocr_field_with_heuristics(region, field, field_config)
     result.text = _short_text_from_result(result.text, field)
     return result
+
+
+def _save_field_crop(
+    *,
+    page_image: Image.Image,
+    bbox_px: tuple[int, int, int, int],
+    field_type: str,
+    field_crop_dir: Path,
+) -> str | None:
+    crop = crop_region(page_image, bbox_px)
+    if crop.width <= 0 or crop.height <= 0:
+        return None
+
+    field_crop_dir.mkdir(parents=True, exist_ok=True)
+    out_path = field_crop_dir / f"{field_type}.png"
+    crop.save(out_path)
+    return str(out_path)
 
 
 def _default_auto_fields() -> list[dict]:
@@ -1400,6 +1454,7 @@ def process_submission_pdf(
     result.version_error = None
 
     all_field_results: list[FieldExtractionResult] = []
+    field_crop_dir = Path(output_dir) / "field_crops" / path.stem
     if 1 in rendered_pages:
         page_image, page_w, page_h = rendered_pages[1]
         header_field_candidates = _extract_header_field_values(page_words.get(1, []))
@@ -1415,36 +1470,67 @@ def process_submission_pdf(
             field_config = _override_config(config, field_def)
 
             header_result = header_field_candidates.get(field_type)
-            if header_result is not None:
-                validated_header = validate_field_result(
-                    header_result,
-                    field_def,
-                    field_config,
-                )
-                if validated_header.validated:
-                    all_field_results.append(validated_header)
-                    continue
-
             dynamic_bbox = dynamic_regions_by_type.get(field_type)
+            if (
+                dynamic_bbox is None
+                and header_result is not None
+                and header_result.bbox_px != (0, 0, 0, 0)
+            ):
+                dynamic_bbox = _value_bbox_to_field_slice_px(
+                    header_result.bbox_px,
+                    page_w=page_w,
+                    page_h=page_h,
+                )
+
+            crop_path: str | None = None
+            dynamic_validated: FieldExtractionResult | None = None
             if dynamic_bbox is not None:
-                ocr_result = _ocr_field_from_dynamic_region(
+                crop_path = _save_field_crop(
+                    page_image=page_image,
+                    bbox_px=dynamic_bbox,
+                    field_type=field_type,
+                    field_crop_dir=field_crop_dir,
+                )
+                dynamic_ocr = _ocr_field_from_dynamic_region(
                     page_image,
                     dynamic_bbox,
                     config,
                     field_def,
                 )
-                all_field_results.append(
-                    validate_field_result(ocr_result, field_def, field_config)
+                dynamic_validated = validate_field_result(
+                    dynamic_ocr,
+                    field_def,
+                    field_config,
                 )
-                continue
+                dynamic_validated.crop_path = crop_path
 
-            all_field_results.append(
-                FieldExtractionResult(
+            header_validated: FieldExtractionResult | None = None
+            if header_result is not None:
+                header_validated = validate_field_result(
+                    header_result,
+                    field_def,
+                    field_config,
+                )
+                header_validated.crop_path = crop_path
+
+            selected: FieldExtractionResult
+            if dynamic_validated is not None and dynamic_validated.validated:
+                selected = dynamic_validated
+            elif header_validated is not None and header_validated.validated:
+                selected = header_validated
+            elif dynamic_validated is not None:
+                selected = dynamic_validated
+            elif header_validated is not None:
+                selected = header_validated
+            else:
+                selected = FieldExtractionResult(
                     field_id=field_def["id"],
                     ocr_result=None,
                     validated=True,
+                    crop_path=crop_path,
                 )
-            )
+
+            all_field_results.append(selected)
 
     all_question_results: list[QuestionExtractionResult] = []
     sub_dir = Path(output_dir) / "responses" / path.stem
@@ -1512,6 +1598,7 @@ def results_to_dict(result: SubmissionResult) -> dict:
                 "confidence": r.ocr_result.confidence if r.ocr_result else 0.0,
                 "validated": r.validated,
                 "error": r.error,
+                "crop_path": r.crop_path,
             }
             for r in result.fields
         ],

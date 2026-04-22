@@ -1,5 +1,5 @@
 ---
-name: "pe ade eee"
+name: "VOU Gary"
 student_id: ""
 course_code: "CS146"
 assignment_title: "Quiz 1"

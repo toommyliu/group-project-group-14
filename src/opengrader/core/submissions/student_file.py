@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import fitz
 import numpy as np
@@ -14,6 +15,11 @@ from opengrader.core.ocr.extractor import (
     ocr_region,
     process_submission_pdf,
     render_page_to_image,
+)
+from opengrader.core.ocr.ollama_vlm import (
+    OllamaVisionConfig,
+    extract_field_text,
+    extract_question_prompt_and_answer,
 )
 from opengrader.core.ocr.scanner import _find_rectangles
 from opengrader.core.ocr.utils import apply_grayscale
@@ -615,6 +621,8 @@ def build_student_submission_document(
     ocr_config: OcrConfig,
     dpi: int = 300,
     split_subquestions: bool = True,
+    text_backend: Literal["tesseract", "ollama"] = "tesseract",
+    ollama_config: OllamaVisionConfig | None = None,
 ) -> StudentSubmissionBuildResult:
     pdf = Path(pdf_path)
     out_dir = Path(output_dir)
@@ -632,6 +640,30 @@ def build_student_submission_document(
         field.field_id: (field.ocr_result.text.strip() if field.ocr_result else "")
         for field in extraction_result.fields
     }
+    field_crop_by_id = {
+        field.field_id: Path(field.crop_path)
+        for field in extraction_result.fields
+        if field.crop_path
+    }
+
+    use_ollama = text_backend == "ollama"
+    active_ollama_config = ollama_config or OllamaVisionConfig()
+
+    if use_ollama:
+        for field_id, field_kind in (("student_name", "name"), ("student_id", "sid")):
+            crop_path = field_crop_by_id.get(field_id)
+            if crop_path is None or not crop_path.exists():
+                continue
+            try:
+                extracted = extract_field_text(
+                    image_path=crop_path,
+                    field_kind=field_kind,
+                    config=active_ollama_config,
+                ).strip()
+            except Exception:
+                extracted = ""
+            if extracted:
+                fields_by_id[field_id] = extracted
 
     student_name = fields_by_id.get("student_name", "")
     student_id = fields_by_id.get("student_id", "")
@@ -668,6 +700,7 @@ def build_student_submission_document(
 
         for question_id, image_path in question_images:
             response_image_path: str | None = None
+            prompt_text = ""
             response_text = ""
 
             if image_path is not None:
@@ -676,12 +709,22 @@ def build_student_submission_document(
                 except ValueError:
                     response_image_path = str(image_path)
 
-                response_text = ocr_image_text(image_path, text_ocr_config)
+                if use_ollama:
+                    try:
+                        prompt_text, response_text = extract_question_prompt_and_answer(
+                            image_path=image_path,
+                            config=active_ollama_config,
+                        )
+                    except Exception:
+                        prompt_text, response_text = "", ""
+
+                if not response_text:
+                    response_text = ocr_image_text(image_path, text_ocr_config)
 
             questions.append(
                 StudentSubmissionQuestion(
                     question_id=question_id,
-                    prompt="",
+                    prompt=prompt_text,
                     possible_points=None,
                     response_image_path=response_image_path,
                     response_text=response_text,
