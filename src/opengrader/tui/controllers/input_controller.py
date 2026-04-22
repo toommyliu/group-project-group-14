@@ -345,7 +345,7 @@ VIM_PROFILE = InputProfile(
             "escape",
             InputCommand.APP_BACK,
             "Back",
-            (InputContext.GLOBAL,),
+            (InputContext.GRADE, InputContext.HOME, InputContext.QA),
             show=True,
         ),
         CommandBindingSpec(
@@ -359,7 +359,7 @@ VIM_PROFILE = InputProfile(
             "up",
             InputCommand.HOME_MOVE_UP,
             "Navigate Up",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=False,
         ),
         CommandBindingSpec(
@@ -373,7 +373,7 @@ VIM_PROFILE = InputProfile(
             "down",
             InputCommand.HOME_MOVE_DOWN,
             "Navigate Down",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=False,
         ),
         CommandBindingSpec(
@@ -408,7 +408,7 @@ VIM_PROFILE = InputProfile(
             "enter",
             InputCommand.HOME_CONFIRM,
             "Select",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
         ),
         CommandBindingSpec(
             "g",
@@ -525,6 +525,12 @@ VIM_PROFILE = InputProfile(
             "enter",
             InputCommand.QA_CONFIRM,
             "Grade QA",
+            (InputContext.QA,),
+        ),
+        CommandBindingSpec(
+            "u",
+            InputCommand.QA_JUMP_UNGRADED,
+            "Jump Ungraded",
             (InputContext.QA,),
         ),
         CommandBindingSpec(
@@ -602,7 +608,7 @@ EMACS_PROFILE = InputProfile(
             "escape",
             InputCommand.APP_BACK,
             "Back",
-            (InputContext.GLOBAL,),
+            (InputContext.GRADE, InputContext.HOME, InputContext.QA),
             show=True,
         ),
         CommandBindingSpec(
@@ -616,7 +622,7 @@ EMACS_PROFILE = InputProfile(
             "up",
             InputCommand.HOME_MOVE_UP,
             "Navigate Up",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=False,
         ),
         CommandBindingSpec(
@@ -630,7 +636,7 @@ EMACS_PROFILE = InputProfile(
             "down",
             InputCommand.HOME_MOVE_DOWN,
             "Navigate Down",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
             show=False,
         ),
         CommandBindingSpec(
@@ -665,7 +671,7 @@ EMACS_PROFILE = InputProfile(
             "enter",
             InputCommand.HOME_CONFIRM,
             "Select",
-            (InputContext.HOME,),
+            (InputContext.HOME, InputContext.COURSE),
         ),
         CommandBindingSpec(
             "g",
@@ -782,6 +788,12 @@ EMACS_PROFILE = InputProfile(
             "enter",
             InputCommand.QA_CONFIRM,
             "Grade QA",
+            (InputContext.QA,),
+        ),
+        CommandBindingSpec(
+            "u",
+            InputCommand.QA_JUMP_UNGRADED,
+            "Jump Ungraded",
             (InputContext.QA,),
         ),
         CommandBindingSpec(
