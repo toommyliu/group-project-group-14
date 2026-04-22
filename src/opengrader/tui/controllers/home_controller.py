@@ -51,12 +51,12 @@ class HomeController:
         app: HomeApp,
         state: TuiWorkflowState,
         data_provider: Provider,
-        open_student: Callable[[int], None],
+        open_question_picker: Callable[[], None],
     ) -> None:
         self._app = app
         self._state = state
         self._data_provider = data_provider
-        self._open_student = open_student
+        self._open_question_picker = open_question_picker
         self._loaded_course_assignments: set[str] = set()
         self._loaded_course_students: set[str] = set()
 
@@ -184,9 +184,7 @@ class HomeController:
             self._data_provider.list_students(self._state.selection.course_id)
         )
         self._state.student_items = students
-        student_index = self._student_index(student.item_id)
-        if student_index is not None:
-            self._open_student(student_index)
+        self._open_question_picker()
 
     def move_up(self) -> None:
         if self._state.current_page == PAGE_COURSE_PICKER:
@@ -524,17 +522,22 @@ class HomeController:
         self._state.selection_labels["course"] = item.label
         selection.assignment_item_id = None
         selection.assignment_id = None
+        selection.question_id = None
         selection.student_item_id = None
         selection.student_id = None
         self._state.active_student_index = -1
+        self._state.active_question_index = -1
         self._state.selection_labels["assignment"] = ""
+        self._state.selection_labels["question"] = ""
         self._state.selection_labels["student"] = ""
 
     def _select_assignment(self, item: NavItem) -> None:
         selection = self._state.selection
         selection.assignment_item_id = item.item_id
         selection.assignment_id = self._numeric_id(item.item_id)
+        selection.question_id = None
         self._state.selection_labels["assignment"] = item.label
+        self._state.selection_labels["question"] = ""
 
     def _select_student(self, item: NavItem) -> None:
         selection = self._state.selection
@@ -566,9 +569,7 @@ class HomeController:
         if not students:
             self._app.get_home_screen().set_status("No students found for this course.")
             return
-        student_index = self._first_ungraded_student_index() or 0
-        if student_index is not None:
-            self._open_student(student_index)
+        self._open_question_picker()
 
     def _ensure_focus(self) -> None:
         home = self._app.get_home_screen()

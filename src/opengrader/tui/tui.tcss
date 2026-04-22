@@ -95,6 +95,53 @@ $foreground: #E4E4E4EB;
     margin-left: 1;
 }
 
+/* --- QA Picker Screen --- */
+
+#qa-picker-title {
+    margin: 1 1 0 1;
+    text-style: bold;
+}
+
+#qa-picker-subtitle {
+    margin: 0 1 1 1;
+    color: $text-muted;
+}
+
+#qa-picker-workspace {
+    height: 1fr;
+}
+
+#qa-list {
+    border: round $accent;
+    border-title-align: left;
+    width: 42;
+    height: 1fr;
+}
+
+#qa-list:focus {
+    border-title-color: $accent;
+}
+
+#qa-details {
+    border: round $surface-lighten-1;
+    margin-left: 1;
+    padding: 1;
+    width: 1fr;
+    height: 1fr;
+}
+
+#qa-keybinding-ref {
+    dock: bottom;
+    color: $text-muted;
+}
+
+#qa-status {
+    background: $accent;
+    color: $foreground;
+    padding: 0 1;
+    height: 1;
+}
+
 /* --- Utility Classes --- */
 
 .student-sub-item {

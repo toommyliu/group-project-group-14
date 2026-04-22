@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Footer, Input
 
@@ -17,9 +18,15 @@ from opengrader.tui.state import (
     PAGE_COURSE_PICKER,
     PAGE_GRADE,
     PAGE_HOME,
+    PAGE_QA_PICKER,
     TuiWorkflowState,
 )
-from opengrader.tui.ui.screens import CoursePickerScreen, GradeScreen, HomeScreen
+from opengrader.tui.ui.screens import (
+    CoursePickerScreen,
+    GradeScreen,
+    HomeScreen,
+    QAPickerScreen,
+)
 
 
 class TuiApp(App):
@@ -52,7 +59,7 @@ class TuiApp(App):
             self,
             self.workflow_state,
             self.data_provider,
-            self.grade_controller.open_student_by_index,
+            self.grade_controller.open_question_picker_for_assignment,
         )
         self.grade_controller.attach_student_refresh(
             self.home_controller.refresh_students
@@ -67,6 +74,7 @@ class TuiApp(App):
         with ContentSwitcher(initial=PAGE_COURSE_PICKER, id="workspace-switcher"):
             yield CoursePickerScreen(id=PAGE_COURSE_PICKER)
             yield HomeScreen(id=PAGE_HOME)
+            yield QAPickerScreen(id=PAGE_QA_PICKER)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield Footer()
 
@@ -86,6 +94,9 @@ class TuiApp(App):
 
     def get_grade_screen(self) -> GradeScreen:
         return self.query_one(f"#{PAGE_GRADE}", GradeScreen)
+
+    def get_qa_picker_screen(self) -> QAPickerScreen:
+        return self.query_one(f"#{PAGE_QA_PICKER}", QAPickerScreen)
 
     def action_dispatch_input(self, profile_name: str, command: str) -> None:
         if not self.input_controller.binding_available(profile_name, command):
@@ -110,6 +121,21 @@ class TuiApp(App):
 
         return self.input_controller.binding_available(profile_name, command)
 
+    def on_key(self, event: events.Key) -> None:
+        if self.workflow_state.current_page != PAGE_QA_PICKER:
+            return
+        if event.key in ("j", "down"):
+            self.grade_controller.qa_move_down()
+            event.stop()
+            return
+        if event.key in ("k", "up"):
+            self.grade_controller.qa_move_up()
+            event.stop()
+            return
+        if event.key == "enter":
+            self.grade_controller.qa_confirm()
+            event.stop()
+
     def on_course_picker_screen_course_highlighted(
         self, event: CoursePickerScreen.CourseHighlighted
     ) -> None:
@@ -123,16 +149,22 @@ class TuiApp(App):
     def on_home_screen_course_highlighted(
         self, event: HomeScreen.CourseHighlighted
     ) -> None:
+        if not self._has_home_screen():
+            return
         self.home_controller.on_course_highlighted(event.item)
 
     def on_home_screen_assignment_highlighted(
         self, event: HomeScreen.AssignmentHighlighted
     ) -> None:
+        if not self._has_home_screen():
+            return
         self.home_controller.on_assignment_highlighted(event.item)
 
     def on_home_screen_student_highlighted(
         self, event: HomeScreen.StudentHighlighted
     ) -> None:
+        if not self._has_home_screen():
+            return
         self.home_controller.on_student_highlighted(event.item)
 
     def on_home_screen_assignment_selected(
@@ -152,10 +184,35 @@ class TuiApp(App):
             event.student, event.assignment
         )
 
-    def on_grade_screen_question_selected(
-        self, event: GradeScreen.QuestionSelected
+    def on_qa_picker_screen_qa_highlighted(
+        self, event: QAPickerScreen.QAHighlighted
     ) -> None:
-        self.grade_controller.on_question_selected(event.question_index)
+        self.grade_controller.on_qa_highlighted(event.item)
+
+    def on_qa_picker_screen_q_a_highlighted(
+        self, event: QAPickerScreen.QAHighlighted
+    ) -> None:
+        self.grade_controller.on_qa_highlighted(event.item)
+
+    def on_qapicker_screen_qahighlighted(
+        self, event: QAPickerScreen.QAHighlighted
+    ) -> None:
+        self.grade_controller.on_qa_highlighted(event.item)
+
+    def on_qa_picker_screen_qa_selected(
+        self, event: QAPickerScreen.QASelected
+    ) -> None:
+        self.grade_controller.on_qa_selected(event.item)
+
+    def on_qa_picker_screen_q_a_selected(
+        self, event: QAPickerScreen.QASelected
+    ) -> None:
+        self.grade_controller.on_qa_selected(event.item)
+
+    def on_qapicker_screen_qaselected(
+        self, event: QAPickerScreen.QASelected
+    ) -> None:
+        self.grade_controller.on_qa_selected(event.item)
 
     def on_grade_screen_rubric_selected(
         self, event: GradeScreen.RubricSelected
@@ -248,12 +305,16 @@ class TuiApp(App):
             self.home_controller.details_prev_page,
         )
         self.input_controller.register(
-            InputCommand.GRADE_NEXT_QUESTION,
-            self.grade_controller.next_question,
+            InputCommand.QA_MOVE_UP,
+            self.grade_controller.qa_move_up,
         )
         self.input_controller.register(
-            InputCommand.GRADE_PREVIOUS_QUESTION,
-            self.grade_controller.previous_question,
+            InputCommand.QA_MOVE_DOWN,
+            self.grade_controller.qa_move_down,
+        )
+        self.input_controller.register(
+            InputCommand.QA_CONFIRM,
+            self.grade_controller.qa_confirm,
         )
         self.input_controller.register(
             InputCommand.GRADE_NEXT_STUDENT,
@@ -264,14 +325,35 @@ class TuiApp(App):
             self.grade_controller.previous_student,
         )
         self.input_controller.register(
+            InputCommand.GRADE_NEXT_UNGRADED_STUDENT,
+            self.grade_controller.next_ungraded_student,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_PREVIOUS_UNGRADED_STUDENT,
+            self.grade_controller.previous_ungraded_student,
+        )
+        self.input_controller.register(
             InputCommand.GRADE_FINALIZE_STUDENT,
             self.grade_controller.finalize_student,
         )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
+            self.grade_controller.return_to_qa_picker()
+            return
+        if self.workflow_state.current_page == PAGE_QA_PICKER:
             self.grade_controller.return_to_home()
+            return
+        if self.workflow_state.current_page == PAGE_HOME:
+            self.home_controller.focus_courses_pane()
 
     def set_input_profile(self, profile_name: InputProfileName | str) -> None:
         self.input_controller.set_profile(profile_name)
         self.refresh_bindings()
+
+    def _has_home_screen(self) -> bool:
+        try:
+            self.get_home_screen()
+        except Exception:
+            return False
+        return True

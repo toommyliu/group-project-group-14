@@ -80,8 +80,16 @@ class SqliteProvider:
             for student in roster
         ]
 
-    def build_question_seeds(self) -> list[QuestionSeed]:
-        return self._question_content.build_question_seeds()
+    def build_question_seeds(
+        self,
+        *,
+        assignment_id: int | None = None,
+        assignment_title: str | None = None,
+    ) -> list[QuestionSeed]:
+        _ = assignment_id
+        return self._question_content.build_question_seeds(
+            assignment_title=assignment_title
+        )
 
     def create_course(
         self,

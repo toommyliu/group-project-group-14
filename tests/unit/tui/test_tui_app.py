@@ -55,6 +55,29 @@ def test_course_selection_populates_tabs() -> None:
     asyncio.run(run())
 
 
+def test_escape_from_selected_course_returns_to_course_picker() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-home"
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert switcher.current == "page-course-picker"
+
+    asyncio.run(run())
+
+
 def test_course_navigation_updates_content_without_enter() -> None:
     class VariableCountsProvider(FakeDataProvider):
         def list_assignments(self, course_id: int | None) -> list[AssignmentSummary]:
@@ -283,7 +306,7 @@ def test_switching_panes_updates_status_immediately() -> None:
     asyncio.run(run())
 
 
-def test_happy_path_opens_grading_via_assignment_tab() -> None:
+def test_happy_path_selects_qa_then_opens_grading() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -311,8 +334,50 @@ def test_happy_path_opens_grading_via_assignment_tab() -> None:
             await pilot.pause()
 
             switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-qa-picker"
+            assert app.workflow_state.selection_labels["student"] == ""
+
+            await pilot.press("enter")
+            await pilot.pause()
+
             assert switcher.current == "page-grade"
             assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
+            assert app.workflow_state.selection_labels["question"] == "Q1"
+            assert len(app.workflow_state.question_items) == 2
+            rubric_list = app.get_grade_screen().query_one("#rubric-list", ListView)
+            assert len(rubric_list.children) == 2
+
+    asyncio.run(run())
+
+
+def test_clicking_qa_opens_grading() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            app.get_home_screen().query_one("#home-course-list", ListView).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("right")
+            await pilot.pause()
+            await pilot.press("g")
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-qa-picker"
+
+            qa_list = app.get_qa_picker_screen().query_one("#qa-list", ListView)
+            await pilot.click(qa_list.children[0])
+            await pilot.pause()
+
+            assert switcher.current == "page-grade"
+            assert app.workflow_state.selection_labels["question"] == "Q1"
 
     asyncio.run(run())
 
@@ -338,6 +403,11 @@ def test_finalize_loads_next_student() -> None:
             await pilot.pause()
 
             switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-qa-picker"
+
+            await pilot.press("enter")
+            await pilot.pause()
+
             assert switcher.current == "page-grade"
             assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
 

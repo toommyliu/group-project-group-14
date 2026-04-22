@@ -36,11 +36,19 @@ class FakeDataProvider:
             StudentSummary(2, "Andy Cortes"),
         ]
 
-    def build_question_seeds(self) -> list[QuestionSeed]:
+    def build_question_seeds(
+        self,
+        *,
+        assignment_id: int | None = None,
+        assignment_title: str | None = None,
+    ) -> list[QuestionSeed]:
+        _ = assignment_id
         rubric_options = [
             RubricOptionSeed(label="Correct", points_delta=0.0),
             RubricOptionSeed(label="Incorrect", points_delta=-10.0),
         ]
+        if assignment_title not in (None, "HW 1"):
+            return [QuestionSeed("Q1", DEFAULT_IMAGE_PATH, list(rubric_options))]
         return [
             QuestionSeed("Q1", DEFAULT_IMAGE_PATH, list(rubric_options)),
             QuestionSeed("Q2", DEFAULT_IMAGE_PATH, list(rubric_options)),

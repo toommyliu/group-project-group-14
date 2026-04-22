@@ -24,16 +24,26 @@ class TuiWorkflowState:
         default_factory=lambda: {
             "course": "",
             "assignment": "",
+            "question": "",
             "student": "",
         }
     )
+    question_items: list[NavItem] = field(default_factory=list)
     student_items: list[NavItem] = field(default_factory=list)
     active_student_index: int = -1
+    active_question_index: int = -1
     student_status: dict[tuple[str, str, str], str] = field(default_factory=dict)
+    qa_student_status: dict[tuple[str, str, str, str], str] = field(
+        default_factory=dict
+    )
 
     def breadcrumb_labels(self) -> list[str]:
-        return [
+        labels = [
             self.selection_labels.get("course") or "Course",
             self.selection_labels.get("assignment") or "Assignment",
-            self.selection_labels.get("student") or "Student",
         ]
+        question = self.selection_labels.get("question")
+        if question:
+            labels.append(question)
+        labels.append(self.selection_labels.get("student") or "Student")
+        return labels

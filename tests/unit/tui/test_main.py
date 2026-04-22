@@ -91,12 +91,19 @@ def test_bootstrap_default_workspace_seeds_when_database_is_empty() -> None:
     assert len(students) == 4
     assert students[0].sid == "12345"
     assert students[0].first_name == "Example"
-    assert students[0].last_name == "Student"
+    assert students[0].last_name == ""
 
 
-def test_bootstrap_default_workspace_skips_when_courses_exist() -> None:
+def test_bootstrap_default_workspace_syncs_roster_when_courses_exist() -> None:
+    course = SimpleNamespace(
+        id=42,
+        code="CMPE-195",
+        name="Senior Design Project",
+        term="Spring 2026",
+        section="01",
+    )
     services = SimpleNamespace(
-        courses=_FakeCoursesService(existing_courses=[object()]),
+        courses=_FakeCoursesService(existing_courses=[course]),
         assignments=_FakeAssignmentsService(),
         enrollments=_FakeEnrollmentsService(),
     )
@@ -109,7 +116,8 @@ def test_bootstrap_default_workspace_skips_when_courses_exist() -> None:
 
     assert services.courses.created == []
     assert services.assignments.created == []
-    assert services.enrollments.calls == []
+    assert len(services.enrollments.calls) == 1
+    assert services.enrollments.calls[0]["course_id"] == 42
 
 
 def test_run_app_bootstraps_database_before_launch() -> None:

@@ -223,7 +223,7 @@ class TemplateFlowApp:
 def test_initialize_populates_courses() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
-    controller = HomeController(app, state, FakeDataProvider(), lambda _: None)
+    controller = HomeController(app, state, FakeDataProvider(), lambda: None)
 
     controller.initialize()
 
@@ -235,7 +235,7 @@ def test_initialize_populates_courses() -> None:
 def test_course_highlighted_loads_assignments_and_students() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
-    controller = HomeController(app, state, FakeDataProvider(), lambda _: None)
+    controller = HomeController(app, state, FakeDataProvider(), lambda: None)
     controller.initialize()
 
     course = NavItem("c1", "CMPE 195", "Spring 2026")
@@ -253,7 +253,7 @@ def test_create_course_focuses_new_course() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
     provider = CreateCourseProvider()
-    controller = HomeController(app, state, provider, lambda _: None)
+    controller = HomeController(app, state, provider, lambda: None)
     controller.initialize()
 
     controller._on_create_course_dialog_closed(
@@ -275,11 +275,16 @@ def test_create_course_focuses_new_course() -> None:
     assert app.home_screen._content_visible is True
 
 
-def test_assignment_selected_opens_grading() -> None:
+def test_assignment_selected_opens_qa_picker() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
-    opened_students: list[int] = []
-    controller = HomeController(app, state, FakeDataProvider(), opened_students.append)
+    opened_picker: list[str] = []
+    controller = HomeController(
+        app,
+        state,
+        FakeDataProvider(),
+        lambda: opened_picker.append("opened"),
+    )
     controller.initialize()
 
     controller.on_course_highlighted(NavItem("c1", "CMPE 195"))
@@ -289,13 +294,13 @@ def test_assignment_selected_opens_grading() -> None:
     assert state.selection.assignment_id == 2
     assert state.selection_labels["assignment"] == "HW 2"
     assert [item.item_id for item in state.student_items] == ["s1", "s2"]
-    assert opened_students == [0]
+    assert opened_picker == ["opened"]
 
 
 def test_student_selected_expands_assignments() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
-    controller = HomeController(app, state, FakeDataProvider(), lambda _: None)
+    controller = HomeController(app, state, FakeDataProvider(), lambda: None)
     controller.initialize()
 
     controller.on_course_highlighted(NavItem("c1", "CMPE 195"))
@@ -308,11 +313,16 @@ def test_student_selected_expands_assignments() -> None:
     assert len(app.home_screen.expanded_assignments) == 2
 
 
-def test_student_submission_selected_opens_grading() -> None:
+def test_student_submission_selected_opens_qa_picker() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
-    opened_students: list[int] = []
-    controller = HomeController(app, state, FakeDataProvider(), opened_students.append)
+    opened_picker: list[str] = []
+    controller = HomeController(
+        app,
+        state,
+        FakeDataProvider(),
+        lambda: opened_picker.append("opened"),
+    )
     controller.initialize()
 
     controller.on_course_highlighted(NavItem("c1", "CMPE 195"))
@@ -326,13 +336,13 @@ def test_student_submission_selected_opens_grading() -> None:
     assert state.selection.student_id == 1
     assert state.selection_labels["assignment"] == "HW 1"
     assert state.selection_labels["student"] == "Tommy Liu"
-    assert opened_students == [0]
+    assert opened_picker == ["opened"]
 
 
 def test_assignment_actions_update_status() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
-    controller = HomeController(app, state, FakeDataProvider(), lambda _: None)
+    controller = HomeController(app, state, FakeDataProvider(), lambda: None)
     controller.initialize()
 
     controller.on_course_highlighted(NavItem("c1", "CMPE 195"))
@@ -358,7 +368,7 @@ def test_edit_assignment_template_uploads_pdf() -> None:
     state = TuiWorkflowState()
     state.selection.course_id = 1
     provider = TemplateFlowProvider()
-    controller = HomeController(app, state, provider, lambda _: None)
+    controller = HomeController(app, state, provider, lambda: None)
 
     controller.edit_assignment_template()
 
@@ -380,7 +390,7 @@ def test_edit_assignment_template_supports_single_version() -> None:
     state = TuiWorkflowState()
     state.selection.course_id = 1
     provider = TemplateFlowProvider()
-    controller = HomeController(app, state, provider, lambda _: None)
+    controller = HomeController(app, state, provider, lambda: None)
 
     controller.edit_assignment_template()
 
@@ -406,7 +416,7 @@ def test_edit_assignment_template_supports_multiple_versions() -> None:
     state = TuiWorkflowState()
     state.selection.course_id = 1
     provider = TemplateFlowProvider()
-    controller = HomeController(app, state, provider, lambda _: None)
+    controller = HomeController(app, state, provider, lambda: None)
 
     controller.edit_assignment_template()
 

@@ -35,7 +35,7 @@ def _split_roster_name(name: str) -> tuple[str, str]:
 
     parts = [part for part in cleaned.split() if part]
     if len(parts) == 1:
-        return (parts[0], "Student")
+        return (parts[0], "")
     return (" ".join(parts[:-1]), parts[-1])
 
 
@@ -84,7 +84,20 @@ def _bootstrap_default_workspace(db_path: str | Path) -> None:
         return
 
     services = build_sqlite_course_services(db_path)
-    if services.courses.list_courses():
+    existing_courses = services.courses.list_courses()
+    if existing_courses:
+        default_course = next(
+            (
+                course
+                for course in existing_courses
+                if course.code == "CMPE-195"
+                and course.name == "Senior Design Project"
+            ),
+            existing_courses[0],
+        )
+        students = _load_bootstrap_students()
+        if students:
+            services.enrollments.enroll_students(default_course.id, students)
         return
 
     course = services.courses.create_course(

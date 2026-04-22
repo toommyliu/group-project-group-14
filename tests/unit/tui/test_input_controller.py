@@ -15,14 +15,14 @@ def test_command_availability_tracks_active_context() -> None:
 
     assert controller.current_context() == InputContext.HOME
     assert controller.command_available(InputCommand.HOME_MOVE_UP) is True
-    assert controller.command_available(InputCommand.GRADE_NEXT_QUESTION) is False
+    assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is False
     assert controller.command_available(InputCommand.APP_QUIT) is True
 
     state.current_page = PAGE_GRADE
 
     assert controller.current_context() == InputContext.GRADE
     assert controller.command_available(InputCommand.HOME_MOVE_UP) is False
-    assert controller.command_available(InputCommand.GRADE_NEXT_QUESTION) is True
+    assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is True
 
 
 def test_dispatch_calls_registered_handler_only_in_matching_context() -> None:
@@ -31,16 +31,16 @@ def test_dispatch_calls_registered_handler_only_in_matching_context() -> None:
     calls: list[str] = []
     controller.register(InputCommand.HOME_MOVE_UP, lambda: calls.append("home"))
     controller.register(
-        InputCommand.GRADE_NEXT_QUESTION,
+        InputCommand.GRADE_NEXT_STUDENT,
         lambda: calls.append("grade"),
     )
 
-    controller.dispatch(InputCommand.GRADE_NEXT_QUESTION)
+    controller.dispatch(InputCommand.GRADE_NEXT_STUDENT)
     controller.dispatch(InputCommand.HOME_MOVE_UP)
 
     state.current_page = PAGE_GRADE
     controller.dispatch(InputCommand.HOME_MOVE_UP)
-    controller.dispatch(InputCommand.GRADE_NEXT_QUESTION)
+    controller.dispatch(InputCommand.GRADE_NEXT_STUDENT)
 
     assert calls == ["home", "grade"]
 

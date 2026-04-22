@@ -12,14 +12,20 @@ class StubQuestionContent:
         self._default_image_path = default_image_path
         self._question_images: list[tuple[str, str]] = []
 
-    def build_question_seeds(self) -> list[QuestionSeed]:
+    def build_question_seeds(
+        self,
+        *,
+        assignment_title: str | None = None,
+    ) -> list[QuestionSeed]:
         rubric_options = [
             RubricOptionSeed(label="Correct", points_delta=0.0),
             RubricOptionSeed(label="Partially Correct", points_delta=-4.0),
             RubricOptionSeed(label="Incorrect", points_delta=-10.0),
         ]
         output: list[QuestionSeed] = []
-        for question_id, image_path in self._load_question_images():
+        for question_id, image_path in self._load_question_images(
+            assignment_title=assignment_title
+        ):
             output.append(
                 QuestionSeed(
                     question_id=question_id,
@@ -29,7 +35,14 @@ class StubQuestionContent:
             )
         return output
 
-    def _load_question_images(self) -> list[tuple[str, str]]:
+    def _load_question_images(
+        self,
+        *,
+        assignment_title: str | None,
+    ) -> list[tuple[str, str]]:
+        if not self._is_hw_1(assignment_title):
+            return [("Q1", self._default_image_path)]
+
         if self._question_images:
             return self._question_images
 
@@ -58,6 +71,12 @@ class StubQuestionContent:
             for question_id in ordered_questions
         ]
         return self._question_images
+
+    @staticmethod
+    def _is_hw_1(assignment_title: str | None) -> bool:
+        normalized = (assignment_title or "").strip().lower().replace("_", " ")
+        normalized = " ".join(normalized.split())
+        return normalized in {"hw 1", "hw1", "homework 1"}
 
     @staticmethod
     def _question_ids_from_stem(stem: str) -> list[str]:

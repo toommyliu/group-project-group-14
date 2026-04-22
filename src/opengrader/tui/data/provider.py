@@ -18,7 +18,12 @@ class Provider(Protocol):
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]: ...
 
-    def build_question_seeds(self) -> list[QuestionSeed]: ...
+    def build_question_seeds(
+        self,
+        *,
+        assignment_id: int | None = None,
+        assignment_title: str | None = None,
+    ) -> list[QuestionSeed]: ...
 
     def create_course(
         self,
