@@ -22,14 +22,32 @@ DEFAULT_CONFIDENCE_THRESHOLD = 60.0
 MIN_TEXT_LENGTH = 1
 MAX_TEXT_LENGTH = 1000
 
-QUESTION_START_MARGIN_NORM = 0.012
-QUESTION_END_MARGIN_NORM = 0.006
+QUESTION_START_MARGIN_NORM = 0.008
+QUESTION_END_MARGIN_NORM = 0.025
 QUESTION_DEFAULT_PAGE_END_NORM = 0.965
 QUESTION_MAX_END_NORM = 0.988
-QUESTION_DEFAULT_X0_NORM = 0.11
-QUESTION_DEFAULT_X1_NORM = 0.89
+QUESTION_DEFAULT_X0_NORM = 0.06
+QUESTION_DEFAULT_X1_NORM = 0.92
 QUESTION_SPAN_TRIGGER_Y_NORM = 0.84
 QUESTION_SPAN_NEXT_PAGE_START_NORM = 0.04
+QUESTION_CROP_PAD_X_NORM = 0.015
+QUESTION_CROP_PAD_TOP_NORM = 0.004
+QUESTION_CROP_PAD_BOTTOM_NORM = 0.008
+QUESTION_BOX_MIN_WIDTH_NORM = 0.36
+QUESTION_BOX_MIN_HEIGHT_NORM = 0.05
+QUESTION_BOX_MAX_HEIGHT_NORM = 0.72
+QUESTION_BOX_PAGE_BORDER_Y_NORM = 0.055
+QUESTION_BOX_MARKER_REL_Y_MAX = 0.34
+QUESTION_NEXT_STRUCTURAL_MIN_GAP_NORM = 0.05
+QUESTION_NEXT_STRUCTURAL_X_MARGIN_NORM = 0.06
+QUESTION_STRUCTURAL_USE_MATCHED_BOX_MAX_HEIGHT_NORM = 0.55
+QUESTION_STRUCTURAL_MATCHED_BOX_FRACTION = 0.75
+QUESTION_TRIM_DARK_THRESHOLD = 232
+QUESTION_TRIM_MIN_COMPONENT_AREA = 18
+QUESTION_TRIM_MIN_COMPONENT_WIDTH = 3
+QUESTION_TRIM_MIN_COMPONENT_HEIGHT = 3
+QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM = 0.65
+QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM = 0.04
 
 FIELD_SLICE_MIN_WIDTH_NORM = 0.42
 FIELD_SLICE_MAX_WIDTH_NORM = 0.82
@@ -364,24 +382,237 @@ def crop_region(image: Image.Image, bbox_px: tuple[int, int, int, int]) -> Image
     return image.crop((x0, y0, x1, y1))
 
 
-def _trim_question_region(region: Image.Image, *, margin_px: int = 12) -> Image.Image:
-    """Trim excess white border while preserving response content."""
+def _expand_question_bbox_px(
+    bbox_px: tuple[int, int, int, int],
+    *,
+    page_w: int,
+    page_h: int,
+) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = bbox_px
+    x_pad = max(4, int(round(page_w * QUESTION_CROP_PAD_X_NORM)))
+    top_pad = max(2, int(round(page_h * QUESTION_CROP_PAD_TOP_NORM)))
+    bottom_pad = max(4, int(round(page_h * QUESTION_CROP_PAD_BOTTOM_NORM)))
+    return _clamp_bbox_px(
+        (x0 - x_pad, y0 - top_pad, x1 + x_pad, y1 + bottom_pad),
+        page_w=page_w,
+        page_h=page_h,
+    )
+
+
+def _trim_extent_by_gap(
+    active: np.ndarray,
+    dimension_size: int,
+    *,
+    min_gap_norm: float = 0.06,
+) -> tuple[int, int]:
+    if active.size <= 1:
+        return (int(active[0]), int(active[-1])) if active.size else (0, 0)
+
+    start = int(active[0])
+    end = int(active[-1])
+    min_gap = max(20, int(dimension_size * min_gap_norm))
+
+    diffs = np.diff(active)
+
+    for i in range(len(diffs)):
+        if diffs[i] > min_gap:
+            before_count = i + 1
+            after_count = len(active) - before_count
+            before_span = int(active[i]) - start
+            after_span = end - int(active[i + 1])
+            if (
+                before_count <= max(3, int(after_count * 0.10))
+                and before_span < max(20, after_span * 0.15)
+            ):
+                start = int(active[i + 1])
+            break
+
+    for i in range(len(diffs) - 1, -1, -1):
+        if diffs[i] > min_gap:
+            before_idx = i
+            after_count = len(active) - (before_idx + 1)
+            before_count = before_idx + 1
+            after_span = end - int(active[i + 1])
+            before_span = int(active[i]) - start
+            if (
+                after_count <= max(3, int(before_count * 0.10))
+                and after_span < max(20, before_span * 0.15)
+            ):
+                end = int(active[i])
+            break
+
+    return start, end
+
+
+def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.Image:
     gray = np.array(region.convert("L"))
     if gray.size == 0:
         return region
 
-    dark_mask = gray < 238
-    coords = np.argwhere(dark_mask)
-    if coords.size == 0:
+    _, binary_inv = cv2.threshold(
+        gray,
+        QUESTION_TRIM_DARK_THRESHOLD,
+        255,
+        cv2.THRESH_BINARY_INV,
+    )
+
+    horizontal_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (max(24, region.width // 5), 1),
+    )
+    vertical_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (1, max(24, region.height // 5)),
+    )
+    horizontal_lines = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, horizontal_kernel)
+    vertical_lines = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, vertical_kernel)
+    content_mask = cv2.subtract(binary_inv, horizontal_lines)
+    content_mask = cv2.subtract(content_mask, vertical_lines)
+    content_mask = cv2.morphologyEx(
+        content_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+    )
+
+    _GUTTER_SCAN_WIDTH = max(10, int(region.width * 0.08))
+    _GUTTER_FILL_THRESHOLD = 0.25
+
+    gutter_right = 0
+    for col_idx in range(_GUTTER_SCAN_WIDTH):
+        col_fill = np.count_nonzero(content_mask[:, col_idx]) / max(1, region.height)
+        if col_fill >= _GUTTER_FILL_THRESHOLD:
+            gutter_right = col_idx + 1
+        else:
+            if gutter_right > 0 and col_idx - gutter_right <= 3:
+                continue
+            break
+    if gutter_right > 0:
+        content_mask[:, :gutter_right] = 0
+
+    gutter_left_r = region.width
+    for col_idx in range(region.width - 1, max(0, region.width - _GUTTER_SCAN_WIDTH) - 1, -1):
+        col_fill = np.count_nonzero(content_mask[:, col_idx]) / max(1, region.height)
+        if col_fill >= _GUTTER_FILL_THRESHOLD:
+            gutter_left_r = col_idx
+        else:
+            if gutter_left_r < region.width and (region.width - 1 - col_idx) - (region.width - gutter_left_r) <= 3:
+                continue
+            break
+    if gutter_left_r < region.width:
+        content_mask[:, gutter_left_r:] = 0
+
+    _BORDER_SCAN_HEIGHT = max(10, int(region.height * 0.15))
+    _BORDER_CORE_FILL = 0.50
+
+    border_core_top = region.height
+    found_core = False
+    for row_idx in range(region.height - 1, max(0, region.height - _BORDER_SCAN_HEIGHT) - 1, -1):
+        row_fill = np.count_nonzero(binary_inv[row_idx, :]) / max(1, region.width)
+        if row_fill >= _BORDER_CORE_FILL:
+            border_core_top = row_idx
+            found_core = True
+        else:
+            if found_core:
+                if (row_idx - border_core_top) >= -3:
+                    continue
+                break
+    if border_core_top < region.height:
+        core_height = region.height - border_core_top
+        fringe = max(6, int(core_height * 1.5))
+        wipe_from = max(0, border_core_top - fringe)
+        content_mask[wipe_from:, :] = 0
+
+    border_core_bottom = 0
+    found_top_core = False
+    for row_idx in range(_BORDER_SCAN_HEIGHT):
+        row_fill = np.count_nonzero(binary_inv[row_idx, :]) / max(1, region.width)
+        if row_fill >= _BORDER_CORE_FILL:
+            border_core_bottom = row_idx + 1
+            found_top_core = True
+        else:
+            if found_top_core:
+                if row_idx - border_core_bottom <= 3:
+                    continue
+                break
+    if border_core_bottom > 0:
+        core_height = border_core_bottom
+        fringe = max(6, int(core_height * 1.5))
+        wipe_to = min(region.height, border_core_bottom + fringe)
+        content_mask[:wipe_to, :] = 0
+
+    _MIN_COMPONENT_AREA = max(QUESTION_TRIM_MIN_COMPONENT_AREA, 40)
+
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(content_mask, 8)
+    component_mask = np.zeros_like(content_mask)
+    for label in range(1, num_labels):
+        x, y, w, h, area = stats[label]
+        if area < _MIN_COMPONENT_AREA:
+            continue
+        if (
+            w >= int(region.width * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
+            and h <= max(12, int(region.height * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM))
+        ):
+            continue
+        if (
+            h >= int(region.height * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
+            and w <= max(12, int(region.width * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM))
+        ):
+            continue
+        if (
+            y + h >= region.height - 2
+            and h <= max(16, int(region.height * 0.06))
+            and w >= int(region.width * 0.2)
+        ):
+            continue
+        if (
+            (x <= 2 or x + w >= region.width - 2)
+            and w <= max(16, int(region.width * 0.06))
+            and h >= int(region.height * 0.2)
+        ):
+            continue
+        if w < QUESTION_TRIM_MIN_COMPONENT_WIDTH and h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT:
+            continue
+        component_mask[y : y + h, x : x + w] = 255
+
+    bbox_mask = component_mask if np.count_nonzero(component_mask) > 0 else binary_inv
+    row_counts = np.count_nonzero(bbox_mask, axis=1)
+    col_counts = np.count_nonzero(bbox_mask, axis=0)
+
+    # Suppress full-span edge lines (borders that survived morphology).
+    edge_row_band = max(6, int(region.height * 0.05))
+    edge_col_band = max(6, int(region.width * 0.08))
+    full_row_threshold = int(region.width * 0.65)
+    full_col_threshold = int(region.height * 0.65)
+
+    for idx in range(min(edge_row_band, len(row_counts))):
+        if row_counts[idx] >= full_row_threshold:
+            row_counts[idx] = 0
+        bottom_idx = len(row_counts) - 1 - idx
+        if bottom_idx >= 0 and row_counts[bottom_idx] >= full_row_threshold:
+            row_counts[bottom_idx] = 0
+
+    for idx in range(min(edge_col_band, len(col_counts))):
+        if col_counts[idx] >= full_col_threshold:
+            col_counts[idx] = 0
+        right_idx = len(col_counts) - 1 - idx
+        if right_idx >= 0 and col_counts[right_idx] >= full_col_threshold:
+            col_counts[right_idx] = 0
+
+    row_threshold = max(4, int(region.width * 0.004))
+    col_threshold = max(4, int(region.height * 0.01))
+    active_rows = np.where(row_counts >= row_threshold)[0]
+    active_cols = np.where(col_counts >= col_threshold)[0]
+
+    if active_rows.size == 0 or active_cols.size == 0:
         return region
 
-    y0, x0 = coords.min(axis=0)
-    y1, x1 = coords.max(axis=0)
+    y0, y1 = _trim_extent_by_gap(active_rows, region.height, min_gap_norm=0.06)
+    x0, x1 = _trim_extent_by_gap(active_cols, region.width, min_gap_norm=0.06)
 
-    x0 = max(0, int(x0) - margin_px)
-    y0 = max(0, int(y0) - margin_px)
-    x1 = min(region.width, int(x1) + margin_px + 1)
-    y1 = min(region.height, int(y1) + margin_px + 1)
+    x0 = max(0, x0 - margin_px)
+    y0 = max(0, y0 - margin_px)
+    x1 = min(region.width, x1 + margin_px + 1)
+    y1 = min(region.height, y1 + margin_px + 1)
 
     if x1 <= x0 or y1 <= y0:
         return region
@@ -392,7 +623,7 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 12) -> Image.
     area_ratio = trimmed_area / original_area
 
     # Guardrails: avoid over-trimming on sparse/noisy scans.
-    if area_ratio < 0.12 or area_ratio > 0.995:
+    if area_ratio < 0.02 or area_ratio > 0.995:
         return region
 
     return trimmed
@@ -645,8 +876,6 @@ def _filter_markers_by_left_margin(
 
 
 def _detected_boxes_norm(page_image: Image.Image) -> list[list[float]]:
-    # scan_template does contour-based rectangle detection and works well for
-    # noisy scans when max_area_ratio is relaxed.
     regions = scan_template(
         page_image,
         min_area_ratio=0.0015,
@@ -674,11 +903,21 @@ def _match_box_for_marker(
         x, y, w, h = box
         if h <= 0 or w <= 0:
             continue
+        if w < QUESTION_BOX_MIN_WIDTH_NORM or h < QUESTION_BOX_MIN_HEIGHT_NORM:
+            continue
+        if y <= QUESTION_BOX_PAGE_BORDER_Y_NORM and h >= QUESTION_BOX_MAX_HEIGHT_NORM:
+            continue
         if not (x - 0.03 <= mx <= x + w + 0.03):
             continue
-        if not (y - 0.03 <= my <= y + min(h * 0.35, 0.14)):
+
+        marker_rel_y = (my - y) / max(h, 1e-6)
+        if marker_rel_y < -0.05 or marker_rel_y > QUESTION_BOX_MARKER_REL_Y_MAX:
             continue
-        score = abs(my - y) + (1.0 - min(1.0, w)) * 0.5
+
+        top_distance = abs(my - y)
+        height_penalty = min(1.0, h / QUESTION_BOX_MAX_HEIGHT_NORM)
+        width_penalty = max(0.0, 0.6 - min(1.0, w))
+        score = (top_distance * 1.8) + (height_penalty * 0.85) + (width_penalty * 0.2)
         candidates.append((score, box))
 
     if not candidates:
@@ -689,9 +928,38 @@ def _match_box_for_marker(
 
     bx, by, bw, bh = box
     expanded = _clamp_bbox_norm(
-        [bx, max(0.0, by - 0.006), bw, min(1.0 - by, bh + 0.012)]
+        [bx, max(0.0, by - 0.006), bw, min(1.0 - by, bh + 0.014)]
     )
     return expanded
+
+
+def _next_structural_question_top_norm(
+    *,
+    min_top_norm: float,
+    column_x0: float,
+    column_x1: float,
+    boxes_norm: list[list[float]],
+) -> float | None:
+    candidates: list[float] = []
+    for box in boxes_norm:
+        x, y, w, h = box
+        if w < QUESTION_BOX_MIN_WIDTH_NORM or h < QUESTION_BOX_MIN_HEIGHT_NORM:
+            continue
+        if y <= min_top_norm:
+            continue
+
+        box_x1 = x + w
+        if box_x1 < column_x0 - QUESTION_NEXT_STRUCTURAL_X_MARGIN_NORM:
+            continue
+        if x > column_x1 + QUESTION_NEXT_STRUCTURAL_X_MARGIN_NORM:
+            continue
+
+        candidates.append(y)
+
+    if not candidates:
+        return None
+
+    return min(candidates)
 
 
 def _estimate_question_column_bounds(
@@ -808,9 +1076,35 @@ def _detect_question_regions(
                 x1 = max(x1, box_x1)
                 start_y = min(start_y, max(0.0, mby - 0.005))
 
-                box_end = min(QUESTION_MAX_END_NORM, mby + mbh + 0.012)
-                if not spans_next_page and end_y - box_end > 0.06:
-                    end_y = max(start_y + 0.03, box_end)
+                if not spans_next_page:
+                    # Keep a little room below the drawn question box for
+                    # handwritten spillover while still preventing bleed into
+                    # the next question.
+                    box_end_soft = min(QUESTION_MAX_END_NORM, mby + mbh + 0.012)
+                    end_y = min(end_y, max(start_y + 0.03, box_end_soft))
+
+            if not spans_next_page:
+                structural_min_top = marker_y_norm + QUESTION_NEXT_STRUCTURAL_MIN_GAP_NORM
+                if matched_box is not None:
+                    _, matched_y, _, matched_h = matched_box
+                    if matched_h <= QUESTION_STRUCTURAL_USE_MATCHED_BOX_MAX_HEIGHT_NORM:
+                        structural_min_top = max(
+                            structural_min_top,
+                            matched_y + (matched_h * QUESTION_STRUCTURAL_MATCHED_BOX_FRACTION),
+                        )
+
+                structural_next_top = _next_structural_question_top_norm(
+                    min_top_norm=structural_min_top,
+                    column_x0=x0,
+                    column_x1=x1,
+                    boxes_norm=boxes_norm,
+                )
+                if structural_next_top is not None:
+                    structural_end = max(
+                        start_y + 0.03,
+                        structural_next_top - QUESTION_END_MARGIN_NORM,
+                    )
+                    end_y = min(end_y, structural_end)
 
             end_y = min(QUESTION_MAX_END_NORM, max(start_y + 0.03, end_y))
             bbox = _clamp_bbox_norm([x0, start_y, max(0.05, x1 - x0), end_y - start_y])
@@ -915,7 +1209,11 @@ def _extract_question_crop_norm(
     response_format: Literal["png", "pdf"],
     sub_dir: Path,
 ) -> QuestionExtractionResult:
-    bbox_px = _bbox_norm_to_px(bbox_norm, page_w, page_h)
+    bbox_px = _expand_question_bbox_px(
+        _bbox_norm_to_px(bbox_norm, page_w, page_h),
+        page_w=page_w,
+        page_h=page_h,
+    )
     region = crop_region(page_image, bbox_px)
     region = _trim_question_region(region)
     out_path = sub_dir / f"{question_id}.{response_format}"
@@ -954,7 +1252,11 @@ def _extract_question_crop_segments(
         if page_number not in rendered_pages:
             continue
         page_image, page_w, page_h = rendered_pages[page_number]
-        bbox_px = _bbox_norm_to_px(bbox_norm, page_w, page_h)
+        bbox_px = _expand_question_bbox_px(
+            _bbox_norm_to_px(bbox_norm, page_w, page_h),
+            page_w=page_w,
+            page_h=page_h,
+        )
         region = crop_region(page_image, bbox_px)
         region = _trim_question_region(region)
         if region.width <= 0 or region.height <= 0:
@@ -1693,14 +1995,23 @@ def _save_field_crop(
     field_crop_dir: Path,
     page_number: int,
     suffix: str = "",
+    mirror_dir: Path | None = None,
 ) -> str | None:
     crop = crop_region(page_image, bbox_px)
     if crop.width <= 0 or crop.height <= 0:
         return None
 
+    filename = f"{field_type}_p{page_number}{suffix}.png"
+
     field_crop_dir.mkdir(parents=True, exist_ok=True)
-    out_path = field_crop_dir / f"{field_type}_p{page_number}{suffix}.png"
+    out_path = field_crop_dir / filename
     crop.save(out_path)
+
+    if mirror_dir is not None:
+        mirror_dir.mkdir(parents=True, exist_ok=True)
+        mirror_path = mirror_dir / filename
+        crop.save(mirror_path)
+
     return str(out_path)
 
 
@@ -1813,7 +2124,10 @@ def process_submission_pdf(
     result.version_error = None
 
     all_field_results: list[FieldExtractionResult] = []
-    field_crop_dir = Path(output_dir) / "field_crops" / path.stem
+    submission_dir = Path(output_dir) / "responses" / path.stem
+    submission_dir.mkdir(parents=True, exist_ok=True)
+    field_crop_dir = submission_dir / "field_crops"
+    field_crop_hoist_dir = Path(output_dir) / "field_crops" / path.stem
     best_field_by_id: dict[str, tuple[float, FieldExtractionResult]] = {}
 
     for page_number in sorted(rendered_pages):
@@ -1857,18 +2171,19 @@ def process_submission_pdf(
                     field_type=field_type,
                     field_crop_dir=field_crop_dir,
                     page_number=page_number,
+                    mirror_dir=field_crop_hoist_dir,
                 )
                 focus_bbox = dynamic_slice_set.get("focus")
-                # TODO: this seems horrible
-                # if focus_bbox is not None:
-                #     _save_field_crop(
-                #         page_image=page_image,
-                #         bbox_px=focus_bbox,
-                #         field_type=field_type,
-                #         field_crop_dir=field_crop_dir,
-                #         page_number=page_number,
-                #         suffix="_focus",
-                #     )
+                if focus_bbox is not None:
+                    _save_field_crop(
+                        page_image=page_image,
+                        bbox_px=focus_bbox,
+                        field_type=field_type,
+                        field_crop_dir=field_crop_dir,
+                        page_number=page_number,
+                        suffix="_focus",
+                        mirror_dir=field_crop_hoist_dir,
+                    )
 
                 dynamic_candidates: list[FieldExtractionResult] = []
                 for candidate_bbox in [dynamic_bbox, focus_bbox]:
@@ -1939,8 +2254,7 @@ def process_submission_pdf(
         )
 
     all_question_results: list[QuestionExtractionResult] = []
-    sub_dir = Path(output_dir) / "responses" / path.stem
-    sub_dir.mkdir(parents=True, exist_ok=True)
+    sub_dir = submission_dir
 
     dynamic_regions_sorted = sorted(
         dynamic_regions,

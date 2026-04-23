@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import fitz
 import numpy as np
@@ -12,6 +12,7 @@ from PIL import Image, ImageOps
 from opengrader.core.ocr.extractor import (
     OcrConfig,
     _safe_image_to_data,
+    _trim_question_region,
     ocr_region,
     process_submission_pdf,
     render_page_to_image,
@@ -19,6 +20,7 @@ from opengrader.core.ocr.extractor import (
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
     extract_field_text,
+    extract_question_prompt_and_answer,
 )
 from opengrader.core.ocr.scanner import _find_rectangles
 from opengrader.core.ocr.utils import apply_grayscale
@@ -283,6 +285,14 @@ def _extract_best_ollama_field_text(
             break
 
     return best_value
+
+
+def _emit_progress(
+    callback: Callable[[str], None] | None,
+    message: str,
+) -> None:
+    if callback is not None:
+        callback(message)
 
 
 def _bbox_norm_to_px(
@@ -551,20 +561,7 @@ def _subquestion_boxes_from_markers(
 
 
 def _trim_response_crop(image: Image.Image, *, margin_px: int = 8) -> Image.Image:
-    gray = image.convert("L")
-    mask = gray.point(lambda px: 255 if px < 245 else 0)
-    bbox = mask.getbbox()
-    if bbox is None:
-        return image
-
-    x0, y0, x1, y1 = bbox
-    x0 = max(0, x0 - margin_px)
-    y0 = max(0, y0 - margin_px)
-    x1 = min(image.width, x1 + margin_px)
-    y1 = min(image.height, y1 + margin_px)
-    if x1 <= x0 or y1 <= y0:
-        return image
-    return image.crop((x0, y0, x1, y1))
+    return _trim_question_region(image, margin_px=margin_px)
 
 
 def _split_question_response_image(
@@ -697,6 +694,8 @@ def build_student_submission_document(
     split_subquestions: bool = True,
     text_backend: Literal["tesseract", "ollama"] = "tesseract",
     ollama_config: OllamaVisionConfig | None = None,
+    skip_ollama_qa: bool = False,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> StudentSubmissionBuildResult:
     pdf = Path(pdf_path)
     out_dir = Path(output_dir)
@@ -728,6 +727,7 @@ def build_student_submission_document(
             crop_path = field_crop_by_id.get(field_id)
             if crop_path is None or not crop_path.exists():
                 continue
+            _emit_progress(progress_callback, f"Ollama field OCR: {field_id}")
             extracted = _extract_best_ollama_field_text(
                 crop_path=crop_path,
                 field_kind=field_kind,
@@ -750,6 +750,7 @@ def build_student_submission_document(
     title_meta = parse_assignment_metadata_from_title(title_text)
 
     questions: list[StudentSubmissionQuestion] = []
+    question_jobs: list[tuple[str, Path | None]] = []
 
     for extracted_question in extraction_result.questions:
         qid = extracted_question.question_id
@@ -770,31 +771,49 @@ def build_student_submission_document(
                     if split_images:
                         question_images = split_images
 
-        print("DEBUG: ", question_images)
+        question_jobs.extend(question_images)
 
-        for question_id, image_path in question_images:
-            response_image_path: str | None = None
-            prompt_text = ""
-            response_text = ""
+    total_question_jobs = len(question_jobs)
+    for index, (question_id, image_path) in enumerate(question_jobs, start=1):
+        response_image_path: str | None = None
+        prompt_text = ""
+        response_text = ""
 
-            if image_path is not None:
-                try:
-                    response_image_path = str(image_path.relative_to(out_dir))
-                except ValueError:
-                    response_image_path = str(image_path)
+        if image_path is not None:
+            try:
+                response_image_path = str(image_path.relative_to(out_dir))
+            except ValueError:
+                response_image_path = str(image_path)
 
-                if not response_text:
-                    response_text = ocr_image_text(image_path, text_ocr_config)
-
-            questions.append(
-                StudentSubmissionQuestion(
-                    question_id=question_id,
-                    prompt=prompt_text,
-                    possible_points=None,
-                    response_image_path=response_image_path,
-                    response_text=response_text,
+            if use_ollama and not skip_ollama_qa:
+                _emit_progress(
+                    progress_callback,
+                    f"Ollama QA [{index}/{total_question_jobs}]: {question_id}",
                 )
+                try:
+                    prompt_text, response_text = extract_question_prompt_and_answer(
+                        image_path=image_path,
+                        config=active_ollama_config,
+                    )
+                except Exception as exc:
+                    _emit_progress(
+                        progress_callback,
+                        f"Ollama QA [{index}/{total_question_jobs}]: {question_id} failed; falling back to local OCR ({exc})",
+                    )
+                    prompt_text, response_text = "", ""
+
+            if not response_text:
+                response_text = ocr_image_text(image_path, text_ocr_config)
+
+        questions.append(
+            StudentSubmissionQuestion(
+                question_id=question_id,
+                prompt=prompt_text,
+                possible_points=None,
+                response_image_path=response_image_path,
+                response_text=response_text,
             )
+        )
 
     document = StudentSubmissionDocument(
         student_name=student_name,

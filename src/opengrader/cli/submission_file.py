@@ -86,9 +86,10 @@ def _build_parser() -> ArgumentParser:
         choices=["tesseract", "ollama"],
         default="tesseract",
         help=(
-            "Text extraction backend for student name/ID fields. "
+            "Text extraction backend for student name/ID fields and "
+            "question prompt/answer extraction. "
             "The ollama backend evaluates multiple header crop variants for "
-            "student fields while question text remains local OCR "
+            "student fields and response images "
             "(default: tesseract)."
         ),
     )
@@ -107,6 +108,15 @@ def _build_parser() -> ArgumentParser:
         type=float,
         default=120.0,
         help="Ollama request timeout in seconds (default: 120).",
+    )
+    parser.add_argument(
+        "--no-ollama-qa",
+        action="store_true",
+        help=(
+            "Skip ollama question prompt/answer extraction. "
+            "When used with --text-backend=ollama, ollama will still be used "
+            "for student name/ID field extraction but question images will use local OCR."
+        ),
     )
     return parser
 
@@ -162,6 +172,8 @@ def run_cli() -> None:
             split_subquestions=not args.no_split_subquestions,
             text_backend=args.text_backend,
             ollama_config=ollama_config,
+            skip_ollama_qa=args.no_ollama_qa,
+            progress_callback=(lambda message: print(f"  {message}")),
         )
         print(f"  Wrote {build_result.markdown_path}")
 

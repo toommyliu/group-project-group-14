@@ -251,6 +251,7 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
             pdf_path=tmp_path / "student-0002.pdf",
             output_dir=output_dir,
             ocr_config=OcrConfig(),
+            split_subquestions=False,
             text_backend="ollama",
             ollama_config=OllamaVisionConfig(model="custom-model:latest"),
         )
@@ -326,16 +327,14 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
     original_process = student_file.process_submission_pdf
     original_extract_title = student_file.extract_title_text_from_submission
     original_extract_field_text = student_file.extract_field_text
-    original_extract_qa = student_file.extract_question_prompt_and_answer
+    original_ocr_image_text = student_file.ocr_image_text
     try:
         student_file.process_submission_pdf = _fake_process_submission_pdf
         student_file.extract_title_text_from_submission = (
             lambda *_args, **_kwargs: "CMPE 195: Homework 3 (C)"
         )
         student_file.extract_field_text = _fake_extract_field_text
-        student_file.extract_question_prompt_and_answer = (
-            lambda **_kwargs: ("Question prompt", "Answer text")
-        )
+        student_file.ocr_image_text = lambda *_args, **_kwargs: "local OCR text"
 
         result = student_file.build_student_submission_document(
             pdf_path=tmp_path / "student-0003.pdf",
@@ -350,4 +349,4 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
         student_file.process_submission_pdf = original_process
         student_file.extract_title_text_from_submission = original_extract_title
         student_file.extract_field_text = original_extract_field_text
-        student_file.extract_question_prompt_and_answer = original_extract_qa
+        student_file.ocr_image_text = original_ocr_image_text

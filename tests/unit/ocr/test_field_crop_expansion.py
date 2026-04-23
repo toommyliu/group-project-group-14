@@ -136,3 +136,23 @@ def test_detect_dynamic_field_regions_uses_header_underlines_when_label_ocr_is_m
     assert "name" in regions
     assert "sid" in regions
     assert regions["name"][1] < regions["sid"][1]
+
+
+def test_trim_question_region_ignores_long_border_lines() -> None:
+    image = Image.new("RGB", (1400, 900), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+
+    # Prompt-like content near the top.
+    draw.rectangle((120, 60, 1180, 92), fill=(90, 90, 90))
+    # Handwritten answer content.
+    draw.rectangle((360, 210, 520, 310), fill=(120, 120, 120))
+    # Full-width border lines that should not dominate trimming.
+    draw.line((0, 840, 1399, 840), fill=(80, 80, 80), width=6)
+    draw.line((8, 0, 8, 899), fill=(80, 80, 80), width=4)
+    draw.line((1390, 0, 1390, 899), fill=(80, 80, 80), width=4)
+
+    trimmed = extractor._trim_question_region(image, margin_px=8)
+
+    assert trimmed.height < 420
+    assert trimmed.width < 1250
+    assert trimmed.height > 100
