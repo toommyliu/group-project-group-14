@@ -9,7 +9,9 @@ from opengrader.core.ocr import (
     process_submission_pdf,
     results_to_dict,
 )
-
+"""
+Takes a student's file and crops out individual question areas to be graded.
+"""
 
 EPILOG = """
 examples:

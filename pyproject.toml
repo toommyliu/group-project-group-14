@@ -28,6 +28,7 @@ dependencies = [
 [project.scripts]
 tui = "opengrader.tui.main:run_app"
 tui-dev = "opengrader.tui.main:run_app_dev"
+pdf-to-qa = "opengrader.cli.pdf_to_qa_solutions_template:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
 submission-file = "opengrader.cli.submission_file:run_cli"
 submission-splitter = "opengrader.cli.submission_splitter:run_cli"

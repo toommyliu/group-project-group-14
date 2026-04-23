@@ -14,6 +14,11 @@ from opengrader.core.pdf.templates.qa_file import (
     qa_to_template_questions,
 )
 
+"""
+CLI (Command Line Interface) utility for converting Markdown-based Question & Answer (QA) documents into PDF templates.
+
+"""
+
 EPILOG = """
 examples:
   uv run qa-file validate --qa-file samples/qa-single.md

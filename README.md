@@ -88,6 +88,7 @@ uv run ocr-pdf --help
 <summary>Available Scripts</summary>
 
 - `tui`: The TUI application
+- `pdf-to-qa`: Convert an answer key PDF into a QA markdown template
 - `qa-file`
   - `validate`: Validate QA markdown structure
   - `generate-template`: Generate templates from QA files
@@ -100,6 +101,11 @@ uv run ocr-pdf --help
 > Scripts that take flags support `--help` to show available options.
 
 #### Example Usage Flow
+
+0. (Optional) Convert an existing answer key PDF to a template:
+```bash
+uv run pdf-to-qa --input /path/to/answer-key.pdf --output /path/to/qa.md
+```
 
 1. Generate a template from a QA file:
 ```bash

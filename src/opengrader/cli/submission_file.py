@@ -6,6 +6,11 @@ from pathlib import Path
 from opengrader.core.ocr import OcrConfig
 from opengrader.core.submissions import build_student_submission_document
 
+"""
+Takes the individual student PDF and the OCR data and bundles them into a Markdown report for each student
+"""
+
+
 EPILOG = """
 examples:
   uv run submission-file --input split/ --output out/submissions/

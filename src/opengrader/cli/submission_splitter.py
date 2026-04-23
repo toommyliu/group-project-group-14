@@ -10,6 +10,10 @@ from opengrader.core.submissions import (
 
 from pypdf import PdfReader
 
+"""
+Splits one large PDF into individual student submissions
+"""
+
 EPILOG = """
 examples:
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
