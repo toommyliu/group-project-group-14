@@ -4,9 +4,17 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
   push:
     branches:
       - main
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
   workflow_dispatch:
 
 concurrency:
