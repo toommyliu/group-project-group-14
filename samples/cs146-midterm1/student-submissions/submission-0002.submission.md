@@ -1,6 +1,6 @@
 ---
 name: "Bill Gates"
-student_id: "784659321"
+student_id: "784654321"
 course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "B"

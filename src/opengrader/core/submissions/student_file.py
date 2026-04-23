@@ -19,7 +19,6 @@ from opengrader.core.ocr.extractor import (
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
     extract_field_text,
-    extract_question_prompt_and_answer,
 )
 from opengrader.core.ocr.scanner import _find_rectangles
 from opengrader.core.ocr.utils import apply_grayscale
@@ -771,6 +770,8 @@ def build_student_submission_document(
                     if split_images:
                         question_images = split_images
 
+        print("DEBUG: ", question_images)
+
         for question_id, image_path in question_images:
             response_image_path: str | None = None
             prompt_text = ""
@@ -781,16 +782,6 @@ def build_student_submission_document(
                     response_image_path = str(image_path.relative_to(out_dir))
                 except ValueError:
                     response_image_path = str(image_path)
-
-                # TO
-                # if use_ollama:
-                #     try:
-                #         prompt_text, response_text = extract_question_prompt_and_answer(
-                #             image_path=image_path,
-                #             config=active_ollama_config,
-                #         )
-                #     except Exception:
-                #         prompt_text, response_text = "", ""
 
                 if not response_text:
                     response_text = ocr_image_text(image_path, text_ocr_config)

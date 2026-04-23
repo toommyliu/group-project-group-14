@@ -86,9 +86,10 @@ def _build_parser() -> ArgumentParser:
         choices=["tesseract", "ollama"],
         default="tesseract",
         help=(
-            "Text extraction backend for name/ID and question text. "
+            "Text extraction backend for student name/ID fields. "
             "The ollama backend evaluates multiple header crop variants for "
-            "student fields (default: tesseract)."
+            "student fields while question text remains local OCR "
+            "(default: tesseract)."
         ),
     )
     parser.add_argument(
