@@ -83,7 +83,7 @@ uv run <script_name> [arguments]
 
 # Examples
 uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf
-uv run ocr-pdf --help
+uv run submission-file --help
 ```
 
 <details>
