@@ -3,22 +3,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from opengrader.tui.data import QuestionSeed, Provider
-from opengrader.tui.ui.screens import GradeScreen, HomeScreen, QAPickerScreen
+from opengrader.tui.data import Provider, QuestionSeed
 from opengrader.tui.state import (
     PAGE_GRADE,
-    PAGE_HOME,
     PAGE_QA_PICKER,
     QuestionGrade,
     RubricOption,
     TuiWorkflowState,
 )
+from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
 class GradeApp(Protocol):
-    def get_home_screen(self) -> HomeScreen: ...
-
     def get_grade_screen(self) -> GradeScreen: ...
 
     def get_qa_picker_screen(self) -> QAPickerScreen: ...
@@ -45,7 +42,10 @@ class GradeController:
         students = self._student_items_for_current_course()
         self._state.student_items = students
         if not students:
-            self._app.get_home_screen().set_status("No students found for this course.")
+            self._app.switch_to(PAGE_QA_PICKER)
+            self._app.get_qa_picker_screen().set_status(
+                "No students found for this grading queue."
+            )
             return
 
         self._state.grading_run.questions = self._question_grades(
@@ -55,7 +55,8 @@ class GradeController:
             self._state.grading_run.questions
         )
         if not self._state.question_items:
-            self._app.get_home_screen().set_status(
+            self._app.switch_to(PAGE_QA_PICKER)
+            self._app.get_qa_picker_screen().set_status(
                 "No questions found for this assignment."
             )
             return
@@ -131,13 +132,9 @@ class GradeController:
         self._state.grading_run.update_comment(comment)
 
     def return_to_home(self) -> None:
-        self._app.switch_to(PAGE_HOME)
-        self._app.get_home_screen().focus_assignments()
+        self.return_to_qa_picker()
 
     def return_to_qa_picker(self) -> None:
-        if self._state.selection.assignment_id is None:
-            self.return_to_home()
-            return
         self.refresh_qa_picker(status="")
         self._app.switch_to(PAGE_QA_PICKER)
         self._app.get_qa_picker_screen().focus_questions()
@@ -153,43 +150,38 @@ class GradeController:
         self._app.get_qa_picker_screen().move_cursor(1)
 
     def qa_jump_ungraded_question(self) -> None:
-        """
-        Jumps the QA picker UI to the first question that is not fully graded for all students on the current assignment.
-        Updates the QA picker status. No action is taken if not on the QA picker page or if there are no students.
-        """
         if self._state.current_page != PAGE_QA_PICKER:
             return
-        
-        # Count of students to compare against graded counts
+
         total_students = len(self._state.student_items)
         if total_students == 0:
             return
 
-        # Loop through all questions available for this assignment
         for index, question in enumerate(self._state.grading_run.questions):
-            
-            # Tally how many students have a 'graded' status for this question
-            graded_countForThisQA = 0
-            for student in self._state.student_items:
-                status_key = (
-                    str(self._state.selection.course_id or ""),
-                    str(self._state.selection.assignment_id or ""),
-                    question.question_id,
-                    student.item_id,
+            graded_count = sum(
+                1
+                for student in self._state.student_items
+                if self._state.qa_student_status.get(
+                    (
+                        str(self._state.selection.course_id or ""),
+                        str(self._state.selection.assignment_id or ""),
+                        question.question_id,
+                        student.item_id,
+                    )
                 )
-                if self._state.qa_student_status.get(status_key) == "graded":
-                    graded_countForThisQA += 1
-
-            # If any student is missing a grade for this question, jump to it
-            if graded_countForThisQA < total_students:
-                self._app.get_qa_picker_screen().move_to_index(index)
-                self._app.get_qa_picker_screen().set_status(
-                    f"Jumped to {question.question_id} ({graded_countForThisQA}/{total_students} graded)"
+                == "graded"
+            )
+            if graded_count < total_students:
+                qa_screen = self._app.get_qa_picker_screen()
+                qa_screen.move_to_index(index)
+                qa_screen.set_status(
+                    f"Jumped to {question.question_id} ({graded_count}/{total_students} graded)"
                 )
                 return
-            
-        # All questions are fully graded
-        self._app.get_qa_picker_screen().set_status("All questions are fully graded for all students!")
+
+        self._app.get_qa_picker_screen().set_status(
+            "All questions are fully graded for all students!"
+        )
 
     def qa_confirm(self) -> None:
         if self._state.current_page != PAGE_QA_PICKER:
@@ -415,12 +407,11 @@ class GradeController:
                 )
                 == "graded"
             )
-            meta = f"{graded_count}/{total_students} graded"
             items.append(
                 NavItem(
                     item_id=question.question_id,
                     label=question.question_id,
-                    meta=meta,
+                    meta=f"{graded_count}/{total_students} graded",
                 )
             )
         return items

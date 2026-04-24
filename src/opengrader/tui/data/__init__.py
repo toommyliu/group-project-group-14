@@ -7,7 +7,7 @@ from .models import (
     StudentSummary,
 )
 from .provider import Provider
-from .sqlite_provider import SqliteProvider
+from .stub_data_provider import StubDataProvider
 
 __all__ = [
     "AssignmentSummary",
@@ -16,6 +16,6 @@ __all__ = [
     "QuestionSeed",
     "RubricOptionSeed",
     "StudentSummary",
-    "SqliteProvider",
+    "StubDataProvider",
     "Provider",
 ]

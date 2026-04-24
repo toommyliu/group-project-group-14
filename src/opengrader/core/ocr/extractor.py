@@ -48,6 +48,7 @@ QUESTION_TRIM_MIN_COMPONENT_WIDTH = 3
 QUESTION_TRIM_MIN_COMPONENT_HEIGHT = 3
 QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM = 0.65
 QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM = 0.04
+QUESTION_TRIM_MIN_AREA_RATIO = 0.01
 
 FIELD_SLICE_MIN_WIDTH_NORM = 0.42
 FIELD_SLICE_MAX_WIDTH_NORM = 0.82
@@ -503,12 +504,29 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
 
     _BORDER_SCAN_HEIGHT = max(10, int(region.height * 0.15))
     _BORDER_CORE_FILL = 0.50
+    _BORDER_EDGE_BAND = max(10, int(region.width * 0.04))
+    _BORDER_EDGE_FILL = 0.35
 
     border_core_top = region.height
     found_core = False
-    for row_idx in range(region.height - 1, max(0, region.height - _BORDER_SCAN_HEIGHT) - 1, -1):
-        row_fill = np.count_nonzero(binary_inv[row_idx, :]) / max(1, region.width)
-        if row_fill >= _BORDER_CORE_FILL:
+    for row_idx in range(
+        region.height - 1,
+        max(0, region.height - _BORDER_SCAN_HEIGHT) - 1,
+        -1,
+    ):
+        row = binary_inv[row_idx, :]
+        row_fill = np.count_nonzero(row) / max(1, region.width)
+        left_edge_fill = np.count_nonzero(row[:_BORDER_EDGE_BAND]) / max(
+            1, _BORDER_EDGE_BAND
+        )
+        right_edge_fill = np.count_nonzero(row[-_BORDER_EDGE_BAND:]) / max(
+            1, _BORDER_EDGE_BAND
+        )
+        if (
+            row_fill >= _BORDER_CORE_FILL
+            and left_edge_fill >= _BORDER_EDGE_FILL
+            and right_edge_fill >= _BORDER_EDGE_FILL
+        ):
             border_core_top = row_idx
             found_core = True
         else:
@@ -525,8 +543,19 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
     border_core_bottom = 0
     found_top_core = False
     for row_idx in range(_BORDER_SCAN_HEIGHT):
-        row_fill = np.count_nonzero(binary_inv[row_idx, :]) / max(1, region.width)
-        if row_fill >= _BORDER_CORE_FILL:
+        row = binary_inv[row_idx, :]
+        row_fill = np.count_nonzero(row) / max(1, region.width)
+        left_edge_fill = np.count_nonzero(row[:_BORDER_EDGE_BAND]) / max(
+            1, _BORDER_EDGE_BAND
+        )
+        right_edge_fill = np.count_nonzero(row[-_BORDER_EDGE_BAND:]) / max(
+            1, _BORDER_EDGE_BAND
+        )
+        if (
+            row_fill >= _BORDER_CORE_FILL
+            and left_edge_fill >= _BORDER_EDGE_FILL
+            and right_edge_fill >= _BORDER_EDGE_FILL
+        ):
             border_core_bottom = row_idx + 1
             found_top_core = True
         else:
@@ -623,7 +652,7 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
     area_ratio = trimmed_area / original_area
 
     # Guardrails: avoid over-trimming on sparse/noisy scans.
-    if area_ratio < 0.02 or area_ratio > 0.995:
+    if area_ratio < QUESTION_TRIM_MIN_AREA_RATIO or area_ratio > 0.995:
         return region
 
     return trimmed
