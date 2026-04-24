@@ -18,3 +18,9 @@ from .scanner import (
     DetectedRegion,
     scan_template,
 )
+from .ollama_vlm import (
+    OllamaVisionConfig,
+    OllamaVisionError,
+    extract_field_text,
+    extract_question_prompt_and_answer,
+)

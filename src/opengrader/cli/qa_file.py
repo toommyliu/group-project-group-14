@@ -16,7 +16,6 @@ from opengrader.core.pdf.templates.qa_file import (
 
 """
 CLI (Command Line Interface) utility for converting Markdown-based Question & Answer (QA) documents into PDF templates.
-
 """
 
 EPILOG = """
