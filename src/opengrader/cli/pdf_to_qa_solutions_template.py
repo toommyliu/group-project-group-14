@@ -264,17 +264,17 @@ def run_cli() -> None:
 
     doc = fitz.open(args.input)
     
-    print("TEST 1: Locating question coordinates...")
+    # print("TEST 1: Locating question coordinates...")
     q_starts, max_q = detect_question_positions(doc)
     if not q_starts:
         print("Warning: No questions were detected. Check if the PDF layout matches the expected 'N. (Points)' format.")
     
     print(f"Found {len(q_starts)} questions (Max ID: {max_q})")
 
-    print("TEST 2: Defining bounding boxes...")
+    # print("TEST 2: Defining bounding boxes...")
     boxes = compute_bounding_boxes(q_starts, max_q)
 
-    print("TEST 3: Extracting text via OCR...")
+    # print("TEST 3: Extracting text via OCR...")
     qa_blocks = extract_content(doc, boxes, max_q)
 
     # Construct final Markdown

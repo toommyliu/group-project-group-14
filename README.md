@@ -88,6 +88,7 @@ uv run ocr-pdf --help
 <summary>Available Scripts</summary>
 
 - `tui`: The TUI application
+- `automated-grading`: Automatically grades student markdown files
 - `pdf-to-qa`: Convert an answer key PDF into a QA markdown template
 - `qa-file`
   - `validate`: Validate QA markdown structure

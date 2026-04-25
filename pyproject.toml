@@ -23,12 +23,15 @@ dependencies = [
   "opencv-python>=4.13.0.92",
   "pytest>=9.0.2",
   "platformdirs>=4.0.0,<5.0.0",
+  "pyyaml>=6.0.1",
+  "numpy>=1.26.0",
 ]
 
 [project.scripts]
 tui = "opengrader.tui.main:run_app"
 tui-dev = "opengrader.tui.main:run_app_dev"
 pdf-to-qa = "opengrader.cli.pdf_to_qa_solutions_template:run_cli"
+automated-grading = "opengrader.cli.automated_grading:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
 submission-file = "opengrader.cli.submission_file:run_cli"
 submission-splitter = "opengrader.cli.submission_splitter:run_cli"
