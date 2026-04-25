@@ -170,6 +170,103 @@ def test_highlighting_student_updates_details() -> None:
     asyncio.run(run())
 
 
+def test_student_list_arrow_keys_move_student_focus_not_questions() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            await pilot.click("#student-list", offset=(2, 1))
+            await pilot.pause()
+
+            await pilot.press("down")
+            await pilot.pause()
+
+            selected_question = qa_screen.selected_question()
+            selected_student = qa_screen.selected_student()
+            assert selected_question is not None
+            assert selected_student is not None
+            assert selected_question.item_id == "Q1"
+            assert selected_student.label == "Andy Cortes"
+
+            preview = qa_screen.query_one("#qa-preview", Static)
+            assert "Andy Cortes" in str(preview.content)
+
+    asyncio.run(run())
+
+
+def test_clicking_qa_pane_after_students_restores_question_navigation() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            await pilot.click("#student-list", offset=(2, 1))
+            await pilot.pause()
+            await pilot.click("#qa-list", offset=(2, 4))
+            await pilot.pause()
+
+            await pilot.press("down")
+            await pilot.pause()
+
+            selected_question = qa_screen.selected_question()
+            selected_student = qa_screen.selected_student()
+            assert selected_question is not None
+            assert selected_student is not None
+            assert selected_question.item_id == "Q2"
+            assert selected_student.label == "Tommy Liu"
+
+    asyncio.run(run())
+
+
+def test_tab_switches_between_question_and_student_panes() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+
+            selected_question = qa_screen.selected_question()
+            selected_student = qa_screen.selected_student()
+            assert selected_question is not None
+            assert selected_student is not None
+            assert selected_question.item_id == "Q1"
+            assert selected_student.label == "Andy Cortes"
+
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+
+            selected_question = qa_screen.selected_question()
+            selected_student = qa_screen.selected_student()
+            assert selected_question is not None
+            assert selected_student is not None
+            assert selected_question.item_id == "Q2"
+            assert selected_student.label == "Andy Cortes"
+
+    asyncio.run(run())
+
+
 def test_escape_on_qa_picker_shows_status_message() -> None:
     async def run() -> None:
         app = TuiApp(

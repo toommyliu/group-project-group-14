@@ -15,6 +15,7 @@ def test_command_availability_tracks_active_context() -> None:
 
     assert controller.current_context() == InputContext.QA
     assert controller.command_available(InputCommand.QA_MOVE_UP) is True
+    assert controller.command_available(InputCommand.QA_SWITCH_PANE) is True
     assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is False
     assert controller.command_available(InputCommand.APP_QUIT) is True
 
@@ -22,6 +23,7 @@ def test_command_availability_tracks_active_context() -> None:
 
     assert controller.current_context() == InputContext.GRADE
     assert controller.command_available(InputCommand.QA_MOVE_UP) is False
+    assert controller.command_available(InputCommand.QA_SWITCH_PANE) is False
     assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is True
 
 

@@ -89,11 +89,20 @@ class TuiApp(App):
     def on_key(self, event: events.Key) -> None:
         if self.workflow_state.current_page != PAGE_QA_PICKER:
             return
+        qa_screen = self.get_qa_picker_screen()
         if event.key in ("j", "down"):
+            if qa_screen.students_have_focus():
+                qa_screen.move_student_cursor(1)
+                event.stop()
+                return
             self.grade_controller.qa_move_down()
             event.stop()
             return
         if event.key in ("k", "up"):
+            if qa_screen.students_have_focus():
+                qa_screen.move_student_cursor(-1)
+                event.stop()
+                return
             self.grade_controller.qa_move_up()
             event.stop()
             return
@@ -155,11 +164,15 @@ class TuiApp(App):
         )
         self.input_controller.register(
             InputCommand.QA_MOVE_UP,
-            self.grade_controller.qa_move_up,
+            self._handle_qa_move_up,
         )
         self.input_controller.register(
             InputCommand.QA_MOVE_DOWN,
-            self.grade_controller.qa_move_down,
+            self._handle_qa_move_down,
+        )
+        self.input_controller.register(
+            InputCommand.QA_SWITCH_PANE,
+            self._handle_qa_switch_pane,
         )
         self.input_controller.register(
             InputCommand.QA_CONFIRM,
@@ -192,6 +205,23 @@ class TuiApp(App):
             return
         if self.workflow_state.current_page == PAGE_QA_PICKER:
             self.get_qa_picker_screen().set_status("Already viewing the grading queue.")
+
+    def _handle_qa_move_down(self) -> None:
+        qa_screen = self.get_qa_picker_screen()
+        if qa_screen.students_have_focus():
+            qa_screen.move_student_cursor(1)
+            return
+        self.grade_controller.qa_move_down()
+
+    def _handle_qa_move_up(self) -> None:
+        qa_screen = self.get_qa_picker_screen()
+        if qa_screen.students_have_focus():
+            qa_screen.move_student_cursor(-1)
+            return
+        self.grade_controller.qa_move_up()
+
+    def _handle_qa_switch_pane(self) -> None:
+        self.get_qa_picker_screen().switch_active_pane()
 
     def set_input_profile(self, profile_name: InputProfileName | str) -> None:
         self.input_controller.set_profile(profile_name)

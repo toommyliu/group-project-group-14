@@ -14,6 +14,7 @@ class InputCommand(str, Enum):
     APP_BACK = "app_back"
     QA_MOVE_UP = "qa_move_up"
     QA_MOVE_DOWN = "qa_move_down"
+    QA_SWITCH_PANE = "qa_switch_pane"
     QA_CONFIRM = "qa_confirm"
     QA_JUMP_UNGRADED = "qa_jump_ungraded_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
@@ -102,6 +103,12 @@ def _shared_command_set(
             "Prev QA",
             (InputContext.QA,),
             key_display=qa_up_display,
+        ),
+        CommandBindingSpec(
+            "tab",
+            InputCommand.QA_SWITCH_PANE,
+            "Switch Pane",
+            (InputContext.QA,),
         ),
         CommandBindingSpec(
             "enter",
