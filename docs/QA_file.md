@@ -60,6 +60,23 @@ Use a `**Correct**` section under a question or subquestion. Multiple correct an
   - `- answer 1`
   - `- answer 2`
 
+### Multiple Choice
+
+Use a `**Choices**` section under a question or subquestion to define a single-select multiple-choice question.
+
+- `- **Choices**`
+  - `- A) option text`
+  - `- B) option text`
+
+Rules:
+
+- `**Choices**` implies the question is multiple choice.
+- Multiple choice is currently **single-select only**.
+- Choices must use contiguous labels starting at `A`.
+- Supported choice formats are `A) text`, `A. text`, or `A: text`.
+- For multiple-choice questions, `**Correct**` must contain **exactly one** option label, such as `B`.
+- A question cannot mix `**Choices**` with nested subquestions.
+
 ### Rubric
 
 Use a `**Rubric**` section under a question or subquestion to define scoring criteria.
@@ -136,6 +153,19 @@ questions_start_page: 1
       - Correct (+0)
       - Partially Correct (-5)
       - Incorrect (-15)
+
+- (10 points) Which data structure is FIFO?
+  - **Choices**
+    - A) Stack
+    - B) Queue
+    - C) Tree
+    - D) Graph
+  - **Correct**
+    - B
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-4)
+    - Incorrect (-10)
 ```
 
 ## Example: Multiple Versions
@@ -152,6 +182,15 @@ questions_start_page: 1
 - (10 points) Convert decimal 5 to binary.
   - **Correct**
     - 101
+
+- (10 points) Answer both parts.
+  - (5 points) Pick the even number.
+    - **Choices**
+      - A) 3
+      - B) 4
+      - C) 5
+    - **Correct**
+      - B
 
 ## Version B
 
