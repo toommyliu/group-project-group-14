@@ -9,6 +9,14 @@ from opengrader.tui.tui import TuiApp
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
 
+def _list_item_texts(list_view: ListView) -> list[str]:
+    return [
+        f"{item.nav.label} [{item.nav.meta}]" if item.nav.meta else item.nav.label
+        for item in list_view.children
+        if hasattr(item, "nav")
+    ]
+
+
 def test_app_launches_directly_to_qa_picker() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -28,6 +36,14 @@ def test_app_launches_directly_to_qa_picker() -> None:
             assert [item.item_id for item in app.workflow_state.question_items] == [
                 "Q1",
                 "Q2",
+            ]
+            student_list = app.get_qa_picker_screen().query_one(
+                "#student-list",
+                ListView,
+            )
+            assert _list_item_texts(student_list) == [
+                "Tommy Liu [0/2 graded]",
+                "Andy Cortes [0/2 graded]",
             ]
 
     asyncio.run(run())
@@ -98,6 +114,58 @@ def test_finalize_loads_next_student() -> None:
 
             assert app.workflow_state.selection_labels["student"] == "Andy Cortes"
             assert app.workflow_state.active_student_index == 1
+
+    asyncio.run(run())
+
+
+def test_student_list_shows_progress_after_finalize() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("ctrl+g")
+            await pilot.pause()
+
+            app.grade_controller.return_to_qa_picker()
+            await pilot.pause()
+
+            student_list = app.get_qa_picker_screen().query_one(
+                "#student-list",
+                ListView,
+            )
+            assert _list_item_texts(student_list) == [
+                "Tommy Liu [1/2 graded]",
+                "Andy Cortes [0/2 graded]",
+            ]
+
+    asyncio.run(run())
+
+
+def test_highlighting_student_updates_details() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            student = qa_screen.selected_student()
+            assert student is not None
+            qa_screen.show_student_details(student)
+            await pilot.pause()
+
+            preview = qa_screen.query_one("#qa-preview", Static)
+            assert "Tommy Liu" in str(preview.content)
+            assert "Progress: 0 / 2 questions graded" in str(preview.content)
 
     asyncio.run(run())
 

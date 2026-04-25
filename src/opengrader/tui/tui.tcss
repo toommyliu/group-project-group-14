@@ -17,14 +17,31 @@ $foreground: #E4E4E4EB;
     height: 1fr;
 }
 
-#qa-list {
-    border: round $accent;
-    border-title-align: left;
+#qa-picker-left-column {
     width: 42;
     height: 1fr;
 }
 
+#qa-list {
+    border: round $accent;
+    border-title-align: left;
+    width: 100%;
+    height: 1fr;
+}
+
 #qa-list:focus {
+    border-title-color: $accent;
+}
+
+#student-list {
+    border: round $accent;
+    border-title-align: left;
+    width: 100%;
+    height: 1fr;
+    margin-top: 1;
+}
+
+#student-list:focus {
     border-title-color: $accent;
 }
 
