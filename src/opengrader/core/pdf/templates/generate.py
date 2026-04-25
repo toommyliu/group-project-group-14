@@ -32,6 +32,31 @@ def _normalize_points(value: Any, *, context: str) -> int:
     return int(value)
 
 
+def _normalize_choices(raw_choices: Any, *, context: str) -> list[dict[str, str]]:
+    if raw_choices is None:
+        return []
+    if not isinstance(raw_choices, list):
+        raise TypeError(f"{context}.choices must be a list, got {type(raw_choices).__name__}")
+
+    normalized: list[dict[str, str]] = []
+    for i, raw_choice in enumerate(raw_choices):
+        if not isinstance(raw_choice, dict):
+            raise TypeError(
+                f"{context}.choices[{i}] must be an object, got {type(raw_choice).__name__}"
+            )
+
+        label = str(raw_choice.get("label", "")).strip()
+        text = str(raw_choice.get("text", "")).strip()
+        if not label:
+            raise ValueError(f"{context}.choices[{i}] missing 'label'")
+        if not text:
+            raise ValueError(f"{context}.choices[{i}] missing 'text'")
+
+        normalized.append({"label": label, "text": text})
+
+    return normalized
+
+
 def _normalize_subquestions(
     parent_id: str,
     raw_subquestions: Any,
@@ -64,11 +89,17 @@ def _normalize_subquestions(
             points = raw_sub.get("points", 0)
             prompt = raw_sub.get("prompt", "")
             label = raw_sub.get("label", default_label)
+            choices = _normalize_choices(
+                raw_sub.get("choices", []),
+                context=f"question[{parent_id!r}].subquestions[{i}]",
+            )
         else:
             raise TypeError(
                 "subquestions entries must be a tuple or object; "
                 f"got {type(raw_sub).__name__}"
             )
+        if isinstance(raw_sub, tuple):
+            choices = []
 
         sid_str = str(sid).strip()
         if not sid_str:
@@ -86,6 +117,7 @@ def _normalize_subquestions(
                     context=f"question[{parent_id!r}].subquestions[{sid_str!r}]",
                 ),
                 "prompt": str(prompt).strip(),
+                "choices": choices,
             }
         )
 
@@ -105,6 +137,7 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
                 )
             qid, points, prompt = raw_question
             subquestions_raw = []
+            choices = []
         elif isinstance(raw_question, dict):
             if "id" not in raw_question:
                 raise ValueError(f"questions[{i}] missing 'id'")
@@ -112,6 +145,10 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
             points = raw_question.get("points", 0)
             prompt = raw_question.get("prompt", "")
             subquestions_raw = raw_question.get("subquestions", [])
+            choices = _normalize_choices(
+                raw_question.get("choices", []),
+                context=f"question[{i}]",
+            )
         else:
             raise TypeError(
                 "questions entries must be tuples or objects; "
@@ -130,6 +167,7 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
                 "id": qid_str,
                 "points": _normalize_points(points, context=f"question[{qid_str!r}]"),
                 "prompt": str(prompt).strip(),
+                "choices": choices,
                 "subquestions": _normalize_subquestions(
                     qid_str,
                     subquestions_raw,

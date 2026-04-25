@@ -262,6 +262,208 @@ def test_parse_rejects_invalid_rubric_top_level_structure() -> None:
         parse_qa_markdown(content)
 
 
+def test_parse_multiple_choice_question_and_template_payload() -> None:
+    content = """
+- (5 points) Which data structure is FIFO?
+  - **Choices**
+    - A) Stack
+    - B. Queue
+    - C: Tree
+    - D) Graph
+  - **Correct**
+    - b
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-2)
+    - Incorrect (-5)
+"""
+
+    document = parse_qa_markdown(content)
+    question = document.questions[0]
+
+    assert question.answers == []
+    assert [(choice.label, choice.text) for choice in question.choices] == [
+        ("A", "Stack"),
+        ("B", "Queue"),
+        ("C", "Tree"),
+        ("D", "Graph"),
+    ]
+    assert question.correct_choice_label == "B"
+
+    assert qa_to_template_questions(document) == [
+        {
+            "id": "q1",
+            "points": 5,
+            "prompt": "Which data structure is FIFO?",
+            "choices": [
+                {"label": "A", "text": "Stack"},
+                {"label": "B", "text": "Queue"},
+                {"label": "C", "text": "Tree"},
+                {"label": "D", "text": "Graph"},
+            ],
+        }
+    ]
+
+
+def test_parse_multiple_choice_subquestion_and_template_payload() -> None:
+    content = """
+- (6 points) Answer all parts.
+  - (3 points) Pick the even number.
+    - **Choices**
+      - A) 3
+      - B) 4
+      - C) 5
+    - **Correct**
+      - B
+  - (3 points) Explain your choice.
+    - **Correct**
+      - 4 is divisible by 2
+"""
+
+    document = parse_qa_markdown(content)
+    question = document.questions[0]
+    subquestion = question.subquestions[0]
+
+    assert [(choice.label, choice.text) for choice in subquestion.choices] == [
+        ("A", "3"),
+        ("B", "4"),
+        ("C", "5"),
+    ]
+    assert subquestion.correct_choice_label == "B"
+
+    assert qa_to_template_questions(document) == [
+        {
+            "id": "q1",
+            "points": 6,
+            "prompt": "Answer all parts.",
+            "subquestions": [
+                {
+                    "id": "q1a",
+                    "label": "a",
+                    "points": 3,
+                    "prompt": "Pick the even number.",
+                    "choices": [
+                        {"label": "A", "text": "3"},
+                        {"label": "B", "text": "4"},
+                        {"label": "C", "text": "5"},
+                    ],
+                },
+                {
+                    "id": "q1b",
+                    "label": "b",
+                    "points": 3,
+                    "prompt": "Explain your choice.",
+                },
+            ],
+        }
+    ]
+
+
+def test_parse_rejects_multiple_choice_question_with_one_choice() -> None:
+    content = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) only option
+  - **Correct**
+    - A
+"""
+
+    with pytest.raises(ValueError, match="at least two choices"):
+        parse_qa_markdown(content)
+
+
+def test_parse_rejects_multiple_choice_question_with_duplicate_labels() -> None:
+    content = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) one
+    - A) two
+  - **Correct**
+    - A
+"""
+
+    with pytest.raises(ValueError, match="unique labels"):
+        parse_qa_markdown(content)
+
+
+def test_parse_rejects_multiple_choice_question_with_non_contiguous_labels() -> None:
+    content = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) one
+    - C) two
+  - **Correct**
+    - A
+"""
+
+    with pytest.raises(ValueError, match="contiguous labels starting at A"):
+        parse_qa_markdown(content)
+
+
+def test_parse_rejects_multiple_choice_question_without_single_correct_label() -> None:
+    missing_correct = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) one
+    - B) two
+"""
+    multiple_correct = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) one
+    - B) two
+  - **Correct**
+    - A
+    - B
+"""
+
+    with pytest.raises(ValueError, match="exactly one correct option label"):
+        parse_qa_markdown(missing_correct)
+    with pytest.raises(ValueError, match="exactly one correct option label"):
+        parse_qa_markdown(multiple_correct)
+
+
+def test_parse_rejects_multiple_choice_question_with_invalid_correct_label() -> None:
+    wrong_label = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) one
+    - B) two
+  - **Correct**
+    - C
+"""
+    answer_text = """
+- (1 points) Bad multiple choice
+  - **Choices**
+    - A) one
+    - B) two
+  - **Correct**
+    - B) two
+"""
+
+    with pytest.raises(ValueError, match="is not one of the defined choices"):
+        parse_qa_markdown(wrong_label)
+    with pytest.raises(ValueError, match="must use only the option label"):
+        parse_qa_markdown(answer_text)
+
+
+def test_parse_rejects_mixing_multiple_choice_and_subquestions() -> None:
+    content = """
+- (5 points) Mixed structure
+  - **Choices**
+    - A) one
+    - B) two
+  - **Correct**
+    - A
+  - (2 points) part a
+    - **Correct**
+      - sub answer
+"""
+
+    with pytest.raises(ValueError, match="mixes multiple-choice options and subquestions"):
+        parse_qa_markdown(content)
+
+
 def test_render_round_trip_preserves_versions_and_question_structure() -> None:
     content = """---
 title: Round Trip Quiz
@@ -313,3 +515,51 @@ questions_start_page: 1
 
     assert [q.prompt for q in reparsed.version_questions["B"]] == ["B root question"]
     assert reparsed.version_questions["B"][0].answers == ["gamma"]
+
+
+def test_render_round_trip_preserves_multiple_choice_structure() -> None:
+    content = """---
+title: Multiple Choice Quiz
+questions_start_page: 1
+---
+
+## Version A
+
+- (4 points) Which one is a queue operation?
+  - **Choices**
+    - A) push
+    - B) enqueue
+    - C) pop
+  - **Correct**
+    - B
+
+- (4 points) Answer both parts.
+  - (2 points) Pick the prime number.
+    - **Choices**
+      - A) 4
+      - B) 5
+      - C) 6
+    - **Correct**
+      - B
+  - (2 points) Explain why.
+    - **Correct**
+      - 5 has exactly two positive divisors
+"""
+
+    parsed = parse_qa_markdown(content)
+    rendered = render_qa_markdown(parsed)
+    reparsed = parse_qa_markdown(rendered)
+
+    version_a = reparsed.version_questions["A"]
+    assert [(choice.label, choice.text) for choice in version_a[0].choices] == [
+        ("A", "push"),
+        ("B", "enqueue"),
+        ("C", "pop"),
+    ]
+    assert version_a[0].correct_choice_label == "B"
+    assert [(choice.label, choice.text) for choice in version_a[1].subquestions[0].choices] == [
+        ("A", "4"),
+        ("B", "5"),
+        ("C", "6"),
+    ]
+    assert version_a[1].subquestions[0].correct_choice_label == "B"
