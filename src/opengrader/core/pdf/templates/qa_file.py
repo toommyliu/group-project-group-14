@@ -14,6 +14,7 @@ _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGN
 _FRONTMATTER_RE = re.compile(r"^---$")
 _VERSION_HEADER_RE = re.compile(r"^\s*##\s+(.+?)\s*$")
 _LIST_ITEM_RE = re.compile(r"^([ \t]*)-\s+(.*)$")
+_CHOICE_ITEM_RE = re.compile(r"^(?P<label>[A-Za-z])[\)\.\:]\s*(?P<text>.+?)\s*$")
 _RUBRIC_OPTION_RE = re.compile(
     r"^(?P<label>.+?)\s*(?:\(\s*(?P<paren>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?\s*\)|:\s*(?P<colon>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?)\s*$",
     re.IGNORECASE,
@@ -43,12 +44,20 @@ class QARubricItem:
 
 
 @dataclass
+class QAChoice:
+    label: str
+    text: str
+
+
+@dataclass
 class QASubquestion:
     id: str
     prompt: str
     points: int
     label: str | None = None
     answers: list[str] = field(default_factory=list)
+    choices: list[QAChoice] = field(default_factory=list)
+    correct_choice_label: str | None = None
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
 
@@ -59,6 +68,8 @@ class QAQuestion:
     prompt: str
     points: int
     answers: list[str] = field(default_factory=list)
+    choices: list[QAChoice] = field(default_factory=list)
+    correct_choice_label: str | None = None
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
     subquestions: list[QASubquestion] = field(default_factory=list)
@@ -348,6 +359,88 @@ def _strip_bold(text: str) -> str:
     return cleaned
 
 
+def _normalize_choice_label(
+    raw: str, *, context: str, allow_prefixed_choice: bool = False
+) -> str:
+    cleaned = _strip_bold(raw).strip()
+    matched = re.fullmatch(r"([A-Za-z])", cleaned)
+    if matched is not None:
+        return matched.group(1).upper()
+
+    if allow_prefixed_choice and _CHOICE_ITEM_RE.match(cleaned):
+        raise ValueError(f"{context} must use only the option label, such as 'A'")
+
+    raise ValueError(f"{context} must be a single option label, such as 'A'")
+
+
+def _parse_choice_item(item: _BulletItem) -> QAChoice:
+    matched = _CHOICE_ITEM_RE.match(_strip_bold(item.text))
+    if matched is None:
+        raise ValueError(
+            "invalid choice at "
+            f"line {item.line_no}: {item.text!r}. "
+            "Use 'A) text', 'A. text', or 'A: text'."
+        )
+    if item.children:
+        raise ValueError(
+            f"choice at line {item.line_no} does not support nested bullets"
+        )
+
+    text = matched.group("text").strip()
+    if not text:
+        raise ValueError(f"choice at line {item.line_no} is missing option text")
+
+    return QAChoice(label=matched.group("label").upper(), text=text)
+
+
+def _parse_choices_section(item: _BulletItem) -> list[QAChoice]:
+    if not item.children:
+        raise ValueError(
+            f"choices section at line {item.line_no} must contain at least one option"
+        )
+    return [_parse_choice_item(child) for child in item.children]
+
+
+def _validate_multiple_choice(
+    *,
+    choices: list[QAChoice],
+    correct_values: list[str],
+    context: str,
+) -> str | None:
+    if not choices:
+        return None
+
+    if len(choices) < 2:
+        raise ValueError(f"{context} must define at least two choices")
+
+    labels = [choice.label for choice in choices]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"{context} choices must use unique labels")
+
+    expected_labels = [chr(ord("A") + i) for i in range(len(choices))]
+    if labels != expected_labels:
+        raise ValueError(
+            f"{context} choices must use contiguous labels starting at A: {', '.join(expected_labels)}"
+        )
+
+    if len(correct_values) != 1:
+        raise ValueError(
+            f"{context} multiple-choice questions must contain exactly one correct option label"
+        )
+
+    correct_label = _normalize_choice_label(
+        correct_values[0],
+        context=f"{context} correct answer",
+        allow_prefixed_choice=True,
+    )
+    if correct_label not in labels:
+        raise ValueError(
+            f"{context} correct answer {correct_label!r} is not one of the defined choices"
+        )
+
+    return correct_label
+
+
 def _parse_rubric_label_and_delta(
     text: str, *, line_no: int, require_delta: bool
 ) -> tuple[str, float | None]:
@@ -547,7 +640,8 @@ def _parse_subquestion_item(
     if not prompt:
         raise ValueError(f"subquestion at line {item.line_no} is missing prompt text")
 
-    answers: list[str] = []
+    correct_values: list[str] = []
+    choices: list[QAChoice] = []
     rubric: list[QARubricItem] = []
     image_markdown: str | None = None
     unknown_nested: list[_BulletItem] = []
@@ -556,7 +650,11 @@ def _parse_subquestion_item(
         section_name = _normalize_section_name(child.text)
 
         if section_name in {"correct", "answer", "answers"}:
-            answers.extend(_section_values(child))
+            correct_values.extend(_section_values(child))
+            continue
+
+        if section_name == "choices":
+            choices.extend(_parse_choices_section(child))
             continue
 
         if section_name == "image":
@@ -582,6 +680,12 @@ def _parse_subquestion_item(
     label = default_subquestion_label(index)
     subquestion_id = f"{parent_id}{label}"
     points = inline_points or 0
+    correct_choice_label = _validate_multiple_choice(
+        choices=choices,
+        correct_values=correct_values,
+        context=f"subquestion {subquestion_id!r}",
+    )
+    answers = [] if choices else correct_values
     _validate_rubric_points(
         rubric,
         points=points,
@@ -594,6 +698,8 @@ def _parse_subquestion_item(
         points=points,
         label=label,
         answers=answers,
+        choices=choices,
+        correct_choice_label=correct_choice_label,
         rubric=rubric,
         image_markdown=image_markdown,
     )
@@ -605,7 +711,8 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
         raise ValueError(f"question at line {item.line_no} is missing prompt text")
 
     qid = f"q{index}"
-    answers: list[str] = []
+    correct_values: list[str] = []
+    choices: list[QAChoice] = []
     rubric: list[QARubricItem] = []
     image_markdown: str | None = None
     subquestion_items: list[_BulletItem] = []
@@ -614,7 +721,11 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
         section_name = _normalize_section_name(child.text)
 
         if section_name in {"correct", "answer", "answers"}:
-            answers.extend(_section_values(child))
+            correct_values.extend(_section_values(child))
+            continue
+
+        if section_name == "choices":
+            choices.extend(_parse_choices_section(child))
             continue
 
         if section_name == "image":
@@ -632,7 +743,11 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
 
         subquestion_items.append(child)
 
-    if answers and subquestion_items:
+    if choices and subquestion_items:
+        raise ValueError(
+            f"question {qid!r} mixes multiple-choice options and subquestions; choose one structure"
+        )
+    if correct_values and subquestion_items:
         raise ValueError(
             f"question {qid!r} mixes direct answers and subquestions; choose one structure"
         )
@@ -643,6 +758,12 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
     ]
 
     points = inline_points or 0
+    correct_choice_label = _validate_multiple_choice(
+        choices=choices,
+        correct_values=correct_values,
+        context=f"question {qid!r}",
+    )
+    answers = [] if choices else correct_values
     _validate_rubric_points(rubric, points=points, context=f"question {qid!r}")
 
     return QAQuestion(
@@ -650,6 +771,8 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
         prompt=prompt,
         points=points,
         answers=answers,
+        choices=choices,
+        correct_choice_label=correct_choice_label,
         rubric=rubric,
         image_markdown=image_markdown,
         subquestions=subquestions,
@@ -779,6 +902,25 @@ def _render_answers(lines: list[str], answers: list[str], *, indent: int) -> Non
         _append_bullet(lines, indent=indent + 2, text=answer)
 
 
+def _render_choices(lines: list[str], choices: list[QAChoice], *, indent: int) -> None:
+    if not choices:
+        return
+
+    _append_bullet(lines, indent=indent, text="**Choices**")
+    for choice in choices:
+        _append_bullet(lines, indent=indent + 2, text=f"{choice.label}) {choice.text}")
+
+
+def _render_correct_choice(
+    lines: list[str], correct_choice_label: str | None, *, indent: int
+) -> None:
+    if correct_choice_label is None:
+        return
+
+    _append_bullet(lines, indent=indent, text="**Correct**")
+    _append_bullet(lines, indent=indent + 2, text=correct_choice_label)
+
+
 def _render_points_delta(points_delta: float) -> str:
     rendered = f"{points_delta:g}"
     if not rendered.startswith("-"):
@@ -831,6 +973,8 @@ def _render_subquestion(
         text=_render_prompt_with_points(subquestion.prompt, subquestion.points),
     )
     _render_image(lines, subquestion.image_markdown, indent=indent + 2)
+    _render_choices(lines, subquestion.choices, indent=indent + 2)
+    _render_correct_choice(lines, subquestion.correct_choice_label, indent=indent + 2)
     _render_answers(lines, subquestion.answers, indent=indent + 2)
     _render_rubric(lines, subquestion.rubric, indent=indent + 2)
 
@@ -844,6 +988,8 @@ def _render_question(
         text=_render_prompt_with_points(question.prompt, question.points),
     )
     _render_image(lines, question.image_markdown, indent=indent + 2)
+    _render_choices(lines, question.choices, indent=indent + 2)
+    _render_correct_choice(lines, question.correct_choice_label, indent=indent + 2)
     _render_answers(lines, question.answers, indent=indent + 2)
     _render_rubric(lines, question.rubric, indent=indent + 2)
 
@@ -904,26 +1050,42 @@ def qa_to_template_questions(
 ) -> list[QuestionInput]:
     questions: list[QuestionInput] = []
     for question in _questions_for_version(document, version):
-        if not question.subquestions:
+        if not question.subquestions and not question.choices:
             questions.append((question.id, question.points, question.prompt))
             continue
 
-        questions.append(
-            {
-                "id": question.id,
-                "points": question.points,
-                "prompt": question.prompt,
-                "subquestions": [
-                    {
-                        "id": subquestion.id,
-                        "label": subquestion.label,
-                        "points": subquestion.points,
-                        "prompt": subquestion.prompt,
-                    }
-                    for subquestion in question.subquestions
-                ],
-            }
-        )
+        question_input: dict[str, object] = {
+            "id": question.id,
+            "points": question.points,
+            "prompt": question.prompt,
+        }
+        if question.choices:
+            question_input["choices"] = [
+                {"label": choice.label, "text": choice.text}
+                for choice in question.choices
+            ]
+        if question.subquestions:
+            question_input["subquestions"] = [
+                {
+                    "id": subquestion.id,
+                    "label": subquestion.label,
+                    "points": subquestion.points,
+                    "prompt": subquestion.prompt,
+                    **(
+                        {
+                            "choices": [
+                                {"label": choice.label, "text": choice.text}
+                                for choice in subquestion.choices
+                            ]
+                        }
+                        if subquestion.choices
+                        else {}
+                    ),
+                }
+                for subquestion in question.subquestions
+            ]
+
+        questions.append(question_input)
 
     return questions
 

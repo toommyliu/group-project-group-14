@@ -138,6 +138,26 @@ def test_detect_dynamic_field_regions_uses_header_underlines_when_label_ocr_is_m
     assert regions["name"][1] < regions["sid"][1]
 
 
+def test_trim_question_region_preserves_answer_written_after_prompt() -> None:
+    image = Image.new("RGB", (1000, 220), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+
+    # Prompt-like content near the top, followed by a short same-line answer.
+    for x0, x1 in [(40, 120), (135, 220), (235, 330), (345, 430), (445, 540)]:
+        draw.rectangle((x0, 50, x1, 72), fill=(90, 90, 90))
+    draw.line(
+        (660, 43, 674, 43, 664, 66, 678, 66),
+        fill=(115, 115, 115),
+        width=5,
+    )
+    draw.ellipse((680, 41, 698, 69), outline=(115, 115, 115), width=5)
+
+    trimmed = extractor._trim_question_region(image, margin_px=8)
+
+    assert trimmed.width > 650
+    assert trimmed.height < 80
+
+
 def test_trim_question_region_ignores_long_border_lines() -> None:
     image = Image.new("RGB", (1400, 900), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)

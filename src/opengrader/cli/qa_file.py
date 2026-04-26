@@ -21,7 +21,9 @@ CLI (Command Line Interface) utility for converting Markdown-based Question & An
 EPILOG = """
 examples:
   uv run qa-file validate --qa-file samples/qa-single.md
+  uv run qa-file validate --qa-file samples/qa-multiple-choice.md
   uv run qa-file generate-template --qa-file samples/qa-single.md --output-pdf out/template-single.pdf
+  uv run qa-file generate-template --qa-file samples/qa-multiple-choice.md --output-pdf out/template-mc.pdf
   uv run qa-file generate-template --qa-file samples/qa-multi.md --output-pdf out/template-multi.pdf --all-versions
 """
 

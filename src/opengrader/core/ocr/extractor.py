@@ -445,6 +445,58 @@ def _trim_extent_by_gap(
     return start, end
 
 
+def _restore_same_line_answer_right_edge(
+    x1: int,
+    y0: int,
+    components: list[tuple[int, int, int, int, int]],
+    *,
+    region_w: int,
+    region_h: int,
+) -> int:
+    """Keep short same-line answers from being treated as right-side tails."""
+    top_band_bottom = y0 + max(80, int(region_h * 0.22))
+    horizontal_line_height = max(
+        12,
+        int(region_h * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM),
+    )
+    vertical_line_width = max(
+        12,
+        int(region_w * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM),
+    )
+    restored_x1 = x1
+
+    for x, y, w, h, area in components:
+        component_right = x + w
+        if component_right <= x1:
+            continue
+
+        component_center_y = y + (h / 2.0)
+        if component_center_y > top_band_bottom:
+            continue
+
+        if area < max(QUESTION_TRIM_MIN_COMPONENT_AREA, 40):
+            continue
+        if (
+            w < QUESTION_TRIM_MIN_COMPONENT_WIDTH
+            or h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT
+        ):
+            continue
+        if (
+            w >= int(region_w * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
+            and h <= horizontal_line_height
+        ):
+            continue
+        if (
+            h >= int(region_h * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
+            and w <= vertical_line_width
+        ):
+            continue
+
+        restored_x1 = max(restored_x1, component_right)
+
+    return restored_x1
+
+
 def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.Image:
     gray = np.array(region.convert("L"))
     if gray.size == 0:
@@ -573,6 +625,7 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
 
     num_labels, _, stats, _ = cv2.connectedComponentsWithStats(content_mask, 8)
     component_mask = np.zeros_like(content_mask)
+    components: list[tuple[int, int, int, int, int]] = []
     for label in range(1, num_labels):
         x, y, w, h, area = stats[label]
         if area < _MIN_COMPONENT_AREA:
@@ -601,6 +654,7 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
             continue
         if w < QUESTION_TRIM_MIN_COMPONENT_WIDTH and h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT:
             continue
+        components.append((int(x), int(y), int(w), int(h), int(area)))
         component_mask[y : y + h, x : x + w] = 255
 
     bbox_mask = component_mask if np.count_nonzero(component_mask) > 0 else binary_inv
@@ -637,6 +691,13 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
 
     y0, y1 = _trim_extent_by_gap(active_rows, region.height, min_gap_norm=0.06)
     x0, x1 = _trim_extent_by_gap(active_cols, region.width, min_gap_norm=0.06)
+    x1 = _restore_same_line_answer_right_edge(
+        x1,
+        y0,
+        components,
+        region_w=region.width,
+        region_h=region.height,
+    )
 
     x0 = max(0, x0 - margin_px)
     y0 = max(0, y0 - margin_px)
