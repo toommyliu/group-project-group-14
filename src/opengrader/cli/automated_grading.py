@@ -5,6 +5,12 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import re
 from pathlib import Path
 
+"""
+Automatically grades the student markdown files using an answer key markdown file
+
+"""
+
+
 EPILOG = """
 examples:
   uv run automated-grading --solutions solutions.md --input student-0001.submission.md
