@@ -1,14 +1,10 @@
 from pathlib import Path
 
-from textual import events
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Footer, Input
 
 from opengrader.tui.controllers import GradeController, InputController
-from opengrader.tui.controllers.input_controller import (
-    InputCommand,
-    InputProfileName,
-)
+from opengrader.tui.controllers.input_controller import InputCommand
 from opengrader.tui.data import Provider
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
@@ -25,9 +21,7 @@ class TuiApp(App):
         *,
         default_image_path: str | None = None,
         data_provider: Provider | None = None,
-        input_profile: InputProfileName | str | None = None,
     ) -> None:
-        self._input_profile = InputController._coerce_profile_name(input_profile)
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
         self.workflow_state = TuiWorkflowState()
@@ -37,10 +31,7 @@ class TuiApp(App):
             self.workflow_state,
             self.data_provider,
         )
-        self.input_controller = InputController(
-            self.workflow_state,
-            profile_name=self._input_profile,
-        )
+        self.input_controller = InputController(self.workflow_state)
         self._register_input_handlers()
 
     def compose(self) -> ComposeResult:
@@ -63,8 +54,8 @@ class TuiApp(App):
     def get_qa_picker_screen(self) -> QAPickerScreen:
         return self.query_one(f"#{PAGE_QA_PICKER}", QAPickerScreen)
 
-    def action_dispatch_input(self, profile_name: str, command: str) -> None:
-        if not self.input_controller.binding_available(profile_name, command):
+    def action_dispatch_input(self, command: str) -> None:
+        if not self._input_command_available(command):
             return
         self.input_controller.dispatch(command)
 
@@ -72,10 +63,10 @@ class TuiApp(App):
         if action != "dispatch_input":
             return True
 
-        if len(parameters) != 2:
+        if len(parameters) != 1:
             return False
-        profile_name, command = parameters
-        if not isinstance(profile_name, str) or not isinstance(command, str):
+        command = parameters[0]
+        if not isinstance(command, str):
             return False
 
         if isinstance(self.focused, Input):
@@ -84,22 +75,7 @@ class TuiApp(App):
         if len(self.screen_stack) > 1:
             return False
 
-        return self.input_controller.binding_available(profile_name, command)
-
-    def on_key(self, event: events.Key) -> None:
-        if self.workflow_state.current_page != PAGE_QA_PICKER:
-            return
-        if event.key in ("j", "down"):
-            self.grade_controller.qa_move_down()
-            event.stop()
-            return
-        if event.key in ("k", "up"):
-            self.grade_controller.qa_move_up()
-            event.stop()
-            return
-        if event.key == "enter":
-            self.grade_controller.qa_confirm()
-            event.stop()
+        return self._input_command_available(command)
 
     def on_qa_picker_screen_qa_highlighted(
         self, event: QAPickerScreen.QAHighlighted
@@ -155,11 +131,23 @@ class TuiApp(App):
         )
         self.input_controller.register(
             InputCommand.QA_MOVE_UP,
-            self.grade_controller.qa_move_up,
+            self._handle_qa_move_up,
         )
         self.input_controller.register(
             InputCommand.QA_MOVE_DOWN,
-            self.grade_controller.qa_move_down,
+            self._handle_qa_move_down,
+        )
+        self.input_controller.register(
+            InputCommand.QA_MOVE_STUDENT_UP,
+            self._handle_student_move_up,
+        )
+        self.input_controller.register(
+            InputCommand.QA_MOVE_STUDENT_DOWN,
+            self._handle_student_move_down,
+        )
+        self.input_controller.register(
+            InputCommand.QA_SWITCH_PANE,
+            self._handle_qa_switch_pane,
         )
         self.input_controller.register(
             InputCommand.QA_CONFIRM,
@@ -193,9 +181,47 @@ class TuiApp(App):
         if self.workflow_state.current_page == PAGE_QA_PICKER:
             self.get_qa_picker_screen().set_status("Already viewing the grading queue.")
 
-    def set_input_profile(self, profile_name: InputProfileName | str) -> None:
-        self.input_controller.set_profile(profile_name)
-        self.refresh_bindings()
+    def _handle_qa_move_down(self) -> None:
+        qa_screen = self.get_qa_picker_screen()
+        if qa_screen.students_have_focus():
+            qa_screen.move_student_cursor(1)
+            return
+        self.grade_controller.qa_move_down()
+
+    def _handle_qa_move_up(self) -> None:
+        qa_screen = self.get_qa_picker_screen()
+        if qa_screen.students_have_focus():
+            qa_screen.move_student_cursor(-1)
+            return
+        self.grade_controller.qa_move_up()
+
+    def _handle_student_move_down(self) -> None:
+        self.get_qa_picker_screen().move_student_cursor(1)
+
+    def _handle_student_move_up(self) -> None:
+        self.get_qa_picker_screen().move_student_cursor(-1)
+
+    def _handle_qa_switch_pane(self) -> None:
+        self.get_qa_picker_screen().switch_active_pane()
+
+    def _input_command_available(self, command: InputCommand | str) -> bool:
+        if not self.input_controller.command_available(command):
+            return False
+
+        normalized_command = InputController._coerce_command(command)
+        if self.workflow_state.current_page != PAGE_QA_PICKER:
+            return True
+
+        if normalized_command in (
+            InputCommand.QA_MOVE_STUDENT_DOWN,
+            InputCommand.QA_MOVE_STUDENT_UP,
+        ):
+            return self.get_qa_picker_screen().students_have_focus()
+
+        if normalized_command in (InputCommand.QA_MOVE_DOWN, InputCommand.QA_MOVE_UP):
+            return not self.get_qa_picker_screen().students_have_focus()
+
+        return True
 
     def _load_demo_grading_queue(self) -> None:
         selection = self.workflow_state.selection

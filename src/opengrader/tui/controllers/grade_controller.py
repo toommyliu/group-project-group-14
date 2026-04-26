@@ -282,9 +282,11 @@ class GradeController:
         ]
         qa_screen.bind_assignment(
             self._question_items(self._state.grading_run.questions),
+            students=self._student_progress_items(),
             breadcrumb_labels=labels,
             assignment_name=self._state.selection_labels.get("assignment")
             or "Assignment",
+            student_question_statuses=self._student_question_statuses(),
         )
         qa_screen.set_status(status)
 
@@ -415,6 +417,50 @@ class GradeController:
                 )
             )
         return items
+
+    def _student_progress_items(self) -> list[NavItem]:
+        items: list[NavItem] = []
+        total_questions = len(self._state.grading_run.questions)
+        for student in self._state.student_items:
+            graded_count = sum(
+                1
+                for question in self._state.grading_run.questions
+                if self._state.qa_student_status.get(
+                    (
+                        str(self._state.selection.course_id or ""),
+                        str(self._state.selection.assignment_id or ""),
+                        question.question_id,
+                        student.item_id,
+                    ),
+                    "ungraded",
+                )
+                == "graded"
+            )
+            items.append(
+                NavItem(
+                    item_id=student.item_id,
+                    label=student.label,
+                    meta=f"{graded_count}/{total_questions} graded",
+                )
+            )
+        return items
+
+    def _student_question_statuses(self) -> dict[tuple[str, str], str]:
+        statuses: dict[tuple[str, str], str] = {}
+        for question in self._state.grading_run.questions:
+            for student in self._state.student_items:
+                statuses[(question.question_id, student.item_id)] = (
+                    self._state.qa_student_status.get(
+                        (
+                            str(self._state.selection.course_id or ""),
+                            str(self._state.selection.assignment_id or ""),
+                            question.question_id,
+                            student.item_id,
+                        ),
+                        "ungraded",
+                    )
+                )
+        return statuses
 
     @staticmethod
     def _numeric_id(raw_id: str) -> int | None:
