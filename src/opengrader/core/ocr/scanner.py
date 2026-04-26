@@ -5,6 +5,9 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from opengrader.core.ocr.question_classifier import classify_question_image
+from opengrader.core.question_types import QuestionType
+
 from .utils import apply_grayscale
 
 
@@ -16,6 +19,7 @@ class DetectedRegion:
     region_type: Literal["header_field", "question", "unknown"]
     confidence: float  # 0-100
     label: str | None = None
+    question_type: QuestionType | None = None
 
 
 # Minimum area as fraction of page area to consider a contour
@@ -168,12 +172,17 @@ def scan_template(
         h_norm = round(h / page_h, 3)
 
         region_type = _classify_region(x, y, w, h, page_h)
+        question_type: QuestionType | None = None
+        if region_type == "question":
+            question_type = classify_question_image(image.crop((x, y, x + w, y + h)))
+
         confidence = min(95.0, 60.0 + (w * h) / page_area * 200)
         regions.append(
             DetectedRegion(
                 bbox=[x_norm, y_norm, w_norm, h_norm],
                 region_type=region_type,
                 confidence=round(confidence, 1),
+                question_type=question_type,
             )
         )
 

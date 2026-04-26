@@ -26,6 +26,3 @@ COLOR_QUESTION_TEXT: ColorType = (0.2, 0.2, 0.2)
 COLOR_SUBQUESTION_TEXT: ColorType = (0.25, 0.25, 0.25)
 COLOR_FIELD_LABEL: ColorType = (0.15, 0.15, 0.15)
 
-
-class QuestionType(str, Enum):
-    FREE_RESPONSE = "free_response"

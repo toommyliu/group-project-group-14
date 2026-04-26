@@ -3,8 +3,14 @@ from pathlib import Path
 import fitz
 
 from opengrader.core.ocr import extractor
-from opengrader.core.ocr.extractor import OcrConfig, OcrResult, process_submission_pdf
+from opengrader.core.ocr.extractor import (
+    OcrConfig,
+    OcrResult,
+    process_submission_pdf,
+    results_to_dict,
+)
 from opengrader.core.pdf.templates.constants import LETTER_H, LETTER_W
+from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 
 
 def _create_blank_pdf(path: Path) -> None:
@@ -35,7 +41,9 @@ def test_process_submission_pdf_extracts_detected_questions(tmp_path: Path) -> N
         ]
 
     original_detect = extractor._detect_question_regions
+    original_classify = extractor.classify_question_image
     extractor._detect_question_regions = _fake_detect
+    extractor.classify_question_image = lambda _image: MULTIPLE_CHOICE
     try:
         result = process_submission_pdf(
             pdf_path=pdf_path,
@@ -46,13 +54,24 @@ def test_process_submission_pdf_extracts_detected_questions(tmp_path: Path) -> N
         )
     finally:
         extractor._detect_question_regions = original_detect
+        extractor.classify_question_image = original_classify
 
     extracted_ids = [question.question_id for question in result.questions]
     assert extracted_ids == ["q1", "q2"]
 
     for question in result.questions:
+        assert question.question_type == MULTIPLE_CHOICE
         assert question.output_path is not None
         assert Path(question.output_path).exists()
+
+    serialized = results_to_dict(result)
+    assert serialized["questions"][0]["question_type"] == MULTIPLE_CHOICE
+
+
+def test_question_extraction_result_defaults_to_free_response() -> None:
+    result = extractor.QuestionExtractionResult(question_id="q1", page_number=1)
+
+    assert result.question_type == FREE_RESPONSE
 
 
 def test_match_box_for_marker_prefers_tighter_question_box() -> None:
