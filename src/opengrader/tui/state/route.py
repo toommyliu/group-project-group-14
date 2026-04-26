@@ -1,6 +1,2 @@
-PAGE_COURSE_PICKER = "page-course-picker"
-PAGE_HOME = "page-home"
 PAGE_QA_PICKER = "page-qa-picker"
 PAGE_GRADE = "page-grade"
-
-PRIMARY_NAV_PAGES: tuple[str, ...] = (PAGE_COURSE_PICKER, PAGE_HOME)

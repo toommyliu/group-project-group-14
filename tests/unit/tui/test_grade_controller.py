@@ -1,23 +1,10 @@
 from dataclasses import dataclass
 
 from opengrader.tui.controllers.grade_controller import GradeController
-from opengrader.tui.state import PAGE_HOME, PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
+from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 from .fakes import FakeDataProvider
-
-
-@dataclass
-class FakeHomeScreen:
-    status: str = ""
-    focused: bool = False
-
-    def set_status(self, text: str) -> None:
-        self.status = text
-
-    def focus_courses(self) -> bool:
-        self.focused = True
-        return True
 
 
 @dataclass
@@ -43,6 +30,7 @@ class FakeQAPickerScreen:
     status: str = ""
     bound_questions: list[NavItem] | None = None
     focused: bool = False
+    moved_to_index: int | None = None
 
     def bind_assignment(
         self,
@@ -66,19 +54,20 @@ class FakeQAPickerScreen:
     def move_cursor(self, direction: int) -> None:
         _ = direction
 
-    def confirm(self) -> None:
-        pass
+    def move_to_index(self, index: int) -> None:
+        self.moved_to_index = index
+
+    def selected_question(self) -> NavItem | None:
+        if not self.bound_questions:
+            return None
+        return self.bound_questions[0]
 
 
 class FakeApp:
     def __init__(self) -> None:
-        self.home_screen = FakeHomeScreen()
         self.grade_screen = FakeGradeScreen()
         self.qa_screen = FakeQAPickerScreen()
-        self.page = PAGE_HOME
-
-    def get_home_screen(self) -> FakeHomeScreen:
-        return self.home_screen
+        self.page = PAGE_QA_PICKER
 
     def get_grade_screen(self) -> FakeGradeScreen:
         return self.grade_screen
@@ -97,10 +86,6 @@ def build_controller() -> tuple[FakeApp, TuiWorkflowState, GradeController]:
     state.selection.assignment_id = 1
     state.selection_labels["course"] = "CMPE 195"
     state.selection_labels["assignment"] = "HW 1"
-    state.student_items = [
-        NavItem("s1", "Tommy Liu"),
-        NavItem("s2", "Andy Cortes"),
-    ]
     controller = GradeController(app, state, FakeDataProvider())
     controller.attach_student_refresh(lambda: None)
     controller.open_question_picker_for_assignment()
@@ -108,9 +93,25 @@ def build_controller() -> tuple[FakeApp, TuiWorkflowState, GradeController]:
     return app, state, controller
 
 
+def test_open_question_picker_binds_questions_and_focuses_picker() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+
+    controller = GradeController(app, state, FakeDataProvider())
+    controller.open_question_picker_for_assignment()
+
+    assert app.page == PAGE_QA_PICKER
+    assert [item.item_id for item in state.question_items] == ["Q1", "Q2"]
+    assert app.qa_screen.bound_questions is not None
+    assert app.qa_screen.focused is True
+
+
 def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
     app, state, controller = build_controller()
-
     state.current_page = PAGE_GRADE
 
     refreshed: list[str] = []
@@ -151,4 +152,14 @@ def test_finalize_last_student_returns_to_qa_picker() -> None:
 
     assert app.page == PAGE_QA_PICKER
     assert app.qa_screen.status == "All students finalized for this QA."
+    assert app.qa_screen.focused is True
+
+
+def test_return_to_home_alias_returns_to_qa_picker() -> None:
+    app, state, controller = build_controller()
+    state.current_page = PAGE_GRADE
+
+    controller.return_to_home()
+
+    assert app.page == PAGE_QA_PICKER
     assert app.qa_screen.focused is True

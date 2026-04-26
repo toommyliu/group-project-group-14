@@ -29,6 +29,7 @@ The PoC demonstrates the start of the workflow: generating templates, processing
 - [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+- [Ollama](https://ollama.com/)
 - Compatible Terminal Emulator
 
 ### Terminal Compatibility
@@ -55,6 +56,7 @@ Install homebrew and dependencies:
 brew install tesseract
 brew install uv
 brew install python@3.13
+brew install ollama
 ```
 
 Clone the repository:
@@ -81,7 +83,7 @@ uv run <script_name> [arguments]
 
 # Examples
 uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf
-uv run ocr-pdf --help
+uv run submission-file --help
 ```
 
 <details>
@@ -121,6 +123,19 @@ submission-splitter --input /path/to/scan.pdf --output /path/to/output --pages-p
 3. Process student submissions into structured markdown:
 ```bash
 submission-file --input /path/to/output --output /path/to/markdown
+```
+
+Run a vision language model to extract printed and handwritten text from the processed submissions:
+```bash
+# Run your vision model first
+ollama run qwen2.5vl:7b
+
+# Then process the submissions
+uv run submission-file \
+  --input samples/cs146-midterm1/split-submissions \
+  --output samples/cs146-midterm1/student-submissions \
+  --text-backend ollama \
+  --ollama-model <your-model-name>
 ```
 
 #### Global Installation (Optional)

@@ -2,20 +2,10 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from opengrader.tui.data.models import (
-    AssignmentSummary,
-    AssignmentTemplateSummary,
-    CourseSummary,
-    QuestionSeed,
-    StudentSummary,
-)
+from opengrader.tui.data.models import QuestionSeed, StudentSummary
 
 
 class Provider(Protocol):
-    def list_courses(self) -> list[CourseSummary]: ...
-
-    def list_assignments(self, course_id: int | None) -> list[AssignmentSummary]: ...
-
     def list_students(self, course_id: int | None) -> list[StudentSummary]: ...
 
     def build_question_seeds(
@@ -24,70 +14,3 @@ class Provider(Protocol):
         assignment_id: int | None = None,
         assignment_title: str | None = None,
     ) -> list[QuestionSeed]: ...
-
-    def create_course(
-        self,
-        *,
-        code: str,
-        name: str,
-        term: str,
-        section: str,
-    ) -> CourseSummary: ...
-
-    def create_assignment(
-        self,
-        *,
-        course_id: int,
-        assignment_type: str,
-        title: str,
-        max_points: str,
-    ) -> AssignmentSummary: ...
-
-    def create_student(
-        self,
-        *,
-        course_id: int,
-        sid: str,
-        first_name: str,
-        last_name: str,
-        middle_name: str | None,
-        email: str | None,
-    ) -> StudentSummary: ...
-
-    def create_assignment_template(
-        self,
-        *,
-        assignment_id: int,
-        name: str,
-        template_pdf_path: str,
-    ) -> AssignmentTemplateSummary: ...
-
-    def list_assignment_templates(
-        self,
-        course_id: int | None,
-    ) -> list[AssignmentTemplateSummary]: ...
-
-    def set_assignment_template(
-        self,
-        *,
-        assignment_id: int,
-        template_id: int,
-    ) -> None: ...
-
-    def replace_assignment_templates(
-        self,
-        *,
-        assignment_id: int,
-        template_ids: list[int],
-        current_template_id: int,
-    ) -> None: ...
-
-    def get_assignment_template(
-        self,
-        assignment_id: int | None,
-    ) -> AssignmentTemplateSummary | None: ...
-
-    def list_assignment_templates_for_assignment(
-        self,
-        assignment_id: int | None,
-    ) -> list[AssignmentTemplateSummary]: ...

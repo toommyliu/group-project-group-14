@@ -6,43 +6,43 @@ from opengrader.tui.controllers.input_controller import (
     InputController,
     current_default_input_profile,
 )
-from opengrader.tui.state import PAGE_HOME, PAGE_GRADE, TuiWorkflowState
+from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 
 
 def test_command_availability_tracks_active_context() -> None:
-    state = TuiWorkflowState(current_page=PAGE_HOME)
+    state = TuiWorkflowState(current_page=PAGE_QA_PICKER)
     controller = InputController(state)
 
-    assert controller.current_context() == InputContext.HOME
-    assert controller.command_available(InputCommand.HOME_MOVE_UP) is True
+    assert controller.current_context() == InputContext.QA
+    assert controller.command_available(InputCommand.QA_MOVE_UP) is True
     assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is False
     assert controller.command_available(InputCommand.APP_QUIT) is True
 
     state.current_page = PAGE_GRADE
 
     assert controller.current_context() == InputContext.GRADE
-    assert controller.command_available(InputCommand.HOME_MOVE_UP) is False
+    assert controller.command_available(InputCommand.QA_MOVE_UP) is False
     assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is True
 
 
 def test_dispatch_calls_registered_handler_only_in_matching_context() -> None:
-    state = TuiWorkflowState(current_page=PAGE_HOME)
+    state = TuiWorkflowState(current_page=PAGE_QA_PICKER)
     controller = InputController(state)
     calls: list[str] = []
-    controller.register(InputCommand.HOME_MOVE_UP, lambda: calls.append("home"))
+    controller.register(InputCommand.QA_MOVE_UP, lambda: calls.append("qa"))
     controller.register(
         InputCommand.GRADE_NEXT_STUDENT,
         lambda: calls.append("grade"),
     )
 
     controller.dispatch(InputCommand.GRADE_NEXT_STUDENT)
-    controller.dispatch(InputCommand.HOME_MOVE_UP)
+    controller.dispatch(InputCommand.QA_MOVE_UP)
 
     state.current_page = PAGE_GRADE
-    controller.dispatch(InputCommand.HOME_MOVE_UP)
+    controller.dispatch(InputCommand.QA_MOVE_UP)
     controller.dispatch(InputCommand.GRADE_NEXT_STUDENT)
 
-    assert calls == ["home", "grade"]
+    assert calls == ["qa", "grade"]
 
 
 def test_profiles_change_keys_without_changing_semantic_commands() -> None:
@@ -65,27 +65,27 @@ def test_none_profile_uses_runtime_default() -> None:
 
 
 def test_binding_available_requires_matching_profile_and_context() -> None:
-    state = TuiWorkflowState(current_page=PAGE_HOME)
+    state = TuiWorkflowState(current_page=PAGE_QA_PICKER)
     controller = InputController(state, profile_name=InputProfileName.VIM)
 
     assert (
         controller.binding_available(
             InputProfileName.VIM,
-            InputCommand.HOME_MOVE_DOWN,
+            InputCommand.QA_MOVE_DOWN,
         )
         is True
     )
     assert (
         controller.binding_available(
             InputProfileName.STANDARD,
-            InputCommand.HOME_MOVE_DOWN,
+            InputCommand.QA_MOVE_DOWN,
         )
         is False
     )
     assert (
         controller.binding_available(
             InputProfileName.EMACS,
-            InputCommand.HOME_MOVE_DOWN,
+            InputCommand.QA_MOVE_DOWN,
         )
         is False
     )
@@ -95,7 +95,7 @@ def test_binding_available_requires_matching_profile_and_context() -> None:
     assert (
         controller.binding_available(
             InputProfileName.VIM,
-            InputCommand.HOME_MOVE_DOWN,
+            InputCommand.QA_MOVE_DOWN,
         )
         is False
     )

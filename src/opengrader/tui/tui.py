@@ -4,29 +4,15 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Footer, Input
 
-from opengrader.tui.controllers import (
-    GradeController,
-    HomeController,
-    InputController,
-)
+from opengrader.tui.controllers import GradeController, InputController
 from opengrader.tui.controllers.input_controller import (
     InputCommand,
     InputProfileName,
 )
-from opengrader.tui.data import Provider, SqliteProvider
-from opengrader.tui.state import (
-    PAGE_COURSE_PICKER,
-    PAGE_GRADE,
-    PAGE_HOME,
-    PAGE_QA_PICKER,
-    TuiWorkflowState,
-)
-from opengrader.tui.ui.screens import (
-    CoursePickerScreen,
-    GradeScreen,
-    HomeScreen,
-    QAPickerScreen,
-)
+from opengrader.tui.data import Provider
+from opengrader.tui.data.stub_data_provider import StubDataProvider
+from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
+from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
 
 
 class TuiApp(App):
@@ -40,29 +26,16 @@ class TuiApp(App):
         default_image_path: str | None = None,
         data_provider: Provider | None = None,
         input_profile: InputProfileName | str | None = None,
-        db_path: str | Path | None = None,
     ) -> None:
         self._input_profile = InputController._coerce_profile_name(input_profile)
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
         self.workflow_state = TuiWorkflowState()
-        self.data_provider = data_provider or SqliteProvider(
-            self.default_image_path,
-            db_path=db_path,
-        )
+        self.data_provider = data_provider or StubDataProvider(self.default_image_path)
         self.grade_controller = GradeController(
             self,
             self.workflow_state,
             self.data_provider,
-        )
-        self.home_controller = HomeController(
-            self,
-            self.workflow_state,
-            self.data_provider,
-            self.grade_controller.open_question_picker_for_assignment,
-        )
-        self.grade_controller.attach_student_refresh(
-            self.home_controller.refresh_students
         )
         self.input_controller = InputController(
             self.workflow_state,
@@ -71,26 +44,18 @@ class TuiApp(App):
         self._register_input_handlers()
 
     def compose(self) -> ComposeResult:
-        with ContentSwitcher(initial=PAGE_COURSE_PICKER, id="workspace-switcher"):
-            yield CoursePickerScreen(id=PAGE_COURSE_PICKER)
-            yield HomeScreen(id=PAGE_HOME)
+        with ContentSwitcher(initial=PAGE_QA_PICKER, id="workspace-switcher"):
             yield QAPickerScreen(id=PAGE_QA_PICKER)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.home_controller.initialize()
+        self._load_demo_grading_queue()
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
         self.query_one(ContentSwitcher).current = page_id
         self.refresh_bindings()
-
-    def get_course_picker_screen(self) -> CoursePickerScreen:
-        return self.query_one(f"#{PAGE_COURSE_PICKER}", CoursePickerScreen)
-
-    def get_home_screen(self) -> HomeScreen:
-        return self.query_one(f"#{PAGE_HOME}", HomeScreen)
 
     def get_grade_screen(self) -> GradeScreen:
         return self.query_one(f"#{PAGE_GRADE}", GradeScreen)
@@ -136,54 +101,6 @@ class TuiApp(App):
             self.grade_controller.qa_confirm()
             event.stop()
 
-    def on_course_picker_screen_course_highlighted(
-        self, event: CoursePickerScreen.CourseHighlighted
-    ) -> None:
-        self.home_controller.on_picker_course_highlighted(event.item)
-
-    def on_course_picker_screen_course_selected(
-        self, event: CoursePickerScreen.CourseSelected
-    ) -> None:
-        self.home_controller.on_picker_course_selected(event.item)
-
-    def on_home_screen_course_highlighted(
-        self, event: HomeScreen.CourseHighlighted
-    ) -> None:
-        if not self._has_home_screen():
-            return
-        self.home_controller.on_course_highlighted(event.item)
-
-    def on_home_screen_assignment_highlighted(
-        self, event: HomeScreen.AssignmentHighlighted
-    ) -> None:
-        if not self._has_home_screen():
-            return
-        self.home_controller.on_assignment_highlighted(event.item)
-
-    def on_home_screen_student_highlighted(
-        self, event: HomeScreen.StudentHighlighted
-    ) -> None:
-        if not self._has_home_screen():
-            return
-        self.home_controller.on_student_highlighted(event.item)
-
-    def on_home_screen_assignment_selected(
-        self, event: HomeScreen.AssignmentSelected
-    ) -> None:
-        self.home_controller.on_assignment_selected(event.item)
-
-    def on_home_screen_student_selected(
-        self, event: HomeScreen.StudentSelected
-    ) -> None:
-        self.home_controller.on_student_selected(event.item)
-
-    def on_home_screen_student_submission_selected(
-        self, event: HomeScreen.StudentSubmissionSelected
-    ) -> None:
-        self.home_controller.on_student_submission_selected(
-            event.student, event.assignment
-        )
-
     def on_qa_picker_screen_qa_highlighted(
         self, event: QAPickerScreen.QAHighlighted
     ) -> None:
@@ -227,83 +144,11 @@ class TuiApp(App):
     def on_grade_screen_return_to_home_requested(
         self, _event: GradeScreen.ReturnToHomeRequested
     ) -> None:
-        self.grade_controller.return_to_home()
+        self.grade_controller.return_to_qa_picker()
 
     def _register_input_handlers(self) -> None:
         self.input_controller.register(InputCommand.APP_QUIT, self.exit)
         self.input_controller.register(InputCommand.APP_BACK, self._handle_back)
-        self.input_controller.register(
-            InputCommand.HOME_MOVE_UP,
-            self.home_controller.move_up,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_MOVE_DOWN,
-            self.home_controller.move_down,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_MOVE_LEFT,
-            self.home_controller.move_left,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_MOVE_RIGHT,
-            self.home_controller.move_right,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_CONFIRM,
-            self.home_controller.confirm,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_ASSIGNMENT_START,
-            self.home_controller.start_grading_selected_assignment,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_ASSIGNMENT_DETAILS,
-            self.home_controller.show_assignment_details,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_ASSIGNMENT_EDIT_RUBRIC,
-            self.home_controller.edit_assignment_rubric,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_ASSIGNMENT_EDIT_TEMPLATE,
-            self.home_controller.edit_assignment_template,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_CREATE,
-            self.home_controller.create,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_FOCUS_COURSES,
-            self.home_controller.focus_courses_pane,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_FOCUS_ASSIGNMENTS,
-            self.home_controller.focus_assignments_pane,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_FOCUS_STUDENTS,
-            self.home_controller.focus_students_pane,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_FOCUS_DETAILS,
-            self.home_controller.focus_details_pane,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_DETAILS_NEXT_TAB,
-            self.home_controller.details_next_tab,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_DETAILS_PREV_TAB,
-            self.home_controller.details_prev_tab,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_DETAILS_NEXT_PAGE,
-            self.home_controller.details_next_page,
-        )
-        self.input_controller.register(
-            InputCommand.HOME_DETAILS_PREV_PAGE,
-            self.home_controller.details_prev_page,
-        )
         self.input_controller.register(
             InputCommand.QA_JUMP_UNGRADED,
             self.grade_controller.qa_jump_ungraded_question,
@@ -346,18 +191,28 @@ class TuiApp(App):
             self.grade_controller.return_to_qa_picker()
             return
         if self.workflow_state.current_page == PAGE_QA_PICKER:
-            self.grade_controller.return_to_home()
-            return
-        if self.workflow_state.current_page == PAGE_HOME:
-            self.home_controller.focus_courses_pane()
+            self.get_qa_picker_screen().set_status("Already viewing the grading queue.")
 
     def set_input_profile(self, profile_name: InputProfileName | str) -> None:
         self.input_controller.set_profile(profile_name)
         self.refresh_bindings()
 
-    def _has_home_screen(self) -> bool:
-        try:
-            self.get_home_screen()
-        except Exception:
-            return False
-        return True
+    def _load_demo_grading_queue(self) -> None:
+        selection = self.workflow_state.selection
+        selection.course_item_id = "c1"
+        selection.course_id = 1
+        selection.assignment_item_id = "a1"
+        selection.assignment_id = 1
+        selection.question_id = None
+        selection.student_item_id = None
+        selection.student_id = None
+
+        self.workflow_state.selection_labels.update(
+            {
+                "course": "CMPE 195",
+                "assignment": "HW 1",
+                "question": "",
+                "student": "",
+            }
+        )
+        self.grade_controller.open_question_picker_for_assignment()

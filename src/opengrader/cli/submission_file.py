@@ -4,6 +4,7 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from opengrader.core.ocr import OcrConfig
+from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
 from opengrader.core.submissions import build_student_submission_document
 
 """
@@ -15,6 +16,7 @@ EPILOG = """
 examples:
   uv run submission-file --input split/ --output out/submissions/
   uv run submission-file --input split/student-0001.pdf --output out/submissions/ --dpi 200
+  uv run submission-file --input split/ --output out/submissions/ --text-backend ollama --ollama-model qwen2.5vl:7b
 """
 
 
@@ -79,6 +81,43 @@ def _build_parser() -> ArgumentParser:
             "nested subquestion boxes are detected."
         ),
     )
+    parser.add_argument(
+        "--text-backend",
+        choices=["tesseract", "ollama"],
+        default="tesseract",
+        help=(
+            "Text extraction backend for student name/ID fields and "
+            "question prompt/answer extraction. "
+            "The ollama backend evaluates multiple header crop variants for "
+            "student fields and response images "
+            "(default: tesseract)."
+        ),
+    )
+    parser.add_argument(
+        "--ollama-model",
+        default="qwen2.5vl:7b",
+        help="Ollama vision model to use when --text-backend=ollama.",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        default="http://127.0.0.1:11434",
+        help="Ollama server URL when --text-backend=ollama.",
+    )
+    parser.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=120.0,
+        help="Ollama request timeout in seconds (default: 120).",
+    )
+    parser.add_argument(
+        "--no-ollama-qa",
+        action="store_true",
+        help=(
+            "Skip ollama question prompt/answer extraction. "
+            "When used with --text-backend=ollama, ollama will still be used "
+            "for student name/ID field extraction but question images will use local OCR."
+        ),
+    )
     return parser
 
 
@@ -114,8 +153,14 @@ def run_cli() -> None:
         confidence_threshold=args.confidence_threshold,
     )
 
-    print("Using OCR-only extraction mode.")
+    print(f"Using text backend: {args.text_backend} {'' if args.text_backend == 'tesseract' else f'(model: {args.ollama_model})'}")
     print(f"Found {len(input_pdfs)} submission PDF(s)")
+
+    ollama_config = OllamaVisionConfig(
+        model=args.ollama_model,
+        host=args.ollama_host,
+        timeout_seconds=args.ollama_timeout,
+    )
 
     for i, pdf_path in enumerate(input_pdfs, 1):
         print(f"[{i}/{len(input_pdfs)}] Converting: {pdf_path.name}")
@@ -125,6 +170,10 @@ def run_cli() -> None:
             ocr_config=config,
             dpi=args.dpi,
             split_subquestions=not args.no_split_subquestions,
+            text_backend=args.text_backend,
+            ollama_config=ollama_config,
+            skip_ollama_qa=args.no_ollama_qa,
+            progress_callback=(lambda message: print(f"  {message}")),
         )
         print(f"  Wrote {build_result.markdown_path}")
 
