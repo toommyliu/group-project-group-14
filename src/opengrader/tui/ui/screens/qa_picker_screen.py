@@ -329,8 +329,11 @@ class QAPickerScreen(Vertical):
             self._set_active_list("qa-list")
 
     def _set_active_list(self, list_id: str) -> None:
+        previous_list_id = self._active_list_id
         self._active_list_id = list_id
         self._sync_active_list_classes()
+        if previous_list_id != list_id and self.is_attached:
+            self.app.refresh_bindings()
 
     def _sync_active_list_classes(self) -> None:
         try:

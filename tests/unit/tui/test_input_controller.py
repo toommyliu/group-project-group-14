@@ -1,10 +1,8 @@
 from opengrader.tui.controllers.input_controller import (
-    DEFAULT_INPUT_PROFILE,
+    INPUT_BINDINGS,
     InputCommand,
     InputContext,
-    InputProfileName,
     InputController,
-    current_default_input_profile,
 )
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 
@@ -47,57 +45,24 @@ def test_dispatch_calls_registered_handler_only_in_matching_context() -> None:
     assert calls == ["qa", "grade"]
 
 
-def test_profiles_change_keys_without_changing_semantic_commands() -> None:
-    standard = InputController.profile(InputProfileName.STANDARD)
-    vim = InputController.profile(InputProfileName.VIM)
-    emacs = InputController.profile(InputProfileName.EMACS)
+def test_single_keymap_merges_standard_and_vim_navigation_keys() -> None:
+    bindings_by_command = {binding.command: binding for binding in INPUT_BINDINGS}
 
-    standard_commands = {binding.command for binding in standard.bindings}
-    vim_commands = {binding.command for binding in vim.bindings}
-    emacs_commands = {binding.command for binding in emacs.bindings}
-
-    assert standard_commands == vim_commands == emacs_commands
-    assert standard.bindings != vim.bindings
-    assert standard.bindings != emacs.bindings
-
-
-def test_none_profile_uses_runtime_default() -> None:
-    assert current_default_input_profile() == DEFAULT_INPUT_PROFILE
-    assert InputController.profile().name == DEFAULT_INPUT_PROFILE
-
-
-def test_binding_available_requires_matching_profile_and_context() -> None:
-    state = TuiWorkflowState(current_page=PAGE_QA_PICKER)
-    controller = InputController(state, profile_name=InputProfileName.VIM)
-
+    assert bindings_by_command[InputCommand.QA_MOVE_DOWN].keys == "j,down"
+    assert bindings_by_command[InputCommand.QA_MOVE_DOWN].key_display == "j/down"
+    assert bindings_by_command[InputCommand.QA_MOVE_UP].keys == "k,up"
+    assert bindings_by_command[InputCommand.QA_MOVE_UP].key_display == "k/up"
+    assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].keys == "j,down"
     assert (
-        controller.binding_available(
-            InputProfileName.VIM,
-            InputCommand.QA_MOVE_DOWN,
-        )
-        is True
+        bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].key_display
+        == "j/down"
     )
+    assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_UP].keys == "k,up"
+    assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_UP].key_display == "k/up"
+    assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].keys == "j,right"
+    assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].key_display == "j/right"
+    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].keys == "k,left"
     assert (
-        controller.binding_available(
-            InputProfileName.STANDARD,
-            InputCommand.QA_MOVE_DOWN,
-        )
-        is False
-    )
-    assert (
-        controller.binding_available(
-            InputProfileName.EMACS,
-            InputCommand.QA_MOVE_DOWN,
-        )
-        is False
-    )
-
-    state.current_page = PAGE_GRADE
-
-    assert (
-        controller.binding_available(
-            InputProfileName.VIM,
-            InputCommand.QA_MOVE_DOWN,
-        )
-        is False
+        bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display
+        == "k/left"
     )
