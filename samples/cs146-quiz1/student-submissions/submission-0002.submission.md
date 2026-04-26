@@ -10,6 +10,7 @@ score: ""
 
 
 - q1:
+  - Question type: Free Response
   - Prompt: 1. (10 pts) Convert decimal 6 to binary [B].
   - Response image: ![q1 response](responses/submission-0002/q1.png)
   - Response text: |
@@ -19,6 +20,7 @@ score: ""
   - Analysis: 
 
 - q2:
+  - Question type: Free Response
   - Prompt: 2. (10 pts) What command lists files in the current directory on Linux? [B]
   - Response image: ![q2 response](responses/submission-0002/q2.png)
   - Response text: |
@@ -28,6 +30,7 @@ score: ""
   - Analysis: 
 
 - q3:
+  - Question type: Free Response
   - Prompt: 3. (10 pts) What is the least significant bit (LSB) of the binary number 1101 [B]?
   - Response image: ![q3 response](responses/submission-0002/q3.png)
   - Response text: |
@@ -37,6 +40,7 @@ score: ""
   - Analysis: 
 
 - q4:
+  - Question type: Free Response
   - Prompt: 4. (10 pts) Which letters in the word "GRADERS" are vowels? [B]
   - Response image: ![q4 response](responses/submission-0002/q4.png)
   - Response text: |
@@ -46,6 +50,7 @@ score: ""
   - Analysis: 
 
 - q5a:
+  - Question type: Free Response
   - Prompt: a) (8 pts) What is an inversion in an array?
   - Response image: ![q5a response](responses/submission-0002/q5a.png)
   - Response text: |
@@ -55,6 +60,7 @@ score: ""
   - Analysis: 
 
 - q5b:
+  - Question type: Free Response
   - Prompt: b) (9 pts) How many inversions are in the array [3, 1, 4, 1, 5]?
   - Response image: ![q5b response](responses/submission-0002/q5b.png)
   - Response text: |
@@ -64,6 +70,7 @@ score: ""
   - Analysis: 
 
 - q5c:
+  - Question type: Free Response
   - Prompt: c) (8 pts) What is the time complexity of counting inversions using nested loops?
   - Response image: ![q5c response](responses/submission-0002/q5c.png)
   - Response text: |
@@ -73,6 +80,7 @@ score: ""
   - Analysis: 
 
 - q6a:
+  - Question type: Free Response
   - Prompt: a) (5 pts) Convert hexadecimal 0x2F to decimal.
   - Response image: ![q6a response](responses/submission-0002/q6a.png)
   - Response text: |
@@ -82,6 +90,7 @@ score: ""
   - Analysis: 
 
 - q6b:
+  - Question type: Free Response
   - Prompt: b) (5 pts) Convert decimal 255 to hexadecimal.
   - Response image: ![q6b response](responses/submission-0002/q6b.png)
   - Response text: |
@@ -91,6 +100,7 @@ score: ""
   - Analysis: 
 
 - q6c:
+  - Question type: Free Response
   - Prompt: c) (5 pts) What is the binary representation of hexadecimal 0xA?
   - Response image: ![q6c response](responses/submission-0002/q6c.png)
   - Response text: |
@@ -102,6 +112,7 @@ score: ""
   - Analysis: 
 
 - q6d:
+  - Question type: Free Response
   - Prompt: d) (5 pts) What is the decimal value of octal 17?
   - Response image: ![q6d response](responses/submission-0002/q6d.png)
   - Response text: |

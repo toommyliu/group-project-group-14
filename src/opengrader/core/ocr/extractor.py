@@ -13,7 +13,10 @@ import numpy as np
 import pytesseract
 from PIL import Image
 
+from opengrader.core.question_types import FREE_RESPONSE, QuestionType
+
 from .alignment import preprocess_for_ocr
+from .question_classifier import classify_question_image
 from .scanner import scan_template
 
 ConfidenceThreshold = float
@@ -100,6 +103,7 @@ class QuestionExtractionResult:
     output_path: str | None = None
     skipped: bool = False
     error: str | None = None
+    question_type: QuestionType = FREE_RESPONSE
 
 
 @dataclass
@@ -1306,6 +1310,7 @@ def _extract_question_crop_norm(
     )
     region = crop_region(page_image, bbox_px)
     region = _trim_question_region(region)
+    question_type = classify_question_image(region)
     out_path = sub_dir / f"{question_id}.{response_format}"
 
     if response_format == "pdf":
@@ -1316,6 +1321,7 @@ def _extract_question_crop_norm(
     return QuestionExtractionResult(
         question_id=question_id,
         page_number=page_num,
+        question_type=question_type,
         output_path=str(out_path),
     )
 
@@ -1332,6 +1338,7 @@ def _extract_question_crop_segments(
         return QuestionExtractionResult(
             question_id=question_id,
             page_number=1,
+            question_type=FREE_RESPONSE,
             skipped=True,
             error="missing_segments",
         )
@@ -1357,6 +1364,7 @@ def _extract_question_crop_segments(
         return QuestionExtractionResult(
             question_id=question_id,
             page_number=first_page_number,
+            question_type=FREE_RESPONSE,
             skipped=True,
             error="empty_crop",
         )
@@ -1383,6 +1391,7 @@ def _extract_question_crop_segments(
     return QuestionExtractionResult(
         question_id=question_id,
         page_number=first_page_number,
+        question_type=classify_question_image(stitched),
         output_path=str(out_path),
     )
 
@@ -2416,6 +2425,7 @@ def results_to_dict(result: SubmissionResult) -> dict:
             {
                 "question_id": q.question_id,
                 "page_number": q.page_number,
+                "question_type": q.question_type,
                 "output_path": q.output_path,
                 "skipped": q.skipped,
                 "error": q.error,

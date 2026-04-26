@@ -10,6 +10,7 @@ from opengrader.core.ocr.extractor import (
     SubmissionResult,
 )
 from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
+from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
 
 
@@ -111,6 +112,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
                 QuestionExtractionResult(
                     question_id="q1",
                     page_number=1,
+                    question_type=MULTIPLE_CHOICE,
                     output_path=str(q1),
                 )
             ],
@@ -131,10 +133,16 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
     def _fake_ocr_image_text(path: str | Path, _config: OcrConfig) -> str:
         return Path(path).stem
 
+    def _fake_classify_question_image_path(image_path: Path) -> str:
+        if image_path == q1a:
+            return MULTIPLE_CHOICE
+        return FREE_RESPONSE
+
     original_process = student_file.process_submission_pdf
     original_extract_title = student_file.extract_title_text_from_submission
     original_ocr_image_text = student_file.ocr_image_text
     original_split = student_file._split_question_response_image
+    original_classify = student_file._classify_question_image_path
     try:
         student_file.process_submission_pdf = _fake_process_submission_pdf
         student_file.extract_title_text_from_submission = (
@@ -142,6 +150,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         )
         student_file.ocr_image_text = _fake_ocr_image_text
         student_file._split_question_response_image = _fake_split_question_response_image
+        student_file._classify_question_image_path = _fake_classify_question_image_path
 
         split_result = student_file.build_student_submission_document(
             pdf_path=tmp_path / "student-0001.pdf",
@@ -151,6 +160,10 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         )
 
         assert [q.question_id for q in split_result.document.questions] == ["q1a", "q1b"]
+        assert [q.question_type for q in split_result.document.questions] == [
+            MULTIPLE_CHOICE,
+            FREE_RESPONSE,
+        ]
         assert split_call_count["count"] == 1
 
         split_call_count["count"] = 0
@@ -162,12 +175,14 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         )
 
         assert [q.question_id for q in no_split_result.document.questions] == ["q1"]
+        assert no_split_result.document.questions[0].question_type == MULTIPLE_CHOICE
         assert split_call_count["count"] == 0
     finally:
         student_file.process_submission_pdf = original_process
         student_file.extract_title_text_from_submission = original_extract_title
         student_file.ocr_image_text = original_ocr_image_text
         student_file._split_question_response_image = original_split
+        student_file._classify_question_image_path = original_classify
 
 
 def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
@@ -265,6 +280,31 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         student_file.extract_title_text_from_submission = original_extract_title
         student_file.extract_field_text = original_extract_field_text
         student_file.extract_question_prompt_and_answer = original_extract_qa
+
+
+def test_render_student_submission_markdown_includes_question_type() -> None:
+    document = student_file.StudentSubmissionDocument(
+        student_name="Taylor Student",
+        student_id="123456789",
+        course_code="CMPE195",
+        assignment_title="Quiz",
+        assignment_version="A",
+        source_pdf="submission.pdf",
+        questions=[
+            student_file.StudentSubmissionQuestion(
+                question_id="q1",
+                question_type=MULTIPLE_CHOICE,
+                prompt="Which structure is FIFO?",
+                possible_points=None,
+                response_image_path=None,
+                response_text="B",
+            )
+        ],
+    )
+
+    markdown = student_file.render_student_submission_markdown(document)
+
+    assert "- q1:\n  - Question type: Multiple Choice\n  - Prompt:" in markdown
 
 
 def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(

@@ -9,6 +9,8 @@ import fitz
 import numpy as np
 from PIL import Image, ImageOps
 
+from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
+from opengrader.core.ocr.question_classifier import classify_question_image
 from opengrader.core.ocr.extractor import (
     OcrConfig,
     _safe_image_to_data,
@@ -61,6 +63,7 @@ class StudentSubmissionQuestion:
     response_text: str
     points_awarded: float | None = None
     analysis: str = ""
+    question_type: QuestionType = FREE_RESPONSE
 
 
 @dataclass(frozen=True)
@@ -612,6 +615,15 @@ def _split_question_response_image(
     return outputs
 
 
+def _classify_question_image_path(image_path: Path) -> QuestionType:
+    try:
+        with Image.open(image_path) as source_image:
+            image = ImageOps.exif_transpose(source_image).convert("RGB")
+            return classify_question_image(image)
+    except Exception:
+        return FREE_RESPONSE
+
+
 def _yaml_field(lines: list[str], key: str, value: str | None) -> None:
     if value is None:
         lines.append(f"{key}: null")
@@ -638,6 +650,12 @@ def _render_multiline_text(lines: list[str], text: str, *, indent: int) -> None:
         lines.append(f"{prefix}  {line}")
 
 
+def _format_question_type(question_type: QuestionType) -> str:
+    if question_type == MULTIPLE_CHOICE:
+        return "Multiple Choice"
+    return "Free Response"
+
+
 def render_student_submission_markdown(document: StudentSubmissionDocument) -> str:
     lines: list[str] = ["---"]
     _yaml_field(lines, "name", document.student_name)
@@ -658,6 +676,7 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             else ""
         )
         lines.append(f"- {question.question_id}:")
+        lines.append(f"  - Question type: {_format_question_type(question.question_type)}")
         lines.append(f"  - Prompt: {points_label}{question.prompt}")
 
         if question.response_image_path:
@@ -750,16 +769,19 @@ def build_student_submission_document(
     title_meta = parse_assignment_metadata_from_title(title_text)
 
     questions: list[StudentSubmissionQuestion] = []
-    question_jobs: list[tuple[str, Path | None]] = []
+    question_jobs: list[tuple[str, Path | None, QuestionType]] = []
 
     for extracted_question in extraction_result.questions:
         qid = extracted_question.question_id
+        parent_question_type = extracted_question.question_type
 
-        question_images: list[tuple[str, Path | None]] = [(qid, None)]
+        question_images: list[tuple[str, Path | None, QuestionType]] = [
+            (qid, None, parent_question_type)
+        ]
         if extracted_question.output_path:
             image_path = Path(extracted_question.output_path)
             if image_path.exists():
-                question_images = [(qid, image_path)]
+                question_images = [(qid, image_path, parent_question_type)]
                 if split_subquestions:
                     try:
                         split_images = _split_question_response_image(
@@ -769,12 +791,21 @@ def build_student_submission_document(
                     except Exception:
                         split_images = []
                     if split_images:
-                        question_images = split_images
+                        question_images = [
+                            (
+                                split_qid,
+                                split_image_path,
+                                _classify_question_image_path(split_image_path),
+                            )
+                            for split_qid, split_image_path in split_images
+                        ]
 
         question_jobs.extend(question_images)
 
     total_question_jobs = len(question_jobs)
-    for index, (question_id, image_path) in enumerate(question_jobs, start=1):
+    for index, (question_id, image_path, question_type) in enumerate(
+        question_jobs, start=1
+    ):
         response_image_path: str | None = None
         prompt_text = ""
         response_text = ""
@@ -812,6 +843,7 @@ def build_student_submission_document(
                 possible_points=None,
                 response_image_path=response_image_path,
                 response_text=response_text,
+                question_type=question_type,
             )
         )
 
