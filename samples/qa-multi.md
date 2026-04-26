@@ -28,8 +28,13 @@ questions_start_page: 1
     - Incorrect (-10)
 
 - (10 points) What is the most significant bit (MSB) of the binary number 1010 [A]?
+  - **Choices**
+    - A) 0
+    - B) 1
+    - C) 2
+    - D) 10
   - **Correct**
-    - 1
+    - B
   - **Rubric**
     - Correct (+0)
     - Partially Correct (-5)
@@ -116,9 +121,13 @@ questions_start_page: 1
     - Incorrect (-10)
 
 - (10 points) What command lists files in the current directory on Linux? [B]
+  - **Choices**
+    - A) ls
+    - B) pwd
+    - C) cd
+    - D) mkdir
   - **Correct**
-    - ls
-    - dir
+    - A
   - **Rubric**
     - Correct (+0)
     - Partially Correct (-5)
@@ -216,8 +225,13 @@ questions_start_page: 1
     - Incorrect (-10)
 
 - (10 points) What is the hexadecimal representation of decimal 26? [C]
+  - **Choices**
+    - A) 0x12
+    - B) 0x1A
+    - C) 0x26
+    - D) 0x2A
   - **Correct**
-    - 0x1A
+    - B
   - **Rubric**
     - Correct (+0)
     - Partially Correct (-5)
