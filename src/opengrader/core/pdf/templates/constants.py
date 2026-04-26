@@ -1,9 +1,11 @@
 from enum import Enum
 from typing import TypeAlias
 
-ANCHOR_SIZE = 9
-ANCHOR_PADDING = 24
-CONTENT_PADDING = ANCHOR_PADDING + 50  # instructions, questions, sequential page header
+PAGE_EDGE_MARGIN = 24
+# Horizontal bounds for instructions, questions, and continuation headers.
+CONTENT_SIDE_MARGIN = PAGE_EDGE_MARGIN + 50
+# Printable-area inset used for footer page numbers and continuation headers.
+PRINT_SAFE_MARGIN = 36
 
 BOX_LINE = 0.75
 
