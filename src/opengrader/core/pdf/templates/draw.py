@@ -186,8 +186,6 @@ def draw_field_box(
     y1: float,
     value: str,
     fonts: ResolvedTemplateFonts,
-    *,
-    draw_border: bool = True,
 ) -> None:
     if draw_border:
         page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
@@ -344,9 +342,8 @@ def draw_question_box(
     points: int,
     prompt: str,
     fonts: ResolvedTemplateFonts,
+    choices: list[dict] | None = None,
     subquestions: list[dict] | None = None,
-    *,
-    draw_borders: bool = True,
 ) -> list[dict]:
     if draw_borders:
         page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
@@ -464,8 +461,6 @@ def build_info_section(
     title: str,
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
-    *,
-    draw_field_borders: bool = True,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
     content_x0 = CONTENT_PADDING
     content_x1 = page_w - CONTENT_PADDING
@@ -666,8 +661,6 @@ def draw_questions_on_page(
     page_h: float,
     start_y: float,
     fonts: ResolvedTemplateFonts,
-    *,
-    draw_borders: bool = True,
 ) -> tuple[int, list[dict]]:
     content_x0 = CONTENT_PADDING
     content_x1 = page_w - CONTENT_PADDING

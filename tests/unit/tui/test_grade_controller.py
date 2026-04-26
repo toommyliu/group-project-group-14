@@ -29,6 +29,7 @@ class FakeGradeScreen:
 class FakeQAPickerScreen:
     status: str = ""
     bound_questions: list[NavItem] | None = None
+    bound_students: list[NavItem] | None = None
     focused: bool = False
     moved_to_index: int | None = None
 
@@ -36,11 +37,14 @@ class FakeQAPickerScreen:
         self,
         questions: list[NavItem],
         *,
+        students: list[NavItem],
         breadcrumb_labels: list[str],
         assignment_name: str,
+        student_question_statuses: dict[tuple[str, str], str] | None = None,
     ) -> None:
-        _ = (breadcrumb_labels, assignment_name)
+        _ = (breadcrumb_labels, assignment_name, student_question_statuses)
         self.bound_questions = questions
+        self.bound_students = students
 
     def set_status(self, text: str) -> None:
         self.status = text
@@ -108,6 +112,49 @@ def test_open_question_picker_binds_questions_and_focuses_picker() -> None:
     assert [item.item_id for item in state.question_items] == ["Q1", "Q2"]
     assert app.qa_screen.bound_questions is not None
     assert app.qa_screen.focused is True
+
+
+def test_open_question_picker_binds_students_with_progress() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+
+    controller = GradeController(app, state, FakeDataProvider())
+    controller.open_question_picker_for_assignment()
+
+    assert app.qa_screen.bound_students is not None
+    assert [item.label for item in app.qa_screen.bound_students] == [
+        "Tommy Liu",
+        "Andy Cortes",
+    ]
+    assert [item.meta for item in app.qa_screen.bound_students] == [
+        "0/2 graded",
+        "0/2 graded",
+    ]
+
+
+def test_refresh_qa_picker_updates_student_question_progress() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+
+    controller = GradeController(app, state, FakeDataProvider())
+    controller.open_question_picker_for_assignment()
+    state.qa_student_status[("1", "1", "Q1", "s1")] = "graded"
+
+    controller.refresh_qa_picker("")
+
+    assert app.qa_screen.bound_students is not None
+    assert [item.meta for item in app.qa_screen.bound_students] == [
+        "1/2 graded",
+        "0/2 graded",
+    ]
 
 
 def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
