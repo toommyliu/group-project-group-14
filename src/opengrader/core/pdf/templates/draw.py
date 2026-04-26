@@ -1,10 +1,11 @@
 import fitz
 
 from .constants import (
-    ANCHOR_PADDING,
     BOX_LINE,
-    CONTENT_PADDING,
+    CONTENT_SIDE_MARGIN,
     MIN_QUESTION_BOX_HEIGHT,
+    PAGE_EDGE_MARGIN,
+    PRINT_SAFE_MARGIN,
     QUESTION_GAP,
     QUESTION_HEADER_HEIGHT,
     QUESTION_INNER_PADDING,
@@ -22,6 +23,7 @@ QUESTION_FONTSIZE = 11
 SUBQUESTION_FONTSIZE = 9
 CHOICE_ROW_GAP = 4
 CHOICE_LEFT_INSET = 20
+PAGE_NUMBER_FONTSIZE = 11
 
 
 def _draw_centered_text(
@@ -267,9 +269,6 @@ def draw_field_box(
     fonts: ResolvedTemplateFonts,
 ) -> None:
     """Draw a name or student-id field with an underline for handwritten input."""
-    if draw_border:
-        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
-
     center_x = (x0 + x1) / 2.0
 
     underline_y = y0 + (y1 - y0) * 0.63
@@ -300,12 +299,13 @@ def draw_page_number(
     fonts: ResolvedTemplateFonts,
 ) -> None:
     """Render the page number centered at the bottom margin."""
+    baseline_y = page_h - PRINT_SAFE_MARGIN - (PAGE_NUMBER_FONTSIZE * 0.35)
     _draw_centered_text(
         page,
         text=str(page_number),
         center_x=page_w / 2.0,
-        baseline_y=page_h - ANCHOR_PADDING - 8,
-        fontsize=11,
+        baseline_y=baseline_y,
+        fontsize=PAGE_NUMBER_FONTSIZE,
         bold=True,
         fonts=fonts,
     )
@@ -328,11 +328,10 @@ def draw_continued_page_header(
     Returns:
         The y-coordinate where question content should begin.
     """
-    content_x0 = CONTENT_PADDING
-    content_x1 = page_w - CONTENT_PADDING
+    content_x0 = CONTENT_SIDE_MARGIN
+    content_x1 = page_w - CONTENT_SIDE_MARGIN
     text = header_text.strip() or "Quiz"
 
-    header_baseline_y = 39.0
     header_size = _fit_font_size(
         text,
         target_width=content_x1 - content_x0,
@@ -341,6 +340,7 @@ def draw_continued_page_header(
         bold=False,
         fonts=fonts,
     )
+    header_baseline_y = PRINT_SAFE_MARGIN + header_size
     _draw_centered_text(
         page,
         text=text,
@@ -480,14 +480,10 @@ def draw_question_box(
         fonts: Resolved template fonts.
         choices: Optional multiple-choice options for a top-level question.
         subquestions: Optional nested question definitions.
-        draw_borders: Whether to draw the enclosing rectangles.
 
     Returns:
         Metadata for drawn subquestions, including prompt and answer regions.
     """
-    if draw_borders:
-        page.draw_rect(fitz.Rect(x0, y0, x1, y1), color=COLOR_BLACK, width=BOX_LINE)
-
     # Question Prompt
 
     header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
@@ -576,13 +572,6 @@ def draw_question_box(
                 f"Question {qid!r} subquestion {subquestion['id']!r} does not fit on the page"
             )
         sub_header_x = sub_rect[0] + CHOICE_LEFT_INSET
-        if draw_borders:
-            page.draw_rect(
-                fitz.Rect(*sub_rect),
-                color=COLOR_BLACK,
-                width=BOX_LINE,
-            )
-
         # Subquestion Prompt
 
         raw_label = str(subquestion.get("label", chr(ord("a") + i))).strip()
@@ -679,7 +668,6 @@ def build_info_section(
         title: Full title text. The first line is treated as the main title.
         instructions: Optional instruction text shown above the questions.
         fonts: Resolved template fonts.
-        draw_field_borders: Whether to draw the name and ID field borders.
 
     Returns:
         A tuple of ``(start_y, regions)`` where ``start_y`` is the first y-position
@@ -687,8 +675,8 @@ def build_info_section(
     """
     # Content bounds
 
-    content_x0 = CONTENT_PADDING
-    content_x1 = page_w - CONTENT_PADDING
+    content_x0 = CONTENT_SIDE_MARGIN
+    content_x1 = page_w - CONTENT_SIDE_MARGIN
 
     # Title lines
 
@@ -810,7 +798,6 @@ def build_info_section(
         name_box[3],
         name,
         fonts,
-        draw_border=draw_field_borders,
     )
     draw_field_box(
         page,
@@ -820,7 +807,6 @@ def build_info_section(
         sid_box[3],
         student_id,
         fonts,
-        draw_border=draw_field_borders,
     )
 
     # Instructions block
@@ -873,7 +859,7 @@ def build_info_section(
 
     title_box = (
         max(content_x0, title_bounds_left - 6),
-        max(ANCHOR_PADDING, title_bounds_top - 3),
+        max(PAGE_EDGE_MARGIN, title_bounds_top - 3),
         min(content_x1, title_bounds_right + 6),
         min(row_y - 4, title_bounds_bottom + 3),
     )
@@ -904,15 +890,15 @@ def draw_questions_on_page(
         page_h: Page height in PDF points.
         start_y: First y-position available for question content.
         fonts: Resolved template fonts.
-        draw_borders: Whether to draw question rectangles.
 
     Returns:
         A tuple of ``(drawn_count, metadata)`` for the questions placed on this page.
     """
-    content_x0 = CONTENT_PADDING
-    content_x1 = page_w - CONTENT_PADDING
+    content_x0 = CONTENT_SIDE_MARGIN
+    content_x1 = page_w - CONTENT_SIDE_MARGIN
     content_top = start_y
-    content_bottom = page_h - ANCHOR_PADDING - 32
+    footer_top = page_h - PRINT_SAFE_MARGIN - PAGE_NUMBER_FONTSIZE
+    content_bottom = min(page_h - PAGE_EDGE_MARGIN - 32, footer_top - 10)
     if content_bottom <= content_top:
         draw_page_number(page, page_number, page_w, page_h, fonts)
         return 0, []
@@ -974,7 +960,6 @@ def draw_questions_on_page(
             fonts,
             choices=choices,
             subquestions=subquestions,
-            draw_borders=draw_borders,
         )
 
         question_meta = {

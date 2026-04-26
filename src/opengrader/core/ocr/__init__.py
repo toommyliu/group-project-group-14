@@ -1,7 +1,4 @@
-from .alignment import (
-    preprocess_for_ocr,
-    align_image,
-)
+from .alignment import preprocess_for_ocr
 from .extractor import (
     OcrConfig,
     OcrResult,
