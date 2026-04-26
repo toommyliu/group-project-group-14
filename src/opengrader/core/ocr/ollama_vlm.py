@@ -117,17 +117,22 @@ def extract_field_text(
 ) -> str:
     if field_kind == "name":
         prompt = (
-            "You are OCR for scanned exams. Read the image and extract ONLY the "
-            "student's name value. The image may include the label 'Name'. Return "
-            "strict JSON with this shape: {\"value\": \"...\"}. Use an empty "
-            "string if unreadable."
+            "You are a strict OCR transcription engine for scanned exams. "
+            "Read only visible text in the image. Extract only the student's name value. "
+            "The image may include the printed label 'Name'. Do not include the label. "
+            "Do not infer, complete, correct, or invent a name. "
+            "If the name is unreadable or not visible, return an empty string. "
+            "Return strict JSON only with this shape: {\"value\": \"...\"}."
         )
     else:
         prompt = (
-            "You are OCR for scanned exams. Read the image and extract ONLY the "
-            "student ID value. The image may include label text like 'Student ID'. "
-            "Return strict JSON with this shape: {\"value\": \"...\"}. Keep "
-            "digits only when possible. Use an empty string if unreadable."
+            "You are a strict OCR transcription engine for scanned exams. "
+            "Read only visible text in the image. Extract only the student ID value. "
+            "The image may include label text like 'Student ID'. Do not include the label. "
+            "Return only digits that are visibly present. "
+            "Do not infer, complete, correct, or invent digits. "
+            "If the ID is unreadable or not visible, return an empty string. "
+            "Return strict JSON only with this shape: {\"value\": \"...\"}."
         )
 
     raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
@@ -145,11 +150,18 @@ def extract_question_prompt_and_answer(
     config: OllamaVisionConfig,
 ) -> tuple[str, str]:
     prompt = (
-        "You are OCR for scanned exams with both printed text and handwriting. "
-        "Read the image and extract: (1) the printed question prompt and "
-        "(2) the student's handwritten answer. Return strict JSON with this shape: "
-        "{\"prompt\": \"...\", \"answer\": \"...\"}. Keep answer text faithful. "
-        "Use empty strings if a field is unreadable."
+        "You are a strict OCR transcription engine for scanned exams. "
+        "Your job is to read visible text in the image, not to answer the exam question. "
+        "The image may contain printed question text and a student's handwritten response. "
+        "Transcribe only what is visibly written on the page. Do not infer, solve, "
+        "complete, correct, or generate an answer from the printed question. "
+        "If handwriting is messy, preserve your best reading of the handwriting. "
+        "If a word or symbol is uncertain, write [unclear]. "
+        "If no handwritten answer is visible, return an empty answer string. "
+        "Return strict JSON only with this shape: "
+        "{\"prompt\": \"...\", \"answer\": \"...\"}. "
+        "The prompt field should contain printed question text only. "
+        "The answer field should contain the student's handwritten answer only."
     )
 
     raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)

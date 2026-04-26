@@ -13,7 +13,7 @@ score: ""
   - Prompt: 1. (10 pts) Convert decimal 6 to binary [B].
   - Response image: ![q1 response](responses/submission-0002/q1.png)
   - Response text: |
-    110
+    maybe
   - Possible points: 
   - Points: 
   - Analysis: 
@@ -22,34 +22,34 @@ score: ""
   - Prompt: 2. (10 pts) What command lists files in the current directory on Linux? [B]
   - Response image: ![q2 response](responses/submission-0002/q2.png)
   - Response text: |
-    B)
+    B) pwd
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q3:
-  - Prompt: 
+  - Prompt: 3. (10 pts) What is the least significant bit (LSB) of the binary number 1101 [B]?
   - Response image: ![q3 response](responses/submission-0002/q3.png)
   - Response text: |
-    3 S (10 3 T pts) What is th t sigm bit of the bin y number 110 h \ e leas’ : . ig ifi icant bi ( Ls B) ft ar mi e) 1 {B]
+    1
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q4:
-  - Prompt: 
+  - Prompt: 4. (10 pts) Which letters in the word "GRADERS" are vowels? [B]
   - Response image: ![q4 response](responses/submission-0002/q4.png)
   - Response text: |
-    4. (10 pts) Which letters in the word "GRADERS" are vowels? [B] Wd Yr Wd
+    no
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q5a:
-  - Prompt: 
+  - Prompt: a) (8 pts) What is an inversion in an array?
   - Response image: ![q5a response](responses/submission-0002/q5a.png)
   - Response text: |
-    a} (8 pts) What is an inversion in an array? Yn S
+    y^2
   - Possible points: 
   - Points: 
   - Analysis: 
@@ -94,7 +94,9 @@ score: ""
   - Prompt: c) (5 pts) What is the binary representation of hexadecimal 0xA?
   - Response image: ![q6c response](responses/submission-0002/q6c.png)
   - Response text: |
-    1010
+    y13
+    maybe
+    10
   - Possible points: 
   - Points: 
   - Analysis: 

@@ -13,7 +13,7 @@ score: ""
   - Prompt: 1. (10 pts) Convert decimal 5 to binary [A].
   - Response image: ![q1 response](responses/submission-0001/q1.png)
   - Response text: |
-    101
+    no
   - Possible points: 
   - Points: 
   - Analysis: 
@@ -22,7 +22,7 @@ score: ""
   - Prompt: 2. (10 pts) Which of these are valid Python integer literals? [A]
   - Response image: ![q2 response](responses/submission-0001/q2.png)
   - Response text: |
-    testing
+    tasting
   - Possible points: 
   - Points: 
   - Analysis: 
@@ -31,7 +31,7 @@ score: ""
   - Prompt: 3. (10 pts) What is the most significant bit (MSB) of the binary number 1010 [A]?
   - Response image: ![q3 response](responses/submission-0001/q3.png)
   - Response text: |
-    B) 1
+    B
   - Possible points: 
   - Points: 
   - Analysis: 
@@ -58,7 +58,7 @@ score: ""
   - Prompt: b) (9 pts) What is the second largest distinct number in [5, 2, 8, 1, 8, 3]?
   - Response image: ![q5b response](responses/submission-0001/q5b.png)
   - Response text: |
-    8
+    y(1) siv
   - Possible points: 
   - Points: 
   - Analysis: 
