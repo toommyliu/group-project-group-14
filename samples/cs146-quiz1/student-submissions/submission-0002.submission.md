@@ -1,9 +1,9 @@
 ---
-name: "ine Bill Caray"
-student_id: "787654321"
-course_code: "NESE4654"
-assignment_title: "C8146: Quiz 1 (B) Name Bl Cabay \ Student ID NESE 4654 } t"
-assignment_version: null
+name: ""
+student_id: "987654321"
+course_code: "CS146"
+assignment_title: "Quiz 1"
+assignment_version: "B"
 source_pdf: "submission-0002.pdf"
 score: ""
 ---

@@ -1,6 +1,6 @@
 ---
 name: "Bill Gates"
-student_id: "784654321"
+student_id: "784659321"
 course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "B"
@@ -10,7 +10,8 @@ score: ""
 
 
 - q1:
-  - Prompt: 1. (10 pts) Convert decimal 6 to binary [B]
+  - Question type: Free Response
+  - Prompt: 1. (10 pts) Convert decimal 6 to binary [B].
   - Response image: ![q1 response](responses/submission-0002/q1.png)
   - Response text: |
     110
@@ -19,6 +20,7 @@ score: ""
   - Analysis: 
 
 - q2:
+  - Question type: Free Response
   - Prompt: 2. (10 pts) What command lists files in the current directory on Linux? [B]
   - Response image: ![q2 response](responses/submission-0002/q2.png)
   - Response text: |
@@ -28,6 +30,7 @@ score: ""
   - Analysis: 
 
 - q3:
+  - Question type: Free Response
   - Prompt: 3. (10 pts) What is the least significant bit (LSB) of the binary number 1101 [B]?
   - Response image: ![q3 response](responses/submission-0002/q3.png)
   - Response text: |
@@ -37,6 +40,7 @@ score: ""
   - Analysis: 
 
 - q4:
+  - Question type: Free Response
   - Prompt: 4. (10 pts) Which letters in the word "GRADERS" are vowels? [B]
   - Response image: ![q4 response](responses/submission-0002/q4.png)
   - Response text: |
@@ -46,7 +50,8 @@ score: ""
   - Analysis: 
 
 - q5a:
-  - Prompt: (8 pts) What is an inversion in an array?
+  - Question type: Free Response
+  - Prompt: a) (8 pts) What is an inversion in an array?
   - Response image: ![q5a response](responses/submission-0002/q5a.png)
   - Response text: |
     no
@@ -55,7 +60,8 @@ score: ""
   - Analysis: 
 
 - q5b:
-  - Prompt: (9 pts) How many inversions are in the array [3, 1, 4, 1, 5]?
+  - Question type: Free Response
+  - Prompt: b) (9 pts) How many inversions are in the array [3, 1, 4, 1, 5]?
   - Response image: ![q5b response](responses/submission-0002/q5b.png)
   - Response text: |
     5
@@ -64,46 +70,51 @@ score: ""
   - Analysis: 
 
 - q5c:
-  - Prompt: (8 pts) What is the time complexity of counting inversions using nested loops?
+  - Question type: Free Response
+  - Prompt: c) (8 pts) What is the time complexity of counting inversions using nested loops?
   - Response image: ![q5c response](responses/submission-0002/q5c.png)
   - Response text: |
-    nopr
+    nlogn
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q6a:
-  - Prompt: (5 pts) Convert hexadecimal 0x2F to decimal.
+  - Question type: Free Response
+  - Prompt: a) (5 pts) Convert hexadecimal 0x2F to decimal.
   - Response image: ![q6a response](responses/submission-0002/q6a.png)
   - Response text: |
-    47
+    90
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q6b:
-  - Prompt: (5 pts) Convert decimal 255 to hexadecimal.
+  - Question type: Free Response
+  - Prompt: b) (5 pts) Convert decimal 255 to hexadecimal.
   - Response image: ![q6b response](responses/submission-0002/q6b.png)
   - Response text: |
-    FF
+    no
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q6c:
-  - Prompt: (5 pts) What is the binary representation of hexadecimal 0xA?
+  - Question type: Free Response
+  - Prompt: c) (5 pts) What is the binary representation of hexadecimal 0xA?
   - Response image: ![q6c response](responses/submission-0002/q6c.png)
   - Response text: |
-    1010
+    5
   - Possible points: 
   - Points: 
   - Analysis: 
 
 - q6d:
-  - Prompt: (5 pts) What is the decimal value of octal 17?
+  - Question type: Free Response
+  - Prompt: d) (5 pts) What is the decimal value of octal 17?
   - Response image: ![q6d response](responses/submission-0002/q6d.png)
   - Response text: |
-    d) (5 pts) What is the decimal value of octal 17? aN
+    15
   - Possible points: 
   - Points: 
   - Analysis:

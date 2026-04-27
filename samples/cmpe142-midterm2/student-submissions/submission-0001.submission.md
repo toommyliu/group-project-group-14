@@ -1,9 +1,9 @@
 ---
-name: ""
-student_id: ""
-course_code: "CMPE 142"
-assignment_title: "Exam 2B"
-assignment_version: "J"
+name: "Ben Davis"
+student_id: "13579110"
+course_code: "CMPE"
+assignment_title: "Exam"
+assignment_version: "2B"
 source_pdf: "submission-0001.pdf"
 score: ""
 ---
@@ -13,8 +13,7 @@ score: ""
   - Question type: Free Response
   - Prompt: 1. (50 points) Minimum score. You don't have to do anything for this question.
   - Response image: ![q1 response](responses/submission-0001/q1.png)
-  - Response text: |
-    1. (50 points) Minimum score. You don’t have to do anything for this question.
+  - Response text: 
   - Possible points: 
   - Points: 
   - Analysis: 

@@ -1,9 +1,9 @@
 ---
 name: "Thao Bui"
-student_id: ""
+student_id: "123456787"
 course_code: "CMPE 142"
-assignment_title: "Exam"
-assignment_version: "2B"
+assignment_title: "Exam 2B"
+assignment_version: "J"
 source_pdf: "submission-0002.pdf"
 score: ""
 ---
@@ -13,8 +13,7 @@ score: ""
   - Question type: Free Response
   - Prompt: 1. (50 points) Minimum score. You don’t have to do anything for this question.
   - Response image: ![q1 response](responses/submission-0002/q1.png)
-  - Response text: |
-    1. (50 points) Minimum score. You don’t have to do anything for this question.
+  - Response text: 
   - Possible points: 
   - Points: 
   - Analysis: 
