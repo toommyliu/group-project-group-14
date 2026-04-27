@@ -22,6 +22,9 @@ class OllamaVisionError(RuntimeError):
     pass
 
 
+_MODEL_CHECK_CACHE: set[tuple[str, str]] = set()
+
+
 @dataclass(frozen=True)
 class TitleMetadataResult:
     course_code: str | None
@@ -97,12 +100,60 @@ def _normalize_version(value: str | None) -> str | None:
     return text.upper()
 
 
+def list_available_models(config: OllamaVisionConfig) -> list[str]:
+    host = config.host.rstrip("/")
+    endpoint = f"{host}/api/tags"
+    req = request.Request(endpoint, method="GET")
+
+    try:
+        with request.urlopen(req, timeout=config.timeout_seconds) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except error.URLError as exc:
+        raise OllamaVisionError(f"failed to reach Ollama at {endpoint}: {exc}") from exc
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise OllamaVisionError(f"invalid JSON response from Ollama: {exc}") from exc
+
+    models = parsed.get("models", [])
+    if not isinstance(models, list):
+        raise OllamaVisionError("invalid Ollama model list response: models is not a list")
+
+    names: list[str] = []
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        name = str(model.get("name") or model.get("model") or "").strip()
+        if name:
+            names.append(name)
+    return sorted(set(names))
+
+
+def ensure_model_available(config: OllamaVisionConfig) -> None:
+    cache_key = (config.host.rstrip("/"), config.model)
+    if cache_key in _MODEL_CHECK_CACHE:
+        return
+
+    available = list_available_models(config)
+    if config.model in available:
+        _MODEL_CHECK_CACHE.add(cache_key)
+        return
+
+    available_text = ", ".join(available) if available else "none"
+    raise OllamaVisionError(
+        f"Ollama model {config.model!r} is not available at {config.host.rstrip('/')}. "
+        f"Available models: {available_text}."
+    )
+
+
 def _generate_with_image(
     *,
     image_path: str | Path,
     prompt: str,
     config: OllamaVisionConfig,
 ) -> str:
+    ensure_model_available(config)
     encoded_image = _image_to_base64(image_path)
     payload = {
         "model": config.model,

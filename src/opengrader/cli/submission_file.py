@@ -4,7 +4,10 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from opengrader.core.ocr import OcrConfig
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
+from opengrader.core.ocr.ollama_vlm import (
+    OllamaVisionConfig,
+    ensure_model_available,
+)
 from opengrader.core.submissions import build_student_submission_document
 
 """
@@ -84,12 +87,12 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--ollama-model",
         default="qwen2.5vl:7b",
-        help="Ollama vision model to use when --text-backend=ollama.",
+        help="Ollama vision model to use for text extraction.",
     )
     parser.add_argument(
         "--ollama-host",
         default="http://127.0.0.1:11434",
-        help="Ollama server URL when --text-backend=ollama.",
+        help="Ollama server URL.",
     )
     parser.add_argument(
         "--ollama-timeout",
@@ -154,6 +157,7 @@ def run_cli() -> None:
         host=args.ollama_host,
         timeout_seconds=args.ollama_timeout,
     )
+    ensure_model_available(ollama_config)
 
     for i, pdf_path in enumerate(input_pdfs, 1):
         print(f"[{i}/{len(input_pdfs)}] Converting: {pdf_path.name}")
