@@ -185,7 +185,7 @@ def _union_px(boxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, in
 
 
 def _normalize_token(text: str) -> str:
-    text = text.translate(_SUBSCRIPT_TRANSLATION)
+    text = text.translate(SUBSCRIPT_TRANSLATION)
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
