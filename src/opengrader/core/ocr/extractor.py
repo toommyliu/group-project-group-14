@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Callable, Literal
+from typing import Literal
 
 import cv2
 import fitz
@@ -15,7 +15,6 @@ from PIL import Image
 
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 
-from .alignment import preprocess_for_ocr
 from .layout import (
     bbox_norm_to_px as layout_bbox_norm_to_px,
     save_layout_debug as write_layout_debug,
@@ -28,7 +27,6 @@ ConfidenceThreshold = float
 
 DEFAULT_CONFIDENCE_THRESHOLD = 60.0
 MIN_TEXT_LENGTH = 1
-MAX_TEXT_LENGTH = 1000
 
 QUESTION_START_MARGIN_NORM = 0.008
 QUESTION_END_MARGIN_NORM = 0.025
@@ -75,10 +73,6 @@ HEADER_CONTEXT_LEFT_PAD_NORM = 0.14
 HEADER_CONTEXT_RIGHT_PAD_NORM = 0.02
 HEADER_CONTEXT_TOP_PAD_NORM = 0.034
 HEADER_CONTEXT_BOTTOM_PAD_NORM = 0.012
-HEADER_FOCUS_LEFT_PAD_NORM = 0.002
-HEADER_FOCUS_RIGHT_PAD_NORM = 0.002
-HEADER_FOCUS_TOP_PAD_NORM = 0.002
-HEADER_FOCUS_BOTTOM_PAD_NORM = 0.002
 
 _QUESTION_MARKER_RE = re.compile(r"^(\d{1,3})[\.)]$")
 _QUESTION_NUM_ONLY_RE = re.compile(r"^\d{1,3}$")
@@ -128,11 +122,8 @@ class SubmissionResult:
 @dataclass
 class OcrConfig:
     lang: str = "eng"
-    psm: int = 6
-    whitelist: str | None = None
     deskew: bool = True
     confidence_threshold: ConfidenceThreshold = DEFAULT_CONFIDENCE_THRESHOLD
-    text_cleanup_fn: Callable[[str], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -172,23 +163,6 @@ class _DetectedQuestionRegion:
     continuation: tuple[int, list[float]] | None = None
 
 
-def _override_config(base: OcrConfig, field: dict) -> OcrConfig:
-    return OcrConfig(
-        lang=field.get("lang", base.lang),
-        psm=field.get("psm", base.psm),
-        whitelist=field.get("whitelist", base.whitelist),
-        deskew=field.get("deskew", base.deskew),
-        confidence_threshold=field.get(
-            "confidence_threshold", base.confidence_threshold
-        ),
-        text_cleanup_fn=base.text_cleanup_fn,
-    )
-
-
-def _normalize_text(raw: str) -> str:
-    return re.sub(r"\s+", " ", raw).strip()
-
-
 def _normalize_name_text(raw: str) -> str:
     text = raw.replace("|", " ").replace("_", " ")
     text = text.replace("“", " ").replace("”", " ").replace("`", " ")
@@ -200,143 +174,6 @@ def _normalize_name_text(raw: str) -> str:
 
 def _normalize_sid_text(raw: str) -> str:
     return "".join(re.findall(r"\d", raw))
-
-
-def _pytesseract_string(image: Image.Image, *, lang: str, config: str) -> str:
-    try:
-        return pytesseract.image_to_string(image, lang=lang, config=config)
-    except Exception:
-        return ""
-
-
-def _ocr_sid_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
-    resample = (
-        Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
-    )
-    variants = [region]
-    if region.width < 1600 and region.height < 500:
-        variants.append(region.resize((region.width * 2, region.height * 2), resample))
-
-    psm_values = [7, 8, 6, 11]
-    candidates: list[tuple[float, str, float]] = []
-
-    for image_variant in variants:
-        for psm in psm_values:
-            local_config = OcrConfig(
-                lang=config.lang,
-                psm=psm,
-                whitelist="0123456789",
-                deskew=False,
-                confidence_threshold=0,
-                text_cleanup_fn=config.text_cleanup_fn,
-            )
-            ocr = ocr_region(image_variant, local_config)
-            processed_digits = "".join(re.findall(r"\d", ocr.text))
-
-            raw = _pytesseract_string(
-                image_variant,
-                lang=config.lang,
-                config=f"--psm {psm} -c tessedit_char_whitelist=0123456789",
-            )
-            raw_digits = "".join(re.findall(r"\d", raw))
-
-            for digits, conf in [
-                (processed_digits, ocr.confidence),
-                (raw_digits, max(42.0, ocr.confidence * 0.65)),
-            ]:
-                if not digits:
-                    continue
-                exact = re.search(r"\d{9}", digits)
-                normalized = exact.group(0) if exact else digits[:9]
-                score = conf + (55.0 if exact else 0.0) - abs(9 - len(normalized)) * 7.0
-                candidates.append((score, normalized, conf))
-
-    if not candidates:
-        return OcrResult(text="", confidence=0.0, bbox_px=(0, 0, 0, 0))
-
-    best = max(candidates, key=lambda item: item[0])
-    if len(best[1]) < 5:
-        return OcrResult(text="", confidence=max(0.0, best[2]), bbox_px=(0, 0, 0, 0))
-
-    final_conf = max(0.0, best[2])
-    if len(best[1]) == 9:
-        final_conf = max(final_conf, 82.0)
-    return OcrResult(text=best[1], confidence=final_conf, bbox_px=(0, 0, 0, 0))
-
-
-def _ocr_name_robust(region: Image.Image, config: OcrConfig) -> OcrResult:
-    resample = (
-        Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
-    )
-    variants = [region]
-    if region.width < 2000 and region.height < 650:
-        variants.append(region.resize((region.width * 2, region.height * 2), resample))
-
-    candidates: list[tuple[float, str, float]] = []
-
-    for image_variant in variants:
-        for psm in [7, 6, 11]:
-            local_config = OcrConfig(
-                lang=config.lang,
-                psm=psm,
-                whitelist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -'.",
-                deskew=False,
-                confidence_threshold=0,
-                text_cleanup_fn=config.text_cleanup_fn,
-            )
-            ocr = ocr_region(image_variant, local_config)
-            cleaned = _normalize_name_text(ocr.text)
-            if cleaned:
-                letters = len(re.findall(r"[A-Za-z]", cleaned))
-                score = (
-                    ocr.confidence + letters * 3.0 + (8.0 if " " in cleaned else 0.0)
-                )
-                candidates.append((score, cleaned, ocr.confidence))
-
-        raw = _pytesseract_string(image_variant, lang=config.lang, config="--psm 7")
-        cleaned_raw = _normalize_name_text(raw)
-        if cleaned_raw:
-            letters = len(re.findall(r"[A-Za-z]", cleaned_raw))
-            score = 32.0 + letters * 2.5 + (8.0 if " " in cleaned_raw else 0.0)
-            candidates.append((score, cleaned_raw, 40.0))
-
-    if not candidates:
-        base = ocr_region(region, config)
-        return OcrResult(
-            text=_normalize_name_text(base.text),
-            confidence=base.confidence,
-            bbox_px=base.bbox_px,
-        )
-
-    best = max(candidates, key=lambda item: item[0])
-    final_conf = max(0.0, best[2])
-    letter_count = len(re.findall(r"[A-Za-z]", best[1]))
-    if letter_count < 2:
-        return OcrResult(text="", confidence=final_conf, bbox_px=(0, 0, 0, 0))
-    if letter_count >= 4:
-        final_conf = max(final_conf, 72.0)
-    return OcrResult(text=best[1], confidence=final_conf, bbox_px=(0, 0, 0, 0))
-
-
-def _ocr_field_with_heuristics(
-    region: Image.Image,
-    field: dict,
-    config: OcrConfig,
-) -> OcrResult:
-    ftype = field.get("type", "text")
-    if ftype == "sid":
-        return _ocr_sid_robust(region, config)
-    if ftype == "name":
-        return _ocr_name_robust(region, config)
-    return ocr_region(region, config)
-
-
-def _short_text_from_result(text: str, field: dict) -> str:
-    ftype = field.get("type", "text")
-    if ftype == "name":
-        return _normalize_name_text(text)
-    if ftype == "sid":
-        return _normalize_sid_text(text)
 
 
 def _is_empty(text: str) -> bool:
@@ -754,76 +591,6 @@ def _safe_image_to_data(
             "par_num": [],
             "line_num": [],
         }
-
-
-def ocr_region(
-    image: Image.Image,
-    config: OcrConfig,
-) -> OcrResult:
-    processed = preprocess_for_ocr(image, deskew=config.deskew)
-    lang = config.lang
-    custom_config = f"--psm {config.psm}"
-
-    if config.whitelist:
-        custom_config += f" -c tessedit_char_whitelist={config.whitelist}"
-
-    data = _safe_image_to_data(processed, lang=lang, config=custom_config)
-
-    words: list[tuple[str, float, tuple[int, int, int, int]]] = []
-    n = len(data.get("text", []))
-    for i in range(n):
-        text = str(data["text"][i]).strip()
-        conf_raw = data["conf"][i]
-        try:
-            conf = float(conf_raw)
-        except (TypeError, ValueError):
-            conf = -1.0
-        if text and conf > 0:
-            words.append(
-                (
-                    text,
-                    conf,
-                    (
-                        int(data["left"][i]),
-                        int(data["top"][i]),
-                        int(data["width"][i]),
-                        int(data["height"][i]),
-                    ),
-                )
-            )
-
-    if not words:
-        fallback_text = ""
-        try:
-            fallback_text = pytesseract.image_to_string(
-                processed,
-                lang=lang,
-                config=custom_config,
-            )
-        except Exception:
-            fallback_text = ""
-        fallback_text = _normalize_text(fallback_text)
-        if fallback_text:
-            return OcrResult(text=fallback_text, confidence=50.0, bbox_px=(0, 0, 0, 0))
-        return OcrResult(text="", confidence=0.0, bbox_px=(0, 0, 0, 0))
-
-    full_text = " ".join(w[0] for w in words)
-    avg_conf = sum(w[1] for w in words) / len(words)
-    min_x = min(w[2][0] for w in words)
-    min_y = min(w[2][1] for w in words)
-    max_x = max(w[2][0] + w[2][2] for w in words)
-    max_y = max(w[2][1] + w[2][3] for w in words)
-
-    if config.text_cleanup_fn:
-        full_text = config.text_cleanup_fn(full_text)
-    if len(full_text) > MAX_TEXT_LENGTH:
-        full_text = full_text[:MAX_TEXT_LENGTH]
-
-    return OcrResult(
-        text=_normalize_text(full_text),
-        confidence=avg_conf,
-        bbox_px=(min_x, min_y, max_x, max_y),
-    )
 
 
 def _ocr_page_words(page_image: Image.Image, config: OcrConfig) -> list[_OcrWord]:
@@ -1853,19 +1620,12 @@ def _underline_to_field_slice_px(
     *,
     page_w: int,
     page_h: int,
-    focus: bool,
 ) -> tuple[int, int, int, int]:
     ux0, uy0, ux1, uy1 = underline_bbox_px
-    if focus:
-        x0 = ux0 - int(round(page_w * HEADER_FOCUS_LEFT_PAD_NORM))
-        x1 = ux1 + int(round(page_w * HEADER_FOCUS_RIGHT_PAD_NORM))
-        y0 = uy0 - int(round(page_h * HEADER_FOCUS_TOP_PAD_NORM))
-        y1 = uy1 + int(round(page_h * HEADER_FOCUS_BOTTOM_PAD_NORM))
-    else:
-        x0 = ux0 - int(round(page_w * HEADER_CONTEXT_LEFT_PAD_NORM))
-        x1 = ux1 + int(round(page_w * HEADER_CONTEXT_RIGHT_PAD_NORM))
-        y0 = uy0 - int(round(page_h * HEADER_CONTEXT_TOP_PAD_NORM))
-        y1 = uy1 + int(round(page_h * HEADER_CONTEXT_BOTTOM_PAD_NORM))
+    x0 = ux0 - int(round(page_w * HEADER_CONTEXT_LEFT_PAD_NORM))
+    x1 = ux1 + int(round(page_w * HEADER_CONTEXT_RIGHT_PAD_NORM))
+    y0 = uy0 - int(round(page_h * HEADER_CONTEXT_TOP_PAD_NORM))
+    y1 = uy1 + int(round(page_h * HEADER_CONTEXT_BOTTOM_PAD_NORM))
 
     return _clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
 
@@ -1883,13 +1643,6 @@ def _set_field_slices_from_underline(
             underline_bbox_px,
             page_w=page_w,
             page_h=page_h,
-            focus=False,
-        ),
-        "focus": _underline_to_field_slice_px(
-            underline_bbox_px,
-            page_w=page_w,
-            page_h=page_h,
-            focus=True,
         ),
     }
 
@@ -2079,19 +1832,6 @@ def _detect_dynamic_field_regions(
     }
 
 
-def _ocr_field_from_dynamic_region(
-    page_image: Image.Image,
-    bbox_px: tuple[int, int, int, int],
-    base_config: OcrConfig,
-    field: dict,
-) -> OcrResult:
-    region = crop_region(page_image, bbox_px)
-    field_config = _override_config(base_config, field)
-    result = _ocr_field_with_heuristics(region, field, field_config)
-    result.text = _short_text_from_result(result.text, field)
-    return result
-
-
 def _save_field_crop(
     *,
     page_image: Image.Image,
@@ -2133,27 +1873,6 @@ def _default_auto_fields() -> list[dict]:
             "required": False,
         },
     ]
-
-
-def _guess_version_from_text(first_page_words: list[_OcrWord]) -> str | None:
-    if not first_page_words:
-        return None
-
-    words = sorted(first_page_words, key=lambda w: (w.top, w.left))
-    top_words = [w.text for w in words if w.top <= max(1, words[0].top + 950)]
-    text = " ".join(top_words)
-
-    candidates: list[str] = []
-    for pattern in [r"\(([A-Z0-9])\)", r"\[([A-Z0-9])\]", r"version\s*([A-Z0-9])"]:
-        for m in re.finditer(pattern, text, flags=re.IGNORECASE):
-            token = m.group(1).upper()
-            if token:
-                candidates.append(token)
-
-    if not candidates:
-        return None
-
-    return candidates[0]
 
 
 def make_review_reason(result: SubmissionResult, config: OcrConfig) -> None:
@@ -2222,10 +1941,6 @@ def process_submission_pdf(
             Path(output_dir) / "layout_debug" / path.stem,
         )
 
-    first_page_image, _, _ = rendered_pages[min(rendered_pages)]
-    text_version_id = _guess_version_from_text(_ocr_page_words(first_page_image, config))
-    result.version_id = text_version_id
-    result.version_confidence = 80.0 if text_version_id else None
     result.version_validated = True
     result.version_error = None
     result.review_reasons.extend(layout.review_reasons)
@@ -2263,25 +1978,15 @@ def process_submission_pdf(
             continue
 
         page_image, page_w, page_h = rendered_pages[detected.page_number]
+        artifact_field_type = "id" if field_id == "student_id" else detected.field_kind
         crop_path = _save_field_crop(
             page_image=page_image,
             bbox_px=layout_bbox_norm_to_px(detected.crop_bbox_norm, page_w, page_h),
-            field_type=detected.field_kind,
+            field_type=artifact_field_type,
             field_crop_dir=field_crop_dir,
             page_number=detected.page_number,
             mirror_dir=field_crop_hoist_dir,
         )
-        if detected.focus_bbox_norm is not None:
-            _save_field_crop(
-                page_image=page_image,
-                bbox_px=layout_bbox_norm_to_px(detected.focus_bbox_norm, page_w, page_h),
-                field_type=detected.field_kind,
-                field_crop_dir=field_crop_dir,
-                page_number=detected.page_number,
-                suffix="_focus",
-                mirror_dir=field_crop_hoist_dir,
-            )
-
         all_field_results.append(
             FieldExtractionResult(
                 field_id=field_id,

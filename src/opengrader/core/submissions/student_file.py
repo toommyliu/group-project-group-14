@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
 
-import fitz
 import numpy as np
 from PIL import Image, ImageOps
 
@@ -15,9 +14,7 @@ from opengrader.core.ocr.extractor import (
     OcrConfig,
     _safe_image_to_data,
     _trim_question_region,
-    ocr_region,
     process_submission_pdf,
-    render_page_to_image,
 )
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
@@ -462,87 +459,8 @@ def parse_assignment_metadata_from_title(
     )
 
 
-def extract_title_text_from_submission(
-    pdf_path: str | Path,
-    config: OcrConfig,
-    dpi: int,
-) -> str:
-    with fitz.open(str(pdf_path)) as doc:
-        if len(doc) == 0:
-            return ""
-
-        # If searchable text exists, prefer it.
-        embedded_text = doc[0].get_text().strip()
-        if embedded_text:
-            return "\n".join(
-                line.strip() for line in embedded_text.splitlines() if line.strip()
-            )
-
-        page_image, page_w, page_h = render_page_to_image(doc, page_idx=0, dpi=dpi)
-
-    x0 = int(round(page_w * 0.05))
-    y0 = int(round(page_h * 0.02))
-    x1 = int(round(page_w * 0.95))
-    y1 = int(round(page_h * 0.32))
-    region = page_image.crop((x0, y0, x1, y1))
-
-    primary = ocr_region(region, config).text.strip()
-    secondary = ocr_region(
-        region,
-        OcrConfig(
-            lang=config.lang,
-            psm=11,
-            whitelist=None,
-            deskew=config.deskew,
-            confidence_threshold=config.confidence_threshold,
-        ),
-    ).text.strip()
-
-    candidates = [text for text in [primary, secondary] if text]
-    if not candidates:
-        return ""
-
-    def _title_score(text: str) -> float:
-        score = float(len(text))
-        if ":" in text:
-            score += 30.0
-        if "(" in text and ")" in text:
-            score += 25.0
-        if _TITLE_COURSE_RE.search(text):
-            score += 35.0
-        return score
-
-    best = max(candidates, key=_title_score)
-    return best
-
-
-def ocr_image_text(path: str | Path, config: OcrConfig) -> str:
-    image_path = Path(path)
-    with Image.open(image_path) as image:
-        result = ocr_region(image, config)
-
-    return result.text.strip()
-
-
-def _general_text_ocr_config(base: OcrConfig) -> OcrConfig:
-    return OcrConfig(
-        lang=base.lang,
-        psm=6,
-        whitelist=None,
-        deskew=base.deskew,
-        confidence_threshold=base.confidence_threshold,
-    )
-
-
 def _iter_field_crop_candidates(crop_path: Path) -> list[Path]:
-    candidates: list[Path] = []
-
-    focus_path = crop_path.with_name(f"{crop_path.stem}_focus{crop_path.suffix}")
-    for candidate in [focus_path, crop_path]:
-        if candidate.exists() and candidate not in candidates:
-            candidates.append(candidate)
-
-    return candidates
+    return [crop_path] if crop_path.exists() else []
 
 
 def _score_ollama_field_value(value: str, field_kind: Literal["name", "sid"]) -> float:
@@ -1030,7 +948,6 @@ def build_student_submission_document(
     ocr_config: OcrConfig,
     dpi: int = 300,
     split_subquestions: bool = True,
-    text_backend: Literal["tesseract", "ollama"] = "tesseract",
     ollama_config: OllamaVisionConfig | None = None,
     skip_ollama_qa: bool = False,
     save_layout_debug: bool = False,
@@ -1059,28 +976,24 @@ def build_student_submission_document(
         if field.crop_path
     }
 
-    use_ollama = text_backend == "ollama"
     active_ollama_config = ollama_config or OllamaVisionConfig()
 
-    if use_ollama:
-        for field_id, field_kind in (("student_name", "name"), ("student_id", "sid")):
-            crop_path = field_crop_by_id.get(field_id)
-            if crop_path is None or not crop_path.exists():
-                continue
-            _emit_progress(progress_callback, f"Ollama field OCR: {field_id}")
-            extracted = _extract_best_ollama_field_text(
-                crop_path=crop_path,
-                field_kind=field_kind,
-                config=active_ollama_config,
-                fallback_value=fields_by_id.get(field_id, ""),
-            )
-            if extracted:
-                fields_by_id[field_id] = extracted
+    for field_id, field_kind in (("student_name", "name"), ("student_id", "sid")):
+        crop_path = field_crop_by_id.get(field_id)
+        if crop_path is None or not crop_path.exists():
+            continue
+        _emit_progress(progress_callback, f"Ollama field OCR: {field_id}")
+        extracted = _extract_best_ollama_field_text(
+            crop_path=crop_path,
+            field_kind=field_kind,
+            config=active_ollama_config,
+            fallback_value=fields_by_id.get(field_id, ""),
+        )
+        if extracted:
+            fields_by_id[field_id] = extracted
 
     student_name = fields_by_id.get("student_name", "")
     student_id = fields_by_id.get("student_id", "")
-
-    text_ocr_config = _general_text_ocr_config(ocr_config)
 
     title_meta: AssignmentTitleMetadata | None = None
     title_crop_path = (
@@ -1088,7 +1001,7 @@ def build_student_submission_document(
         if extraction_result.title_crop_path
         else None
     )
-    if use_ollama and title_crop_path is not None and title_crop_path.exists():
+    if title_crop_path is not None and title_crop_path.exists():
         _emit_progress(progress_callback, "Ollama title OCR")
         try:
             title_meta = parse_assignment_metadata_from_title(
@@ -1100,16 +1013,11 @@ def build_student_submission_document(
         except Exception as exc:
             _emit_progress(
                 progress_callback,
-                f"Ollama title OCR failed; falling back to local OCR ({exc})",
+                f"Ollama title OCR failed ({exc})",
             )
 
     if title_meta is None:
-        title_text = extract_title_text_from_submission(
-            pdf_path=pdf,
-            config=text_ocr_config,
-            dpi=dpi,
-        )
-        title_meta = parse_assignment_metadata_from_title(title_text)
+        title_meta = parse_assignment_metadata_from_title("")
 
     questions: list[StudentSubmissionQuestion] = []
     question_jobs: list[tuple[str, Path | None, QuestionType]] = []
@@ -1159,7 +1067,7 @@ def build_student_submission_document(
             except ValueError:
                 response_image_path = str(image_path)
 
-            if use_ollama and not skip_ollama_qa:
+            if not skip_ollama_qa:
                 _emit_progress(
                     progress_callback,
                     f"Ollama QA [{index}/{total_question_jobs}]: {question_id}",
@@ -1172,12 +1080,9 @@ def build_student_submission_document(
                 except Exception as exc:
                     _emit_progress(
                         progress_callback,
-                        f"Ollama QA [{index}/{total_question_jobs}]: {question_id} failed; falling back to local OCR ({exc})",
+                        f"Ollama QA [{index}/{total_question_jobs}]: {question_id} failed ({exc})",
                     )
                     prompt_text, response_text = "", ""
-
-            if not response_text:
-                response_text = ocr_image_text(image_path, text_ocr_config)
 
         questions.append(
             StudentSubmissionQuestion(

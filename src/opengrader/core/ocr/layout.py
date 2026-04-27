@@ -54,7 +54,6 @@ class DetectedFieldRegion:
     field_kind: Literal["name", "sid"]
     page_number: int
     crop_bbox_norm: list[float]
-    focus_bbox_norm: list[float] | None
     anchor_bbox_norm: list[float] | None
     confidence: float
 
@@ -193,10 +192,20 @@ def _looks_like_name_label(token_norm: str) -> bool:
 
 
 def _looks_like_sid_label(token_norm: str) -> bool:
-    if token_norm in {"studentid", "sid", "id", "studentld"}:
+    if token_norm in {
+        "studentid",
+        "student1d",
+        "studentld",
+        "sid",
+        "id",
+        "1d",
+        "ld",
+        "i0",
+        "l0",
+    }:
         return True
     return token_norm.startswith("student") and (
-        "id" in token_norm or "ld" in token_norm
+        "id" in token_norm or "1d" in token_norm or "ld" in token_norm
     )
 
 
@@ -486,7 +495,8 @@ def _field_label_bbox(
     for line in lines:
         if max_y_px is not None and line.bbox_px[1] > max_y_px:
             continue
-        if line.bbox_px[0] / page_w > 0.75:
+        max_label_x = 0.75 if kind == "name" else 0.92
+        if line.bbox_px[0] / page_w > max_label_x:
             continue
         norms = [_normalize_token(word.text) for word in line.words]
         for idx, norm in enumerate(norms):
@@ -541,7 +551,7 @@ def _region_for_label(
     *,
     page_w: int,
     page_h: int,
-) -> tuple[list[float], list[float] | None, float]:
+) -> tuple[list[float], float]:
     """Pair a label with the nearest value rule/box, or a same-line fallback."""
 
     lx0, ly0, lx1, ly1 = label_bbox
@@ -569,17 +579,9 @@ def _region_for_label(
             max(lx1, vx1) + int(page_w * 0.025),
             max(ly1, vy1) + int(page_h * 0.025),
         )
-        focus = _expand_px(
-            value,
-            page_w=page_w,
-            page_h=page_h,
-            pad_x=max(3, int(page_w * 0.004)),
-            pad_y=max(4, int(page_h * 0.012)),
-        )
         context = _expand_px(context, page_w=page_w, page_h=page_h, pad_x=0, pad_y=0)
         return (
             bbox_px_to_norm(context, page_w, page_h),
-            bbox_px_to_norm(focus, page_w, page_h),
             92.0,
         )
 
@@ -588,11 +590,80 @@ def _region_for_label(
     x1 = min(page_w, max(lx1 + int(page_w * 0.45), int(page_w * 0.62)))
     y0 = max(0, ly0 - y_pad)
     y1 = min(page_h, ly1 + y_pad)
-    focus = (min(page_w, lx1 + int(page_w * 0.018)), y0, x1, y1)
     return (
         bbox_px_to_norm((x0, y0, x1, y1), page_w, page_h),
-        bbox_px_to_norm(focus, page_w, page_h),
         68.0,
+    )
+
+
+def _region_for_orphan_value_mark(
+    value_bbox: tuple[int, int, int, int],
+    *,
+    page_w: int,
+    page_h: int,
+) -> list[float]:
+    vx0, vy0, vx1, vy1 = value_bbox
+    context = (
+        vx0 - int(page_w * 0.14),
+        vy0 - int(page_h * 0.025),
+        vx1 + int(page_w * 0.025),
+        vy1 + int(page_h * 0.025),
+    )
+    context = _expand_px(context, page_w=page_w, page_h=page_h, pad_x=0, pad_y=0)
+    return bbox_px_to_norm(context, page_w, page_h)
+
+
+def _add_sid_from_unused_header_mark(
+    fields: list[DetectedFieldRegion],
+    primitives: list[LayoutPrimitive],
+    *,
+    page_w: int,
+    page_h: int,
+    first_question_y_px: int | None,
+) -> None:
+    if any(field.field_kind == "sid" for field in fields):
+        return
+
+    name_fields = [field for field in fields if field.field_kind == "name"]
+    if not name_fields:
+        return
+
+    name_bbox = bbox_norm_to_px(name_fields[0].crop_bbox_norm, page_w, page_h)
+    header_bottom = first_question_y_px if first_question_y_px is not None else int(page_h * 0.25)
+    candidates: list[tuple[float, tuple[int, int, int, int]]] = []
+    for mark in _candidate_underlines(primitives, page_w, page_h):
+        x0, y0, x1, y1 = mark
+        if y0 > header_bottom:
+            continue
+        if x1 <= name_bbox[0]:
+            continue
+        if y0 > name_bbox[3] + page_h * 0.12:
+            continue
+        if not (x0 >= name_bbox[2] - page_w * 0.02 or y0 > name_bbox[3] + page_h * 0.01):
+            continue
+        width_norm = (x1 - x0) / page_w
+        if width_norm < 0.10 or width_norm > 0.45:
+            continue
+        y_score = y0 / max(1, page_h) * 30.0
+        right_bonus = 18.0 if x0 > page_w * 0.45 else 0.0
+        below_name_bonus = 8.0 if y0 > name_bbox[3] else 0.0
+        score = right_bonus + below_name_bonus + width_norm * 40.0 - y_score
+        candidates.append((score, mark))
+
+    if not candidates:
+        return
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    crop = _region_for_orphan_value_mark(candidates[0][1], page_w=page_w, page_h=page_h)
+    fields.append(
+        DetectedFieldRegion(
+            field_id="student_id",
+            field_kind="sid",
+            page_number=1,
+            crop_bbox_norm=crop,
+            anchor_bbox_norm=None,
+            confidence=72.0,
+        )
     )
 
 
@@ -616,7 +687,7 @@ def _detect_fields(
         if label is None:
             continue
         label_bbox, label_score = label
-        crop, focus, region_score = _region_for_label(
+        crop, region_score = _region_for_label(
             label_bbox,
             first_page_primitives,
             page_w=page_w,
@@ -628,7 +699,6 @@ def _detect_fields(
                 field_kind=kind,  # type: ignore[arg-type]
                 page_number=1,
                 crop_bbox_norm=crop,
-                focus_bbox_norm=focus,
                 anchor_bbox_norm=bbox_px_to_norm(label_bbox, page_w, page_h),
                 confidence=round(
                     min(98.0, (label_score * 0.55) + (region_score * 0.45)),
@@ -636,6 +706,13 @@ def _detect_fields(
                 ),
             )
         )
+    _add_sid_from_unused_header_mark(
+        out,
+        first_page_primitives,
+        page_w=page_w,
+        page_h=page_h,
+        first_question_y_px=first_question_y_px,
+    )
     return out
 
 

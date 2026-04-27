@@ -9,7 +9,6 @@ from .extractor import (
     results_to_dict,
     render_page_to_image,
     crop_region,
-    ocr_region,
 )
 from .scanner import (
     DetectedRegion,
@@ -28,6 +27,7 @@ from .layout import (
 from .ollama_vlm import (
     OllamaVisionConfig,
     OllamaVisionError,
+    ensure_model_available,
     extract_field_text,
     extract_student_field,
     extract_title_metadata,

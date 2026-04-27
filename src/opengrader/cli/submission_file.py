@@ -57,19 +57,7 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--lang",
         default="eng",
-        help="Tesseract OCR language code(s), comma-separated (default: eng).",
-    )
-    parser.add_argument(
-        "--psm",
-        type=int,
-        default=6,
-        choices=range(0, 14),
-        help="Tesseract page segmentation mode 0-13 (default: 6).",
-    )
-    parser.add_argument(
-        "--whitelist",
-        default=None,
-        help="Optional OCR whitelist for fields.",
+        help="Language code(s) for layout anchor detection, comma-separated (default: eng).",
     )
     parser.add_argument(
         "--no-deskew",
@@ -105,8 +93,7 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help=(
             "Skip ollama question prompt/answer extraction. "
-            "Ollama will still be used for student name/ID/title extraction, "
-            "but question images will use local OCR."
+            "Ollama will still be used for student name/ID/title extraction."
         ),
     )
     parser.add_argument(
@@ -143,8 +130,6 @@ def run_cli() -> None:
 
     config = OcrConfig(
         lang=args.lang,
-        psm=args.psm,
-        whitelist=args.whitelist,
         deskew=not args.no_deskew,
         confidence_threshold=args.confidence_threshold,
     )
@@ -167,7 +152,6 @@ def run_cli() -> None:
             ocr_config=config,
             dpi=args.dpi,
             split_subquestions=not args.no_split_subquestions,
-            text_backend="ollama",
             ollama_config=ollama_config,
             skip_ollama_qa=args.no_ollama_qa,
             save_layout_debug=args.save_layout_debug,
