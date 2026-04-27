@@ -16,7 +16,7 @@ EPILOG = """
 examples:
   uv run submission-file --input split/ --output out/submissions/
   uv run submission-file --input split/student-0001.pdf --output out/submissions/ --dpi 200
-  uv run submission-file --input split/ --output out/submissions/ --text-backend ollama --ollama-model qwen2.5vl:7b
+  uv run submission-file --input split/ --output out/submissions/ --ollama-model qwen2.5vl:7b
 """
 
 
@@ -82,18 +82,6 @@ def _build_parser() -> ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--text-backend",
-        choices=["tesseract", "ollama"],
-        default="tesseract",
-        help=(
-            "Text extraction backend for student name/ID fields and "
-            "question prompt/answer extraction. "
-            "The ollama backend evaluates multiple header crop variants for "
-            "student fields and response images "
-            "(default: tesseract)."
-        ),
-    )
-    parser.add_argument(
         "--ollama-model",
         default="qwen2.5vl:7b",
         help="Ollama vision model to use when --text-backend=ollama.",
@@ -114,9 +102,14 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help=(
             "Skip ollama question prompt/answer extraction. "
-            "When used with --text-backend=ollama, ollama will still be used "
-            "for student name/ID field extraction but question images will use local OCR."
+            "Ollama will still be used for student name/ID/title extraction, "
+            "but question images will use local OCR."
         ),
+    )
+    parser.add_argument(
+        "--save-layout-debug",
+        action="store_true",
+        help="Write detected layout JSON and overlay PNGs for each submission.",
     )
     return parser
 
@@ -153,7 +146,7 @@ def run_cli() -> None:
         confidence_threshold=args.confidence_threshold,
     )
 
-    print(f"Using text backend: {args.text_backend} {'' if args.text_backend == 'tesseract' else f'(model: {args.ollama_model})'}")
+    print(f"Using Ollama vision model: {args.ollama_model}")
     print(f"Found {len(input_pdfs)} submission PDF(s)")
 
     ollama_config = OllamaVisionConfig(
@@ -170,9 +163,10 @@ def run_cli() -> None:
             ocr_config=config,
             dpi=args.dpi,
             split_subquestions=not args.no_split_subquestions,
-            text_backend=args.text_backend,
+            text_backend="ollama",
             ollama_config=ollama_config,
             skip_ollama_qa=args.no_ollama_qa,
+            save_layout_debug=args.save_layout_debug,
             progress_callback=(lambda message: print(f"  {message}")),
         )
         print(f"  Wrote {build_result.markdown_path}")

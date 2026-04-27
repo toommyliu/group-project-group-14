@@ -21,8 +21,10 @@ from opengrader.core.ocr.extractor import (
 )
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
+    TitleMetadataResult,
     extract_field_text,
     extract_question_prompt_and_answer,
+    extract_title_metadata,
 )
 from opengrader.core.ocr.scanner import _find_rectangles
 from opengrader.core.ocr.utils import apply_grayscale
@@ -36,9 +38,19 @@ _TITLE_VERSION_EXPLICIT_RE = re.compile(r"(?i)\bversion\s*([A-Z0-9]+)\b")
 _TITLE_VERSION_SUFFIX_RE = re.compile(
     r"(?i)\b(?:midterm|exam|quiz|final|assignment|hw|homework)\s*\d*\s*([A-Z])\b"
 )
+_TITLE_VERSION_BRACKET_RE = re.compile(
+    r"[\(\[]\s*([A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*)\s*[\)\]]"
+)
+_SUBSCRIPT_TRANSLATION = str.maketrans(
+    "₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ",
+    "0123456789aehijklmnoprstuvx",
+)
 
 _TOP_LEVEL_QUESTION_ID_RE = re.compile(r"^q\d+$")
-_MAX_SUBQUESTION_COUNT = 26
+_SUBMISSION_QUESTION_RE = re.compile(r"^-\s+([^:\s]+):\s*$")
+_SUBMISSION_FIELD_RE = re.compile(r"^  -\s+([^:]+):\s*(.*)$")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+_MAX_SUBQUESTION_COUNT = 26 # A-Z
 _SUBQUESTION_MIN_WIDTH_NORM = 0.45
 _SUBQUESTION_MIN_HEIGHT_NORM = 0.08
 _SUBQUESTION_MAX_X_SPREAD_NORM = 0.08
@@ -85,7 +97,304 @@ class StudentSubmissionBuildResult:
     responses_dir: Path
 
 
-def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
+def _parse_submission_scalar(raw: str) -> str | None:
+    value = raw.strip()
+    if value in {"", "null", "Null", "NULL"}:
+        return None
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return value[1:-1].replace('\\"', '"')
+    return value
+
+
+def _parse_submission_float(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _render_submission_float(value: float | None) -> str:
+    if value is None:
+        return ""
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:g}"
+
+
+def _parse_student_submission_frontmatter(lines: list[str]) -> tuple[dict[str, str], int]:
+    if len(lines) < 2 or lines[0].strip() != "---":
+        return {}, 0
+
+    frontmatter: dict[str, str] = {}
+    index = 1
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() == "---":
+            return frontmatter, index + 1
+
+        if ":" in line:
+            key, raw_value = line.split(":", 1)
+            parsed = _parse_submission_scalar(raw_value)
+            frontmatter[key.strip()] = parsed or ""
+        index += 1
+
+    return {}, 0
+
+
+def _submission_block_value(lines: list[str], start: int) -> tuple[str, int]:
+    output: list[str] = []
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        if _SUBMISSION_FIELD_RE.match(line) or _SUBMISSION_QUESTION_RE.match(line):
+            break
+        if line.startswith("    "):
+            output.append(line[4:])
+        elif line.strip():
+            output.append(line.strip())
+        else:
+            output.append("")
+        index += 1
+    return "\n".join(output).rstrip(), index
+
+
+def _parse_response_image_path(raw: str, *, markdown_path: Path | None) -> str | None:
+    value = raw.strip()
+    if not value:
+        return None
+
+    matched = _MARKDOWN_IMAGE_RE.search(value)
+    if matched is not None:
+        value = matched.group(1).strip()
+
+    if not value:
+        return None
+
+    path = Path(value)
+    if path.is_absolute() or markdown_path is None:
+        return str(path)
+    return str((markdown_path.parent / path).resolve())
+
+
+def parse_student_submission_markdown(
+    content: str,
+    *,
+    markdown_path: str | Path | None = None,
+) -> StudentSubmissionDocument:
+    path = Path(markdown_path) if markdown_path is not None else None
+    lines = content.splitlines()
+    frontmatter, index = _parse_student_submission_frontmatter(lines)
+
+    questions: list[StudentSubmissionQuestion] = []
+    while index < len(lines):
+        matched_question = _SUBMISSION_QUESTION_RE.match(lines[index])
+        if matched_question is None:
+            index += 1
+            continue
+
+        question_id = matched_question.group(1).strip()
+        index += 1
+        fields: dict[str, str] = {}
+
+        while index < len(lines):
+            if _SUBMISSION_QUESTION_RE.match(lines[index]):
+                break
+
+            matched_field = _SUBMISSION_FIELD_RE.match(lines[index])
+            if matched_field is None:
+                index += 1
+                continue
+
+            field_name = matched_field.group(1).strip().lower()
+            raw_value = matched_field.group(2)
+            index += 1
+
+            if raw_value.strip() == "|":
+                value, index = _submission_block_value(lines, index)
+            else:
+                value = raw_value.strip()
+            fields[field_name] = value
+
+        questions.append(
+            StudentSubmissionQuestion(
+                question_id=question_id,
+                prompt=fields.get("prompt", ""),
+                possible_points=_parse_submission_float(fields.get("possible points")),
+                response_image_path=_parse_response_image_path(
+                    fields.get("response image", ""),
+                    markdown_path=path,
+                ),
+                response_text=fields.get("response text", ""),
+                points_awarded=_parse_submission_float(fields.get("points")),
+                analysis=fields.get("analysis", ""),
+            )
+        )
+
+    return StudentSubmissionDocument(
+        student_name=frontmatter.get("name", ""),
+        student_id=frontmatter.get("student_id", ""),
+        course_code=frontmatter.get("course_code") or None,
+        assignment_title=frontmatter.get("assignment_title") or None,
+        assignment_version=frontmatter.get("assignment_version") or None,
+        source_pdf=frontmatter.get("source_pdf", ""),
+        score=frontmatter.get("score", ""),
+        questions=questions,
+    )
+
+
+def load_student_submission_markdown(path: str | Path) -> StudentSubmissionDocument:
+    markdown_path = Path(path)
+    return parse_student_submission_markdown(
+        markdown_path.read_text(encoding="utf-8"),
+        markdown_path=markdown_path,
+    )
+
+
+def _field_block_end(lines: list[str], start: int) -> int:
+    index = start
+    while index < len(lines):
+        if _SUBMISSION_FIELD_RE.match(lines[index]) or _SUBMISSION_QUESTION_RE.match(
+            lines[index]
+        ):
+            break
+        index += 1
+    return index
+
+
+def _render_submission_field(
+    name: str,
+    value: str,
+    *,
+    indent: str = "  ",
+) -> list[str]:
+    if "\n" not in value:
+        return [f"{indent}- {name}: {value}"]
+
+    rendered = [f"{indent}- {name}: |"]
+    rendered.extend(f"{indent}  {line}" for line in value.splitlines())
+    return rendered
+
+
+def _replace_submission_field(
+    lines: list[str],
+    *,
+    question_start: int,
+    question_end: int,
+    field_name: str,
+    value: str,
+) -> int:
+    normalized = field_name.lower()
+    index = question_start + 1
+    while index < question_end:
+        matched = _SUBMISSION_FIELD_RE.match(lines[index])
+        if matched is None:
+            index += 1
+            continue
+        if matched.group(1).strip().lower() != normalized:
+            index += 1
+            continue
+
+        replacement = _render_submission_field(field_name, value)
+        field_end = (
+            _field_block_end(lines, index + 1)
+            if matched.group(2).strip() == "|"
+            else index + 1
+        )
+        lines[index:field_end] = replacement
+        return question_end + len(replacement) - (field_end - index)
+
+    insertion = _render_submission_field(field_name, value)
+    lines[question_end:question_end] = insertion
+    return question_end + len(insertion)
+
+
+def update_student_submission_grade(
+    path: str | Path,
+    *,
+    question_id: str,
+    points_awarded: float | None,
+    analysis: str,
+) -> StudentSubmissionDocument:
+    markdown_path = Path(path)
+    lines = markdown_path.read_text(encoding="utf-8").splitlines()
+
+    index = 0
+    while index < len(lines):
+        matched = _SUBMISSION_QUESTION_RE.match(lines[index])
+        if matched is None or matched.group(1).strip() != question_id:
+            index += 1
+            continue
+
+        question_end = index + 1
+        while question_end < len(lines):
+            if _SUBMISSION_QUESTION_RE.match(lines[question_end]):
+                break
+            question_end += 1
+
+        # Preserve OCR output and image references exactly; grading edits should only
+        # touch the fields a grader owns.
+        question_end = _replace_submission_field(
+            lines,
+            question_start=index,
+            question_end=question_end,
+            field_name="Points",
+            value=_render_submission_float(points_awarded),
+        )
+        _replace_submission_field(
+            lines,
+            question_start=index,
+            question_end=question_end,
+            field_name="Analysis",
+            value=analysis,
+        )
+        markdown_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return load_student_submission_markdown(markdown_path)
+
+    raise ValueError(f"question {question_id!r} not found in {markdown_path}")
+
+
+def _normalize_assignment_version(token: str | None) -> str | None:
+    if not token:
+        return None
+    cleaned = token.translate(_SUBSCRIPT_TRANSLATION)
+    cleaned = re.sub(r"(?i)^version\s+", "", cleaned.strip())
+    cleaned = cleaned.strip("()[]{}:;,- ")
+    cleaned = re.sub(r"[\s_]+", "", cleaned)
+    return cleaned.upper() if cleaned else None
+
+
+def parse_assignment_metadata_from_title(
+    raw_title: str | TitleMetadataResult | dict[str, str | None],
+) -> AssignmentTitleMetadata:
+    if isinstance(raw_title, TitleMetadataResult):
+        return AssignmentTitleMetadata(
+            raw_title=raw_title.raw_title,
+            course_code=raw_title.course_code,
+            assignment_title=raw_title.assignment_title or "Unknown Assignment",
+            assignment_version=_normalize_assignment_version(
+                raw_title.assignment_version
+            ),
+        )
+
+    if isinstance(raw_title, dict):
+        title = str(raw_title.get("assignment_title") or "").strip()
+        raw = str(raw_title.get("raw_title") or title).strip()
+        course_code = raw_title.get("course_code")
+        version = raw_title.get("assignment_version")
+        return AssignmentTitleMetadata(
+            raw_title=raw,
+            course_code=str(course_code).strip() if course_code else None,
+            assignment_title=title or "Unknown Assignment",
+            assignment_version=(
+                _normalize_assignment_version(str(version)) if version else None
+            ),
+        )
+
     normalized = "\n".join(
         line.strip() for line in raw_title.splitlines() if line.strip()
     )
@@ -96,7 +405,9 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
         assignment_title = re.sub(
             r"\s+", " ", canonical_match.group("assignment")
         ).strip()
-        assignment_version = canonical_match.group("version").upper()
+        assignment_version = _normalize_assignment_version(
+            canonical_match.group("version")
+        )
         return AssignmentTitleMetadata(
             raw_title=normalized,
             course_code=course_code,
@@ -121,14 +432,22 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
 
     matched_explicit_version = _TITLE_VERSION_EXPLICIT_RE.search(normalized)
     if matched_explicit_version is not None:
-        assignment_version = matched_explicit_version.group(1).upper()
-    else:
-        matched_suffix_version = _TITLE_VERSION_SUFFIX_RE.search(assignment_line)
-        assignment_version = (
-            matched_suffix_version.group(1).upper()
-            if matched_suffix_version is not None
-            else None
+        assignment_version = _normalize_assignment_version(
+            matched_explicit_version.group(1)
         )
+    else:
+        matched_bracket_version = _TITLE_VERSION_BRACKET_RE.search(assignment_line)
+        if matched_bracket_version is not None:
+            assignment_version = _normalize_assignment_version(
+                matched_bracket_version.group(1)
+            )
+        else:
+            matched_suffix_version = _TITLE_VERSION_SUFFIX_RE.search(assignment_line)
+            assignment_version = (
+                _normalize_assignment_version(matched_suffix_version.group(1))
+                if matched_suffix_version is not None
+                else None
+            )
 
     assignment_title = assignment_line.strip() or "Unknown Assignment"
     assignment_title = re.sub(
@@ -714,6 +1033,7 @@ def build_student_submission_document(
     text_backend: Literal["tesseract", "ollama"] = "tesseract",
     ollama_config: OllamaVisionConfig | None = None,
     skip_ollama_qa: bool = False,
+    save_layout_debug: bool = False,
     progress_callback: Callable[[str], None] | None = None,
 ) -> StudentSubmissionBuildResult:
     pdf = Path(pdf_path)
@@ -726,6 +1046,7 @@ def build_student_submission_document(
         output_dir=out_dir,
         response_format="png",
         dpi=dpi,
+        save_layout_debug=save_layout_debug,
     )
 
     fields_by_id = {
@@ -761,12 +1082,34 @@ def build_student_submission_document(
 
     text_ocr_config = _general_text_ocr_config(ocr_config)
 
-    title_text = extract_title_text_from_submission(
-        pdf_path=pdf,
-        config=text_ocr_config,
-        dpi=dpi,
+    title_meta: AssignmentTitleMetadata | None = None
+    title_crop_path = (
+        Path(extraction_result.title_crop_path)
+        if extraction_result.title_crop_path
+        else None
     )
-    title_meta = parse_assignment_metadata_from_title(title_text)
+    if use_ollama and title_crop_path is not None and title_crop_path.exists():
+        _emit_progress(progress_callback, "Ollama title OCR")
+        try:
+            title_meta = parse_assignment_metadata_from_title(
+                extract_title_metadata(
+                    image_path=title_crop_path,
+                    config=active_ollama_config,
+                )
+            )
+        except Exception as exc:
+            _emit_progress(
+                progress_callback,
+                f"Ollama title OCR failed; falling back to local OCR ({exc})",
+            )
+
+    if title_meta is None:
+        title_text = extract_title_text_from_submission(
+            pdf_path=pdf,
+            config=text_ocr_config,
+            dpi=dpi,
+        )
+        title_meta = parse_assignment_metadata_from_title(title_text)
 
     questions: list[StudentSubmissionQuestion] = []
     question_jobs: list[tuple[str, Path | None, QuestionType]] = []

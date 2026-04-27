@@ -22,6 +22,14 @@ class OllamaVisionError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class TitleMetadataResult:
+    course_code: str | None
+    assignment_title: str
+    assignment_version: str | None
+    raw_title: str
+
+
 def _image_to_base64(image_path: str | Path) -> str:
     data = Path(image_path).read_bytes()
     return base64.b64encode(data).decode("ascii")
@@ -68,6 +76,25 @@ def _normalize_sid(value: str) -> str:
     if len(digits) >= 9:
         return digits[:9]
     return digits
+
+
+_SUBSCRIPT_TRANSLATION = str.maketrans(
+    "₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ",
+    "0123456789aehijklmnoprstuvx",
+)
+
+
+def _normalize_version(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.translate(_SUBSCRIPT_TRANSLATION)
+    text = re.sub(r"(?i)^version\s+", "", text.strip())
+    text = text.strip("()[]{}:;,- ")
+    text = re.sub(r"\s+", "", text)
+    text = text.replace("_", "")
+    if not text:
+        return None
+    return text.upper()
 
 
 def _generate_with_image(
@@ -142,6 +169,66 @@ def extract_field_text(
     if field_kind == "name":
         return _normalize_name(value)
     return _normalize_sid(value)
+
+
+def extract_student_field(
+    *,
+    image_path: str | Path,
+    field_kind: Literal["name", "sid"],
+    config: OllamaVisionConfig,
+) -> str:
+    return extract_field_text(
+        image_path=image_path,
+        field_kind=field_kind,
+        config=config,
+    )
+
+
+def extract_title_metadata(
+    *,
+    image_path: str | Path,
+    config: OllamaVisionConfig,
+) -> TitleMetadataResult:
+    prompt = (
+        "You are a strict OCR transcription engine for scanned assignment titles. "
+        "Read only visible printed title text in the image. Do not infer, complete, "
+        "correct, or invent missing course, title, or version values. "
+        "If a value is unreadable or absent, return an empty string for that value. "
+        "Return strict JSON only with this shape: "
+        "{\"course_code\": \"\", \"assignment_title\": \"\", "
+        "\"assignment_version\": \"\", \"raw_title\": \"\"}. "
+        "For assignment_version, preserve visible version markers such as (A), "
+        "[B], Version C, suffix letters, or subscript-like letters/digits."
+    )
+
+    raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
+    parsed = _parse_json_from_response(raw)
+    if parsed is None:
+        cleaned = re.sub(r"\s+", " ", raw).strip()
+        return TitleMetadataResult(
+            course_code=None,
+            assignment_title=cleaned,
+            assignment_version=None,
+            raw_title=cleaned,
+        )
+
+    course_code = str(parsed.get("course_code", "")).strip() or None
+    assignment_title = str(parsed.get("assignment_title", "")).strip()
+    raw_title = str(parsed.get("raw_title", "")).strip()
+    version = _normalize_version(str(parsed.get("assignment_version", "")).strip())
+
+    if not raw_title:
+        parts = [part for part in [course_code, assignment_title, version] if part]
+        raw_title = " ".join(parts)
+
+    return TitleMetadataResult(
+        course_code=course_code,
+        assignment_title=(
+            re.sub(r"\s+", " ", assignment_title).strip() or "Unknown Assignment"
+        ),
+        assignment_version=version,
+        raw_title=re.sub(r"\s+", " ", raw_title).strip(),
+    )
 
 
 def extract_question_prompt_and_answer(

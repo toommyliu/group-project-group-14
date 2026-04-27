@@ -16,6 +16,11 @@ from PIL import Image
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 
 from .alignment import preprocess_for_ocr
+from .layout import (
+    bbox_norm_to_px as layout_bbox_norm_to_px,
+    save_layout_debug as write_layout_debug,
+    scan_submission_layout,
+)
 from .question_classifier import classify_question_image
 from .scanner import scan_template
 
@@ -113,6 +118,7 @@ class SubmissionResult:
     version_confidence: float | None = None
     version_validated: bool = False
     version_error: str | None = None
+    title_crop_path: str | None = None
     fields: list[FieldExtractionResult] = field(default_factory=list)
     questions: list[QuestionExtractionResult] = field(default_factory=list)
     needs_review: bool = False
@@ -2187,6 +2193,7 @@ def process_submission_pdf(
     output_dir: str | Path,
     response_format: Literal["png", "pdf"] = "png",
     dpi: int = 300,
+    save_layout_debug: bool = False,
 ) -> SubmissionResult:
     path = Path(pdf_path)
     result = SubmissionResult(filename=path.name)
@@ -2194,16 +2201,12 @@ def process_submission_pdf(
     doc = fitz.open(str(path))
 
     rendered_pages: dict[int, tuple[Image.Image, int, int]] = {}
-    page_words: dict[int, list[_OcrWord]] = {}
-    page_boxes: dict[int, list[list[float]]] = {}
 
     try:
         for page_idx in range(len(doc)):
             page_number = page_idx + 1
             page_image, page_w, page_h = render_page_to_image(doc, page_idx, dpi)
             rendered_pages[page_number] = (page_image, page_w, page_h)
-            page_words[page_number] = _ocr_page_words(page_image, config)
-            page_boxes[page_number] = _detected_boxes_norm(page_image)
     finally:
         doc.close()
 
@@ -2211,170 +2214,113 @@ def process_submission_pdf(
         result.version_validated = True
         return result
 
-    page_dims = {
-        page_number: (w, h) for page_number, (_, w, h) in rendered_pages.items()
-    }
-    dynamic_regions = _detect_question_regions(page_words, page_dims, page_boxes)
+    layout = scan_submission_layout(rendered_pages, config)
+    if save_layout_debug:
+        write_layout_debug(
+            layout,
+            rendered_pages,
+            Path(output_dir) / "layout_debug" / path.stem,
+        )
 
-    text_version_id = _guess_version_from_text(page_words.get(1, []))
+    first_page_image, _, _ = rendered_pages[min(rendered_pages)]
+    text_version_id = _guess_version_from_text(_ocr_page_words(first_page_image, config))
     result.version_id = text_version_id
     result.version_confidence = 80.0 if text_version_id else None
     result.version_validated = True
     result.version_error = None
+    result.review_reasons.extend(layout.review_reasons)
 
     all_field_results: list[FieldExtractionResult] = []
     submission_dir = Path(output_dir) / "responses" / path.stem
     submission_dir.mkdir(parents=True, exist_ok=True)
     field_crop_dir = submission_dir / "field_crops"
     field_crop_hoist_dir = Path(output_dir) / "field_crops" / path.stem
-    best_field_by_id: dict[str, tuple[float, FieldExtractionResult]] = {}
-
-    for page_number in sorted(rendered_pages):
-        if page_number != 1:
-            continue
-        page_image, page_w, page_h = rendered_pages[page_number]
-        page_word_list = page_words.get(page_number, [])
-        header_field_candidates = _extract_header_field_values(page_word_list)
-        dynamic_slices_by_type = _detect_dynamic_field_slices(
-            page_word_list,
-            page_w,
-            page_h,
-            page_boxes.get(page_number, []),
-            page_image=page_image,
+    if layout.title_region is not None and layout.title_region.page_number in rendered_pages:
+        page_image, page_w, page_h = rendered_pages[layout.title_region.page_number]
+        title_crop = crop_region(
+            page_image,
+            layout_bbox_norm_to_px(layout.title_region.crop_bbox_norm, page_w, page_h),
         )
+        title_dir = submission_dir / "field_crops"
+        title_dir.mkdir(parents=True, exist_ok=True)
+        title_path = title_dir / f"title_p{layout.title_region.page_number}.png"
+        title_crop.save(title_path)
+        result.title_crop_path = str(title_path)
 
-        for field_def in _default_auto_fields():
-            field_type = field_def.get("type", "text")
-            field_config = _override_config(config, field_def)
-
-            header_result = header_field_candidates.get(field_type)
-            dynamic_slice_set = dynamic_slices_by_type.get(field_type, {})
-            dynamic_bbox = dynamic_slice_set.get("primary")
-            if (
-                dynamic_bbox is None
-                and header_result is not None
-                and header_result.bbox_px != (0, 0, 0, 0)
-            ):
-                dynamic_bbox = _value_bbox_to_field_slice_px(
-                    header_result.bbox_px,
-                    page_w=page_w,
-                    page_h=page_h,
-                )
-
-            crop_path: str | None = None
-            dynamic_validated: FieldExtractionResult | None = None
-            if dynamic_bbox is not None:
-                crop_path = _save_field_crop(
-                    page_image=page_image,
-                    bbox_px=dynamic_bbox,
-                    field_type=field_type,
-                    field_crop_dir=field_crop_dir,
-                    page_number=page_number,
-                    mirror_dir=field_crop_hoist_dir,
-                )
-                focus_bbox = dynamic_slice_set.get("focus")
-                if focus_bbox is not None:
-                    _save_field_crop(
-                        page_image=page_image,
-                        bbox_px=focus_bbox,
-                        field_type=field_type,
-                        field_crop_dir=field_crop_dir,
-                        page_number=page_number,
-                        suffix="_focus",
-                        mirror_dir=field_crop_hoist_dir,
-                    )
-
-                dynamic_candidates: list[FieldExtractionResult] = []
-                for candidate_bbox in [dynamic_bbox, focus_bbox]:
-                    if candidate_bbox is None:
-                        continue
-                    dynamic_ocr = _ocr_field_from_dynamic_region(
-                        page_image,
-                        candidate_bbox,
-                        config,
-                        field_def,
-                    )
-                    candidate = validate_field_result(
-                        dynamic_ocr,
-                        field_def,
-                        field_config,
-                    )
-                    candidate.crop_path = crop_path
-                    dynamic_candidates.append(candidate)
-
-                if dynamic_candidates:
-                    dynamic_validated = max(
-                        dynamic_candidates,
-                        key=_field_result_score,
-                    )
-
-            header_validated: FieldExtractionResult | None = None
-            if header_result is not None:
-                header_validated = validate_field_result(
-                    header_result,
-                    field_def,
-                    field_config,
-                )
-                header_validated.crop_path = crop_path
-
-            selected: FieldExtractionResult | None = None
-            if dynamic_validated is not None and dynamic_validated.validated:
-                selected = dynamic_validated
-            elif header_validated is not None and header_validated.validated:
-                selected = header_validated
-            elif dynamic_validated is not None:
-                selected = dynamic_validated
-            elif header_validated is not None:
-                selected = header_validated
-
-            if selected is None:
-                continue
-
-            field_id = field_def["id"]
-            score = _field_result_score(selected)
-            prev = best_field_by_id.get(field_id)
-            if prev is None or score > prev[0]:
-                best_field_by_id[field_id] = (score, selected)
-
+    field_by_id = {field.field_id: field for field in layout.fields}
     for field_def in _default_auto_fields():
         field_id = field_def["id"]
-        chosen = best_field_by_id.get(field_id)
-        if chosen is not None:
-            all_field_results.append(chosen[1])
+        detected = field_by_id.get(field_id)
+        if detected is None or detected.page_number not in rendered_pages:
+            all_field_results.append(
+                FieldExtractionResult(
+                    field_id=field_id,
+                    ocr_result=None,
+                    validated=True,
+                    crop_path=None,
+                )
+            )
             continue
+
+        page_image, page_w, page_h = rendered_pages[detected.page_number]
+        crop_path = _save_field_crop(
+            page_image=page_image,
+            bbox_px=layout_bbox_norm_to_px(detected.crop_bbox_norm, page_w, page_h),
+            field_type=detected.field_kind,
+            field_crop_dir=field_crop_dir,
+            page_number=detected.page_number,
+            mirror_dir=field_crop_hoist_dir,
+        )
+        if detected.focus_bbox_norm is not None:
+            _save_field_crop(
+                page_image=page_image,
+                bbox_px=layout_bbox_norm_to_px(detected.focus_bbox_norm, page_w, page_h),
+                field_type=detected.field_kind,
+                field_crop_dir=field_crop_dir,
+                page_number=detected.page_number,
+                suffix="_focus",
+                mirror_dir=field_crop_hoist_dir,
+            )
 
         all_field_results.append(
             FieldExtractionResult(
                 field_id=field_id,
-                ocr_result=None,
+                ocr_result=OcrResult(
+                    text="",
+                    confidence=detected.confidence,
+                    bbox_px=(0, 0, 0, 0),
+                ),
                 validated=True,
-                crop_path=None,
+                crop_path=crop_path,
             )
         )
 
     all_question_results: list[QuestionExtractionResult] = []
     sub_dir = submission_dir
 
-    dynamic_regions_sorted = sorted(
-        dynamic_regions,
-        key=lambda r: (r.question_number, r.page_number, r.bbox_norm[1]),
+    detected_questions_sorted = sorted(
+        layout.questions,
+        key=lambda r: (r.question_number, r.page_number, r.crop_bbox_norm[1]),
     )
 
     used_ids: set[str] = set()
-    for i, region in enumerate(dynamic_regions_sorted, start=1):
+    for i, region in enumerate(detected_questions_sorted, start=1):
         page_number = region.page_number
         page_image, page_w, page_h = rendered_pages[page_number]
-        qid = f"q{region.question_number}"
+        qid = region.question_id
         if qid in used_ids:
             qid = f"q{region.question_number}_{i}"
         used_ids.add(qid)
 
-        if region.continuation is not None:
+        if region.continuation_segments:
             all_question_results.append(
                 _extract_question_crop_segments(
                     rendered_pages=rendered_pages,
                     question_id=qid,
-                    segments=[(page_number, region.bbox_norm), region.continuation],
+                    segments=[
+                        (page_number, region.crop_bbox_norm),
+                        *region.continuation_segments,
+                    ],
                     response_format=response_format,
                     sub_dir=sub_dir,
                 )
@@ -2385,7 +2331,7 @@ def process_submission_pdf(
             _extract_question_crop_norm(
                 page_image=page_image,
                 question_id=qid,
-                bbox_norm=region.bbox_norm,
+                bbox_norm=region.crop_bbox_norm,
                 page_w=page_w,
                 page_h=page_h,
                 page_num=page_number,
@@ -2398,6 +2344,11 @@ def process_submission_pdf(
     result.questions = all_question_results
 
     make_review_reason(result, config)
+    if layout.review_reasons:
+        result.needs_review = True
+        result.review_reasons = list(
+            dict.fromkeys([*result.review_reasons, *layout.review_reasons])
+        )
     return result
 
 
@@ -2408,6 +2359,7 @@ def results_to_dict(result: SubmissionResult) -> dict:
         "version_confidence": result.version_confidence,
         "version_validated": result.version_validated,
         "version_error": result.version_error,
+        "title_crop_path": result.title_crop_path,
         "needs_review": result.needs_review,
         "review_reasons": result.review_reasons,
         "fields": [
