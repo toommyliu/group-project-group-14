@@ -10,6 +10,7 @@ from PIL import Image, ImageOps
 
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
 from opengrader.core.ocr.question_classifier import classify_question_image
+from opengrader.core.ocr.constants import SUBSCRIPT_TRANSLATION
 from opengrader.core.ocr.extractor import (
     OcrConfig,
     _safe_image_to_data,
@@ -37,10 +38,6 @@ _TITLE_VERSION_SUFFIX_RE = re.compile(
 )
 _TITLE_VERSION_BRACKET_RE = re.compile(
     r"[\(\[]\s*([A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*)\s*[\)\]]"
-)
-_SUBSCRIPT_TRANSLATION = str.maketrans(
-    "₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ",
-    "0123456789aehijklmnoprstuvx",
 )
 
 _TOP_LEVEL_QUESTION_ID_RE = re.compile(r"^q\d+$")
@@ -358,7 +355,7 @@ def update_student_submission_grade(
 def _normalize_assignment_version(token: str | None) -> str | None:
     if not token:
         return None
-    cleaned = token.translate(_SUBSCRIPT_TRANSLATION)
+    cleaned = token.translate(SUBSCRIPT_TRANSLATION)
     cleaned = re.sub(r"(?i)^version\s+", "", cleaned.strip())
     cleaned = cleaned.strip("()[]{}:;,- ")
     cleaned = re.sub(r"[\s_]+", "", cleaned)

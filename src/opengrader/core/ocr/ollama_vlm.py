@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Literal
 from urllib import error, request
 
+from .constants import SUBSCRIPT_TRANSLATION
+
 # https://docs.ollama.com/api/introduction
 # TODO: https://pydantic.dev/docs/ai/overview/ if we ever support multiple providers
 
@@ -21,8 +23,7 @@ class OllamaVisionConfig:
 class OllamaVisionError(RuntimeError):
     pass
 
-
-_MODEL_CHECK_CACHE: set[tuple[str, str]] = set()
+_AVAILABLE_MODELS: set[tuple[str, str]] = set()
 
 
 @dataclass(frozen=True)
@@ -81,16 +82,11 @@ def _normalize_sid(value: str) -> str:
     return digits
 
 
-_SUBSCRIPT_TRANSLATION = str.maketrans(
-    "₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ",
-    "0123456789aehijklmnoprstuvx",
-)
-
 
 def _normalize_version(value: str | None) -> str | None:
     if value is None:
         return None
-    text = value.translate(_SUBSCRIPT_TRANSLATION)
+    text = value.translate(SUBSCRIPT_TRANSLATION)
     text = re.sub(r"(?i)^version\s+", "", text.strip())
     text = text.strip("()[]{}:;,- ")
     text = re.sub(r"\s+", "", text)
@@ -132,18 +128,19 @@ def list_available_models(config: OllamaVisionConfig) -> list[str]:
 
 def ensure_model_available(config: OllamaVisionConfig) -> None:
     cache_key = (config.host.rstrip("/"), config.model)
-    if cache_key in _MODEL_CHECK_CACHE:
+    if cache_key in _AVAILABLE_MODELS:
         return
 
     available = list_available_models(config)
     if config.model in available:
-        _MODEL_CHECK_CACHE.add(cache_key)
+        _AVAILABLE_MODELS.add(cache_key)
         return
 
     available_text = ", ".join(available) if available else "none"
     raise OllamaVisionError(
         f"Ollama model {config.model!r} is not available at {config.host.rstrip('/')}. "
-        f"Available models: {available_text}."
+        f"Available models: {available_text}. "
+        f"Install it with: ollama pull {config.model}"
     )
 
 

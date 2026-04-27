@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 
+from .constants import SUBSCRIPT_TRANSLATION
 from .question_classifier import classify_question_image
 from .utils import apply_grayscale
 
@@ -95,14 +96,17 @@ class _QuestionAnchor:
 
 
 _QUESTION_TOKEN_RE = re.compile(r"^(\d{1,3})[\.)]?$") # Match standalone question numbers like "1.", "2)" or "3".
-_QUESTION_Q_RE = re.compile(r"^q(?:uestion)?\s*(\d{1,3})[\.)]?$", re.IGNORECASE) # Matches "q7", "Q 12.", "question 99)", etc.
-_SUBSCRIPT_TRANSLATION = str.maketrans(
-    "₀₁₂₃₄₅₆₇₈₉ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ",
-    "0123456789aehijklmnoprstuvx",
-) # Maps common subscript characters to their ASCII equivalents.
+_QUESTION_Q_RE = re.compile(r"^q(?:uestion)?\s*(\d{1,3})[\.)]?$", re.IGNORECASE) # Match "q7", "Q 12.", "question 99)", etc.
 
 
-# Geometry helpers
+# Heuristic thresholds for page positions.
+
+_HEADER_MARK_MAX_Y_NORM = 0.22  # Restrict header field marks to the top 22% of the page.
+_HEADER_MARK_MIN_WIDTH_NORM = 0.06  # Ignore tiny line fragments and OCR noise.
+_HEADER_MARK_MAX_WIDTH_NORM = 0.45  # Exclude wide separators unlikely to be field blanks.
+_TITLE_SEARCH_MAX_Y_NORM = 0.34  # Keep title detection to the upper third of the page.
+
+# Geometry helpers.
 
 
 def _clamp_bbox_norm(bbox: list[float]) -> list[float]:
@@ -198,6 +202,7 @@ def _looks_like_sid_label(token_norm: str) -> bool:
         "studentld",
         "sid",
         "id",
+        # Potential OCR misreads
         "1d",
         "ld",
         "i0",
@@ -310,7 +315,7 @@ def _merge_boxes_px(
         px0, py0, px1, py1 = merged[-1]
         x0, y0, x1, y1 = box
         same_row = abs(((py0 + py1) // 2) - ((y0 + y1) // 2)) <= same_axis_px
-        close = x0 <= px1 + max_gap_px
+        close = px0 <= x0 <= px1 + max_gap_px
         if same_row and close:
             merged[-1] = (min(px0, x0), min(py0, y0), max(px1, x1), max(py1, y1))
         else:
@@ -327,17 +332,39 @@ def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
         return []
 
     _, inv = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    adaptive_inv = cv2.adaptiveThreshold(
+        gray,
+        255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        41,
+        15,
+    )
     primitives: list[LayoutPrimitive] = []
 
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(32, page_w // 12), 1))
-    hlines = cv2.morphologyEx(inv, cv2.MORPH_OPEN, h_kernel)
-    h_contours, _ = cv2.findContours(hlines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    h_boxes = [cv2.boundingRect(c) for c in h_contours]
-    h_px = [
-        (x, y, x + w, y + h)
-        for x, y, w, h in h_boxes
-        if w / page_w >= 0.10 and h / page_h <= 0.025
+    h_px: list[tuple[int, int, int, int]] = []
+    hline_passes = [
+        (inv, max(32, page_w // 12), 0.10, 1.0),
+        (
+            adaptive_inv,
+            max(36, page_w // 50),
+            _HEADER_MARK_MIN_WIDTH_NORM,
+            _HEADER_MARK_MAX_Y_NORM,
+        ),
     ]
+    for source, kernel_width, min_width_norm, max_y_norm in hline_passes:
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_width, 1))
+        hlines = cv2.morphologyEx(source, cv2.MORPH_OPEN, h_kernel)
+        h_contours, _ = cv2.findContours(
+            hlines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for contour in h_contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if y / page_h > max_y_norm:
+                continue
+            if w / page_w < min_width_norm or h / page_h > 0.025:
+                continue
+            h_px.append((x, y, x + w, y + h))
     for x0, y0, x1, y1 in _merge_boxes_px(
         h_px,
         max_gap_px=max(12, page_w // 80),
@@ -667,6 +694,98 @@ def _add_sid_from_unused_header_mark(
     )
 
 
+def _add_fields_from_header_marks(
+    fields: list[DetectedFieldRegion],
+    primitives: list[LayoutPrimitive],
+    *,
+    page_w: int,
+    page_h: int,
+    first_question_y_px: int | None,
+) -> None:
+    """Infer missing student fields from short header rules when OCR misses labels."""
+
+    if any(field.field_kind == "name" for field in fields) and any(
+        field.field_kind == "sid" for field in fields
+    ):
+        return
+
+    header_bottom = min(
+        int(page_h * _HEADER_MARK_MAX_Y_NORM),
+        first_question_y_px if first_question_y_px is not None else page_h,
+    )
+    marks: list[tuple[int, int, int, int]] = []
+    for mark in _candidate_underlines(primitives, page_w, page_h):
+        x0, y0, x1, y1 = mark
+        width_norm = (x1 - x0) / page_w
+        height_norm = (y1 - y0) / page_h
+        if y0 > header_bottom or y0 < page_h * 0.025:
+            continue
+        if not (
+            _HEADER_MARK_MIN_WIDTH_NORM
+            <= width_norm
+            <= _HEADER_MARK_MAX_WIDTH_NORM
+        ):
+            continue
+        if height_norm > 0.025:
+            continue
+        marks.append(mark)
+
+    if not marks:
+        return
+
+    existing_boxes = [
+        bbox_norm_to_px(field.crop_bbox_norm, page_w, page_h) for field in fields
+    ]
+
+    def overlaps_existing(mark: tuple[int, int, int, int]) -> bool:
+        mx0, my0, mx1, my1 = mark
+        mcx = (mx0 + mx1) / 2
+        mcy = (my0 + my1) / 2
+        for x0, y0, x1, y1 in existing_boxes:
+            if x0 <= mcx <= x1 and y0 <= mcy <= y1:
+                return True
+        return False
+
+    unused = [mark for mark in marks if not overlaps_existing(mark)]
+    if not unused:
+        return
+
+    def add_field(
+        field_kind: Literal["name", "sid"],
+        field_id: Literal["student_name", "student_id"],
+        mark: tuple[int, int, int, int],
+    ) -> None:
+        crop = _region_for_orphan_value_mark(mark, page_w=page_w, page_h=page_h)
+        fields.append(
+            DetectedFieldRegion(
+                field_id=field_id,
+                field_kind=field_kind,
+                page_number=1,
+                crop_bbox_norm=crop,
+                anchor_bbox_norm=None,
+                confidence=70.0,
+            )
+        )
+        existing_boxes.append(bbox_norm_to_px(crop, page_w, page_h))
+
+    if not any(field.field_kind == "name" for field in fields):
+        left_marks = [
+            mark for mark in unused if ((mark[0] + mark[2]) / 2) < page_w * 0.58
+        ]
+        if left_marks:
+            left_marks.sort(key=lambda b: (b[1], b[0]))
+            add_field("name", "student_name", left_marks[0])
+            unused = [mark for mark in unused if not overlaps_existing(mark)]
+
+    if not any(field.field_kind == "sid" for field in fields):
+        right_marks = [
+            mark for mark in unused if ((mark[0] + mark[2]) / 2) > page_w * 0.42
+        ]
+        if right_marks:
+            right_marks.sort(key=lambda b: (b[1], -b[2]))
+            add_field("sid", "student_id", right_marks[0])
+
+
 def _detect_fields(
     first_page_lines: list[PageTextLine],
     first_page_primitives: list[LayoutPrimitive],
@@ -713,6 +832,13 @@ def _detect_fields(
         page_h=page_h,
         first_question_y_px=first_question_y_px,
     )
+    _add_fields_from_header_marks(
+        out,
+        first_page_primitives,
+        page_w=page_w,
+        page_h=page_h,
+        first_question_y_px=first_question_y_px,
+    )
     return out
 
 
@@ -724,23 +850,35 @@ def _detect_title_region(
     first_question_y_px: int | None,
     fields: list[DetectedFieldRegion],
 ) -> DetectedTitleRegion | None:
-    """Detect the title block before fields or questions begin."""
+    """Detect the assignment title from the first-page header."""
 
-    cut_y = (
+    search_bottom = (
         first_question_y_px
         if first_question_y_px is not None
-        else int(page_h * 0.35)
+        else int(page_h * _TITLE_SEARCH_MAX_Y_NORM)
     )
-    for field in fields:
-        ax = field.anchor_bbox_norm or field.crop_bbox_norm
-        _, y, _, _ = ax
-        cut_y = min(cut_y, int(y * page_h))
+    search_bottom = min(search_bottom, int(page_h * _TITLE_SEARCH_MAX_Y_NORM))
+    field_boxes = [
+        bbox_norm_to_px(field.crop_bbox_norm, page_w, page_h) for field in fields
+    ]
+
+    def line_center_is_in_field(line: PageTextLine) -> bool:
+        x0, y0, x1, y1 = line.bbox_px
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2
+        for fx0, fy0, fx1, fy1 in field_boxes:
+            if fx0 <= cx <= fx1 and fy0 <= cy <= fy1:
+                return True
+        return False
+
     candidate_lines: list[PageTextLine] = []
     for line in first_page_lines:
         x0, y0, x1, y1 = line.bbox_px
-        if y0 > cut_y:
+        if y0 > search_bottom:
             continue
         if y1 < page_h * 0.015:
+            continue
+        if line_center_is_in_field(line):
             continue
         norms = [_normalize_token(word.text) for word in line.words]
         if any(_looks_like_name_label(n) or _looks_like_sid_label(n) for n in norms):
@@ -758,19 +896,28 @@ def _detect_title_region(
 
     def score(line: PageTextLine) -> float:
         x0, y0, x1, y1 = line.bbox_px
-        width = x1 - x0
-        height = y1 - y0
-        center_penalty = abs(((x0 + x1) / 2) - page_w / 2) / max(1, page_w) * 18.0
+        width_norm = (x1 - x0) / max(1, page_w)
+        height_norm = (y1 - y0) / max(1, page_h)
+        center_offset = abs(((x0 + x1) / 2) - page_w / 2) / max(1, page_w)
+        token_count = len(re.findall(r"[A-Za-z0-9]+", line.text))
+        long_line_penalty = max(0.0, width_norm - 0.50) * 90.0
+        verbose_penalty = max(0, token_count - 8) * 4.0
+        short_line_penalty = max(0.0, 0.08 - width_norm) * 80.0
         return (
             line.confidence
-            + width / page_w * 30.0
-            + height / page_h * 160.0
-            - center_penalty
+            + min(width_norm, 0.48) * 28.0
+            + height_norm * 140.0
+            - center_offset * 70.0
+            - long_line_penalty
+            - verbose_penalty
+            - short_line_penalty
             - y0 / page_h * 8.0
         )
 
     best = max(candidate_lines, key=score)
+    best_score = score(best)
     selected = [best]
+    max_title_line_gap = max(14, int(page_h * 0.010))
     for line in candidate_lines:
         if line is best:
             continue
@@ -778,15 +925,23 @@ def _detect_title_region(
             abs(line.bbox_px[1] - best.bbox_px[3]),
             abs(best.bbox_px[1] - line.bbox_px[3]),
         )
-        if vertical_gap <= max(35, int(page_h * 0.025)):
+        center_delta = abs(
+            ((line.bbox_px[0] + line.bbox_px[2]) / 2)
+            - ((best.bbox_px[0] + best.bbox_px[2]) / 2)
+        ) / max(1, page_w)
+        if (
+            vertical_gap <= max_title_line_gap
+            and center_delta <= 0.18
+            and score(line) >= best_score - 20.0
+        ):
             selected.append(line)
 
     bbox = _expand_px(
         _union_px([line.bbox_px for line in selected]),
         page_w=page_w,
         page_h=page_h,
-        pad_x=max(16, int(page_w * 0.035)),
-        pad_y=max(10, int(page_h * 0.015)),
+        pad_x=max(14, int(page_w * 0.025)),
+        pad_y=max(8, int(page_h * 0.006)),
     )
     return DetectedTitleRegion(
         page_number=1,
