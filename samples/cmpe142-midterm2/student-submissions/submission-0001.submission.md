@@ -40,12 +40,10 @@ score: ""
 
 - q4:
   - Question type: Free Response
-  - Prompt: 4. (2 points) the following function clears bit (makes 0) n (where bit 0 is the least significant bit) in a 64-bit page table entry. write the code to replace XXXX (DO NOT USE ANY SPACES!)
+  - Prompt: 4. (2 points) the following function clears bit (makes 0) n (where bit 0 is the least significant bit) in a 64-bit page table entry. write the code to replace XXXX (DO NOT USE ANY SPACES!) void clr_pte_bit(uint64_t *pte, n) { *pte = XXXX; } 1 Name: _Ben Davis_ ID: _13579110_ NO
   - Response image: ![q4 response](responses/submission-0001/q4.png)
   - Response text: |
-    void clr_pte_bit(uint64_t *pte, n) {
-    	*pte = XXXX;
-    }
+    13579110
   - Possible points: 
   - Points: 
   - Analysis: 

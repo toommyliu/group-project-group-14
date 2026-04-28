@@ -166,7 +166,9 @@
       "question_type": "free_response"
     }
   ],
-  "review_reasons": [],
+  "review_reasons": [
+    "q4: continuation_fallback_band"
+  ],
   "primitives_by_page": {
     "1": [
       {

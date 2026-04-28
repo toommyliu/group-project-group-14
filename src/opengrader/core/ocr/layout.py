@@ -105,6 +105,12 @@ _HEADER_MARK_MAX_Y_NORM = 0.22  # Restrict header field marks to the top 22% of 
 _HEADER_MARK_MIN_WIDTH_NORM = 0.06  # Ignore tiny line fragments and OCR noise.
 _HEADER_MARK_MAX_WIDTH_NORM = 0.45  # Exclude wide separators unlikely to be field blanks.
 _TITLE_SEARCH_MAX_Y_NORM = 0.34  # Keep title detection to the upper third of the page.
+_QUESTION_CONTINUATION_TRIGGER_Y_NORM = 0.70  # Only low-page questions may spill forward.
+_QUESTION_CONTINUATION_TOP_NORM = 0.04  # Skip scanner/header noise at the top edge.
+_QUESTION_CONTINUATION_MIN_HEIGHT_NORM = 0.06  # Avoid stitching tiny slivers.
+_QUESTION_CONTINUATION_MAX_BOX_TOP_NORM = 0.38  # Limit continuation boxes to page-top regions.
+_QUESTION_CONTINUATION_X_OVERLAP_MIN_RATIO = 0.45  # Require boxes to align with the question column.
+_QUESTION_CONTINUATION_PAGE_END_NORM = 0.965  # Leave footer/page-number area out of fallback bands.
 
 # Geometry helpers.
 
@@ -1009,10 +1015,171 @@ def _matched_question_box(
     return sorted(candidates, key=lambda item: item[0])[0][1]
 
 
+def _next_rendered_page(page_number: int, page_numbers: list[int]) -> int | None:
+    """Return the immediate rendered page after ``page_number``."""
+
+    for candidate in page_numbers:
+        if candidate > page_number:
+            return candidate
+    return None
+
+
+def _next_page_top_boundary(
+    page_number: int,
+    anchors_by_page: dict[int, list[_QuestionAnchor]],
+    dims: dict[int, tuple[int, int]],
+) -> float:
+    """Find the deterministic bottom bound for a top-of-page continuation."""
+
+    page_dims = dims.get(page_number)
+    if page_dims is None:
+        return _QUESTION_CONTINUATION_TOP_NORM
+
+    _, page_h = page_dims
+    anchors = anchors_by_page.get(page_number, [])
+    if not anchors:
+        return _QUESTION_CONTINUATION_PAGE_END_NORM
+
+    first_anchor = min(anchors, key=lambda a: (a.line_bbox_px[1], a.line_bbox_px[0]))
+    anchor_y = first_anchor.line_bbox_px[1] / max(1, page_h)
+    return min(
+        _QUESTION_CONTINUATION_PAGE_END_NORM,
+        max(_QUESTION_CONTINUATION_TOP_NORM, anchor_y - 0.02),
+    )
+
+
+def _x_overlap_ratio(
+    *,
+    ax0: float,
+    ax1: float,
+    bx0: float,
+    bx1: float,
+) -> float:
+    overlap = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+    smaller_width = max(1e-6, min(ax1 - ax0, bx1 - bx0))
+    return overlap / smaller_width
+
+
+def _top_continuation_box(
+    *,
+    primitives: list[LayoutPrimitive],
+    column_x0: float,
+    column_x1: float,
+    boundary_y: float,
+) -> list[float] | None:
+    """Select a printed answer box at the top of a continuation page."""
+
+    candidates: list[list[float]] = []
+    for primitive in primitives:
+        if primitive.kind != "box":
+            continue
+        x, y, w, h = primitive.bbox_norm
+        if w < 0.28 or h < _QUESTION_CONTINUATION_MIN_HEIGHT_NORM:
+            continue
+        if y > _QUESTION_CONTINUATION_MAX_BOX_TOP_NORM:
+            continue
+        if y <= 0.055 and h >= 0.72:
+            continue
+        box_bottom = y + h
+        if box_bottom > boundary_y:
+            continue
+        visible_top = max(y, _QUESTION_CONTINUATION_TOP_NORM)
+        visible_height = box_bottom - visible_top
+        if visible_height < _QUESTION_CONTINUATION_MIN_HEIGHT_NORM:
+            continue
+        if (
+            _x_overlap_ratio(
+                ax0=x,
+                ax1=x + w,
+                bx0=column_x0,
+                bx1=column_x1,
+            )
+            < _QUESTION_CONTINUATION_X_OVERLAP_MIN_RATIO
+        ):
+            continue
+        candidates.append([x, visible_top, w, visible_height])
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda box: (box[1], box[0]))
+    cluster = [candidates[0]]
+    cluster_bottom = candidates[0][1] + candidates[0][3]
+    for box in candidates[1:]:
+        x, y, w, h = box
+        if y - cluster_bottom > 0.025:
+            break
+        if (
+            _x_overlap_ratio(
+                ax0=x,
+                ax1=x + w,
+                bx0=column_x0,
+                bx1=column_x1,
+            )
+            < _QUESTION_CONTINUATION_X_OVERLAP_MIN_RATIO
+        ):
+            break
+        cluster.append(box)
+        cluster_bottom = max(cluster_bottom, y + h)
+
+    x0 = min(box[0] for box in cluster)
+    y0 = min(box[1] for box in cluster)
+    x1 = max(box[0] + box[2] for box in cluster)
+    y1 = max(box[1] + box[3] for box in cluster)
+    return _clamp_bbox_norm([x0, y0, x1 - x0, y1 - y0])
+
+
+def _continuation_segment_for_next_page(
+    *,
+    current_anchor: _QuestionAnchor,
+    next_page_number: int,
+    anchors_by_page: dict[int, list[_QuestionAnchor]],
+    primitives_by_page: dict[int, list[LayoutPrimitive]],
+    dims: dict[int, tuple[int, int]],
+    column_x0: float,
+    column_x1: float,
+    review_reasons: list[str] | None,
+) -> tuple[int, list[float]] | None:
+    page_dims = dims.get(next_page_number)
+    if page_dims is None:
+        return None
+
+    boundary_y = _next_page_top_boundary(next_page_number, anchors_by_page, dims)
+    box = _top_continuation_box(
+        primitives=primitives_by_page.get(next_page_number, []),
+        column_x0=column_x0,
+        column_x1=column_x1,
+        boundary_y=boundary_y,
+    )
+    if box is not None:
+        return next_page_number, box
+
+    height = boundary_y - _QUESTION_CONTINUATION_TOP_NORM
+    if height < _QUESTION_CONTINUATION_MIN_HEIGHT_NORM:
+        return None
+
+    if review_reasons is not None:
+        review_reasons.append(
+            f"q{current_anchor.question_number}: continuation_fallback_band"
+        )
+    return (
+        next_page_number,
+        _clamp_bbox_norm(
+            [
+                column_x0,
+                _QUESTION_CONTINUATION_TOP_NORM,
+                max(0.05, column_x1 - column_x0),
+                height,
+            ]
+        ),
+    )
+
+
 def _detect_questions(
     anchors: list[_QuestionAnchor],
     rendered_pages: dict[int, tuple[Image.Image, int, int]],
     primitives_by_page: dict[int, list[LayoutPrimitive]],
+    review_reasons: list[str] | None = None,
 ) -> list[DetectedQuestionRegion]:
     """Build question crops from anchors and structural boundaries."""
 
@@ -1026,6 +1193,10 @@ def _detect_questions(
     sorted_anchors = sorted(
         anchors, key=lambda a: (a.page_number, a.bbox_px[1], a.bbox_px[0])
     )
+    page_numbers = sorted(rendered_pages)
+    anchors_by_page: dict[int, list[_QuestionAnchor]] = {}
+    for anchor in sorted_anchors:
+        anchors_by_page.setdefault(anchor.page_number, []).append(anchor)
 
     questions: list[DetectedQuestionRegion] = []
     for idx, anchor in enumerate(sorted_anchors):
@@ -1037,25 +1208,22 @@ def _detect_questions(
 
         if next_anchor is not None and next_anchor.page_number == anchor.page_number:
             y1 = max(y0 + 0.03, (next_anchor.line_bbox_px[1] / page_h) - 0.02)
-        elif next_anchor is not None and next_anchor.page_number > anchor.page_number:
-            if y0 > 0.78:
-                y1 = 0.988
-                _, next_page_h = dims[next_anchor.page_number]
-                next_end = max(0.04, (next_anchor.line_bbox_px[1] / next_page_h) - 0.02)
-                if next_end > 0.08:
-                    continuation.append(
-                        (
-                            next_anchor.page_number,
-                            _clamp_bbox_norm(
-                                [
-                                    x0_default,
-                                    0.04,
-                                    x1_default - x0_default,
-                                    next_end - 0.04,
-                                ]
-                            ),
-                        )
-                    )
+        elif y0 >= _QUESTION_CONTINUATION_TRIGGER_Y_NORM:
+            y1 = 0.988
+            next_page_number = _next_rendered_page(anchor.page_number, page_numbers)
+            if next_page_number is not None:
+                segment = _continuation_segment_for_next_page(
+                    current_anchor=anchor,
+                    next_page_number=next_page_number,
+                    anchors_by_page=anchors_by_page,
+                    primitives_by_page=primitives_by_page,
+                    dims=dims,
+                    column_x0=x0_default,
+                    column_x1=x1_default,
+                    review_reasons=review_reasons,
+                )
+                if segment is not None:
+                    continuation.append(segment)
 
         x0 = x0_default
         x1 = x1_default
@@ -1179,6 +1347,7 @@ def scan_submission_layout(
         anchors,
         rendered_pages,
         primitives_by_page,
+        review_reasons=review_reasons,
     )
     for question in questions:
         _, _, w, h = question.crop_bbox_norm
