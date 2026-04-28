@@ -125,7 +125,10 @@ class GradeScreen(Vertical):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.index is None:
             return
-        if event.list_view.id == "rubric-list" and 0 <= event.index < self._rubric_count:
+        if (
+            event.list_view.id == "rubric-list"
+            and 0 <= event.index < self._rubric_count
+        ):
             self.post_message(self.RubricSelected(event.index))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:

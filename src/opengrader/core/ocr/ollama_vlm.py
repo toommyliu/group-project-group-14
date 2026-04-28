@@ -13,6 +13,7 @@ from .constants import SUBSCRIPT_TRANSLATION
 # https://docs.ollama.com/api/introduction
 # TODO: https://pydantic.dev/docs/ai/overview/ if we ever support multiple providers
 
+
 @dataclass(frozen=True)
 class OllamaVisionConfig:
     model: str = "qwen2.5vl:7b"
@@ -22,6 +23,7 @@ class OllamaVisionConfig:
 
 class OllamaVisionError(RuntimeError):
     pass
+
 
 _AVAILABLE_MODELS: set[tuple[str, str]] = set()
 
@@ -82,7 +84,6 @@ def _normalize_sid(value: str) -> str:
     return digits
 
 
-
 def _normalize_version(value: str | None) -> str | None:
     if value is None:
         return None
@@ -114,7 +115,9 @@ def list_available_models(config: OllamaVisionConfig) -> list[str]:
 
     models = parsed.get("models", [])
     if not isinstance(models, list):
-        raise OllamaVisionError("invalid Ollama model list response: models is not a list")
+        raise OllamaVisionError(
+            "invalid Ollama model list response: models is not a list"
+        )
 
     names: list[str] = []
     for model in models:
@@ -197,7 +200,7 @@ def extract_field_text(
             "The image may include the printed label 'Name'. Do not include the label. "
             "Do not infer, complete, correct, or invent a name. "
             "If the name is unreadable or not visible, return an empty string. "
-            "Return strict JSON only with this shape: {\"value\": \"...\"}."
+            'Return strict JSON only with this shape: {"value": "..."}.'
         )
     else:
         prompt = (
@@ -207,7 +210,7 @@ def extract_field_text(
             "Return only digits that are visibly present. "
             "Do not infer, complete, correct, or invent digits. "
             "If the ID is unreadable or not visible, return an empty string. "
-            "Return strict JSON only with this shape: {\"value\": \"...\"}."
+            'Return strict JSON only with this shape: {"value": "..."}.'
         )
 
     raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
@@ -243,8 +246,8 @@ def extract_title_metadata(
         "correct, or invent missing course, title, or version values. "
         "If a value is unreadable or absent, return an empty string for that value. "
         "Return strict JSON only with this shape: "
-        "{\"course_code\": \"\", \"assignment_title\": \"\", "
-        "\"assignment_version\": \"\", \"raw_title\": \"\"}. "
+        '{"course_code": "", "assignment_title": "", '
+        '"assignment_version": "", "raw_title": ""}. '
         "For assignment_version, preserve visible version markers such as (A), "
         "[B], Version C, suffix letters, or subscript-like letters/digits."
     )
@@ -294,7 +297,7 @@ def extract_question_prompt_and_answer(
         "If a word or symbol is uncertain, write [unclear]. "
         "If no handwritten answer is visible, return an empty answer string. "
         "Return strict JSON only with this shape: "
-        "{\"prompt\": \"...\", \"answer\": \"...\"}. "
+        '{"prompt": "...", "answer": "..."}. '
         "The prompt field should contain printed question text only. "
         "The answer field should contain the student's handwritten answer only."
     )

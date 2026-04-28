@@ -36,7 +36,9 @@ def _normalize_choices(raw_choices: Any, *, context: str) -> list[dict[str, str]
     if raw_choices is None:
         return []
     if not isinstance(raw_choices, list):
-        raise TypeError(f"{context}.choices must be a list, got {type(raw_choices).__name__}")
+        raise TypeError(
+            f"{context}.choices must be a list, got {type(raw_choices).__name__}"
+        )
 
     normalized: list[dict[str, str]] = []
     for i, raw_choice in enumerate(raw_choices):

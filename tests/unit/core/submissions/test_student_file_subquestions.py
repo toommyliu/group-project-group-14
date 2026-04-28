@@ -92,19 +92,25 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
     Image.new("RGB", (200, 90), color=(255, 255, 255)).save(q1a)
     Image.new("RGB", (200, 90), color=(255, 255, 255)).save(q1b)
 
-    def _fake_process_submission_pdf(*_args: object, **_kwargs: object) -> SubmissionResult:
+    def _fake_process_submission_pdf(
+        *_args: object, **_kwargs: object
+    ) -> SubmissionResult:
         return SubmissionResult(
             filename="student-0001.pdf",
             version_validated=True,
             fields=[
                 FieldExtractionResult(
                     field_id="student_name",
-                    ocr_result=OcrResult(text="Jane Student", confidence=99.0, bbox_px=(0, 0, 0, 0)),
+                    ocr_result=OcrResult(
+                        text="Jane Student", confidence=99.0, bbox_px=(0, 0, 0, 0)
+                    ),
                     validated=True,
                 ),
                 FieldExtractionResult(
                     field_id="student_id",
-                    ocr_result=OcrResult(text="123456789", confidence=99.0, bbox_px=(0, 0, 0, 0)),
+                    ocr_result=OcrResult(
+                        text="123456789", confidence=99.0, bbox_px=(0, 0, 0, 0)
+                    ),
                     validated=True,
                 ),
             ],
@@ -140,7 +146,9 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
     original_classify = student_file._classify_question_image_path
     try:
         student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file._split_question_response_image = _fake_split_question_response_image
+        student_file._split_question_response_image = (
+            _fake_split_question_response_image
+        )
         student_file._classify_question_image_path = _fake_classify_question_image_path
 
         split_result = student_file.build_student_submission_document(
@@ -151,7 +159,10 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             skip_ollama_qa=True,
         )
 
-        assert [q.question_id for q in split_result.document.questions] == ["q1a", "q1b"]
+        assert [q.question_id for q in split_result.document.questions] == [
+            "q1a",
+            "q1b",
+        ]
         assert [q.question_type for q in split_result.document.questions] == [
             MULTIPLE_CHOICE,
             FREE_RESPONSE,
@@ -193,20 +204,26 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
     Image.new("RGB", (500, 120), color=(255, 255, 255)).save(name_crop)
     Image.new("RGB", (500, 120), color=(255, 255, 255)).save(sid_crop)
 
-    def _fake_process_submission_pdf(*_args: object, **_kwargs: object) -> SubmissionResult:
+    def _fake_process_submission_pdf(
+        *_args: object, **_kwargs: object
+    ) -> SubmissionResult:
         return SubmissionResult(
             filename="student-0002.pdf",
             version_validated=True,
             fields=[
                 FieldExtractionResult(
                     field_id="student_name",
-                    ocr_result=OcrResult(text="fallback name", confidence=55.0, bbox_px=(0, 0, 0, 0)),
+                    ocr_result=OcrResult(
+                        text="fallback name", confidence=55.0, bbox_px=(0, 0, 0, 0)
+                    ),
                     validated=False,
                     crop_path=str(name_crop),
                 ),
                 FieldExtractionResult(
                     field_id="student_id",
-                    ocr_result=OcrResult(text="11111", confidence=55.0, bbox_px=(0, 0, 0, 0)),
+                    ocr_result=OcrResult(
+                        text="11111", confidence=55.0, bbox_px=(0, 0, 0, 0)
+                    ),
                     validated=False,
                     crop_path=str(sid_crop),
                 ),
@@ -309,7 +326,9 @@ def test_build_student_submission_document_uses_primary_field_crop_for_ollama_fi
     Image.new("RGB", (500, 120), color=(255, 255, 255)).save(name_crop)
     Image.new("RGB", (500, 120), color=(255, 255, 255)).save(sid_crop)
 
-    def _fake_process_submission_pdf(*_args: object, **_kwargs: object) -> SubmissionResult:
+    def _fake_process_submission_pdf(
+        *_args: object, **_kwargs: object
+    ) -> SubmissionResult:
         return SubmissionResult(
             filename="student-0003.pdf",
             version_validated=True,

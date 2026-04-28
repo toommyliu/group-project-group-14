@@ -95,22 +95,38 @@ class _QuestionAnchor:
     confidence: float
 
 
-_QUESTION_TOKEN_RE = re.compile(r"^(\d{1,3})[\.)]?$") # Match standalone question numbers like "1.", "2)" or "3".
-_QUESTION_Q_RE = re.compile(r"^q(?:uestion)?\s*(\d{1,3})[\.)]?$", re.IGNORECASE) # Match "q7", "Q 12.", "question 99)", etc.
+_QUESTION_TOKEN_RE = re.compile(
+    r"^(\d{1,3})[\.)]?$"
+)  # Match standalone question numbers like "1.", "2)" or "3".
+_QUESTION_Q_RE = re.compile(
+    r"^q(?:uestion)?\s*(\d{1,3})[\.)]?$", re.IGNORECASE
+)  # Match "q7", "Q 12.", "question 99)", etc.
 
 
 # Heuristic thresholds for page positions.
 
-_HEADER_MARK_MAX_Y_NORM = 0.22  # Restrict header field marks to the top 22% of the page.
+_HEADER_MARK_MAX_Y_NORM = (
+    0.22  # Restrict header field marks to the top 22% of the page.
+)
 _HEADER_MARK_MIN_WIDTH_NORM = 0.06  # Ignore tiny line fragments and OCR noise.
-_HEADER_MARK_MAX_WIDTH_NORM = 0.45  # Exclude wide separators unlikely to be field blanks.
+_HEADER_MARK_MAX_WIDTH_NORM = (
+    0.45  # Exclude wide separators unlikely to be field blanks.
+)
 _TITLE_SEARCH_MAX_Y_NORM = 0.34  # Keep title detection to the upper third of the page.
-_QUESTION_CONTINUATION_TRIGGER_Y_NORM = 0.70  # Only low-page questions may spill forward.
+_QUESTION_CONTINUATION_TRIGGER_Y_NORM = (
+    0.70  # Only low-page questions may spill forward.
+)
 _QUESTION_CONTINUATION_TOP_NORM = 0.04  # Skip scanner/header noise at the top edge.
 _QUESTION_CONTINUATION_MIN_HEIGHT_NORM = 0.06  # Avoid stitching tiny slivers.
-_QUESTION_CONTINUATION_MAX_BOX_TOP_NORM = 0.38  # Limit continuation boxes to page-top regions.
-_QUESTION_CONTINUATION_X_OVERLAP_MIN_RATIO = 0.45  # Require boxes to align with the question column.
-_QUESTION_CONTINUATION_PAGE_END_NORM = 0.965  # Leave footer/page-number area out of fallback bands.
+_QUESTION_CONTINUATION_MAX_BOX_TOP_NORM = (
+    0.38  # Limit continuation boxes to page-top regions.
+)
+_QUESTION_CONTINUATION_X_OVERLAP_MIN_RATIO = (
+    0.45  # Require boxes to align with the question column.
+)
+_QUESTION_CONTINUATION_PAGE_END_NORM = (
+    0.965  # Leave footer/page-number area out of fallback bands.
+)
 
 # Geometry helpers.
 
@@ -710,7 +726,9 @@ def _add_sid_from_unused_header_mark(
         return
 
     name_bbox = bbox_norm_to_px(name_fields[0].crop_bbox_norm, page_w, page_h)
-    header_bottom = first_question_y_px if first_question_y_px is not None else int(page_h * 0.25)
+    header_bottom = (
+        first_question_y_px if first_question_y_px is not None else int(page_h * 0.25)
+    )
     candidates: list[tuple[float, tuple[int, int, int, int]]] = []
     for mark in _candidate_underlines(primitives, page_w, page_h):
         x0, y0, x1, y1 = mark
@@ -720,7 +738,9 @@ def _add_sid_from_unused_header_mark(
             continue
         if y0 > name_bbox[3] + page_h * 0.12:
             continue
-        if not (x0 >= name_bbox[2] - page_w * 0.02 or y0 > name_bbox[3] + page_h * 0.01):
+        if not (
+            x0 >= name_bbox[2] - page_w * 0.02 or y0 > name_bbox[3] + page_h * 0.01
+        ):
             continue
         width_norm = (x1 - x0) / page_w
         if width_norm < 0.10 or width_norm > 0.45:
@@ -777,9 +797,7 @@ def _add_fields_from_header_marks(
         if y0 > header_bottom or y0 < page_h * 0.025:
             continue
         if not (
-            _HEADER_MARK_MIN_WIDTH_NORM
-            <= width_norm
-            <= _HEADER_MARK_MAX_WIDTH_NORM
+            _HEADER_MARK_MIN_WIDTH_NORM <= width_norm <= _HEADER_MARK_MAX_WIDTH_NORM
         ):
             continue
         if height_norm > 0.025:
@@ -941,9 +959,7 @@ def _detect_title_region(
             continue
         # Keep metadata labels and first-question prompts from being promoted to
         # assignment titles.
-        if re.match(
-            r"^(?:q(?:uestion)?|problem)?\s*\d{1,3}[\.)]?\b", line.text, re.I
-        ):
+        if re.match(r"^(?:q(?:uestion)?|problem)?\s*\d{1,3}[\.)]?\b", line.text, re.I):
             continue
         if len(re.findall(r"[A-Za-z0-9]", line.text)) < 3:
             continue
@@ -1061,9 +1077,7 @@ def _matched_question_box(
         rel_y = (anchor_y - y) / max(h, 1e-6)
         if rel_y < -0.14 or rel_y > 0.42:
             continue
-        candidates.append(
-            (abs(anchor_y - y) + h * 0.3 - w * 0.06, primitive.bbox_norm)
-        )
+        candidates.append((abs(anchor_y - y) + h * 0.3 - w * 0.06, primitive.bbox_norm))
     if not candidates:
         return None
     # A matched answer box is stronger evidence than anchor-only spacing for the
@@ -1250,10 +1264,11 @@ def _detect_questions(
     if not anchors:
         return []
     dims = {
-        page: (page_w, page_h)
-        for page, (_, page_w, page_h) in rendered_pages.items()
+        page: (page_w, page_h) for page, (_, page_w, page_h) in rendered_pages.items()
     }
-    x0_default, x1_default = _estimate_question_x_bounds(anchors, primitives_by_page, dims)
+    x0_default, x1_default = _estimate_question_x_bounds(
+        anchors, primitives_by_page, dims
+    )
     sorted_anchors = sorted(
         anchors, key=lambda a: (a.page_number, a.bbox_px[1], a.bbox_px[0])
     )
@@ -1307,9 +1322,7 @@ def _detect_questions(
             else:
                 y1 = min(y1, max(y0 + 0.03, my + mh + 0.014))
 
-        crop_bbox = _clamp_bbox_norm(
-            [x0, y0, max(0.05, x1 - x0), max(0.03, y1 - y0)]
-        )
+        crop_bbox = _clamp_bbox_norm([x0, y0, max(0.05, x1 - x0), max(0.03, y1 - y0)])
         crop_px = bbox_norm_to_px(crop_bbox, page_w, page_h)
         crop = page_image.crop(crop_px)
         questions.append(
@@ -1433,9 +1446,7 @@ def save_layout_debug(
     layout: SubmissionLayout,
     rendered_pages: dict[int, tuple[Image.Image, int, int]],
     output_dir: str | Path,
-    question_crop_bboxes_by_page: dict[
-        int, list[tuple[str, tuple[int, int, int, int]]]
-    ]
+    question_crop_bboxes_by_page: dict[int, list[tuple[str, tuple[int, int, int, int]]]]
     | None = None,
 ) -> None:
     """Write scanner decisions as JSON plus page overlays."""

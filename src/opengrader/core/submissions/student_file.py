@@ -36,15 +36,13 @@ _TITLE_VERSION_EXPLICIT_RE = re.compile(r"(?i)\bversion\s*([A-Z0-9]+)\b")
 _TITLE_VERSION_SUFFIX_RE = re.compile(
     r"(?i)\b(?:midterm|exam|quiz|final|assignment|hw|homework)\s*\d*\s*([A-Z])\b"
 )
-_TITLE_VERSION_BRACKET_RE = re.compile(
-    r"[\(\[]\s*([A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*)\s*[\)\]]"
-)
+_TITLE_VERSION_BRACKET_RE = re.compile(r"[\(\[]\s*([A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*)\s*[\)\]]")
 
 _TOP_LEVEL_QUESTION_ID_RE = re.compile(r"^q\d+$")
 _SUBMISSION_QUESTION_RE = re.compile(r"^-\s+([^:\s]+):\s*$")
 _SUBMISSION_FIELD_RE = re.compile(r"^  -\s+([^:]+):\s*(.*)$")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-_MAX_SUBQUESTION_COUNT = 26 # A-Z
+_MAX_SUBQUESTION_COUNT = 26  # A-Z
 _SUBQUESTION_MIN_WIDTH_NORM = 0.45
 _SUBQUESTION_MIN_HEIGHT_NORM = 0.08
 _SUBQUESTION_MAX_X_SPREAD_NORM = 0.08
@@ -120,7 +118,9 @@ def _render_submission_float(value: float | None) -> str:
     return f"{value:g}"
 
 
-def _parse_student_submission_frontmatter(lines: list[str]) -> tuple[dict[str, str], int]:
+def _parse_student_submission_frontmatter(
+    lines: list[str],
+) -> tuple[dict[str, str], int]:
     if len(lines) < 2 or lines[0].strip() != "---":
         return {}, 0
 
@@ -910,7 +910,9 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             else ""
         )
         lines.append(f"- {question.question_id}:")
-        lines.append(f"  - Question type: {_format_question_type(question.question_type)}")
+        lines.append(
+            f"  - Question type: {_format_question_type(question.question_type)}"
+        )
         lines.append(f"  - Prompt: {points_label}{question.prompt}")
 
         if question.response_image_path:

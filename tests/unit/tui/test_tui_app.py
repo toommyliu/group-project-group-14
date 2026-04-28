@@ -310,9 +310,7 @@ def test_qa_picker_move_binding_label_tracks_active_pane() -> None:
                 )
                 is True
             )
-            assert (
-                app.screen.active_bindings["j"].binding.description == "Next Student"
-            )
+            assert app.screen.active_bindings["j"].binding.description == "Next Student"
 
     asyncio.run(run())
 

@@ -54,8 +54,7 @@ def test_single_keymap_merges_standard_and_vim_navigation_keys() -> None:
     assert bindings_by_command[InputCommand.QA_MOVE_UP].key_display == "k/up"
     assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].keys == "j,down"
     assert (
-        bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].key_display
-        == "j/down"
+        bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].key_display == "j/down"
     )
     assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_UP].keys == "k,up"
     assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_UP].key_display == "k/up"
@@ -63,6 +62,5 @@ def test_single_keymap_merges_standard_and_vim_navigation_keys() -> None:
     assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].key_display == "j/right"
     assert bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].keys == "k,left"
     assert (
-        bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display
-        == "k/left"
+        bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display == "k/left"
     )

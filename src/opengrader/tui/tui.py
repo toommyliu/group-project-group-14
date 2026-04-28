@@ -92,9 +92,7 @@ class TuiApp(App):
     ) -> None:
         self.grade_controller.on_qa_highlighted(event.item)
 
-    def on_qa_picker_screen_qa_selected(
-        self, event: QAPickerScreen.QASelected
-    ) -> None:
+    def on_qa_picker_screen_qa_selected(self, event: QAPickerScreen.QASelected) -> None:
         self.grade_controller.on_qa_selected(event.item)
 
     def on_qa_picker_screen_q_a_selected(
@@ -102,9 +100,7 @@ class TuiApp(App):
     ) -> None:
         self.grade_controller.on_qa_selected(event.item)
 
-    def on_qapicker_screen_qaselected(
-        self, event: QAPickerScreen.QASelected
-    ) -> None:
+    def on_qapicker_screen_qaselected(self, event: QAPickerScreen.QASelected) -> None:
         self.grade_controller.on_qa_selected(event.item)
 
     def on_grade_screen_rubric_selected(

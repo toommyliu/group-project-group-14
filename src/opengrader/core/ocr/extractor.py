@@ -162,7 +162,6 @@ class _QuestionMarker:
     has_points_hint: bool
 
 
-
 def _normalize_name_text(raw: str) -> str:
     """Clean OCR output into a plausible human name string."""
 
@@ -288,9 +287,8 @@ def _trim_extent_by_gap(
             after_count = len(active) - before_count
             before_span = int(active[i]) - start
             after_span = end - int(active[i + 1])
-            if (
-                before_count <= max(3, int(after_count * 0.10))
-                and before_span < max(20, after_span * 0.15)
+            if before_count <= max(3, int(after_count * 0.10)) and before_span < max(
+                20, after_span * 0.15
             ):
                 start = int(active[i + 1])
             break
@@ -304,9 +302,8 @@ def _trim_extent_by_gap(
             before_count = before_idx + 1
             after_span = end - int(active[i + 1])
             before_span = int(active[i]) - start
-            if (
-                after_count <= max(3, int(before_count * 0.10))
-                and after_span < max(20, before_span * 0.15)
+            if after_count <= max(3, int(before_count * 0.10)) and after_span < max(
+                20, before_span * 0.15
             ):
                 end = int(active[i])
             break
@@ -428,12 +425,17 @@ def _trim_question_region_once_with_bbox(
         content_mask[:, :gutter_right] = 0
 
     gutter_left_r = region.width
-    for col_idx in range(region.width - 1, max(0, region.width - _GUTTER_SCAN_WIDTH) - 1, -1):
+    for col_idx in range(
+        region.width - 1, max(0, region.width - _GUTTER_SCAN_WIDTH) - 1, -1
+    ):
         col_fill = np.count_nonzero(content_mask[:, col_idx]) / max(1, region.height)
         if col_fill >= _GUTTER_FILL_THRESHOLD:
             gutter_left_r = col_idx
         else:
-            if gutter_left_r < region.width and (region.width - 1 - col_idx) - (region.width - gutter_left_r) <= 3:
+            if (
+                gutter_left_r < region.width
+                and (region.width - 1 - col_idx) - (region.width - gutter_left_r) <= 3
+            ):
                 continue
             break
     if gutter_left_r < region.width:
@@ -519,14 +521,16 @@ def _trim_question_region_once_with_bbox(
         x, y, w, h, area = stats[label]
         if area < _MIN_COMPONENT_AREA:
             continue
-        if (
-            w >= int(region.width * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
-            and h <= max(12, int(region.height * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM))
+        if w >= int(
+            region.width * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM
+        ) and h <= max(
+            12, int(region.height * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM)
         ):
             continue
-        if (
-            h >= int(region.height * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
-            and w <= max(12, int(region.width * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM))
+        if h >= int(
+            region.height * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM
+        ) and w <= max(
+            12, int(region.width * QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM)
         ):
             continue
         if (
@@ -541,7 +545,10 @@ def _trim_question_region_once_with_bbox(
             and h >= int(region.height * 0.2)
         ):
             continue
-        if w < QUESTION_TRIM_MIN_COMPONENT_WIDTH and h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT:
+        if (
+            w < QUESTION_TRIM_MIN_COMPONENT_WIDTH
+            and h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT
+        ):
             continue
         # Keep likely handwriting/OCR text while excluding leftover rules and
         # edge fragments that morphology did not fully remove.
@@ -649,7 +656,9 @@ def _question_final_crop_bbox_px(
         page_h=page_h,
     )
 
+
 # TODO: this can be shared
+
 
 def _safe_image_to_data(
     image: Image.Image,
@@ -1154,8 +1163,12 @@ def _value_bbox_to_field_slice_px(
     value_w = max(1, vx1 - vx0)
     value_h = max(1, vy1 - vy0)
 
-    pad_left = max(int(round(page_w * FIELD_SLICE_PAD_LEFT_NORM)), int(round(value_w * 0.20)))
-    pad_right = max(int(round(page_w * FIELD_SLICE_PAD_RIGHT_NORM)), int(round(value_w * 0.42)))
+    pad_left = max(
+        int(round(page_w * FIELD_SLICE_PAD_LEFT_NORM)), int(round(value_w * 0.20))
+    )
+    pad_right = max(
+        int(round(page_w * FIELD_SLICE_PAD_RIGHT_NORM)), int(round(value_w * 0.42))
+    )
 
     x0 = vx0 - pad_left
     x1 = vx1 + pad_right
@@ -1174,7 +1187,9 @@ def _value_bbox_to_field_slice_px(
         x0 = int(round(center_x - half * 0.95))
         x1 = int(round(center_x + half * 1.05))
 
-    top_pad = max(int(round(value_h * FIELD_SLICE_TOP_PAD_FACTOR)), int(round(page_h * 0.01)))
+    top_pad = max(
+        int(round(value_h * FIELD_SLICE_TOP_PAD_FACTOR)), int(round(page_h * 0.01))
+    )
     bottom_pad = max(
         int(round(value_h * FIELD_SLICE_BOTTOM_PAD_FACTOR)),
         int(round(page_h * 0.008)),
@@ -1241,7 +1256,9 @@ def _label_to_field_bbox_px(
     return _value_bbox_to_field_slice_px(label_bbox_px, page_w=page_w, page_h=page_h)
 
 
-def _detect_header_underlines(page_image: Image.Image) -> list[tuple[int, int, int, int]]:
+def _detect_header_underlines(
+    page_image: Image.Image,
+) -> list[tuple[int, int, int, int]]:
     """Detect horizontal header underlines that can represent metadata blanks."""
 
     gray = np.array(page_image.convert("L"))
@@ -1288,7 +1305,9 @@ def _detect_header_underlines(page_image: Image.Image) -> list[tuple[int, int, i
 
         px0, py0, px1, py1 = merged[-1]
         x0, y0, x1, y1 = bbox
-        same_row = abs(((py0 + py1) // 2) - ((y0 + y1) // 2)) <= max(10, int(page_h * 0.01))
+        same_row = abs(((py0 + py1) // 2) - ((y0 + y1) // 2)) <= max(
+            10, int(page_h * 0.01)
+        )
         overlaps_horizontally = x0 <= px1 + max(20, int(page_w * 0.02))
         if same_row and overlaps_horizontally:
             merged[-1] = (min(px0, x0), min(py0, y0), max(px1, x1), max(py1, y1))
@@ -1414,7 +1433,9 @@ def _detect_dynamic_field_slices(
             used_underline_indices.add(underline_idx)
         else:
             out["name"] = {
-                "primary": _label_to_field_bbox_px(label_bbox, page_w, page_h, boxes_norm)
+                "primary": _label_to_field_bbox_px(
+                    label_bbox, page_w, page_h, boxes_norm
+                )
             }
 
     sid_label = _find_student_id_label(page_words)
@@ -1437,7 +1458,9 @@ def _detect_dynamic_field_slices(
             used_underline_indices.add(underline_idx)
         else:
             out["sid"] = {
-                "primary": _label_to_field_bbox_px(sid_label, page_w, page_h, boxes_norm)
+                "primary": _label_to_field_bbox_px(
+                    sid_label, page_w, page_h, boxes_norm
+                )
             }
 
     parsed_fields = _extract_header_field_values(page_words)
@@ -1486,7 +1509,9 @@ def _detect_dynamic_field_slices(
                     page_h=page_h,
                 )
                 used_underline_indices.add(idx)
-                ordered_underlines = [item for item in ordered_underlines if item[0] != idx]
+                ordered_underlines = [
+                    item for item in ordered_underlines if item[0] != idx
+                ]
 
         if "sid" not in out:
             sid_candidate: tuple[int, tuple[int, int, int, int]] | None = None
@@ -1720,7 +1745,10 @@ def process_submission_pdf(
     submission_dir.mkdir(parents=True, exist_ok=True)
     field_crop_dir = submission_dir / "field_crops"
     field_crop_hoist_dir = Path(output_dir) / "field_crops" / path.stem
-    if layout.title_region is not None and layout.title_region.page_number in rendered_pages:
+    if (
+        layout.title_region is not None
+        and layout.title_region.page_number in rendered_pages
+    ):
         page_image, page_w, page_h = rendered_pages[layout.title_region.page_number]
         title_crop = crop_region(
             page_image,

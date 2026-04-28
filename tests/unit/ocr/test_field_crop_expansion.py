@@ -90,13 +90,17 @@ def test_detect_dynamic_field_regions_falls_back_to_line_parsing() -> None:
         ),
     ]
 
-    regions = extractor._detect_dynamic_field_regions(words, page_w, page_h, boxes_norm=[])
+    regions = extractor._detect_dynamic_field_regions(
+        words, page_w, page_h, boxes_norm=[]
+    )
 
     assert "name" in regions
     assert "sid" in regions
 
 
-def test_detect_dynamic_field_regions_uses_header_underlines_when_label_ocr_is_missing() -> None:
+def test_detect_dynamic_field_regions_uses_header_underlines_when_label_ocr_is_missing() -> (
+    None
+):
     page_w = 2000
     page_h = 3000
     image = Image.new("RGB", (page_w, page_h), color=(255, 255, 255))

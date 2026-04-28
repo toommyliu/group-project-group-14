@@ -116,7 +116,9 @@ def test_process_submission_pdf_preserves_layout_multiple_choice_vote(
         )
 
     monkeypatch.setattr(extractor, "scan_submission_layout", _fake_scan_layout)
-    monkeypatch.setattr(extractor, "classify_question_image", lambda _image: FREE_RESPONSE)
+    monkeypatch.setattr(
+        extractor, "classify_question_image", lambda _image: FREE_RESPONSE
+    )
 
     result = process_submission_pdf(
         pdf_path=pdf_path,
