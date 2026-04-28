@@ -124,13 +124,13 @@ $foreground: #E4E4E4EB;
     width: 1;
     height: 1fr;
     color: $text-muted;
-    background: transparent;
+    background: $surface-lighten-1;
 }
 
 .grade-screen__resize-handle:hover,
 .grade-screen__resize-handle--dragging {
     color: $accent;
-    background: transparent;
+    background: $accent;
 }
 
 #grade-student-name,

@@ -16,6 +16,9 @@ class _RubricListItem(ListItem):
 
 
 class _SidebarResizeHandle(Static):
+    # Don't allow text selection.
+    ALLOW_SELECT = False
+
     def __init__(self) -> None:
         super().__init__(
             " ",
@@ -25,6 +28,7 @@ class _SidebarResizeHandle(Static):
         self._dragging = False
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
+        """Start dragging resize handle on left click."""
         if event.button != 1:
             return
         self._dragging = True
@@ -165,7 +169,7 @@ class GradeScreen(Vertical):
         desired_width = (
             workspace.region.x + workspace.size.width - int(round(screen_x))
         )
-        desired_width -= max(1, handle.size.width)
+        desired_width -= max(1, round(handle.size.width / 2))
         self.set_sidebar_width(desired_width)
 
     def set_sidebar_width(self, width: int) -> None:
