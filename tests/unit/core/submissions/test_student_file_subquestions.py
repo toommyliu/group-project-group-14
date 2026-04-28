@@ -130,25 +130,16 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         assert image_path == q1
         return [("q1a", q1a), ("q1b", q1b)]
 
-    def _fake_ocr_image_text(path: str | Path, _config: OcrConfig) -> str:
-        return Path(path).stem
-
     def _fake_classify_question_image_path(image_path: Path) -> str:
         if image_path == q1a:
             return MULTIPLE_CHOICE
         return FREE_RESPONSE
 
     original_process = student_file.process_submission_pdf
-    original_extract_title = student_file.extract_title_text_from_submission
-    original_ocr_image_text = student_file.ocr_image_text
     original_split = student_file._split_question_response_image
     original_classify = student_file._classify_question_image_path
     try:
         student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file.extract_title_text_from_submission = (
-            lambda *_args, **_kwargs: "CMPE 195: Homework 1 (A)"
-        )
-        student_file.ocr_image_text = _fake_ocr_image_text
         student_file._split_question_response_image = _fake_split_question_response_image
         student_file._classify_question_image_path = _fake_classify_question_image_path
 
@@ -157,6 +148,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             output_dir=output_dir,
             ocr_config=OcrConfig(),
             split_subquestions=True,
+            skip_ollama_qa=True,
         )
 
         assert [q.question_id for q in split_result.document.questions] == ["q1a", "q1b"]
@@ -172,6 +164,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             output_dir=output_dir,
             ocr_config=OcrConfig(),
             split_subquestions=False,
+            skip_ollama_qa=True,
         )
 
         assert [q.question_id for q in no_split_result.document.questions] == ["q1"]
@@ -179,8 +172,6 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         assert split_call_count["count"] == 0
     finally:
         student_file.process_submission_pdf = original_process
-        student_file.extract_title_text_from_submission = original_extract_title
-        student_file.ocr_image_text = original_ocr_image_text
         student_file._split_question_response_image = original_split
         student_file._classify_question_image_path = original_classify
 
@@ -249,14 +240,10 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         return "State Big-O complexity.", "O(n log n)"
 
     original_process = student_file.process_submission_pdf
-    original_extract_title = student_file.extract_title_text_from_submission
     original_extract_field_text = student_file.extract_field_text
     original_extract_qa = student_file.extract_question_prompt_and_answer
     try:
         student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file.extract_title_text_from_submission = (
-            lambda *_args, **_kwargs: "CMPE 195: Homework 2 (B)"
-        )
         student_file.extract_field_text = _fake_extract_field_text
         student_file.extract_question_prompt_and_answer = (
             _fake_extract_question_prompt_and_answer
@@ -267,7 +254,6 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
             output_dir=output_dir,
             ocr_config=OcrConfig(),
             split_subquestions=False,
-            text_backend="ollama",
             ollama_config=OllamaVisionConfig(model="custom-model:latest"),
         )
 
@@ -277,7 +263,6 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         assert result.document.questions[0].response_text == "O(n log n)"
     finally:
         student_file.process_submission_pdf = original_process
-        student_file.extract_title_text_from_submission = original_extract_title
         student_file.extract_field_text = original_extract_field_text
         student_file.extract_question_prompt_and_answer = original_extract_qa
 
@@ -307,7 +292,7 @@ def test_render_student_submission_markdown_includes_question_type() -> None:
     assert "- q1:\n  - Question type: Multiple Choice\n  - Prompt:" in markdown
 
 
-def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
+def test_build_student_submission_document_uses_primary_field_crop_for_ollama_fields(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
@@ -318,12 +303,10 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
 
     q1 = response_dir / "q1.png"
     name_crop = field_dir / "name_p1.png"
-    name_focus_crop = field_dir / "name_p1_focus.png"
     sid_crop = field_dir / "sid_p1.png"
 
     Image.new("RGB", (300, 160), color=(255, 255, 255)).save(q1)
     Image.new("RGB", (500, 120), color=(255, 255, 255)).save(name_crop)
-    Image.new("RGB", (360, 120), color=(255, 255, 255)).save(name_focus_crop)
     Image.new("RGB", (500, 120), color=(255, 255, 255)).save(sid_crop)
 
     def _fake_process_submission_pdf(*_args: object, **_kwargs: object) -> SubmissionResult:
@@ -360,33 +343,25 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
         config: OllamaVisionConfig,
     ) -> str:
         _ = field_kind, config
-        if Path(image_path).name.endswith("_focus.png"):
+        if Path(image_path) == name_crop:
             return "Taylor Student"
         return "name"
 
     original_process = student_file.process_submission_pdf
-    original_extract_title = student_file.extract_title_text_from_submission
     original_extract_field_text = student_file.extract_field_text
-    original_ocr_image_text = student_file.ocr_image_text
     try:
         student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file.extract_title_text_from_submission = (
-            lambda *_args, **_kwargs: "CMPE 195: Homework 3 (C)"
-        )
         student_file.extract_field_text = _fake_extract_field_text
-        student_file.ocr_image_text = lambda *_args, **_kwargs: "local OCR text"
 
         result = student_file.build_student_submission_document(
             pdf_path=tmp_path / "student-0003.pdf",
             output_dir=output_dir,
             ocr_config=OcrConfig(),
-            text_backend="ollama",
             ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+            skip_ollama_qa=True,
         )
 
         assert result.document.student_name == "Taylor Student"
     finally:
         student_file.process_submission_pdf = original_process
-        student_file.extract_title_text_from_submission = original_extract_title
         student_file.extract_field_text = original_extract_field_text
-        student_file.ocr_image_text = original_ocr_image_text
