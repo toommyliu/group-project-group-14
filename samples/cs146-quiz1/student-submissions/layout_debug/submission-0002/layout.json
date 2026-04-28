@@ -66,9 +66,19 @@
         0.1541,
         0.7034,
         0.7859,
-        0.2616
+        0.2846
       ],
-      "continuation_segments": [],
+      "continuation_segments": [
+        [
+          2,
+          [
+            0.1541,
+            0.04,
+            0.7859,
+            0.0732
+          ]
+        ]
+      ],
       "confidence": 92.7,
       "question_type": "free_response"
     },
@@ -116,7 +126,8 @@
     }
   ],
   "review_reasons": [
-    "student_name_region_missing"
+    "student_name_region_missing",
+    "q3: continuation_fallback_band"
   ],
   "primitives_by_page": {
     "1": [

@@ -34,7 +34,7 @@ score: ""
   - Prompt: 3. (10 pts) What is the least significant bit (LSB) of the binary number 1101 [B]?
   - Response image: ![q3 response](responses/submission-0002/q3.png)
   - Response text: |
-    1
+    no
   - Possible points: 
   - Points: 
   - Analysis: 

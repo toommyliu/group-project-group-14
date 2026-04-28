@@ -84,9 +84,19 @@
         0.1535,
         0.7115,
         0.7865,
-        0.2535
+        0.2765
       ],
-      "continuation_segments": [],
+      "continuation_segments": [
+        [
+          2,
+          [
+            0.1535,
+            0.04,
+            0.7865,
+            0.0632
+          ]
+        ]
+      ],
       "confidence": 95.3,
       "question_type": "free_response"
     },
@@ -133,7 +143,9 @@
       "question_type": "free_response"
     }
   ],
-  "review_reasons": [],
+  "review_reasons": [
+    "q3: continuation_fallback_band"
+  ],
   "primitives_by_page": {
     "1": [
       {
