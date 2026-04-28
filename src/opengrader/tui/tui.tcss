@@ -93,3 +93,71 @@ $foreground: #E4E4E4EB;
     padding: 0 1;
     height: 1;
 }
+
+#grade-workspace {
+    height: 1fr;
+}
+
+#response-viewer {
+    width: 1fr;
+    height: 1fr;
+    background: #101010;
+    scrollbar-size: 1 1;
+}
+
+#response-viewer Image {
+    width: 100%;
+    height: auto;
+}
+
+#grade-sidebar {
+    width: 42%;
+    min-width: 36;
+    max-width: 54;
+    height: 1fr;
+    padding: 0 1;
+    background: $background;
+    scrollbar-size: 1 1;
+}
+
+.grade-screen__resize-handle {
+    width: 1;
+    height: 1fr;
+    color: $text-muted;
+    background: transparent;
+}
+
+.grade-screen__resize-handle:hover,
+.grade-screen__resize-handle--dragging {
+    color: $accent;
+    background: transparent;
+}
+
+#grade-student-name,
+#total-grade-label,
+#grade-progress {
+    height: auto;
+}
+
+#question-context {
+    height: auto;
+    max-height: 18;
+    margin-bottom: 1;
+}
+
+#rubric-list {
+    height: auto;
+    max-height: 10;
+    background: transparent;
+}
+
+#question-comment {
+    width: 100%;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+#db-status {
+    height: auto;
+    min-height: 1;
+}

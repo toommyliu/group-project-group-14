@@ -115,6 +115,33 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
     asyncio.run(run())
 
 
+def test_grade_sidebar_width_is_bounded_when_resized() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            sidebar = grade_screen.query_one("#grade-sidebar")
+
+            grade_screen.set_sidebar_width(1)
+            await pilot.pause()
+            assert int(sidebar.styles.width.value) == grade_screen.SIDEBAR_MIN_WIDTH
+
+            grade_screen.set_sidebar_width(10_000)
+            await pilot.pause()
+            assert int(sidebar.styles.width.value) <= grade_screen.SIDEBAR_MAX_WIDTH
+
+    asyncio.run(run())
+
+
 def test_happy_path_selects_qa_then_opens_grading() -> None:
     async def run() -> None:
         app = TuiApp(

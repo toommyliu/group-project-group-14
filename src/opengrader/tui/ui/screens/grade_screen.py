@@ -1,3 +1,4 @@
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
@@ -14,7 +15,59 @@ class _RubricListItem(ListItem):
         super().__init__(self.label)
 
 
+class _SidebarResizeHandle(Static):
+    def __init__(self) -> None:
+        super().__init__(
+            " ",
+            id="grade-sidebar-resize-handle",
+            classes="grade-screen__resize-handle",
+        )
+        self._dragging = False
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button != 1:
+            return
+        self._dragging = True
+        self.capture_mouse()
+        self.add_class("grade-screen__resize-handle--dragging")
+        self._resize(event.screen_x)
+        event.stop()
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if not self._dragging:
+            return
+        self._resize(event.screen_x)
+        event.stop()
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if not self._dragging:
+            return
+        self._dragging = False
+        self.release_mouse()
+        self.remove_class("grade-screen__resize-handle--dragging")
+        self._resize(event.screen_x)
+        event.stop()
+
+    def on_leave(self, _event: events.Leave) -> None:
+        if self._dragging:
+            return
+        self.remove_class("grade-screen__resize-handle--dragging")
+
+    def _resize(self, screen_x: float | None) -> None:
+        if screen_x is None:
+            return
+        screen = self.parent
+        while screen is not None and not isinstance(screen, GradeScreen):
+            screen = screen.parent
+        if isinstance(screen, GradeScreen):
+            screen.resize_sidebar_to_screen_x(screen_x)
+
+
 class GradeScreen(Vertical):
+    SIDEBAR_MIN_WIDTH = 32
+    SIDEBAR_MAX_WIDTH = 72
+    RESPONSE_MIN_WIDTH = 28
+
     class RubricSelected(Message):
         def __init__(self, option_index: int) -> None:
             self.option_index = option_index
@@ -46,6 +99,8 @@ class GradeScreen(Vertical):
         yield Breadcrumb(id="grade-breadcrumb")
         with Horizontal(id="grade-workspace"):
             yield ResponseViewer(self._default_image_path, id="response-viewer")
+            # Invisible drag target for resizing the grading sidebar.
+            yield _SidebarResizeHandle()
             with VerticalScroll(id="grade-sidebar"):
                 yield Label("", id="grade-student-name")
                 yield Label("Score: 100.0", id="total-grade-label")
@@ -103,6 +158,38 @@ class GradeScreen(Vertical):
 
     def set_progress(self, text: str) -> None:
         self.query_one("#grade-progress", Label).update(text)
+
+    def resize_sidebar_to_screen_x(self, screen_x: float) -> None:
+        workspace = self.query_one("#grade-workspace", Horizontal)
+        handle = self.query_one("#grade-sidebar-resize-handle", _SidebarResizeHandle)
+        desired_width = (
+            workspace.region.x + workspace.size.width - int(round(screen_x))
+        )
+        desired_width -= max(1, handle.size.width)
+        self.set_sidebar_width(desired_width)
+
+    def set_sidebar_width(self, width: int) -> None:
+        sidebar = self.query_one("#grade-sidebar", VerticalScroll)
+        sidebar.styles.width = self._bounded_sidebar_width(width)
+        self.refresh(layout=True)
+
+    def _bounded_sidebar_width(self, width: int) -> int:
+        try:
+            workspace = self.query_one("#grade-workspace", Horizontal)
+            handle = self.query_one(
+                "#grade-sidebar-resize-handle",
+                _SidebarResizeHandle,
+            )
+            available = workspace.size.width - max(1, handle.size.width)
+        except Exception:
+            available = self.SIDEBAR_MAX_WIDTH + self.RESPONSE_MIN_WIDTH
+
+        upper_bound = min(
+            self.SIDEBAR_MAX_WIDTH,
+            max(self.SIDEBAR_MIN_WIDTH, available - self.RESPONSE_MIN_WIDTH),
+        )
+        lower_bound = min(self.SIDEBAR_MIN_WIDTH, upper_bound)
+        return max(lower_bound, min(int(width), upper_bound))
 
     def _sync_rubric_options(self, current) -> None:
         rubric_list = self.query_one("#rubric-list", ListView)

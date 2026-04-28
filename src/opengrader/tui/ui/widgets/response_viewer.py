@@ -1,4 +1,3 @@
-import uuid
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -10,6 +9,8 @@ from textual_image.widget import Image
 class ResponseViewer(VerticalScroll):
     def __init__(self, image_path: str, *, id: str | None = None) -> None:
         self._image_path = image_path
+        self._image_widget: Image | None = None
+        self._status_widget: Static | None = None
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -19,14 +20,39 @@ class ResponseViewer(VerticalScroll):
         self.set_image_path(self._image_path)
 
     def set_image_path(self, image_path: str) -> None:
-        self._image_path = image_path
-        for child in list(self.children):
-            child.remove()
-
-        path = Path(image_path)
-        if not path.exists():
-            self.mount(Static(f"Image not found: {image_path}"))
+        if (
+            image_path == self._image_path
+            and self._image_widget is not None
+            and self._image_widget.is_attached
+        ):
             return
 
-        unique_id = f"resp-img-{uuid.uuid4().hex[:8]}"
-        self.mount(Image(image_path, id=unique_id))
+        self._image_path = image_path
+        path = Path(image_path)
+        if not path.exists():
+            self._remove_image_widget()
+            message = f"Image not found: {image_path}"
+            if self._status_widget is None or not self._status_widget.is_attached:
+                self._status_widget = Static(message, id="response-viewer-status")
+                self.mount(self._status_widget)
+                return
+            self._status_widget.update(message)
+            return
+
+        self._remove_status_widget()
+        if self._image_widget is None or not self._image_widget.is_attached:
+            self._image_widget = Image(image_path, id="response-viewer-image")
+            self.mount(self._image_widget)
+            return
+
+        self._image_widget.image = image_path
+
+    def _remove_image_widget(self) -> None:
+        if self._image_widget is not None and self._image_widget.is_attached:
+            self._image_widget.remove()
+        self._image_widget = None
+
+    def _remove_status_widget(self) -> None:
+        if self._status_widget is not None and self._status_widget.is_attached:
+            self._status_widget.remove()
+        self._status_widget = None
