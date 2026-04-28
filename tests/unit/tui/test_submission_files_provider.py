@@ -17,7 +17,10 @@ def test_submission_files_provider_loads_students_and_questions() -> None:
     students = provider.list_students(course_id=1)
     seeds = provider.build_question_seeds(student_item_id=None)
 
-    assert [student.full_name for student in students] == ["Tommy Liu", "ine Bill Caray"]
+    assert [student.full_name for student in students] == [
+        "Tommy Liu",
+        "submission-0002.submission",
+    ]
     assert [seed.question_id for seed in seeds] == [
         "q1",
         "q2",

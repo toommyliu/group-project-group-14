@@ -81,7 +81,7 @@ def test_app_loads_file_backed_grading_queue() -> None:
             )
             assert _list_item_texts(student_list) == [
                 "Tommy Liu [0/11 graded]",
-                "ine Bill Caray [0/11 graded]",
+                "submission-0002.submission [0/11 graded]",
             ]
 
     asyncio.run(run())
