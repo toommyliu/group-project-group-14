@@ -66,7 +66,7 @@ class QAPickerScreen(Vertical):
                 yield Static("Highlight a QA to preview it.", id="qa-preview")
                 yield Static(
                     "j/k or up/down  Move\n"
-                    "tab            Switch pane\n"
+                    "tab/shift+tab  Switch pane\n"
                     "click or enter  Grade selected QA\n"
                     "escape          Back to assignments",
                     id="qa-keybinding-ref",
@@ -314,7 +314,7 @@ class QAPickerScreen(Vertical):
         if event.key == "enter":
             self.confirm()
             event.stop()
-        if event.key == "tab":
+        if event.key in ("tab", "shift+tab"):
             self.switch_active_pane()
             event.stop()
 

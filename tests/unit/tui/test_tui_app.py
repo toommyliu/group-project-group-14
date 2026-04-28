@@ -333,6 +333,57 @@ def test_tab_switches_between_question_and_student_panes() -> None:
     asyncio.run(run())
 
 
+def test_shift_tab_switches_between_question_and_student_panes() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            qa_list = qa_screen.query_one("#qa-list", ListView)
+            student_list = qa_screen.query_one("#student-list", ListView)
+            assert qa_list.has_class("-pane-active")
+            assert not student_list.has_class("-pane-active")
+
+            await pilot.press("shift+tab")
+            await pilot.pause()
+
+            assert not qa_list.has_class("-pane-active")
+            assert student_list.has_class("-pane-active")
+
+            await pilot.press("down")
+            await pilot.pause()
+
+            selected_question = qa_screen.selected_question()
+            selected_student = qa_screen.selected_student()
+            assert selected_question is not None
+            assert selected_student is not None
+            assert selected_question.item_id == "Q1"
+            assert selected_student.label == "Andy Cortes"
+
+            await pilot.press("shift+tab")
+            await pilot.pause()
+
+            assert qa_list.has_class("-pane-active")
+            assert not student_list.has_class("-pane-active")
+
+            await pilot.press("down")
+            await pilot.pause()
+
+            selected_question = qa_screen.selected_question()
+            selected_student = qa_screen.selected_student()
+            assert selected_question is not None
+            assert selected_student is not None
+            assert selected_question.item_id == "Q2"
+            assert selected_student.label == "Andy Cortes"
+
+    asyncio.run(run())
+
+
 def test_qa_picker_move_binding_label_tracks_active_pane() -> None:
     async def run() -> None:
         app = TuiApp(
