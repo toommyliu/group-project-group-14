@@ -1,9 +1,9 @@
 ---
 name: "Thao Bui"
 student_id: "123456787"
-course_code: "CMPE 142"
-assignment_title: "Exam 2B"
-assignment_version: "J"
+course_code: "CMPE"
+assignment_title: "Exam"
+assignment_version: "2B"
 source_pdf: "submission-0002.pdf"
 score: ""
 ---

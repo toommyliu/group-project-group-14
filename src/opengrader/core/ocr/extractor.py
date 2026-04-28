@@ -16,6 +16,7 @@ from PIL import Image
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 
 from .layout import (
+    SubmissionLayout,
     bbox_norm_to_px as layout_bbox_norm_to_px,
     save_layout_debug as write_layout_debug,
     scan_submission_layout,
@@ -344,10 +345,12 @@ def _restore_same_line_answer_right_edge(
     return restored_x1
 
 
-def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.Image:
+def _trim_question_region_once_with_bbox(
+    region: Image.Image, *, margin_px: int = 8
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
     gray = np.array(region.convert("L"))
     if gray.size == 0:
-        return region
+        return region, (0, 0, region.width, region.height)
 
     _, binary_inv = cv2.threshold(
         gray,
@@ -534,7 +537,7 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
     active_cols = np.where(col_counts >= col_threshold)[0]
 
     if active_rows.size == 0 or active_cols.size == 0:
-        return region
+        return region, (0, 0, region.width, region.height)
 
     y0, y1 = _trim_extent_by_gap(active_rows, region.height, min_gap_norm=0.06)
     x0, x1 = _trim_extent_by_gap(active_cols, region.width, min_gap_norm=0.06)
@@ -552,7 +555,7 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
     y1 = min(region.height, y1 + margin_px + 1)
 
     if x1 <= x0 or y1 <= y0:
-        return region
+        return region, (0, 0, region.width, region.height)
 
     trimmed = region.crop((x0, y0, x1, y1))
     original_area = max(1, region.width * region.height)
@@ -561,9 +564,42 @@ def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.I
 
     # Guardrails: avoid over-trimming on sparse/noisy scans.
     if area_ratio < QUESTION_TRIM_MIN_AREA_RATIO or area_ratio > 0.995:
-        return region
+        return region, (0, 0, region.width, region.height)
 
+    return trimmed, (x0, y0, x1, y1)
+
+
+def _trim_question_region_with_bbox(
+    region: Image.Image, *, margin_px: int = 8
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    return _trim_question_region_once_with_bbox(region, margin_px=margin_px)
+
+
+def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.Image:
+    trimmed, _bbox = _trim_question_region_with_bbox(region, margin_px=margin_px)
     return trimmed
+
+
+def _question_final_crop_bbox_px(
+    page_image: Image.Image,
+    bbox_norm: list[float],
+    page_w: int,
+    page_h: int,
+) -> tuple[int, int, int, int]:
+    expanded_bbox_px = _expand_question_bbox_px(
+        _bbox_norm_to_px(bbox_norm, page_w, page_h),
+        page_w=page_w,
+        page_h=page_h,
+    )
+    region = crop_region(page_image, expanded_bbox_px)
+    _trimmed, trim_bbox_px = _trim_question_region_with_bbox(region)
+    x0, y0, _x1, _y1 = expanded_bbox_px
+    tx0, ty0, tx1, ty1 = trim_bbox_px
+    return _clamp_bbox_px(
+        (x0 + tx0, y0 + ty0, x0 + tx1, y0 + ty1),
+        page_w=page_w,
+        page_h=page_h,
+    )
 
 
 def _safe_image_to_data(
@@ -1906,6 +1942,34 @@ def _field_result_score(field_result: FieldExtractionResult) -> float:
     return base
 
 
+def _final_question_debug_bboxes_by_page(
+    layout: SubmissionLayout,
+    rendered_pages: dict[int, tuple[Image.Image, int, int]],
+) -> dict[int, list[tuple[str, tuple[int, int, int, int]]]]:
+    bboxes_by_page: dict[int, list[tuple[str, tuple[int, int, int, int]]]] = {}
+    for question in layout.questions:
+        segments = [
+            (question.page_number, question.crop_bbox_norm),
+            *question.continuation_segments,
+        ]
+        for page_number, bbox_norm in segments:
+            if page_number not in rendered_pages:
+                continue
+            page_image, page_w, page_h = rendered_pages[page_number]
+            bboxes_by_page.setdefault(page_number, []).append(
+                (
+                    question.question_id,
+                    _question_final_crop_bbox_px(
+                        page_image,
+                        bbox_norm,
+                        page_w,
+                        page_h,
+                    ),
+                )
+            )
+    return bboxes_by_page
+
+
 def process_submission_pdf(
     pdf_path: str | Path,
     config: OcrConfig,
@@ -1939,6 +2003,10 @@ def process_submission_pdf(
             layout,
             rendered_pages,
             Path(output_dir) / "layout_debug" / path.stem,
+            question_crop_bboxes_by_page=_final_question_debug_bboxes_by_page(
+                layout,
+                rendered_pages,
+            ),
         )
 
     result.version_validated = True

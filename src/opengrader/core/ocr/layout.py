@@ -1198,6 +1198,10 @@ def save_layout_debug(
     layout: SubmissionLayout,
     rendered_pages: dict[int, tuple[Image.Image, int, int]],
     output_dir: str | Path,
+    question_crop_bboxes_by_page: dict[
+        int, list[tuple[str, tuple[int, int, int, int]]]
+    ]
+    | None = None,
 ) -> None:
     """Write scanner decisions as JSON plus page overlays."""
 
@@ -1230,9 +1234,17 @@ def save_layout_debug(
                 layout.title_region.crop_bbox_norm, page_w, page_h
             )
             draw.rectangle((x0, y0, x1, y1), outline=(180, 60, 180), width=5)
-        for question in layout.questions:
-            if question.page_number != page_number:
-                continue
-            x0, y0, x1, y1 = bbox_norm_to_px(question.crop_bbox_norm, page_w, page_h)
-            draw.rectangle((x0, y0, x1, y1), outline=(220, 50, 50), width=5)
+        if question_crop_bboxes_by_page is None:
+            for question in layout.questions:
+                if question.page_number != page_number:
+                    continue
+                x0, y0, x1, y1 = bbox_norm_to_px(
+                    question.crop_bbox_norm, page_w, page_h
+                )
+                draw.rectangle((x0, y0, x1, y1), outline=(220, 50, 50), width=5)
+        else:
+            for _question_id, (x0, y0, x1, y1) in question_crop_bboxes_by_page.get(
+                page_number, []
+            ):
+                draw.rectangle((x0, y0, x1, y1), outline=(220, 50, 50), width=5)
         overlay.save(out_dir / f"page-{page_number:04d}.layout.png")
