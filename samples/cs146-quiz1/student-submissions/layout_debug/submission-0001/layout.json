@@ -140,7 +140,7 @@
       ],
       "continuation_segments": [],
       "confidence": 95.5,
-      "question_type": "free_response"
+      "question_type": "multiple_choice"
     }
   ],
   "review_reasons": [

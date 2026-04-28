@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import fitz
+from PIL import Image
 
 from opengrader.core.ocr import layout
 from opengrader.core.ocr import extractor
@@ -89,24 +90,107 @@ def test_question_extraction_result_defaults_to_free_response() -> None:
     assert result.question_type == FREE_RESPONSE
 
 
-def test_match_box_for_marker_prefers_tighter_question_box() -> None:
-    marker = extractor._QuestionMarker(
-        page_number=1,
-        question_number=1,
-        x_px=120,
-        y_px=400,
-        conf=97.0,
-        has_points_hint=True,
+def test_process_submission_pdf_preserves_layout_multiple_choice_vote(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    pdf_path = tmp_path / "submission.pdf"
+    _create_blank_pdf(pdf_path, page_count=2)
+
+    def _fake_scan_layout(*_args: object, **_kwargs: object) -> SubmissionLayout:
+        return SubmissionLayout(
+            title_region=None,
+            fields=[],
+            review_reasons=[],
+            questions=[
+                DetectedQuestionRegion(
+                    question_id="q1",
+                    page_number=1,
+                    question_number=1,
+                    crop_bbox_norm=[0.1, 0.2, 0.8, 0.2],
+                    continuation_segments=[(2, [0.1, 0.1, 0.8, 0.2])],
+                    confidence=95.0,
+                    question_type=MULTIPLE_CHOICE,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(extractor, "scan_submission_layout", _fake_scan_layout)
+    monkeypatch.setattr(extractor, "classify_question_image", lambda _image: FREE_RESPONSE)
+
+    result = process_submission_pdf(
+        pdf_path=pdf_path,
+        config=OcrConfig(),
+        output_dir=tmp_path,
+        response_format="png",
+        dpi=72,
     )
 
-    matched = extractor._match_box_for_marker(
+    assert [question.question_type for question in result.questions] == [
+        MULTIPLE_CHOICE
+    ]
+
+
+def test_process_submission_pdf_upgrades_layout_free_response_vote(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    pdf_path = tmp_path / "submission.pdf"
+    _create_blank_pdf(pdf_path)
+
+    def _fake_scan_layout(*_args: object, **_kwargs: object) -> SubmissionLayout:
+        return SubmissionLayout(
+            title_region=None,
+            fields=[],
+            review_reasons=[],
+            questions=[
+                DetectedQuestionRegion(
+                    question_id="q1",
+                    page_number=1,
+                    question_number=1,
+                    crop_bbox_norm=[0.1, 0.2, 0.8, 0.2],
+                    continuation_segments=[],
+                    confidence=95.0,
+                    question_type=FREE_RESPONSE,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(extractor, "scan_submission_layout", _fake_scan_layout)
+    monkeypatch.setattr(
+        extractor, "classify_question_image", lambda _image: MULTIPLE_CHOICE
+    )
+
+    result = process_submission_pdf(
+        pdf_path=pdf_path,
+        config=OcrConfig(),
+        output_dir=tmp_path,
+        response_format="png",
+        dpi=72,
+    )
+
+    assert [question.question_type for question in result.questions] == [
+        MULTIPLE_CHOICE
+    ]
+
+
+def test_match_box_for_marker_prefers_tighter_question_box() -> None:
+    marker = layout._QuestionAnchor(
+        page_number=1,
+        question_number=1,
+        bbox_px=(120, 400, 145, 428),
+        line_bbox_px=(120, 400, 700, 428),
+        confidence=97.0,
+    )
+
+    matched = layout._matched_question_box(
         marker,
+        primitives=[
+            layout.LayoutPrimitive("box", [0.05, 0.10, 0.90, 0.82], 92.0),
+            layout.LayoutPrimitive("box", [0.08, 0.18, 0.84, 0.20], 92.0),
+        ],
         page_w=1000,
         page_h=2000,
-        boxes_norm=[
-            [0.05, 0.10, 0.90, 0.82],
-            [0.08, 0.18, 0.84, 0.20],
-        ],
     )
 
     assert matched is not None
@@ -114,37 +198,31 @@ def test_match_box_for_marker_prefers_tighter_question_box() -> None:
     assert matched[3] < 0.30
 
 
-def test_detect_question_regions_uses_structural_boundary_when_next_marker_missing() -> None:
-    def _fake_marker_extract(
-        page_number: int,
-        _words: list[extractor._OcrWord],
-        _page_w: int,
-        _page_h: int,
-    ) -> list[extractor._QuestionMarker]:
-        return [
-            extractor._QuestionMarker(
-                page_number=page_number,
+def test_detect_questions_uses_structural_boundary_when_next_marker_missing(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(layout, "classify_question_image", lambda _image: FREE_RESPONSE)
+    regions = layout._detect_questions(
+        anchors=[
+            layout._QuestionAnchor(
+                page_number=1,
                 question_number=1,
-                x_px=120,
-                y_px=360,
-                conf=95.0,
-                has_points_hint=True,
+                bbox_px=(120, 360, 145, 388),
+                line_bbox_px=(120, 360, 700, 388),
+                confidence=95.0,
             )
-        ]
-
-    original_marker_extract = extractor._extract_question_markers_for_page
-    extractor._extract_question_markers_for_page = _fake_marker_extract
-    try:
-        regions = extractor._detect_question_regions(
-            page_words={1: []},
-            page_dims={1: (1000, 2000)},
-            page_boxes={1: [[0.08, 0.16, 0.84, 0.22], [0.08, 0.49, 0.84, 0.22]]},
-        )
-    finally:
-        extractor._extract_question_markers_for_page = original_marker_extract
+        ],
+        rendered_pages={1: (Image.new("RGB", (1000, 2000), "white"), 1000, 2000)},
+        primitives_by_page={
+            1: [
+                layout.LayoutPrimitive("box", [0.08, 0.16, 0.84, 0.22], 92.0),
+                layout.LayoutPrimitive("box", [0.08, 0.49, 0.84, 0.22], 92.0),
+            ]
+        },
+    )
 
     assert len(regions) == 1
-    _, y, _, h = regions[0].bbox_norm
+    _, y, _, h = regions[0].crop_bbox_norm
     assert (y + h) < 0.49
 
 
@@ -302,3 +380,61 @@ def test_save_layout_debug_receives_final_question_bboxes_for_continuations(
     assert set(captured) == {1, 2}
     assert [question_id for question_id, _bbox in captured[1]] == ["q1"]
     assert [question_id for question_id, _bbox in captured[2]] == ["q1"]
+
+
+def test_save_layout_debug_uses_final_question_type_vote(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    pdf_path = tmp_path / "submission.pdf"
+    _create_blank_pdf(pdf_path)
+
+    def _fake_scan_layout(*_args: object, **_kwargs: object) -> SubmissionLayout:
+        return SubmissionLayout(
+            title_region=None,
+            fields=[],
+            review_reasons=[],
+            questions=[
+                DetectedQuestionRegion(
+                    question_id="q1",
+                    page_number=1,
+                    question_number=1,
+                    crop_bbox_norm=[0.1, 0.2, 0.8, 0.2],
+                    continuation_segments=[],
+                    confidence=95.0,
+                    question_type=FREE_RESPONSE,
+                ),
+            ],
+        )
+
+    captured_question_types: list[str] = []
+
+    def _fake_write_layout_debug(
+        debug_layout: SubmissionLayout,
+        _rendered_pages: dict[int, tuple[object, int, int]],
+        _output_dir: Path,
+        **_kwargs: object,
+    ) -> None:
+        captured_question_types.extend(
+            question.question_type for question in debug_layout.questions
+        )
+
+    monkeypatch.setattr(extractor, "scan_submission_layout", _fake_scan_layout)
+    monkeypatch.setattr(extractor, "write_layout_debug", _fake_write_layout_debug)
+    monkeypatch.setattr(
+        extractor, "classify_question_image", lambda _image: MULTIPLE_CHOICE
+    )
+
+    result = process_submission_pdf(
+        pdf_path=pdf_path,
+        config=OcrConfig(),
+        output_dir=tmp_path,
+        response_format="png",
+        dpi=72,
+        save_layout_debug=True,
+    )
+
+    assert [question.question_type for question in result.questions] == [
+        MULTIPLE_CHOICE
+    ]
+    assert captured_question_types == [MULTIPLE_CHOICE]

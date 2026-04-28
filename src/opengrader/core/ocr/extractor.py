@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from statistics import median
 from typing import Literal
@@ -13,7 +13,7 @@ import numpy as np
 import pytesseract
 from PIL import Image
 
-from opengrader.core.question_types import FREE_RESPONSE, QuestionType
+from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
 
 from .layout import (
     SubmissionLayout,
@@ -693,6 +693,46 @@ def _group_words_by_line(
     return lines
 
 
+def _merge_question_type_votes(*votes: QuestionType | None) -> QuestionType:
+    """Return the most specific question type found by any extraction stage."""
+
+    if any(vote == MULTIPLE_CHOICE for vote in votes):
+        return MULTIPLE_CHOICE
+    return FREE_RESPONSE
+
+
+def _question_region_key(region: "DetectedQuestionRegion") -> tuple:
+    """Return a stable key for matching layout regions to extracted artifacts."""
+
+    return (
+        region.question_id,
+        region.question_number,
+        region.page_number,
+        tuple(region.crop_bbox_norm),
+    )
+
+
+def _layout_with_final_question_types(
+    layout: SubmissionLayout,
+    final_types_by_region_key: dict[tuple, QuestionType],
+) -> SubmissionLayout:
+    """Return layout debug data with question types from final extraction."""
+
+    return replace(
+        layout,
+        questions=[
+            replace(
+                question,
+                question_type=final_types_by_region_key.get(
+                    _question_region_key(question),
+                    question.question_type,
+                ),
+            )
+            for question in layout.questions
+        ],
+    )
+
+
 def _extract_question_crop_norm(
     page_image: Image.Image,
     question_id: str,
@@ -702,6 +742,7 @@ def _extract_question_crop_norm(
     page_num: int,
     response_format: Literal["png", "pdf"],
     sub_dir: Path,
+    detected_question_type: QuestionType | None = None,
 ) -> QuestionExtractionResult:
     """Write a single-page question crop artifact from a normalized bbox."""
 
@@ -712,7 +753,9 @@ def _extract_question_crop_norm(
     )
     region = crop_region(page_image, bbox_px)
     region = _trim_question_region(region)
-    question_type = classify_question_image(region)
+    question_type = _merge_question_type_votes(
+        detected_question_type, classify_question_image(region)
+    )
     out_path = sub_dir / f"{question_id}.{response_format}"
 
     if response_format == "pdf":
@@ -735,6 +778,7 @@ def _extract_question_crop_segments(
     segments: list[tuple[int, list[float]]],
     response_format: Literal["png", "pdf"],
     sub_dir: Path,
+    detected_question_type: QuestionType | None = None,
 ) -> QuestionExtractionResult:
     """
     Write one question artifact from one or more page segments.
@@ -802,7 +846,9 @@ def _extract_question_crop_segments(
     return QuestionExtractionResult(
         question_id=question_id,
         page_number=first_page_number,
-        question_type=classify_question_image(stitched),
+        question_type=_merge_question_type_votes(
+            detected_question_type, classify_question_image(stitched)
+        ),
         output_path=str(out_path),
     )
 
@@ -1499,6 +1545,30 @@ def _detect_dynamic_field_slices(
     return out
 
 
+def _detect_dynamic_field_regions(
+    page_words: list[_OcrWord],
+    page_w: int,
+    page_h: int,
+    boxes_norm: list[list[float]],
+    *,
+    page_image: Image.Image | None = None,
+) -> dict[str, tuple[int, int, int, int]]:
+    """Compatibility wrapper returning each detected field's primary crop."""
+
+    slices = _detect_dynamic_field_slices(
+        page_words,
+        page_w,
+        page_h,
+        boxes_norm,
+        page_image=page_image,
+    )
+    return {
+        field_type: field_slices["primary"]
+        for field_type, field_slices in slices.items()
+        if "primary" in field_slices
+    }
+
+
 def _save_field_crop(
     *,
     page_image: Image.Image,
@@ -1640,16 +1710,6 @@ def process_submission_pdf(
     # Layout detection owns crop discovery; this layer writes artifacts and
     # carries review metadata forward without re-deciding geometry.
     layout = scan_submission_layout(rendered_pages, config)
-    if save_layout_debug:
-        write_layout_debug(
-            layout,
-            rendered_pages,
-            Path(output_dir) / "layout_debug" / path.stem,
-            question_crop_bboxes_by_page=_final_question_debug_bboxes_by_page(
-                layout,
-                rendered_pages,
-            ),
-        )
 
     result.version_validated = True
     result.version_error = None
@@ -1719,6 +1779,7 @@ def process_submission_pdf(
     )
 
     used_ids: set[str] = set()
+    final_types_by_region_key: dict[tuple, QuestionType] = {}
     for i, region in enumerate(detected_questions_sorted, start=1):
         page_number = region.page_number
         page_image, page_w, page_h = rendered_pages[page_number]
@@ -1730,35 +1791,56 @@ def process_submission_pdf(
         used_ids.add(qid)
 
         if region.continuation_segments:
-            all_question_results.append(
-                _extract_question_crop_segments(
-                    rendered_pages=rendered_pages,
-                    question_id=qid,
-                    segments=[
-                        (page_number, region.crop_bbox_norm),
-                        *region.continuation_segments,
-                    ],
-                    response_format=response_format,
-                    sub_dir=sub_dir,
-                )
+            question_result = _extract_question_crop_segments(
+                rendered_pages=rendered_pages,
+                question_id=qid,
+                segments=[
+                    (page_number, region.crop_bbox_norm),
+                    *region.continuation_segments,
+                ],
+                response_format=response_format,
+                sub_dir=sub_dir,
+                detected_question_type=region.question_type,
+            )
+            all_question_results.append(question_result)
+            final_types_by_region_key[_question_region_key(region)] = (
+                question_result.question_type
             )
             continue
 
-        all_question_results.append(
-            _extract_question_crop_norm(
-                page_image=page_image,
-                question_id=qid,
-                bbox_norm=region.crop_bbox_norm,
-                page_w=page_w,
-                page_h=page_h,
-                page_num=page_number,
-                response_format=response_format,
-                sub_dir=sub_dir,
-            )
+        question_result = _extract_question_crop_norm(
+            page_image=page_image,
+            question_id=qid,
+            bbox_norm=region.crop_bbox_norm,
+            page_w=page_w,
+            page_h=page_h,
+            page_num=page_number,
+            response_format=response_format,
+            sub_dir=sub_dir,
+            detected_question_type=region.question_type,
+        )
+        all_question_results.append(question_result)
+        final_types_by_region_key[_question_region_key(region)] = (
+            question_result.question_type
         )
 
     result.fields = all_field_results
     result.questions = all_question_results
+
+    if save_layout_debug:
+        debug_layout = _layout_with_final_question_types(
+            layout,
+            final_types_by_region_key,
+        )
+        write_layout_debug(
+            debug_layout,
+            rendered_pages,
+            Path(output_dir) / "layout_debug" / path.stem,
+            question_crop_bboxes_by_page=_final_question_debug_bboxes_by_page(
+                debug_layout,
+                rendered_pages,
+            ),
+        )
 
     make_review_reason(result, config)
     if layout.review_reasons:

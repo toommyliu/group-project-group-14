@@ -30,7 +30,7 @@ score: ""
   - Analysis: 
 
 - q3:
-  - Question type: Free Response
+  - Question type: Multiple Choice
   - Prompt: 3. (10 pts) What is the most significant bit (MSB) of the binary number 1010 [A]?
   - Response image: ![q3 response](responses/submission-0001/q3.png)
   - Response text: |
