@@ -112,8 +112,8 @@ $foreground: #E4E4E4EB;
 
 #grade-sidebar {
     width: 42%;
-    min-width: 36;
-    max-width: 54;
+    min-width: 32;
+    max-width: 72;
     height: 1fr;
     padding: 0 1;
     background: $background;
@@ -136,19 +136,26 @@ $foreground: #E4E4E4EB;
 #grade-student-name,
 #total-grade-label,
 #grade-progress {
+    width: 100%;
     height: auto;
 }
 
 #question-context {
+    width: 100%;
     height: auto;
     max-height: 18;
     margin-bottom: 1;
 }
 
 #rubric-list {
-    height: auto;
-    max-height: 10;
+    width: 100%;
+    height: 10;
     background: transparent;
+}
+
+#rubric-list > ListItem,
+#rubric-list > ListItem > Label {
+    width: 100%;
 }
 
 #question-comment {
@@ -158,6 +165,7 @@ $foreground: #E4E4E4EB;
 }
 
 #db-status {
+    width: 100%;
     height: auto;
     min-height: 1;
 }

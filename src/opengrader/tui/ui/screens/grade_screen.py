@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -12,11 +14,22 @@ from opengrader.tui.ui.widgets.response_viewer import ResponseViewer
 class _RubricListItem(ListItem):
     def __init__(self) -> None:
         self.label = Label("")
+        self._option_text = ""
+        self._selected = False
         super().__init__(self.label)
+
+    def update_option(self, text: str, selected: bool) -> None:
+        if text != self._option_text:
+            self.label.update(text)
+            self._option_text = text
+        if selected == self._selected:
+            return
+        self._selected = selected
+        self.set_class(selected, "rubric-selected")
 
 
 class _SidebarResizeHandle(Static):
-    # Don't allow text selection.
+    # Don't allow text selection on the invisible resize handle.
     ALLOW_SELECT = False
 
     def __init__(self) -> None:
@@ -26,6 +39,8 @@ class _SidebarResizeHandle(Static):
             classes="grade-screen__resize-handle",
         )
         self._dragging = False
+        # The parent screen.
+        self._screen: GradeScreen | None = None
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         """Start dragging resize handle on left click."""
@@ -34,13 +49,13 @@ class _SidebarResizeHandle(Static):
         self._dragging = True
         self.capture_mouse()
         self.add_class("grade-screen__resize-handle--dragging")
-        self._resize(event.screen_x)
+        self._resize(event.screen_x, immediate=True)
         event.stop()
 
     def on_mouse_move(self, event: events.MouseMove) -> None:
         if not self._dragging:
             return
-        self._resize(event.screen_x)
+        self._resize(event.screen_x, immediate=False)
         event.stop()
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
@@ -49,7 +64,7 @@ class _SidebarResizeHandle(Static):
         self._dragging = False
         self.release_mouse()
         self.remove_class("grade-screen__resize-handle--dragging")
-        self._resize(event.screen_x)
+        self._resize(event.screen_x, immediate=True)
         event.stop()
 
     def on_leave(self, _event: events.Leave) -> None:
@@ -57,14 +72,27 @@ class _SidebarResizeHandle(Static):
             return
         self.remove_class("grade-screen__resize-handle--dragging")
 
-    def _resize(self, screen_x: float | None) -> None:
+    def _resize(self, screen_x: float | None, *, immediate: bool) -> None:
         if screen_x is None:
             return
+        screen = self._grade_screen()
+        if screen is None:
+            return
+        if immediate:
+            screen.resize_sidebar_to_screen_x(screen_x)
+            return
+        screen.queue_sidebar_resize_to_screen_x(screen_x)
+
+    def _grade_screen(self) -> GradeScreen | None:
+        if self._screen is not None:
+            return self._screen
         screen = self.parent
         while screen is not None and not isinstance(screen, GradeScreen):
             screen = screen.parent
         if isinstance(screen, GradeScreen):
-            screen.resize_sidebar_to_screen_x(screen_x)
+            self._screen = screen
+            return screen
+        return None
 
 
 class GradeScreen(Vertical):
@@ -97,6 +125,10 @@ class GradeScreen(Vertical):
     def __init__(self, default_image_path: str, *, id: str | None = None) -> None:
         self._default_image_path = default_image_path
         self._rubric_count = 0
+        # Keep track of states to avoid frequent reflows during sidebar resizing.
+        self._sidebar_width: int | None = None
+        self._pending_sidebar_width: int | None = None
+        self._sidebar_resize_scheduled = False
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -164,18 +196,49 @@ class GradeScreen(Vertical):
         self.query_one("#grade-progress", Label).update(text)
 
     def resize_sidebar_to_screen_x(self, screen_x: float) -> None:
+        self._pending_sidebar_width = None
+        self.set_sidebar_width(self._sidebar_width_from_screen_x(screen_x))
+
+    def queue_sidebar_resize_to_screen_x(self, screen_x: float) -> None:
+        self._queue_sidebar_width(self._sidebar_width_from_screen_x(screen_x))
+
+    def _sidebar_width_from_screen_x(self, screen_x: float) -> int:
         workspace = self.query_one("#grade-workspace", Horizontal)
         handle = self.query_one("#grade-sidebar-resize-handle", _SidebarResizeHandle)
         desired_width = (
             workspace.region.x + workspace.size.width - int(round(screen_x))
         )
         desired_width -= max(1, round(handle.size.width / 2))
-        self.set_sidebar_width(desired_width)
+        return desired_width
 
     def set_sidebar_width(self, width: int) -> None:
+        width = self._bounded_sidebar_width(width)
+        if width == self._sidebar_width:
+            return
+
         sidebar = self.query_one("#grade-sidebar", VerticalScroll)
-        sidebar.styles.width = self._bounded_sidebar_width(width)
-        self.refresh(layout=True)
+        sidebar.styles.width = width
+        self._sidebar_width = width
+        self._refresh_sidebar_layout(sidebar)
+
+    def _queue_sidebar_width(self, width: int) -> None:
+        self._pending_sidebar_width = self._bounded_sidebar_width(width)
+        if self._sidebar_resize_scheduled:
+            return
+        self._sidebar_resize_scheduled = True
+        self.call_next(self._apply_pending_sidebar_width)
+
+    def _apply_pending_sidebar_width(self) -> None:
+        self._sidebar_resize_scheduled = False
+        width = self._pending_sidebar_width
+        self._pending_sidebar_width = None
+        if width is None:
+            return
+        self.set_sidebar_width(width)
+
+    def _refresh_sidebar_layout(self, sidebar: VerticalScroll) -> None:
+        sidebar.refresh(layout=True)
+        self.query_one("#grade-workspace", Horizontal).refresh(layout=True)
 
     def _bounded_sidebar_width(self, width: int) -> int:
         try:
@@ -211,11 +274,10 @@ class GradeScreen(Vertical):
             li = rubric_list.children[option_index]
             if not isinstance(li, _RubricListItem):
                 continue
-            li.label.update(f"{marker}  {option.label}  ({option.points_delta:+.1f})")
-            if selected:
-                li.add_class("rubric-selected")
-                continue
-            li.remove_class("rubric-selected")
+            li.update_option(
+                f"{marker}  {option.label}  ({option.points_delta:+.1f})",
+                selected,
+            )
 
     @staticmethod
     def _question_context_text(current) -> str:
