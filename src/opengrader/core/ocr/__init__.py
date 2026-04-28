@@ -1,4 +1,3 @@
-from .alignment import preprocess_for_ocr
 from .extractor import (
     OcrConfig,
     OcrResult,
@@ -9,10 +8,6 @@ from .extractor import (
     results_to_dict,
     render_page_to_image,
     crop_region,
-)
-from .scanner import (
-    DetectedRegion,
-    scan_template,
 )
 from .layout import (
     DetectedFieldRegion,

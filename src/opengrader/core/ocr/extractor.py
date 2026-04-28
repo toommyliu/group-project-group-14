@@ -22,24 +22,22 @@ from .layout import (
     scan_submission_layout,
 )
 from .question_classifier import classify_question_image
-from .scanner import scan_template
 
 ConfidenceThreshold = float
 
+# Keep OCR confidence defaults centralized so callers can tune validation
+# without changing the crop-discovery heuristics below.
 DEFAULT_CONFIDENCE_THRESHOLD = 60.0
 MIN_TEXT_LENGTH = 1
 
-QUESTION_START_MARGIN_NORM = 0.008
-QUESTION_END_MARGIN_NORM = 0.025
-QUESTION_DEFAULT_PAGE_END_NORM = 0.965
-QUESTION_MAX_END_NORM = 0.988
-QUESTION_DEFAULT_X0_NORM = 0.06
-QUESTION_DEFAULT_X1_NORM = 0.92
-QUESTION_SPAN_TRIGGER_Y_NORM = 0.84
-QUESTION_SPAN_NEXT_PAGE_START_NORM = 0.04
+# Question crops get small padding so border-touching handwriting survives
+# trimming, while printed rules still remain close enough to remove later.
 QUESTION_CROP_PAD_X_NORM = 0.015
 QUESTION_CROP_PAD_TOP_NORM = 0.004
 QUESTION_CROP_PAD_BOTTOM_NORM = 0.008
+
+# Structural answer-box limits reject page borders and tiny decoration before a
+# box is allowed to influence question crop bounds.
 QUESTION_BOX_MIN_WIDTH_NORM = 0.36
 QUESTION_BOX_MIN_HEIGHT_NORM = 0.05
 QUESTION_BOX_MAX_HEIGHT_NORM = 0.72
@@ -49,6 +47,9 @@ QUESTION_NEXT_STRUCTURAL_MIN_GAP_NORM = 0.05
 QUESTION_NEXT_STRUCTURAL_X_MARGIN_NORM = 0.06
 QUESTION_STRUCTURAL_USE_MATCHED_BOX_MAX_HEIGHT_NORM = 0.55
 QUESTION_STRUCTURAL_MATCHED_BOX_FRACTION = 0.75
+
+# Trim thresholds favor keeping ambiguous student marks over tight crops; rules
+# and large edge artifacts are filtered separately before these are applied.
 QUESTION_TRIM_DARK_THRESHOLD = 232
 QUESTION_TRIM_MIN_COMPONENT_AREA = 18
 QUESTION_TRIM_MIN_COMPONENT_WIDTH = 3
@@ -57,6 +58,8 @@ QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM = 0.65
 QUESTION_TRIM_LINE_COMPONENT_MAX_THICKNESS_NORM = 0.04
 QUESTION_TRIM_MIN_AREA_RATIO = 0.01
 
+# Field slices are intentionally wider than parsed text so saved artifacts show
+# surrounding label context for manual review.
 FIELD_SLICE_MIN_WIDTH_NORM = 0.42
 FIELD_SLICE_MAX_WIDTH_NORM = 0.82
 FIELD_SLICE_PAD_LEFT_NORM = 0.02
@@ -65,18 +68,21 @@ FIELD_SLICE_TOP_PAD_FACTOR = 1.9
 FIELD_SLICE_BOTTOM_PAD_FACTOR = 1.45
 FIELD_SLICE_MIN_HEIGHT_NORM = 0.03
 FIELD_SLICE_MAX_HEIGHT_NORM = 0.145
+
+# Header underline detection is constrained to plausible metadata blanks so
+# answer boxes and page separators do not get reused as name/ID fields.
 HEADER_UNDERLINE_SCAN_END_NORM = 0.42
 HEADER_UNDERLINE_MIN_WIDTH_NORM = 0.18
 HEADER_UNDERLINE_MAX_WIDTH_NORM = 0.88
 HEADER_UNDERLINE_MAX_HEIGHT_NORM = 0.012
 HEADER_UNDERLINE_MIN_Y_NORM = 0.06
+
+# Underline-derived crops include nearby label text because field values may be
+# blank, handwritten, or poorly recognized by OCR.
 HEADER_CONTEXT_LEFT_PAD_NORM = 0.14
 HEADER_CONTEXT_RIGHT_PAD_NORM = 0.02
 HEADER_CONTEXT_TOP_PAD_NORM = 0.034
 HEADER_CONTEXT_BOTTOM_PAD_NORM = 0.012
-
-_QUESTION_MARKER_RE = re.compile(r"^(\d{1,3})[\.)]$")
-_QUESTION_NUM_ONLY_RE = re.compile(r"^\d{1,3}$")
 
 
 @dataclass
@@ -156,15 +162,10 @@ class _QuestionMarker:
     has_points_hint: bool
 
 
-@dataclass(frozen=True)
-class _DetectedQuestionRegion:
-    page_number: int
-    question_number: int
-    bbox_norm: list[float]
-    continuation: tuple[int, list[float]] | None = None
-
 
 def _normalize_name_text(raw: str) -> str:
+    """Clean OCR output into a plausible human name string."""
+
     text = raw.replace("|", " ").replace("_", " ")
     text = text.replace("“", " ").replace("”", " ").replace("`", " ")
     text = re.sub(r"[^A-Za-z\s\-'\.]", " ", text)
@@ -174,14 +175,14 @@ def _normalize_name_text(raw: str) -> str:
 
 
 def _normalize_sid_text(raw: str) -> str:
+    """Keep only digits from OCR output intended to contain a student ID."""
+
     return "".join(re.findall(r"\d", raw))
 
 
-def _is_empty(text: str) -> bool:
-    return len(text.strip()) < MIN_TEXT_LENGTH
-
-
 def _clamp_bbox_norm(bbox: list[float]) -> list[float]:
+    """Clamp a normalized bbox to page bounds."""
+
     x, y, w, h = bbox
     x = max(0.0, min(1.0, x))
     y = max(0.0, min(1.0, y))
@@ -193,6 +194,8 @@ def _clamp_bbox_norm(bbox: list[float]) -> list[float]:
 def _bbox_norm_to_px(
     bbox_norm: list[float], page_w: int, page_h: int
 ) -> tuple[int, int, int, int]:
+    """Convert a normalized bbox to a non-empty pixel bbox."""
+
     x, y, w, h = _clamp_bbox_norm(bbox_norm)
     x0 = int(round(x * page_w))
     y0 = int(round(y * page_h))
@@ -209,13 +212,21 @@ def _bbox_norm_to_px(
     return x0, y0, x1, y1
 
 
-def _bbox_area_norm(bbox: list[float]) -> float:
-    return max(0.0, bbox[2]) * max(0.0, bbox[3])
-
-
 def render_page_to_image(
     doc: fitz.Document, page_idx: int, dpi: int = 300
 ) -> tuple[Image.Image, int, int]:
+    """
+    Render one PDF page into a PIL image.
+
+    Args:
+        doc: Open PyMuPDF document.
+        page_idx: Zero-based page index.
+        dpi: Render resolution used for OCR and crop artifacts.
+
+    Returns:
+        The rendered image plus its width and height in pixels.
+    """
+
     page = doc[page_idx]
     zoom = dpi / 72.0
     mat = fitz.Matrix(zoom, zoom)
@@ -227,6 +238,8 @@ def render_page_to_image(
 
 
 def crop_region(image: Image.Image, bbox_px: tuple[int, int, int, int]) -> Image.Image:
+    """Crop a PIL image using a pixel bbox."""
+
     x0, y0, x1, y1 = bbox_px
     return image.crop((x0, y0, x1, y1))
 
@@ -237,6 +250,8 @@ def _expand_question_bbox_px(
     page_w: int,
     page_h: int,
 ) -> tuple[int, int, int, int]:
+    """Apply standard question-crop padding to a pixel bbox."""
+
     x0, y0, x1, y1 = bbox_px
     x_pad = max(4, int(round(page_w * QUESTION_CROP_PAD_X_NORM)))
     top_pad = max(2, int(round(page_h * QUESTION_CROP_PAD_TOP_NORM)))
@@ -254,6 +269,8 @@ def _trim_extent_by_gap(
     *,
     min_gap_norm: float = 0.06,
 ) -> tuple[int, int]:
+    """Trim isolated edge clusters from an active row or column extent."""
+
     if active.size <= 1:
         return (int(active[0]), int(active[-1])) if active.size else (0, 0)
 
@@ -263,6 +280,8 @@ def _trim_extent_by_gap(
 
     diffs = np.diff(active)
 
+    # Treat leading specks as scan noise only when they are tiny compared with
+    # the main content span.
     for i in range(len(diffs)):
         if diffs[i] > min_gap:
             before_count = i + 1
@@ -276,6 +295,8 @@ def _trim_extent_by_gap(
                 start = int(active[i + 1])
             break
 
+    # Apply the same caution at the trailing edge so sparse answers are not
+    # cropped away as if they were border noise.
     for i in range(len(diffs) - 1, -1, -1):
         if diffs[i] > min_gap:
             before_idx = i
@@ -329,6 +350,8 @@ def _restore_same_line_answer_right_edge(
             or h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT
         ):
             continue
+        # Printed rules are ignored here so same-line answers can extend right
+        # without reintroducing answer-box borders.
         if (
             w >= int(region_w * QUESTION_TRIM_LINE_COMPONENT_MIN_SPAN_NORM)
             and h <= horizontal_line_height
@@ -348,6 +371,14 @@ def _restore_same_line_answer_right_edge(
 def _trim_question_region_once_with_bbox(
     region: Image.Image, *, margin_px: int = 8
 ) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """
+    Trim a question crop down to likely answer content.
+
+    Printed answer-box rules, dark scanner gutters, and page-edge fragments are
+    removed before computing the content bounds. The original region is returned
+    when the trim looks unsafe.
+    """
+
     gray = np.array(region.convert("L"))
     if gray.size == 0:
         return region, (0, 0, region.width, region.height)
@@ -369,6 +400,8 @@ def _trim_question_region_once_with_bbox(
     )
     horizontal_lines = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, horizontal_kernel)
     vertical_lines = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, vertical_kernel)
+    # Remove printed rules before measuring content; otherwise the answer box
+    # frame becomes the crop instead of the student's response.
     content_mask = cv2.subtract(binary_inv, horizontal_lines)
     content_mask = cv2.subtract(content_mask, vertical_lines)
     content_mask = cv2.morphologyEx(
@@ -381,6 +414,8 @@ def _trim_question_region_once_with_bbox(
     _GUTTER_FILL_THRESHOLD = 0.25
 
     gutter_right = 0
+    # Dark scanner gutters and page borders can look like real content unless
+    # dense edge columns are wiped before bounding-box estimation.
     for col_idx in range(_GUTTER_SCAN_WIDTH):
         col_fill = np.count_nonzero(content_mask[:, col_idx]) / max(1, region.height)
         if col_fill >= _GUTTER_FILL_THRESHOLD:
@@ -440,6 +475,8 @@ def _trim_question_region_once_with_bbox(
         core_height = region.height - border_core_top
         fringe = max(6, int(core_height * 1.5))
         wipe_from = max(0, border_core_top - fringe)
+        # Keep surviving bottom frame lines from stretching the crop to the
+        # printed answer-box edge.
         content_mask[wipe_from:, :] = 0
 
     border_core_bottom = 0
@@ -469,6 +506,8 @@ def _trim_question_region_once_with_bbox(
         core_height = border_core_bottom
         fringe = max(6, int(core_height * 1.5))
         wipe_to = min(region.height, border_core_bottom + fringe)
+        # Top frame lines are removed for the same reason as bottom borders:
+        # they are template structure, not answer content.
         content_mask[:wipe_to, :] = 0
 
     _MIN_COMPONENT_AREA = max(QUESTION_TRIM_MIN_COMPONENT_AREA, 40)
@@ -504,6 +543,8 @@ def _trim_question_region_once_with_bbox(
             continue
         if w < QUESTION_TRIM_MIN_COMPONENT_WIDTH and h < QUESTION_TRIM_MIN_COMPONENT_HEIGHT:
             continue
+        # Keep likely handwriting/OCR text while excluding leftover rules and
+        # edge fragments that morphology did not fully remove.
         components.append((int(x), int(y), int(w), int(h), int(area)))
         component_mask[y : y + h, x : x + w] = 255
 
@@ -562,7 +603,8 @@ def _trim_question_region_once_with_bbox(
     trimmed_area = trimmed.width * trimmed.height
     area_ratio = trimmed_area / original_area
 
-    # Guardrails: avoid over-trimming on sparse/noisy scans.
+    # Guardrails: preserve the original crop when sparse/noisy scans make the
+    # trim either implausibly small or effectively unchanged.
     if area_ratio < QUESTION_TRIM_MIN_AREA_RATIO or area_ratio > 0.995:
         return region, (0, 0, region.width, region.height)
 
@@ -572,10 +614,14 @@ def _trim_question_region_once_with_bbox(
 def _trim_question_region_with_bbox(
     region: Image.Image, *, margin_px: int = 8
 ) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """Trim a question region and return the trim bbox in region coordinates."""
+
     return _trim_question_region_once_with_bbox(region, margin_px=margin_px)
 
 
 def _trim_question_region(region: Image.Image, *, margin_px: int = 8) -> Image.Image:
+    """Return a question region trimmed to likely answer content."""
+
     trimmed, _bbox = _trim_question_region_with_bbox(region, margin_px=margin_px)
     return trimmed
 
@@ -586,6 +632,8 @@ def _question_final_crop_bbox_px(
     page_w: int,
     page_h: int,
 ) -> tuple[int, int, int, int]:
+    """Compute the final expanded-and-trimmed question crop bbox in page pixels."""
+
     expanded_bbox_px = _expand_question_bbox_px(
         _bbox_norm_to_px(bbox_norm, page_w, page_h),
         page_w=page_w,
@@ -601,6 +649,7 @@ def _question_final_crop_bbox_px(
         page_h=page_h,
     )
 
+# TODO: this can be shared
 
 def _safe_image_to_data(
     image: Image.Image,
@@ -608,6 +657,8 @@ def _safe_image_to_data(
     lang: str,
     config: str,
 ) -> dict:
+    """Run Tesseract word extraction and return an empty result on failure."""
+
     try:
         return pytesseract.image_to_data(
             image,
@@ -629,477 +680,17 @@ def _safe_image_to_data(
         }
 
 
-def _ocr_page_words(page_image: Image.Image, config: OcrConfig) -> list[_OcrWord]:
-    data = _safe_image_to_data(page_image, lang=config.lang, config="--psm 6")
-    words: list[_OcrWord] = []
-    n = len(data.get("text", []))
-
-    for i in range(n):
-        text = str(data["text"][i]).strip()
-        if not text:
-            continue
-        conf_raw = data["conf"][i]
-        try:
-            conf = float(conf_raw)
-        except (TypeError, ValueError):
-            conf = -1.0
-        if conf <= 0:
-            continue
-
-        try:
-            line_id = (
-                int(data.get("block_num", [0] * n)[i]),
-                int(data.get("par_num", [0] * n)[i]),
-                int(data.get("line_num", [0] * n)[i]),
-            )
-        except (TypeError, ValueError):
-            line_id = (0, 0, i)
-
-        words.append(
-            _OcrWord(
-                text=text,
-                conf=conf,
-                left=int(data["left"][i]),
-                top=int(data["top"][i]),
-                width=int(data["width"][i]),
-                height=int(data["height"][i]),
-                line_id=line_id,
-            )
-        )
-
-    return words
-
-
 def _group_words_by_line(
     words: list[_OcrWord],
 ) -> dict[tuple[int, int, int], list[_OcrWord]]:
+    """Group OCR words by Tesseract line identifiers."""
+
     lines: dict[tuple[int, int, int], list[_OcrWord]] = {}
     for w in words:
         lines.setdefault(w.line_id, []).append(w)
     for line_words in lines.values():
         line_words.sort(key=lambda word: word.left)
     return lines
-
-
-def _question_number_from_token(text: str) -> int | None:
-    m = _QUESTION_MARKER_RE.fullmatch(text)
-    if m:
-        return int(m.group(1))
-    return None
-
-
-def _extract_question_markers_for_page(
-    page_number: int,
-    words: list[_OcrWord],
-    page_w: int,
-    page_h: int,
-) -> list[_QuestionMarker]:
-    if not words:
-        return []
-
-    line_map = _group_words_by_line(words)
-    markers: list[_QuestionMarker] = []
-
-    words_sorted = sorted(words, key=lambda w: (w.top, w.left))
-    for idx, word in enumerate(words_sorted):
-        qnum = _question_number_from_token(word.text)
-        if qnum is None and _QUESTION_NUM_ONLY_RE.fullmatch(word.text):
-            for j in range(idx + 1, min(idx + 4, len(words_sorted))):
-                nxt = words_sorted[j]
-                if nxt.line_id != word.line_id:
-                    break
-                if nxt.text in {".", ")"}:
-                    qnum = int(word.text)
-                    break
-
-        if qnum is None:
-            continue
-
-        x_norm = word.left / page_w if page_w else 0.0
-        y_norm = word.top / page_h if page_h else 0.0
-
-        if x_norm > 0.45:
-            continue
-        if y_norm < 0.07 or y_norm > 0.985:
-            continue
-
-        line_words = line_map.get(word.line_id, [])
-        line_text = " ".join(w.text.lower() for w in line_words)
-        has_points_hint = ("pts" in line_text) or ("point" in line_text)
-
-        markers.append(
-            _QuestionMarker(
-                page_number=page_number,
-                question_number=qnum,
-                x_px=word.left,
-                y_px=word.top,
-                conf=word.conf,
-                has_points_hint=has_points_hint,
-            )
-        )
-
-    if not markers:
-        return []
-
-    # Deduplicate by question number on a page.
-    best_by_key: dict[tuple[int, int], _QuestionMarker] = {}
-    for marker in markers:
-        key = (marker.page_number, marker.question_number)
-        prev = best_by_key.get(key)
-        if prev is None:
-            best_by_key[key] = marker
-            continue
-        prev_score = prev.conf + (15.0 if prev.has_points_hint else 0.0)
-        marker_score = marker.conf + (15.0 if marker.has_points_hint else 0.0)
-        if marker_score > prev_score:
-            best_by_key[key] = marker
-
-    return sorted(best_by_key.values(), key=lambda m: (m.page_number, m.y_px, m.x_px))
-
-
-def _filter_markers_by_left_margin(
-    markers: list[_QuestionMarker],
-) -> list[_QuestionMarker]:
-    if not markers:
-        return []
-    x_values = [m.x_px for m in markers]
-    median_x = median(x_values)
-
-    kept: list[_QuestionMarker] = []
-    for marker in markers:
-        if abs(marker.x_px - median_x) <= max(80.0, median_x * 0.25):
-            kept.append(marker)
-            continue
-        if marker.has_points_hint:
-            kept.append(marker)
-
-    if kept:
-        return kept
-    return markers
-
-
-def _detected_boxes_norm(page_image: Image.Image) -> list[list[float]]:
-    regions = scan_template(
-        page_image,
-        min_area_ratio=0.0015,
-        max_area_ratio=0.95,
-    )
-    boxes = [_clamp_bbox_norm(r.bbox) for r in regions]
-    boxes.sort(key=lambda b: (b[1], b[0]))
-    return boxes
-
-
-def _match_box_for_marker(
-    marker: _QuestionMarker,
-    page_w: int,
-    page_h: int,
-    boxes_norm: list[list[float]],
-) -> list[float] | None:
-    if not boxes_norm or page_w <= 0 or page_h <= 0:
-        return None
-
-    mx = marker.x_px / page_w
-    my = marker.y_px / page_h
-
-    candidates: list[tuple[float, list[float]]] = []
-    for box in boxes_norm:
-        x, y, w, h = box
-        if h <= 0 or w <= 0:
-            continue
-        if w < QUESTION_BOX_MIN_WIDTH_NORM or h < QUESTION_BOX_MIN_HEIGHT_NORM:
-            continue
-        if y <= QUESTION_BOX_PAGE_BORDER_Y_NORM and h >= QUESTION_BOX_MAX_HEIGHT_NORM:
-            continue
-        if not (x - 0.03 <= mx <= x + w + 0.03):
-            continue
-
-        marker_rel_y = (my - y) / max(h, 1e-6)
-        if marker_rel_y < -0.05 or marker_rel_y > QUESTION_BOX_MARKER_REL_Y_MAX:
-            continue
-
-        top_distance = abs(my - y)
-        height_penalty = min(1.0, h / QUESTION_BOX_MAX_HEIGHT_NORM)
-        width_penalty = max(0.0, 0.6 - min(1.0, w))
-        score = (top_distance * 1.8) + (height_penalty * 0.85) + (width_penalty * 0.2)
-        candidates.append((score, box))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda item: item[0])
-    box = candidates[0][1]
-
-    bx, by, bw, bh = box
-    expanded = _clamp_bbox_norm(
-        [bx, max(0.0, by - 0.006), bw, min(1.0 - by, bh + 0.014)]
-    )
-    return expanded
-
-
-def _next_structural_question_top_norm(
-    *,
-    min_top_norm: float,
-    column_x0: float,
-    column_x1: float,
-    boxes_norm: list[list[float]],
-) -> float | None:
-    candidates: list[float] = []
-    for box in boxes_norm:
-        x, y, w, h = box
-        if w < QUESTION_BOX_MIN_WIDTH_NORM or h < QUESTION_BOX_MIN_HEIGHT_NORM:
-            continue
-        if y <= min_top_norm:
-            continue
-
-        box_x1 = x + w
-        if box_x1 < column_x0 - QUESTION_NEXT_STRUCTURAL_X_MARGIN_NORM:
-            continue
-        if x > column_x1 + QUESTION_NEXT_STRUCTURAL_X_MARGIN_NORM:
-            continue
-
-        candidates.append(y)
-
-    if not candidates:
-        return None
-
-    return min(candidates)
-
-
-def _estimate_question_column_bounds(
-    page_boxes: dict[int, list[list[float]]],
-) -> tuple[float, float]:
-    x0_values: list[float] = []
-    x1_values: list[float] = []
-
-    for boxes in page_boxes.values():
-        for box in boxes:
-            x, y, w, h = box
-            if w < 0.45 or h < 0.08:
-                continue
-            if y < 0.12:
-                continue
-            x0_values.append(x)
-            x1_values.append(x + w)
-
-    if not x0_values or not x1_values:
-        return QUESTION_DEFAULT_X0_NORM, QUESTION_DEFAULT_X1_NORM
-
-    x0 = max(0.02, float(median(x0_values)) - 0.004)
-    x1 = min(0.98, float(median(x1_values)) + 0.004)
-    if x1 - x0 < 0.30:
-        return QUESTION_DEFAULT_X0_NORM, QUESTION_DEFAULT_X1_NORM
-    return x0, x1
-
-
-def _next_question_marker(
-    markers: list[_QuestionMarker],
-    current: _QuestionMarker,
-) -> _QuestionMarker | None:
-    wanted = current.question_number + 1
-    candidates = [
-        marker
-        for marker in markers
-        if marker.question_number == wanted
-        and (
-            marker.page_number > current.page_number
-            or (
-                marker.page_number == current.page_number and marker.y_px > current.y_px
-            )
-        )
-    ]
-    if not candidates:
-        return None
-    return min(
-        candidates, key=lambda marker: (marker.page_number, marker.y_px, marker.x_px)
-    )
-
-
-def _detect_question_regions(
-    page_words: dict[int, list[_OcrWord]],
-    page_dims: dict[int, tuple[int, int]],
-    page_boxes: dict[int, list[list[float]]],
-) -> list[_DetectedQuestionRegion]:
-    markers: list[_QuestionMarker] = []
-    for page_number, words in page_words.items():
-        page_w, page_h = page_dims[page_number]
-        markers.extend(
-            _extract_question_markers_for_page(page_number, words, page_w, page_h)
-        )
-
-    if not markers:
-        return []
-
-    markers = _filter_markers_by_left_margin(markers)
-    markers.sort(key=lambda marker: (marker.page_number, marker.y_px, marker.x_px))
-
-    by_page: dict[int, list[_QuestionMarker]] = {}
-    for marker in markers:
-        by_page.setdefault(marker.page_number, []).append(marker)
-
-    default_x0, default_x1 = _estimate_question_column_bounds(page_boxes)
-
-    regions: list[_DetectedQuestionRegion] = []
-    for page_number in sorted(by_page):
-        markers_on_page = by_page[page_number]
-        page_w, page_h = page_dims[page_number]
-        boxes_norm = page_boxes.get(page_number, [])
-
-        for idx, marker in enumerate(markers_on_page):
-            marker_y_norm = marker.y_px / page_h if page_h else 0.0
-            start_y = max(0.0, marker_y_norm - QUESTION_START_MARGIN_NORM)
-
-            next_same_page = (
-                markers_on_page[idx + 1] if idx + 1 < len(markers_on_page) else None
-            )
-            next_question = _next_question_marker(markers, marker)
-            spans_next_page = (
-                next_same_page is None
-                and next_question is not None
-                and next_question.page_number > page_number
-                and marker_y_norm >= QUESTION_SPAN_TRIGGER_Y_NORM
-            )
-
-            if next_same_page is not None:
-                next_y = next_same_page.y_px / page_h
-                end_y = max(start_y + 0.02, next_y - QUESTION_END_MARGIN_NORM)
-            elif spans_next_page:
-                end_y = QUESTION_MAX_END_NORM
-            else:
-                end_y = QUESTION_DEFAULT_PAGE_END_NORM
-
-            x0 = default_x0
-            x1 = default_x1
-
-            matched_box = _match_box_for_marker(marker, page_w, page_h, boxes_norm)
-            if matched_box is not None and _bbox_area_norm(matched_box) > 0.015:
-                mbx, mby, mbw, mbh = matched_box
-                box_x0 = max(0.02, mbx + 0.002)
-                box_x1 = min(0.98, mbx + mbw - 0.002)
-                x0 = min(x0, box_x0)
-                x1 = max(x1, box_x1)
-                start_y = min(start_y, max(0.0, mby - 0.005))
-
-                if not spans_next_page:
-                    # Keep a little room below the drawn question box for
-                    # handwritten spillover while still preventing bleed into
-                    # the next question.
-                    box_end_soft = min(QUESTION_MAX_END_NORM, mby + mbh + 0.012)
-                    end_y = min(end_y, max(start_y + 0.03, box_end_soft))
-
-            if not spans_next_page:
-                structural_min_top = marker_y_norm + QUESTION_NEXT_STRUCTURAL_MIN_GAP_NORM
-                if matched_box is not None:
-                    _, matched_y, _, matched_h = matched_box
-                    if matched_h <= QUESTION_STRUCTURAL_USE_MATCHED_BOX_MAX_HEIGHT_NORM:
-                        structural_min_top = max(
-                            structural_min_top,
-                            matched_y + (matched_h * QUESTION_STRUCTURAL_MATCHED_BOX_FRACTION),
-                        )
-
-                structural_next_top = _next_structural_question_top_norm(
-                    min_top_norm=structural_min_top,
-                    column_x0=x0,
-                    column_x1=x1,
-                    boxes_norm=boxes_norm,
-                )
-                if structural_next_top is not None:
-                    structural_end = max(
-                        start_y + 0.03,
-                        structural_next_top - QUESTION_END_MARGIN_NORM,
-                    )
-                    end_y = min(end_y, structural_end)
-
-            end_y = min(QUESTION_MAX_END_NORM, max(start_y + 0.03, end_y))
-            bbox = _clamp_bbox_norm([x0, start_y, max(0.05, x1 - x0), end_y - start_y])
-
-            continuation: tuple[int, list[float]] | None = None
-            if spans_next_page and next_question is not None:
-                next_page_num = next_question.page_number
-                next_dims = page_dims.get(next_page_num)
-                if next_dims is not None:
-                    _, next_h = next_dims
-                    next_end = (next_question.y_px / next_h) - QUESTION_END_MARGIN_NORM
-                    next_start = QUESTION_SPAN_NEXT_PAGE_START_NORM
-                    if next_end - next_start >= 0.03:
-                        continuation_bbox = _clamp_bbox_norm(
-                            [
-                                x0,
-                                next_start,
-                                max(0.05, x1 - x0),
-                                next_end - next_start,
-                            ]
-                        )
-                        continuation = (next_page_num, continuation_bbox)
-
-            regions.append(
-                _DetectedQuestionRegion(
-                    page_number=page_number,
-                    question_number=marker.question_number,
-                    bbox_norm=bbox,
-                    continuation=continuation,
-                )
-            )
-
-    return regions
-
-
-def validate_field_result(
-    result: OcrResult, field: dict, config: OcrConfig
-) -> FieldExtractionResult:
-    fid = field["id"]
-    ftype = field.get("type", "text")
-
-    if result.confidence < config.confidence_threshold:
-        return FieldExtractionResult(
-            field_id=fid,
-            ocr_result=result,
-            validated=False,
-            error=f"low_ocr_confidence({result.confidence:.1f} < {config.confidence_threshold})",
-        )
-
-    text = result.text
-    if _is_empty(text):
-        if field.get("required", False):
-            return FieldExtractionResult(
-                field_id=fid,
-                ocr_result=result,
-                validated=False,
-                error="empty_required_field",
-            )
-        return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
-
-    if ftype == "version_marker":
-        expected = field.get("expected", "")
-        normalized = text.upper().strip()
-        if normalized != expected.upper():
-            return FieldExtractionResult(
-                field_id=fid,
-                ocr_result=result,
-                expected=expected,
-                validated=False,
-                error=f"version_mismatch(expected={expected!r}, got={text!r})",
-            )
-
-    if ftype == "name":
-        if not re.match(r"^[A-Za-z\s\-'\.]+$", text):
-            return FieldExtractionResult(
-                field_id=fid,
-                ocr_result=result,
-                validated=False,
-                error=f"invalid_name_characters(got={text!r})",
-            )
-
-    if ftype == "sid":
-        digit_count = len(_normalize_sid_text(text))
-        if digit_count < 5:
-            return FieldExtractionResult(
-                field_id=fid,
-                ocr_result=result,
-                validated=False,
-                error=f"invalid_sid_format(got={text!r})",
-            )
-
-    return FieldExtractionResult(field_id=fid, ocr_result=result, validated=True)
 
 
 def _extract_question_crop_norm(
@@ -1112,6 +703,8 @@ def _extract_question_crop_norm(
     response_format: Literal["png", "pdf"],
     sub_dir: Path,
 ) -> QuestionExtractionResult:
+    """Write a single-page question crop artifact from a normalized bbox."""
+
     bbox_px = _expand_question_bbox_px(
         _bbox_norm_to_px(bbox_norm, page_w, page_h),
         page_w=page_w,
@@ -1143,6 +736,13 @@ def _extract_question_crop_segments(
     response_format: Literal["png", "pdf"],
     sub_dir: Path,
 ) -> QuestionExtractionResult:
+    """
+    Write one question artifact from one or more page segments.
+
+    Continuation segments are cropped independently and vertically stitched so
+    callers receive a single output file for the logical question.
+    """
+
     if not segments:
         return QuestionExtractionResult(
             question_id=question_id,
@@ -1181,6 +781,8 @@ def _extract_question_crop_segments(
     if len(crops) == 1:
         stitched = crops[0]
     else:
+        # Downstream grading expects one artifact per question, so continuation
+        # crops are stacked into a single response image.
         width = max(crop.width for crop in crops)
         height = sum(crop.height for crop in crops)
         stitched = Image.new("RGB", (width, height), color=(255, 255, 255))
@@ -1206,16 +808,22 @@ def _extract_question_crop_segments(
 
 
 def _normalized_label_token(text: str) -> str:
+    """Normalize OCR label text for fuzzy header-field matching."""
+
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
 def _looks_like_name_label(token_norm: str) -> bool:
+    """Return whether a normalized token is a likely name label."""
+
     if token_norm in {"name", "nane", "naine", "narne"}:
         return True
     return token_norm.startswith("name") or token_norm.startswith("narn")
 
 
 def _looks_like_sid_label(token_norm: str) -> bool:
+    """Return whether a normalized token is a likely student ID label."""
+
     if token_norm in {"studentid", "sid", "id", "studentld"}:
         return True
     if token_norm.startswith("student") and ("id" in token_norm or "ld" in token_norm):
@@ -1224,6 +832,8 @@ def _looks_like_sid_label(token_norm: str) -> bool:
 
 
 def _words_bbox(words: list[_OcrWord]) -> tuple[int, int, int, int]:
+    """Return the union bbox for OCR words."""
+
     if not words:
         return (0, 0, 0, 0)
     return (
@@ -1239,6 +849,8 @@ def _extract_name_from_line(
     *,
     page_w_est: int,
 ) -> tuple[str, float, tuple[int, int, int, int]] | None:
+    """Parse a name value from one OCR line when a name label is present."""
+
     if not line_words:
         return None
 
@@ -1276,6 +888,8 @@ def _extract_name_from_line(
     for i in range(label_idx + 1, len(line_words)):
         norm = norms[i]
         if _looks_like_sid_label(norm) or norm == "student":
+            # Adjacent header fields often share a line; stop before the next
+            # label so the name value does not swallow the ID.
             break
         value_words.append(line_words[i])
 
@@ -1301,6 +915,8 @@ def _extract_sid_from_line(
     *,
     page_w_est: int,
 ) -> tuple[str, float, tuple[int, int, int, int]] | None:
+    """Parse a student ID value from one OCR line when an ID label is present."""
+
     if not line_words:
         return None
 
@@ -1346,6 +962,8 @@ def _extract_sid_from_line(
     for i in range(label_end_idx + 1, len(line_words)):
         norm = norms[i]
         if _looks_like_name_label(norm):
+            # Stop at a neighboring name label for the same reason: headers may
+            # be compact and label/value pairs can run together.
             break
         value_words.append(line_words[i])
 
@@ -1362,6 +980,8 @@ def _extract_sid_from_line(
 
 
 def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
+    """Extract best-effort name and student ID values from OCR header text."""
+
     if not words:
         return {}
 
@@ -1387,6 +1007,8 @@ def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
         name_candidate = _extract_name_from_line(line_words, page_w_est=page_w_est)
         if name_candidate is not None:
             text, conf, bbox = name_candidate
+            # Confidence ranks competing parses, but field crops are still saved
+            # for review rather than treated as verified identity data.
             score = conf + len(re.findall(r"[A-Za-z]", text)) * 2.0
             if " " in text:
                 score += 6.0
@@ -1413,6 +1035,8 @@ def _extract_header_field_values(words: list[_OcrWord]) -> dict[str, OcrResult]:
 
 
 def _find_label_word(words: list[_OcrWord], target: str) -> _OcrWord | None:
+    """Find the first likely OCR word for a requested header label."""
+
     normalized_target = target.lower()
     if normalized_target == "name":
         candidates = [
@@ -1429,6 +1053,8 @@ def _find_label_word(words: list[_OcrWord], target: str) -> _OcrWord | None:
 
 
 def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] | None:
+    """Find a likely student ID label bbox, including split 'student id' text."""
+
     line_map = _group_words_by_line(words)
     for line_words in line_map.values():
         texts = [_normalized_label_token(w.text) for w in line_words]
@@ -1456,6 +1082,8 @@ def _clamp_bbox_px(
     page_w: int,
     page_h: int,
 ) -> tuple[int, int, int, int]:
+    """Clamp a pixel bbox to a non-empty page region."""
+
     x0, y0, x1, y1 = bbox_px
     x0 = max(0, min(page_w - 1, x0))
     y0 = max(0, min(page_h - 1, y0))
@@ -1474,6 +1102,8 @@ def _value_bbox_to_field_slice_px(
     page_w: int,
     page_h: int,
 ) -> tuple[int, int, int, int]:
+    """Expand a detected field value bbox into a review-friendly field crop."""
+
     vx0, vy0, vx1, vy1 = value_bbox_px
     value_w = max(1, vx1 - vx0)
     value_h = max(1, vy1 - vy0)
@@ -1529,6 +1159,8 @@ def _label_to_field_bbox_px(
     page_h: int,
     boxes_norm: list[list[float]],
 ) -> tuple[int, int, int, int]:
+    """Pair a field label with a nearby structural value box when possible."""
+
     lx0, ly0, lx1, ly1 = label_bbox_px
     label_center_y = (ly0 + ly1) / 2.0
 
@@ -1564,11 +1196,15 @@ def _label_to_field_bbox_px(
 
 
 def _detect_header_underlines(page_image: Image.Image) -> list[tuple[int, int, int, int]]:
+    """Detect horizontal header underlines that can represent metadata blanks."""
+
     gray = np.array(page_image.convert("L"))
     page_h, page_w = gray.shape[:2]
     if page_h <= 0 or page_w <= 0:
         return []
 
+    # Limit underline detection to the header; answer boxes later on the page
+    # contain similar horizontal rules.
     scan_end = max(1, int(round(page_h * HEADER_UNDERLINE_SCAN_END_NORM)))
     header = gray[:scan_end, :]
 
@@ -1625,6 +1261,8 @@ def _find_matching_underline(
     page_h: int,
     used_indices: set[int] | None = None,
 ) -> int | None:
+    """Find the nearest unused underline to the right of a field label."""
+
     lx0, ly0, lx1, ly1 = label_bbox_px
     label_center_y = (ly0 + ly1) / 2.0
     best_idx: int | None = None
@@ -1657,6 +1295,8 @@ def _underline_to_field_slice_px(
     page_w: int,
     page_h: int,
 ) -> tuple[int, int, int, int]:
+    """Expand a header underline into a field crop with label context."""
+
     ux0, uy0, ux1, uy1 = underline_bbox_px
     x0 = ux0 - int(round(page_w * HEADER_CONTEXT_LEFT_PAD_NORM))
     x1 = ux1 + int(round(page_w * HEADER_CONTEXT_RIGHT_PAD_NORM))
@@ -1674,6 +1314,8 @@ def _set_field_slices_from_underline(
     page_w: int,
     page_h: int,
 ) -> None:
+    """Store the primary field slice derived from a header underline."""
+
     out[field_type] = {
         "primary": _underline_to_field_slice_px(
             underline_bbox_px,
@@ -1691,7 +1333,17 @@ def _detect_dynamic_field_slices(
     *,
     page_image: Image.Image | None = None,
 ) -> dict[str, dict[str, tuple[int, int, int, int]]]:
+    """
+    Infer first-page metadata field crops from OCR and header geometry.
+
+    The result maps field types such as ``name`` and ``sid`` to pixel crop
+    bboxes. It is a best-effort fallback path for templates where fields are not
+    supplied by the semantic layout scanner.
+    """
+
     out: dict[str, dict[str, tuple[int, int, int, int]]] = {}
+    # Field slices are resolved from strongest to weakest evidence: label plus
+    # underline, parsed value, unused underline, then generic structural boxes.
     underlines = _detect_header_underlines(page_image) if page_image is not None else []
     used_underline_indices: set[int] = set()
 
@@ -1847,27 +1499,6 @@ def _detect_dynamic_field_slices(
     return out
 
 
-def _detect_dynamic_field_regions(
-    page_words: list[_OcrWord],
-    page_w: int,
-    page_h: int,
-    boxes_norm: list[list[float]],
-    page_image: Image.Image | None = None,
-) -> dict[str, tuple[int, int, int, int]]:
-    slices = _detect_dynamic_field_slices(
-        page_words,
-        page_w,
-        page_h,
-        boxes_norm,
-        page_image=page_image,
-    )
-    return {
-        field_type: field_slices["primary"]
-        for field_type, field_slices in slices.items()
-        if "primary" in field_slices
-    }
-
-
 def _save_field_crop(
     *,
     page_image: Image.Image,
@@ -1878,6 +1509,8 @@ def _save_field_crop(
     suffix: str = "",
     mirror_dir: Path | None = None,
 ) -> str | None:
+    """Save a field crop and optionally mirror it to a hoisted artifact folder."""
+
     crop = crop_region(page_image, bbox_px)
     if crop.width <= 0 or crop.height <= 0:
         return None
@@ -1897,6 +1530,8 @@ def _save_field_crop(
 
 
 def _default_auto_fields() -> list[dict]:
+    """Return metadata fields that are always attempted during extraction."""
+
     return [
         {
             "id": "student_name",
@@ -1912,6 +1547,8 @@ def _default_auto_fields() -> list[dict]:
 
 
 def make_review_reason(result: SubmissionResult, config: OcrConfig) -> None:
+    """Populate review flags from validation failures on a submission result."""
+
     _ = config
     result.needs_review = False
     result.review_reasons = []
@@ -1927,25 +1564,12 @@ def make_review_reason(result: SubmissionResult, config: OcrConfig) -> None:
         result.review_reasons.append(f"{fr.field_id}: {fr.error or 'unknown'}")
 
 
-def _field_result_score(field_result: FieldExtractionResult) -> float:
-    if field_result.ocr_result is None:
-        return -1.0
-
-    text = field_result.ocr_result.text.strip()
-    base = field_result.ocr_result.confidence
-    if field_result.validated:
-        base += 35.0
-    if text:
-        base += min(20.0, float(len(text)) * 1.1)
-    if field_result.crop_path:
-        base += 4.0
-    return base
-
-
 def _final_question_debug_bboxes_by_page(
     layout: SubmissionLayout,
     rendered_pages: dict[int, tuple[Image.Image, int, int]],
 ) -> dict[int, list[tuple[str, tuple[int, int, int, int]]]]:
+    """Compute final question crop boxes for layout debug overlays."""
+
     bboxes_by_page: dict[int, list[tuple[str, tuple[int, int, int, int]]]] = {}
     for question in layout.questions:
         segments = [
@@ -1978,6 +1602,22 @@ def process_submission_pdf(
     dpi: int = 300,
     save_layout_debug: bool = False,
 ) -> SubmissionResult:
+    """
+    Extract field and question crop artifacts from a submission PDF.
+
+    Args:
+        pdf_path: Path to the submission PDF.
+        config: OCR configuration used by layout scanning.
+        output_dir: Directory where response artifacts are written.
+        response_format: Image or PDF format for question response artifacts.
+        dpi: Render resolution for OCR and saved crops.
+        save_layout_debug: Whether to write JSON and overlay debug artifacts.
+
+    Returns:
+        A submission result containing artifact paths, detected question types,
+        and any review reasons raised during layout or extraction.
+    """
+
     path = Path(pdf_path)
     result = SubmissionResult(filename=path.name)
 
@@ -1997,6 +1637,8 @@ def process_submission_pdf(
         result.version_validated = True
         return result
 
+    # Layout detection owns crop discovery; this layer writes artifacts and
+    # carries review metadata forward without re-deciding geometry.
     layout = scan_submission_layout(rendered_pages, config)
     if save_layout_debug:
         write_layout_debug(
@@ -2082,6 +1724,8 @@ def process_submission_pdf(
         page_image, page_w, page_h = rendered_pages[page_number]
         qid = region.question_id
         if qid in used_ids:
+            # Duplicate markers are kept as separate artifacts instead of
+            # overwriting an earlier crop with the same question id.
             qid = f"q{region.question_number}_{i}"
         used_ids.add(qid)
 
@@ -2126,6 +1770,8 @@ def process_submission_pdf(
 
 
 def results_to_dict(result: SubmissionResult) -> dict:
+    """Serialize a submission result into plain Python containers."""
+
     return {
         "filename": result.filename,
         "version_id": result.version_id,

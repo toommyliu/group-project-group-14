@@ -22,13 +22,13 @@ class DetectedRegion:
     question_type: QuestionType | None = None
 
 
-# Minimum area as fraction of page area to consider a contour
+# Ignore tiny contours so text specks and dust do not become template regions.
 MIN_REGION_AREA_RATIO = 0.002
-# Maximum area - skip huge rectangles (e.g., page borders)
+# Skip huge rectangles because page borders are not student-fillable regions.
 MAX_REGION_AREA_RATIO = 0.5
-# Minimum aspect ratio (w/h) to consider - skip very narrow/tall regions
+# Very narrow regions are usually strokes or separators, not answer boxes.
 MIN_ASPECT_RATIO = 0.3
-# Header zone: regions with y-center in the top N% are header fields
+# The template scanner uses vertical position as a cheap header-field signal.
 HEADER_ZONE_RATIO = 0.15
 
 
@@ -48,6 +48,8 @@ def _find_rectangles(
     Returns:
         List of (x, y, w, h) tuples for detected rectangles in pixel coordinates.
     """
+    # Adaptive thresholding and dilation help faint printed boxes survive long
+    # enough to be found as contours.
     binary = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 10
     )
@@ -67,6 +69,8 @@ def _find_rectangles(
         if w == 0 or h == 0:
             continue
         aspect = w / h
+        # Aspect and rectangularity filters reject text blobs and page noise
+        # while keeping hand-drawn or slightly broken boxes.
         if aspect < MIN_ASPECT_RATIO:
             continue
         rect_area = w * h
@@ -98,7 +102,8 @@ def _merge_overlapping(
             x2, y2, w2, h2 = rects[j]
             bx0, by0, bx1, by1 = x2, y2, x2 + w2, y2 + h2
 
-            # Compute intersection
+            # OpenCV can report nested contours for the same drawn box, so
+            # collapse heavy overlaps into one candidate region.
             ix0 = max(ax0, bx0)
             iy0 = max(ay0, by0)
             ix1 = min(ax1, bx1)
@@ -107,7 +112,6 @@ def _merge_overlapping(
                 intersection = (ix1 - ix0) * (iy1 - iy0)
                 smaller_area = min(w1 * h1, w2 * h2)
                 if smaller_area > 0 and intersection / smaller_area > overlap_threshold:
-                    # Merge: take union bounding box
                     ax0 = min(ax0, bx0)
                     ay0 = min(ay0, by0)
                     ax1 = max(ax1, bx1)
@@ -174,6 +178,8 @@ def scan_template(
         region_type = _classify_region(x, y, w, h, page_h)
         question_type: QuestionType | None = None
         if region_type == "question":
+            # Header fields are not classified as question types because their
+            # short labels can look like answer content to the classifier.
             question_type = classify_question_image(image.crop((x, y, x + w, y + h)))
 
         confidence = min(95.0, 60.0 + (w * h) / page_area * 200)
