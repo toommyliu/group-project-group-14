@@ -9,6 +9,8 @@ from .student_file import (
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
     build_student_submission_document,
+    load_student_submission_markdown,
+    parse_student_submission_markdown,
     parse_assignment_metadata_from_title,
     render_student_submission_markdown,
 )
@@ -22,6 +24,8 @@ __all__ = [
     "StudentSubmissionDocument",
     "StudentSubmissionQuestion",
     "build_student_submission_document",
+    "load_student_submission_markdown",
+    "parse_student_submission_markdown",
     "parse_assignment_metadata_from_title",
     "render_student_submission_markdown",
 ]

@@ -34,8 +34,9 @@ class StubDataProvider:
         *,
         assignment_id: int | None = None,
         assignment_title: str | None = None,
+        student_item_id: str | None = None,
     ) -> list[QuestionSeed]:
-        _ = assignment_id
+        _ = (assignment_id, student_item_id)
         return self._question_content.build_question_seeds(
             assignment_title=assignment_title
         )

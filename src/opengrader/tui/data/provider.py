@@ -13,4 +13,5 @@ class Provider(Protocol):
         *,
         assignment_id: int | None = None,
         assignment_title: str | None = None,
+        student_item_id: str | None = None,
     ) -> list[QuestionSeed]: ...

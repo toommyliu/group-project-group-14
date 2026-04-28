@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Literal
 
 import numpy as np
+import yaml
 from PIL import Image, ImageOps
 
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
@@ -48,6 +49,14 @@ _SUBQUESTION_MIN_HEIGHT_NORM = 0.08
 _SUBQUESTION_MAX_X_SPREAD_NORM = 0.08
 _SUBQUESTION_MARKER_MAX_X_NORM = 0.30
 _SUBQUESTION_MARKER_TOKEN_RE = re.compile(r"^[\(\[]?([a-z])[\)\].:]?$")
+_SUBMISSION_FRONTMATTER_RE = re.compile(r"^---\s*$")
+_SUBMISSION_QUESTION_RE = re.compile(r"^-\s+([A-Za-z]\w*):\s*$")
+_SUBMISSION_FIELD_RE = re.compile(r"^\s{2}-\s+([^:]+):\s*(.*)$")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+_PROMPT_POINTS_RE = re.compile(
+    r"^\((\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.*)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -89,306 +98,203 @@ class StudentSubmissionBuildResult:
     responses_dir: Path
 
 
-def _parse_submission_scalar(raw: str) -> str | None:
-    value = raw.strip()
-    if value in {"", "null", "Null", "NULL"}:
+def _parse_submission_frontmatter(content: str) -> tuple[dict[str, object], list[str]]:
+    lines = content.splitlines()
+    if not lines or _SUBMISSION_FRONTMATTER_RE.match(lines[0]) is None:
+        return {}, lines
+
+    for index in range(1, len(lines)):
+        if _SUBMISSION_FRONTMATTER_RE.match(lines[index]) is not None:
+            raw_frontmatter = "\n".join(lines[1:index])
+            parsed = yaml.safe_load(raw_frontmatter) or {}
+            if not isinstance(parsed, dict):
+                raise ValueError("student submission frontmatter must be a mapping")
+            return parsed, lines[index + 1 :]
+
+    return {}, lines
+
+
+def _submission_question_blocks(
+    lines: list[str],
+) -> list[tuple[str, list[str]]]:
+    blocks: list[tuple[str, list[str]]] = []
+    current_id: str | None = None
+    current_lines: list[str] = []
+
+    for line in lines:
+        matched = _SUBMISSION_QUESTION_RE.match(line)
+        if matched is not None:
+            if current_id is not None:
+                blocks.append((current_id, current_lines))
+            current_id = matched.group(1)
+            current_lines = []
+            continue
+
+        if current_id is not None:
+            current_lines.append(line)
+
+    if current_id is not None:
+        blocks.append((current_id, current_lines))
+
+    return blocks
+
+
+def _parse_submission_question_fields(lines: list[str]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    index = 0
+    while index < len(lines):
+        matched = _SUBMISSION_FIELD_RE.match(lines[index])
+        if matched is None:
+            index += 1
+            continue
+
+        key = matched.group(1).strip()
+        raw_value = matched.group(2).rstrip()
+        index += 1
+
+        if raw_value == "|":
+            value_lines: list[str] = []
+            while index < len(lines):
+                next_line = lines[index]
+                if _SUBMISSION_FIELD_RE.match(next_line) is not None:
+                    break
+                if next_line.startswith("    "):
+                    value_lines.append(next_line[4:])
+                elif next_line.strip():
+                    value_lines.append(next_line.strip())
+                else:
+                    value_lines.append("")
+                index += 1
+            fields[key] = "\n".join(value_lines).rstrip()
+            continue
+
+        fields[key] = raw_value.strip()
+
+    return fields
+
+
+def _frontmatter_str(
+    frontmatter: dict[str, object],
+    key: str,
+    *,
+    default: str = "",
+) -> str:
+    value = frontmatter.get(key)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _frontmatter_optional_str(
+    frontmatter: dict[str, object],
+    key: str,
+) -> str | None:
+    value = frontmatter.get(key)
+    if value is None:
         return None
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        return value[1:-1].replace('\\"', '"')
-    return value
+    text = str(value).strip()
+    return text or None
 
 
-def _parse_submission_float(raw: str | None) -> float | None:
+def _parse_optional_float(raw: str | None) -> float | None:
     if raw is None:
         return None
-    value = raw.strip()
-    if not value:
+    text = raw.strip()
+    if not text:
         return None
     try:
-        return float(value)
+        return float(text)
     except ValueError:
         return None
 
 
-def _render_submission_float(value: float | None) -> str:
-    if value is None:
-        return ""
-    if value.is_integer():
-        return str(int(value))
-    return f"{value:g}"
+def _strip_prompt_points(prompt: str) -> tuple[str, float | None]:
+    matched = _PROMPT_POINTS_RE.match(prompt.strip())
+    if matched is None:
+        return prompt.strip(), None
+    return matched.group(2).strip(), float(matched.group(1))
 
 
-def _parse_student_submission_frontmatter(
-    lines: list[str],
-) -> tuple[dict[str, str], int]:
-    if len(lines) < 2 or lines[0].strip() != "---":
-        return {}, 0
-
-    frontmatter: dict[str, str] = {}
-    index = 1
-    while index < len(lines):
-        line = lines[index]
-        if line.strip() == "---":
-            return frontmatter, index + 1
-
-        if ":" in line:
-            key, raw_value = line.split(":", 1)
-            parsed = _parse_submission_scalar(raw_value)
-            frontmatter[key.strip()] = parsed or ""
-        index += 1
-
-    return {}, 0
+def _parse_question_type(raw: str | None) -> QuestionType:
+    normalized = (raw or "").strip().lower().replace("-", " ")
+    if normalized in {"multiple choice", "multiple_choice"}:
+        return MULTIPLE_CHOICE
+    return FREE_RESPONSE
 
 
-def _submission_block_value(lines: list[str], start: int) -> tuple[str, int]:
-    output: list[str] = []
-    index = start
-    while index < len(lines):
-        line = lines[index]
-        if _SUBMISSION_FIELD_RE.match(line) or _SUBMISSION_QUESTION_RE.match(line):
-            break
-        if line.startswith("    "):
-            output.append(line[4:])
-        elif line.strip():
-            output.append(line.strip())
-        else:
-            output.append("")
-        index += 1
-    return "\n".join(output).rstrip(), index
-
-
-def _parse_response_image_path(raw: str, *, markdown_path: Path | None) -> str | None:
-    value = raw.strip()
-    if not value:
+def _parse_response_image_path(raw: str | None, base_path: Path | None) -> str | None:
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
         return None
 
-    matched = _MARKDOWN_IMAGE_RE.search(value)
-    if matched is not None:
-        value = matched.group(1).strip()
-
-    if not value:
+    matched = _MARKDOWN_IMAGE_RE.search(text)
+    image_path = matched.group(1).strip() if matched is not None else text
+    if not image_path:
         return None
 
-    path = Path(value)
-    if path.is_absolute() or markdown_path is None:
+    path = Path(image_path).expanduser()
+    if path.is_absolute() or base_path is None:
         return str(path)
-    return str((markdown_path.parent / path).resolve())
+    return str((base_path / path).resolve())
 
 
 def parse_student_submission_markdown(
     content: str,
     *,
-    markdown_path: str | Path | None = None,
+    base_path: Path | None = None,
 ) -> StudentSubmissionDocument:
-    path = Path(markdown_path) if markdown_path is not None else None
-    lines = content.splitlines()
-    frontmatter, index = _parse_student_submission_frontmatter(lines)
-
+    frontmatter, body_lines = _parse_submission_frontmatter(content)
     questions: list[StudentSubmissionQuestion] = []
-    while index < len(lines):
-        matched_question = _SUBMISSION_QUESTION_RE.match(lines[index])
-        if matched_question is None:
-            index += 1
-            continue
 
-        question_id = matched_question.group(1).strip()
-        index += 1
-        fields: dict[str, str] = {}
-
-        while index < len(lines):
-            if _SUBMISSION_QUESTION_RE.match(lines[index]):
-                break
-
-            matched_field = _SUBMISSION_FIELD_RE.match(lines[index])
-            if matched_field is None:
-                index += 1
-                continue
-
-            field_name = matched_field.group(1).strip().lower()
-            raw_value = matched_field.group(2)
-            index += 1
-
-            if raw_value.strip() == "|":
-                value, index = _submission_block_value(lines, index)
-            else:
-                value = raw_value.strip()
-            fields[field_name] = value
+    for question_id, question_lines in _submission_question_blocks(body_lines):
+        fields = _parse_submission_question_fields(question_lines)
+        prompt_raw = fields.get("Prompt", "")
+        possible_points = _parse_optional_float(fields.get("Possible points"))
+        prompt = prompt_raw.strip()
+        if possible_points is None:
+            stripped_prompt, inline_points = _strip_prompt_points(prompt)
+            prompt = stripped_prompt
+            possible_points = inline_points
 
         questions.append(
             StudentSubmissionQuestion(
                 question_id=question_id,
-                prompt=fields.get("prompt", ""),
-                possible_points=_parse_submission_float(fields.get("possible points")),
+                prompt=prompt,
+                possible_points=possible_points,
                 response_image_path=_parse_response_image_path(
-                    fields.get("response image", ""),
-                    markdown_path=path,
+                    fields.get("Response image"),
+                    base_path,
                 ),
-                response_text=fields.get("response text", ""),
-                points_awarded=_parse_submission_float(fields.get("points")),
-                analysis=fields.get("analysis", ""),
+                response_text=fields.get("Response text", "").strip(),
+                points_awarded=_parse_optional_float(fields.get("Points")),
+                analysis=fields.get("Analysis", "").strip(),
+                question_type=_parse_question_type(fields.get("Question type")),
             )
         )
 
     return StudentSubmissionDocument(
-        student_name=frontmatter.get("name", ""),
-        student_id=frontmatter.get("student_id", ""),
-        course_code=frontmatter.get("course_code") or None,
-        assignment_title=frontmatter.get("assignment_title") or None,
-        assignment_version=frontmatter.get("assignment_version") or None,
-        source_pdf=frontmatter.get("source_pdf", ""),
-        score=frontmatter.get("score", ""),
+        student_name=_frontmatter_str(frontmatter, "name"),
+        student_id=_frontmatter_str(frontmatter, "student_id"),
+        course_code=_frontmatter_optional_str(frontmatter, "course_code"),
+        assignment_title=_frontmatter_str(frontmatter, "assignment_title"),
+        assignment_version=_frontmatter_optional_str(frontmatter, "assignment_version"),
+        source_pdf=_frontmatter_str(frontmatter, "source_pdf"),
+        score=_frontmatter_str(frontmatter, "score"),
         questions=questions,
     )
 
 
 def load_student_submission_markdown(path: str | Path) -> StudentSubmissionDocument:
-    markdown_path = Path(path)
+    submission_path = Path(path)
     return parse_student_submission_markdown(
-        markdown_path.read_text(encoding="utf-8"),
-        markdown_path=markdown_path,
+        submission_path.read_text(),
+        base_path=submission_path.parent,
     )
 
 
-def _field_block_end(lines: list[str], start: int) -> int:
-    index = start
-    while index < len(lines):
-        if _SUBMISSION_FIELD_RE.match(lines[index]) or _SUBMISSION_QUESTION_RE.match(
-            lines[index]
-        ):
-            break
-        index += 1
-    return index
-
-
-def _render_submission_field(
-    name: str,
-    value: str,
-    *,
-    indent: str = "  ",
-) -> list[str]:
-    if "\n" not in value:
-        return [f"{indent}- {name}: {value}"]
-
-    rendered = [f"{indent}- {name}: |"]
-    rendered.extend(f"{indent}  {line}" for line in value.splitlines())
-    return rendered
-
-
-def _replace_submission_field(
-    lines: list[str],
-    *,
-    question_start: int,
-    question_end: int,
-    field_name: str,
-    value: str,
-) -> int:
-    normalized = field_name.lower()
-    index = question_start + 1
-    while index < question_end:
-        matched = _SUBMISSION_FIELD_RE.match(lines[index])
-        if matched is None:
-            index += 1
-            continue
-        if matched.group(1).strip().lower() != normalized:
-            index += 1
-            continue
-
-        replacement = _render_submission_field(field_name, value)
-        field_end = (
-            _field_block_end(lines, index + 1)
-            if matched.group(2).strip() == "|"
-            else index + 1
-        )
-        lines[index:field_end] = replacement
-        return question_end + len(replacement) - (field_end - index)
-
-    insertion = _render_submission_field(field_name, value)
-    lines[question_end:question_end] = insertion
-    return question_end + len(insertion)
-
-
-def update_student_submission_grade(
-    path: str | Path,
-    *,
-    question_id: str,
-    points_awarded: float | None,
-    analysis: str,
-) -> StudentSubmissionDocument:
-    markdown_path = Path(path)
-    lines = markdown_path.read_text(encoding="utf-8").splitlines()
-
-    index = 0
-    while index < len(lines):
-        matched = _SUBMISSION_QUESTION_RE.match(lines[index])
-        if matched is None or matched.group(1).strip() != question_id:
-            index += 1
-            continue
-
-        question_end = index + 1
-        while question_end < len(lines):
-            if _SUBMISSION_QUESTION_RE.match(lines[question_end]):
-                break
-            question_end += 1
-
-        # Preserve OCR output and image references exactly; grading edits should only
-        # touch the fields a grader owns.
-        question_end = _replace_submission_field(
-            lines,
-            question_start=index,
-            question_end=question_end,
-            field_name="Points",
-            value=_render_submission_float(points_awarded),
-        )
-        _replace_submission_field(
-            lines,
-            question_start=index,
-            question_end=question_end,
-            field_name="Analysis",
-            value=analysis,
-        )
-        markdown_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        return load_student_submission_markdown(markdown_path)
-
-    raise ValueError(f"question {question_id!r} not found in {markdown_path}")
-
-
-def _normalize_assignment_version(token: str | None) -> str | None:
-    if not token:
-        return None
-    cleaned = token.translate(SUBSCRIPT_TRANSLATION)
-    cleaned = re.sub(r"(?i)^version\s+", "", cleaned.strip())
-    cleaned = cleaned.strip("()[]{}:;,- ")
-    cleaned = re.sub(r"[\s_]+", "", cleaned)
-    return cleaned.upper() if cleaned else None
-
-
-def parse_assignment_metadata_from_title(
-    raw_title: str | TitleMetadataResult | dict[str, str | None],
-) -> AssignmentTitleMetadata:
-    if isinstance(raw_title, TitleMetadataResult):
-        return AssignmentTitleMetadata(
-            raw_title=raw_title.raw_title,
-            course_code=raw_title.course_code,
-            assignment_title=raw_title.assignment_title or "Unknown Assignment",
-            assignment_version=_normalize_assignment_version(
-                raw_title.assignment_version
-            ),
-        )
-
-    if isinstance(raw_title, dict):
-        title = str(raw_title.get("assignment_title") or "").strip()
-        raw = str(raw_title.get("raw_title") or title).strip()
-        course_code = raw_title.get("course_code")
-        version = raw_title.get("assignment_version")
-        return AssignmentTitleMetadata(
-            raw_title=raw,
-            course_code=str(course_code).strip() if course_code else None,
-            assignment_title=title or "Unknown Assignment",
-            assignment_version=(
-                _normalize_assignment_version(str(version)) if version else None
-            ),
-        )
-
+def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
     normalized = "\n".join(
         line.strip() for line in raw_title.splitlines() if line.strip()
     )

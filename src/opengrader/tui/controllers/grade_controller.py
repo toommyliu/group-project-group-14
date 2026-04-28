@@ -15,6 +15,9 @@ from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 
+_CURRENT_STUDENT_ITEM = object()
+
+
 class GradeApp(Protocol):
     def get_grade_screen(self) -> GradeScreen: ...
 
@@ -49,7 +52,10 @@ class GradeController:
             return
 
         self._state.grading_run.questions = self._question_grades(
-            self._build_question_seeds_for_selection()
+            self._build_question_seeds_for_selection(student_item_id=None)
+        )
+        self._state.grading_run.max_points = self._max_points(
+            self._state.grading_run.questions
         )
         self._state.question_items = self._question_items(
             self._state.grading_run.questions
@@ -112,9 +118,11 @@ class GradeController:
             assignment_name=self._state.selection_labels.get("assignment")
             or "Assignment",
         )
-        self._state.grading_run.max_points = 100.0
         self._state.grading_run.questions = self._question_grades(
             self._build_question_seeds_for_selection()
+        )
+        self._state.grading_run.max_points = self._max_points(
+            self._state.grading_run.questions
         )
         self._state.grading_run.select_question(question_index)
         self._state.active_question_index = (
@@ -324,10 +332,20 @@ class GradeController:
             )
         ]
 
-    def _build_question_seeds_for_selection(self) -> list[QuestionSeed]:
+    def _build_question_seeds_for_selection(
+        self,
+        *,
+        student_item_id: str | None | object = _CURRENT_STUDENT_ITEM,
+    ) -> list[QuestionSeed]:
+        if student_item_id is _CURRENT_STUDENT_ITEM:
+            student_item_id = self._state.selection.student_item_id
+        provider_student_item_id = (
+            student_item_id if isinstance(student_item_id, str) else None
+        )
         return self._data_provider.build_question_seeds(
             assignment_id=self._state.selection.assignment_id,
             assignment_title=self._state.selection_labels.get("assignment") or None,
+            student_item_id=provider_student_item_id,
         )
 
     def _find_ungraded_student_index(
@@ -387,9 +405,18 @@ class GradeController:
                     )
                     for option in seed.rubric_options
                 ],
+                points=seed.points,
+                prompt=seed.prompt,
+                expected_answers=list(seed.expected_answers),
+                response_text=seed.response_text,
             )
             for seed in seeds
         ]
+
+    @staticmethod
+    def _max_points(questions: list[QuestionGrade]) -> float:
+        total = sum(question.points for question in questions)
+        return total if total > 0 else 100.0
 
     def _question_items(self, questions: list[QuestionGrade]) -> list[NavItem]:
         items: list[NavItem] = []

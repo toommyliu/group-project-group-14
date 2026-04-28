@@ -49,6 +49,72 @@ def test_app_launches_directly_to_qa_picker() -> None:
     asyncio.run(run())
 
 
+def test_app_loads_file_backed_grading_queue() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.workflow_state.selection_labels["course"] == "CS146"
+            assert app.workflow_state.selection_labels["assignment"] == "CS146: Quiz 1"
+            assert [item.item_id for item in app.workflow_state.question_items] == [
+                "q1",
+                "q2",
+                "q3",
+                "q4",
+                "q5a",
+                "q5b",
+                "q5c",
+                "q6a",
+                "q6b",
+                "q6c",
+                "q6d",
+            ]
+            student_list = app.get_qa_picker_screen().query_one(
+                "#student-list",
+                ListView,
+            )
+            assert _list_item_texts(student_list) == [
+                "Tommy Liu [0/11 graded]",
+                "ine Bill Caray [0/11 graded]",
+            ]
+
+    asyncio.run(run())
+
+
+def test_file_backed_app_opens_student_specific_grading_context() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            current = app.workflow_state.grading_run.current_question
+            assert current is not None
+            assert app.workflow_state.grading_run.max_points == 85
+            assert current.question_id == "q1"
+            assert current.prompt == "Convert decimal 5 to binary [A]."
+            assert current.response_text == "no"
+            assert current.image_path.endswith("responses/submission-0001/q1.png")
+
+            context = app.get_grade_screen().query_one("#question-context", Static)
+            assert "Convert decimal 5 to binary [A]." in str(context.content)
+            assert "Response text:" in str(context.content)
+
+    asyncio.run(run())
+
+
 def test_happy_path_selects_qa_then_opens_grading() -> None:
     async def run() -> None:
         app = TuiApp(

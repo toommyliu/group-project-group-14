@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 import os
 
 from opengrader.tui.tui import TuiApp
@@ -17,8 +18,34 @@ def _enable_textual_feature(feature: str) -> None:
     os.environ[_TEXTUAL_ENV_VAR] = ",".join(sorted(features))
 
 
-def run_app() -> None:
-    TuiApp().run()
+def _build_parser() -> ArgumentParser:
+    parser = ArgumentParser(description="Launch the Opengrader TUI.")
+    parser.add_argument("--qa-file", help="Path to a QA markdown file.")
+    parser.add_argument(
+        "--submissions",
+        help="Path to a .submission.md file or directory containing submission files.",
+    )
+    return parser
+
+
+def run_app(argv: list[str] | None = None) -> None:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if bool(args.qa_file) != bool(args.submissions):
+        parser.error("--qa-file and --submissions must be provided together")
+
+    try:
+        if args.qa_file:
+            TuiApp(
+                qa_file_path=args.qa_file,
+                submissions_path=args.submissions,
+            ).run()
+            return
+
+        TuiApp().run()
+    except (OSError, ValueError) as exc:
+        parser.exit(2, f"error: {exc}\n")
 
 
 def run_app_dev() -> None:

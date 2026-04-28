@@ -51,6 +51,9 @@ class GradeScreen(Vertical):
                 yield Label("Score: 100.0", id="total-grade-label")
                 yield Label("Progress: 0/0", id="grade-progress")
                 yield Rule()
+                yield Label("Question", classes="sidebar-section-title")
+                yield Static("", id="question-context")
+                yield Rule()
                 yield Label("Rubric", classes="sidebar-section-title")
                 yield ListView(id="rubric-list")
                 yield Input(
@@ -79,6 +82,7 @@ class GradeScreen(Vertical):
             for child in list(rubric_list.children):
                 child.remove()
             self._rubric_count = 0
+            self.query_one("#question-context", Static).update("")
             comment_input = self.query_one("#question-comment", Input)
             if comment_input.value:
                 comment_input.value = ""
@@ -86,6 +90,9 @@ class GradeScreen(Vertical):
 
         viewer = self.query_one("#response-viewer", ResponseViewer)
         viewer.set_image_path(current.image_path)
+        self.query_one("#question-context", Static).update(
+            self._question_context_text(current)
+        )
 
         self._rubric_count = len(current.rubric_options)
         self._sync_rubric_options(current)
@@ -118,6 +125,19 @@ class GradeScreen(Vertical):
                 li.add_class("rubric-selected")
                 continue
             li.remove_class("rubric-selected")
+
+    @staticmethod
+    def _question_context_text(current) -> str:
+        parts = [
+            f"{current.question_id} ({current.points:g} points)",
+            "",
+            current.prompt or "No prompt available.",
+        ]
+        if current.expected_answers:
+            parts.extend(["", "Expected:", "\n".join(current.expected_answers)])
+        if current.response_text:
+            parts.extend(["", "Response text:", current.response_text])
+        return "\n".join(parts)
 
     def set_status(self, text: str) -> None:
         self.query_one("#db-status", Static).update(text)

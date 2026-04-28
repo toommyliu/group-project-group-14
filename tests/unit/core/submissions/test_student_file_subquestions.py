@@ -309,7 +309,71 @@ def test_render_student_submission_markdown_includes_question_type() -> None:
     assert "- q1:\n  - Question type: Multiple Choice\n  - Prompt:" in markdown
 
 
-def test_build_student_submission_document_uses_primary_field_crop_for_ollama_fields(
+def test_parse_student_submission_markdown_reads_frontmatter_and_questions(
+    tmp_path: Path,
+) -> None:
+    submission_path = (
+        Path("samples/cs146-quiz1/student-submissions/submission-0001.submission.md")
+    )
+    document = student_file.load_student_submission_markdown(submission_path)
+
+    assert document.student_name == "Tommy Liu"
+    assert document.student_id == "123456789"
+    assert document.course_code == "CS146"
+    assert document.assignment_title == "Quiz 1"
+    assert document.assignment_version == "A"
+    assert document.questions[0].question_id == "q1"
+    assert document.questions[0].response_text == "no"
+    assert document.questions[0].response_image_path is not None
+    assert Path(document.questions[0].response_image_path).is_absolute()
+    assert Path(document.questions[0].response_image_path).exists()
+
+
+def test_parse_student_submission_markdown_round_trips_rendered_document(
+    tmp_path: Path,
+) -> None:
+    response_dir = tmp_path / "responses"
+    response_dir.mkdir()
+    response_image = response_dir / "q1.png"
+    Image.new("RGB", (10, 10), color=(255, 255, 255)).save(response_image)
+
+    document = student_file.StudentSubmissionDocument(
+        student_name="Taylor Student",
+        student_id="123",
+        course_code="CMPE195",
+        assignment_title="Quiz",
+        assignment_version="A",
+        source_pdf="submission.pdf",
+        questions=[
+            student_file.StudentSubmissionQuestion(
+                question_id="q1",
+                question_type=MULTIPLE_CHOICE,
+                prompt="Which structure is FIFO?",
+                possible_points=2,
+                response_image_path="responses/q1.png",
+                response_text="B\nbecause queue",
+                points_awarded=1.0,
+                analysis="Partial",
+            )
+        ],
+    )
+
+    parsed = student_file.parse_student_submission_markdown(
+        student_file.render_student_submission_markdown(document),
+        base_path=tmp_path,
+    )
+
+    assert parsed.student_name == "Taylor Student"
+    assert parsed.questions[0].question_id == "q1"
+    assert parsed.questions[0].question_type == MULTIPLE_CHOICE
+    assert parsed.questions[0].possible_points == 2
+    assert parsed.questions[0].response_text == "B\nbecause queue"
+    assert parsed.questions[0].points_awarded == 1.0
+    assert parsed.questions[0].analysis == "Partial"
+    assert parsed.questions[0].response_image_path == str(response_image.resolve())
+
+
+def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
