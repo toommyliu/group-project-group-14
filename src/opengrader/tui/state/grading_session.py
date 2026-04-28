@@ -16,6 +16,8 @@ class QuestionGrade:
     prompt: str = ""
     expected_answers: list[str] = field(default_factory=list)
     response_text: str = ""
+    points_awarded: float | None = None
+    rubric_label: str = ""
     selected_option_index: int | None = None
     comment: str = ""
 

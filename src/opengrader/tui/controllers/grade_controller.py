@@ -134,10 +134,14 @@ class GradeController:
 
     def on_rubric_selected(self, option_index: int) -> None:
         self._state.grading_run.apply_option(option_index)
-        self.refresh_grade_screen(status="")
+        status = self._persist_current_grade()
+        self.refresh_grade_screen(status=status)
 
     def on_comment_updated(self, comment: str) -> None:
         self._state.grading_run.update_comment(comment)
+        error = self._persist_current_analysis(comment)
+        if error:
+            self.refresh_grade_screen(status=error)
 
     def return_to_home(self) -> None:
         self.return_to_qa_picker()
@@ -305,6 +309,60 @@ class GradeController:
             return None
         return self._state.student_items[self._state.active_student_index]
 
+    def _persist_current_grade(self) -> str:
+        save_grade = getattr(self._data_provider, "save_question_grade", None)
+        if not callable(save_grade):
+            return ""
+
+        current_student = self._current_student_item()
+        current_question = self._state.grading_run.current_question
+        if current_student is None or current_question is None:
+            return ""
+        if current_question.selected_option_index is None:
+            return ""
+
+        selected_option = current_question.rubric_options[
+            current_question.selected_option_index
+        ]
+        points_awarded = self._clamp_points(
+            current_question.points + selected_option.points_delta,
+            max_points=current_question.points,
+        )
+        current_question.points_awarded = points_awarded
+        current_question.rubric_label = selected_option.label
+
+        try:
+            save_grade(
+                student_item_id=current_student.item_id,
+                question_id=current_question.question_id,
+                possible_points=current_question.points,
+                points_awarded=points_awarded,
+                rubric_label=selected_option.label,
+            )
+        except Exception as exc:
+            return f"Could not save grade: {exc}"
+        return "Saved grade to submission file."
+
+    def _persist_current_analysis(self, analysis: str) -> str:
+        save_analysis = getattr(self._data_provider, "save_question_analysis", None)
+        if not callable(save_analysis):
+            return ""
+
+        current_student = self._current_student_item()
+        current_question = self._state.grading_run.current_question
+        if current_student is None or current_question is None:
+            return ""
+
+        try:
+            save_analysis(
+                student_item_id=current_student.item_id,
+                question_id=current_question.question_id,
+                analysis=analysis,
+            )
+        except Exception as exc:
+            return f"Could not save comment: {exc}"
+        return ""
+
     def _status_key(self, student_item_id: str) -> tuple[str, str, str]:
         return (
             str(self._state.selection.course_id or ""),
@@ -409,6 +467,10 @@ class GradeController:
                 prompt=seed.prompt,
                 expected_answers=list(seed.expected_answers),
                 response_text=seed.response_text,
+                points_awarded=seed.points_awarded,
+                rubric_label=seed.rubric_label,
+                selected_option_index=GradeController._selected_option_index(seed),
+                comment=seed.analysis,
             )
             for seed in seeds
         ]
@@ -417,6 +479,33 @@ class GradeController:
     def _max_points(questions: list[QuestionGrade]) -> float:
         total = sum(question.points for question in questions)
         return total if total > 0 else 100.0
+
+    @staticmethod
+    def _selected_option_index(seed: QuestionSeed) -> int | None:
+        if seed.rubric_label:
+            for index, option in enumerate(seed.rubric_options):
+                if option.label == seed.rubric_label:
+                    return index
+
+        if seed.points_awarded is None:
+            return None
+
+        matching_indices = [
+            index
+            for index, option in enumerate(seed.rubric_options)
+            if GradeController._clamp_points(
+                seed.points + option.points_delta,
+                max_points=seed.points,
+            )
+            == seed.points_awarded
+        ]
+        if len(matching_indices) == 1:
+            return matching_indices[0]
+        return None
+
+    @staticmethod
+    def _clamp_points(points: float, *, max_points: float) -> float:
+        return max(0.0, min(points, max_points))
 
     def _question_items(self, questions: list[QuestionGrade]) -> list[NavItem]:
         items: list[NavItem] = []

@@ -1,10 +1,19 @@
 from pathlib import Path
+import shutil
 
 import pytest
 
+from opengrader.core.submissions import load_student_submission_markdown
 from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 
 from .fakes import DEFAULT_IMAGE_PATH
+
+
+def _copy_sample_submissions(tmp_path: Path) -> Path:
+    source = Path("samples/cs146-quiz1/student-submissions")
+    destination = tmp_path / "student-submissions"
+    shutil.copytree(source, destination)
+    return destination
 
 
 def test_submission_files_provider_loads_students_and_questions() -> None:
@@ -116,3 +125,68 @@ def test_submission_files_provider_raises_for_unknown_version(tmp_path: Path) ->
             submissions_path=submission_path,
             default_image_path=DEFAULT_IMAGE_PATH,
         )
+
+
+def test_submission_files_provider_save_question_grade_updates_selected_file(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=7,
+        rubric_label="Partially Correct",
+    )
+
+    first = load_student_submission_markdown(
+        submissions_path / "submission-0001.submission.md"
+    )
+    second = load_student_submission_markdown(
+        submissions_path / "submission-0002.submission.md"
+    )
+    assert first.questions[0].possible_points == 10
+    assert first.questions[0].points_awarded == 7
+    assert first.questions[0].rubric_label == "Partially Correct"
+    assert second.questions[0].points_awarded is None
+
+    reloaded = provider.build_question_seeds(student_item_id="s1")
+    assert reloaded[0].points_awarded == 7
+    assert reloaded[0].rubric_label == "Partially Correct"
+
+
+def test_submission_files_provider_save_question_analysis_preserves_grade(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=7,
+        rubric_label="Partially Correct",
+    )
+    provider.save_question_analysis(
+        student_item_id="s1",
+        question_id="q1",
+        analysis="Useful explanation.",
+    )
+
+    document = load_student_submission_markdown(
+        submissions_path / "submission-0001.submission.md"
+    )
+    assert document.questions[0].points_awarded == 7
+    assert document.questions[0].rubric_label == "Partially Correct"
+    assert document.questions[0].analysis == "Useful explanation."

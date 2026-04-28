@@ -75,6 +75,7 @@ class StudentSubmissionQuestion:
     response_image_path: str | None
     response_text: str
     points_awarded: float | None = None
+    rubric_label: str = ""
     analysis: str = ""
     question_type: QuestionType = FREE_RESPONSE
 
@@ -96,6 +97,15 @@ class StudentSubmissionBuildResult:
     document: StudentSubmissionDocument
     markdown_path: Path
     responses_dir: Path
+
+
+@dataclass(frozen=True)
+class StudentSubmissionGradeUpdate:
+    question_id: str
+    possible_points: float | None = None
+    points_awarded: float | None = None
+    rubric_label: str | None = None
+    analysis: str | None = None
 
 
 def _parse_submission_frontmatter(content: str) -> tuple[dict[str, object], list[str]]:
@@ -222,6 +232,14 @@ def _parse_question_type(raw: str | None) -> QuestionType:
     return FREE_RESPONSE
 
 
+def _format_submission_points(value: float | None) -> str:
+    if value is None:
+        return ""
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
+
+
 def _parse_response_image_path(raw: str | None, base_path: Path | None) -> str | None:
     if raw is None:
         return None
@@ -269,6 +287,7 @@ def parse_student_submission_markdown(
                 ),
                 response_text=fields.get("Response text", "").strip(),
                 points_awarded=_parse_optional_float(fields.get("Points")),
+                rubric_label=fields.get("Rubric", "").strip(),
                 analysis=fields.get("Analysis", "").strip(),
                 question_type=_parse_question_type(fields.get("Question type")),
             )
@@ -292,6 +311,149 @@ def load_student_submission_markdown(path: str | Path) -> StudentSubmissionDocum
         submission_path.read_text(),
         base_path=submission_path.parent,
     )
+
+
+def _format_update_field_lines(field_name: str, value: str) -> list[str]:
+    if field_name == "Analysis" and "\n" in value:
+        lines = ["  - Analysis: |"]
+        lines.extend(f"    {line}" for line in value.splitlines())
+        return lines
+    return [f"  - {field_name}: {value}".rstrip()]
+
+
+def _replace_question_field(
+    block: list[str],
+    field_name: str,
+    value: str,
+) -> bool:
+    field_re = re.compile(rf"^  -\s+{re.escape(field_name)}:\s*(.*)$")
+    for index, line in enumerate(block):
+        if field_re.match(line) is None:
+            continue
+
+        end = index + 1
+        if line.rstrip().endswith("|"):
+            while end < len(block) and _SUBMISSION_FIELD_RE.match(block[end]) is None:
+                end += 1
+        block[index:end] = _format_update_field_lines(field_name, value)
+        return True
+    return False
+
+
+def _insert_question_field(
+    block: list[str],
+    *,
+    after_field: str,
+    field_name: str,
+    value: str,
+) -> bool:
+    after_re = re.compile(rf"^  -\s+{re.escape(after_field)}:\s*(.*)$")
+    for index, line in enumerate(block):
+        if after_re.match(line) is None:
+            continue
+
+        insert_at = index + 1
+        if line.rstrip().endswith("|"):
+            while (
+                insert_at < len(block)
+                and _SUBMISSION_FIELD_RE.match(block[insert_at]) is None
+            ):
+                insert_at += 1
+        block[insert_at:insert_at] = _format_update_field_lines(field_name, value)
+        return True
+    return False
+
+
+def _upsert_question_field(
+    block: list[str],
+    *,
+    field_name: str,
+    value: str,
+    after_fields: tuple[str, ...],
+) -> None:
+    if _replace_question_field(block, field_name, value):
+        return
+    for after_field in after_fields:
+        if _insert_question_field(
+            block,
+            after_field=after_field,
+            field_name=field_name,
+            value=value,
+        ):
+            return
+    block.extend(_format_update_field_lines(field_name, value))
+
+
+def _find_submission_question_block(
+    lines: list[str],
+    question_id: str,
+) -> tuple[int, int] | None:
+    question_re = re.compile(rf"^-\s+{re.escape(question_id)}:\s*$")
+    for start, line in enumerate(lines):
+        if question_re.match(line) is None:
+            continue
+        end = start + 1
+        while end < len(lines) and _SUBMISSION_QUESTION_RE.match(lines[end]) is None:
+            end += 1
+        return start, end
+    return None
+
+
+def update_student_submission_markdown(
+    content: str,
+    update: StudentSubmissionGradeUpdate,
+) -> str:
+    had_trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+    block_range = _find_submission_question_block(lines, update.question_id)
+    if block_range is None:
+        raise ValueError(f"question not found in submission: {update.question_id}")
+
+    start, end = block_range
+    block = lines[start:end]
+    if update.possible_points is not None:
+        _upsert_question_field(
+            block,
+            field_name="Possible points",
+            value=_format_submission_points(update.possible_points),
+            after_fields=("Response text", "Response image", "Prompt"),
+        )
+    if update.points_awarded is not None:
+        _upsert_question_field(
+            block,
+            field_name="Points",
+            value=_format_submission_points(update.points_awarded),
+            after_fields=("Possible points", "Response text", "Response image"),
+        )
+    if update.rubric_label is not None:
+        _upsert_question_field(
+            block,
+            field_name="Rubric",
+            value=update.rubric_label,
+            after_fields=("Points", "Possible points"),
+        )
+    if update.analysis is not None:
+        _upsert_question_field(
+            block,
+            field_name="Analysis",
+            value=update.analysis,
+            after_fields=("Rubric", "Points", "Possible points"),
+        )
+
+    lines[start:end] = block
+    updated = "\n".join(lines)
+    if had_trailing_newline:
+        return updated + "\n"
+    return updated
+
+
+def update_student_submission_file(
+    path: str | Path,
+    update: StudentSubmissionGradeUpdate,
+) -> None:
+    submission_path = Path(path)
+    updated = update_student_submission_markdown(submission_path.read_text(), update)
+    submission_path.write_text(updated)
 
 
 def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
@@ -831,15 +993,18 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
         _render_multiline_text(lines, question.response_text, indent=2)
 
         points_text = (
-            str(int(question.possible_points))
+            _format_submission_points(question.possible_points)
             if question.possible_points is not None
             else ""
         )
         lines.append(f"  - Possible points: {points_text}")
         points_awarded_text = (
-            str(question.points_awarded) if question.points_awarded is not None else ""
+            _format_submission_points(question.points_awarded)
+            if question.points_awarded is not None
+            else ""
         )
         lines.append(f"  - Points: {points_awarded_text}")
+        lines.append(f"  - Rubric: {question.rubric_label}")
         lines.append(f"  - Analysis: {question.analysis}")
         lines.append("")
 

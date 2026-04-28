@@ -7,6 +7,18 @@ from opengrader.tui.ui.widgets.nav_item import NavItem
 from .fakes import FakeDataProvider
 
 
+class PersistentFakeDataProvider(FakeDataProvider):
+    def __init__(self) -> None:
+        self.saved_grades: list[dict[str, object]] = []
+        self.saved_analyses: list[dict[str, object]] = []
+
+    def save_question_grade(self, **kwargs: object) -> None:
+        self.saved_grades.append(kwargs)
+
+    def save_question_analysis(self, **kwargs: object) -> None:
+        self.saved_analyses.append(kwargs)
+
+
 @dataclass
 class FakeGradeScreen:
     status: str = ""
@@ -210,3 +222,54 @@ def test_return_to_home_alias_returns_to_qa_picker() -> None:
 
     assert app.page == PAGE_QA_PICKER
     assert app.qa_screen.focused is True
+
+
+def test_rubric_selection_persists_grade_when_provider_supports_it() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = PersistentFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+
+    controller.on_rubric_selected(1)
+
+    assert provider.saved_grades == [
+        {
+            "student_item_id": "s1",
+            "question_id": "Q1",
+            "possible_points": 0.0,
+            "points_awarded": 0.0,
+            "rubric_label": "Incorrect",
+        }
+    ]
+    assert app.grade_screen.status == "Saved grade to submission file."
+
+
+def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = PersistentFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+
+    controller.on_comment_updated("Needs clearer work.")
+
+    assert provider.saved_analyses == [
+        {
+            "student_item_id": "s1",
+            "question_id": "Q1",
+            "analysis": "Needs clearer work.",
+        }
+    ]

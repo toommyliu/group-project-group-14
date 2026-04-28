@@ -35,8 +35,9 @@ score: ""
   - Response image: ![q3 response](responses/submission-0001/q3.png)
   - Response text: |
     1
-  - Possible points: 
-  - Points: 
+  - Possible points: 10
+  - Points: 10
+  - Rubric: Correct
   - Analysis: 
 
 - q4:

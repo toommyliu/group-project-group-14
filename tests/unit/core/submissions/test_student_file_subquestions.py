@@ -369,8 +369,94 @@ def test_parse_student_submission_markdown_round_trips_rendered_document(
     assert parsed.questions[0].possible_points == 2
     assert parsed.questions[0].response_text == "B\nbecause queue"
     assert parsed.questions[0].points_awarded == 1.0
+    assert parsed.questions[0].rubric_label == ""
     assert parsed.questions[0].analysis == "Partial"
     assert parsed.questions[0].response_image_path == str(response_image.resolve())
+
+
+def test_update_student_submission_markdown_updates_grade_fields() -> None:
+    content = "\n".join(
+        [
+            "---",
+            'name: "Student"',
+            "---",
+            "",
+            "- q1:",
+            "  - Prompt: One",
+            "  - Response image: ![q1 response](responses/q1.png)",
+            "  - Response text: |",
+            "    answer",
+            "  - Possible points: ",
+            "  - Points: ",
+            "  - Analysis: ",
+            "",
+            "- q2:",
+            "  - Prompt: Two",
+            "  - Points: ",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            possible_points=5,
+            points_awarded=2,
+            rubric_label="Partially Correct",
+            analysis="Process was close.",
+        ),
+    )
+
+    assert "  - Response image: ![q1 response](responses/q1.png)" in updated
+    assert "  - Possible points: 5" in updated
+    assert "  - Points: 2" in updated
+    assert "  - Rubric: Partially Correct" in updated
+    assert "  - Analysis: Process was close." in updated
+    assert "- q2:\n  - Prompt: Two\n  - Points: " in updated
+
+
+def test_update_student_submission_markdown_supports_multiline_analysis() -> None:
+    content = "\n".join(
+        [
+            "- q1:",
+            "  - Prompt: One",
+            "  - Points: 1",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            analysis="First line\nSecond line",
+        ),
+    )
+
+    assert (
+        "  - Analysis: |\n"
+        "    First line\n"
+        "    Second line"
+    ) in updated
+
+
+def test_parse_student_submission_markdown_reads_rubric_label() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Points: 1",
+                "  - Rubric: Correct",
+                "  - Analysis: Looks good.",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_label == "Correct"
+    assert document.questions[0].analysis == "Looks good."
 
 
 def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(

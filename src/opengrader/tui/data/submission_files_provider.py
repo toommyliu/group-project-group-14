@@ -12,8 +12,10 @@ from opengrader.core.pdf.templates.qa_file import (
 )
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
+    StudentSubmissionGradeUpdate,
     StudentSubmissionQuestion,
     load_student_submission_markdown,
+    update_student_submission_file,
 )
 from opengrader.tui.data.models import QuestionSeed, RubricOptionSeed, StudentSummary
 
@@ -110,10 +112,55 @@ class SubmissionFilesProvider:
                     prompt=context.prompt,
                     expected_answers=context.expected_answers,
                     response_text=response.response_text if response is not None else "",
+                    points_awarded=(
+                        response.points_awarded if response is not None else None
+                    ),
+                    rubric_label=response.rubric_label if response is not None else "",
+                    analysis=response.analysis if response is not None else "",
                 )
             )
 
         return seeds
+
+    def save_question_grade(
+        self,
+        *,
+        student_item_id: str,
+        question_id: str,
+        possible_points: float,
+        points_awarded: float,
+        rubric_label: str | None,
+        analysis: str | None = None,
+    ) -> None:
+        submission = self._submission_for_student_item(student_item_id)
+        update_student_submission_file(
+            submission.path,
+            StudentSubmissionGradeUpdate(
+                question_id=question_id,
+                possible_points=possible_points,
+                points_awarded=points_awarded,
+                rubric_label=rubric_label,
+                analysis=analysis,
+            ),
+        )
+        self._reload_submission(student_item_id)
+
+    def save_question_analysis(
+        self,
+        *,
+        student_item_id: str,
+        question_id: str,
+        analysis: str,
+    ) -> None:
+        submission = self._submission_for_student_item(student_item_id)
+        update_student_submission_file(
+            submission.path,
+            StudentSubmissionGradeUpdate(
+                question_id=question_id,
+                analysis=analysis,
+            ),
+        )
+        self._reload_submission(student_item_id)
 
     @staticmethod
     def _submission_paths(path: Path) -> list[Path]:
@@ -128,25 +175,31 @@ class SubmissionFilesProvider:
         if not submission_paths:
             raise ValueError(f"no *.submission.md files found in {path}")
 
-        loaded: list[_LoadedSubmission] = []
-        for submission_path in submission_paths:
-            document = load_student_submission_markdown(submission_path)
-            qa_version, qa_questions = self._questions_for_submission(
-                document,
-                submission_path,
-            )
-            loaded.append(
-                _LoadedSubmission(
-                    path=submission_path,
-                    document=document,
-                    questions_by_id={
-                        question.question_id: question for question in document.questions
-                    },
-                    qa_version=qa_version,
-                    question_contexts=self._flatten_question_contexts(qa_questions),
-                )
-            )
-        return loaded
+        return [
+            self._load_submission(submission_path)
+            for submission_path in submission_paths
+        ]
+
+    def _load_submission(self, submission_path: Path) -> _LoadedSubmission:
+        document = load_student_submission_markdown(submission_path)
+        qa_version, qa_questions = self._questions_for_submission(
+            document,
+            submission_path,
+        )
+        return _LoadedSubmission(
+            path=submission_path,
+            document=document,
+            questions_by_id={
+                question.question_id: question for question in document.questions
+            },
+            qa_version=qa_version,
+            question_contexts=self._flatten_question_contexts(qa_questions),
+        )
+
+    def _reload_submission(self, student_item_id: str) -> None:
+        existing = self._submission_for_student_item(student_item_id)
+        index = self._submissions.index(existing)
+        self._submissions[index] = self._load_submission(existing.path)
 
     def _questions_for_submission(
         self,
