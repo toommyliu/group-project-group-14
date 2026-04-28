@@ -460,7 +460,9 @@ def test_parse_rejects_mixing_multiple_choice_and_subquestions() -> None:
       - sub answer
 """
 
-    with pytest.raises(ValueError, match="mixes multiple-choice options and subquestions"):
+    with pytest.raises(
+        ValueError, match="mixes multiple-choice options and subquestions"
+    ):
         parse_qa_markdown(content)
 
 
@@ -557,7 +559,9 @@ questions_start_page: 1
         ("C", "pop"),
     ]
     assert version_a[0].correct_choice_label == "B"
-    assert [(choice.label, choice.text) for choice in version_a[1].subquestions[0].choices] == [
+    assert [
+        (choice.label, choice.text) for choice in version_a[1].subquestions[0].choices
+    ] == [
         ("A", "4"),
         ("B", "5"),
         ("C", "6"),

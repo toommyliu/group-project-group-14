@@ -546,11 +546,15 @@ def draw_question_box(
     if available <= 0:
         return []
 
-    sub_min_heights = [_subquestion_min_height(subquestion) for subquestion in subquestions]
+    sub_min_heights = [
+        _subquestion_min_height(subquestion) for subquestion in subquestions
+    ]
     required = sum(sub_min_heights)
     extra_total = max(0.0, available - required)
     expandable_indices = [
-        i for i, subquestion in enumerate(subquestions) if _subquestion_can_expand(subquestion)
+        i
+        for i, subquestion in enumerate(subquestions)
+        if _subquestion_can_expand(subquestion)
     ]
     extra_per_subquestion = (
         extra_total / len(expandable_indices) if expandable_indices else 0.0
@@ -560,8 +564,10 @@ def draw_question_box(
 
     for i, subquestion in enumerate(subquestions):
         sub_y0 = cursor_y
-        sub_y1 = sub_y0 + sub_min_heights[i] + (
-            extra_per_subquestion if i in expandable_indices else 0.0
+        sub_y1 = (
+            sub_y0
+            + sub_min_heights[i]
+            + (extra_per_subquestion if i in expandable_indices else 0.0)
         )
         sub_rect = (x0 + 8, sub_y0, x1 - 8, sub_y1)
         sub_content_rect = _subquestion_answer_rect(
@@ -633,9 +639,7 @@ def draw_question_box(
                 fontsize=SUBQUESTION_FONTSIZE,
                 fonts=fonts,
                 color=COLOR_SUBQUESTION_TEXT,
-                context=(
-                    f"Question {qid!r} subquestion {subquestion_meta['id']!r}"
-                ),
+                context=(f"Question {qid!r} subquestion {subquestion_meta['id']!r}"),
             )
         else:
             subquestion_meta["answer_rect"] = sub_content_rect
@@ -709,7 +713,11 @@ def build_info_section(
         *,
         bold: bool,
     ) -> None:
-        nonlocal title_bounds_left, title_bounds_top, title_bounds_right, title_bounds_bottom
+        nonlocal \
+            title_bounds_left, \
+            title_bounds_top, \
+            title_bounds_right, \
+            title_bounds_bottom
         line_w = measure_text_width(text, fontsize, bold=bold, fonts=fonts)
         line_left = center_x - (line_w / 2.0)
         line_right = center_x + (line_w / 2.0)
@@ -928,9 +936,13 @@ def draw_questions_on_page(
     required_height = sum(question_min_heights) + (max_fit - 1) * QUESTION_GAP
     extra_total = max(0.0, available_height - required_height)
     expandable_indices = [
-        i for i, question in enumerate(questions[:max_fit]) if _question_can_expand(question)
+        i
+        for i, question in enumerate(questions[:max_fit])
+        if _question_can_expand(question)
     ]
-    extra_per_question = extra_total / len(expandable_indices) if expandable_indices else 0.0
+    extra_per_question = (
+        extra_total / len(expandable_indices) if expandable_indices else 0.0
+    )
 
     drawn_meta: list[dict] = []
     y = content_top

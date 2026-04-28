@@ -115,7 +115,6 @@ def _run_validate(args: object) -> None:
     print(f"QA file is valid: {qa_path}")
 
 
-
 def _run_generate_template(args: object) -> None:
     qa_doc = load_qa_markdown(getattr(args, "qa_file"))
 

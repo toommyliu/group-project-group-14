@@ -1,0 +1,5977 @@
+{
+  "title_region": {
+    "page_number": 1,
+    "crop_bbox_norm": [
+      0.3741,
+      0.1727,
+      0.2629,
+      0.0309
+    ],
+    "confidence": 96.0
+  },
+  "fields": [
+    {
+      "field_id": "student_name",
+      "field_kind": "name",
+      "page_number": 1,
+      "crop_bbox_norm": [
+        0.2741,
+        0.2118,
+        0.4506,
+        0.0595
+      ],
+      "anchor_bbox_norm": [
+        0.2918,
+        0.2368,
+        0.04,
+        0.0095
+      ],
+      "confidence": 70.5
+    },
+    {
+      "field_id": "student_id",
+      "field_kind": "sid",
+      "page_number": 1,
+      "crop_bbox_norm": [
+        0.2741,
+        0.2691,
+        0.4506,
+        0.0595
+      ],
+      "anchor_bbox_norm": [
+        0.2918,
+        0.2941,
+        0.0776,
+        0.0095
+      ],
+      "confidence": 93.2
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "q1",
+      "question_number": 1,
+      "page_number": 1,
+      "crop_bbox_norm": [
+        0.1535,
+        0.3602,
+        0.7865,
+        0.1639
+      ],
+      "continuation_segments": [],
+      "confidence": 95.2,
+      "question_type": "free_response"
+    },
+    {
+      "question_id": "q2",
+      "question_number": 2,
+      "page_number": 1,
+      "crop_bbox_norm": [
+        0.1535,
+        0.5361,
+        0.7865,
+        0.1635
+      ],
+      "continuation_segments": [],
+      "confidence": 93.6,
+      "question_type": "free_response"
+    },
+    {
+      "question_id": "q3",
+      "question_number": 3,
+      "page_number": 1,
+      "crop_bbox_norm": [
+        0.1535,
+        0.7115,
+        0.7865,
+        0.2765
+      ],
+      "continuation_segments": [
+        [
+          2,
+          [
+            0.1535,
+            0.04,
+            0.7865,
+            0.0632
+          ]
+        ]
+      ],
+      "confidence": 95.3,
+      "question_type": "free_response"
+    },
+    {
+      "question_id": "q4",
+      "question_number": 4,
+      "page_number": 2,
+      "crop_bbox_norm": [
+        0.1535,
+        0.1152,
+        0.7865,
+        0.2975
+      ],
+      "continuation_segments": [],
+      "confidence": 93.2,
+      "question_type": "free_response"
+    },
+    {
+      "question_id": "q5",
+      "question_number": 5,
+      "page_number": 2,
+      "crop_bbox_norm": [
+        0.1535,
+        0.4247,
+        0.7865,
+        0.5403
+      ],
+      "continuation_segments": [],
+      "confidence": 95.9,
+      "question_type": "free_response"
+    },
+    {
+      "question_id": "q6",
+      "question_number": 6,
+      "page_number": 3,
+      "crop_bbox_norm": [
+        0.1535,
+        0.1115,
+        0.7865,
+        0.8535
+      ],
+      "continuation_segments": [],
+      "confidence": 92.8,
+      "question_type": "free_response"
+    }
+  ],
+  "review_reasons": [
+    "q3: continuation_fallback_band"
+  ],
+  "primitives_by_page": {
+    "1": [
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.3924,
+          0.2441,
+          0.3076,
+          0.0009
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.3924,
+          0.3014,
+          0.3076,
+          0.0009
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.0524,
+          0.9505,
+          0.8953,
+          0.005
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "vline",
+        "bbox_norm": [
+          0.0524,
+          0.0432,
+          0.0071,
+          0.9123
+        ],
+        "confidence": 84.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5759,
+          0.1786,
+          0.0065,
+          0.0191
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3988,
+          0.1795,
+          0.0171,
+          0.0141
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4182,
+          0.1795,
+          0.0118,
+          0.0141
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.49,
+          0.1795,
+          0.0176,
+          0.0173
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5847,
+          0.1795,
+          0.0188,
+          0.0141
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6065,
+          0.1791,
+          0.0059,
+          0.0186
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4335,
+          0.1805,
+          0.01,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4459,
+          0.1805,
+          0.0118,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4594,
+          0.1805,
+          0.0118,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5535,
+          0.1805,
+          0.0094,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5094,
+          0.1841,
+          0.0135,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5241,
+          0.1841,
+          0.0059,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5312,
+          0.1845,
+          0.0106,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4712,
+          0.2209,
+          0.0288,
+          0.0195
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4447,
+          0.2232,
+          0.0071,
+          0.0177
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3924,
+          0.2241,
+          0.3082,
+          0.0214
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4394,
+          0.2236,
+          0.0059,
+          0.0177
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5153,
+          0.2259,
+          0.0071,
+          0.0164
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5029,
+          0.2273,
+          0.0112,
+          0.0109
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4335,
+          0.2305,
+          0.0035,
+          0.0105
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2918,
+          0.2368,
+          0.0094,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3041,
+          0.24,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4635,
+          0.2805,
+          0.0112,
+          0.0168
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4806,
+          0.2805,
+          0.0088,
+          0.0173
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4994,
+          0.2814,
+          0.0212,
+          0.0159
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5241,
+          0.2814,
+          0.0124,
+          0.0145
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4912,
+          0.2823,
+          0.0088,
+          0.0136
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4553,
+          0.2827,
+          0.0076,
+          0.0141
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4329,
+          0.2845,
+          0.0053,
+          0.0141
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4412,
+          0.285,
+          0.0135,
+          0.0136
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2918,
+          0.2941,
+          0.0082,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3194,
+          0.2941,
+          0.0041,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3012,
+          0.295,
+          0.0047,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3529,
+          0.2945,
+          0.0047,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3594,
+          0.2945,
+          0.01,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3418,
+          0.2959,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3247,
+          0.2973,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3924,
+          0.3009,
+          0.3076,
+          0.0018
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1682,
+          0.3309,
+          0.0059,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2747,
+          0.3314,
+          0.01,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2865,
+          0.3314,
+          0.0024,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1918,
+          0.3318,
+          0.0059,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2241,
+          0.3318,
+          0.0053,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3153,
+          0.3318,
+          0.0024,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3247,
+          0.3318,
+          0.0147,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3482,
+          0.3323,
+          0.0071,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3724,
+          0.3323,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.39,
+          0.3323,
+          0.0141,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1753,
+          0.3336,
+          0.0159,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1982,
+          0.3341,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2065,
+          0.3341,
+          0.0082,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2159,
+          0.3341,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2353,
+          0.3341,
+          0.0082,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2535,
+          0.3341,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4271,
+          0.3336,
+          0.0041,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.29,
+          0.3345,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2976,
+          0.3345,
+          0.0053,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3035,
+          0.3345,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.34,
+          0.335,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3653,
+          0.335,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3765,
+          0.335,
+          0.0129,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4106,
+          0.3355,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4188,
+          0.3355,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4324,
+          0.3355,
+          0.0118,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2076,
+          0.3682,
+          0.0047,
+          0.0123
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2641,
+          0.3682,
+          0.0047,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1812,
+          0.3691,
+          0.0065,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2147,
+          0.3691,
+          0.0071,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2235,
+          0.3691,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2488,
+          0.3695,
+          0.0065,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2794,
+          0.3691,
+          0.0106,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3412,
+          0.3695,
+          0.0076,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4835,
+          0.3695,
+          0.0024,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5,
+          0.3695,
+          0.0018,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.33,
+          0.3705,
+          0.0047,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3906,
+          0.37,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4329,
+          0.37,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4876,
+          0.37,
+          0.0106,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4135,
+          0.3714,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2394,
+          0.3718,
+          0.0088,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2565,
+          0.3718,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2912,
+          0.3723,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2994,
+          0.3723,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3082,
+          0.3723,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3165,
+          0.3723,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3241,
+          0.3723,
+          0.0029,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.35,
+          0.3727,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3571,
+          0.3727,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3653,
+          0.3727,
+          0.0024,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3729,
+          0.3727,
+          0.0088,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3824,
+          0.3727,
+          0.0071,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4194,
+          0.3732,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4547,
+          0.3732,
+          0.0118,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4688,
+          0.3732,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4006,
+          0.3736,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3553,
+          0.3964,
+          0.01,
+          0.0209
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2088,
+          0.5441,
+          0.0041,
+          0.0123
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2641,
+          0.5441,
+          0.0053,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1806,
+          0.545,
+          0.0082,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2241,
+          0.545,
+          0.0082,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.28,
+          0.545,
+          0.0065,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2859,
+          0.545,
+          0.01,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2965,
+          0.545,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3171,
+          0.545,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3394,
+          0.545,
+          0.0053,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3559,
+          0.545,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6253,
+          0.545,
+          0.0024,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6412,
+          0.545,
+          0.0024,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2159,
+          0.5455,
+          0.0065,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2494,
+          0.5455,
+          0.0065,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4335,
+          0.5455,
+          0.0029,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4418,
+          0.5455,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4559,
+          0.5455,
+          0.0094,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4812,
+          0.5455,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5653,
+          0.5455,
+          0.0024,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6012,
+          0.5459,
+          0.0024,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6288,
+          0.5459,
+          0.0106,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3494,
+          0.5464,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5253,
+          0.5468,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.24,
+          0.5477,
+          0.0088,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2571,
+          0.5477,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.31,
+          0.5477,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3312,
+          0.5477,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3682,
+          0.5477,
+          0.0088,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4753,
+          0.5473,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5741,
+          0.5473,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3647,
+          0.5482,
+          0.0082,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3906,
+          0.5482,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4041,
+          0.5482,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4165,
+          0.5482,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4253,
+          0.5482,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4665,
+          0.5486,
+          0.0076,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.49,
+          0.5486,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5382,
+          0.5486,
+          0.0071,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5465,
+          0.5486,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5794,
+          0.5486,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3729,
+          0.5709,
+          0.0071,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3553,
+          0.5723,
+          0.0082,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3365,
+          0.575,
+          0.0088,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3282,
+          0.5768,
+          0.0035,
+          0.0114
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3782,
+          0.5764,
+          0.01,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3465,
+          0.5777,
+          0.0076,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2071,
+          0.7195,
+          0.0047,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2629,
+          0.7195,
+          0.0047,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1794,
+          0.7205,
+          0.0082,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2141,
+          0.7205,
+          0.0065,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2224,
+          0.7205,
+          0.0082,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2788,
+          0.72,
+          0.0153,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2953,
+          0.72,
+          0.0035,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3459,
+          0.72,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4388,
+          0.72,
+          0.0071,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4835,
+          0.72,
+          0.0076,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5088,
+          0.72,
+          0.0035,
+          0.0123
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5153,
+          0.7205,
+          0.0071,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5235,
+          0.7205,
+          0.0041,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5288,
+          0.7205,
+          0.0076,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5382,
+          0.7205,
+          0.0094,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2482,
+          0.7209,
+          0.0059,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3124,
+          0.7209,
+          0.0047,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.34,
+          0.7209,
+          0.0047,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4724,
+          0.7214,
+          0.0041,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5494,
+          0.7209,
+          0.0035,
+          0.0114
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5682,
+          0.7209,
+          0.0053,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5853,
+          0.7209,
+          0.0035,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6065,
+          0.7209,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6882,
+          0.7214,
+          0.0024,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7541,
+          0.7214,
+          0.0018,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.77,
+          0.7214,
+          0.0018,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3953,
+          0.7218,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4971,
+          0.7218,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5794,
+          0.7223,
+          0.0041,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7159,
+          0.7223,
+          0.0053,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7235,
+          0.7223,
+          0.0065,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7324,
+          0.7223,
+          0.0047,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7394,
+          0.7223,
+          0.0071,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7576,
+          0.7223,
+          0.0106,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2382,
+          0.7232,
+          0.0088,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2553,
+          0.7227,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3041,
+          0.7232,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3276,
+          0.7227,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3547,
+          0.7232,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3676,
+          0.7232,
+          0.0124,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3806,
+          0.7232,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3882,
+          0.7227,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4171,
+          0.7232,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4259,
+          0.7232,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4476,
+          0.7232,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4665,
+          0.7232,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4924,
+          0.7232,
+          0.0029,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5606,
+          0.7236,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6282,
+          0.7241,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6424,
+          0.7241,
+          0.0053,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6606,
+          0.7241,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6965,
+          0.7245,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3329,
+          0.7582,
+          0.0118,
+          0.0155
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3435,
+          0.7677,
+          0.0024,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3347,
+          0.7777,
+          0.02,
+          0.0064
+        ],
+        "confidence": 50.0
+      }
+    ],
+    "2": [
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.1612,
+          0.0841,
+          0.6876,
+          0.0086
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.3724,
+          0.0905,
+          0.2424,
+          0.0018
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.0524,
+          0.9514,
+          0.8959,
+          0.0055
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "vline",
+        "bbox_norm": [
+          0.0524,
+          0.0441,
+          0.0059,
+          0.9127
+        ],
+        "confidence": 84.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1606,
+          0.0836,
+          0.6876,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2018,
+          0.1232,
+          0.0047,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1735,
+          0.1241,
+          0.0082,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2094,
+          0.1245,
+          0.0059,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2176,
+          0.1245,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2588,
+          0.1245,
+          0.0047,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2441,
+          0.1259,
+          0.0059,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2747,
+          0.1259,
+          0.0247,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2335,
+          0.1277,
+          0.0094,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3124,
+          0.1273,
+          0.0035,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3347,
+          0.1277,
+          0.0059,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5406,
+          0.1277,
+          0.0024,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2512,
+          0.1282,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3518,
+          0.1282,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5247,
+          0.1282,
+          0.0018,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5324,
+          0.1286,
+          0.0065,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3459,
+          0.1295,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4182,
+          0.1291,
+          0.0076,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5112,
+          0.1291,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3047,
+          0.13,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3265,
+          0.1305,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3606,
+          0.1314,
+          0.0124,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3741,
+          0.1314,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3871,
+          0.1318,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3959,
+          0.1318,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4053,
+          0.1323,
+          0.0118,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4271,
+          0.1323,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4341,
+          0.1323,
+          0.0053,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.44,
+          0.1318,
+          0.0059,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4524,
+          0.1323,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4665,
+          0.1318,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4788,
+          0.1318,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4865,
+          0.1323,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4947,
+          0.1318,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5024,
+          0.1318,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2771,
+          0.1586,
+          0.0306,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2465,
+          0.1591,
+          0.02,
+          0.0159
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2653,
+          0.1623,
+          0.0094,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2053,
+          0.4327,
+          0.0047,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2618,
+          0.4332,
+          0.0047,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6865,
+          0.4327,
+          0.0029,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6906,
+          0.4332,
+          0.0106,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.7024,
+          0.4327,
+          0.0024,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1776,
+          0.4341,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2118,
+          0.4341,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2776,
+          0.4341,
+          0.0106,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6582,
+          0.4336,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2212,
+          0.4345,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2459,
+          0.435,
+          0.0071,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3435,
+          0.435,
+          0.0035,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3476,
+          0.435,
+          0.0035,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4065,
+          0.435,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4435,
+          0.435,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4618,
+          0.435,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5029,
+          0.435,
+          0.0041,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5612,
+          0.4345,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5759,
+          0.4345,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4976,
+          0.4359,
+          0.0041,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6159,
+          0.4355,
+          0.0041,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2365,
+          0.4368,
+          0.0094,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2541,
+          0.4368,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3812,
+          0.4364,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4324,
+          0.4364,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6447,
+          0.4368,
+          0.0124,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6671,
+          0.4364,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2894,
+          0.4373,
+          0.0082,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2982,
+          0.4373,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3047,
+          0.4377,
+          0.0112,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3159,
+          0.4377,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3353,
+          0.4377,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3576,
+          0.4377,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3871,
+          0.4377,
+          0.0053,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3982,
+          0.4377,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4153,
+          0.4377,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4753,
+          0.4377,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4835,
+          0.4377,
+          0.0076,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5118,
+          0.4377,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5447,
+          0.4377,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.58,
+          0.4373,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5941,
+          0.4373,
+          0.0071,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6018,
+          0.4373,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6271,
+          0.4373,
+          0.0082,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6359,
+          0.4373,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3665,
+          0.4382,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4235,
+          0.4382,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1906,
+          0.4773,
+          0.0029,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2341,
+          0.4773,
+          0.0029,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2459,
+          0.4777,
+          0.0053,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2512,
+          0.4777,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2565,
+          0.4777,
+          0.0094,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5776,
+          0.4777,
+          0.0059,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6506,
+          0.4773,
+          0.0018,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6994,
+          0.4773,
+          0.0018,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2047,
+          0.4782,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.29,
+          0.4782,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3206,
+          0.4782,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3665,
+          0.4782,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.37,
+          0.4782,
+          0.0059,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4453,
+          0.4782,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4629,
+          0.4782,
+          0.0035,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4765,
+          0.4782,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5241,
+          0.4782,
+          0.0065,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5359,
+          0.4782,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6153,
+          0.4786,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2741,
+          0.4791,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4294,
+          0.4795,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5682,
+          0.4791,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5935,
+          0.4791,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2159,
+          0.4805,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2671,
+          0.4805,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5171,
+          0.4805,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5506,
+          0.4805,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5571,
+          0.4805,
+          0.0106,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6324,
+          0.48,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6876,
+          0.48,
+          0.0065,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2829,
+          0.4809,
+          0.0065,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2935,
+          0.4809,
+          0.0059,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3429,
+          0.4809,
+          0.0088,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3812,
+          0.4809,
+          0.0047,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.51,
+          0.4809,
+          0.0065,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3347,
+          0.5091,
+          0.0259,
+          0.0123
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2976,
+          0.5109,
+          0.0124,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2918,
+          0.5127,
+          0.0053,
+          0.0127
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3129,
+          0.5127,
+          0.0088,
+          0.0114
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3253,
+          0.5132,
+          0.0094,
+          0.0105
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5153,
+          0.6123,
+          0.0018,
+          0.0109
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5971,
+          0.6123,
+          0.0018,
+          0.0109
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4771,
+          0.6132,
+          0.0018,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5759,
+          0.6132,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.59,
+          0.6132,
+          0.0053,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1918,
+          0.6136,
+          0.0029,
+          0.0105
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2018,
+          0.6141,
+          0.0029,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2353,
+          0.6141,
+          0.0029,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2476,
+          0.6141,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2524,
+          0.6141,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2612,
+          0.6141,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3024,
+          0.6136,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3506,
+          0.6136,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3624,
+          0.6136,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4047,
+          0.6136,
+          0.0065,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5465,
+          0.6136,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5624,
+          0.6136,
+          0.0035,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1841,
+          0.6145,
+          0.0065,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2059,
+          0.6145,
+          0.0059,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2247,
+          0.615,
+          0.0041,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2753,
+          0.615,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3953,
+          0.6145,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4206,
+          0.6145,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4424,
+          0.6145,
+          0.0029,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3776,
+          0.6159,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4294,
+          0.6159,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4794,
+          0.6159,
+          0.0094,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2171,
+          0.6168,
+          0.0071,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3365,
+          0.6164,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4124,
+          0.6164,
+          0.0071,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3288,
+          0.6477,
+          0.0035,
+          0.0118
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3176,
+          0.6568,
+          0.0071,
+          0.0032
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3312,
+          0.66,
+          0.0024,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5176,
+          0.7486,
+          0.0059,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5429,
+          0.7486,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3294,
+          0.7495,
+          0.0029,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3535,
+          0.7495,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3841,
+          0.7491,
+          0.0029,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4471,
+          0.7491,
+          0.0035,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4776,
+          0.7491,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1894,
+          0.7505,
+          0.0035,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2329,
+          0.75,
+          0.0035,
+          0.0105
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2453,
+          0.7505,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2506,
+          0.7505,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2588,
+          0.7505,
+          0.0029,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2876,
+          0.75,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3094,
+          0.75,
+          0.0018,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3124,
+          0.75,
+          0.0065,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4176,
+          0.75,
+          0.0041,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.49,
+          0.75,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5124,
+          0.75,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6206,
+          0.75,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2,
+          0.7514,
+          0.0029,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2041,
+          0.7509,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2735,
+          0.7514,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4988,
+          0.7514,
+          0.0076,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2229,
+          0.7518,
+          0.0024,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3571,
+          0.7518,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2153,
+          0.7532,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2947,
+          0.7527,
+          0.0065,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3494,
+          0.7809,
+          0.0335,
+          0.0123
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3171,
+          0.7823,
+          0.0106,
+          0.0145
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3365,
+          0.7832,
+          0.01,
+          0.0109
+        ],
+        "confidence": 50.0
+      }
+    ],
+    "3": [
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.1612,
+          0.0814,
+          0.6853,
+          0.0073
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "hline",
+        "bbox_norm": [
+          0.0524,
+          0.9532,
+          0.8935,
+          0.0064
+        ],
+        "confidence": 88.0
+      },
+      {
+        "kind": "vline",
+        "bbox_norm": [
+          0.0524,
+          0.04,
+          0.0065,
+          0.9195
+        ],
+        "confidence": 84.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1612,
+          0.0809,
+          0.6847,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2024,
+          0.1195,
+          0.0047,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1741,
+          0.12,
+          0.0088,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2088,
+          0.1205,
+          0.0076,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2588,
+          0.1205,
+          0.0047,
+          0.0132
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2176,
+          0.1209,
+          0.0088,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2435,
+          0.1214,
+          0.0065,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2747,
+          0.1214,
+          0.0112,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6576,
+          0.1223,
+          0.0024,
+          0.0136
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6735,
+          0.1218,
+          0.0024,
+          0.0136
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3394,
+          0.1227,
+          0.0076,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3612,
+          0.1232,
+          0.0047,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3735,
+          0.1232,
+          0.0035,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3782,
+          0.1232,
+          0.0029,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6612,
+          0.1227,
+          0.0106,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2335,
+          0.1236,
+          0.0094,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2512,
+          0.1241,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2865,
+          0.125,
+          0.0147,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3329,
+          0.1245,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5071,
+          0.125,
+          0.0082,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5441,
+          0.125,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3018,
+          0.1255,
+          0.0112,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3135,
+          0.1255,
+          0.0065,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3212,
+          0.1255,
+          0.0053,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3476,
+          0.1259,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.46,
+          0.1259,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6165,
+          0.1255,
+          0.0041,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3653,
+          0.1264,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3824,
+          0.1264,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3906,
+          0.1268,
+          0.0094,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5335,
+          0.1264,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5618,
+          0.1268,
+          0.0041,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5876,
+          0.1268,
+          0.0041,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6312,
+          0.1268,
+          0.0053,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3994,
+          0.1273,
+          0.0065,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4071,
+          0.1273,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4159,
+          0.1273,
+          0.0071,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4288,
+          0.1273,
+          0.0082,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4376,
+          0.1273,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4465,
+          0.1273,
+          0.0124,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.47,
+          0.1277,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4871,
+          0.1277,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4994,
+          0.1277,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5676,
+          0.1277,
+          0.0076,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5806,
+          0.1277,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5935,
+          0.1277,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6,
+          0.1277,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6088,
+          0.1273,
+          0.0059,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6224,
+          0.1273,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4788,
+          0.1282,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5159,
+          0.1282,
+          0.0071,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5247,
+          0.1282,
+          0.0071,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5535,
+          0.1282,
+          0.0076,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1876,
+          0.1655,
+          0.0035,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1976,
+          0.1655,
+          0.0029,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2024,
+          0.1659,
+          0.0053,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2312,
+          0.1659,
+          0.0029,
+          0.0105
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2429,
+          0.1668,
+          0.0106,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2535,
+          0.1668,
+          0.01,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2206,
+          0.1673,
+          0.0029,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2988,
+          0.1677,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2129,
+          0.1682,
+          0.0071,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2712,
+          0.1682,
+          0.0041,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6382,
+          0.1686,
+          0.0024,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6465,
+          0.1686,
+          0.0024,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2641,
+          0.1695,
+          0.0065,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2941,
+          0.1691,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3165,
+          0.1691,
+          0.0035,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3776,
+          0.1691,
+          0.0024,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4206,
+          0.1691,
+          0.0041,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5876,
+          0.1695,
+          0.0047,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6071,
+          0.1695,
+          0.0024,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6218,
+          0.1691,
+          0.0053,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2806,
+          0.17,
+          0.0082,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3253,
+          0.1705,
+          0.01,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3976,
+          0.17,
+          0.0035,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5041,
+          0.17,
+          0.0059,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5218,
+          0.17,
+          0.0118,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3465,
+          0.1709,
+          0.0118,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3588,
+          0.1709,
+          0.0106,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3706,
+          0.1714,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3806,
+          0.1714,
+          0.0124,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4559,
+          0.1709,
+          0.0035,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6282,
+          0.1714,
+          0.0088,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4135,
+          0.1718,
+          0.0065,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4329,
+          0.1718,
+          0.0112,
+          0.0059
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4718,
+          0.1723,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4824,
+          0.1723,
+          0.0065,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5347,
+          0.1723,
+          0.0088,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5806,
+          0.1718,
+          0.0065,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.57,
+          0.1759,
+          0.0065,
+          0.0036
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4076,
+          0.1964,
+          0.0124,
+          0.0241
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3788,
+          0.2,
+          0.0129,
+          0.0168
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3918,
+          0.2009,
+          0.0147,
+          0.0173
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3576,
+          0.2023,
+          0.0147,
+          0.015
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1829,
+          0.3491,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2459,
+          0.35,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2506,
+          0.35,
+          0.0053,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2559,
+          0.35,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3012,
+          0.3505,
+          0.0059,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6365,
+          0.3505,
+          0.0029,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2235,
+          0.3509,
+          0.0024,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3794,
+          0.3514,
+          0.0018,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4218,
+          0.3514,
+          0.0035,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5129,
+          0.3514,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.52,
+          0.3514,
+          0.0088,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5494,
+          0.3514,
+          0.0124,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5671,
+          0.3514,
+          0.0065,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2165,
+          0.3523,
+          0.0059,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4582,
+          0.3518,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6482,
+          0.3518,
+          0.0024,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3994,
+          0.3527,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6188,
+          0.3532,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.6582,
+          0.3532,
+          0.0112,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3606,
+          0.3536,
+          0.0106,
+          0.0055
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3718,
+          0.3536,
+          0.0065,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3882,
+          0.3541,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4147,
+          0.3541,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4294,
+          0.3541,
+          0.0106,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4406,
+          0.3541,
+          0.0106,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4688,
+          0.3541,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4759,
+          0.3541,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5018,
+          0.3541,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5847,
+          0.3536,
+          0.0112,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4182,
+          0.3677,
+          0.0094,
+          0.0236
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3565,
+          0.3714,
+          0.0059,
+          0.0195
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3394,
+          0.3723,
+          0.0106,
+          0.02
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3218,
+          0.375,
+          0.0135,
+          0.0141
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3776,
+          0.3764,
+          0.0129,
+          0.0268
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4024,
+          0.3777,
+          0.0153,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3241,
+          0.3786,
+          0.0076,
+          0.0123
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3671,
+          0.3791,
+          0.0082,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2459,
+          0.5286,
+          0.0047,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2506,
+          0.5286,
+          0.0053,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2588,
+          0.5286,
+          0.0035,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2759,
+          0.5286,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2871,
+          0.5286,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5212,
+          0.5286,
+          0.0094,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5441,
+          0.5286,
+          0.0029,
+          0.0091
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4006,
+          0.5291,
+          0.0071,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4088,
+          0.5291,
+          0.0029,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4129,
+          0.5291,
+          0.0076,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4218,
+          0.5291,
+          0.0088,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4365,
+          0.5291,
+          0.0029,
+          0.0086
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4412,
+          0.5291,
+          0.0171,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.47,
+          0.5291,
+          0.0035,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.49,
+          0.5291,
+          0.0071,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3224,
+          0.53,
+          0.0029,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4606,
+          0.53,
+          0.0041,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5124,
+          0.53,
+          0.0035,
+          0.0064
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2159,
+          0.5314,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3059,
+          0.5314,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3276,
+          0.5314,
+          0.0106,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3729,
+          0.5318,
+          0.0112,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3853,
+          0.5318,
+          0.01,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3188,
+          0.5614,
+          0.0106,
+          0.0177
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3306,
+          0.5609,
+          0.0071,
+          0.0168
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3665,
+          0.5609,
+          0.0129,
+          0.0136
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3406,
+          0.5659,
+          0.0047,
+          0.0109
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3453,
+          0.5664,
+          0.0106,
+          0.01
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3553,
+          0.5664,
+          0.01,
+          0.0109
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2882,
+          0.7068,
+          0.0065,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4018,
+          0.7068,
+          0.0076,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4112,
+          0.7068,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4153,
+          0.7068,
+          0.0071,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4235,
+          0.7068,
+          0.0094,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4435,
+          0.7068,
+          0.0071,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4753,
+          0.7068,
+          0.0029,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4947,
+          0.7068,
+          0.0071,
+          0.0077
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5265,
+          0.7068,
+          0.0088,
+          0.0082
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.1876,
+          0.7077,
+          0.0024,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2471,
+          0.7073,
+          0.0041,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2518,
+          0.7073,
+          0.0047,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2606,
+          0.7073,
+          0.0059,
+          0.0073
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3065,
+          0.7095,
+          0.0071,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3288,
+          0.7095,
+          0.0112,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3518,
+          0.7095,
+          0.0065,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3741,
+          0.7095,
+          0.0106,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3865,
+          0.7095,
+          0.0106,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.4559,
+          0.7095,
+          0.0088,
+          0.0045
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.5071,
+          0.7095,
+          0.0088,
+          0.005
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.2171,
+          0.71,
+          0.0065,
+          0.0068
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3088,
+          0.7459,
+          0.0053,
+          0.0118
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3559,
+          0.75,
+          0.0094,
+          0.0095
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3806,
+          0.7536,
+          0.0076,
+          0.0032
+        ],
+        "confidence": 50.0
+      },
+      {
+        "kind": "component",
+        "bbox_norm": [
+          0.3012,
+          0.7573,
+          0.0088,
+          0.0032
+        ],
+        "confidence": 50.0
+      }
+    ]
+  }
+}

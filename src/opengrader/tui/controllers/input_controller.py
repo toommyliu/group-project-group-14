@@ -91,7 +91,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.QA,),
         key_display="k/up",
     ),
-
     CommandBindingSpec(
         "tab",
         InputCommand.QA_SWITCH_PANE,

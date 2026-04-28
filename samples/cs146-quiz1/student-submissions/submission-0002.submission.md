@@ -1,9 +1,9 @@
 ---
-name: "ine Bill Caray"
-student_id: "787654321"
-course_code: "NESE4654"
-assignment_title: "C8146: Quiz 1 (B) Name Bl Cabay \ Student ID NESE 4654 } t"
-assignment_version: null
+name: ""
+student_id: "987654321"
+course_code: "CS146"
+assignment_title: "Quiz 1"
+assignment_version: "B"
 source_pdf: "submission-0002.pdf"
 score: ""
 ---
@@ -34,7 +34,7 @@ score: ""
   - Prompt: 3. (10 pts) What is the least significant bit (LSB) of the binary number 1101 [B]?
   - Response image: ![q3 response](responses/submission-0002/q3.png)
   - Response text: |
-    1
+    no
   - Possible points: 
   - Points: 
   - Analysis: 

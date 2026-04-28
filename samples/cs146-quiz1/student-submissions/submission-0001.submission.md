@@ -34,7 +34,7 @@ score: ""
   - Prompt: 3. (10 pts) What is the most significant bit (MSB) of the binary number 1010 [A]?
   - Response image: ![q3 response](responses/submission-0001/q3.png)
   - Response text: |
-    B
+    B)
   - Possible points: 
   - Points: 
   - Analysis: 
@@ -73,8 +73,7 @@ score: ""
   - Question type: Free Response
   - Prompt: c) (8 pts) What should the algorithm return for a list with only one element?
   - Response image: ![q5c response](responses/submission-0001/q5c.png)
-  - Response text: |
-    c) (8 pts) What should the algorithm return for a list with only one element?
+  - Response text: 
   - Possible points: 
   - Points: 
   - Analysis: 

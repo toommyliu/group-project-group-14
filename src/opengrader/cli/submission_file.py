@@ -4,7 +4,10 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from opengrader.core.ocr import OcrConfig
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
+from opengrader.core.ocr.ollama_vlm import (
+    OllamaVisionConfig,
+    ensure_model_available,
+)
 from opengrader.core.submissions import build_student_submission_document
 
 """
@@ -16,7 +19,7 @@ EPILOG = """
 examples:
   uv run submission-file --input split/ --output out/submissions/
   uv run submission-file --input split/student-0001.pdf --output out/submissions/ --dpi 200
-  uv run submission-file --input split/ --output out/submissions/ --text-backend ollama --ollama-model qwen2.5vl:7b
+  uv run submission-file --input split/ --output out/submissions/ --ollama-model qwen2.5vl:7b
 """
 
 
@@ -54,19 +57,7 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--lang",
         default="eng",
-        help="Tesseract OCR language code(s), comma-separated (default: eng).",
-    )
-    parser.add_argument(
-        "--psm",
-        type=int,
-        default=6,
-        choices=range(0, 14),
-        help="Tesseract page segmentation mode 0-13 (default: 6).",
-    )
-    parser.add_argument(
-        "--whitelist",
-        default=None,
-        help="Optional OCR whitelist for fields.",
+        help="Language code(s) for layout anchor detection, comma-separated (default: eng).",
     )
     parser.add_argument(
         "--no-deskew",
@@ -82,26 +73,14 @@ def _build_parser() -> ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--text-backend",
-        choices=["tesseract", "ollama"],
-        default="tesseract",
-        help=(
-            "Text extraction backend for student name/ID fields and "
-            "question prompt/answer extraction. "
-            "The ollama backend evaluates multiple header crop variants for "
-            "student fields and response images "
-            "(default: tesseract)."
-        ),
-    )
-    parser.add_argument(
         "--ollama-model",
         default="qwen2.5vl:7b",
-        help="Ollama vision model to use when --text-backend=ollama.",
+        help="Ollama vision model to use for text extraction.",
     )
     parser.add_argument(
         "--ollama-host",
         default="http://127.0.0.1:11434",
-        help="Ollama server URL when --text-backend=ollama.",
+        help="Ollama server URL.",
     )
     parser.add_argument(
         "--ollama-timeout",
@@ -114,9 +93,13 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help=(
             "Skip ollama question prompt/answer extraction. "
-            "When used with --text-backend=ollama, ollama will still be used "
-            "for student name/ID field extraction but question images will use local OCR."
+            "Ollama will still be used for student name/ID/title extraction."
         ),
+    )
+    parser.add_argument(
+        "--save-layout-debug",
+        action="store_true",
+        help="Write detected layout JSON and overlay PNGs for each submission.",
     )
     return parser
 
@@ -147,13 +130,11 @@ def run_cli() -> None:
 
     config = OcrConfig(
         lang=args.lang,
-        psm=args.psm,
-        whitelist=args.whitelist,
         deskew=not args.no_deskew,
         confidence_threshold=args.confidence_threshold,
     )
 
-    print(f"Using text backend: {args.text_backend} {'' if args.text_backend == 'tesseract' else f'(model: {args.ollama_model})'}")
+    print(f"Using Ollama vision model: {args.ollama_model}")
     print(f"Found {len(input_pdfs)} submission PDF(s)")
 
     ollama_config = OllamaVisionConfig(
@@ -161,6 +142,7 @@ def run_cli() -> None:
         host=args.ollama_host,
         timeout_seconds=args.ollama_timeout,
     )
+    ensure_model_available(ollama_config)
 
     for i, pdf_path in enumerate(input_pdfs, 1):
         print(f"[{i}/{len(input_pdfs)}] Converting: {pdf_path.name}")
@@ -170,9 +152,9 @@ def run_cli() -> None:
             ocr_config=config,
             dpi=args.dpi,
             split_subquestions=not args.no_split_subquestions,
-            text_backend=args.text_backend,
             ollama_config=ollama_config,
             skip_ollama_qa=args.no_ollama_qa,
+            save_layout_debug=args.save_layout_debug,
             progress_callback=(lambda message: print(f"  {message}")),
         )
         print(f"  Wrote {build_result.markdown_path}")

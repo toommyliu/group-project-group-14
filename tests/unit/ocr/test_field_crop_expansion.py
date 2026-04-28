@@ -90,13 +90,17 @@ def test_detect_dynamic_field_regions_falls_back_to_line_parsing() -> None:
         ),
     ]
 
-    regions = extractor._detect_dynamic_field_regions(words, page_w, page_h, boxes_norm=[])
+    regions = extractor._detect_dynamic_field_regions(
+        words, page_w, page_h, boxes_norm=[]
+    )
 
     assert "name" in regions
     assert "sid" in regions
 
 
-def test_detect_dynamic_field_regions_uses_header_underlines_when_label_ocr_is_missing() -> None:
+def test_detect_dynamic_field_regions_uses_header_underlines_when_label_ocr_is_missing() -> (
+    None
+):
     page_w = 2000
     page_h = 3000
     image = Image.new("RGB", (page_w, page_h), color=(255, 255, 255))
@@ -156,6 +160,45 @@ def test_trim_question_region_preserves_answer_written_after_prompt() -> None:
 
     assert trimmed.width > 650
     assert trimmed.height < 80
+
+
+def test_trim_question_region_with_bbox_matches_trimmed_image_size() -> None:
+    image = Image.new("RGB", (1000, 220), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((280, 70, 340, 150), fill=(90, 90, 90))
+
+    trimmed, bbox = extractor._trim_question_region_with_bbox(image, margin_px=8)
+    x0, y0, x1, y1 = bbox
+
+    assert trimmed.size == (x1 - x0, y1 - y0)
+    assert x0 > 0
+    assert y0 > 0
+    assert x1 < image.width
+    assert y1 < image.height
+
+
+def test_question_final_crop_bbox_tracks_expansion_and_trim() -> None:
+    image = Image.new("RGB", (1000, 1000), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    raw_bbox = [0.3, 0.3, 0.5, 0.3]
+
+    # Content just left of the raw layout box must be considered because
+    # extraction expands the crop before trimming.
+    draw.rectangle((290, 360, 360, 420), fill=(110, 110, 110))
+    draw.rectangle((330, 330, 520, 365), fill=(90, 90, 90))
+
+    raw_px = extractor._bbox_norm_to_px(raw_bbox, 1000, 1000)
+    expanded_px = extractor._expand_question_bbox_px(
+        raw_px,
+        page_w=1000,
+        page_h=1000,
+    )
+    final_px = extractor._question_final_crop_bbox_px(image, raw_bbox, 1000, 1000)
+
+    assert expanded_px[0] <= final_px[0] < raw_px[0]
+    assert final_px[1] > expanded_px[1]
+    assert final_px[2] < raw_px[2]
+    assert final_px[3] < raw_px[3]
 
 
 def test_trim_question_region_ignores_long_border_lines() -> None:
