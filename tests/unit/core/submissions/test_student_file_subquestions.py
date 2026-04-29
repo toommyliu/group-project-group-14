@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 from opengrader.core.ocr.extractor import (
@@ -459,13 +460,45 @@ def test_parse_student_submission_markdown_reads_rubric_label() -> None:
     assert document.questions[0].analysis == "Looks good."
 
 
+def test_parse_student_submission_markdown_reads_incorrect_rubric_label() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Rubric: Incorrect",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_labels == ("Incorrect",)
+
+
+def test_parse_student_submission_markdown_reads_top_level_partial_rubric() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Rubric: Partially Correct",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_labels == ("Partially Correct",)
+
+
 def test_parse_student_submission_markdown_reads_multi_label_rubric() -> None:
     document = student_file.parse_student_submission_markdown(
         "\n".join(
             [
                 "- q1:",
                 "  - Prompt: One",
-                '  - Rubric: ["Partially Correct - A","Partially Correct - B"]',
+                "  - Rubric: Partially Correct",
+                "    - A",
+                "    - B",
                 "",
                 "- q2:",
                 "  - Prompt: Two",
@@ -480,6 +513,23 @@ def test_parse_student_submission_markdown_reads_multi_label_rubric() -> None:
         "Partially Correct - B",
     )
     assert document.questions[1].rubric_labels == ()
+
+
+def test_parse_student_submission_markdown_rejects_json_rubric_arrays() -> None:
+    with pytest.raises(
+        ValueError,
+        match="legacy JSON rubric arrays are no longer supported",
+    ):
+        student_file.parse_student_submission_markdown(
+            "\n".join(
+                [
+                    "- q1:",
+                    "  - Prompt: One",
+                    '  - Rubric: ["Partially Correct - A","Partially Correct - B"]',
+                    "",
+                ]
+            )
+        )
 
 
 def test_render_student_submission_markdown_formats_multi_label_rubric() -> None:
@@ -512,9 +562,14 @@ def test_render_student_submission_markdown_formats_multi_label_rubric() -> None
 
     rendered = student_file.render_student_submission_markdown(document)
 
-    assert "  - Rubric: Partially Correct - A" in rendered
     assert (
-        '  - Rubric: ["Partially Correct - A","Partially Correct - B"]'
+        "  - Rubric: Partially Correct\n"
+        "    - A"
+    ) in rendered
+    assert (
+        "  - Rubric: Partially Correct\n"
+        "    - A\n"
+        "    - B"
         in rendered
     )
 
@@ -527,6 +582,8 @@ def test_update_student_submission_markdown_clears_grade_fields() -> None:
             "  - Possible points: 5",
             "  - Points: 3",
             "  - Rubric: Partially Correct",
+            "    - A",
+            "    - B",
             "",
         ]
     )
@@ -544,6 +601,40 @@ def test_update_student_submission_markdown_clears_grade_fields() -> None:
     assert "  - Rubric:" in updated
     assert "  - Points: 3" not in updated
     assert "  - Rubric: Partially Correct" not in updated
+    assert "    - A" not in updated
+    assert "    - B" not in updated
+
+
+def test_update_student_submission_markdown_replaces_nested_rubric_children() -> None:
+    content = "\n".join(
+        [
+            "- q1:",
+            "  - Prompt: One",
+            "  - Points: 3",
+            "  - Rubric: Partially Correct",
+            "    - A",
+            "    - B",
+            "  - Analysis: Existing.",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            points_awarded=2,
+            rubric_labels=("Partially Correct - C",),
+        ),
+    )
+
+    assert (
+        "  - Rubric: Partially Correct\n"
+        "    - C\n"
+        "  - Analysis: Existing."
+    ) in updated
+    assert "    - A" not in updated
+    assert "    - B" not in updated
 
 
 def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(

@@ -16,8 +16,8 @@ score: ""
   - Response text: |
     110
   - Possible points: 10
-  - Points:
-  - Rubric:
+  - Points: 0
+  - Rubric: Incorrect
   - Analysis:
 
 - q2:
@@ -26,8 +26,9 @@ score: ""
   - Response image: ![q2 response](responses/submission-0002/q2.png)
   - Response text: |
     ls
-  - Possible points: 
-  - Points: 
+  - Possible points: 10
+  - Points: 0
+  - Rubric: Incorrect
   - Analysis: 
 
 - q3:
@@ -36,8 +37,9 @@ score: ""
   - Response image: ![q3 response](responses/submission-0002/q3.png)
   - Response text: |
     1
-  - Possible points: 
-  - Points: 
+  - Possible points: 10
+  - Points: 0
+  - Rubric: Incorrect
   - Analysis: 
 
 - q4:
@@ -46,8 +48,10 @@ score: ""
   - Response image: ![q4 response](responses/submission-0002/q4.png)
   - Response text: |
     A
-  - Possible points: 
-  - Points: 
+  - Possible points: 10
+  - Points: 5
+  - Rubric: Partially Correct
+    - One vowel missing or one non-vowel selected
   - Analysis: 
 
 - q5a:
@@ -56,8 +60,10 @@ score: ""
   - Response image: ![q5a response](responses/submission-0002/q5a.png)
   - Response text: |
     no
-  - Possible points: 
-  - Points: 
+  - Possible points: 8
+  - Points: 5
+  - Rubric: Partially Correct
+    - Identifies it counts comparisons but not inversions
   - Analysis: 
 
 - q5b:

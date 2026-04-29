@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,11 +52,15 @@ _SUBQUESTION_MARKER_TOKEN_RE = re.compile(r"^[\(\[]?([a-z])[\)\].:]?$")
 _SUBMISSION_FRONTMATTER_RE = re.compile(r"^---\s*$")
 _SUBMISSION_QUESTION_RE = re.compile(r"^-\s+([A-Za-z]\w*):\s*$")
 _SUBMISSION_FIELD_RE = re.compile(r"^\s{2}-\s+([^:]+):\s*(.*)$")
+_SUBMISSION_CHILD_BULLET_RE = re.compile(r"^\s{4}-\s+(.*)$")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 _PROMPT_POINTS_RE = re.compile(
     r"^\((\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.*)$",
     re.IGNORECASE,
 )
+_PARTIAL_RUBRIC_CATEGORY = "Partially Correct"
+_PARTIAL_RUBRIC_PREFIX = f"{_PARTIAL_RUBRIC_CATEGORY} - "
+_RUBRIC_CATEGORIES = {"Correct", _PARTIAL_RUBRIC_CATEGORY, "Incorrect"}
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,14 @@ class StudentSubmissionGradeUpdate:
     analysis: str | None = None
 
 
+@dataclass(frozen=True)
+class _SubmissionQuestionFields:
+    """Parsed scalar field values and indented child bullets for one question."""
+
+    values: dict[str, str]
+    children: dict[str, tuple[str, ...]]
+
+
 def _parse_submission_frontmatter(content: str) -> tuple[dict[str, object], list[str]]:
     lines = content.splitlines()
     if not lines or _SUBMISSION_FRONTMATTER_RE.match(lines[0]) is None:
@@ -155,8 +166,21 @@ def _submission_question_blocks(
     return blocks
 
 
-def _parse_submission_question_fields(lines: list[str]) -> dict[str, str]:
+def _parse_submission_question_fields(lines: list[str]) -> _SubmissionQuestionFields:
+    """Parse scalar question fields and field-owned child bullets.
+
+    Submission question fields normally use two-space list entries such as
+    ``  - Points: 10``. Literal fields with ``|`` continue to consume their
+    indented body exactly as before. Non-literal fields may now own child
+    bullets of the form ``    - text``; this is used by ``Rubric`` to store
+    selected partial-credit subitems in a readable nested shape.
+
+    Returns the scalar values separately from child bullets so existing fields
+    can continue to use simple string lookup while rubric parsing can validate
+    category headers and subitems together.
+    """
     fields: dict[str, str] = {}
+    children: dict[str, tuple[str, ...]] = {}
     index = 0
     while index < len(lines):
         matched = _SUBMISSION_FIELD_RE.match(lines[index])
@@ -184,9 +208,19 @@ def _parse_submission_question_fields(lines: list[str]) -> dict[str, str]:
             fields[key] = "\n".join(value_lines).rstrip()
             continue
 
-        fields[key] = raw_value.strip()
+        child_values: list[str] = []
+        while index < len(lines):
+            child_match = _SUBMISSION_CHILD_BULLET_RE.match(lines[index])
+            if child_match is None:
+                break
+            child_values.append(child_match.group(1).strip())
+            index += 1
 
-    return fields
+        fields[key] = raw_value.strip()
+        if child_values:
+            children[key] = tuple(child_values)
+
+    return _SubmissionQuestionFields(values=fields, children=children)
 
 
 def _frontmatter_str(
@@ -264,28 +298,90 @@ def _parse_response_image_path(raw: str | None, base_path: Path | None) -> str |
     return str((base_path / path).resolve())
 
 
-def _parse_rubric_labels(value: str) -> tuple[str, ...]:
-    """Parse a blank, single-label, or JSON-array rubric field."""
+def _partial_rubric_label(child_label: str) -> str:
+    """Return the flat internal label for a partial-credit child bullet."""
+    return f"{_PARTIAL_RUBRIC_PREFIX}{child_label.strip()}"
+
+
+def _strip_partial_rubric_prefix(label: str) -> str:
+    """Return a partial-credit label without its category prefix."""
+    stripped = label.strip()
+    if stripped.startswith(_PARTIAL_RUBRIC_PREFIX):
+        return stripped[len(_PARTIAL_RUBRIC_PREFIX) :].strip()
+    return stripped
+
+
+def _parse_rubric_labels(
+    value: str,
+    children: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Parse a category-style selected-rubric field.
+
+    The submission markdown format stores the selected rubric as a top-level
+    category in the field value and, for partial-credit selections, optional
+    child bullets under that category. ``Rubric: Correct`` and
+    ``Rubric: Incorrect`` map directly to single internal labels. ``Rubric:
+    Partially Correct`` maps either to the category label itself or to flat
+    internal labels of the form ``Partially Correct - <child>`` when child
+    bullets are present.
+
+    Blank rubric fields with no children mean no selection. Legacy JSON arrays
+    are rejected because this is a deliberate file-format break. Child bullets
+    are only valid under ``Partially Correct``; using them under another
+    category, or without a category value, raises ``ValueError``.
+    """
     stripped = value.strip()
-    if not stripped:
-        return ()
+    child_labels = tuple(child.strip() for child in children if child.strip())
     if stripped.startswith("["):
-        try:
-            parsed = json.loads(stripped)
-        except json.JSONDecodeError:
-            return (stripped,)
-        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
-            return tuple(item.strip() for item in parsed if item.strip())
+        raise ValueError("legacy JSON rubric arrays are no longer supported")
+    if not stripped:
+        if child_labels:
+            raise ValueError("rubric child bullets require a rubric category")
+        return ()
+    if stripped not in _RUBRIC_CATEGORIES:
+        raise ValueError(f"unsupported rubric category: {stripped}")
+    if stripped != _PARTIAL_RUBRIC_CATEGORY and child_labels:
+        raise ValueError(f"{stripped} rubric selections cannot have child bullets")
+    if stripped == _PARTIAL_RUBRIC_CATEGORY and child_labels:
+        return tuple(_partial_rubric_label(child) for child in child_labels)
     return (stripped,)
 
 
-def _format_rubric_labels(labels: tuple[str, ...]) -> str:
-    """Render selected rubric labels into the submission markdown field."""
+def _format_rubric_field_lines(
+    labels: tuple[str, ...],
+    *,
+    indent: int = 2,
+) -> list[str]:
+    """Render selected rubric labels as a submission markdown Rubric field.
+
+    The renderer is the inverse of ``_parse_rubric_labels``: internal labels
+    remain flat for the rest of the application, while markdown gets the
+    readable category shape. Empty selections render as ``Rubric:``. Correct,
+    Incorrect, and top-level Partially Correct render inline. Partial-credit
+    subitem labels render under ``Rubric: Partially Correct`` with the
+    ``Partially Correct - `` prefix stripped from each child bullet.
+
+    Mixed categories or unknown labels are rejected so invalid internal state
+    does not get written into student submission files.
+    """
+    prefix = " " * indent
     if not labels:
-        return ""
-    if len(labels) == 1:
-        return labels[0]
-    return json.dumps(list(labels), separators=(",", ":"))
+        return [f"{prefix}- Rubric:"]
+    if len(labels) == 1 and labels[0] in _RUBRIC_CATEGORIES:
+        return [f"{prefix}- Rubric: {labels[0]}"]
+
+    child_labels: list[str] = []
+    for label in labels:
+        if not label.startswith(_PARTIAL_RUBRIC_PREFIX):
+            raise ValueError(f"unsupported rubric label: {label}")
+        child_label = _strip_partial_rubric_prefix(label)
+        if not child_label:
+            raise ValueError("partial-credit rubric child labels cannot be blank")
+        child_labels.append(child_label)
+
+    lines = [f"{prefix}- Rubric: {_PARTIAL_RUBRIC_CATEGORY}"]
+    lines.extend(f"{prefix}  - {child_label}" for child_label in child_labels)
+    return lines
 
 
 def parse_student_submission_markdown(
@@ -298,8 +394,8 @@ def parse_student_submission_markdown(
 
     for question_id, question_lines in _submission_question_blocks(body_lines):
         fields = _parse_submission_question_fields(question_lines)
-        prompt_raw = fields.get("Prompt", "")
-        possible_points = _parse_optional_float(fields.get("Possible points"))
+        prompt_raw = fields.values.get("Prompt", "")
+        possible_points = _parse_optional_float(fields.values.get("Possible points"))
         prompt = prompt_raw.strip()
         if possible_points is None:
             stripped_prompt, inline_points = _strip_prompt_points(prompt)
@@ -312,14 +408,17 @@ def parse_student_submission_markdown(
                 prompt=prompt,
                 possible_points=possible_points,
                 response_image_path=_parse_response_image_path(
-                    fields.get("Response image"),
+                    fields.values.get("Response image"),
                     base_path,
                 ),
-                response_text=fields.get("Response text", "").strip(),
-                points_awarded=_parse_optional_float(fields.get("Points")),
-                rubric_labels=_parse_rubric_labels(fields.get("Rubric", "")),
-                analysis=fields.get("Analysis", "").strip(),
-                question_type=_parse_question_type(fields.get("Question type")),
+                response_text=fields.values.get("Response text", "").strip(),
+                points_awarded=_parse_optional_float(fields.values.get("Points")),
+                rubric_labels=_parse_rubric_labels(
+                    fields.values.get("Rubric", ""),
+                    fields.children.get("Rubric", ()),
+                ),
+                analysis=fields.values.get("Analysis", "").strip(),
+                question_type=_parse_question_type(fields.values.get("Question type")),
             )
         )
 
@@ -343,7 +442,17 @@ def load_student_submission_markdown(path: str | Path) -> StudentSubmissionDocum
     )
 
 
-def _format_update_field_lines(field_name: str, value: str) -> list[str]:
+def _format_update_field_lines(
+    field_name: str,
+    value: str | tuple[str, ...],
+) -> list[str]:
+    """Render one updated question field as submission markdown lines."""
+    if field_name == "Rubric":
+        if not isinstance(value, tuple):
+            raise TypeError("Rubric updates require rubric label tuples")
+        return _format_rubric_field_lines(value)
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} updates require string values")
     if field_name == "Analysis" and "\n" in value:
         lines = ["  - Analysis: |"]
         lines.extend(f"    {line}" for line in value.splitlines())
@@ -351,20 +460,41 @@ def _format_update_field_lines(field_name: str, value: str) -> list[str]:
     return [f"  - {field_name}: {value}".rstrip()]
 
 
+def _question_field_end(block: list[str], start: int) -> int:
+    """Return the exclusive end index for a question field and its owned body.
+
+    Literal block fields such as ``Analysis: |`` consume all following lines
+    until the next two-space question field. Other fields may own consecutive
+    four-space child bullets, which is how nested selected-rubric subitems are
+    represented. Replacement and insertion use this range so edits do not split
+    a field from its body or leave stale rubric child bullets behind.
+    """
+    end = start + 1
+    if block[start].rstrip().endswith("|"):
+        while end < len(block) and _SUBMISSION_FIELD_RE.match(block[end]) is None:
+            end += 1
+        return end
+
+    while (
+        end < len(block)
+        and _SUBMISSION_CHILD_BULLET_RE.match(block[end]) is not None
+    ):
+        end += 1
+    return end
+
+
 def _replace_question_field(
     block: list[str],
     field_name: str,
-    value: str,
+    value: str | tuple[str, ...],
 ) -> bool:
+    """Replace a question field, including any literal body or child bullets."""
     field_re = re.compile(rf"^  -\s+{re.escape(field_name)}:\s*(.*)$")
     for index, line in enumerate(block):
         if field_re.match(line) is None:
             continue
 
-        end = index + 1
-        if line.rstrip().endswith("|"):
-            while end < len(block) and _SUBMISSION_FIELD_RE.match(block[end]) is None:
-                end += 1
+        end = _question_field_end(block, index)
         block[index:end] = _format_update_field_lines(field_name, value)
         return True
     return False
@@ -375,20 +505,15 @@ def _insert_question_field(
     *,
     after_field: str,
     field_name: str,
-    value: str,
+    value: str | tuple[str, ...],
 ) -> bool:
+    """Insert a question field after another field's complete markdown range."""
     after_re = re.compile(rf"^  -\s+{re.escape(after_field)}:\s*(.*)$")
     for index, line in enumerate(block):
         if after_re.match(line) is None:
             continue
 
-        insert_at = index + 1
-        if line.rstrip().endswith("|"):
-            while (
-                insert_at < len(block)
-                and _SUBMISSION_FIELD_RE.match(block[insert_at]) is None
-            ):
-                insert_at += 1
+        insert_at = _question_field_end(block, index)
         block[insert_at:insert_at] = _format_update_field_lines(field_name, value)
         return True
     return False
@@ -398,9 +523,10 @@ def _upsert_question_field(
     block: list[str],
     *,
     field_name: str,
-    value: str,
+    value: str | tuple[str, ...],
     after_fields: tuple[str, ...],
 ) -> None:
+    """Replace a question field or insert it near related fields."""
     if _replace_question_field(block, field_name, value):
         return
     for after_field in after_fields:
@@ -459,7 +585,7 @@ def update_student_submission_markdown(
         _upsert_question_field(
             block,
             field_name="Rubric",
-            value=_format_rubric_labels(update.rubric_labels),
+            value=update.rubric_labels,
             after_fields=("Points", "Possible points"),
         )
     if update.analysis is not None:
@@ -1034,7 +1160,7 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             else ""
         )
         lines.append(f"  - Points: {points_awarded_text}")
-        lines.append(f"  - Rubric: {_format_rubric_labels(question.rubric_labels)}")
+        lines.extend(_format_rubric_field_lines(question.rubric_labels))
         lines.append(f"  - Analysis: {question.analysis}")
         lines.append("")
 

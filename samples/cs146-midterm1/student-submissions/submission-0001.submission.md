@@ -16,8 +16,9 @@ score: ""
   - Response text: |
     5
   - Possible points: 10
-  - Points: 10
-  - Rubric: ["Partially Correct - Binary form attempted but value incorrect","Partially Correct - Conversion process mostly incorrect"]
+  - Points: 5
+  - Rubric: Partially Correct
+    - Testing this is the second rubric item being edited of partial credit
   - Analysis: q
 
 - q2:
@@ -48,9 +49,10 @@ score: ""
   - Response image: ![q4 response](responses/submission-0001/q4.png)
   - Response text: |
     None
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 10
+  - Rubric: Correct
+  - Analysis:
 
 - q5a:
   - Question type: Free Response
@@ -58,8 +60,10 @@ score: ""
   - Response image: ![q5a response](responses/submission-0001/q5a.png)
   - Response text: |
     none
-  - Possible points: 
-  - Points: 
+  - Possible points: 8
+  - Points: 5
+  - Rubric: Partially Correct
+    - Identifies it finds a second value but not distinct
   - Analysis: 
 
 - q5b:

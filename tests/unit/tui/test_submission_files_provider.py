@@ -128,7 +128,7 @@ def test_submission_files_provider_loads_students_and_questions() -> None:
     assert [option.label for option in seeds[0].rubric_options] == [
         "Correct",
         "Partially Correct - Binary form attempted but value incorrect",
-        "Partially Correct - Conversion process mostly incorrect",
+        "Partially Correct - Testing this is the second rubric item being edited of partial credit",
         "Incorrect",
     ]
 
@@ -549,8 +549,9 @@ title: Quiz
 
     submission_path = submissions_path / "student-1.submission.md"
     assert (
-        'Rubric: ["Partially Correct - Binary digits mostly correct",'
-        '"Partially Correct - Shows conversion setup"]'
+        "Rubric: Partially Correct\n"
+        "    - Binary digits mostly correct\n"
+        "    - Shows conversion setup"
     ) in submission_path.read_text()
     reloaded = provider.build_question_seeds(student_item_id="s1")
     assert reloaded[0].selected_rubric_labels == (

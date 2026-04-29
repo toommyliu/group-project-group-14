@@ -528,9 +528,9 @@ def test_grade_rubric_editor_exposes_partial_credit_subitems() -> None:
 
             assert labels == [
                 "Binary form attempted but value incorrect",
-                "Conversion process mostly incorrect",
+                "Testing this is the second rubric item being edited of partial credit",
             ]
-            assert deltas == ["+7", "+3"]
+            assert deltas == ["+5", "+5"]
 
     asyncio.run(run())
 
