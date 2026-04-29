@@ -61,6 +61,10 @@ class GradeController:
         self._state.grading_run.max_points = self._max_points(
             self._state.grading_run.questions
         )
+
+        # Progress counters are derived from saved submission grades, not
+        # session-only finalize state.
+        self._hydrate_saved_grading_status()
         self._state.question_items = self._question_items(
             self._state.grading_run.questions
         )
@@ -226,6 +230,9 @@ class GradeController:
             self.refresh_grade_screen(status=f"Could not save rubric: {exc}")
             return
 
+        # Rubric edits can propagate saved grades, so rebuild progress before
+        # reloading the active student's grading context.
+        self._hydrate_saved_grading_status()
         if 0 <= active_student_index < len(self._state.student_items):
             self.open_student_by_index(active_student_index)
 
@@ -346,10 +353,15 @@ class GradeController:
         if not self._on_grade_page():
             return
         current = self._current_student_item()
-        if current is None:
+        current_question = self._state.grading_run.current_question
+        if current is None or current_question is None:
             return
 
-        self._state.qa_student_status[self._qa_status_key(current.item_id)] = "graded"
+        self._set_qa_student_status(
+            current_question.question_id,
+            current.item_id,
+            graded=True,
+        )
         self._state.student_status[self._status_key(current.item_id)] = "graded"
         if self._refresh_students is not None:
             self._refresh_students()
@@ -497,6 +509,11 @@ class GradeController:
             )
         except Exception as exc:
             return f"Could not save grade: {exc}"
+        self._set_qa_student_status(
+            current_question.question_id,
+            current_student.item_id,
+            graded=bool(selected_options),
+        )
         return "Saved grade to submission file."
 
     def _persist_current_analysis(self, analysis: str) -> str:
@@ -527,12 +544,66 @@ class GradeController:
         )
 
     def _qa_status_key(self, student_item_id: str) -> tuple[str, str, str, str]:
-        return (
-            str(self._state.selection.course_id or ""),
-            str(self._state.selection.assignment_id or ""),
+        """Return the progress key for the currently selected QA/student."""
+        return self._qa_status_key_for(
             str(self._state.selection.question_id or ""),
             student_item_id,
         )
+
+    def _qa_status_key_for(
+        self,
+        question_id: str,
+        student_item_id: str,
+    ) -> tuple[str, str, str, str]:
+        """Return the progress key for an explicit QA/student pair."""
+        return (
+            str(self._state.selection.course_id or ""),
+            str(self._state.selection.assignment_id or ""),
+            question_id,
+            student_item_id,
+        )
+
+    def _set_qa_student_status(
+        self,
+        question_id: str,
+        student_item_id: str,
+        *,
+        graded: bool,
+    ) -> None:
+        """Store or clear one QA/student progress marker."""
+        key = self._qa_status_key_for(question_id, student_item_id)
+        if graded:
+            self._state.qa_student_status[key] = "graded"
+            return
+        self._state.qa_student_status.pop(key, None)
+
+    def _hydrate_saved_grading_status(self) -> None:
+        """Rebuild QA progress for the active assignment from persisted grades.
+
+        The submission markdown is the source of truth across TUI sessions.
+        Only resolvable saved grades are marked graded; ambiguous or missing
+        grade fields remain absent so existing ungraded defaults apply.
+        """
+        course_id = str(self._state.selection.course_id or "")
+        assignment_id = str(self._state.selection.assignment_id or "")
+        self._state.qa_student_status = {
+            key: status
+            for key, status in self._state.qa_student_status.items()
+            if key[:2] != (course_id, assignment_id)
+        }
+
+        for student in self._state.student_items:
+            # Use each student's provider context so versioned QA files and
+            # student-specific submission markdown are interpreted correctly.
+            for seed in self._build_question_seeds_for_selection(
+                student_item_id=student.item_id
+            ):
+                if self._seed_is_graded(seed):
+                    self._set_qa_student_status(
+                        seed.question_id,
+                        student.item_id,
+                        graded=True,
+                    )
 
     def _student_items_for_current_course(self) -> list[NavItem]:
         return [
@@ -645,6 +716,12 @@ class GradeController:
 
     @staticmethod
     def _selected_option_indices(seed: QuestionSeed) -> set[int]:
+        """Resolve persisted rubric state to runtime option indices.
+
+        Labels are authoritative because they preserve checklist selections.
+        Point-only grades are supported as a fallback only when they map to one
+        rubric row, avoiding false progress on ambiguous saved scores.
+        """
         if seed.selected_rubric_labels:
             selected_labels = set(seed.selected_rubric_labels)
             return {
@@ -670,6 +747,11 @@ class GradeController:
             return {matching_indices[0]}
         return set()
 
+    @staticmethod
+    def _seed_is_graded(seed: QuestionSeed) -> bool:
+        """Return whether a persisted question seed has a resolvable grade."""
+        return bool(GradeController._selected_option_indices(seed))
+
     def _question_items(self, questions: list[QuestionGrade]) -> list[NavItem]:
         items: list[NavItem] = []
         total_students = len(self._state.student_items)
@@ -678,12 +760,7 @@ class GradeController:
                 1
                 for student in self._state.student_items
                 if self._state.qa_student_status.get(
-                    (
-                        str(self._state.selection.course_id or ""),
-                        str(self._state.selection.assignment_id or ""),
-                        question.question_id,
-                        student.item_id,
-                    ),
+                    self._qa_status_key_for(question.question_id, student.item_id),
                     "ungraded",
                 )
                 == "graded"
@@ -705,12 +782,7 @@ class GradeController:
                 1
                 for question in self._state.grading_run.questions
                 if self._state.qa_student_status.get(
-                    (
-                        str(self._state.selection.course_id or ""),
-                        str(self._state.selection.assignment_id or ""),
-                        question.question_id,
-                        student.item_id,
-                    ),
+                    self._qa_status_key_for(question.question_id, student.item_id),
                     "ungraded",
                 )
                 == "graded"
@@ -730,12 +802,7 @@ class GradeController:
             for student in self._state.student_items:
                 statuses[(question.question_id, student.item_id)] = (
                     self._state.qa_student_status.get(
-                        (
-                            str(self._state.selection.course_id or ""),
-                            str(self._state.selection.assignment_id or ""),
-                            question.question_id,
-                            student.item_id,
-                        ),
+                        self._qa_status_key_for(question.question_id, student.item_id),
                         "ungraded",
                     )
                 )

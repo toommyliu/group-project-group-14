@@ -35,6 +35,34 @@ class PersistentFakeDataProvider(FakeDataProvider):
         self.saved_analyses.append(kwargs)
 
 
+class SavedProgressFakeDataProvider(FakeDataProvider):
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        student_item_id = kwargs.get("student_item_id")
+        seeds = super().build_question_seeds(**kwargs)
+        if student_item_id not in {"s1", "s2"}:
+            return seeds
+        return [
+            replace(seed, selected_rubric_labels=("Correct",))
+            if seed.question_id == "Q1"
+            else seed
+            for seed in seeds
+        ]
+
+
+class ChecklistPersistentFakeDataProvider(PersistentFakeDataProvider):
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        seeds = super().build_question_seeds(**kwargs)
+        rubric_options = [
+            _seed("Correct", 0.0),
+            _seed("Partially Correct", -5.0, "checklist"),
+            _seed("Incorrect", -10.0),
+        ]
+        return [
+            replace(seed, rubric_options=list(rubric_options), points=10)
+            for seed in seeds
+        ]
+
+
 class RubricPersistentFakeDataProvider(FakeDataProvider):
     def __init__(self) -> None:
         self.saved_rubrics: list[dict[str, object]] = []
@@ -222,6 +250,29 @@ def test_open_question_picker_binds_students_with_progress() -> None:
     ]
 
 
+def test_open_question_picker_hydrates_saved_qa_progress() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+
+    controller = GradeController(app, state, SavedProgressFakeDataProvider())
+    controller.open_question_picker_for_assignment()
+
+    assert app.qa_screen.bound_questions is not None
+    assert [item.meta for item in app.qa_screen.bound_questions] == [
+        "2/2 graded",
+        "0/2 graded",
+    ]
+    assert app.qa_screen.bound_students is not None
+    assert [item.meta for item in app.qa_screen.bound_students] == [
+        "1/2 graded",
+        "1/2 graded",
+    ]
+
+
 def test_refresh_qa_picker_updates_student_question_progress() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
@@ -241,6 +292,24 @@ def test_refresh_qa_picker_updates_student_question_progress() -> None:
         "1/2 graded",
         "0/2 graded",
     ]
+
+
+def test_jump_ungraded_question_uses_hydrated_saved_progress() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+
+    controller = GradeController(app, state, SavedProgressFakeDataProvider())
+    controller.open_question_picker_for_assignment()
+    state.current_page = PAGE_QA_PICKER
+
+    controller.qa_jump_ungraded_question()
+
+    assert app.qa_screen.moved_to_index == 1
+    assert app.qa_screen.status == "Jumped to Q2 (0/2 graded)"
 
 
 def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
@@ -386,6 +455,35 @@ def test_rubric_selection_persists_grade_when_provider_supports_it() -> None:
         }
     ]
     assert app.grade_screen.status == "Saved grade to submission file."
+    assert state.qa_student_status[("1", "1", "Q1", "s1")] == "graded"
+    assert app.grade_screen.progress == "Progress: 1 / 2 students"
+
+
+def test_clearing_last_checklist_selection_removes_qa_progress() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = ChecklistPersistentFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+
+    controller.on_rubric_selected(1)
+    controller.on_rubric_selected(1)
+
+    assert ("1", "1", "Q1", "s1") not in state.qa_student_status
+    assert provider.saved_grades[-1] == {
+        "student_item_id": "s1",
+        "question_id": "Q1",
+        "possible_points": 10,
+        "points_awarded": None,
+        "rubric_labels": (),
+    }
+    assert app.grade_screen.progress == "Progress: 0 / 2 students"
 
 
 def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
