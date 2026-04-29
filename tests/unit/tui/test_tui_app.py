@@ -1,6 +1,6 @@
 import asyncio
 
-from textual.widgets import Button, ContentSwitcher, Input, ListView, Static
+from textual.widgets import Button, Checkbox, ContentSwitcher, Input, ListView, Static
 
 from opengrader.tui.controllers.input_controller import InputCommand
 from opengrader.tui.data import RubricEditResult, RubricOptionSeed
@@ -11,6 +11,21 @@ from opengrader.tui.tui import TuiApp
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
 
+def _seed(
+    label: str,
+    points_delta: float,
+    selection_mode: str = "exclusive",
+) -> RubricOptionSeed:
+    kind = (
+        "correct"
+        if label == "Correct"
+        else "incorrect"
+        if label == "Incorrect"
+        else "partial"
+    )
+    return RubricOptionSeed(label, points_delta, kind, selection_mode)
+
+
 class RubricEditingFakeDataProvider(FakeDataProvider):
     def __init__(self) -> None:
         self.saved_options: list[RubricOptionSeed] | None = None
@@ -18,21 +33,21 @@ class RubricEditingFakeDataProvider(FakeDataProvider):
     def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
         seeds = super().build_question_seeds(**kwargs)
         rubric_options = [
-            RubricOptionSeed("Correct", 0.0),
-            RubricOptionSeed("Partially Correct", -5.0),
-            RubricOptionSeed("Incorrect", -10.0),
+            _seed("Correct", 0.0),
+            _seed("Partially Correct", -5.0),
+            _seed("Incorrect", -10.0),
         ]
         return [
             seed.__class__(
                 question_id=seed.question_id,
                 image_path=seed.image_path,
                 rubric_options=list(rubric_options),
-                points=seed.points,
+                points=10,
                 prompt=seed.prompt,
                 expected_answers=list(seed.expected_answers),
                 response_text=seed.response_text,
                 points_awarded=seed.points_awarded,
-                rubric_label=seed.rubric_label,
+                selected_rubric_labels=seed.selected_rubric_labels,
                 analysis=seed.analysis,
             )
             for seed in seeds
@@ -49,6 +64,36 @@ class RubricEditingFakeDataProvider(FakeDataProvider):
         _ = (student_item_id, question_id, original_options)
         self.saved_options = list(options)
         return RubricEditResult(propagated_count=0)
+
+
+class LongRubricFakeDataProvider(FakeDataProvider):
+    LONG_LABEL = (
+        "Partially Correct - Binary form attempted but value incorrect and "
+        "conversion process mostly incorrect"
+    )
+
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        seeds = super().build_question_seeds(**kwargs)
+        rubric_options = [
+            _seed("Correct", 0.0),
+            _seed(self.LONG_LABEL, -3.0),
+            _seed("Incorrect", -10.0),
+        ]
+        return [
+            seed.__class__(
+                question_id=seed.question_id,
+                image_path=seed.image_path,
+                rubric_options=list(rubric_options),
+                points=10,
+                prompt=seed.prompt,
+                expected_answers=list(seed.expected_answers),
+                response_text=seed.response_text,
+                points_awarded=seed.points_awarded,
+                selected_rubric_labels=seed.selected_rubric_labels,
+                analysis=seed.analysis,
+            )
+            for seed in seeds
+        ]
 
 
 def _list_item_texts(list_view: ListView) -> list[str]:
@@ -286,7 +331,42 @@ def test_grade_screen_focuses_rubric_and_number_keys_select_items() -> None:
 
             current = app.workflow_state.grading_run.current_question
             assert current is not None
-            assert current.selected_option_index == 1
+            assert current.selected_option_indices == {1}
+
+    asyncio.run(run())
+
+
+def test_grade_rubric_rows_wrap_without_checkbox_controls() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=LongRubricFakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            rubric_list = app.get_grade_screen().query_one("#rubric-list", ListView)
+            long_item = rubric_list.children[1]
+
+            assert list(rubric_list.query(Checkbox)) == []
+
+            label = long_item.query_one(".rubric-row-label", Static)
+            points = long_item.query_one(".rubric-row-points", Static)
+            assert str(label.content) == LongRubricFakeDataProvider.LONG_LABEL
+            assert str(points.content) == "-3.0"
+            assert str(points.content) not in str(label.content)
+
+            await pilot.press("2")
+            await pilot.pause()
+
+            current = app.workflow_state.grading_run.current_question
+            assert current is not None
+            assert current.selected_option_indices == {1}
+            assert long_item.has_class("rubric-selected")
+            assert str(long_item.query_one(".rubric-row-marker", Static).content) == ">"
 
     asyncio.run(run())
 
@@ -450,7 +530,7 @@ def test_grade_rubric_editor_exposes_partial_credit_subitems() -> None:
                 "Binary form attempted but value incorrect",
                 "Conversion process mostly incorrect",
             ]
-            assert deltas == ["-3", "-7"]
+            assert deltas == ["+7", "+3"]
 
     asyncio.run(run())
 
@@ -477,7 +557,7 @@ def test_grade_rubric_editor_rejects_mixed_positive_and_negative_scoring() -> No
                 for widget in subitems.query(".rubric-edit-delta")
                 if isinstance(widget, Input)
             )
-            first_delta.value = "+2"
+            first_delta.value = "-2"
             grade_screen.query_one("#rubric-edit-save", Button).press()
             await pilot.pause()
 
@@ -503,19 +583,19 @@ def test_rubric_editor_ctrl_s_saves() -> None:
             await pilot.pause()
 
             grade_screen = app.get_grade_screen()
-            incorrect = grade_screen.query_one("#rubric-editor-incorrect")
-            incorrect_delta = next(
+            subitems = grade_screen.query_one("#rubric-editor-subitems")
+            partial_delta = next(
                 widget
-                for widget in incorrect.query(".rubric-edit-delta")
+                for widget in subitems.query(".rubric-edit-delta")
                 if isinstance(widget, Input)
             )
-            incorrect_delta.value = "-9"
+            partial_delta.value = "-4"
 
             await pilot.press("ctrl+s")
             await pilot.pause()
 
             assert provider.saved_options is not None
-            assert provider.saved_options[-1] == RubricOptionSeed("Incorrect", -9.0)
+            assert provider.saved_options[1] == _seed("Partially Correct", -4.0)
             assert grade_screen.query_one("#rubric-list", ListView).display is True
             assert grade_screen.query_one("#rubric-editor-panel").display is False
 
@@ -743,7 +823,7 @@ def test_rubric_editor_validation_error_keeps_focus_trap() -> None:
                 for widget in subitems.query(".rubric-edit-delta")
                 if isinstance(widget, Input)
             )
-            first_delta.value = "+2"
+            first_delta.value = "-2"
 
             await pilot.press("ctrl+s")
             await pilot.pause()

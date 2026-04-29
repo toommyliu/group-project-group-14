@@ -11,11 +11,11 @@ questions_start_page: 1
   - **Correct**
     - 101
   - **Rubric**
-    - Correct (+0)
+    - Correct (+10)
     - Partially Correct
-      - Binary form attempted but value incorrect (-3)
-      - Conversion process mostly incorrect (-7)
-    - Incorrect (-10)
+      - Binary form attempted but value incorrect (+7)
+      - Conversion process mostly incorrect (+3)
+    - Incorrect (+0)
 
 - (10 points) Which of these are valid Python integer literals? [A]
   - **Correct**
@@ -68,7 +68,7 @@ questions_start_page: 1
       - Correct (+0)
       - Partially Correct
         - Returns 8 (didn't account for distinct) (-4)
-        - Process identified but calculation wrong (-6)
+        - Process identified but calculation wrong (-5)
       - Incorrect (-9)
   - (8 points) What should the algorithm return for a list with only one element?
     - **Correct**
@@ -114,11 +114,11 @@ questions_start_page: 1
   - **Correct**
     - 110
   - **Rubric**
-    - Correct (+0)
+    - Correct (+10)
     - Partially Correct
-      - Binary structure is close (-2)
-      - Major conversion mistakes (-8)
-    - Incorrect (-10)
+      - Binary structure is close (+2)
+      - Major conversion mistakes (+8)
+    - Incorrect (+0)
 
 - (10 points) What command lists files in the current directory on Linux? [B]
   - **Choices**
@@ -169,7 +169,7 @@ questions_start_page: 1
       - Correct (+0)
       - Partially Correct
         - Close but incorrect value (-4)
-        - Process identified but calculation wrong (-6)
+        - Process identified but calculation wrong (-5)
       - Incorrect (-9)
   - (8 points) What is the time complexity of counting inversions using nested loops?
     - **Correct**
@@ -186,8 +186,8 @@ questions_start_page: 1
     - **Rubric**
       - Correct (+0)
       - Partially Correct
-        - One digit error (-3)
-        - Process correct but calculation wrong (-4)
+        - One digit error (-2)
+        - Process correct but calculation wrong (-3)
       - Incorrect (-5)
   - (5 points) Convert decimal 255 to hexadecimal.
     - **Correct**
@@ -218,11 +218,11 @@ questions_start_page: 1
   - **Correct**
     - 1001
   - **Rubric**
-    - Correct (+0)
+    - Correct (+10)
     - Partially Correct
-      - One-bit mistake (-3)
-      - Multiple-bit mistakes (-7)
-    - Incorrect (-10)
+      - One-bit mistake (+3)
+      - Multiple-bit mistakes (+7)
+    - Incorrect (+0)
 
 - (10 points) What is the hexadecimal representation of decimal 26? [C]
   - **Choices**
@@ -273,7 +273,7 @@ questions_start_page: 1
       - Correct (+0)
       - Partially Correct
         - Close but incorrect value (-4)
-        - Process identified but calculation wrong (-6)
+        - Process identified but calculation wrong (-5)
       - Incorrect (-9)
   - (8 points) What is the time complexity of the naive recursive Fibonacci implementation?
     - **Correct**
@@ -283,7 +283,7 @@ questions_start_page: 1
       - Correct (+0)
       - Partially Correct
         - Identifies as inefficient but not exponential (-4)
-        - O(n) or O(n²) (-6)
+        - O(n) or O(n²) (-4)
       - Incorrect (-8)
 
 - (20 points) Answer the following questions about memory management [C].
@@ -293,8 +293,8 @@ questions_start_page: 1
     - **Rubric**
       - Correct (+0)
       - Partially Correct
-        - Partial understanding of the concept (-3)
-        - Confuses with other memory issues (-4)
+        - Partial understanding of the concept (-2)
+        - Confuses with other memory issues (-3)
       - Incorrect (-5)
   - (5 points) What is a stack overflow?
     - **Correct**
@@ -309,8 +309,8 @@ questions_start_page: 1
     - **Rubric**
       - Correct (+0)
       - Partially Correct
-        - Identifies one aspect correctly (-3)
-        - Vague or incomplete distinction (-4)
+        - Identifies one aspect correctly (-2)
+        - Vague or incomplete distinction (-3)
       - Incorrect (-5)
   - (5 points) What is dynamic memory allocation?
     - **Correct**

@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
+
 
 @dataclass(frozen=True)
 class StudentSummary:
@@ -9,8 +11,12 @@ class StudentSummary:
 
 @dataclass(frozen=True)
 class RubricOptionSeed:
+    """A flattened rubric option prepared for grading UI and persistence."""
+
     label: str
     points_delta: float
+    kind: RubricOptionKind
+    selection_mode: RubricSelectionMode
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,8 @@ class RubricEditResult:
 
 @dataclass(frozen=True)
 class QuestionSeed:
+    """Question data prepared by providers for a grading session."""
+
     question_id: str
     image_path: str
     rubric_options: list[RubricOptionSeed]
@@ -37,5 +45,5 @@ class QuestionSeed:
     expected_answers: list[str] = field(default_factory=list)
     response_text: str = ""
     points_awarded: float | None = None
-    rubric_label: str = ""
+    selected_rubric_labels: tuple[str, ...] = ()
     analysis: str = ""

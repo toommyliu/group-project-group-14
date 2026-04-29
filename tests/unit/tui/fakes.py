@@ -24,8 +24,8 @@ class FakeDataProvider:
     ) -> list[QuestionSeed]:
         _ = (assignment_id, student_item_id)
         rubric_options = [
-            RubricOptionSeed(label="Correct", points_delta=0.0),
-            RubricOptionSeed(label="Incorrect", points_delta=-10.0),
+            RubricOptionSeed("Correct", 0.0, "correct", "exclusive"),
+            RubricOptionSeed("Incorrect", -10.0, "incorrect", "exclusive"),
         ]
         if assignment_title not in (None, "HW 1"):
             return [QuestionSeed("Q1", DEFAULT_IMAGE_PATH, list(rubric_options))]

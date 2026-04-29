@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,9 +76,14 @@ class StudentSubmissionQuestion:
     response_image_path: str | None
     response_text: str
     points_awarded: float | None = None
-    rubric_label: str = ""
+    rubric_labels: tuple[str, ...] = ()
     analysis: str = ""
     question_type: QuestionType = FREE_RESPONSE
+
+    @property
+    def rubric_label(self) -> str:
+        """Return the legacy single-label view of selected rubric labels."""
+        return self.rubric_labels[0] if len(self.rubric_labels) == 1 else ""
 
 
 @dataclass(frozen=True)
@@ -104,7 +110,7 @@ class StudentSubmissionGradeUpdate:
     question_id: str
     possible_points: float | None = None
     points_awarded: float | None = None
-    rubric_label: str | None = None
+    rubric_labels: tuple[str, ...] | None = None
     analysis: str | None = None
 
 
@@ -258,6 +264,30 @@ def _parse_response_image_path(raw: str | None, base_path: Path | None) -> str |
     return str((base_path / path).resolve())
 
 
+def _parse_rubric_labels(value: str) -> tuple[str, ...]:
+    """Parse a blank, single-label, or JSON-array rubric field."""
+    stripped = value.strip()
+    if not stripped:
+        return ()
+    if stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return (stripped,)
+        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
+            return tuple(item.strip() for item in parsed if item.strip())
+    return (stripped,)
+
+
+def _format_rubric_labels(labels: tuple[str, ...]) -> str:
+    """Render selected rubric labels into the submission markdown field."""
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    return json.dumps(list(labels), separators=(",", ":"))
+
+
 def parse_student_submission_markdown(
     content: str,
     *,
@@ -287,7 +317,7 @@ def parse_student_submission_markdown(
                 ),
                 response_text=fields.get("Response text", "").strip(),
                 points_awarded=_parse_optional_float(fields.get("Points")),
-                rubric_label=fields.get("Rubric", "").strip(),
+                rubric_labels=_parse_rubric_labels(fields.get("Rubric", "")),
                 analysis=fields.get("Analysis", "").strip(),
                 question_type=_parse_question_type(fields.get("Question type")),
             )
@@ -418,18 +448,18 @@ def update_student_submission_markdown(
             value=_format_submission_points(update.possible_points),
             after_fields=("Response text", "Response image", "Prompt"),
         )
-    if update.points_awarded is not None:
+    if update.points_awarded is not None or update.rubric_labels is not None:
         _upsert_question_field(
             block,
             field_name="Points",
             value=_format_submission_points(update.points_awarded),
             after_fields=("Possible points", "Response text", "Response image"),
         )
-    if update.rubric_label is not None:
+    if update.rubric_labels is not None:
         _upsert_question_field(
             block,
             field_name="Rubric",
-            value=update.rubric_label,
+            value=_format_rubric_labels(update.rubric_labels),
             after_fields=("Points", "Possible points"),
         )
     if update.analysis is not None:
@@ -1004,7 +1034,7 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             else ""
         )
         lines.append(f"  - Points: {points_awarded_text}")
-        lines.append(f"  - Rubric: {question.rubric_label}")
+        lines.append(f"  - Rubric: {_format_rubric_labels(question.rubric_labels)}")
         lines.append(f"  - Analysis: {question.analysis}")
         lines.append("")
 

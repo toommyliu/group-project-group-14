@@ -15,9 +15,10 @@ score: ""
   - Response image: ![q1 response](responses/submission-0002/q1.png)
   - Response text: |
     110
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points:
+  - Rubric:
+  - Analysis:
 
 - q2:
   - Question type: Free Response

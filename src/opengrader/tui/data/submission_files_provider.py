@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from opengrader.core.pdf.templates.qa_file import (
+from opengrader.core.qa_file import (
     QARubricFlatOption,
     QAQuestion,
     QARubricItem,
@@ -15,6 +15,7 @@ from opengrader.core.pdf.templates.qa_file import (
     replace_qa_rubric_options,
     save_qa_markdown,
 )
+from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
@@ -132,7 +133,9 @@ class SubmissionFilesProvider:
                     points_awarded=(
                         response.points_awarded if response is not None else None
                     ),
-                    rubric_label=response.rubric_label if response is not None else "",
+                    selected_rubric_labels=(
+                        response.rubric_labels if response is not None else ()
+                    ),
                     analysis=response.analysis if response is not None else "",
                 )
             )
@@ -145,8 +148,8 @@ class SubmissionFilesProvider:
         student_item_id: str,
         question_id: str,
         possible_points: float,
-        points_awarded: float,
-        rubric_label: str | None,
+        points_awarded: float | None,
+        rubric_labels: tuple[str, ...],
         analysis: str | None = None,
     ) -> None:
         submission = self._submission_for_student_item(student_item_id)
@@ -156,7 +159,7 @@ class SubmissionFilesProvider:
                 question_id=question_id,
                 possible_points=possible_points,
                 points_awarded=points_awarded,
-                rubric_label=rubric_label,
+                rubric_labels=rubric_labels,
                 analysis=analysis,
             ),
         )
@@ -213,6 +216,8 @@ class SubmissionFilesProvider:
                 QARubricFlatOption(
                     label=option.label,
                     points_delta=option.points_delta,
+                    kind=option.kind,
+                    selection_mode=option.selection_mode,
                 )
                 for option in options
             ],
@@ -220,14 +225,12 @@ class SubmissionFilesProvider:
         )
         save_qa_markdown(self._qa_doc, self._qa_path)
 
-        propagated_count = 0
-        for change in changes:
-            propagated_count += self._propagate_rubric_option_change(
-                qa_version=submission.qa_version,
-                question_id=question_id,
-                context=context,
-                change=change,
-            )
+        propagated_count = self._propagate_rubric_option_changes(
+            qa_version=submission.qa_version,
+            question_id=question_id,
+            context=context,
+            changes=changes,
+        )
 
         self._qa_doc = load_qa_markdown(self._qa_path)
         self._submissions = self._load_submissions(self._submissions_path)
@@ -430,14 +433,26 @@ class SubmissionFilesProvider:
             RubricOptionSeed(
                 label=option.label,
                 points_delta=option.points_delta,
+                kind=option.kind,
+                selection_mode=option.selection_mode,
             )
             for option in flatten_rubric_options(context.rubric)
         ]
         if options:
             return options
         return [
-            RubricOptionSeed(label="Correct", points_delta=0.0),
-            RubricOptionSeed(label="Incorrect", points_delta=-context.points),
+            RubricOptionSeed(
+                label="Correct",
+                points_delta=0.0,
+                kind="correct",
+                selection_mode="exclusive",
+            ),
+            RubricOptionSeed(
+                label="Incorrect",
+                points_delta=-context.points,
+                kind="incorrect",
+                selection_mode="exclusive",
+            ),
         ]
 
     @staticmethod
@@ -509,37 +524,38 @@ class SubmissionFilesProvider:
         options: list[_RubricOptionDelete],
     ) -> int:
         count = 0
-        for option in options:
-            old_points = self._awarded_points_for_delta(
-                context.points,
-                option.points_delta,
-            )
-            for submission in self._submissions:
-                if submission.qa_version != qa_version:
-                    continue
-                response = submission.questions_by_id.get(question_id)
-                if response is None:
-                    continue
-                if self._saved_grade_matches(response, option.label, old_points):
-                    count += 1
+        deleted_labels = {option.label for option in options}
+        for submission in self._submissions:
+            if submission.qa_version != qa_version:
+                continue
+            response = submission.questions_by_id.get(question_id)
+            if response is None:
+                continue
+            if deleted_labels.intersection(response.rubric_labels):
+                count += 1
         return count
 
-    def _propagate_rubric_option_change(
+    def _propagate_rubric_option_changes(
         self,
         *,
         qa_version: str | None,
         question_id: str,
         context: _QuestionContext,
-        change: RubricOptionUpdate,
+        changes: list[RubricOptionUpdate],
     ) -> int:
-        old_points = self._awarded_points_for_delta(
-            context.points,
-            change.old_points_delta,
-        )
-        new_points = self._awarded_points_for_delta(
-            context.points,
-            change.new_points_delta,
-        )
+        """Propagate label/weight edits only when saved grades still match."""
+        if not changes:
+            return 0
+
+        label_changes = {change.old_label: change for change in changes}
+        old_value_map = {
+            option.label: option.points_delta
+            for option in self._rubric_leaf_options(context.rubric)
+        }
+        new_value_map = dict(old_value_map)
+        for change in changes:
+            new_value_map.pop(change.old_label, None)
+            new_value_map[change.new_label] = change.new_points_delta
 
         propagated_count = 0
         for submission in self._submissions:
@@ -548,12 +564,25 @@ class SubmissionFilesProvider:
             response = submission.questions_by_id.get(question_id)
             if response is None:
                 continue
-            if not self._saved_grade_matches(
-                response,
-                change.old_label,
-                old_points,
-            ):
+            if not set(response.rubric_labels).intersection(label_changes):
                 continue
+            old_points = self._awarded_points_for_labels(
+                context.points,
+                response.rubric_labels,
+                old_value_map,
+            )
+            if response.points_awarded is None or abs(response.points_awarded - old_points) > 1e-6:
+                continue
+
+            new_labels = tuple(
+                label_changes[label].new_label if label in label_changes else label
+                for label in response.rubric_labels
+            )
+            new_points = self._awarded_points_for_labels(
+                context.points,
+                new_labels,
+                new_value_map,
+            )
 
             update_student_submission_file(
                 submission.path,
@@ -561,27 +590,26 @@ class SubmissionFilesProvider:
                     question_id=question_id,
                     possible_points=context.points,
                     points_awarded=new_points,
-                    rubric_label=change.new_label,
+                    rubric_labels=new_labels,
                 ),
             )
             propagated_count += 1
         return propagated_count
 
     @staticmethod
-    def _awarded_points_for_delta(points: float, points_delta: float) -> float:
-        return max(0.0, min(points, points + points_delta))
-
-    @staticmethod
-    def _saved_grade_matches(
-        response: StudentSubmissionQuestion,
-        rubric_label: str,
-        points_awarded: float,
-    ) -> bool:
-        if response.points_awarded is None:
-            return False
-        return (
-            response.rubric_label == rubric_label
-            and abs(response.points_awarded - points_awarded) <= 1e-6
+    def _awarded_points_for_labels(
+        points: float,
+        labels: tuple[str, ...],
+        rubric_value_map: dict[str, float],
+    ) -> float:
+        """Compute saved points from persisted labels and rubric weights."""
+        selected_values = [
+            rubric_value_map[label] for label in labels if label in rubric_value_map
+        ]
+        return awarded_points_for_rubric_selection(
+            points,
+            selected_values,
+            rubric_value_map.values(),
         )
 
     @classmethod
@@ -591,6 +619,7 @@ class SubmissionFilesProvider:
         *,
         parent_labels: tuple[str, ...] = (),
     ) -> list[RubricOptionSeed]:
+        """Flatten QA rubric leaves for grade propagation helpers."""
         options: list[RubricOptionSeed] = []
         for item in items:
             labels = (*parent_labels, item.label)
@@ -609,6 +638,18 @@ class SubmissionFilesProvider:
                 RubricOptionSeed(
                     label=" - ".join(labels),
                     points_delta=item.points_delta,
+                    kind=(
+                        "correct"
+                        if labels == ("Correct",)
+                        else "incorrect"
+                        if labels == ("Incorrect",)
+                        else "partial"
+                    ),
+                    selection_mode=(
+                        "checklist"
+                        if parent_labels and parent_labels[0] == "Partially Correct"
+                        else "exclusive"
+                    ),
                 )
             )
         return options

@@ -18,9 +18,9 @@ class StubQuestionContent:
         assignment_title: str | None = None,
     ) -> list[QuestionSeed]:
         rubric_options = [
-            RubricOptionSeed(label="Correct", points_delta=0.0),
-            RubricOptionSeed(label="Partially Correct", points_delta=-4.0),
-            RubricOptionSeed(label="Incorrect", points_delta=-10.0),
+            RubricOptionSeed("Correct", 0.0, "correct", "exclusive"),
+            RubricOptionSeed("Partially Correct", -4.0, "partial", "exclusive"),
+            RubricOptionSeed("Incorrect", -10.0, "incorrect", "exclusive"),
         ]
         output: list[QuestionSeed] = []
         for question_id, image_path in self._load_question_images(

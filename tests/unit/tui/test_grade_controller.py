@@ -8,6 +8,21 @@ from opengrader.tui.ui.widgets.nav_item import NavItem
 from .fakes import FakeDataProvider
 
 
+def _seed(
+    label: str,
+    points_delta: float,
+    selection_mode: str = "exclusive",
+) -> RubricOptionSeed:
+    kind = (
+        "correct"
+        if label == "Correct"
+        else "incorrect"
+        if label == "Incorrect"
+        else "partial"
+    )
+    return RubricOptionSeed(label, points_delta, kind, selection_mode)
+
+
 class PersistentFakeDataProvider(FakeDataProvider):
     def __init__(self) -> None:
         self.saved_grades: list[dict[str, object]] = []
@@ -24,8 +39,8 @@ class RubricPersistentFakeDataProvider(FakeDataProvider):
     def __init__(self) -> None:
         self.saved_rubrics: list[dict[str, object]] = []
         self.rubric_options = [
-            RubricOptionSeed(label="Correct", points_delta=0.0),
-            RubricOptionSeed(label="Incorrect", points_delta=-10.0),
+            _seed("Correct", 0.0),
+            _seed("Incorrect", -10.0),
         ]
         self.raise_on_save: Exception | None = None
 
@@ -279,7 +294,7 @@ def test_rubric_selection_persists_grade_when_provider_supports_it() -> None:
             "question_id": "Q1",
             "possible_points": 0.0,
             "points_awarded": 0.0,
-            "rubric_label": "Incorrect",
+            "rubric_labels": ("Incorrect",),
         }
     ]
     assert app.grade_screen.status == "Saved grade to submission file."
@@ -352,13 +367,13 @@ def test_rubric_editor_save_calls_provider_and_reloads_active_student() -> None:
     controller.open_question_by_index(0)
     state.current_page = PAGE_GRADE
     original_options = [
-        RubricOptionSeed(option.label, option.points_delta)
+        _seed(option.label, option.points_delta)
         for option in state.grading_run.current_question.rubric_options
     ]
     new_options = [
-        RubricOptionSeed("Correct", 0.0),
-        RubricOptionSeed("Partially Correct", -4.0),
-        RubricOptionSeed("Incorrect", -10.0),
+        _seed("Correct", 0.0),
+        _seed("Partially Correct", -4.0),
+        _seed("Incorrect", -10.0),
     ]
 
     controller.on_rubric_options_saved(
@@ -400,15 +415,15 @@ def test_rubric_editor_save_reports_provider_errors() -> None:
     current = state.grading_run.current_question
     assert current is not None
     original_options = [
-        RubricOptionSeed(option.label, option.points_delta)
+        _seed(option.label, option.points_delta)
         for option in current.rubric_options
     ]
 
     controller.on_rubric_options_saved(
         [
-            RubricOptionSeed("Correct", 0.0),
-            RubricOptionSeed("Partially Correct", -4.0),
-            RubricOptionSeed("Incorrect", -10.0),
+            _seed("Correct", 0.0),
+            _seed("Partially Correct", -4.0),
+            _seed("Incorrect", -10.0),
         ],
         original_options=original_options,
     )

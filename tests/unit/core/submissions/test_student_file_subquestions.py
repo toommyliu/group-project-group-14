@@ -403,7 +403,7 @@ def test_update_student_submission_markdown_updates_grade_fields() -> None:
             question_id="q1",
             possible_points=5,
             points_awarded=2,
-            rubric_label="Partially Correct",
+            rubric_labels=("Partially Correct",),
             analysis="Process was close.",
         ),
     )
@@ -457,6 +457,93 @@ def test_parse_student_submission_markdown_reads_rubric_label() -> None:
 
     assert document.questions[0].rubric_label == "Correct"
     assert document.questions[0].analysis == "Looks good."
+
+
+def test_parse_student_submission_markdown_reads_multi_label_rubric() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                '  - Rubric: ["Partially Correct - A","Partially Correct - B"]',
+                "",
+                "- q2:",
+                "  - Prompt: Two",
+                "  - Rubric: ",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_labels == (
+        "Partially Correct - A",
+        "Partially Correct - B",
+    )
+    assert document.questions[1].rubric_labels == ()
+
+
+def test_render_student_submission_markdown_formats_multi_label_rubric() -> None:
+    document = student_file.StudentSubmissionDocument(
+        student_name="Taylor Student",
+        student_id="123",
+        course_code="CMPE195",
+        assignment_title="Quiz",
+        assignment_version="A",
+        source_pdf="submission.pdf",
+        questions=[
+            student_file.StudentSubmissionQuestion(
+                question_id="q1",
+                prompt="One",
+                possible_points=None,
+                response_image_path="",
+                response_text="",
+                rubric_labels=("Partially Correct - A",),
+            ),
+            student_file.StudentSubmissionQuestion(
+                question_id="q2",
+                prompt="Two",
+                possible_points=None,
+                response_image_path="",
+                response_text="",
+                rubric_labels=("Partially Correct - A", "Partially Correct - B"),
+            ),
+        ],
+    )
+
+    rendered = student_file.render_student_submission_markdown(document)
+
+    assert "  - Rubric: Partially Correct - A" in rendered
+    assert (
+        '  - Rubric: ["Partially Correct - A","Partially Correct - B"]'
+        in rendered
+    )
+
+
+def test_update_student_submission_markdown_clears_grade_fields() -> None:
+    content = "\n".join(
+        [
+            "- q1:",
+            "  - Prompt: One",
+            "  - Possible points: 5",
+            "  - Points: 3",
+            "  - Rubric: Partially Correct",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            points_awarded=None,
+            rubric_labels=(),
+        ),
+    )
+
+    assert "  - Points:" in updated
+    assert "  - Rubric:" in updated
+    assert "  - Points: 3" not in updated
+    assert "  - Rubric: Partially Correct" not in updated
 
 
 def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(

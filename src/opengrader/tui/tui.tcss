@@ -149,13 +149,55 @@ $foreground: #E4E4E4EB;
 
 #rubric-list {
     width: 100%;
-    height: 10;
+    height: auto;
+    max-height: 14;
+    background: transparent;
+    scrollbar-size: 1 1;
+}
+
+#rubric-list > ListItem {
+    width: 100%;
+    height: auto;
+    padding: 0 1 0 0;
     background: transparent;
 }
 
-#rubric-list > ListItem,
-#rubric-list > ListItem > Label {
+.rubric-row {
     width: 100%;
+    height: auto;
+}
+
+.rubric-row-marker {
+    width: 2;
+    color: $accent;
+    text-style: bold;
+}
+
+.rubric-row-index {
+    width: 3;
+    color: $text-muted;
+}
+
+.rubric-row-label {
+    width: 1fr;
+    height: auto;
+    color: $foreground;
+}
+
+.rubric-row-points {
+    width: 8;
+    color: $text-muted;
+    text-align: right;
+}
+
+#rubric-list > ListItem.rubric-selected {
+    background: $accent 15%;
+}
+
+#rubric-list > ListItem.rubric-selected .rubric-row-label,
+#rubric-list > ListItem.rubric-selected .rubric-row-points {
+    color: $accent;
+    text-style: bold;
 }
 
 #rubric-editor-panel {

@@ -1,6 +1,8 @@
+import importlib.util
+
 import pytest
 
-from opengrader.core.pdf.templates.qa_file import (
+from opengrader.core.qa_file import (
     QARubricFlatOption,
     flatten_rubric_options,
     parse_qa_markdown,
@@ -8,6 +10,27 @@ from opengrader.core.pdf.templates.qa_file import (
     render_qa_markdown,
     replace_qa_rubric_options,
 )
+
+
+def _flat(
+    label: str,
+    points_delta: float,
+    kind: str | None = None,
+    selection_mode: str = "exclusive",
+) -> QARubricFlatOption:
+    if kind is None:
+        kind = (
+            "correct"
+            if label == "Correct"
+            else "incorrect"
+            if label == "Incorrect"
+            else "partial"
+        )
+    return QARubricFlatOption(label, points_delta, kind, selection_mode)
+
+
+def test_old_qa_file_template_module_no_longer_exists() -> None:
+    assert importlib.util.find_spec("opengrader.core.pdf.templates.qa_file") is None
 
 
 def test_parse_indentation_single_version_with_subquestions_and_correct_answers() -> (
@@ -100,9 +123,9 @@ def test_parse_rubric_items_with_positive_negative_and_partial_credit_notes() ->
 - (8 points) Multi-part scoring
   - (8 points) Show your work
     - **Rubric**
-      - Correct (+2)
-      - Partially Correct (-3)
-      - Incorrect (-8)
+      - Correct (+8)
+      - Partially Correct (+5)
+      - Incorrect (+0)
 """
 
     document = parse_qa_markdown(content)
@@ -120,9 +143,9 @@ def test_parse_rubric_items_with_positive_negative_and_partial_credit_notes() ->
 
     q2a = document.questions[1].subquestions[0]
     assert [(item.label, item.points_delta) for item in q2a.rubric] == [
-        ("Correct", 2.0),
-        ("Partially Correct", -3.0),
-        ("Incorrect", -8.0),
+        ("Correct", 8.0),
+        ("Partially Correct", 5.0),
+        ("Incorrect", 0.0),
     ]
 
 
@@ -140,16 +163,18 @@ def test_flatten_rubric_options_uses_sidebar_labels() -> None:
     )
 
     assert flatten_rubric_options(document.questions[0].rubric) == [
-        QARubricFlatOption("Correct", 0.0),
-        QARubricFlatOption(
+        _flat("Correct", 0.0),
+        _flat(
             "Partially Correct - Binary form attempted but value incorrect",
             -3.0,
+            selection_mode="checklist",
         ),
-        QARubricFlatOption(
+        _flat(
             "Partially Correct - Conversion process mostly incorrect",
             -7.0,
+            selection_mode="checklist",
         ),
-        QARubricFlatOption("Incorrect", -10.0),
+        _flat("Incorrect", -10.0),
     ]
 
 
@@ -168,10 +193,10 @@ def test_replace_qa_rubric_options_updates_nested_partial_items() -> None:
         document,
         "q1",
         [
-            QARubricFlatOption("Correct", 0.0),
-            QARubricFlatOption("Partially Correct - Minor issue", -2.0),
-            QARubricFlatOption("Partially Correct - Major issue", -8.0),
-            QARubricFlatOption("Incorrect", -10.0),
+            _flat("Correct", 0.0),
+            _flat("Partially Correct - Minor issue", -2.0, selection_mode="checklist"),
+            _flat("Partially Correct - Major issue", -8.0, selection_mode="checklist"),
+            _flat("Incorrect", -10.0),
         ],
     )
 
@@ -206,8 +231,8 @@ def test_replace_qa_rubric_options_rejects_missing_required_categories() -> None
             document,
             "q1",
             [
-                QARubricFlatOption("Correct", 0.0),
-                QARubricFlatOption("Partially Correct", -5.0),
+                _flat("Correct", 0.0),
+                _flat("Partially Correct", -5.0),
             ],
         )
 
@@ -228,9 +253,9 @@ def test_replace_qa_rubric_options_rejects_mixed_awards_and_deductions() -> None
             document,
             "q1",
             [
-                QARubricFlatOption("Correct", 0.0),
-                QARubricFlatOption("Partially Correct - No", 2.0),
-                QARubricFlatOption("Incorrect", -10.0),
+                _flat("Correct", 0.0),
+                _flat("Partially Correct - No", 2.0, selection_mode="checklist"),
+                _flat("Incorrect", -10.0),
             ],
         )
 
@@ -263,22 +288,22 @@ title: Quiz
         document,
         "q1",
         [
-            QARubricFlatOption("Correct", 0.0),
-            QARubricFlatOption("Partially Correct", -2.0),
-            QARubricFlatOption("Incorrect", -10.0),
+            _flat("Correct", 0.0),
+            _flat("Partially Correct", -2.0),
+            _flat("Incorrect", -10.0),
         ],
         version="B",
     )
 
     assert flatten_rubric_options(document.version_questions["A"][0].rubric) == [
-        QARubricFlatOption("Correct", 0.0),
-        QARubricFlatOption("Partially Correct", -5.0),
-        QARubricFlatOption("Incorrect", -10.0),
+        _flat("Correct", 0.0),
+        _flat("Partially Correct", -5.0),
+        _flat("Incorrect", -10.0),
     ]
     assert flatten_rubric_options(document.version_questions["B"][0].rubric) == [
-        QARubricFlatOption("Correct", 0.0),
-        QARubricFlatOption("Partially Correct", -2.0),
-        QARubricFlatOption("Incorrect", -10.0),
+        _flat("Correct", 0.0),
+        _flat("Partially Correct", -2.0),
+        _flat("Incorrect", -10.0),
     ]
 
 
@@ -393,7 +418,7 @@ def test_parse_weighted_partial_credit_items_can_accumulate_to_full_deduction() 
     ]
 
 
-def test_parse_rejects_rubric_deductions_that_do_not_reach_question_points() -> None:
+def test_parse_rejects_checklist_partial_deductions_that_do_not_sum_to_points() -> None:
     content = """
 - (5 points) Parent
   - **Rubric**
@@ -401,10 +426,10 @@ def test_parse_rejects_rubric_deductions_that_do_not_reach_question_points() -> 
     - Partially Correct
       - Major conceptual error (-3)
       - Minor notation issue (-1)
-    - Incorrect (-6)
+    - Incorrect (-5)
 """
 
-    with pytest.raises(ValueError, match="must accumulate to -5 points"):
+    with pytest.raises(ValueError, match="checklist partial items must sum to -5"):
         parse_qa_markdown(content)
 
 

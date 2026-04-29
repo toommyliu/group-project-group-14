@@ -7,8 +7,17 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Button, Input, Label, ListItem, ListView, Rule, Static
+from textual.widgets import (
+    Button,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Rule,
+    Static,
+)
 
+from opengrader.core.qa_file.scoring import rubric_scoring_mode
 from opengrader.tui.data import RubricOptionSeed
 from opengrader.tui.state import QuestionGrade, StudentGradingRun
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
@@ -21,19 +30,31 @@ RubricEditorCallback = Callable[[RubricEditorResult], None]
 
 class _RubricListItem(ListItem):
     def __init__(self) -> None:
-        self.label = Label("")
-        self._option_text = ""
-        self._selected = False
-        super().__init__(self.label)
+        self.marker = Static("", classes="rubric-row-marker", markup=False)
+        self.index_label = Static("", classes="rubric-row-index", markup=False)
+        self.option_label = Static("", classes="rubric-row-label", markup=False)
+        self.points_label = Static("", classes="rubric-row-points", markup=False)
+        self.row = Horizontal(
+            self.marker,
+            self.index_label,
+            self.option_label,
+            self.points_label,
+            classes="rubric-row",
+        )
+        super().__init__(self.row)
 
-    def update_option(self, text: str, selected: bool) -> None:
+    def update_option(
+        self,
+        index: int,
+        label: str,
+        points_delta: float,
+        selected: bool,
+    ) -> None:
         """Refresh the visible rubric text and selected styling."""
-        if text != self._option_text:
-            self.label.update(text)
-            self._option_text = text
-        if selected == self._selected:
-            return
-        self._selected = selected
+        self.marker.update(">" if selected else "")
+        self.index_label.update(f"{index + 1}.")
+        self.option_label.update(label)
+        self.points_label.update(f"{points_delta:+.1f}")
         self.set_class(selected, "rubric-selected")
 
 
@@ -81,7 +102,6 @@ class _RubricEditRow(Horizontal):
         if self.row_kind == "correct":
             self.index_label.update("")
             self.label_input.disabled = True
-            self.delta_input.disabled = True
             self.delete_button.disabled = True
             self.delete_button.display = False
             return
@@ -94,11 +114,21 @@ class _RubricEditRow(Horizontal):
     def option(self) -> RubricOptionSeed:
         """Return this editor row as a provider-ready rubric option."""
         label = self.label_input.value.strip()
+        kind = "partial"
+        selection_mode = "checklist"
         if self.row_kind == "partial":
             label = f"Partially Correct - {_partial_subitem_label(label)}"
+        elif self.row_kind == "correct":
+            kind = "correct"
+            selection_mode = "exclusive"
+        elif self.row_kind == "incorrect":
+            kind = "incorrect"
+            selection_mode = "exclusive"
         return RubricOptionSeed(
             label=label,
             points_delta=float(self.delta_input.value.strip()),
+            kind=kind,
+            selection_mode=selection_mode,
         )
 
 
@@ -209,6 +239,7 @@ class GradeScreen(Vertical):
         self._sidebar_resize_scheduled = False
         self._rubric_edit_callback = None
         self._rubric_edit_mode = False
+        self._rubric_edit_points = 0.0
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -338,6 +369,7 @@ class GradeScreen(Vertical):
         _ = app
         self._rubric_edit_callback = callback
         self._rubric_edit_mode = True
+        self._rubric_edit_points = question.points
         self._clear_rubric_editor_rows()
         correct_rows = self.query_one("#rubric-editor-correct", Vertical)
         partial_rows = self.query_one("#rubric-editor-subitems", Vertical)
@@ -350,6 +382,8 @@ class GradeScreen(Vertical):
             seed = RubricOptionSeed(
                 label=option.label,
                 points_delta=option.points_delta,
+                kind=option.kind,
+                selection_mode=option.selection_mode,
             )
             if option.label == "Correct":
                 correct_option = seed
@@ -361,7 +395,8 @@ class GradeScreen(Vertical):
         correct_rows.mount(
             _RubricEditRow(
                 0,
-                correct_option or RubricOptionSeed("Correct", 0.0),
+                correct_option
+                or RubricOptionSeed("Correct", 0.0, "correct", "exclusive"),
                 row_kind="correct",
             )
         )
@@ -376,7 +411,13 @@ class GradeScreen(Vertical):
         incorrect_rows.mount(
             _RubricEditRow(
                 0,
-                incorrect_option or RubricOptionSeed("Incorrect", -question.points),
+                incorrect_option
+                or RubricOptionSeed(
+                    "Incorrect",
+                    -question.points,
+                    "incorrect",
+                    "exclusive",
+                ),
                 row_kind="incorrect",
             )
         )
@@ -490,22 +531,20 @@ class GradeScreen(Vertical):
             extra_child.remove()
 
         for option_index, option in enumerate(current.rubric_options):
-            selected = current.selected_option_index == option_index
-            marker = "*" if selected else "o"
+            selected = option_index in current.selected_option_indices
             li = rubric_list.children[option_index]
             if not isinstance(li, _RubricListItem):
                 continue
             li.update_option(
-                f"{option_index + 1}. {marker}  {option.label}  ({option.points_delta:+.1f})",
+                option_index,
+                option.label,
+                option.points_delta,
                 selected,
             )
 
         if option_count:
-            rubric_list.index = (
-                current.selected_option_index
-                if current.selected_option_index is not None
-                else 0
-            )
+            selected = sorted(current.selected_option_indices)
+            rubric_list.index = selected[0] if selected else 0
 
     def _focus_rubric_list(self) -> None:
         """Return keyboard focus to the rubric list when grading."""
@@ -533,6 +572,7 @@ class GradeScreen(Vertical):
     def _collect_rubric_edit_options(self) -> list[RubricOptionSeed] | str:
         """Validate editor rows and return options or an error message."""
         options: list[RubricOptionSeed] = []
+        partial_rows: list[_RubricEditRow] = []
         for row in self.query(_RubricEditRow):
             label = (
                 _partial_subitem_label(row.label_input.value)
@@ -541,34 +581,113 @@ class GradeScreen(Vertical):
             )
             if not label:
                 return "Rubric labels cannot be blank."
+            if row.row_kind == "partial":
+                partial_rows.append(row)
+                continue
             try:
                 option = row.option()
             except ValueError:
                 return f"{label}: points delta must be a number."
             options.append(option)
 
+        partial_result = self._collect_partial_rubric_options(partial_rows)
+        if isinstance(partial_result, str):
+            return partial_result
+        options[1:1] = partial_result
+
         labels = [option.label for option in options]
         if len(set(labels)) != len(labels):
             return "Rubric labels must be unique."
         correct_options = [option for option in options if option.label == "Correct"]
-        if len(correct_options) != 1 or abs(correct_options[0].points_delta) > 1e-6:
-            return "Correct must be present exactly once with +0 points."
+        if len(correct_options) != 1:
+            return "Correct must be present exactly once."
         if sum(1 for option in options if option.label == "Incorrect") != 1:
             return "Incorrect must be present exactly once."
         if not [
             option for option in options if option.label not in {"Correct", "Incorrect"}
         ]:
             return "At least one partial-credit option is required."
-        non_correct_deltas = [
-            option.points_delta
-            for option in options
-            if option.label != "Correct"
-        ]
-        if any(delta < 0 for delta in non_correct_deltas) and any(
-            delta > 0 for delta in non_correct_deltas
-        ):
+        try:
+            mode = rubric_scoring_mode(option.points_delta for option in options)
+        except ValueError:
             return "Use either positive awards or negative deductions, not both."
+        correct_delta = correct_options[0].points_delta
+        incorrect_options = [option for option in options if option.label == "Incorrect"]
+        incorrect_delta = incorrect_options[0].points_delta
+        if mode == "positive_awards":
+            if abs(correct_delta - self._rubric_edit_points) > 1e-6:
+                return f"Correct must award +{self._rubric_edit_points:g} points."
+            if abs(incorrect_delta) > 1e-6:
+                return "Incorrect must award +0 points."
+        elif abs(correct_delta) > 1e-6:
+            return "Correct must use +0 points for deduction rubrics."
+        elif abs(incorrect_delta + self._rubric_edit_points) > 1e-6:
+            return f"Incorrect must deduct -{self._rubric_edit_points:g} points."
+        exact_sum_error = self._validate_partial_exact_sum(options, mode)
+        if exact_sum_error:
+            return exact_sum_error
         return options
+
+    def _collect_partial_rubric_options(
+        self,
+        rows: list[_RubricEditRow],
+    ) -> list[RubricOptionSeed] | str:
+        """Collect partial rows as either one direct shortcut or checklist items."""
+        if not rows:
+            return []
+        if len(rows) == 1 and rows[0].label_input.value.strip() == "Partially Correct":
+            try:
+                points_delta = float(rows[0].delta_input.value.strip())
+            except ValueError:
+                return "Partially Correct: points delta must be a number."
+            return [
+                RubricOptionSeed(
+                    "Partially Correct",
+                    points_delta,
+                    "partial",
+                    "exclusive",
+                )
+            ]
+
+        options: list[RubricOptionSeed] = []
+        for row in rows:
+            try:
+                points_delta = float(row.delta_input.value.strip())
+            except ValueError:
+                label = _partial_subitem_label(row.label_input.value)
+                return f"{label}: points delta must be a number."
+            options.append(
+                RubricOptionSeed(
+                    f"Partially Correct - {_partial_subitem_label(row.label_input.value)}",
+                    points_delta,
+                    "partial",
+                    "checklist",
+                )
+            )
+        return options
+
+    def _validate_partial_exact_sum(
+        self,
+        options: list[RubricOptionSeed],
+        mode: str,
+    ) -> str:
+        """Validate that checklist partial rows cover the whole question value."""
+        checklist_partials = [
+            option
+            for option in options
+            if option.kind == "partial" and option.selection_mode == "checklist"
+        ]
+        if not checklist_partials:
+            return ""
+        total = sum(option.points_delta for option in checklist_partials)
+        target = (
+            self._rubric_edit_points
+            if mode == "positive_awards"
+            else -self._rubric_edit_points
+        )
+        if abs(total - target) <= 1e-6:
+            return ""
+        return f"Checklist partial items must sum to {target:+g} points."
 
     def _save_rubric_edit(self) -> None:
         """Validate and submit rubric editor changes."""
@@ -652,13 +771,36 @@ class GradeScreen(Vertical):
         """Add a new partial-credit subitem row."""
         event.stop()
         rows = self.query_one("#rubric-editor-subitems", Vertical)
+        default_delta = (
+            1.0
+            if self._current_editor_mode() == "positive_awards"
+            else -1.0
+        )
         row = _RubricEditRow(
             len(rows.children),
-            RubricOptionSeed("Partially Correct - New subitem", -1.0),
+            RubricOptionSeed(
+                "Partially Correct - New subitem",
+                default_delta,
+                "partial",
+                "checklist",
+            ),
             row_kind="partial",
         )
         rows.mount(row)
         self.call_next(row.label_input.focus)
+
+    def _current_editor_mode(self) -> str:
+        """Return the current rubric editor scoring mode."""
+        options: list[float] = []
+        for row in self.query(_RubricEditRow):
+            try:
+                options.append(float(row.delta_input.value.strip()))
+            except ValueError:
+                continue
+        try:
+            return rubric_scoring_mode(options)
+        except ValueError:
+            return "negative_deductions"
 
     @on(Button.Pressed, "#rubric-edit-save")
     def _on_rubric_save_pressed(self, event: Button.Pressed) -> None:

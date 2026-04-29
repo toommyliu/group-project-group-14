@@ -15,9 +15,10 @@ score: ""
   - Response image: ![q1 response](responses/submission-0001/q1.png)
   - Response text: |
     5
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 10
+  - Rubric: ["Partially Correct - Binary form attempted but value incorrect","Partially Correct - Conversion process mostly incorrect"]
+  - Analysis: q
 
 - q2:
   - Question type: Free Response
@@ -26,8 +27,8 @@ score: ""
   - Response text: |
     now
   - Possible points: 10
-  - Points: 5
-  - Rubric: Partially Correct
+  - Points: 10
+  - Rubric: Correct
   - Analysis: hell oworld
 
 - q3:
@@ -39,7 +40,7 @@ score: ""
   - Possible points: 10
   - Points: 10
   - Rubric: Correct
-  - Analysis: 
+  - Analysis:
 
 - q4:
   - Question type: Free Response

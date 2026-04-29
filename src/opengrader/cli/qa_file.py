@@ -8,7 +8,7 @@ from opengrader.core.pdf.templates import (
     CMU_REGULAR_FILE,
     generate_template_pdf,
 )
-from opengrader.core.pdf.templates.qa_file import (
+from opengrader.core.qa_file import (
     load_qa_markdown,
     render_qa_markdown,
     qa_to_template_questions,
