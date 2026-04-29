@@ -1,6 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from opengrader.tui.controllers.grade_controller import GradeController
+from opengrader.tui.data import RubricEditResult, RubricOptionSeed
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
@@ -19,12 +20,40 @@ class PersistentFakeDataProvider(FakeDataProvider):
         self.saved_analyses.append(kwargs)
 
 
+class RubricPersistentFakeDataProvider(FakeDataProvider):
+    def __init__(self) -> None:
+        self.saved_rubrics: list[dict[str, object]] = []
+        self.rubric_options = [
+            RubricOptionSeed(label="Correct", points_delta=0.0),
+            RubricOptionSeed(label="Incorrect", points_delta=-10.0),
+        ]
+        self.raise_on_save: Exception | None = None
+
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        seeds = super().build_question_seeds(**kwargs)
+        return [
+            replace(seed, rubric_options=list(self.rubric_options))
+            for seed in seeds
+        ]
+
+    def save_rubric_options(self, **kwargs: object) -> RubricEditResult:
+        if self.raise_on_save is not None:
+            raise self.raise_on_save
+        self.saved_rubrics.append(kwargs)
+        options = kwargs["options"]
+        assert isinstance(options, list)
+        self.rubric_options = list(options)
+        return RubricEditResult(propagated_count=3)
+
+
 @dataclass
 class FakeGradeScreen:
     status: str = ""
     bound_student_name: str = ""
     bound_labels: list[str] | None = None
     progress: str = ""
+    presented_question_id: str | None = None
+    rubric_callback: object | None = None
 
     def bind_run(self, run, breadcrumb_labels: list[str]) -> None:
         self.bound_student_name = run.student_name
@@ -35,6 +64,11 @@ class FakeGradeScreen:
 
     def set_progress(self, text: str) -> None:
         self.progress = text
+
+    def present_rubric_editor(self, app, question, callback) -> None:  # noqa: ANN001
+        _ = app
+        self.presented_question_id = question.question_id
+        self.rubric_callback = callback
 
 
 @dataclass
@@ -273,3 +307,112 @@ def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
             "analysis": "Needs clearer work.",
         }
     ]
+
+
+def test_open_rubric_editor_presents_modal_when_provider_supports_it() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = RubricPersistentFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+
+    controller.open_rubric_editor()
+
+    assert app.grade_screen.presented_question_id == "Q1"
+    assert app.grade_screen.rubric_callback is not None
+
+
+def test_open_rubric_editor_reports_unsupported_provider() -> None:
+    app, state, controller = build_controller()
+    state.current_page = PAGE_GRADE
+
+    controller.open_rubric_editor()
+
+    assert app.grade_screen.status == (
+        "Rubric editing is not supported by this data provider."
+    )
+
+
+def test_rubric_editor_save_calls_provider_and_reloads_active_student() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = RubricPersistentFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+    original_options = [
+        RubricOptionSeed(option.label, option.points_delta)
+        for option in state.grading_run.current_question.rubric_options
+    ]
+    new_options = [
+        RubricOptionSeed("Correct", 0.0),
+        RubricOptionSeed("Partially Correct", -4.0),
+        RubricOptionSeed("Incorrect", -10.0),
+    ]
+
+    controller.on_rubric_options_saved(
+        new_options,
+        original_options=original_options,
+    )
+
+    assert provider.saved_rubrics == [
+        {
+            "student_item_id": "s1",
+            "question_id": "Q1",
+            "options": new_options,
+            "original_options": original_options,
+        }
+    ]
+    current = state.grading_run.current_question
+    assert current is not None
+    assert [option.label for option in current.rubric_options] == [
+        "Correct",
+        "Partially Correct",
+        "Incorrect",
+    ]
+    assert app.grade_screen.status == "Rubric saved. Updated 3 matching grades."
+
+
+def test_rubric_editor_save_reports_provider_errors() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = RubricPersistentFakeDataProvider()
+    provider.raise_on_save = ValueError("Cannot delete rubric option used by 1.")
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+    current = state.grading_run.current_question
+    assert current is not None
+    original_options = [
+        RubricOptionSeed(option.label, option.points_delta)
+        for option in current.rubric_options
+    ]
+
+    controller.on_rubric_options_saved(
+        [
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -4.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+        original_options=original_options,
+    )
+
+    assert app.grade_screen.status == (
+        "Could not save rubric: Cannot delete rubric option used by 1."
+    )

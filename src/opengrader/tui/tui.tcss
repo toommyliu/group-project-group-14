@@ -158,6 +158,77 @@ $foreground: #E4E4E4EB;
     width: 100%;
 }
 
+#rubric-editor-panel {
+    width: 100%;
+    height: auto;
+}
+
+#rubric-editor-status {
+    width: 100%;
+    height: auto;
+    color: $text-muted;
+    margin-bottom: 0;
+}
+
+#rubric-editor-correct,
+#rubric-editor-subitems,
+#rubric-editor-incorrect {
+    width: 100%;
+    height: auto;
+}
+
+.rubric-edit-section-title {
+    width: 100%;
+    height: auto;
+    color: $text-muted;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.rubric-edit-row {
+    width: 100%;
+    height: 1;
+    margin-bottom: 0;
+    align-vertical: middle;
+}
+
+.rubric-edit-index {
+    width: 3;
+    color: $text-muted;
+}
+
+.rubric-edit-label {
+    width: 1fr;
+    height: 1;
+    min-height: 1;
+}
+
+.rubric-edit-delta {
+    width: 6;
+    height: 1;
+    min-height: 1;
+    margin-left: 1;
+}
+
+.rubric-edit-delete {
+    width: 3;
+    height: 1;
+    margin-left: 1;
+}
+
+#rubric-subitem-actions,
+#rubric-editor-actions {
+    width: 100%;
+    height: auto;
+    margin-top: 0;
+}
+
+#rubric-subitem-actions Button,
+#rubric-editor-actions Button {
+    margin-right: 1;
+    height: 1;
+}
+
 #question-comment {
     width: 100%;
     margin-top: 1;

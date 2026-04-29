@@ -1,12 +1,30 @@
 import asyncio
 
-from textual.widgets import ContentSwitcher, ListView, Static
+from textual.widgets import Button, ContentSwitcher, Input, ListView, Static
 
 from opengrader.tui.controllers.input_controller import InputCommand
+from opengrader.tui.data import RubricEditResult, RubricOptionSeed
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.tui import TuiApp
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
+
+
+class RubricEditingFakeDataProvider(FakeDataProvider):
+    def __init__(self) -> None:
+        self.saved_options: list[RubricOptionSeed] | None = None
+
+    def save_rubric_options(
+        self,
+        *,
+        student_item_id: str,
+        question_id: str,
+        options: list[RubricOptionSeed],
+        original_options: list[RubricOptionSeed],
+    ) -> RubricEditResult:
+        _ = (student_item_id, question_id, original_options)
+        self.saved_options = list(options)
+        return RubricEditResult(propagated_count=0)
 
 
 def _list_item_texts(list_view: ListView) -> list[str]:
@@ -161,6 +179,139 @@ def test_happy_path_selects_qa_then_opens_grading() -> None:
 
             rubric_list = app.get_grade_screen().query_one("#rubric-list", ListView)
             assert len(rubric_list.children) == 2
+
+    asyncio.run(run())
+
+
+def test_grade_screen_focuses_rubric_and_number_keys_select_items() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            rubric_list = app.get_grade_screen().query_one("#rubric-list", ListView)
+            assert app.focused == rubric_list
+
+            await pilot.press("2")
+            await pilot.pause()
+
+            current = app.workflow_state.grading_run.current_question
+            assert current is not None
+            assert current.selected_option_index == 1
+
+    asyncio.run(run())
+
+
+def test_grade_rubric_editor_is_inline_and_structured() -> None:
+    async def run() -> None:
+        provider = RubricEditingFakeDataProvider()
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=provider,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            assert grade_screen.query_one("#rubric-list", ListView).display is False
+            assert grade_screen.query_one("#rubric-editor-panel").display is True
+            label_inputs = [
+                widget
+                for widget in grade_screen.query(".rubric-edit-label")
+                if isinstance(widget, Input)
+            ]
+            delta_inputs = [
+                widget
+                for widget in grade_screen.query(".rubric-edit-delta")
+                if isinstance(widget, Input)
+            ]
+            assert [input.value for input in label_inputs] == [
+                "Correct",
+                "Incorrect",
+            ]
+            assert [input.value for input in delta_inputs] == ["+0", "-10"]
+
+    asyncio.run(run())
+
+
+def test_grade_rubric_editor_exposes_partial_credit_subitems() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            subitems = grade_screen.query_one("#rubric-editor-subitems")
+            labels = [
+                widget.value
+                for widget in subitems.query(".rubric-edit-label")
+                if isinstance(widget, Input)
+            ]
+            deltas = [
+                widget.value
+                for widget in subitems.query(".rubric-edit-delta")
+                if isinstance(widget, Input)
+            ]
+
+            assert labels == [
+                "Binary form attempted but value incorrect",
+                "Conversion process mostly incorrect",
+            ]
+            assert deltas == ["-3", "-7"]
+
+    asyncio.run(run())
+
+
+def test_grade_rubric_editor_rejects_mixed_positive_and_negative_scoring() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            subitems = grade_screen.query_one("#rubric-editor-subitems")
+            first_delta = next(
+                widget
+                for widget in subitems.query(".rubric-edit-delta")
+                if isinstance(widget, Input)
+            )
+            first_delta.value = "+2"
+            grade_screen.query_one("#rubric-edit-save", Button).press()
+            await pilot.pause()
+
+            status = grade_screen.query_one("#rubric-editor-status", Static)
+            assert "positive awards" in str(status.content)
 
     asyncio.run(run())
 

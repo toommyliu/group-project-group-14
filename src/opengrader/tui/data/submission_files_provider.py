@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from opengrader.core.pdf.templates.qa_file import (
+    QARubricFlatOption,
     QAQuestion,
     QARubricItem,
     QASubquestion,
+    flatten_rubric_options,
     load_qa_markdown,
+    replace_qa_rubric_options,
+    save_qa_markdown,
 )
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
@@ -17,7 +22,13 @@ from opengrader.core.submissions import (
     load_student_submission_markdown,
     update_student_submission_file,
 )
-from opengrader.tui.data.models import QuestionSeed, RubricOptionSeed, StudentSummary
+from opengrader.tui.data.models import (
+    QuestionSeed,
+    RubricEditResult,
+    RubricOptionSeed,
+    RubricOptionUpdate,
+    StudentSummary,
+)
 
 
 _VERSION_MARKER_RE = re.compile(r"\[([A-Za-z0-9]+)\]|\(([A-Za-z0-9]+)\)")
@@ -39,6 +50,12 @@ class _LoadedSubmission:
     questions_by_id: dict[str, StudentSubmissionQuestion]
     qa_version: str | None
     question_contexts: list[_QuestionContext]
+
+
+@dataclass(frozen=True)
+class _RubricOptionDelete:
+    label: str
+    points_delta: float
 
 
 class SubmissionFilesProvider:
@@ -162,6 +179,60 @@ class SubmissionFilesProvider:
         )
         self._reload_submission(student_item_id)
 
+    def save_rubric_options(
+        self,
+        *,
+        student_item_id: str,
+        question_id: str,
+        options: list[RubricOptionSeed],
+        original_options: list[RubricOptionSeed],
+    ) -> RubricEditResult:
+        submission = self._submission_for_student_item(student_item_id)
+        context = self._question_context_for_submission(submission, question_id)
+        changes, deleted_options = self._rubric_option_diff(
+            original_options,
+            options,
+        )
+
+        blocked_count = self._matching_saved_grade_count(
+            qa_version=submission.qa_version,
+            question_id=question_id,
+            context=context,
+            options=deleted_options,
+        )
+        if blocked_count:
+            raise ValueError(
+                "Cannot delete rubric option used by "
+                f"{blocked_count} saved grade{'s' if blocked_count != 1 else ''}."
+            )
+
+        replace_qa_rubric_options(
+            self._qa_doc,
+            question_id,
+            [
+                QARubricFlatOption(
+                    label=option.label,
+                    points_delta=option.points_delta,
+                )
+                for option in options
+            ],
+            version=submission.qa_version,
+        )
+        save_qa_markdown(self._qa_doc, self._qa_path)
+
+        propagated_count = 0
+        for change in changes:
+            propagated_count += self._propagate_rubric_option_change(
+                qa_version=submission.qa_version,
+                question_id=question_id,
+                context=context,
+                change=change,
+            )
+
+        self._qa_doc = load_qa_markdown(self._qa_path)
+        self._submissions = self._load_submissions(self._submissions_path)
+        return RubricEditResult(propagated_count=propagated_count)
+
     @staticmethod
     def _submission_paths(path: Path) -> list[Path]:
         if path.is_file():
@@ -200,6 +271,16 @@ class SubmissionFilesProvider:
         existing = self._submission_for_student_item(student_item_id)
         index = self._submissions.index(existing)
         self._submissions[index] = self._load_submission(existing.path)
+
+    def _question_context_for_submission(
+        self,
+        submission: _LoadedSubmission,
+        question_id: str,
+    ) -> _QuestionContext:
+        for context in submission.question_contexts:
+            if context.question_id == question_id:
+                return context
+        raise ValueError(f"question not found in submission QA context: {question_id}")
 
     def _questions_for_submission(
         self,
@@ -345,13 +426,163 @@ class SubmissionFilesProvider:
         return self._default_image_path
 
     def _rubric_options(self, context: _QuestionContext) -> list[RubricOptionSeed]:
-        options = self._rubric_leaf_options(context.rubric)
+        options = [
+            RubricOptionSeed(
+                label=option.label,
+                points_delta=option.points_delta,
+            )
+            for option in flatten_rubric_options(context.rubric)
+        ]
         if options:
             return options
         return [
             RubricOptionSeed(label="Correct", points_delta=0.0),
             RubricOptionSeed(label="Incorrect", points_delta=-context.points),
         ]
+
+    @staticmethod
+    def _rubric_option_diff(
+        original_options: list[RubricOptionSeed],
+        options: list[RubricOptionSeed],
+    ) -> tuple[list[RubricOptionUpdate], list[_RubricOptionDelete]]:
+        original_keys = [
+            (option.label, option.points_delta) for option in original_options
+        ]
+        new_keys = [(option.label, option.points_delta) for option in options]
+        matcher = SequenceMatcher(
+            a=original_keys,
+            b=new_keys,
+            autojunk=False,
+        )
+        changes: list[RubricOptionUpdate] = []
+        deleted_options: list[_RubricOptionDelete] = []
+
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            if tag == "delete":
+                deleted_options.extend(
+                    _RubricOptionDelete(
+                        label=option.label,
+                        points_delta=option.points_delta,
+                    )
+                    for option in original_options[i1:i2]
+                )
+                continue
+            if tag == "insert":
+                continue
+
+            original_segment = original_options[i1:i2]
+            new_segment = options[j1:j2]
+            if len(original_segment) != len(new_segment):
+                deleted_options.extend(
+                    _RubricOptionDelete(
+                        label=option.label,
+                        points_delta=option.points_delta,
+                    )
+                    for option in original_segment
+                )
+                continue
+
+            for original, new in zip(original_segment, new_segment, strict=True):
+                if (
+                    original.label == new.label
+                    and abs(original.points_delta - new.points_delta) <= 1e-6
+                ):
+                    continue
+                changes.append(
+                    RubricOptionUpdate(
+                        old_label=original.label,
+                        old_points_delta=original.points_delta,
+                        new_label=new.label,
+                        new_points_delta=new.points_delta,
+                    )
+                )
+        return changes, deleted_options
+
+    def _matching_saved_grade_count(
+        self,
+        *,
+        qa_version: str | None,
+        question_id: str,
+        context: _QuestionContext,
+        options: list[_RubricOptionDelete],
+    ) -> int:
+        count = 0
+        for option in options:
+            old_points = self._awarded_points_for_delta(
+                context.points,
+                option.points_delta,
+            )
+            for submission in self._submissions:
+                if submission.qa_version != qa_version:
+                    continue
+                response = submission.questions_by_id.get(question_id)
+                if response is None:
+                    continue
+                if self._saved_grade_matches(response, option.label, old_points):
+                    count += 1
+        return count
+
+    def _propagate_rubric_option_change(
+        self,
+        *,
+        qa_version: str | None,
+        question_id: str,
+        context: _QuestionContext,
+        change: RubricOptionUpdate,
+    ) -> int:
+        old_points = self._awarded_points_for_delta(
+            context.points,
+            change.old_points_delta,
+        )
+        new_points = self._awarded_points_for_delta(
+            context.points,
+            change.new_points_delta,
+        )
+
+        propagated_count = 0
+        for submission in self._submissions:
+            if submission.qa_version != qa_version:
+                continue
+            response = submission.questions_by_id.get(question_id)
+            if response is None:
+                continue
+            if not self._saved_grade_matches(
+                response,
+                change.old_label,
+                old_points,
+            ):
+                continue
+
+            update_student_submission_file(
+                submission.path,
+                StudentSubmissionGradeUpdate(
+                    question_id=question_id,
+                    possible_points=context.points,
+                    points_awarded=new_points,
+                    rubric_label=change.new_label,
+                ),
+            )
+            propagated_count += 1
+        return propagated_count
+
+    @staticmethod
+    def _awarded_points_for_delta(points: float, points_delta: float) -> float:
+        return max(0.0, min(points, points + points_delta))
+
+    @staticmethod
+    def _saved_grade_matches(
+        response: StudentSubmissionQuestion,
+        rubric_label: str,
+        points_awarded: float,
+    ) -> bool:
+        if response.points_awarded is None:
+            return False
+        return (
+            response.rubric_label == rubric_label
+            and abs(response.points_awarded - points_awarded) <= 1e-6
+        )
 
     @classmethod
     def _rubric_leaf_options(

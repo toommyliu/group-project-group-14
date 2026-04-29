@@ -14,6 +14,20 @@ class RubricOptionSeed:
 
 
 @dataclass(frozen=True)
+class RubricOptionUpdate:
+    old_label: str
+    old_points_delta: float
+    new_label: str
+    new_points_delta: float
+
+
+@dataclass(frozen=True)
+class RubricEditResult:
+    propagated_count: int
+    deleted_blocked_count: int = 0
+
+
+@dataclass(frozen=True)
 class QuestionSeed:
     question_id: str
     image_path: str

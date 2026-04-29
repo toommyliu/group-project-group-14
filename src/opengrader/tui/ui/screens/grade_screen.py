@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from textual import events
+from collections.abc import Callable
+
+from textual import events, on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Input, Label, ListItem, ListView, Rule, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Rule, Static
 
-from opengrader.tui.state import StudentGradingRun
+from opengrader.tui.data import RubricOptionSeed
+from opengrader.tui.state import QuestionGrade, StudentGradingRun
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.response_viewer import ResponseViewer
+
+RubricEditorResult = list[RubricOptionSeed] | None
+RubricEditorCallback = Callable[[RubricEditorResult], None]
 
 
 class _RubricListItem(ListItem):
@@ -26,6 +32,69 @@ class _RubricListItem(ListItem):
             return
         self._selected = selected
         self.set_class(selected, "rubric-selected")
+
+
+class _RubricEditRow(Horizontal):
+    def __init__(
+        self,
+        row_index: int,
+        option: RubricOptionSeed,
+        *,
+        row_kind: str,
+    ) -> None:
+        self.row_index = row_index
+        self.row_kind = row_kind
+        self.index_label = Label(f"{row_index + 1}.", classes="rubric-edit-index")
+        self.label_input = Input(
+            value=(
+                _partial_subitem_label(option.label)
+                if row_kind == "partial"
+                else option.label
+            ),
+            classes="rubric-edit-label",
+            compact=True,
+        )
+        self.delta_input = Input(
+            value=_render_points_delta(option.points_delta),
+            classes="rubric-edit-delta",
+            compact=True,
+        )
+        self.delete_button = Button(
+            "x",
+            classes="rubric-edit-delete",
+            compact=True,
+        )
+        super().__init__(
+            self.index_label,
+            self.label_input,
+            self.delta_input,
+            self.delete_button,
+            classes="rubric-edit-row",
+        )
+        self._apply_required_state()
+
+    def _apply_required_state(self) -> None:
+        if self.row_kind == "correct":
+            self.index_label.update("")
+            self.label_input.disabled = True
+            self.delta_input.disabled = True
+            self.delete_button.disabled = True
+            self.delete_button.display = False
+            return
+        if self.row_kind == "incorrect":
+            self.index_label.update("")
+            self.label_input.disabled = True
+            self.delete_button.disabled = True
+            self.delete_button.display = False
+
+    def option(self) -> RubricOptionSeed:
+        label = self.label_input.value.strip()
+        if self.row_kind == "partial":
+            label = f"Partially Correct - {_partial_subitem_label(label)}"
+        return RubricOptionSeed(
+            label=label,
+            points_delta=float(self.delta_input.value.strip()),
+        )
 
 
 class _SidebarResizeHandle(Static):
@@ -110,6 +179,9 @@ class GradeScreen(Vertical):
             self.comment = comment
             super().__init__()
 
+    class RubricEditRequested(Message):
+        pass
+
     class NextStudentRequested(Message):
         pass
 
@@ -129,6 +201,8 @@ class GradeScreen(Vertical):
         self._sidebar_width: int | None = None
         self._pending_sidebar_width: int | None = None
         self._sidebar_resize_scheduled = False
+        self._rubric_edit_callback = None
+        self._rubric_edit_mode = False
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -147,12 +221,46 @@ class GradeScreen(Vertical):
                 yield Rule()
                 yield Label("Rubric", classes="sidebar-section-title")
                 yield ListView(id="rubric-list")
+                with Vertical(id="rubric-editor-panel"):
+                    yield Static("", id="rubric-editor-status")
+                    yield Label("Correct", classes="rubric-edit-section-title")
+                    with Vertical(id="rubric-editor-correct"):
+                        pass
+                    yield Label(
+                        "Partial-credit subitems",
+                        classes="rubric-edit-section-title",
+                    )
+                    with Vertical(id="rubric-editor-subitems"):
+                        pass
+                    with Horizontal(id="rubric-subitem-actions"):
+                        yield Button(
+                            "+ Subitem",
+                            id="rubric-edit-add",
+                            compact=True,
+                        )
+                    yield Label("Incorrect", classes="rubric-edit-section-title")
+                    with Vertical(id="rubric-editor-incorrect"):
+                        pass
+                    with Horizontal(id="rubric-editor-actions"):
+                        yield Button(
+                            "Save",
+                            id="rubric-edit-save",
+                            compact=True,
+                        )
+                        yield Button(
+                            "Cancel",
+                            id="rubric-edit-cancel",
+                            compact=True,
+                        )
                 yield Input(
                     placeholder="Comment for this question...",
                     id="question-comment",
                 )
                 yield Rule()
                 yield Static("", id="db-status")
+
+    def on_mount(self) -> None:
+        self._update_rubric_list_visibility()
 
     def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
         self.query_one("#grade-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
@@ -177,6 +285,7 @@ class GradeScreen(Vertical):
             comment_input = self.query_one("#question-comment", Input)
             if comment_input.value:
                 comment_input.value = ""
+            self.exit_rubric_edit_mode()
             return
 
         viewer = self.query_one("#response-viewer", ResponseViewer)
@@ -186,7 +295,11 @@ class GradeScreen(Vertical):
         )
 
         self._rubric_count = len(current.rubric_options)
-        self._sync_rubric_options(current)
+        if self._rubric_edit_mode:
+            self._update_rubric_list_visibility()
+        else:
+            self._sync_rubric_options(current)
+            self._focus_rubric_list()
 
         comment_input = self.query_one("#question-comment", Input)
         if comment_input.value != current.comment:
@@ -194,6 +307,72 @@ class GradeScreen(Vertical):
 
     def set_progress(self, text: str) -> None:
         self.query_one("#grade-progress", Label).update(text)
+
+    def present_rubric_editor(
+        self,
+        app: object,
+        question: QuestionGrade,
+        callback: RubricEditorCallback,
+    ) -> None:
+        _ = app
+        self._rubric_edit_callback = callback
+        self._rubric_edit_mode = True
+        self._clear_rubric_editor_rows()
+        correct_rows = self.query_one("#rubric-editor-correct", Vertical)
+        partial_rows = self.query_one("#rubric-editor-subitems", Vertical)
+        incorrect_rows = self.query_one("#rubric-editor-incorrect", Vertical)
+
+        correct_option: RubricOptionSeed | None = None
+        incorrect_option: RubricOptionSeed | None = None
+        partial_options: list[RubricOptionSeed] = []
+        for option in question.rubric_options:
+            seed = RubricOptionSeed(
+                label=option.label,
+                points_delta=option.points_delta,
+            )
+            if option.label == "Correct":
+                correct_option = seed
+            elif option.label == "Incorrect":
+                incorrect_option = seed
+            else:
+                partial_options.append(seed)
+
+        correct_rows.mount(
+            _RubricEditRow(
+                0,
+                correct_option or RubricOptionSeed("Correct", 0.0),
+                row_kind="correct",
+            )
+        )
+        for option in partial_options:
+            partial_rows.mount(
+                _RubricEditRow(
+                    len(partial_rows.children),
+                    option,
+                    row_kind="partial",
+                )
+            )
+        incorrect_rows.mount(
+            _RubricEditRow(
+                0,
+                incorrect_option or RubricOptionSeed("Incorrect", -question.points),
+                row_kind="incorrect",
+            )
+        )
+        self.query_one("#rubric-editor-status", Static).update(
+            ""
+        )
+        self._update_rubric_list_visibility()
+        first_editable = self._first_editable_rubric_input()
+        if first_editable is not None:
+            self.call_next(first_editable.focus)
+
+    def exit_rubric_edit_mode(self) -> None:
+        self._rubric_edit_callback = None
+        self._rubric_edit_mode = False
+        self._update_rubric_list_visibility()
+        self._clear_rubric_editor_rows()
+        self._focus_rubric_list()
 
     def resize_sidebar_to_screen_x(self, screen_x: float) -> None:
         self._pending_sidebar_width = None
@@ -275,9 +454,75 @@ class GradeScreen(Vertical):
             if not isinstance(li, _RubricListItem):
                 continue
             li.update_option(
-                f"{marker}  {option.label}  ({option.points_delta:+.1f})",
+                f"{option_index + 1}. {marker}  {option.label}  ({option.points_delta:+.1f})",
                 selected,
             )
+
+        if option_count:
+            rubric_list.index = (
+                current.selected_option_index
+                if current.selected_option_index is not None
+                else 0
+            )
+
+    def _focus_rubric_list(self) -> None:
+        if self._rubric_edit_mode or self._rubric_count == 0:
+            return
+        rubric_list = self.query_one("#rubric-list", ListView)
+        self.call_next(rubric_list.focus)
+
+    def _update_rubric_list_visibility(self) -> None:
+        self.query_one("#rubric-list", ListView).display = not self._rubric_edit_mode
+        self.query_one("#rubric-editor-panel", Vertical).display = (
+            self._rubric_edit_mode
+        )
+
+    def _first_editable_rubric_input(self) -> Input | None:
+        for row in self.query(_RubricEditRow):
+            if not row.label_input.disabled:
+                return row.label_input
+            if not row.delta_input.disabled:
+                return row.delta_input
+        return None
+
+    def _collect_rubric_edit_options(self) -> list[RubricOptionSeed] | str:
+        options: list[RubricOptionSeed] = []
+        for row in self.query(_RubricEditRow):
+            label = (
+                _partial_subitem_label(row.label_input.value)
+                if row.row_kind == "partial"
+                else row.label_input.value.strip()
+            )
+            if not label:
+                return "Rubric labels cannot be blank."
+            try:
+                option = row.option()
+            except ValueError:
+                return f"{label}: points delta must be a number."
+            options.append(option)
+
+        labels = [option.label for option in options]
+        if len(set(labels)) != len(labels):
+            return "Rubric labels must be unique."
+        correct_options = [option for option in options if option.label == "Correct"]
+        if len(correct_options) != 1 or abs(correct_options[0].points_delta) > 1e-6:
+            return "Correct must be present exactly once with +0 points."
+        if sum(1 for option in options if option.label == "Incorrect") != 1:
+            return "Incorrect must be present exactly once."
+        if not [
+            option for option in options if option.label not in {"Correct", "Incorrect"}
+        ]:
+            return "At least one partial-credit option is required."
+        non_correct_deltas = [
+            option.points_delta
+            for option in options
+            if option.label != "Correct"
+        ]
+        if any(delta < 0 for delta in non_correct_deltas) and any(
+            delta > 0 for delta in non_correct_deltas
+        ):
+            return "Use either positive awards or negative deductions, not both."
+        return options
 
     @staticmethod
     def _question_context_text(current) -> str:
@@ -295,6 +540,78 @@ class GradeScreen(Vertical):
     def set_status(self, text: str) -> None:
         self.query_one("#db-status", Static).update(text)
 
+    @on(Button.Pressed, "#rubric-edit-add")
+    def _on_rubric_add_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        rows = self.query_one("#rubric-editor-subitems", Vertical)
+        row = _RubricEditRow(
+            len(rows.children),
+            RubricOptionSeed("Partially Correct - New subitem", -1.0),
+            row_kind="partial",
+        )
+        rows.mount(row)
+        self.call_next(row.label_input.focus)
+
+    @on(Button.Pressed, "#rubric-edit-save")
+    def _on_rubric_save_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        result = self._collect_rubric_edit_options()
+        if isinstance(result, str):
+            self.query_one("#rubric-editor-status", Static).update(result)
+            return
+        callback = self._rubric_edit_callback
+        self.exit_rubric_edit_mode()
+        if callable(callback):
+            callback(result)
+
+    @on(Button.Pressed, "#rubric-edit-cancel")
+    def _on_rubric_cancel_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        callback = self._rubric_edit_callback
+        self.exit_rubric_edit_mode()
+        if callable(callback):
+            callback(None)
+
+    @on(Button.Pressed, ".rubric-edit-delete")
+    def _on_rubric_delete_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        row = event.button.parent
+        if isinstance(row, _RubricEditRow):
+            row.remove()
+            self._renumber_rubric_edit_rows()
+
+    def _renumber_rubric_edit_rows(self) -> None:
+        rows = [
+            row
+            for row in self.query(_RubricEditRow)
+            if row.row_kind == "partial"
+        ]
+        for index, row in enumerate(rows):
+            row.row_index = index
+            label = row.query_one(".rubric-edit-index", Label)
+            label.update(f"{index + 1}.")
+
+    def _clear_rubric_editor_rows(self) -> None:
+        for container_id in (
+            "#rubric-editor-correct",
+            "#rubric-editor-subitems",
+            "#rubric-editor-incorrect",
+        ):
+            container = self.query_one(container_id, Vertical)
+            for child in list(container.children):
+                child.remove()
+
+    def on_key(self, event: events.Key) -> None:
+        focused = self.app.focused
+        if isinstance(focused, Input) or self._rubric_edit_mode:
+            return
+        if len(event.key) == 1 and event.key.isdigit() and event.key != "0":
+            option_index = int(event.key) - 1
+            if 0 <= option_index < self._rubric_count:
+                event.stop()
+                event.prevent_default()
+                self.post_message(self.RubricSelected(option_index))
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.index is None:
             return
@@ -311,3 +628,18 @@ class GradeScreen(Vertical):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "question-comment":
             self.post_message(self.CommentUpdated(event.value))
+
+
+def _render_points_delta(points_delta: float) -> str:
+    rendered = f"{points_delta:g}"
+    if not rendered.startswith("-"):
+        rendered = f"+{rendered}"
+    return rendered
+
+
+def _partial_subitem_label(label: str) -> str:
+    stripped = label.strip()
+    prefix = "Partially Correct - "
+    if stripped.startswith(prefix):
+        stripped = stripped[len(prefix) :].strip()
+    return stripped

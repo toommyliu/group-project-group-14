@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from opengrader.tui.data import Provider, QuestionSeed
+from opengrader.tui.data import Provider, QuestionSeed, RubricOptionSeed
 from opengrader.tui.state import (
     PAGE_GRADE,
     PAGE_QA_PICKER,
@@ -142,6 +142,93 @@ class GradeController:
         error = self._persist_current_analysis(comment)
         if error:
             self.refresh_grade_screen(status=error)
+
+    def open_rubric_editor(self) -> None:
+        if not self._on_grade_page():
+            return
+
+        current_question = self._state.grading_run.current_question
+        if current_question is None:
+            self.refresh_grade_screen(status="No question selected.")
+            return
+
+        save_rubric = getattr(self._data_provider, "save_rubric_options", None)
+        if not callable(save_rubric):
+            self.refresh_grade_screen(
+                status="Rubric editing is not supported by this data provider."
+            )
+            return
+
+        original_options = [
+            RubricOptionSeed(
+                label=option.label,
+                points_delta=option.points_delta,
+            )
+            for option in current_question.rubric_options
+        ]
+
+        present_editor = getattr(
+            self._app.get_grade_screen(),
+            "present_rubric_editor",
+            None,
+        )
+        if not callable(present_editor):
+            self.refresh_grade_screen(status="Rubric editor is not available.")
+            return
+
+        present_editor(
+            self._app,
+            current_question,
+            lambda options: self.on_rubric_options_saved(
+                options,
+                original_options=original_options,
+            ),
+        )
+
+    def on_rubric_options_saved(
+        self,
+        options: list[RubricOptionSeed] | None,
+        *,
+        original_options: list[RubricOptionSeed],
+    ) -> None:
+        if options is None:
+            return
+
+        save_rubric = getattr(self._data_provider, "save_rubric_options", None)
+        if not callable(save_rubric):
+            self.refresh_grade_screen(
+                status="Rubric editing is not supported by this data provider."
+            )
+            return
+
+        current_student = self._current_student_item()
+        current_question = self._state.grading_run.current_question
+        if current_student is None or current_question is None:
+            self.refresh_grade_screen(status="No active grade to update.")
+            return
+
+        active_student_index = self._state.active_student_index
+        try:
+            result = save_rubric(
+                student_item_id=current_student.item_id,
+                question_id=current_question.question_id,
+                options=options,
+                original_options=original_options,
+            )
+        except Exception as exc:
+            self.refresh_grade_screen(status=f"Could not save rubric: {exc}")
+            return
+
+        if 0 <= active_student_index < len(self._state.student_items):
+            self.open_student_by_index(active_student_index)
+
+        self.refresh_grade_screen(
+            status=(
+                "Rubric saved. Updated "
+                f"{result.propagated_count} matching "
+                f"grade{'s' if result.propagated_count != 1 else ''}."
+            )
+        )
 
     def return_to_home(self) -> None:
         self.return_to_qa_picker()

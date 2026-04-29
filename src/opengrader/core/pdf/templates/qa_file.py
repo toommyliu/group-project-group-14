@@ -43,6 +43,12 @@ class QARubricItem:
     subitems: list["QARubricItem"] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class QARubricFlatOption:
+    label: str
+    points_delta: float
+
+
 @dataclass
 class QAChoice:
     label: str
@@ -1043,6 +1049,172 @@ def _questions_for_version(
         )
 
     return document.version_questions[selected]
+
+
+def find_qa_question(
+    document: QADocument,
+    question_id: str,
+    *,
+    version: str | None = None,
+) -> QAQuestion | QASubquestion:
+    for question in _questions_for_version(document, version):
+        if question.id == question_id:
+            return question
+        for subquestion in question.subquestions:
+            if subquestion.id == question_id:
+                return subquestion
+    raise ValueError(f"question not found in QA file: {question_id}")
+
+
+def flatten_rubric_options(
+    rubric_items: list[QARubricItem],
+) -> list[QARubricFlatOption]:
+    return _flatten_rubric_options(rubric_items)
+
+
+def qa_rubric_options_for_question(
+    document: QADocument,
+    question_id: str,
+    *,
+    version: str | None = None,
+) -> list[QARubricFlatOption]:
+    question = find_qa_question(document, question_id, version=version)
+    return flatten_rubric_options(question.rubric)
+
+
+def replace_qa_rubric_options(
+    document: QADocument,
+    question_id: str,
+    options: list[QARubricFlatOption],
+    *,
+    version: str | None = None,
+) -> None:
+    question = find_qa_question(document, question_id, version=version)
+    question.rubric = _rubric_from_flat_options(options, points=question.points)
+
+
+def _flatten_rubric_options(
+    items: list[QARubricItem],
+    *,
+    parent_labels: tuple[str, ...] = (),
+) -> list[QARubricFlatOption]:
+    options: list[QARubricFlatOption] = []
+    for item in items:
+        if parent_labels == ("Partially Correct",) and item.label == "Partially Correct":
+            labels = parent_labels
+        else:
+            labels = (*parent_labels, item.label)
+        if item.subitems:
+            options.extend(
+                _flatten_rubric_options(
+                    item.subitems,
+                    parent_labels=labels,
+                )
+            )
+            continue
+
+        if item.points_delta is None:
+            continue
+        options.append(
+            QARubricFlatOption(
+                label=" - ".join(labels),
+                points_delta=item.points_delta,
+            )
+        )
+    return options
+
+
+def _rubric_from_flat_options(
+    options: list[QARubricFlatOption],
+    *,
+    points: int,
+) -> list[QARubricItem]:
+    if not options:
+        raise ValueError("rubric must include at least one option")
+
+    labels = [option.label.strip() for option in options]
+    if any(not label for label in labels):
+        raise ValueError("rubric option labels cannot be blank")
+    if len(set(labels)) != len(labels):
+        raise ValueError("rubric option labels must be unique")
+
+    correct_options = [
+        option for option in options if option.label.strip() == "Correct"
+    ]
+    if len(correct_options) != 1:
+        raise ValueError("rubric must contain exactly one Correct option")
+    if abs(correct_options[0].points_delta) > 1e-6:
+        raise ValueError("Correct rubric option must have +0 points")
+
+    incorrect_options = [
+        option for option in options if option.label.strip() == "Incorrect"
+    ]
+    if len(incorrect_options) != 1:
+        raise ValueError("rubric must contain exactly one Incorrect option")
+
+    partial_options = [
+        option
+        for option in options
+        if option.label.strip() not in {"Correct", "Incorrect"}
+    ]
+    if not partial_options:
+        raise ValueError("rubric must include at least one partial-credit option")
+    non_correct_deltas = [
+        option.points_delta for option in (*partial_options, *incorrect_options)
+    ]
+    if any(delta < 0 for delta in non_correct_deltas) and any(
+        delta > 0 for delta in non_correct_deltas
+    ):
+        raise ValueError(
+            "rubric cannot mix positive awards and negative deductions"
+        )
+
+    rubric = [
+        QARubricItem(label="Correct", points_delta=0.0),
+        _partial_rubric_item(partial_options),
+        QARubricItem(
+            label="Incorrect",
+            points_delta=incorrect_options[0].points_delta,
+        ),
+    ]
+    _validate_rubric_points(rubric, points=points, context="updated rubric")
+    return rubric
+
+
+def _partial_rubric_item(
+    partial_options: list[QARubricFlatOption],
+) -> QARubricItem:
+    if len(partial_options) == 1:
+        option = partial_options[0]
+        label = option.label.strip()
+        if _canonical_rubric_category(label) == "Partially Correct":
+            return QARubricItem(
+                label="Partially Correct",
+                points_delta=option.points_delta,
+            )
+
+    subitems: list[QARubricItem] = []
+    for option in partial_options:
+        label = _partial_subitem_label(option.label)
+        subitems.append(
+            QARubricItem(
+                label=label,
+                points_delta=option.points_delta,
+            )
+        )
+    return QARubricItem(label="Partially Correct", subitems=subitems)
+
+
+def _partial_subitem_label(label: str) -> str:
+    stripped = label.strip()
+    prefix = "Partially Correct - "
+    if stripped.startswith(prefix):
+        stripped = stripped[len(prefix) :].strip()
+    if not stripped:
+        raise ValueError("partial-credit rubric option labels cannot be blank")
+    if stripped in {"Correct", "Incorrect"}:
+        raise ValueError(f"{stripped} cannot be used as a partial-credit label")
+    return stripped
 
 
 def qa_to_template_questions(

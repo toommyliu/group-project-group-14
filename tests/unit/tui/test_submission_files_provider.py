@@ -3,7 +3,13 @@ import shutil
 
 import pytest
 
+from opengrader.core.pdf.templates.qa_file import (
+    QARubricFlatOption,
+    flatten_rubric_options,
+    load_qa_markdown,
+)
 from opengrader.core.submissions import load_student_submission_markdown
+from opengrader.tui.data import RubricOptionSeed
 from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 
 from .fakes import DEFAULT_IMAGE_PATH
@@ -14,6 +20,58 @@ def _copy_sample_submissions(tmp_path: Path) -> Path:
     destination = tmp_path / "student-submissions"
     shutil.copytree(source, destination)
     return destination
+
+
+def _write_simple_qa(path: Path) -> None:
+    path.write_text(
+        """---
+title: Quiz
+---
+
+- (10 points) Convert.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+    )
+
+
+def _write_simple_submission(path: Path, *, name: str, version: str = "") -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "---",
+                f'name: "{name}"',
+                'student_id: "1"',
+                'course_code: "CMPE"',
+                'assignment_title: "Quiz"',
+                f'assignment_version: "{version}"',
+                'source_pdf: "student.pdf"',
+                'score: ""',
+                "---",
+                "",
+                "- q1:",
+                "  - Question type: Free Response",
+                "  - Prompt: Convert.",
+                "  - Response image: ",
+                "  - Response text: ",
+                "  - Possible points: ",
+                "  - Points: ",
+                "  - Analysis: ",
+                "",
+            ]
+        )
+    )
+
+
+def _write_simple_submissions(path: Path, *, count: int = 2) -> None:
+    path.mkdir()
+    for index in range(count):
+        _write_simple_submission(
+            path / f"student-{index + 1}.submission.md",
+            name=f"Student {index + 1}",
+        )
 
 
 def test_submission_files_provider_loads_students_and_questions() -> None:
@@ -190,3 +248,345 @@ def test_submission_files_provider_save_question_analysis_preserves_grade(
     assert document.questions[0].points_awarded == 7
     assert document.questions[0].rubric_label == "Partially Correct"
     assert document.questions[0].analysis == "Useful explanation."
+
+
+def test_submission_files_provider_save_rubric_options_updates_qa_and_grades(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    submissions_path = tmp_path / "submissions"
+    _write_simple_qa(qa_path)
+    _write_simple_submissions(submissions_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    for student_item_id in ("s1", "s2"):
+        provider.save_question_grade(
+            student_item_id=student_item_id,
+            question_id="q1",
+            possible_points=10,
+            points_awarded=5,
+            rubric_label="Partially Correct",
+        )
+
+    original_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+    result = provider.save_rubric_options(
+        student_item_id="s1",
+        question_id="q1",
+        original_options=original_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct - Nearly correct", -2.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+
+    assert result.propagated_count == 2
+    qa_doc = load_qa_markdown(qa_path)
+    assert flatten_rubric_options(qa_doc.questions[0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct - Nearly correct", -2.0),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+    for submission_name in ("student-1.submission.md", "student-2.submission.md"):
+        document = load_student_submission_markdown(submissions_path / submission_name)
+        assert document.questions[0].points_awarded == 8
+        assert document.questions[0].rubric_label == (
+            "Partially Correct - Nearly correct"
+        )
+
+
+def test_submission_files_provider_rubric_propagation_requires_label_and_points(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    submissions_path = tmp_path / "submissions"
+    _write_simple_qa(qa_path)
+    _write_simple_submissions(submissions_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=5,
+        rubric_label="Partially Correct",
+    )
+    provider.save_question_grade(
+        student_item_id="s2",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=4,
+        rubric_label="Partially Correct",
+    )
+
+    original_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+    result = provider.save_rubric_options(
+        student_item_id="s1",
+        question_id="q1",
+        original_options=original_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -2.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+
+    first = load_student_submission_markdown(
+        submissions_path / "student-1.submission.md"
+    )
+    second = load_student_submission_markdown(
+        submissions_path / "student-2.submission.md"
+    )
+    assert result.propagated_count == 1
+    assert first.questions[0].points_awarded == 8
+    assert second.questions[0].points_awarded == 4
+
+
+def test_submission_files_provider_rubric_addition_does_not_rewrite_grades(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    submissions_path = tmp_path / "submissions"
+    _write_simple_qa(qa_path)
+    _write_simple_submissions(submissions_path, count=1)
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=5,
+        rubric_label="Partially Correct",
+    )
+
+    original_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+    result = provider.save_rubric_options(
+        student_item_id="s1",
+        question_id="q1",
+        original_options=original_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -5.0),
+            RubricOptionSeed("Partially Correct - Small issue", -2.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+
+    document = load_student_submission_markdown(
+        submissions_path / "student-1.submission.md"
+    )
+    assert result.propagated_count == 0
+    assert document.questions[0].points_awarded == 5
+    assert flatten_rubric_options(load_qa_markdown(qa_path).questions[0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct", -5.0),
+        QARubricFlatOption("Partially Correct - Small issue", -2.0),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+
+
+def test_submission_files_provider_rubric_delete_unused_option_succeeds(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    submissions_path = tmp_path / "submissions"
+    _write_simple_qa(qa_path)
+    _write_simple_submissions(submissions_path, count=1)
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    original_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+    provider.save_rubric_options(
+        student_item_id="s1",
+        question_id="q1",
+        original_options=original_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -5.0),
+            RubricOptionSeed("Partially Correct - Small issue", -2.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+    expanded_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+
+    provider.save_rubric_options(
+        student_item_id="s1",
+        question_id="q1",
+        original_options=expanded_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -5.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+
+    assert flatten_rubric_options(load_qa_markdown(qa_path).questions[0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct", -5.0),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+
+
+def test_submission_files_provider_rubric_delete_used_option_is_blocked(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    submissions_path = tmp_path / "submissions"
+    _write_simple_qa(qa_path)
+    _write_simple_submissions(submissions_path, count=1)
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    original_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+    provider.save_rubric_options(
+        student_item_id="s1",
+        question_id="q1",
+        original_options=original_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -5.0),
+            RubricOptionSeed("Partially Correct - Small issue", -2.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=8,
+        rubric_label="Partially Correct - Small issue",
+    )
+    expanded_options = provider.build_question_seeds(student_item_id="s1")[
+        0
+    ].rubric_options
+
+    with pytest.raises(ValueError, match="Cannot delete rubric option used by 1"):
+        provider.save_rubric_options(
+            student_item_id="s1",
+            question_id="q1",
+            original_options=expanded_options,
+            options=[
+                RubricOptionSeed("Correct", 0.0),
+                RubricOptionSeed("Partially Correct", -5.0),
+                RubricOptionSeed("Incorrect", -10.0),
+            ],
+        )
+
+
+def test_submission_files_provider_rubric_edits_are_version_specific(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    qa_path.write_text(
+        """---
+title: Quiz
+---
+
+## Version A
+
+- (10 points) Convert A.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+
+## Version B
+
+- (10 points) Convert B.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-4)
+    - Incorrect (-10)
+"""
+    )
+    submissions_path = tmp_path / "submissions"
+    submissions_path.mkdir()
+    _write_simple_submission(
+        submissions_path / "student-a.submission.md",
+        name="Student A",
+        version="A",
+    )
+    _write_simple_submission(
+        submissions_path / "student-b.submission.md",
+        name="Student B",
+        version="B",
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=5,
+        rubric_label="Partially Correct",
+    )
+    provider.save_question_grade(
+        student_item_id="s2",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=6,
+        rubric_label="Partially Correct",
+    )
+
+    original_options = provider.build_question_seeds(student_item_id="s2")[
+        0
+    ].rubric_options
+    result = provider.save_rubric_options(
+        student_item_id="s2",
+        question_id="q1",
+        original_options=original_options,
+        options=[
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -2.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ],
+    )
+
+    qa_doc = load_qa_markdown(qa_path)
+    first = load_student_submission_markdown(
+        submissions_path / "student-a.submission.md"
+    )
+    second = load_student_submission_markdown(
+        submissions_path / "student-b.submission.md"
+    )
+    assert result.propagated_count == 1
+    assert flatten_rubric_options(qa_doc.version_questions["A"][0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct", -5.0),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+    assert flatten_rubric_options(qa_doc.version_questions["B"][0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct", -2.0),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+    assert first.questions[0].points_awarded == 5
+    assert second.questions[0].points_awarded == 8

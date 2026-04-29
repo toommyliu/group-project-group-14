@@ -1,9 +1,12 @@
 import pytest
 
 from opengrader.core.pdf.templates.qa_file import (
+    QARubricFlatOption,
+    flatten_rubric_options,
     parse_qa_markdown,
     qa_to_template_questions,
     render_qa_markdown,
+    replace_qa_rubric_options,
 )
 
 
@@ -120,6 +123,162 @@ def test_parse_rubric_items_with_positive_negative_and_partial_credit_notes() ->
         ("Correct", 2.0),
         ("Partially Correct", -3.0),
         ("Incorrect", -8.0),
+    ]
+
+
+def test_flatten_rubric_options_uses_sidebar_labels() -> None:
+    document = parse_qa_markdown(
+        """
+- (10 points) Convert.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct
+      - Binary form attempted but value incorrect (-3)
+      - Conversion process mostly incorrect (-7)
+    - Incorrect (-10)
+"""
+    )
+
+    assert flatten_rubric_options(document.questions[0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption(
+            "Partially Correct - Binary form attempted but value incorrect",
+            -3.0,
+        ),
+        QARubricFlatOption(
+            "Partially Correct - Conversion process mostly incorrect",
+            -7.0,
+        ),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+
+
+def test_replace_qa_rubric_options_updates_nested_partial_items() -> None:
+    document = parse_qa_markdown(
+        """
+- (10 points) Convert.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+    )
+
+    replace_qa_rubric_options(
+        document,
+        "q1",
+        [
+            QARubricFlatOption("Correct", 0.0),
+            QARubricFlatOption("Partially Correct - Minor issue", -2.0),
+            QARubricFlatOption("Partially Correct - Major issue", -8.0),
+            QARubricFlatOption("Incorrect", -10.0),
+        ],
+    )
+
+    rendered = render_qa_markdown(document)
+    reparsed = parse_qa_markdown(rendered)
+    rubric = reparsed.questions[0].rubric
+
+    assert [(item.label, item.points_delta) for item in rubric] == [
+        ("Correct", 0.0),
+        ("Partially Correct", None),
+        ("Incorrect", -10.0),
+    ]
+    assert [(item.label, item.points_delta) for item in rubric[1].subitems] == [
+        ("Minor issue", -2.0),
+        ("Major issue", -8.0),
+    ]
+
+
+def test_replace_qa_rubric_options_rejects_missing_required_categories() -> None:
+    document = parse_qa_markdown(
+        """
+- (10 points) Convert.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+    )
+
+    with pytest.raises(ValueError, match="Incorrect"):
+        replace_qa_rubric_options(
+            document,
+            "q1",
+            [
+                QARubricFlatOption("Correct", 0.0),
+                QARubricFlatOption("Partially Correct", -5.0),
+            ],
+        )
+
+
+def test_replace_qa_rubric_options_rejects_mixed_awards_and_deductions() -> None:
+    document = parse_qa_markdown(
+        """
+- (10 points) Convert.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+    )
+
+    with pytest.raises(ValueError, match="cannot mix positive awards"):
+        replace_qa_rubric_options(
+            document,
+            "q1",
+            [
+                QARubricFlatOption("Correct", 0.0),
+                QARubricFlatOption("Partially Correct - No", 2.0),
+                QARubricFlatOption("Incorrect", -10.0),
+            ],
+        )
+
+
+def test_replace_qa_rubric_options_updates_only_selected_version() -> None:
+    document = parse_qa_markdown(
+        """---
+title: Quiz
+---
+
+## Version A
+
+- (10 points) Convert A.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+
+## Version B
+
+- (10 points) Convert B.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-4)
+    - Incorrect (-10)
+"""
+    )
+
+    replace_qa_rubric_options(
+        document,
+        "q1",
+        [
+            QARubricFlatOption("Correct", 0.0),
+            QARubricFlatOption("Partially Correct", -2.0),
+            QARubricFlatOption("Incorrect", -10.0),
+        ],
+        version="B",
+    )
+
+    assert flatten_rubric_options(document.version_questions["A"][0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct", -5.0),
+        QARubricFlatOption("Incorrect", -10.0),
+    ]
+    assert flatten_rubric_options(document.version_questions["B"][0].rubric) == [
+        QARubricFlatOption("Correct", 0.0),
+        QARubricFlatOption("Partially Correct", -2.0),
+        QARubricFlatOption("Incorrect", -10.0),
     ]
 
 
