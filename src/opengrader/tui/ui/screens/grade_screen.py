@@ -13,6 +13,7 @@ from opengrader.tui.data import RubricOptionSeed
 from opengrader.tui.state import QuestionGrade, StudentGradingRun
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.response_viewer import ResponseViewer
+from opengrader.tui.ui.widgets.shortcut_input import ShortcutInput
 
 RubricEditorResult = list[RubricOptionSeed] | None
 RubricEditorCallback = Callable[[RubricEditorResult], None]
@@ -47,7 +48,7 @@ class _RubricEditRow(Horizontal):
         self.row_index = row_index
         self.row_kind = row_kind
         self.index_label = Label(f"{row_index + 1}.", classes="rubric-edit-index")
-        self.label_input = Input(
+        self.label_input = ShortcutInput(
             value=(
                 _partial_subitem_label(option.label)
                 if row_kind == "partial"
@@ -56,7 +57,7 @@ class _RubricEditRow(Horizontal):
             classes="rubric-edit-label",
             compact=True,
         )
-        self.delta_input = Input(
+        self.delta_input = ShortcutInput(
             value=_render_points_delta(option.points_delta),
             classes="rubric-edit-delta",
             compact=True,
@@ -257,7 +258,7 @@ class GradeScreen(Vertical):
                             id="rubric-edit-cancel",
                             compact=True,
                         )
-                yield Input(
+                yield ShortcutInput(
                     placeholder="Comment for this question...",
                     id="question-comment",
                 )
@@ -705,6 +706,7 @@ class GradeScreen(Vertical):
 
     def on_key(self, event: events.Key) -> None:
         if self._rubric_edit_mode:
+            focused = self.app.focused
             if event.key in ("ctrl+s", "super+s", "cmd+s"):
                 self._save_rubric_edit()
                 event.prevent_default()
@@ -720,6 +722,8 @@ class GradeScreen(Vertical):
             elif event.key in ("enter", "space"):
                 if self._press_focused_rubric_button():
                     event.prevent_default()
+            elif isinstance(focused, Input):
+                return
             event.stop()
             return
 

@@ -13,6 +13,8 @@ from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import Input, Label, Static
 
+from opengrader.tui.ui.widgets.shortcut_input import ShortcutInput
+
 FieldValidator = Callable[[str], str | None]
 DialogValidator = Callable[[dict[str, str]], str | None]
 DialogResult = dict[str, str] | None
@@ -148,7 +150,7 @@ class Dialog(ModalScreen[DialogResult]):
             for field in self._fields:
                 with Horizontal(classes="dialog-field-row"):
                     yield Label(field.label, classes="dialog-field-label")
-                    yield Input(
+                    yield ShortcutInput(
                         value=field.value,
                         placeholder=field.placeholder,
                         id=self._input_id(field.key),

@@ -25,9 +25,10 @@ score: ""
   - Response image: ![q2 response](responses/submission-0001/q2.png)
   - Response text: |
     now
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 5
+  - Rubric: Partially Correct
+  - Analysis: hell oworld
 
 - q3:
   - Question type: Free Response

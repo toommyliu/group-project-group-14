@@ -342,6 +342,42 @@ def test_grade_comment_shortcut_focuses_comment_and_done_keys_return_to_rubric()
     asyncio.run(run())
 
 
+def test_comment_input_supports_word_shortcuts_without_grade_navigation() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            app.workflow_state.active_student_index = 0
+            comment_input = app.get_grade_screen().query_one("#question-comment", Input)
+            comment_input.value = "alpha beta gamma"
+            comment_input.cursor_position = len(comment_input.value)
+            comment_input.focus()
+            await pilot.pause()
+
+            await pilot.press("alt+b")
+            await pilot.pause()
+
+            assert comment_input.cursor_position == 11
+            assert app.workflow_state.active_student_index == 0
+            assert app.workflow_state.current_page == PAGE_GRADE
+
+            await pilot.press("alt+f")
+            await pilot.pause()
+
+            assert comment_input.cursor_position == len(comment_input.value)
+            assert app.workflow_state.active_student_index == 0
+            assert app.workflow_state.current_page == PAGE_GRADE
+
+    asyncio.run(run())
+
+
 def test_grade_rubric_editor_is_inline_and_structured() -> None:
     async def run() -> None:
         provider = RubricEditingFakeDataProvider()
@@ -642,6 +678,44 @@ def test_rubric_editor_tab_is_trapped_inside_editor() -> None:
             assert app.focused is not None
             assert editor in app.focused.ancestors
             assert app.focused.id != "question-comment"
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_input_supports_word_shortcuts_inside_focus_trap() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            editor = grade_screen.query_one("#rubric-editor-panel")
+            label_input = next(
+                widget
+                for widget in editor.query(".rubric-edit-label")
+                if isinstance(widget, Input) and not widget.disabled
+            )
+            label_input.value = "alpha beta gamma"
+            label_input.cursor_position = len(label_input.value)
+            label_input.focus()
+            await pilot.pause()
+
+            await pilot.press("alt+b")
+            await pilot.pause()
+
+            assert label_input.cursor_position == 11
+            assert app.focused == label_input
+            assert editor in label_input.ancestors
+            assert app.workflow_state.current_page == PAGE_GRADE
 
     asyncio.run(run())
 
