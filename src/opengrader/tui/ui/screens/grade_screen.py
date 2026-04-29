@@ -172,6 +172,7 @@ class GradeScreen(Vertical):
     SIDEBAR_MIN_WIDTH = 32
     SIDEBAR_MAX_WIDTH = 72
     RESPONSE_MIN_WIDTH = 28
+    SIDEBAR_RESIZE_STEP = 4
 
     class RubricSelected(Message):
         def __init__(self, option_index: int) -> None:
@@ -400,6 +401,9 @@ class GradeScreen(Vertical):
     def queue_sidebar_resize_to_screen_x(self, screen_x: float) -> None:
         self._queue_sidebar_width(self._sidebar_width_from_screen_x(screen_x))
 
+    def adjust_sidebar_width(self, delta: int) -> None:
+        self.set_sidebar_width(self._current_sidebar_width() + delta)
+
     def _sidebar_width_from_screen_x(self, screen_x: float) -> int:
         """Convert a resize-handle x-coordinate into sidebar width."""
         workspace = self.query_one("#grade-workspace", Horizontal)
@@ -419,6 +423,18 @@ class GradeScreen(Vertical):
         sidebar.styles.width = width
         self._sidebar_width = width
         self._refresh_sidebar_layout(sidebar)
+
+    def _current_sidebar_width(self) -> int:
+        """Return the tracked or measured sidebar width."""
+        if self._sidebar_width is not None:
+            return self._sidebar_width
+
+        sidebar = self.query_one("#grade-sidebar", VerticalScroll)
+        measured_width = sidebar.size.width
+        if measured_width > 0:
+            return self._bounded_sidebar_width(measured_width)
+
+        return self._bounded_sidebar_width(self.SIDEBAR_MIN_WIDTH)
 
     def _queue_sidebar_width(self, width: int) -> None:
         """Coalesce sidebar width updates during mouse dragging."""

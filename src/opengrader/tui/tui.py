@@ -183,6 +183,14 @@ class TuiApp(App):
             InputCommand.GRADE_FOCUS_COMMENT,
             lambda: self.get_grade_screen().focus_question_comment(),
         )
+        self.input_controller.register(
+            InputCommand.GRADE_SHRINK_SIDEBAR,
+            self._handle_grade_shrink_sidebar,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_WIDEN_SIDEBAR,
+            self._handle_grade_widen_sidebar,
+        )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
@@ -213,6 +221,14 @@ class TuiApp(App):
 
     def _handle_qa_switch_pane(self) -> None:
         self.get_qa_picker_screen().switch_active_pane()
+
+    def _handle_grade_shrink_sidebar(self) -> None:
+        grade_screen = self.get_grade_screen()
+        grade_screen.adjust_sidebar_width(-grade_screen.SIDEBAR_RESIZE_STEP)
+
+    def _handle_grade_widen_sidebar(self) -> None:
+        grade_screen = self.get_grade_screen()
+        grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
 
     def _input_command_available(self, command: InputCommand | str) -> bool:
         if not self.input_controller.command_available(command):

@@ -26,6 +26,8 @@ class InputCommand(str, Enum):
     GRADE_FINALIZE_STUDENT = "grade_finalize_student"
     GRADE_EDIT_RUBRIC = "grade_edit_rubric"
     GRADE_FOCUS_COMMENT = "grade_focus_comment"
+    GRADE_SHRINK_SIDEBAR = "grade_shrink_sidebar"
+    GRADE_WIDEN_SIDEBAR = "grade_widen_sidebar"
 
 
 class InputContext(str, Enum):
@@ -149,6 +151,20 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         InputCommand.GRADE_FOCUS_COMMENT,
         "Comment",
         (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "[",
+        InputCommand.GRADE_SHRINK_SIDEBAR,
+        "Narrow Sidebar",
+        (InputContext.GRADE,),
+        show=False
+    ),
+    CommandBindingSpec(
+        "]",
+        InputCommand.GRADE_WIDEN_SIDEBAR,
+        "Widen Sidebar",
+        (InputContext.GRADE,),
+        show=False
     ),
     CommandBindingSpec(
         "ctrl+g",

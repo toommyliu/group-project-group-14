@@ -184,6 +184,65 @@ def test_grade_sidebar_width_is_bounded_when_resized() -> None:
     asyncio.run(run())
 
 
+def test_grade_sidebar_can_be_resized_with_bracket_hotkeys() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            sidebar = grade_screen.query_one("#grade-sidebar")
+            baseline_width = grade_screen.SIDEBAR_MIN_WIDTH + 8
+            grade_screen.set_sidebar_width(baseline_width)
+            await pilot.pause()
+
+            await pilot.press("]")
+            await pilot.pause()
+            assert (
+                int(sidebar.styles.width.value)
+                == baseline_width + grade_screen.SIDEBAR_RESIZE_STEP
+            )
+
+            await pilot.press("[")
+            await pilot.pause()
+            assert int(sidebar.styles.width.value) == baseline_width
+
+    asyncio.run(run())
+
+
+def test_grade_sidebar_hotkeys_are_ignored_while_comment_input_is_focused() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            sidebar = grade_screen.query_one("#grade-sidebar")
+            baseline_width = grade_screen.SIDEBAR_MIN_WIDTH + 8
+            grade_screen.set_sidebar_width(baseline_width)
+            grade_screen.query_one("#question-comment", Input).focus()
+            await pilot.pause()
+
+            await pilot.press("]")
+            await pilot.pause()
+
+            assert int(sidebar.styles.width.value) == baseline_width
+
+    asyncio.run(run())
+
+
 def test_happy_path_selects_qa_then_opens_grading() -> None:
     async def run() -> None:
         app = TuiApp(
