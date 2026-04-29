@@ -105,11 +105,6 @@ $foreground: #E4E4E4EB;
     scrollbar-size: 1 1;
 }
 
-#response-viewer Image {
-    width: 100%;
-    height: auto;
-}
-
 #grade-sidebar {
     width: 42%;
     min-width: 32;

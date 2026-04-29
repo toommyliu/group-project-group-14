@@ -6,9 +6,9 @@ from PIL import Image as PILImage
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
-from textual_image.widget import Image
 
 from opengrader.core.pdf.pdf_preview import get_pdf_page_count, pdf_page_to_image
+from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
 _preview_cache: dict[tuple[str, int], PILImage.Image] = {}
 
@@ -19,10 +19,6 @@ class TemplatePreview(VerticalScroll):
         width: 1fr;
         height: 1fr;
         align: center top;
-    }
-    TemplatePreview Image {
-        width: 90%;
-        height: auto;
     }
     """
 
@@ -39,12 +35,12 @@ class TemplatePreview(VerticalScroll):
         self._current_page = 0
         self._total_pages = 0
         self._header: Static | None = None
-        self._image: Image | None = None
+        self._image: SharpImage | None = None
 
     def compose(self) -> ComposeResult:
         self._header = Static("")
         yield self._header
-        self._image = Image(None)
+        self._image = SharpImage(None, fit_width_fraction=0.9)
         yield self._image
 
     def on_mount(self) -> None:
@@ -77,7 +73,7 @@ class TemplatePreview(VerticalScroll):
         if pil_image is None:
             try:
                 pil_image = pdf_page_to_image(
-                    self._pdf_path, page=self._current_page, dpi=96
+                    self._pdf_path, page=self._current_page, dpi=192
                 )
                 _preview_cache[cache_key] = pil_image
             except Exception as exc:

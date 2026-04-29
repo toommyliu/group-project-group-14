@@ -3,13 +3,14 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
-from textual_image.widget import Image
+
+from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
 
 class ResponseViewer(VerticalScroll):
     def __init__(self, image_path: str, *, id: str | None = None) -> None:
         self._image_path = image_path
-        self._image_widget: Image | None = None
+        self._image_widget: SharpImage | None = None
         self._status_widget: Static | None = None
         super().__init__(id=id)
 
@@ -41,7 +42,7 @@ class ResponseViewer(VerticalScroll):
 
         self._remove_status_widget()
         if self._image_widget is None or not self._image_widget.is_attached:
-            self._image_widget = Image(image_path, id="response-viewer-image")
+            self._image_widget = SharpImage(image_path, id="response-viewer-image")
             self.mount(self._image_widget)
             return
 
