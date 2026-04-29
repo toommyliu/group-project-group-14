@@ -38,6 +38,9 @@ class GradeController:
         self._state = state
         self._data_provider = data_provider
         self._refresh_students: Callable[[], None] | None = None
+        self._qa_picker_return_list_id = "qa-list"
+        self._qa_picker_return_question_item_id: str | None = None
+        self._qa_picker_return_student_item_id: str | None = None
 
     def attach_student_refresh(self, callback: Callable[[], None]) -> None:
         self._refresh_students = callback
@@ -80,6 +83,7 @@ class GradeController:
         if index is None:
             self._app.get_qa_picker_screen().set_status("Select a valid QA.")
             return
+        self._remember_qa_picker_return_state()
         self.open_question_by_index(index)
 
     def open_question_by_index(self, index: int) -> None:
@@ -239,7 +243,7 @@ class GradeController:
     def return_to_qa_picker(self) -> None:
         self.refresh_qa_picker(status="")
         self._app.switch_to(PAGE_QA_PICKER)
-        self._app.get_qa_picker_screen().focus_questions()
+        self._focus_qa_picker_after_grade()
 
     def qa_move_up(self) -> None:
         if self._state.current_page != PAGE_QA_PICKER:
@@ -363,7 +367,7 @@ class GradeController:
 
         self.refresh_qa_picker(status="All students finalized for this QA.")
         self._app.switch_to(PAGE_QA_PICKER)
-        self._app.get_qa_picker_screen().focus_questions()
+        self._focus_qa_picker_after_grade()
 
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
@@ -390,7 +394,69 @@ class GradeController:
             or "Assignment",
             student_question_statuses=self._student_question_statuses(),
         )
+        self._restore_qa_picker_question_selection()
+        self._restore_qa_picker_student_selection()
         qa_screen.set_status(status)
+
+    def _restore_qa_picker_question_selection(self) -> None:
+        question_item_id = self._qa_picker_return_question_item_id
+        if question_item_id is not None:
+            saved_index = self._question_index(question_item_id)
+            if saved_index is not None:
+                self._app.get_qa_picker_screen().move_to_index(saved_index)
+                return
+
+        active_index = self._state.active_question_index
+        if 0 <= active_index < len(self._state.grading_run.questions):
+            self._app.get_qa_picker_screen().move_to_index(active_index)
+            return
+
+        question_id = self._state.selection.question_id
+        if question_id is None:
+            return
+
+        fallback_index = self._question_index(question_id)
+        if fallback_index is not None:
+            self._app.get_qa_picker_screen().move_to_index(fallback_index)
+
+    def _restore_qa_picker_student_selection(self) -> None:
+        student_item_id = self._qa_picker_return_student_item_id
+        if student_item_id is not None:
+            saved_index = self._student_index(student_item_id)
+            if saved_index is not None:
+                self._app.get_qa_picker_screen().move_student_to_index(saved_index)
+                return
+
+        selection_item_id = self._state.selection.student_item_id
+        if selection_item_id is None:
+            return
+
+        fallback_index = self._student_index(selection_item_id)
+        if fallback_index is not None:
+            self._app.get_qa_picker_screen().move_student_to_index(fallback_index)
+
+    def _focus_qa_picker_after_grade(self) -> None:
+        qa_screen = self._app.get_qa_picker_screen()
+        if self._qa_picker_return_list_id == "student-list":
+            qa_screen.focus_students()
+            return
+        qa_screen.focus_questions()
+
+    def _remember_qa_picker_return_state(self) -> None:
+        qa_screen = self._app.get_qa_picker_screen()
+        self._qa_picker_return_list_id = (
+            "student-list" if qa_screen.students_have_focus() else "qa-list"
+        )
+
+        question = qa_screen.selected_question()
+        self._qa_picker_return_question_item_id = (
+            question.item_id if question is not None else None
+        )
+
+        student = qa_screen.selected_student()
+        self._qa_picker_return_student_item_id = (
+            student.item_id if student is not None else None
+        )
 
     def _current_student_item(self) -> NavItem | None:
         if self._state.active_student_index < 0:
@@ -534,6 +600,12 @@ class GradeController:
     def _question_index(self, item_id: str) -> int | None:
         for index, question in enumerate(self._state.grading_run.questions):
             if question.question_id == item_id:
+                return index
+        return None
+
+    def _student_index(self, item_id: str) -> int | None:
+        for index, student in enumerate(self._state.student_items):
+            if student.item_id == item_id:
                 return index
         return None
 

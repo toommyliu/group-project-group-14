@@ -92,7 +92,12 @@ class FakeQAPickerScreen:
     bound_questions: list[NavItem] | None = None
     bound_students: list[NavItem] | None = None
     focused: bool = False
+    focused_pane: str | None = None
+    active_pane: str = "questions"
+    question_index: int = 0
+    student_index: int = 0
     moved_to_index: int | None = None
+    moved_student_to_index: int | None = None
 
     def bind_assignment(
         self,
@@ -112,6 +117,13 @@ class FakeQAPickerScreen:
 
     def focus_questions(self) -> None:
         self.focused = True
+        self.focused_pane = "questions"
+        self.active_pane = "questions"
+
+    def focus_students(self) -> None:
+        self.focused = True
+        self.focused_pane = "students"
+        self.active_pane = "students"
 
     def show_question_details(self, item: NavItem) -> None:
         _ = item
@@ -120,12 +132,25 @@ class FakeQAPickerScreen:
         _ = direction
 
     def move_to_index(self, index: int) -> None:
+        self.question_index = index
         self.moved_to_index = index
+
+    def move_student_to_index(self, index: int) -> None:
+        self.student_index = index
+        self.moved_student_to_index = index
 
     def selected_question(self) -> NavItem | None:
         if not self.bound_questions:
             return None
-        return self.bound_questions[0]
+        return self.bound_questions[self.question_index]
+
+    def selected_student(self) -> NavItem | None:
+        if not self.bound_students:
+            return None
+        return self.bound_students[self.student_index]
+
+    def students_have_focus(self) -> bool:
+        return self.active_pane == "students"
 
 
 class FakeApp:
@@ -261,6 +286,7 @@ def test_finalize_last_student_returns_to_qa_picker() -> None:
     assert app.page == PAGE_QA_PICKER
     assert app.qa_screen.status == "All students finalized for this QA."
     assert app.qa_screen.focused is True
+    assert app.qa_screen.focused_pane == "questions"
 
 
 def test_return_to_home_alias_returns_to_qa_picker() -> None:
@@ -271,6 +297,68 @@ def test_return_to_home_alias_returns_to_qa_picker() -> None:
 
     assert app.page == PAGE_QA_PICKER
     assert app.qa_screen.focused is True
+    assert app.qa_screen.focused_pane == "questions"
+
+
+def test_return_to_qa_picker_restores_active_question_selection() -> None:
+    app, state, controller = build_controller()
+    controller.open_question_by_index(1)
+    state.current_page = PAGE_GRADE
+
+    controller.return_to_qa_picker()
+
+    assert app.page == PAGE_QA_PICKER
+    assert app.qa_screen.moved_to_index == 1
+    assert app.qa_screen.focused is True
+    assert app.qa_screen.focused_pane == "questions"
+
+
+def test_return_to_qa_picker_restores_active_student_selection() -> None:
+    app, state, controller = build_controller()
+    controller.open_student_by_index(1)
+    state.current_page = PAGE_GRADE
+
+    controller.return_to_qa_picker()
+
+    assert app.page == PAGE_QA_PICKER
+    assert app.qa_screen.moved_student_to_index == 1
+    assert app.qa_screen.focused is True
+    assert app.qa_screen.focused_pane == "questions"
+
+
+def test_return_to_qa_picker_restores_question_pane_origin() -> None:
+    app, state, controller = build_controller()
+    state.current_page = PAGE_QA_PICKER
+    app.qa_screen.active_pane = "questions"
+    app.qa_screen.move_to_index(1)
+
+    item = app.qa_screen.selected_question()
+    assert item is not None
+    controller.on_qa_selected(item)
+    state.current_page = PAGE_GRADE
+    controller.return_to_qa_picker()
+
+    assert app.qa_screen.moved_to_index == 1
+    assert app.qa_screen.focused_pane == "questions"
+
+
+def test_return_to_qa_picker_restores_student_pane_origin() -> None:
+    app, state, controller = build_controller()
+    state.current_page = PAGE_QA_PICKER
+    app.qa_screen.active_pane = "students"
+    app.qa_screen.move_to_index(1)
+    app.qa_screen.move_student_to_index(1)
+
+    item = app.qa_screen.selected_question()
+    assert item is not None
+    controller.on_qa_selected(item)
+    state.current_page = PAGE_GRADE
+    controller.next_student()
+    controller.return_to_qa_picker()
+
+    assert app.qa_screen.moved_to_index == 1
+    assert app.qa_screen.moved_student_to_index == 1
+    assert app.qa_screen.focused_pane == "students"
 
 
 def test_rubric_selection_persists_grade_when_provider_supports_it() -> None:

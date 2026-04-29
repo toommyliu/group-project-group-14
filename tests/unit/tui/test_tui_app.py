@@ -902,6 +902,90 @@ def test_escape_from_grade_returns_to_qa_picker() -> None:
     asyncio.run(run())
 
 
+def test_returning_from_question_pane_restores_question_focus() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.get_qa_picker_screen().move_to_index(2)
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert app.workflow_state.active_question_index == 2
+            await pilot.press("j")
+            await pilot.pause()
+            assert app.workflow_state.active_student_index == 1
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            qa_list = qa_screen.query_one("#qa-list", ListView)
+            student_list = qa_screen.query_one("#student-list", ListView)
+            preview = qa_screen.query_one("#qa-preview", Static)
+
+            assert qa_list.index == 2
+            assert qa_list.children[0].has_class("-highlight") is False
+            assert qa_list.children[1].has_class("-highlight") is False
+            assert qa_list.children[2].has_class("-highlight") is True
+            assert student_list.index == 0
+            assert qa_list.has_class("-pane-active") is True
+            assert student_list.has_class("-pane-active") is False
+            assert app.focused is qa_list
+            assert "q3" in str(preview.content)
+
+    asyncio.run(run())
+
+
+def test_returning_from_student_pane_restores_student_focus() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.get_qa_picker_screen().move_to_index(2)
+            await pilot.pause()
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("j")
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            student_list = qa_screen.query_one("#student-list", ListView)
+            assert student_list.index == 1
+
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+            qa_list = qa_screen.query_one("#qa-list", ListView)
+            student_list = qa_screen.query_one("#student-list", ListView)
+            preview = qa_screen.query_one("#qa-preview", Static)
+
+            assert qa_list.index == 2
+            assert qa_list.children[2].has_class("-highlight") is True
+            assert student_list.index == 1
+            assert student_list.children[0].has_class("-highlight") is False
+            assert student_list.children[1].has_class("-highlight") is True
+            assert qa_list.has_class("-pane-active") is False
+            assert student_list.has_class("-pane-active") is True
+            assert app.focused is student_list
+            assert "Highlighted QA: q3" in str(preview.content)
+
+    asyncio.run(run())
+
+
 def test_finalize_loads_next_student() -> None:
     async def run() -> None:
         app = TuiApp(
