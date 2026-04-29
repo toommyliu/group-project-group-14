@@ -125,6 +125,19 @@ def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
     assert app.grade_screen.progress == "Progress: 1 / 2 students"
 
 
+def test_open_student_by_index_syncs_submission_context() -> None:
+    _app, state, controller = build_controller()
+
+    controller.open_student_by_index(0)
+
+    assert state.selection.assignment_version == "B"
+    assert state.selection.submission_markdown_path is not None
+    assert state.selection.submission_markdown_path.endswith(
+        "submission-0002.submission.md"
+    )
+    assert state.grading_run.questions[0].answers == ["A1"]
+
+
 def test_next_previous_ungraded_student_skip_graded_for_selected_qa() -> None:
     _app, state, controller = build_controller()
     state.current_page = PAGE_GRADE

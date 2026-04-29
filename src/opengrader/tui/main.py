@@ -12,6 +12,11 @@ _TEXTUAL_ENV_VAR = "TEXTUAL"
 _DEVTOOLS_FEATURE = "devtools"
 _SKIP_BOOTSTRAP_ENV_VAR = "OPENGRADER_SKIP_BOOTSTRAP"
 _ROSTER_PATH = Path(__file__).resolve().parents[3] / "data" / "roster.csv"
+_DEFAULT_ASSIGNMENTS: tuple[tuple[str, str, int], ...] = (
+    ("HW 1", "assignment", 100),
+    ("Quiz 1", "quiz", 100),
+    ("Midterm", "exam", 100),
+)
 
 
 def _enable_textual_feature(feature: str) -> None:
@@ -95,6 +100,7 @@ def _bootstrap_default_workspace(db_path: str | Path) -> None:
             ),
             existing_courses[0],
         )
+        _ensure_default_assignments(services, course_id=default_course.id)
         students = _load_bootstrap_students()
         if students:
             services.enrollments.enroll_students(default_course.id, students)
@@ -107,10 +113,7 @@ def _bootstrap_default_workspace(db_path: str | Path) -> None:
         section="01",
     )
 
-    for title, assignment_type, max_points in [
-        ("HW 1", "assignment", 100),
-        ("Midterm", "exam", 100),
-    ]:
+    for title, assignment_type, max_points in _DEFAULT_ASSIGNMENTS:
         services.assignments.create_assignment(
             course_id=course.id,
             assignment_type=assignment_type,
@@ -121,6 +124,21 @@ def _bootstrap_default_workspace(db_path: str | Path) -> None:
     students = _load_bootstrap_students()
     if students:
         services.enrollments.enroll_students(course.id, students)
+
+
+def _ensure_default_assignments(services, *, course_id: int) -> None:
+    existing_titles = {
+        assignment.title for assignment in services.assignments.list_assignments(course_id)
+    }
+    for title, assignment_type, max_points in _DEFAULT_ASSIGNMENTS:
+        if title in existing_titles:
+            continue
+        services.assignments.create_assignment(
+            course_id=course_id,
+            assignment_type=assignment_type,
+            title=title,
+            max_points=max_points,
+        )
 
 
 def run_app() -> None:

@@ -1,6 +1,6 @@
 ---
-name: "pe ade eee"
-student_id: ""
+name: "Andy"
+student_id: "123"
 course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "B"

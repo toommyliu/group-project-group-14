@@ -8,6 +8,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Label, ListItem, ListView, Static
 
+from opengrader.tui.data.models import StudentSubmissionSummary
 from opengrader.tui.ui.widgets import HomeSidebar, SelectionDetails
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.widgets.tabbed_pane import TabbedPane
@@ -249,9 +250,11 @@ class HomeScreen(Vertical):
         self,
         student: NavItem,
         assignment: NavItem,
+        *,
+        submission: StudentSubmissionSummary | None = None,
     ) -> None:
         details = self.query_one("#home-selection-details", SelectionDetails)
-        details.show_student_submission(student, assignment)
+        details.show_student_submission(student, assignment, submission=submission)
 
     def set_status(self, text: str) -> None:
         self.query_one("#home-status", Static).update(text)

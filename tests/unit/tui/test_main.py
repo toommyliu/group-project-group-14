@@ -39,8 +39,13 @@ class _FakeCoursesService:
 
 
 class _FakeAssignmentsService:
-    def __init__(self) -> None:
+    def __init__(self, existing_assignments: list[object] | None = None) -> None:
         self.created: list[dict[str, object]] = []
+        self._assignments = list(existing_assignments or [])
+
+    def list_assignments(self, course_id: int) -> list[object]:
+        _ = course_id
+        return list(self._assignments)
 
     def create_assignment(
         self,
@@ -57,6 +62,14 @@ class _FakeAssignmentsService:
                 "title": title,
                 "max_points": max_points,
             }
+        )
+        self._assignments.append(
+            SimpleNamespace(
+                course_id=course_id,
+                assignment_type=assignment_type,
+                title=title,
+                max_points=max_points,
+            )
         )
 
 
@@ -84,6 +97,7 @@ def test_bootstrap_default_workspace_seeds_when_database_is_empty() -> None:
     assert len(services.courses.created) == 1
     assert [item["title"] for item in services.assignments.created] == [
         "HW 1",
+        "Quiz 1",
         "Midterm",
     ]
     assert len(services.enrollments.calls) == 1
@@ -115,9 +129,41 @@ def test_bootstrap_default_workspace_syncs_roster_when_courses_exist() -> None:
         _bootstrap_default_workspace(Path("demo.db"))
 
     assert services.courses.created == []
-    assert services.assignments.created == []
+    assert [item["title"] for item in services.assignments.created] == [
+        "HW 1",
+        "Quiz 1",
+        "Midterm",
+    ]
     assert len(services.enrollments.calls) == 1
     assert services.enrollments.calls[0]["course_id"] == 42
+
+
+def test_bootstrap_default_workspace_only_backfills_missing_assignments() -> None:
+    course = SimpleNamespace(
+        id=42,
+        code="CMPE-195",
+        name="Senior Design Project",
+        term="Spring 2026",
+        section="01",
+    )
+    services = SimpleNamespace(
+        courses=_FakeCoursesService(existing_courses=[course]),
+        assignments=_FakeAssignmentsService(
+            existing_assignments=[
+                SimpleNamespace(title="HW 1"),
+                SimpleNamespace(title="Midterm"),
+            ]
+        ),
+        enrollments=_FakeEnrollmentsService(),
+    )
+
+    with patch(
+        "opengrader.tui.main.build_sqlite_course_services",
+        return_value=services,
+    ):
+        _bootstrap_default_workspace(Path("demo.db"))
+
+    assert [item["title"] for item in services.assignments.created] == ["Quiz 1"]
 
 
 def test_run_app_bootstraps_database_before_launch() -> None:

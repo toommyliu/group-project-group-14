@@ -51,6 +51,9 @@ class GradeScreen(Vertical):
                 yield Label("Score: 100.0", id="total-grade-label")
                 yield Label("Progress: 0/0", id="grade-progress")
                 yield Rule()
+                yield Label("Correct Answer", classes="sidebar-section-title")
+                yield Static("", id="correct-answer")
+                yield Rule()
                 yield Label("Rubric", classes="sidebar-section-title")
                 yield ListView(id="rubric-list")
                 yield Input(
@@ -82,11 +85,15 @@ class GradeScreen(Vertical):
             comment_input = self.query_one("#question-comment", Input)
             if comment_input.value:
                 comment_input.value = ""
+            self.query_one("#correct-answer", Static).update("")
             return
 
         viewer = self.query_one("#response-viewer", ResponseViewer)
         viewer.set_image_path(current.image_path)
 
+        self.query_one("#correct-answer", Static).update(
+            self._format_correct_answer(current.answers)
+        )
         self._rubric_count = len(current.rubric_options)
         self._sync_rubric_options(current)
 
@@ -96,6 +103,14 @@ class GradeScreen(Vertical):
 
     def set_progress(self, text: str) -> None:
         self.query_one("#grade-progress", Label).update(text)
+
+    @staticmethod
+    def _format_correct_answer(answers: list[str]) -> str:
+        if not answers:
+            return "No correct answer listed."
+        if len(answers) == 1:
+            return answers[0]
+        return "\n".join(f"- {answer}" for answer in answers)
 
     def _sync_rubric_options(self, current) -> None:
         rubric_list = self.query_one("#rubric-list", ListView)

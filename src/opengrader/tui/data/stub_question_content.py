@@ -16,7 +16,9 @@ class StubQuestionContent:
         self,
         *,
         assignment_title: str | None = None,
+        assignment_version: str | None = None,
     ) -> list[QuestionSeed]:
+        _ = assignment_version
         rubric_options = [
             RubricOptionSeed(label="Correct", points_delta=0.0),
             RubricOptionSeed(label="Partially Correct", points_delta=-4.0),
@@ -29,6 +31,7 @@ class StubQuestionContent:
             output.append(
                 QuestionSeed(
                     question_id=question_id,
+                    prompt=question_id,
                     image_path=image_path,
                     rubric_options=list(rubric_options),
                 )

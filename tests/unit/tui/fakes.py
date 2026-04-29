@@ -7,6 +7,7 @@ from opengrader.tui.data import (
     QuestionSeed,
     RubricOptionSeed,
     StudentSummary,
+    StudentSubmissionSummary,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -36,22 +37,54 @@ class FakeDataProvider:
             StudentSummary(2, "Andy Cortes"),
         ]
 
+    def get_student_submission_summary(
+        self,
+        *,
+        student_id: int | None,
+        student_name: str | None,
+        assignment_id: int | None,
+        assignment_title: str | None,
+    ) -> StudentSubmissionSummary | None:
+        if student_id != 1 or assignment_id != 1:
+            return None
+        _ = student_name
+        return StudentSubmissionSummary(
+            name="pe ade eee",
+            student_id="",
+            course_code="CS146",
+            assignment_title=assignment_title or "Quiz 1",
+            assignment_version="B",
+            source_pdf="submission-0002.pdf",
+            score="",
+            markdown_path="samples/cs146-midterm1/student-submissions/submission-0002.submission.md",
+        )
+
     def build_question_seeds(
         self,
         *,
         assignment_id: int | None = None,
         assignment_title: str | None = None,
+        assignment_version: str | None = None,
+        submission_markdown_path: str | None = None,
     ) -> list[QuestionSeed]:
-        _ = assignment_id
+        _ = (assignment_id, assignment_version, submission_markdown_path)
         rubric_options = [
             RubricOptionSeed(label="Correct", points_delta=0.0),
             RubricOptionSeed(label="Incorrect", points_delta=-10.0),
         ]
         if assignment_title not in (None, "HW 1"):
-            return [QuestionSeed("Q1", DEFAULT_IMAGE_PATH, list(rubric_options))]
+            return [
+                QuestionSeed(
+                    "Q1",
+                    "Q1",
+                    DEFAULT_IMAGE_PATH,
+                    list(rubric_options),
+                    ["answer 1"],
+                )
+            ]
         return [
-            QuestionSeed("Q1", DEFAULT_IMAGE_PATH, list(rubric_options)),
-            QuestionSeed("Q2", DEFAULT_IMAGE_PATH, list(rubric_options)),
+            QuestionSeed("Q1", "Q1", DEFAULT_IMAGE_PATH, list(rubric_options), ["A1"]),
+            QuestionSeed("Q2", "Q2", DEFAULT_IMAGE_PATH, list(rubric_options), ["A2"]),
         ]
 
     def create_course(

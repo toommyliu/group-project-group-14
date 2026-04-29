@@ -8,6 +8,7 @@ from opengrader.tui.data.models import (
     CourseSummary,
     QuestionSeed,
     StudentSummary,
+    StudentSubmissionSummary,
 )
 
 
@@ -18,11 +19,22 @@ class Provider(Protocol):
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]: ...
 
+    def get_student_submission_summary(
+        self,
+        *,
+        student_id: int | None,
+        student_name: str | None,
+        assignment_id: int | None,
+        assignment_title: str | None,
+    ) -> StudentSubmissionSummary | None: ...
+
     def build_question_seeds(
         self,
         *,
         assignment_id: int | None = None,
         assignment_title: str | None = None,
+        assignment_version: str | None = None,
+        submission_markdown_path: str | None = None,
     ) -> list[QuestionSeed]: ...
 
     def create_course(

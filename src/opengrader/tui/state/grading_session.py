@@ -10,8 +10,10 @@ class RubricOption:
 @dataclass
 class QuestionGrade:
     question_id: str
+    prompt: str
     image_path: str
     rubric_options: list[RubricOption]
+    answers: list[str] = field(default_factory=list)
     selected_option_index: int | None = None
     comment: str = ""
 

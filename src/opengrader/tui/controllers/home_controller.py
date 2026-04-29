@@ -178,7 +178,23 @@ class HomeController:
         self._select_assignment(assignment)
 
         home = self._app.get_home_screen()
-        home.show_student_submission_details(student, assignment)
+        submission = self._data_provider.get_student_submission_summary(
+            student_id=self._state.selection.student_id,
+            student_name=student.label,
+            assignment_id=self._state.selection.assignment_id,
+            assignment_title=assignment.label,
+        )
+        self._state.selection.assignment_version = (
+            submission.assignment_version if submission is not None else None
+        )
+        self._state.selection.submission_markdown_path = (
+            submission.markdown_path if submission is not None else None
+        )
+        home.show_student_submission_details(
+            student,
+            assignment,
+            submission=submission,
+        )
 
         students = self._student_items(
             self._data_provider.list_students(self._state.selection.course_id)
@@ -522,6 +538,8 @@ class HomeController:
         self._state.selection_labels["course"] = item.label
         selection.assignment_item_id = None
         selection.assignment_id = None
+        selection.assignment_version = None
+        selection.submission_markdown_path = None
         selection.question_id = None
         selection.student_item_id = None
         selection.student_id = None
@@ -535,6 +553,8 @@ class HomeController:
         selection = self._state.selection
         selection.assignment_item_id = item.item_id
         selection.assignment_id = self._numeric_id(item.item_id)
+        selection.assignment_version = None
+        selection.submission_markdown_path = None
         selection.question_id = None
         self._state.selection_labels["assignment"] = item.label
         self._state.selection_labels["question"] = ""

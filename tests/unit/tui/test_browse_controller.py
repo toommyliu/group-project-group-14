@@ -3,7 +3,11 @@ from pathlib import Path
 from opengrader.tui.controllers.home_controller import HomeController
 from opengrader.tui.state import TuiWorkflowState
 from opengrader.tui.ui.widgets.nav_item import NavItem
-from opengrader.tui.data import AssignmentTemplateSummary, CourseSummary
+from opengrader.tui.data import (
+    AssignmentTemplateSummary,
+    CourseSummary,
+    StudentSubmissionSummary,
+)
 
 from .fakes import FakeDataProvider
 
@@ -87,8 +91,11 @@ class FakeHomeScreen:
         self,
         student: NavItem,
         assignment: NavItem,
+        *,
+        submission: StudentSubmissionSummary | None = None,
     ) -> None:
-        self.details = f"submission:{student.label}:{assignment.label}"
+        source_pdf = submission.source_pdf if submission is not None else ""
+        self.details = f"submission:{student.label}:{assignment.label}:{source_pdf}"
 
     def selected_course(self) -> NavItem | None:
         return None
@@ -336,6 +343,10 @@ def test_student_submission_selected_opens_qa_picker() -> None:
     assert state.selection.student_id == 1
     assert state.selection_labels["assignment"] == "HW 1"
     assert state.selection_labels["student"] == "Tommy Liu"
+    assert (
+        app.home_screen.details
+        == "submission:Tommy Liu:HW 1:submission-0002.pdf"
+    )
     assert opened_picker == ["opened"]
 
 

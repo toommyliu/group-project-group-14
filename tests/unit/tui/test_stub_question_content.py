@@ -29,4 +29,5 @@ def test_non_hw_1_uses_default_placeholder_question() -> None:
     seeds = content.build_question_seeds(assignment_title="HW 2")
 
     assert [seed.question_id for seed in seeds] == ["Q1"]
+    assert seeds[0].prompt == "Q1"
     assert seeds[0].image_path == DEFAULT_IMAGE_PATH

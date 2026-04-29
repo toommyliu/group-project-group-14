@@ -6,6 +6,8 @@ from pathlib import Path
 from rich.markup import escape
 from textual.widget import Widget
 
+from opengrader.tui.data.models import StudentSubmissionSummary
+
 from .nav_item import NavItem
 from .tabbed_pane import TabbedPaneTab, TabbedPane
 from .selection_detail_content import (
@@ -89,11 +91,21 @@ class SelectionDetails(TabbedPane):
 
         self.set_tabs([TabbedPaneTab(label="", build=_build_details)])
 
-    def show_student_submission(self, student: NavItem, assignment: NavItem) -> None:
+    def show_student_submission(
+        self,
+        student: NavItem,
+        assignment: NavItem,
+        *,
+        submission: StudentSubmissionSummary | None = None,
+    ) -> None:
         self._set_context("Submission", student.label, subtitle="[g] Grade")
 
         def _build_details() -> Widget:
-            return StudentSubmissionDetail(student, assignment)
+            return StudentSubmissionDetail(
+                student,
+                assignment,
+                submission=submission,
+            )
 
         self.set_tabs([TabbedPaneTab(label="", build=_build_details)])
 

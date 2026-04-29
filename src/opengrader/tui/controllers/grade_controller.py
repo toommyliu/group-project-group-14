@@ -104,6 +104,7 @@ class GradeController:
         self._state.selection.student_item_id = student_item.item_id
         self._state.selection.student_id = self._numeric_id(student_item.item_id)
         self._state.selection_labels["student"] = student_item.label
+        self._sync_submission_context_for_student(student_item)
 
         self._state.grading_run.reset(
             student_id=self._state.selection.student_id,
@@ -295,6 +296,22 @@ class GradeController:
         return self._data_provider.build_question_seeds(
             assignment_id=self._state.selection.assignment_id,
             assignment_title=self._state.selection_labels.get("assignment") or None,
+            assignment_version=self._state.selection.assignment_version,
+            submission_markdown_path=self._state.selection.submission_markdown_path,
+        )
+
+    def _sync_submission_context_for_student(self, student_item: NavItem) -> None:
+        submission = self._data_provider.get_student_submission_summary(
+            student_id=self._state.selection.student_id,
+            student_name=student_item.label,
+            assignment_id=self._state.selection.assignment_id,
+            assignment_title=self._state.selection_labels.get("assignment") or None,
+        )
+        self._state.selection.assignment_version = (
+            submission.assignment_version if submission is not None else None
+        )
+        self._state.selection.submission_markdown_path = (
+            submission.markdown_path if submission is not None else None
         )
 
     def _find_ungraded_student_index(
@@ -346,6 +363,7 @@ class GradeController:
         return [
             QuestionGrade(
                 question_id=seed.question_id,
+                prompt=seed.prompt,
                 image_path=seed.image_path,
                 rubric_options=[
                     RubricOption(
@@ -354,6 +372,7 @@ class GradeController:
                     )
                     for option in seed.rubric_options
                 ],
+                answers=list(seed.answers or []),
             )
             for seed in seeds
         ]
@@ -380,7 +399,7 @@ class GradeController:
             items.append(
                 NavItem(
                     item_id=question.question_id,
-                    label=question.question_id,
+                    label=f"{question.question_id}: {question.prompt}",
                     meta=meta,
                 )
             )

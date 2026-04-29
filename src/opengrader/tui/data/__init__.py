@@ -5,6 +5,7 @@ from .models import (
     QuestionSeed,
     RubricOptionSeed,
     StudentSummary,
+    StudentSubmissionSummary,
 )
 from .provider import Provider
 from .sqlite_provider import SqliteProvider
@@ -16,6 +17,7 @@ __all__ = [
     "QuestionSeed",
     "RubricOptionSeed",
     "StudentSummary",
+    "StudentSubmissionSummary",
     "SqliteProvider",
     "Provider",
 ]

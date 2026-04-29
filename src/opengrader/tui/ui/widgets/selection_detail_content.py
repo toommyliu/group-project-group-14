@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
+from opengrader.tui.data.models import StudentSubmissionSummary
+
 from .nav_item import NavItem
 
 
@@ -61,11 +63,26 @@ class StudentSubmissionDetail(Static):
         student: NavItem,
         assignment: NavItem,
         *,
+        submission: StudentSubmissionSummary | None = None,
         id: str | None = None,
     ) -> None:
+        lines = [
+            f"Student: {student.label}",
+            f"Assignment: {assignment.label}",
+        ]
+        if submission is not None:
+            lines.extend(
+                [
+                    f"Submission name: {submission.name or 'N/A'}",
+                    f"Student ID: {submission.student_id or 'N/A'}",
+                    f"Course code: {submission.course_code or 'N/A'}",
+                    f"Assignment title: {submission.assignment_title or 'N/A'}",
+                    f"Assignment version: {submission.assignment_version or 'N/A'}",
+                    f"Source PDF: {submission.source_pdf or 'N/A'}",
+                    f"Score: {submission.score or 'N/A'}",
+                ]
+            )
         super().__init__(
-            f"Student: {student.label}\n"
-            f"Assignment: {assignment.label}\n"
-            "\nPress [g] to grade this submission.",
+            "\n".join(lines) + "\n\nPress [g] to grade this submission.",
             id=id,
         )

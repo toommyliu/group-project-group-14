@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,18 @@ class StudentSummary:
 
 
 @dataclass(frozen=True)
+class StudentSubmissionSummary:
+    name: str
+    student_id: str
+    course_code: str
+    assignment_title: str
+    assignment_version: str
+    source_pdf: str
+    score: str
+    markdown_path: str
+
+
+@dataclass(frozen=True)
 class RubricOptionSeed:
     label: str
     points_delta: float
@@ -40,5 +52,8 @@ class RubricOptionSeed:
 @dataclass(frozen=True)
 class QuestionSeed:
     question_id: str
+    prompt: str
     image_path: str
     rubric_options: list[RubricOptionSeed]
+    answers: list[str] = field(default_factory=list)
+    response_text: str = ""

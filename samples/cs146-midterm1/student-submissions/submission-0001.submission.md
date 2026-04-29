@@ -1,6 +1,6 @@
 ---
-name: ""
-student_id: ""
+name: "Tommy"
+student_id: "456"
 course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "A"
