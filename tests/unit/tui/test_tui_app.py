@@ -5,6 +5,7 @@ from textual.widgets import Button, ContentSwitcher, Input, ListView, Static
 from opengrader.tui.controllers.input_controller import InputCommand
 from opengrader.tui.data import RubricEditResult, RubricOptionSeed
 from opengrader.tui.data.stub_data_provider import StubDataProvider
+from opengrader.tui.state import PAGE_GRADE
 from opengrader.tui.tui import TuiApp
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
@@ -227,6 +228,57 @@ def test_grade_screen_focuses_rubric_and_number_keys_select_items() -> None:
             current = app.workflow_state.grading_run.current_question
             assert current is not None
             assert current.selected_option_index == 1
+
+    asyncio.run(run())
+
+
+def test_grade_comment_shortcut_focuses_comment_and_done_keys_return_to_rubric() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            rubric_list = grade_screen.query_one("#rubric-list", ListView)
+            assert app.focused == rubric_list
+
+            await pilot.press("c")
+            await pilot.pause()
+
+            assert app.focused is not None
+            assert app.focused.id == "question-comment"
+
+            comment_text = "Needs clearer calculation"
+            await pilot.press(*comment_text)
+            await pilot.pause()
+
+            current = app.workflow_state.grading_run.current_question
+            assert current is not None
+            assert comment_text in current.comment
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert app.focused == rubric_list
+            assert app.workflow_state.current_page == PAGE_GRADE
+
+            await pilot.press("c")
+            await pilot.pause()
+
+            assert app.focused is not None
+            assert app.focused.id == "question-comment"
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert app.focused == rubric_list
+            assert app.workflow_state.current_page == PAGE_GRADE
 
     asyncio.run(run())
 
@@ -602,6 +654,14 @@ def test_rubric_editor_blocks_grade_shortcuts_while_editing() -> None:
             assert app.get_grade_screen().query_one(
                 "#rubric-editor-panel"
             ).display is True
+
+            await pilot.press("c")
+            await pilot.pause()
+
+            editor = app.get_grade_screen().query_one("#rubric-editor-panel")
+            assert app.focused is not None
+            assert editor in app.focused.ancestors
+            assert app.focused.id != "question-comment"
 
     asyncio.run(run())
 

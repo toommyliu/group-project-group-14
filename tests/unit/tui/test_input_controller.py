@@ -15,6 +15,7 @@ def test_command_availability_tracks_active_context() -> None:
     assert controller.command_available(InputCommand.QA_MOVE_UP) is True
     assert controller.command_available(InputCommand.QA_SWITCH_PANE) is True
     assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is False
+    assert controller.command_available(InputCommand.GRADE_FOCUS_COMMENT) is False
     assert controller.command_available(InputCommand.APP_QUIT) is True
 
     state.current_page = PAGE_GRADE
@@ -23,6 +24,7 @@ def test_command_availability_tracks_active_context() -> None:
     assert controller.command_available(InputCommand.QA_MOVE_UP) is False
     assert controller.command_available(InputCommand.QA_SWITCH_PANE) is False
     assert controller.command_available(InputCommand.GRADE_NEXT_STUDENT) is True
+    assert controller.command_available(InputCommand.GRADE_FOCUS_COMMENT) is True
 
 
 def test_dispatch_calls_registered_handler_only_in_matching_context() -> None:
@@ -64,3 +66,5 @@ def test_single_keymap_merges_standard_and_vim_navigation_keys() -> None:
     assert (
         bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display == "k/left"
     )
+    assert bindings_by_command[InputCommand.GRADE_FOCUS_COMMENT].keys == "c"
+    assert bindings_by_command[InputCommand.GRADE_FOCUS_COMMENT].description == "Comment"

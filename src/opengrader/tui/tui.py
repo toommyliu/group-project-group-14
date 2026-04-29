@@ -179,6 +179,10 @@ class TuiApp(App):
             InputCommand.GRADE_EDIT_RUBRIC,
             self.grade_controller.open_rubric_editor,
         )
+        self.input_controller.register(
+            InputCommand.GRADE_FOCUS_COMMENT,
+            lambda: self.get_grade_screen().focus_question_comment(),
+        )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:

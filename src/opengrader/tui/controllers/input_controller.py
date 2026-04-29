@@ -25,6 +25,7 @@ class InputCommand(str, Enum):
     GRADE_PREVIOUS_UNGRADED_STUDENT = "grade_previous_ungraded_student"
     GRADE_FINALIZE_STUDENT = "grade_finalize_student"
     GRADE_EDIT_RUBRIC = "grade_edit_rubric"
+    GRADE_FOCUS_COMMENT = "grade_focus_comment"
 
 
 class InputContext(str, Enum):
@@ -141,6 +142,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "e",
         InputCommand.GRADE_EDIT_RUBRIC,
         "Edit Rubric",
+        (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "c",
+        InputCommand.GRADE_FOCUS_COMMENT,
+        "Comment",
         (InputContext.GRADE,),
     ),
     CommandBindingSpec(

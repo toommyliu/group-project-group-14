@@ -315,6 +315,18 @@ class GradeScreen(Vertical):
     def rubric_edit_active(self) -> bool:
         return self._rubric_edit_mode
 
+    def focus_question_comment(self) -> None:
+        """Move keyboard focus to the question comment input."""
+        if self._rubric_edit_mode:
+            return
+        comment_input = self.query_one("#question-comment", Input)
+
+        def focus_comment() -> None:
+            comment_input.focus()
+            comment_input.cursor_position = len(comment_input.value)
+
+        self.call_next(focus_comment)
+
     def present_rubric_editor(
         self,
         app: object,
@@ -696,6 +708,14 @@ class GradeScreen(Vertical):
             return
 
         focused = self.app.focused
+        if isinstance(focused, Input) and focused.id == "question-comment":
+            if event.key in ("enter", "escape"):
+                self.post_message(self.CommentUpdated(focused.value))
+                self._focus_rubric_list()
+                event.prevent_default()
+                event.stop()
+            return
+
         if isinstance(focused, Input):
             return
 
