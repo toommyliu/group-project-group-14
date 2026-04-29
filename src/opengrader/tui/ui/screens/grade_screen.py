@@ -6,6 +6,7 @@ from textual import events, on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
+from textual.widget import Widget
 from textual.widgets import Button, Input, Label, ListItem, ListView, Rule, Static
 
 from opengrader.tui.data import RubricOptionSeed
@@ -25,6 +26,7 @@ class _RubricListItem(ListItem):
         super().__init__(self.label)
 
     def update_option(self, text: str, selected: bool) -> None:
+        """Refresh the visible rubric text and selected styling."""
         if text != self._option_text:
             self.label.update(text)
             self._option_text = text
@@ -74,6 +76,7 @@ class _RubricEditRow(Horizontal):
         self._apply_required_state()
 
     def _apply_required_state(self) -> None:
+        """Disable editing controls for schema-owned rubric rows."""
         if self.row_kind == "correct":
             self.index_label.update("")
             self.label_input.disabled = True
@@ -88,6 +91,7 @@ class _RubricEditRow(Horizontal):
             self.delete_button.display = False
 
     def option(self) -> RubricOptionSeed:
+        """Return this editor row as a provider-ready rubric option."""
         label = self.label_input.value.strip()
         if self.row_kind == "partial":
             label = f"Partially Correct - {_partial_subitem_label(label)}"
@@ -108,7 +112,6 @@ class _SidebarResizeHandle(Static):
             classes="grade-screen__resize-handle",
         )
         self._dragging = False
-        # The parent screen.
         self._screen: GradeScreen | None = None
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
@@ -142,6 +145,7 @@ class _SidebarResizeHandle(Static):
         self.remove_class("grade-screen__resize-handle--dragging")
 
     def _resize(self, screen_x: float | None, *, immediate: bool) -> None:
+        """Apply or queue a sidebar resize from a screen x-coordinate."""
         if screen_x is None:
             return
         screen = self._grade_screen()
@@ -308,6 +312,9 @@ class GradeScreen(Vertical):
     def set_progress(self, text: str) -> None:
         self.query_one("#grade-progress", Label).update(text)
 
+    def rubric_edit_active(self) -> bool:
+        return self._rubric_edit_mode
+
     def present_rubric_editor(
         self,
         app: object,
@@ -382,6 +389,7 @@ class GradeScreen(Vertical):
         self._queue_sidebar_width(self._sidebar_width_from_screen_x(screen_x))
 
     def _sidebar_width_from_screen_x(self, screen_x: float) -> int:
+        """Convert a resize-handle x-coordinate into sidebar width."""
         workspace = self.query_one("#grade-workspace", Horizontal)
         handle = self.query_one("#grade-sidebar-resize-handle", _SidebarResizeHandle)
         desired_width = (
@@ -401,6 +409,7 @@ class GradeScreen(Vertical):
         self._refresh_sidebar_layout(sidebar)
 
     def _queue_sidebar_width(self, width: int) -> None:
+        """Coalesce sidebar width updates during mouse dragging."""
         self._pending_sidebar_width = self._bounded_sidebar_width(width)
         if self._sidebar_resize_scheduled:
             return
@@ -408,6 +417,7 @@ class GradeScreen(Vertical):
         self.call_next(self._apply_pending_sidebar_width)
 
     def _apply_pending_sidebar_width(self) -> None:
+        """Apply the latest queued sidebar width."""
         self._sidebar_resize_scheduled = False
         width = self._pending_sidebar_width
         self._pending_sidebar_width = None
@@ -416,10 +426,12 @@ class GradeScreen(Vertical):
         self.set_sidebar_width(width)
 
     def _refresh_sidebar_layout(self, sidebar: VerticalScroll) -> None:
+        """Refresh widgets affected by a sidebar width change."""
         sidebar.refresh(layout=True)
         self.query_one("#grade-workspace", Horizontal).refresh(layout=True)
 
     def _bounded_sidebar_width(self, width: int) -> int:
+        """Clamp sidebar width to keep the response pane usable."""
         try:
             workspace = self.query_one("#grade-workspace", Horizontal)
             handle = self.query_one(
@@ -438,6 +450,7 @@ class GradeScreen(Vertical):
         return max(lower_bound, min(int(width), upper_bound))
 
     def _sync_rubric_options(self, current) -> None:
+        """Mirror the current question rubric into the sidebar list."""
         rubric_list = self.query_one("#rubric-list", ListView)
         option_count = len(current.rubric_options)
 
@@ -466,18 +479,21 @@ class GradeScreen(Vertical):
             )
 
     def _focus_rubric_list(self) -> None:
+        """Return keyboard focus to the rubric list when grading."""
         if self._rubric_edit_mode or self._rubric_count == 0:
             return
         rubric_list = self.query_one("#rubric-list", ListView)
         self.call_next(rubric_list.focus)
 
     def _update_rubric_list_visibility(self) -> None:
+        """Toggle between rubric selection and rubric editing views."""
         self.query_one("#rubric-list", ListView).display = not self._rubric_edit_mode
         self.query_one("#rubric-editor-panel", Vertical).display = (
             self._rubric_edit_mode
         )
 
     def _first_editable_rubric_input(self) -> Input | None:
+        """Find the first editable rubric input for initial focus."""
         for row in self.query(_RubricEditRow):
             if not row.label_input.disabled:
                 return row.label_input
@@ -486,6 +502,7 @@ class GradeScreen(Vertical):
         return None
 
     def _collect_rubric_edit_options(self) -> list[RubricOptionSeed] | str:
+        """Validate editor rows and return options or an error message."""
         options: list[RubricOptionSeed] = []
         for row in self.query(_RubricEditRow):
             label = (
@@ -524,8 +541,69 @@ class GradeScreen(Vertical):
             return "Use either positive awards or negative deductions, not both."
         return options
 
+    def _save_rubric_edit(self) -> None:
+        """Validate and submit rubric editor changes."""
+        result = self._collect_rubric_edit_options()
+        if isinstance(result, str):
+            self.query_one("#rubric-editor-status", Static).update(result)
+            return
+        callback = self._rubric_edit_callback
+        self.exit_rubric_edit_mode()
+        if callable(callback):
+            callback(result)
+
+    def _cancel_rubric_edit(self) -> None:
+        """Exit rubric editing without saving changes."""
+        callback = self._rubric_edit_callback
+        self.exit_rubric_edit_mode()
+        if callable(callback):
+            callback(None)
+
+    def _rubric_editor_focus_chain(self) -> list[Widget]:
+        """Return enabled focus targets inside the rubric editor."""
+        editor = self.query_one("#rubric-editor-panel", Vertical)
+        return [
+            widget
+            for widget in editor.query("Input, Button")
+            if isinstance(widget, Widget)
+            and widget.can_focus
+            and not widget.disabled
+            and widget.display
+        ]
+
+    def _move_rubric_editor_focus(self, *, reverse: bool) -> None:
+        """Cycle focus within the rubric editor."""
+        focus_chain = self._rubric_editor_focus_chain()
+        if not focus_chain:
+            return
+
+        current_focus = self.app.focused
+        if current_focus in focus_chain:
+            current_index = focus_chain.index(current_focus)
+            next_index = (current_index - 1 if reverse else current_index + 1) % len(
+                focus_chain
+            )
+        else:
+            next_index = len(focus_chain) - 1 if reverse else 0
+
+        focus_chain[next_index].focus()
+
+    def _press_focused_rubric_button(self) -> bool:
+        """Press the focused rubric editor button if one is focused."""
+        focused = self.app.focused
+        editor = self.query_one("#rubric-editor-panel", Vertical)
+        if not isinstance(focused, Button):
+            return False
+        if editor not in focused.ancestors:
+            return False
+        if focused.disabled or not focused.display:
+            return False
+        focused.press()
+        return True
+
     @staticmethod
     def _question_context_text(current) -> str:
+        """Render the current question details shown above the rubric."""
         parts = [
             f"{current.question_id} ({current.points:g} points)",
             "",
@@ -542,6 +620,7 @@ class GradeScreen(Vertical):
 
     @on(Button.Pressed, "#rubric-edit-add")
     def _on_rubric_add_pressed(self, event: Button.Pressed) -> None:
+        """Add a new partial-credit subitem row."""
         event.stop()
         rows = self.query_one("#rubric-editor-subitems", Vertical)
         row = _RubricEditRow(
@@ -554,26 +633,19 @@ class GradeScreen(Vertical):
 
     @on(Button.Pressed, "#rubric-edit-save")
     def _on_rubric_save_pressed(self, event: Button.Pressed) -> None:
+        """Handle the rubric editor Save button."""
         event.stop()
-        result = self._collect_rubric_edit_options()
-        if isinstance(result, str):
-            self.query_one("#rubric-editor-status", Static).update(result)
-            return
-        callback = self._rubric_edit_callback
-        self.exit_rubric_edit_mode()
-        if callable(callback):
-            callback(result)
+        self._save_rubric_edit()
 
     @on(Button.Pressed, "#rubric-edit-cancel")
     def _on_rubric_cancel_pressed(self, event: Button.Pressed) -> None:
+        """Handle the rubric editor Cancel button."""
         event.stop()
-        callback = self._rubric_edit_callback
-        self.exit_rubric_edit_mode()
-        if callable(callback):
-            callback(None)
+        self._cancel_rubric_edit()
 
     @on(Button.Pressed, ".rubric-edit-delete")
     def _on_rubric_delete_pressed(self, event: Button.Pressed) -> None:
+        """Remove a partial-credit subitem row."""
         event.stop()
         row = event.button.parent
         if isinstance(row, _RubricEditRow):
@@ -581,6 +653,7 @@ class GradeScreen(Vertical):
             self._renumber_rubric_edit_rows()
 
     def _renumber_rubric_edit_rows(self) -> None:
+        """Refresh partial-credit row numbers after deletion."""
         rows = [
             row
             for row in self.query(_RubricEditRow)
@@ -592,6 +665,7 @@ class GradeScreen(Vertical):
             label.update(f"{index + 1}.")
 
     def _clear_rubric_editor_rows(self) -> None:
+        """Remove all mounted rubric editor rows."""
         for container_id in (
             "#rubric-editor-correct",
             "#rubric-editor-subitems",
@@ -602,9 +676,30 @@ class GradeScreen(Vertical):
                 child.remove()
 
     def on_key(self, event: events.Key) -> None:
-        focused = self.app.focused
-        if isinstance(focused, Input) or self._rubric_edit_mode:
+        if self._rubric_edit_mode:
+            if event.key in ("ctrl+s", "super+s", "cmd+s"):
+                self._save_rubric_edit()
+                event.prevent_default()
+            elif event.key == "escape":
+                self._cancel_rubric_edit()
+                event.prevent_default()
+            elif event.key == "tab":
+                self._move_rubric_editor_focus(reverse=False)
+                event.prevent_default()
+            elif event.key == "shift+tab":
+                self._move_rubric_editor_focus(reverse=True)
+                event.prevent_default()
+            elif event.key in ("enter", "space"):
+                if self._press_focused_rubric_button():
+                    event.prevent_default()
+            event.stop()
             return
+
+        focused = self.app.focused
+        if isinstance(focused, Input):
+            return
+
+        # 1-9 to select the corresponding rubric item.
         if len(event.key) == 1 and event.key.isdigit() and event.key != "0":
             option_index = int(event.key) - 1
             if 0 <= option_index < self._rubric_count:
@@ -631,6 +726,7 @@ class GradeScreen(Vertical):
 
 
 def _render_points_delta(points_delta: float) -> str:
+    """Render a signed points delta for rubric inputs."""
     rendered = f"{points_delta:g}"
     if not rendered.startswith("-"):
         rendered = f"+{rendered}"
@@ -638,6 +734,7 @@ def _render_points_delta(points_delta: float) -> str:
 
 
 def _partial_subitem_label(label: str) -> str:
+    """Strip the partial-credit prefix from a flat rubric label."""
     stripped = label.strip()
     prefix = "Partially Correct - "
     if stripped.startswith(prefix):

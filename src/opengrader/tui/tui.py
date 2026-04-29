@@ -215,6 +215,15 @@ class TuiApp(App):
             return False
 
         normalized_command = InputController._coerce_command(command)
+
+        # Disable all input commands when editing the rubric and
+        # prioritize GradeScreen on_key.
+        if (
+            self.workflow_state.current_page == PAGE_GRADE
+            and self.get_grade_screen().rubric_edit_active()
+        ):
+            return False
+
         if self.workflow_state.current_page != PAGE_QA_PICKER:
             return True
 

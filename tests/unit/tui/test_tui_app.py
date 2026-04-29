@@ -14,6 +14,29 @@ class RubricEditingFakeDataProvider(FakeDataProvider):
     def __init__(self) -> None:
         self.saved_options: list[RubricOptionSeed] | None = None
 
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        seeds = super().build_question_seeds(**kwargs)
+        rubric_options = [
+            RubricOptionSeed("Correct", 0.0),
+            RubricOptionSeed("Partially Correct", -5.0),
+            RubricOptionSeed("Incorrect", -10.0),
+        ]
+        return [
+            seed.__class__(
+                question_id=seed.question_id,
+                image_path=seed.image_path,
+                rubric_options=list(rubric_options),
+                points=seed.points,
+                prompt=seed.prompt,
+                expected_answers=list(seed.expected_answers),
+                response_text=seed.response_text,
+                points_awarded=seed.points_awarded,
+                rubric_label=seed.rubric_label,
+                analysis=seed.analysis,
+            )
+            for seed in seeds
+        ]
+
     def save_rubric_options(
         self,
         *,
@@ -239,9 +262,10 @@ def test_grade_rubric_editor_is_inline_and_structured() -> None:
             ]
             assert [input.value for input in label_inputs] == [
                 "Correct",
+                "Partially Correct",
                 "Incorrect",
             ]
-            assert [input.value for input in delta_inputs] == ["+0", "-10"]
+            assert [input.value for input in delta_inputs] == ["+0", "-5", "-10"]
 
     asyncio.run(run())
 
@@ -312,6 +336,272 @@ def test_grade_rubric_editor_rejects_mixed_positive_and_negative_scoring() -> No
 
             status = grade_screen.query_one("#rubric-editor-status", Static)
             assert "positive awards" in str(status.content)
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_ctrl_s_saves() -> None:
+    async def run() -> None:
+        provider = RubricEditingFakeDataProvider()
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=provider,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            incorrect = grade_screen.query_one("#rubric-editor-incorrect")
+            incorrect_delta = next(
+                widget
+                for widget in incorrect.query(".rubric-edit-delta")
+                if isinstance(widget, Input)
+            )
+            incorrect_delta.value = "-9"
+
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+
+            assert provider.saved_options is not None
+            assert provider.saved_options[-1] == RubricOptionSeed("Incorrect", -9.0)
+            assert grade_screen.query_one("#rubric-list", ListView).display is True
+            assert grade_screen.query_one("#rubric-editor-panel").display is False
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_enter_on_save_button_saves() -> None:
+    async def run() -> None:
+        provider = RubricEditingFakeDataProvider()
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=provider,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            save_button = grade_screen.query_one("#rubric-edit-save", Button)
+            save_button.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert provider.saved_options is not None
+            assert grade_screen.query_one("#rubric-list", ListView).display is True
+            assert grade_screen.query_one("#rubric-editor-panel").display is False
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_escape_cancels_without_saving() -> None:
+    async def run() -> None:
+        provider = RubricEditingFakeDataProvider()
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=provider,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-grade"
+
+            await pilot.press("e")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            assert provider.saved_options is None
+            assert switcher.current == "page-grade"
+            assert grade_screen.query_one("#rubric-list", ListView).display is True
+            assert grade_screen.query_one("#rubric-editor-panel").display is False
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_space_on_cancel_button_cancels_without_saving() -> None:
+    async def run() -> None:
+        provider = RubricEditingFakeDataProvider()
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=provider,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            cancel_button = grade_screen.query_one("#rubric-edit-cancel", Button)
+            cancel_button.focus()
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+
+            assert provider.saved_options is None
+            assert grade_screen.query_one("#rubric-list", ListView).display is True
+            assert grade_screen.query_one("#rubric-editor-panel").display is False
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_enter_on_add_button_adds_subitem() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            subitems = grade_screen.query_one("#rubric-editor-subitems")
+            before_count = len(
+                [
+                    widget
+                    for widget in subitems.query(".rubric-edit-label")
+                    if isinstance(widget, Input)
+                ]
+            )
+            add_button = grade_screen.query_one("#rubric-edit-add", Button)
+            add_button.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            after_labels = [
+                widget
+                for widget in subitems.query(".rubric-edit-label")
+                if isinstance(widget, Input)
+            ]
+            assert len(after_labels) == before_count + 1
+            assert app.focused == after_labels[-1]
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_tab_is_trapped_inside_editor() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            editor = grade_screen.query_one("#rubric-editor-panel")
+            for _ in range(8):
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.focused is not None
+                assert editor in app.focused.ancestors
+
+            await pilot.press("shift+tab")
+            await pilot.pause()
+            assert app.focused is not None
+            assert editor in app.focused.ancestors
+            assert app.focused.id != "question-comment"
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_validation_error_keeps_focus_trap() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            editor = grade_screen.query_one("#rubric-editor-panel")
+            subitems = grade_screen.query_one("#rubric-editor-subitems")
+            first_delta = next(
+                widget
+                for widget in subitems.query(".rubric-edit-delta")
+                if isinstance(widget, Input)
+            )
+            first_delta.value = "+2"
+
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+
+            status = grade_screen.query_one("#rubric-editor-status", Static)
+            assert "positive awards" in str(status.content)
+            assert grade_screen.query_one("#rubric-editor-panel").display is True
+
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is not None
+            assert editor in app.focused.ancestors
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_blocks_grade_shortcuts_while_editing() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.workflow_state.active_student_index == 0
+
+            await pilot.press("e")
+            await pilot.pause()
+            save_button = app.get_grade_screen().query_one("#rubric-edit-save", Button)
+            save_button.focus()
+            await pilot.pause()
+
+            await pilot.press("j")
+            await pilot.pause()
+
+            assert app.workflow_state.active_student_index == 0
+            assert app.get_grade_screen().query_one(
+                "#rubric-editor-panel"
+            ).display is True
 
     asyncio.run(run())
 
