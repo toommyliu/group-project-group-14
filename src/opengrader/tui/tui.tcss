@@ -200,6 +200,27 @@ $foreground: #E4E4E4EB;
     text-style: bold;
 }
 
+#rubric-list > ListItem.-highlight {
+    background: #202326;
+}
+
+#rubric-list:focus > ListItem.-highlight {
+    background: $accent 35%;
+}
+
+#rubric-list > ListItem.-highlight .rubric-row-index,
+#rubric-list > ListItem.-highlight .rubric-row-label,
+#rubric-list > ListItem.-highlight .rubric-row-points {
+    color: $foreground;
+    text-style: bold;
+}
+
+#rubric-list:focus > ListItem.-highlight .rubric-row-marker,
+#rubric-list:focus > ListItem.-highlight .rubric-row-index {
+    color: $accent;
+    text-style: bold;
+}
+
 #rubric-editor-panel {
     width: 100%;
     height: auto;
