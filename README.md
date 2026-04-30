@@ -265,10 +265,12 @@ https://github.com/user-attachments/assets/f8938fa9-d64f-4d88-a8e4-62a48111a471
 
 ## Technical Stack
 
-| Category   | Technology |
-| ---------- | ---------- |
-| Frontend   | Python     |
-| Backend    | Python     |
+| Area | Technologies |
+| ---- | ------------ |
+| Frontend/backend | [Python](https://www.python.org/), [Textual](https://textual.textualize.io/), Terminal Emulator | 
+| Document processing | [pypdf](https://pypdf.readthedocs.io/en/stable/), [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/), [Tesseract](https://tesseract-ocr.github.io/), [opencv](https://pypi.org/project/opencv-python/) |
+| Local model integration | [Ollama](https://ollama.com/)
+| Testing | [pytest](https://docs.pytest.org/en/stable/) |
 
 ## What's Next (195B)
 
