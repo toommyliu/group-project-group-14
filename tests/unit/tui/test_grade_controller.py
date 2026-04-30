@@ -27,12 +27,19 @@ class PersistentFakeDataProvider(FakeDataProvider):
     def __init__(self) -> None:
         self.saved_grades: list[dict[str, object]] = []
         self.saved_analyses: list[dict[str, object]] = []
+        self.saved_annotations: list[dict[str, object]] = []
+        self.annotation_error: Exception | None = None
 
     def save_question_grade(self, **kwargs: object) -> None:
         self.saved_grades.append(kwargs)
 
     def save_question_analysis(self, **kwargs: object) -> None:
         self.saved_analyses.append(kwargs)
+
+    def save_question_comment_annotation(self, **kwargs: object) -> None:
+        if self.annotation_error is not None:
+            raise self.annotation_error
+        self.saved_annotations.append(kwargs)
 
 
 class SavedProgressFakeDataProvider(FakeDataProvider):
@@ -508,6 +515,36 @@ def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
             "analysis": "Needs clearer work.",
         }
     ]
+    assert provider.saved_annotations == [
+        {
+            "student_item_id": "s1",
+            "question_id": "Q1",
+            "comment": "Needs clearer work.",
+        }
+    ]
+
+
+def test_comment_update_reports_annotation_errors() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = PersistentFakeDataProvider()
+    provider.annotation_error = ValueError("Question source metadata missing")
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+
+    controller.on_comment_updated("Needs clearer work.")
+
+    assert provider.saved_analyses
+    assert provider.saved_annotations == []
+    assert app.grade_screen.status == (
+        "Could not annotate PDF: Question source metadata missing"
+    )
 
 
 def test_open_rubric_editor_presents_modal_when_provider_supports_it() -> None:

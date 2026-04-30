@@ -10,7 +10,7 @@ from opengrader.core.ocr.extractor import (
     QuestionExtractionResult,
     SubmissionResult,
 )
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
+from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResult
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
 
@@ -131,11 +131,14 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         *,
         question_id: str,
         image_path: Path,
-    ) -> list[tuple[str, Path]]:
+    ) -> list[student_file._SplitQuestionImage]:
         split_call_count["count"] += 1
         assert question_id == "q1"
         assert image_path == q1
-        return [("q1a", q1a), ("q1b", q1b)]
+        return [
+            student_file._SplitQuestionImage("q1a", q1a, (0.0, 0.0, 1.0, 0.5)),
+            student_file._SplitQuestionImage("q1b", q1b, (0.0, 0.5, 1.0, 0.5)),
+        ]
 
     def _fake_classify_question_image_path(image_path: Path) -> str:
         if image_path == q1a:
@@ -168,6 +171,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             MULTIPLE_CHOICE,
             FREE_RESPONSE,
         ]
+        assert split_result.document.source_pdf == "../student-0001.pdf"
         assert split_call_count["count"] == 1
 
         split_call_count["count"] = 0
@@ -355,6 +359,12 @@ def test_parse_student_submission_markdown_round_trips_rendered_document(
                 response_text="B\nbecause queue",
                 points_awarded=1.0,
                 analysis="Partial",
+                source_segments=(
+                    student_file.QuestionSourceSegment(
+                        page_number=1,
+                        bbox_norm=(0.1, 0.2, 0.7, 0.3),
+                    ),
+                ),
             )
         ],
     )
@@ -368,6 +378,12 @@ def test_parse_student_submission_markdown_round_trips_rendered_document(
     assert parsed.questions[0].question_id == "q1"
     assert parsed.questions[0].question_type == MULTIPLE_CHOICE
     assert parsed.questions[0].possible_points == 2
+    assert parsed.questions[0].source_segments == (
+        student_file.QuestionSourceSegment(
+            page_number=1,
+            bbox_norm=(0.1, 0.2, 0.7, 0.3),
+        ),
+    )
     assert parsed.questions[0].response_text == "B\nbecause queue"
     assert parsed.questions[0].points_awarded == 1.0
     assert parsed.questions[0].rubric_label == ""
@@ -712,3 +728,72 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
     finally:
         student_file.process_submission_pdf = original_process
         student_file.extract_field_text = original_extract_field_text
+
+
+def test_build_student_submission_document_uses_structured_title_metadata(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "out"
+    response_dir = output_dir / "responses" / "student-0004"
+    field_dir = output_dir / "field_crops" / "student-0004"
+    response_dir.mkdir(parents=True, exist_ok=True)
+    field_dir.mkdir(parents=True, exist_ok=True)
+
+    q1 = response_dir / "q1.png"
+    title_crop = field_dir / "title_p1.png"
+    Image.new("RGB", (300, 160), color=(255, 255, 255)).save(q1)
+    Image.new("RGB", (500, 120), color=(255, 255, 255)).save(title_crop)
+
+    def _fake_process_submission_pdf(
+        *_args: object, **_kwargs: object
+    ) -> SubmissionResult:
+        return SubmissionResult(
+            filename="student-0004.pdf",
+            version_validated=True,
+            title_crop_path=str(title_crop),
+            fields=[],
+            questions=[
+                QuestionExtractionResult(
+                    question_id="q1",
+                    page_number=1,
+                    output_path=str(q1),
+                )
+            ],
+        )
+
+    def _fake_extract_title_metadata(
+        *,
+        image_path: str | Path,
+        config: OllamaVisionConfig,
+    ) -> TitleMetadataResult:
+        _ = image_path, config
+        return TitleMetadataResult(
+            course_code="CS146",
+            assignment_title="Quiz 1",
+            assignment_version="A",
+            raw_title="CS146: Quiz 1 (A)",
+        )
+
+    original_process = student_file.process_submission_pdf
+    original_extract_title_metadata = student_file.extract_title_metadata
+    progress: list[str] = []
+    try:
+        student_file.process_submission_pdf = _fake_process_submission_pdf
+        student_file.extract_title_metadata = _fake_extract_title_metadata
+
+        result = student_file.build_student_submission_document(
+            pdf_path=tmp_path / "student-0004.pdf",
+            output_dir=output_dir,
+            ocr_config=OcrConfig(),
+            ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+            skip_ollama_qa=True,
+            progress_callback=progress.append,
+        )
+
+        assert not [message for message in progress if "title OCR failed" in message]
+        assert result.document.course_code == "CS146"
+        assert result.document.assignment_title == "Quiz 1"
+        assert result.document.assignment_version == "A"
+    finally:
+        student_file.process_submission_pdf = original_process
+        student_file.extract_title_metadata = original_extract_title_metadata

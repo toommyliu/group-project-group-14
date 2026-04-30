@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 
+import fitz
 import pytest
 
 from opengrader.core.qa_file import (
@@ -87,6 +88,46 @@ def _write_simple_submission(path: Path, *, name: str, version: str = "") -> Non
     )
 
 
+def _write_submission_with_source_metadata(
+    path: Path,
+    *,
+    source_pdf: str,
+) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "---",
+                'name: "Student 1"',
+                'student_id: "1"',
+                'course_code: "CMPE"',
+                'assignment_title: "Quiz"',
+                'assignment_version: ""',
+                f'source_pdf: "{source_pdf}"',
+                'score: ""',
+                "---",
+                "",
+                "- q1:",
+                "  - Question type: Free Response",
+                "  - Prompt: Convert.",
+                "  - Response image: ",
+                '  - Source segments: [{"page":1,"bbox":[0.2,0.3,0.5,0.2]}]',
+                "  - Response text: ",
+                "  - Possible points: ",
+                "  - Points: ",
+                "  - Analysis: ",
+                "",
+            ]
+        )
+    )
+
+
+def _create_blank_pdf(path: Path) -> None:
+    doc = fitz.open()
+    doc.new_page(width=300, height=400)
+    doc.save(path)
+    doc.close()
+
+
 def _write_simple_submissions(path: Path, *, count: int = 2) -> None:
     path.mkdir()
     for index in range(count):
@@ -128,7 +169,7 @@ def test_submission_files_provider_loads_students_and_questions() -> None:
     assert [option.label for option in seeds[0].rubric_options] == [
         "Correct",
         "Partially Correct - Binary form attempted but value incorrect",
-        "Partially Correct - Testing this is the second rubric item being edited of partial credit",
+        "Partially Correct - Conversion process mostly incorrect",
         "Incorrect",
     ]
 
@@ -270,6 +311,66 @@ def test_submission_files_provider_save_question_analysis_preserves_grade(
     assert document.questions[0].points_awarded == 7
     assert document.questions[0].rubric_label == "Partially Correct"
     assert document.questions[0].analysis == "Useful explanation."
+
+
+def test_submission_files_provider_saves_question_comment_annotation(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    split_dir = tmp_path / "split-submissions"
+    split_dir.mkdir()
+    source_pdf = split_dir / "student.pdf"
+    _create_blank_pdf(source_pdf)
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    _write_submission_with_source_metadata(
+        submissions_path / "student.submission.md",
+        source_pdf="../split-submissions/student.pdf",
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    annotated_path = provider.save_question_comment_annotation(
+        student_item_id="s1",
+        question_id="q1",
+        comment="Show the conversion steps.",
+    )
+
+    assert annotated_path == submissions_path / "annotated-pdfs" / "student.annotated.pdf"
+    with fitz.open(annotated_path) as document:
+        annot = document[0].first_annot
+        assert annot is not None
+        info = annot.info
+        assert info.get("title", "") == ""
+        assert info["subject"].startswith("cm:")
+        assert "opengrader" not in info["subject"].lower()
+        assert "q1" not in info["subject"].lower()
+        assert info["content"] == "Show the conversion steps."
+
+
+def test_submission_files_provider_requires_source_metadata_for_annotation(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "student-submissions"
+    _write_simple_submissions(submissions_path, count=1)
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    with pytest.raises(ValueError, match="regenerate submission files"):
+        provider.save_question_comment_annotation(
+            student_item_id="s1",
+            question_id="q1",
+            comment="Needs work.",
+        )
 
 
 def test_submission_files_provider_save_rubric_options_updates_qa_and_grades(
