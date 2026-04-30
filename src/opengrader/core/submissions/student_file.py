@@ -31,15 +31,31 @@ from opengrader.core.ocr.utils import apply_grayscale
 from opengrader.core.source_location import QuestionSourceSegment
 
 
-_TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b")
+_TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b", re.IGNORECASE)
 _TITLE_CANONICAL_RE = re.compile(
     r"(?i)\b(?P<course>[A-Z]{2,}\s*\d{1,4}[A-Z]?)\s*:\s*(?P<assignment>[^\n()]{1,80}?)\s*\((?P<version>[A-Z0-9])\)"
 )
 _TITLE_VERSION_EXPLICIT_RE = re.compile(r"(?i)\bversion\s*([A-Z0-9]+)\b")
+_TITLE_COMPACT_VERSION_RE = re.compile(
+    r"(?i)\b(?P<title>"
+    r"(?:quiz|midterm|exam|final|assignment|hw|homework|lab|project)\s+\d+)"
+    r"\s*[_-]\s*(?P<version>[A-Z0-9]+)\b"
+)
 _TITLE_VERSION_SUFFIX_RE = re.compile(
     r"(?i)\b(?:midterm|exam|quiz|final|assignment|hw|homework)\s*\d*\s*([A-Z])\b"
 )
-_TITLE_VERSION_BRACKET_RE = re.compile(r"[\(\[]\s*([A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*)\s*[\)\]]")
+_TITLE_VERSION_BRACKET_RE = re.compile(
+    r"[\(\[]\s*([A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*)\s*[\)\]]"
+)
+_TITLE_ASSIGNMENT_WORDS = {
+    "assignment",
+    "exam",
+    "final",
+    "homework",
+    "hw",
+    "midterm",
+    "quiz",
+}
 
 _TOP_LEVEL_QUESTION_ID_RE = re.compile(r"^q\d+$")
 _SUBMISSION_QUESTION_RE = re.compile(r"^-\s+([^:\s]+):\s*$")
@@ -692,17 +708,66 @@ def _normalize_assignment_version(raw: str | None) -> str | None:
     return text.upper() or None
 
 
+def _normalize_course_code(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    return re.sub(r"\s+", "", raw).upper() or None
+
+
+def _looks_like_course_code(raw: str | None) -> bool:
+    """Return whether a course-like token is probably a real course code."""
+    normalized = _normalize_course_code(raw)
+    if normalized is None:
+        return False
+    matched_prefix = re.match(r"[A-Z]+", normalized)
+    if matched_prefix is None:
+        return False
+    return matched_prefix.group(0).lower() not in _TITLE_ASSIGNMENT_WORDS
+
+
+def _find_course_match(text: str) -> re.Match[str] | None:
+    """Find a course code while excluding assignment-title tokens."""
+    for match in _TITLE_COURSE_RE.finditer(text):
+        if _looks_like_course_code(match.group(1)):
+            return match
+    return None
+
+
+def _normalize_assignment_title(raw: str) -> str:
+    text = re.sub(r"\s+", " ", raw).strip(" :-")
+    if not text:
+        return "Unknown Assignment"
+    if text == text.lower():
+        text = text.title()
+    text = re.sub(r"(?i)\bhw\b", "HW", text)
+    return text
+
+
+def _has_compact_title_version(raw_title: str) -> bool:
+    """Return whether raw title text uses a compact version suffix."""
+    return _TITLE_COMPACT_VERSION_RE.search(raw_title) is not None
+
+
 def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
+    """Parse deterministic assignment metadata from VLM-transcribed title text.
+
+    The VLM reads the title crop, but this parser owns normalization so every
+    submission for the same assignment lands on the same frontmatter values.
+    It supports course-prefixed titles, explicit version markers, and compact
+    suffix versions while preserving the assignment number in the title.
+    """
     normalized = "\n".join(
         line.strip() for line in raw_title.splitlines() if line.strip()
     )
 
     canonical_match = _TITLE_CANONICAL_RE.search(normalized)
-    if canonical_match is not None:
-        course_code = canonical_match.group("course").replace(" ", "")
-        assignment_title = re.sub(
-            r"\s+", " ", canonical_match.group("assignment")
-        ).strip()
+    if canonical_match is not None and _looks_like_course_code(
+        canonical_match.group("course")
+    ):
+        course_code = _normalize_course_code(canonical_match.group("course"))
+        assignment_title = _normalize_assignment_title(
+            canonical_match.group("assignment")
+        )
         assignment_version = _normalize_assignment_version(
             canonical_match.group("version")
         )
@@ -718,15 +783,20 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
         first_line = normalized.splitlines()[0]
 
     course_code: str | None = None
-    matched_course = _TITLE_COURSE_RE.search(first_line)
+    matched_course = _find_course_match(first_line)
     if matched_course is not None:
-        course_code = matched_course.group(1).replace(" ", "")
+        course_code = _normalize_course_code(matched_course.group(1))
 
     assignment_line = first_line
     if ":" in assignment_line:
         left, right = assignment_line.split(":", 1)
-        if _TITLE_COURSE_RE.search(left):
+        if _find_course_match(left):
             assignment_line = right.strip()
+    elif matched_course is not None and not first_line[: matched_course.start()].strip(
+        " :-"
+    ):
+        # Support course-prefixed titles without a separator.
+        assignment_line = first_line[matched_course.end() :].strip(" :-")
 
     matched_explicit_version = _TITLE_VERSION_EXPLICIT_RE.search(normalized)
     if matched_explicit_version is not None:
@@ -740,16 +810,32 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
                 matched_bracket_version.group(1)
             )
         else:
-            matched_suffix_version = _TITLE_VERSION_SUFFIX_RE.search(assignment_line)
-            assignment_version = (
-                _normalize_assignment_version(matched_suffix_version.group(1))
-                if matched_suffix_version is not None
-                else None
-            )
+            matched_compact_version = _TITLE_COMPACT_VERSION_RE.search(assignment_line)
+            if matched_compact_version is not None:
+                # Compact suffixes identify the version; the preceding number
+                # remains part of the assignment title.
+                assignment_line = matched_compact_version.group("title")
+                assignment_version = _normalize_assignment_version(
+                    matched_compact_version.group("version")
+                )
+            else:
+                matched_suffix_version = _TITLE_VERSION_SUFFIX_RE.search(
+                    assignment_line
+                )
+                assignment_version = (
+                    _normalize_assignment_version(matched_suffix_version.group(1))
+                    if matched_suffix_version is not None
+                    else None
+                )
 
-    assignment_title = assignment_line.strip() or "Unknown Assignment"
+    assignment_title = _normalize_assignment_title(assignment_line)
     assignment_title = re.sub(
-        r"(?i)\s*for\s+version\s+[A-Z0-9]+\s*$", "", assignment_title
+        r"(?i)\s*(?:for\s+)?version\s+[A-Z0-9]+\s*$", "", assignment_title
+    ).strip()
+    assignment_title = re.sub(
+        r"\s*[\(\[]\s*[A-Z0-9][A-Z0-9_₀-₉ₐ-ₜ]*\s*[\)\]]\s*$",
+        "",
+        assignment_title,
     ).strip()
 
     return AssignmentTitleMetadata(
@@ -765,12 +851,20 @@ def _assignment_metadata_from_title_result(
 ) -> AssignmentTitleMetadata:
     """Convert structured title OCR output into submission metadata."""
     parsed = parse_assignment_metadata_from_title(result.raw_title)
-    assignment_title = result.assignment_title.strip()
-    if not assignment_title or assignment_title == "Unknown Assignment":
+    parsed_compact_version = _has_compact_title_version(result.raw_title)
+    assignment_title = _normalize_assignment_title(result.assignment_title)
+    # Structured VLM fields can preserve compact suffixes in assignment_title.
+    # When raw_title has a deterministic compact-version parse, prefer that
+    # parser's title/version split over the VLM's structured title field.
+    if (
+        parsed_compact_version
+        or not assignment_title
+        or assignment_title == "Unknown Assignment"
+    ):
         assignment_title = parsed.assignment_title
     return AssignmentTitleMetadata(
         raw_title=result.raw_title.strip() or parsed.raw_title,
-        course_code=result.course_code or parsed.course_code,
+        course_code=_normalize_course_code(result.course_code) or parsed.course_code,
         assignment_title=assignment_title,
         assignment_version=result.assignment_version or parsed.assignment_version,
     )
