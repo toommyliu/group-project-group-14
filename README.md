@@ -72,18 +72,14 @@ uv sync --all-groups
 
 ## Usage Guide
 
-Run the TUI:
-```bash
-uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
-```
-
 Run CLI tools:
 ```bash
 uv run <script_name> [arguments]
+```
 
-# Examples
-uv run qa-file generate-template --qa-file SAMPLE-QA.md --output-pdf out/template-vA.pdf
-uv run submission-file --help
+Run the TUI:
+```bash
+uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
 ```
 
 <details>
