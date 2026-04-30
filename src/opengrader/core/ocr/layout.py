@@ -101,6 +101,16 @@ _QUESTION_TOKEN_RE = re.compile(
 _QUESTION_Q_RE = re.compile(
     r"^q(?:uestion)?\s*(\d{1,3})[\.)]?$", re.IGNORECASE
 )  # Match "q7", "Q 12.", "question 99)", etc.
+_TITLE_COURSE_RE = re.compile(r"\b[A-Z]{2,}\s*\d{1,4}[A-Z]?\b", re.IGNORECASE)
+_TITLE_ASSIGNMENT_RE = re.compile(
+    r"\b(?:quiz|midterm|exam|final|assignment|homework|hw)\b",
+    re.IGNORECASE,
+)
+_TITLE_COMPACT_VERSION_RE = re.compile(
+    r"\b(?:quiz|midterm|exam|final|assignment|homework|hw)\s*"
+    r"\d+\s*[_-]\s*[A-Z0-9]+\b",
+    re.IGNORECASE,
+)
 
 
 # Heuristic thresholds for page positions.
@@ -923,8 +933,14 @@ def _detect_title_region(
     page_h: int,
     first_question_y_px: int | None,
     fields: list[DetectedFieldRegion],
+    review_reasons: list[str] | None = None,
 ) -> DetectedTitleRegion | None:
-    """Detect the assignment title from the first-page header."""
+    """Detect the assignment title crop from first-page header geometry.
+
+    This finds where the title is; later VLM OCR reads what the title says.
+    Header scans can merge nearby title and student-field text, so candidate
+    lines are reduced to their title-like segment before scoring.
+    """
 
     search_bottom = (
         first_question_y_px
@@ -936,6 +952,27 @@ def _detect_title_region(
         bbox_norm_to_px(field.crop_bbox_norm, page_w, page_h) for field in fields
     ]
 
+    def fallback_region() -> DetectedTitleRegion:
+        """Return a conservative header crop when no title-like line is reliable."""
+        if review_reasons is not None:
+            review_reasons.append("title_region_fallback_header")
+        bottom = max(
+            int(page_h * 0.08),
+            min(search_bottom, int(page_h * 0.18)),
+        )
+        bbox = _expand_px(
+            (int(page_w * 0.04), int(page_h * 0.02), int(page_w * 0.96), bottom),
+            page_w=page_w,
+            page_h=page_h,
+            pad_x=0,
+            pad_y=max(4, int(page_h * 0.004)),
+        )
+        return DetectedTitleRegion(
+            page_number=1,
+            crop_bbox_norm=bbox_px_to_norm(bbox, page_w, page_h),
+            confidence=35.0,
+        )
+
     def line_center_is_in_field(line: PageTextLine) -> bool:
         x0, y0, x1, y1 = line.bbox_px
         cx = (x0 + x1) / 2
@@ -945,8 +982,75 @@ def _detect_title_region(
                 return True
         return False
 
+    def word_center_is_in_field(word: PageTextWord) -> bool:
+        x0, y0, x1, y1 = word.bbox_px
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2
+        for fx0, fy0, fx1, fy1 in field_boxes:
+            if fx0 <= cx <= fx1 and fy0 <= cy <= fy1:
+                return True
+        return False
+
+    def title_segment_from_line(line: PageTextLine) -> PageTextLine | None:
+        """Trim a mixed header OCR line down to the probable title segment."""
+        words = list(line.words)
+        if not words:
+            return None
+
+        end_idx = len(words)
+        for idx, word in enumerate(words):
+            norm = _normalize_token(word.text)
+            if _looks_like_name_label(norm) or _looks_like_sid_label(norm):
+                end_idx = idx
+                break
+
+        segment_words = [
+            word for word in words[:end_idx] if not word_center_is_in_field(word)
+        ]
+        if not segment_words:
+            return None
+
+        bbox = _union_px([word.bbox_px for word in segment_words])
+        confidence = sum(word.confidence for word in segment_words) / len(segment_words)
+        text = re.sub(
+            r"\s+",
+            " ",
+            " ".join(word.text for word in segment_words),
+        ).strip()
+        return PageTextLine(
+            text=text,
+            confidence=confidence,
+            bbox_px=bbox,
+            words=tuple(segment_words),
+        )
+
+    def distance_to_nearest_field(line: PageTextLine) -> float:
+        if not field_boxes:
+            return page_h * 0.20
+        x0, y0, x1, y1 = line.bbox_px
+        distances: list[float] = []
+        for fx0, fy0, fx1, fy1 in field_boxes:
+            dx = max(fx0 - x1, x0 - fx1, 0)
+            dy = max(fy0 - y1, y0 - fy1, 0)
+            distances.append((dx * dx + dy * dy) ** 0.5)
+        return min(distances)
+
+    def title_cue_score(text: str) -> float:
+        """Score deterministic title hints without using OCR text as final output."""
+        score = 0.0
+        if _TITLE_COURSE_RE.search(text):
+            score += 34.0
+        if _TITLE_ASSIGNMENT_RE.search(text):
+            score += 30.0
+        if _TITLE_COMPACT_VERSION_RE.search(text):
+            score += 18.0
+        return score
+
     candidate_lines: list[PageTextLine] = []
-    for line in first_page_lines:
+    for raw_line in first_page_lines:
+        line = title_segment_from_line(raw_line)
+        if line is None:
+            continue
         x0, y0, x1, y1 = line.bbox_px
         if y0 > search_bottom:
             continue
@@ -966,30 +1070,56 @@ def _detect_title_region(
         candidate_lines.append(line)
 
     if not candidate_lines:
-        return None
+        return fallback_region()
 
     def score(line: PageTextLine) -> float:
+        """Rank candidate title crops by stable header geometry and weak text cues."""
         x0, y0, x1, y1 = line.bbox_px
         width_norm = (x1 - x0) / max(1, page_w)
         height_norm = (y1 - y0) / max(1, page_h)
-        center_offset = abs(((x0 + x1) / 2) - page_w / 2) / max(1, page_w)
         token_count = len(re.findall(r"[A-Za-z0-9]+", line.text))
-        long_line_penalty = max(0.0, width_norm - 0.50) * 90.0
-        verbose_penalty = max(0, token_count - 8) * 4.0
-        short_line_penalty = max(0.0, 0.08 - width_norm) * 80.0
+        y_norm = y0 / max(1, page_h)
+        search_progress = y0 / max(1, search_bottom)
+        long_line_penalty = max(0.0, width_norm - 0.62) * 100.0
+        verbose_penalty = max(0, token_count - 9) * 5.0
+        short_line_penalty = max(0.0, 0.05 - width_norm) * 60.0
+        instruction_penalty = (
+            24.0
+            if re.search(
+                r"\b(?:instructions?|show your work|answer all)\b",
+                line.text,
+                re.I,
+            )
+            else 0.0
+        )
+        # Instructions can be high-confidence and near the top of the page.
+        # Field proximity keeps header title rows ahead of instruction blocks.
+        field_distance_bonus = (
+            min(distance_to_nearest_field(line) / max(1, page_h), 0.08) * 95.0
+        )
+        above_field_bonus = 0.0
+        if field_boxes and any(y1 <= fy0 for _fx0, fy0, _fx1, _fy1 in field_boxes):
+            above_field_bonus = 12.0
         return (
-            line.confidence
-            + min(width_norm, 0.48) * 28.0
+            line.confidence * 0.45
+            + title_cue_score(line.text)
+            + min(width_norm, 0.55) * 18.0
             + height_norm * 140.0
-            - center_offset * 70.0
+            + max(0.0, 1.0 - search_progress) * 16.0
+            + field_distance_bonus
+            + above_field_bonus
             - long_line_penalty
             - verbose_penalty
             - short_line_penalty
-            - y0 / page_h * 8.0
+            - instruction_penalty
+            - y_norm * 10.0
         )
 
     best = max(candidate_lines, key=score)
     best_score = score(best)
+    if title_cue_score(best.text) <= 0.0 and best_score < 45.0:
+        return fallback_region()
+
     selected = [best]
     max_title_line_gap = max(14, int(page_h * 0.010))
     for line in candidate_lines:
@@ -1003,9 +1133,10 @@ def _detect_title_region(
             ((line.bbox_px[0] + line.bbox_px[2]) / 2)
             - ((best.bbox_px[0] + best.bbox_px[2]) / 2)
         ) / max(1, page_w)
+        left_delta = abs(line.bbox_px[0] - best.bbox_px[0]) / max(1, page_w)
         if (
             vertical_gap <= max_title_line_gap
-            and center_delta <= 0.18
+            and (center_delta <= 0.18 or left_delta <= 0.08)
             and score(line) >= best_score - 20.0
         ):
             selected.append(line)
@@ -1399,6 +1530,7 @@ def scan_submission_layout(
         page_h=first_h,
         first_question_y_px=first_question_y_px,
         fields=fields,
+        review_reasons=review_reasons,
     )
     if title_region is None:
         review_reasons.append("title_region_missing")

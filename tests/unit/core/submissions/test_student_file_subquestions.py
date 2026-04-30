@@ -15,6 +15,48 @@ from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
 
 
+def test_parse_assignment_metadata_extracts_compact_suffix_version() -> None:
+    metadata = student_file.parse_assignment_metadata_from_title("cmpe 30 quiz 2_5a")
+
+    assert metadata.course_code == "CMPE30"
+    assert metadata.assignment_title == "Quiz 2"
+    assert metadata.assignment_version == "5A"
+
+
+def test_parse_assignment_metadata_extracts_colon_compact_suffix_version() -> None:
+    metadata = student_file.parse_assignment_metadata_from_title("CMPE 30: Quiz 2_5a")
+
+    assert metadata.course_code == "CMPE30"
+    assert metadata.assignment_title == "Quiz 2"
+    assert metadata.assignment_version == "5A"
+
+
+def test_parse_assignment_metadata_preserves_existing_version_forms() -> None:
+    canonical = student_file.parse_assignment_metadata_from_title("CS146: Quiz 1 (A)")
+    explicit = student_file.parse_assignment_metadata_from_title("Quiz 1 Version B")
+
+    assert canonical.course_code == "CS146"
+    assert canonical.assignment_title == "Quiz 1"
+    assert canonical.assignment_version == "A"
+    assert explicit.assignment_title == "Quiz 1"
+    assert explicit.assignment_version == "B"
+
+
+def test_assignment_metadata_from_title_result_prefers_compact_raw_parse() -> None:
+    metadata = student_file._assignment_metadata_from_title_result(
+        TitleMetadataResult(
+            course_code=None,
+            assignment_title="Quiz 2_5a",
+            assignment_version=None,
+            raw_title="cmpe 30 quiz 2_5a",
+        )
+    )
+
+    assert metadata.course_code == "CMPE30"
+    assert metadata.assignment_title == "Quiz 2"
+    assert metadata.assignment_version == "5A"
+
+
 def _draw_subquestion_boxes(path: Path) -> None:
     image = Image.new("RGB", (1200, 1600), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
