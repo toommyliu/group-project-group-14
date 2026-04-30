@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
 
 import numpy as np
+import yaml
 from PIL import Image, ImageOps
 
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
@@ -26,6 +28,7 @@ from opengrader.core.ocr.ollama_vlm import (
 )
 from opengrader.core.ocr.scanner import _find_rectangles
 from opengrader.core.ocr.utils import apply_grayscale
+from opengrader.core.source_location import QuestionSourceSegment
 
 
 _TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b")
@@ -48,6 +51,18 @@ _SUBQUESTION_MIN_HEIGHT_NORM = 0.08
 _SUBQUESTION_MAX_X_SPREAD_NORM = 0.08
 _SUBQUESTION_MARKER_MAX_X_NORM = 0.30
 _SUBQUESTION_MARKER_TOKEN_RE = re.compile(r"^[\(\[]?([a-z])[\)\].:]?$")
+_SUBMISSION_FRONTMATTER_RE = re.compile(r"^---\s*$")
+_SUBMISSION_QUESTION_RE = re.compile(r"^-\s+([A-Za-z]\w*):\s*$")
+_SUBMISSION_FIELD_RE = re.compile(r"^\s{2}-\s+([^:]+):\s*(.*)$")
+_SUBMISSION_CHILD_BULLET_RE = re.compile(r"^\s{4}-\s+(.*)$")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+_PROMPT_POINTS_RE = re.compile(
+    r"^\((\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.*)$",
+    re.IGNORECASE,
+)
+_PARTIAL_RUBRIC_CATEGORY = "Partially Correct"
+_PARTIAL_RUBRIC_PREFIX = f"{_PARTIAL_RUBRIC_CATEGORY} - "
+_RUBRIC_CATEGORIES = {"Correct", _PARTIAL_RUBRIC_CATEGORY, "Incorrect"}
 
 
 @dataclass(frozen=True)
@@ -66,8 +81,15 @@ class StudentSubmissionQuestion:
     response_image_path: str | None
     response_text: str
     points_awarded: float | None = None
+    rubric_labels: tuple[str, ...] = ()
     analysis: str = ""
     question_type: QuestionType = FREE_RESPONSE
+    source_segments: tuple[QuestionSourceSegment, ...] = ()
+
+    @property
+    def rubric_label(self) -> str:
+        """Return the legacy single-label view of selected rubric labels."""
+        return self.rubric_labels[0] if len(self.rubric_labels) == 1 else ""
 
 
 @dataclass(frozen=True)
@@ -89,306 +111,588 @@ class StudentSubmissionBuildResult:
     responses_dir: Path
 
 
-def _parse_submission_scalar(raw: str) -> str | None:
-    value = raw.strip()
-    if value in {"", "null", "Null", "NULL"}:
+@dataclass(frozen=True)
+class StudentSubmissionGradeUpdate:
+    question_id: str
+    possible_points: float | None = None
+    points_awarded: float | None = None
+    rubric_labels: tuple[str, ...] | None = None
+    analysis: str | None = None
+
+
+@dataclass(frozen=True)
+class _SplitQuestionImage:
+    question_id: str
+    image_path: Path
+    bbox_norm: tuple[float, float, float, float]
+
+    def __iter__(self):
+        yield self.question_id
+        yield self.image_path
+
+
+@dataclass(frozen=True)
+class _SubmissionQuestionFields:
+    """Parsed scalar field values and indented child bullets for one question."""
+
+    values: dict[str, str]
+    children: dict[str, tuple[str, ...]]
+
+
+def _parse_submission_frontmatter(content: str) -> tuple[dict[str, object], list[str]]:
+    lines = content.splitlines()
+    if not lines or _SUBMISSION_FRONTMATTER_RE.match(lines[0]) is None:
+        return {}, lines
+
+    for index in range(1, len(lines)):
+        if _SUBMISSION_FRONTMATTER_RE.match(lines[index]) is not None:
+            raw_frontmatter = "\n".join(lines[1:index])
+            parsed = yaml.safe_load(raw_frontmatter) or {}
+            if not isinstance(parsed, dict):
+                raise ValueError("student submission frontmatter must be a mapping")
+            return parsed, lines[index + 1 :]
+
+    return {}, lines
+
+
+def _submission_question_blocks(
+    lines: list[str],
+) -> list[tuple[str, list[str]]]:
+    blocks: list[tuple[str, list[str]]] = []
+    current_id: str | None = None
+    current_lines: list[str] = []
+
+    for line in lines:
+        matched = _SUBMISSION_QUESTION_RE.match(line)
+        if matched is not None:
+            if current_id is not None:
+                blocks.append((current_id, current_lines))
+            current_id = matched.group(1)
+            current_lines = []
+            continue
+
+        if current_id is not None:
+            current_lines.append(line)
+
+    if current_id is not None:
+        blocks.append((current_id, current_lines))
+
+    return blocks
+
+
+def _parse_submission_question_fields(lines: list[str]) -> _SubmissionQuestionFields:
+    """Parse scalar question fields and field-owned child bullets.
+
+    Submission question fields normally use two-space list entries such as
+    ``  - Points: 10``. Literal fields with ``|`` continue to consume their
+    indented body exactly as before. Non-literal fields may now own child
+    bullets of the form ``    - text``; this is used by ``Rubric`` to store
+    selected partial-credit subitems in a readable nested shape.
+
+    Returns the scalar values separately from child bullets so existing fields
+    can continue to use simple string lookup while rubric parsing can validate
+    category headers and subitems together.
+    """
+    fields: dict[str, str] = {}
+    children: dict[str, tuple[str, ...]] = {}
+    index = 0
+    while index < len(lines):
+        matched = _SUBMISSION_FIELD_RE.match(lines[index])
+        if matched is None:
+            index += 1
+            continue
+
+        key = matched.group(1).strip()
+        raw_value = matched.group(2).rstrip()
+        index += 1
+
+        if raw_value == "|":
+            value_lines: list[str] = []
+            while index < len(lines):
+                next_line = lines[index]
+                if _SUBMISSION_FIELD_RE.match(next_line) is not None:
+                    break
+                if next_line.startswith("    "):
+                    value_lines.append(next_line[4:])
+                elif next_line.strip():
+                    value_lines.append(next_line.strip())
+                else:
+                    value_lines.append("")
+                index += 1
+            fields[key] = "\n".join(value_lines).rstrip()
+            continue
+
+        child_values: list[str] = []
+        while index < len(lines):
+            child_match = _SUBMISSION_CHILD_BULLET_RE.match(lines[index])
+            if child_match is None:
+                break
+            child_values.append(child_match.group(1).strip())
+            index += 1
+
+        fields[key] = raw_value.strip()
+        if child_values:
+            children[key] = tuple(child_values)
+
+    return _SubmissionQuestionFields(values=fields, children=children)
+
+
+def _frontmatter_str(
+    frontmatter: dict[str, object],
+    key: str,
+    *,
+    default: str = "",
+) -> str:
+    value = frontmatter.get(key)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _frontmatter_optional_str(
+    frontmatter: dict[str, object],
+    key: str,
+) -> str | None:
+    value = frontmatter.get(key)
+    if value is None:
         return None
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        return value[1:-1].replace('\\"', '"')
-    return value
+    text = str(value).strip()
+    return text or None
 
 
-def _parse_submission_float(raw: str | None) -> float | None:
+def _parse_optional_float(raw: str | None) -> float | None:
     if raw is None:
         return None
-    value = raw.strip()
-    if not value:
+    text = raw.strip()
+    if not text:
         return None
     try:
-        return float(value)
+        return float(text)
     except ValueError:
         return None
 
 
-def _render_submission_float(value: float | None) -> str:
+def _strip_prompt_points(prompt: str) -> tuple[str, float | None]:
+    matched = _PROMPT_POINTS_RE.match(prompt.strip())
+    if matched is None:
+        return prompt.strip(), None
+    return matched.group(2).strip(), float(matched.group(1))
+
+
+def _parse_question_type(raw: str | None) -> QuestionType:
+    normalized = (raw or "").strip().lower().replace("-", " ")
+    if normalized in {"multiple choice", "multiple_choice"}:
+        return MULTIPLE_CHOICE
+    return FREE_RESPONSE
+
+
+def _parse_source_segments(raw: str | None) -> tuple[QuestionSourceSegment, ...]:
+    text = (raw or "").strip()
+    if not text:
+        return ()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("source segments must be JSON") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("source segments must be a JSON list")
+
+    segments: list[QuestionSourceSegment] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("source segment entries must be objects")
+        page = item.get("page")
+        if page is None:
+            page = item.get("page_number")
+        bbox = item.get("bbox")
+        if not isinstance(page, int) or page < 1:
+            raise ValueError("source segment page must be a positive integer")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            raise ValueError("source segment bbox must contain four numbers")
+        try:
+            x, y, w, h = (float(value) for value in bbox)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("source segment bbox must contain numbers") from exc
+        segments.append(
+            QuestionSourceSegment(
+                page_number=page,
+                bbox_norm=(x, y, w, h),
+            )
+        )
+    return tuple(segments)
+
+
+def _format_source_segments(
+    segments: tuple[QuestionSourceSegment, ...],
+) -> str:
+    if not segments:
+        return ""
+    payload = [
+        {
+            "page": segment.page_number,
+            "bbox": [round(value, 4) for value in segment.bbox_norm],
+        }
+        for segment in segments
+    ]
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _format_submission_points(value: float | None) -> str:
     if value is None:
         return ""
-    if value.is_integer():
+    if float(value).is_integer():
         return str(int(value))
     return f"{value:g}"
 
 
-def _parse_student_submission_frontmatter(
-    lines: list[str],
-) -> tuple[dict[str, str], int]:
-    if len(lines) < 2 or lines[0].strip() != "---":
-        return {}, 0
-
-    frontmatter: dict[str, str] = {}
-    index = 1
-    while index < len(lines):
-        line = lines[index]
-        if line.strip() == "---":
-            return frontmatter, index + 1
-
-        if ":" in line:
-            key, raw_value = line.split(":", 1)
-            parsed = _parse_submission_scalar(raw_value)
-            frontmatter[key.strip()] = parsed or ""
-        index += 1
-
-    return {}, 0
-
-
-def _submission_block_value(lines: list[str], start: int) -> tuple[str, int]:
-    output: list[str] = []
-    index = start
-    while index < len(lines):
-        line = lines[index]
-        if _SUBMISSION_FIELD_RE.match(line) or _SUBMISSION_QUESTION_RE.match(line):
-            break
-        if line.startswith("    "):
-            output.append(line[4:])
-        elif line.strip():
-            output.append(line.strip())
-        else:
-            output.append("")
-        index += 1
-    return "\n".join(output).rstrip(), index
-
-
-def _parse_response_image_path(raw: str, *, markdown_path: Path | None) -> str | None:
-    value = raw.strip()
-    if not value:
+def _parse_response_image_path(raw: str | None, base_path: Path | None) -> str | None:
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
         return None
 
-    matched = _MARKDOWN_IMAGE_RE.search(value)
-    if matched is not None:
-        value = matched.group(1).strip()
-
-    if not value:
+    matched = _MARKDOWN_IMAGE_RE.search(text)
+    image_path = matched.group(1).strip() if matched is not None else text
+    if not image_path:
         return None
 
-    path = Path(value)
-    if path.is_absolute() or markdown_path is None:
+    path = Path(image_path).expanduser()
+    if path.is_absolute() or base_path is None:
         return str(path)
-    return str((markdown_path.parent / path).resolve())
+    return str((base_path / path).resolve())
+
+
+def _partial_rubric_label(child_label: str) -> str:
+    """Return the flat internal label for a partial-credit child bullet."""
+    return f"{_PARTIAL_RUBRIC_PREFIX}{child_label.strip()}"
+
+
+def _strip_partial_rubric_prefix(label: str) -> str:
+    """Return a partial-credit label without its category prefix."""
+    stripped = label.strip()
+    if stripped.startswith(_PARTIAL_RUBRIC_PREFIX):
+        return stripped[len(_PARTIAL_RUBRIC_PREFIX) :].strip()
+    return stripped
+
+
+def _parse_rubric_labels(
+    value: str,
+    children: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Parse a category-style selected-rubric field.
+
+    The submission markdown format stores the selected rubric as a top-level
+    category in the field value and, for partial-credit selections, optional
+    child bullets under that category. ``Rubric: Correct`` and
+    ``Rubric: Incorrect`` map directly to single internal labels. ``Rubric:
+    Partially Correct`` maps either to the category label itself or to flat
+    internal labels of the form ``Partially Correct - <child>`` when child
+    bullets are present.
+
+    Blank rubric fields with no children mean no selection. Legacy JSON arrays
+    are rejected because this is a deliberate file-format break. Child bullets
+    are only valid under ``Partially Correct``; using them under another
+    category, or without a category value, raises ``ValueError``.
+    """
+    stripped = value.strip()
+    child_labels = tuple(child.strip() for child in children if child.strip())
+    if stripped.startswith("["):
+        raise ValueError("legacy JSON rubric arrays are no longer supported")
+    if not stripped:
+        if child_labels:
+            raise ValueError("rubric child bullets require a rubric category")
+        return ()
+    if stripped not in _RUBRIC_CATEGORIES:
+        raise ValueError(f"unsupported rubric category: {stripped}")
+    if stripped != _PARTIAL_RUBRIC_CATEGORY and child_labels:
+        raise ValueError(f"{stripped} rubric selections cannot have child bullets")
+    if stripped == _PARTIAL_RUBRIC_CATEGORY and child_labels:
+        return tuple(_partial_rubric_label(child) for child in child_labels)
+    return (stripped,)
+
+
+def _format_rubric_field_lines(
+    labels: tuple[str, ...],
+    *,
+    indent: int = 2,
+) -> list[str]:
+    """Render selected rubric labels as a submission markdown Rubric field.
+
+    The renderer is the inverse of ``_parse_rubric_labels``: internal labels
+    remain flat for the rest of the application, while markdown gets the
+    readable category shape. Empty selections render as ``Rubric:``. Correct,
+    Incorrect, and top-level Partially Correct render inline. Partial-credit
+    subitem labels render under ``Rubric: Partially Correct`` with the
+    ``Partially Correct - `` prefix stripped from each child bullet.
+
+    Mixed categories or unknown labels are rejected so invalid internal state
+    does not get written into student submission files.
+    """
+    prefix = " " * indent
+    if not labels:
+        return [f"{prefix}- Rubric:"]
+    if len(labels) == 1 and labels[0] in _RUBRIC_CATEGORIES:
+        return [f"{prefix}- Rubric: {labels[0]}"]
+
+    child_labels: list[str] = []
+    for label in labels:
+        if not label.startswith(_PARTIAL_RUBRIC_PREFIX):
+            raise ValueError(f"unsupported rubric label: {label}")
+        child_label = _strip_partial_rubric_prefix(label)
+        if not child_label:
+            raise ValueError("partial-credit rubric child labels cannot be blank")
+        child_labels.append(child_label)
+
+    lines = [f"{prefix}- Rubric: {_PARTIAL_RUBRIC_CATEGORY}"]
+    lines.extend(f"{prefix}  - {child_label}" for child_label in child_labels)
+    return lines
 
 
 def parse_student_submission_markdown(
     content: str,
     *,
-    markdown_path: str | Path | None = None,
+    base_path: Path | None = None,
 ) -> StudentSubmissionDocument:
-    path = Path(markdown_path) if markdown_path is not None else None
-    lines = content.splitlines()
-    frontmatter, index = _parse_student_submission_frontmatter(lines)
-
+    frontmatter, body_lines = _parse_submission_frontmatter(content)
     questions: list[StudentSubmissionQuestion] = []
-    while index < len(lines):
-        matched_question = _SUBMISSION_QUESTION_RE.match(lines[index])
-        if matched_question is None:
-            index += 1
-            continue
 
-        question_id = matched_question.group(1).strip()
-        index += 1
-        fields: dict[str, str] = {}
-
-        while index < len(lines):
-            if _SUBMISSION_QUESTION_RE.match(lines[index]):
-                break
-
-            matched_field = _SUBMISSION_FIELD_RE.match(lines[index])
-            if matched_field is None:
-                index += 1
-                continue
-
-            field_name = matched_field.group(1).strip().lower()
-            raw_value = matched_field.group(2)
-            index += 1
-
-            if raw_value.strip() == "|":
-                value, index = _submission_block_value(lines, index)
-            else:
-                value = raw_value.strip()
-            fields[field_name] = value
+    for question_id, question_lines in _submission_question_blocks(body_lines):
+        fields = _parse_submission_question_fields(question_lines)
+        prompt_raw = fields.values.get("Prompt", "")
+        possible_points = _parse_optional_float(fields.values.get("Possible points"))
+        prompt = prompt_raw.strip()
+        if possible_points is None:
+            stripped_prompt, inline_points = _strip_prompt_points(prompt)
+            prompt = stripped_prompt
+            possible_points = inline_points
 
         questions.append(
             StudentSubmissionQuestion(
                 question_id=question_id,
-                prompt=fields.get("prompt", ""),
-                possible_points=_parse_submission_float(fields.get("possible points")),
+                prompt=prompt,
+                possible_points=possible_points,
                 response_image_path=_parse_response_image_path(
-                    fields.get("response image", ""),
-                    markdown_path=path,
+                    fields.values.get("Response image"),
+                    base_path,
                 ),
-                response_text=fields.get("response text", ""),
-                points_awarded=_parse_submission_float(fields.get("points")),
-                analysis=fields.get("analysis", ""),
+                response_text=fields.values.get("Response text", "").strip(),
+                points_awarded=_parse_optional_float(fields.values.get("Points")),
+                rubric_labels=_parse_rubric_labels(
+                    fields.values.get("Rubric", ""),
+                    fields.children.get("Rubric", ()),
+                ),
+                analysis=fields.values.get("Analysis", "").strip(),
+                question_type=_parse_question_type(fields.values.get("Question type")),
+                source_segments=_parse_source_segments(
+                    fields.values.get("Source segments")
+                ),
             )
         )
 
     return StudentSubmissionDocument(
-        student_name=frontmatter.get("name", ""),
-        student_id=frontmatter.get("student_id", ""),
-        course_code=frontmatter.get("course_code") or None,
-        assignment_title=frontmatter.get("assignment_title") or None,
-        assignment_version=frontmatter.get("assignment_version") or None,
-        source_pdf=frontmatter.get("source_pdf", ""),
-        score=frontmatter.get("score", ""),
+        student_name=_frontmatter_str(frontmatter, "name"),
+        student_id=_frontmatter_str(frontmatter, "student_id"),
+        course_code=_frontmatter_optional_str(frontmatter, "course_code"),
+        assignment_title=_frontmatter_str(frontmatter, "assignment_title"),
+        assignment_version=_frontmatter_optional_str(frontmatter, "assignment_version"),
+        source_pdf=_frontmatter_str(frontmatter, "source_pdf"),
+        score=_frontmatter_str(frontmatter, "score"),
         questions=questions,
     )
 
 
 def load_student_submission_markdown(path: str | Path) -> StudentSubmissionDocument:
-    markdown_path = Path(path)
+    submission_path = Path(path)
     return parse_student_submission_markdown(
-        markdown_path.read_text(encoding="utf-8"),
-        markdown_path=markdown_path,
+        submission_path.read_text(),
+        base_path=submission_path.parent,
     )
 
 
-def _field_block_end(lines: list[str], start: int) -> int:
-    index = start
-    while index < len(lines):
-        if _SUBMISSION_FIELD_RE.match(lines[index]) or _SUBMISSION_QUESTION_RE.match(
-            lines[index]
-        ):
-            break
-        index += 1
-    return index
-
-
-def _render_submission_field(
-    name: str,
-    value: str,
-    *,
-    indent: str = "  ",
-) -> list[str]:
-    if "\n" not in value:
-        return [f"{indent}- {name}: {value}"]
-
-    rendered = [f"{indent}- {name}: |"]
-    rendered.extend(f"{indent}  {line}" for line in value.splitlines())
-    return rendered
-
-
-def _replace_submission_field(
-    lines: list[str],
-    *,
-    question_start: int,
-    question_end: int,
+def _format_update_field_lines(
     field_name: str,
-    value: str,
-) -> int:
-    normalized = field_name.lower()
-    index = question_start + 1
-    while index < question_end:
-        matched = _SUBMISSION_FIELD_RE.match(lines[index])
-        if matched is None:
-            index += 1
+    value: str | tuple[str, ...],
+) -> list[str]:
+    """Render one updated question field as submission markdown lines."""
+    if field_name == "Rubric":
+        if not isinstance(value, tuple):
+            raise TypeError("Rubric updates require rubric label tuples")
+        return _format_rubric_field_lines(value)
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} updates require string values")
+    if field_name == "Analysis" and "\n" in value:
+        lines = ["  - Analysis: |"]
+        lines.extend(f"    {line}" for line in value.splitlines())
+        return lines
+    return [f"  - {field_name}: {value}".rstrip()]
+
+
+def _question_field_end(block: list[str], start: int) -> int:
+    """Return the exclusive end index for a question field and its owned body.
+
+    Literal block fields such as ``Analysis: |`` consume all following lines
+    until the next two-space question field. Other fields may own consecutive
+    four-space child bullets, which is how nested selected-rubric subitems are
+    represented. Replacement and insertion use this range so edits do not split
+    a field from its body or leave stale rubric child bullets behind.
+    """
+    end = start + 1
+    if block[start].rstrip().endswith("|"):
+        while end < len(block) and _SUBMISSION_FIELD_RE.match(block[end]) is None:
+            end += 1
+        return end
+
+    while (
+        end < len(block)
+        and _SUBMISSION_CHILD_BULLET_RE.match(block[end]) is not None
+    ):
+        end += 1
+    return end
+
+
+def _replace_question_field(
+    block: list[str],
+    field_name: str,
+    value: str | tuple[str, ...],
+) -> bool:
+    """Replace a question field, including any literal body or child bullets."""
+    field_re = re.compile(rf"^  -\s+{re.escape(field_name)}:\s*(.*)$")
+    for index, line in enumerate(block):
+        if field_re.match(line) is None:
             continue
-        if matched.group(1).strip().lower() != normalized:
-            index += 1
-            continue
 
-        replacement = _render_submission_field(field_name, value)
-        field_end = (
-            _field_block_end(lines, index + 1)
-            if matched.group(2).strip() == "|"
-            else index + 1
-        )
-        lines[index:field_end] = replacement
-        return question_end + len(replacement) - (field_end - index)
-
-    insertion = _render_submission_field(field_name, value)
-    lines[question_end:question_end] = insertion
-    return question_end + len(insertion)
+        end = _question_field_end(block, index)
+        block[index:end] = _format_update_field_lines(field_name, value)
+        return True
+    return False
 
 
-def update_student_submission_grade(
-    path: str | Path,
+def _insert_question_field(
+    block: list[str],
     *,
-    question_id: str,
-    points_awarded: float | None,
-    analysis: str,
-) -> StudentSubmissionDocument:
-    markdown_path = Path(path)
-    lines = markdown_path.read_text(encoding="utf-8").splitlines()
-
-    index = 0
-    while index < len(lines):
-        matched = _SUBMISSION_QUESTION_RE.match(lines[index])
-        if matched is None or matched.group(1).strip() != question_id:
-            index += 1
+    after_field: str,
+    field_name: str,
+    value: str | tuple[str, ...],
+) -> bool:
+    """Insert a question field after another field's complete markdown range."""
+    after_re = re.compile(rf"^  -\s+{re.escape(after_field)}:\s*(.*)$")
+    for index, line in enumerate(block):
+        if after_re.match(line) is None:
             continue
 
-        question_end = index + 1
-        while question_end < len(lines):
-            if _SUBMISSION_QUESTION_RE.match(lines[question_end]):
-                break
-            question_end += 1
+        insert_at = _question_field_end(block, index)
+        block[insert_at:insert_at] = _format_update_field_lines(field_name, value)
+        return True
+    return False
 
-        # Preserve OCR output and image references exactly; grading edits should only
-        # touch the fields a grader owns.
-        question_end = _replace_submission_field(
-            lines,
-            question_start=index,
-            question_end=question_end,
+
+def _upsert_question_field(
+    block: list[str],
+    *,
+    field_name: str,
+    value: str | tuple[str, ...],
+    after_fields: tuple[str, ...],
+) -> None:
+    """Replace a question field or insert it near related fields."""
+    if _replace_question_field(block, field_name, value):
+        return
+    for after_field in after_fields:
+        if _insert_question_field(
+            block,
+            after_field=after_field,
+            field_name=field_name,
+            value=value,
+        ):
+            return
+    block.extend(_format_update_field_lines(field_name, value))
+
+
+def _find_submission_question_block(
+    lines: list[str],
+    question_id: str,
+) -> tuple[int, int] | None:
+    question_re = re.compile(rf"^-\s+{re.escape(question_id)}:\s*$")
+    for start, line in enumerate(lines):
+        if question_re.match(line) is None:
+            continue
+        end = start + 1
+        while end < len(lines) and _SUBMISSION_QUESTION_RE.match(lines[end]) is None:
+            end += 1
+        return start, end
+    return None
+
+
+def update_student_submission_markdown(
+    content: str,
+    update: StudentSubmissionGradeUpdate,
+) -> str:
+    had_trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+    block_range = _find_submission_question_block(lines, update.question_id)
+    if block_range is None:
+        raise ValueError(f"question not found in submission: {update.question_id}")
+
+    start, end = block_range
+    block = lines[start:end]
+    if update.possible_points is not None:
+        _upsert_question_field(
+            block,
+            field_name="Possible points",
+            value=_format_submission_points(update.possible_points),
+            after_fields=("Response text", "Response image", "Prompt"),
+        )
+    if update.points_awarded is not None or update.rubric_labels is not None:
+        _upsert_question_field(
+            block,
             field_name="Points",
-            value=_render_submission_float(points_awarded),
+            value=_format_submission_points(update.points_awarded),
+            after_fields=("Possible points", "Response text", "Response image"),
         )
-        _replace_submission_field(
-            lines,
-            question_start=index,
-            question_end=question_end,
+    if update.rubric_labels is not None:
+        _upsert_question_field(
+            block,
+            field_name="Rubric",
+            value=update.rubric_labels,
+            after_fields=("Points", "Possible points"),
+        )
+    if update.analysis is not None:
+        _upsert_question_field(
+            block,
             field_name="Analysis",
-            value=analysis,
+            value=update.analysis,
+            after_fields=("Rubric", "Points", "Possible points"),
         )
-        markdown_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        return load_student_submission_markdown(markdown_path)
 
-    raise ValueError(f"question {question_id!r} not found in {markdown_path}")
+    lines[start:end] = block
+    updated = "\n".join(lines)
+    if had_trailing_newline:
+        return updated + "\n"
+    return updated
 
 
-def _normalize_assignment_version(token: str | None) -> str | None:
-    if not token:
+def update_student_submission_file(
+    path: str | Path,
+    update: StudentSubmissionGradeUpdate,
+) -> None:
+    submission_path = Path(path)
+    updated = update_student_submission_markdown(submission_path.read_text(), update)
+    submission_path.write_text(updated)
+
+
+def _normalize_assignment_version(raw: str | None) -> str | None:
+    if raw is None:
         return None
-    cleaned = token.translate(SUBSCRIPT_TRANSLATION)
-    cleaned = re.sub(r"(?i)^version\s+", "", cleaned.strip())
-    cleaned = cleaned.strip("()[]{}:;,- ")
-    cleaned = re.sub(r"[\s_]+", "", cleaned)
-    return cleaned.upper() if cleaned else None
+    text = raw.translate(SUBSCRIPT_TRANSLATION)
+    text = re.sub(r"(?i)^version\s+", "", text.strip())
+    text = text.strip("()[]{}:;,- ")
+    text = re.sub(r"\s+", "", text)
+    text = text.replace("_", "")
+    return text.upper() or None
 
 
-def parse_assignment_metadata_from_title(
-    raw_title: str | TitleMetadataResult | dict[str, str | None],
-) -> AssignmentTitleMetadata:
-    if isinstance(raw_title, TitleMetadataResult):
-        return AssignmentTitleMetadata(
-            raw_title=raw_title.raw_title,
-            course_code=raw_title.course_code,
-            assignment_title=raw_title.assignment_title or "Unknown Assignment",
-            assignment_version=_normalize_assignment_version(
-                raw_title.assignment_version
-            ),
-        )
-
-    if isinstance(raw_title, dict):
-        title = str(raw_title.get("assignment_title") or "").strip()
-        raw = str(raw_title.get("raw_title") or title).strip()
-        course_code = raw_title.get("course_code")
-        version = raw_title.get("assignment_version")
-        return AssignmentTitleMetadata(
-            raw_title=raw,
-            course_code=str(course_code).strip() if course_code else None,
-            assignment_title=title or "Unknown Assignment",
-            assignment_version=(
-                _normalize_assignment_version(str(version)) if version else None
-            ),
-        )
-
+def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
     normalized = "\n".join(
         line.strip() for line in raw_title.splitlines() if line.strip()
     )
@@ -453,6 +757,22 @@ def parse_assignment_metadata_from_title(
         course_code=course_code,
         assignment_title=assignment_title,
         assignment_version=assignment_version,
+    )
+
+
+def _assignment_metadata_from_title_result(
+    result: TitleMetadataResult,
+) -> AssignmentTitleMetadata:
+    """Convert structured title OCR output into submission metadata."""
+    parsed = parse_assignment_metadata_from_title(result.raw_title)
+    assignment_title = result.assignment_title.strip()
+    if not assignment_title or assignment_title == "Unknown Assignment":
+        assignment_title = parsed.assignment_title
+    return AssignmentTitleMetadata(
+        raw_title=result.raw_title.strip() or parsed.raw_title,
+        course_code=result.course_code or parsed.course_code,
+        assignment_title=assignment_title,
+        assignment_version=result.assignment_version or parsed.assignment_version,
     )
 
 
@@ -530,6 +850,19 @@ def _emit_progress(
 ) -> None:
     if callback is not None:
         callback(message)
+
+
+def _source_pdf_reference(pdf_path: Path, output_dir: Path) -> str:
+    """Return a stable markdown reference from output dir to the source PDF."""
+    resolved_pdf = pdf_path.expanduser().resolve()
+    resolved_output = output_dir.expanduser().resolve()
+    try:
+        return str(resolved_pdf.relative_to(resolved_output))
+    except ValueError:
+        try:
+            return str(Path("..") / resolved_pdf.relative_to(resolved_output.parent))
+        except ValueError:
+            return str(resolved_pdf)
 
 
 def _bbox_norm_to_px(
@@ -805,7 +1138,7 @@ def _split_question_response_image(
     *,
     question_id: str,
     image_path: Path,
-) -> list[tuple[str, Path]]:
+) -> list[_SplitQuestionImage]:
     if not _TOP_LEVEL_QUESTION_ID_RE.fullmatch(question_id):
         return []
 
@@ -822,7 +1155,7 @@ def _split_question_response_image(
     if len(boxes) < 2:
         return []
 
-    outputs: list[tuple[str, Path]] = []
+    outputs: list[_SplitQuestionImage] = []
     for idx, box in enumerate(boxes):
         label = chr(ord("a") + idx)
         subquestion_id = f"{question_id}{label}"
@@ -844,9 +1177,56 @@ def _split_question_response_image(
 
         output_path = image_path.with_name(f"{subquestion_id}{image_path.suffix}")
         crop.save(output_path)
-        outputs.append((subquestion_id, output_path))
+        outputs.append(
+            _SplitQuestionImage(
+                question_id=subquestion_id,
+                image_path=output_path,
+                bbox_norm=(
+                    expanded_box[0],
+                    expanded_box[1],
+                    expanded_box[2],
+                    expanded_box[3],
+                ),
+            )
+        )
 
     return outputs
+
+
+def _map_subquestion_source_segments(
+    parent_segments: tuple[QuestionSourceSegment, ...],
+    child_bbox_norm: tuple[float, float, float, float],
+) -> tuple[QuestionSourceSegment, ...]:
+    """Map a child crop within a parent response image onto source PDF space."""
+    if not parent_segments:
+        return ()
+    parent = parent_segments[0]
+    parent_x, parent_y, parent_w, parent_h = parent.bbox_norm
+    child_x, child_y, child_w, child_h = child_bbox_norm
+    return (
+        QuestionSourceSegment(
+            page_number=parent.page_number,
+            bbox_norm=(
+                parent_x + (child_x * parent_w),
+                parent_y + (child_y * parent_h),
+                child_w * parent_w,
+                child_h * parent_h,
+            ),
+        ),
+    )
+
+
+def _coerce_split_question_image(
+    split_image: _SplitQuestionImage | tuple[str, Path],
+) -> _SplitQuestionImage:
+    if isinstance(split_image, _SplitQuestionImage):
+        return split_image
+    question_id, image_path = split_image
+    return _SplitQuestionImage(
+        question_id=question_id,
+        image_path=image_path,
+        bbox_norm=(0.0, 0.0, 1.0, 1.0),
+    )
 
 
 def _classify_question_image_path(image_path: Path) -> QuestionType:
@@ -921,19 +1301,25 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             )
         else:
             lines.append("  - Response image: ")
+        lines.append(
+            f"  - Source segments: {_format_source_segments(question.source_segments)}"
+        )
 
         _render_multiline_text(lines, question.response_text, indent=2)
 
         points_text = (
-            str(int(question.possible_points))
+            _format_submission_points(question.possible_points)
             if question.possible_points is not None
             else ""
         )
         lines.append(f"  - Possible points: {points_text}")
         points_awarded_text = (
-            str(question.points_awarded) if question.points_awarded is not None else ""
+            _format_submission_points(question.points_awarded)
+            if question.points_awarded is not None
+            else ""
         )
         lines.append(f"  - Points: {points_awarded_text}")
+        lines.extend(_format_rubric_field_lines(question.rubric_labels))
         lines.append(f"  - Analysis: {question.analysis}")
         lines.append("")
 
@@ -1003,7 +1389,7 @@ def build_student_submission_document(
     if title_crop_path is not None and title_crop_path.exists():
         _emit_progress(progress_callback, "Ollama title OCR")
         try:
-            title_meta = parse_assignment_metadata_from_title(
+            title_meta = _assignment_metadata_from_title_result(
                 extract_title_metadata(
                     image_path=title_crop_path,
                     config=active_ollama_config,
@@ -1019,19 +1405,26 @@ def build_student_submission_document(
         title_meta = parse_assignment_metadata_from_title("")
 
     questions: list[StudentSubmissionQuestion] = []
-    question_jobs: list[tuple[str, Path | None, QuestionType]] = []
+    question_jobs: list[
+        tuple[str, Path | None, QuestionType, tuple[QuestionSourceSegment, ...]]
+    ] = []
 
     for extracted_question in extraction_result.questions:
         qid = extracted_question.question_id
         parent_question_type = extracted_question.question_type
 
-        question_images: list[tuple[str, Path | None, QuestionType]] = [
-            (qid, None, parent_question_type)
+        parent_source_segments = extracted_question.source_segments
+        question_images: list[
+            tuple[str, Path | None, QuestionType, tuple[QuestionSourceSegment, ...]]
+        ] = [
+            (qid, None, parent_question_type, parent_source_segments)
         ]
         if extracted_question.output_path:
             image_path = Path(extracted_question.output_path)
             if image_path.exists():
-                question_images = [(qid, image_path, parent_question_type)]
+                question_images = [
+                    (qid, image_path, parent_question_type, parent_source_segments)
+                ]
                 if split_subquestions:
                     try:
                         split_images = _split_question_response_image(
@@ -1041,19 +1434,27 @@ def build_student_submission_document(
                     except Exception:
                         split_images = []
                     if split_images:
+                        split_question_images = [
+                            _coerce_split_question_image(split_image)
+                            for split_image in split_images
+                        ]
                         question_images = [
                             (
-                                split_qid,
-                                split_image_path,
-                                _classify_question_image_path(split_image_path),
+                                split_image.question_id,
+                                split_image.image_path,
+                                _classify_question_image_path(split_image.image_path),
+                                _map_subquestion_source_segments(
+                                    parent_source_segments,
+                                    split_image.bbox_norm,
+                                ),
                             )
-                            for split_qid, split_image_path in split_images
+                            for split_image in split_question_images
                         ]
 
         question_jobs.extend(question_images)
 
     total_question_jobs = len(question_jobs)
-    for index, (question_id, image_path, question_type) in enumerate(
+    for index, (question_id, image_path, question_type, source_segments) in enumerate(
         question_jobs, start=1
     ):
         response_image_path: str | None = None
@@ -1091,6 +1492,7 @@ def build_student_submission_document(
                 response_image_path=response_image_path,
                 response_text=response_text,
                 question_type=question_type,
+                source_segments=source_segments,
             )
         )
 
@@ -1100,7 +1502,7 @@ def build_student_submission_document(
         course_code=title_meta.course_code,
         assignment_title=title_meta.assignment_title,
         assignment_version=title_meta.assignment_version,
-        source_pdf=pdf.name,
+        source_pdf=_source_pdf_reference(pdf, out_dir),
         score="",
         questions=questions,
     )

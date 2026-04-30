@@ -6,8 +6,10 @@ from enum import Enum
 from pathlib import Path
 from typing import TypedDict
 
-from .generate import QuestionInput
-from .utils import default_subquestion_label
+from opengrader.core.pdf.templates.generate import QuestionInput
+from opengrader.core.pdf.templates.utils import default_subquestion_label
+
+from .scoring import RubricOptionKind, RubricSelectionMode, rubric_scoring_mode
 
 # "(10 points) Question prompt" -> points=10, prompt="Question prompt"
 _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGNORECASE)
@@ -37,20 +39,36 @@ class FrontmatterMarker(str, Enum):
 
 @dataclass
 class QARubricItem:
+    """One rubric category or weighted checklist leaf from a QA file."""
+
     label: str
     points_delta: float | None = None
     notes: list[str] = field(default_factory=list)
     subitems: list["QARubricItem"] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class QARubricFlatOption:
+    """Flattened rubric leaf option with grading selection semantics."""
+
+    label: str
+    points_delta: float
+    kind: RubricOptionKind
+    selection_mode: RubricSelectionMode
+
+
 @dataclass
 class QAChoice:
+    """One multiple-choice option declared in a QA file."""
+
     label: str
     text: str
 
 
 @dataclass
 class QASubquestion:
+    """A graded part nested under a parent QA question."""
+
     id: str
     prompt: str
     points: int
@@ -64,6 +82,8 @@ class QASubquestion:
 
 @dataclass
 class QAQuestion:
+    """A top-level QA question with optional answers, choices, or subquestions."""
+
     id: str
     prompt: str
     points: int
@@ -77,6 +97,8 @@ class QAQuestion:
 
 @dataclass
 class QADocument:
+    """Parsed QA markdown plus assignment-level metadata."""
+
     questions: list[QAQuestion]
     title: str | None = None
     instructions: str | None = None
@@ -558,30 +580,6 @@ def _parse_rubric_section(item: _BulletItem) -> list[QARubricItem]:
     return rubric
 
 
-def _rubric_deductions_reach_points(deltas: list[float], points: int) -> bool:
-    if points <= 0:
-        return True
-
-    scale = 1000
-    target = points * scale
-    deductions = [int(round(abs(delta) * scale)) for delta in deltas if delta < 0]
-    if not deductions:
-        return False
-
-    reachable: set[int] = {0}
-    for deduction in deductions:
-        next_reachable: set[int] = set(reachable)
-        for partial in reachable:
-            candidate = partial + deduction
-            if candidate <= target:
-                next_reachable.add(candidate)
-        reachable = next_reachable
-        if target in reachable:
-            return True
-
-    return target in reachable
-
-
 def _rubric_effective_deltas(
     rubric: list[QARubricItem], *, context: str
 ) -> list[float]:
@@ -617,6 +615,62 @@ def _rubric_effective_deltas(
     return deltas
 
 
+def _validate_correct_and_incorrect_shortcuts(
+    rubric: list[QARubricItem],
+    *,
+    points: int,
+    mode: str,
+    context: str,
+) -> None:
+    """Enforce exclusive full-credit and zero-credit shortcut values."""
+    by_label = {item.label: item for item in rubric}
+    correct = by_label.get("Correct")
+    incorrect = by_label.get("Incorrect")
+    if correct is None or correct.points_delta is None:
+        return
+    if incorrect is None or incorrect.points_delta is None:
+        return
+
+    if mode == "positive_awards":
+        if abs(correct.points_delta - points) > 1e-6:
+            raise ValueError(
+                f"{context} Correct rubric item must award +{points:g} points"
+            )
+        if abs(incorrect.points_delta) > 1e-6:
+            raise ValueError(f"{context} Incorrect rubric item must award +0 points")
+        return
+
+    if abs(correct.points_delta) > 1e-6:
+        raise ValueError(f"{context} Correct rubric item must have +0 points")
+    if abs(incorrect.points_delta + points) > 1e-6:
+        raise ValueError(
+            f"{context} Incorrect rubric item must deduct -{points:g} points"
+        )
+
+
+def _validate_nested_partial_exact_sum(
+    rubric: list[QARubricItem],
+    *,
+    points: int,
+    mode: str,
+    context: str,
+) -> None:
+    """Ensure checklist partial weights exactly cover the question value."""
+    partial = next((item for item in rubric if item.label == "Partially Correct"), None)
+    if partial is None or not partial.subitems:
+        return
+
+    total = sum(sub.points_delta or 0.0 for sub in partial.subitems)
+    target = float(points if mode == "positive_awards" else -points)
+    if abs(total - target) <= 1e-6:
+        return
+
+    raise ValueError(
+        f"{context} checklist partial items must sum to {target:+g} points; "
+        f"got {total:+g}"
+    )
+
+
 def _validate_rubric_points(
     rubric: list[QARubricItem], *, points: int, context: str
 ) -> None:
@@ -624,12 +678,18 @@ def _validate_rubric_points(
         return
 
     deltas = _rubric_effective_deltas(rubric, context=context)
-    if _rubric_deductions_reach_points(deltas, points):
-        return
-
-    raise ValueError(
-        f"{context} rubric deductions must accumulate to -{points} points. "
-        "Include an item (or combination of weighted items) that sums to full deduction."
+    mode = rubric_scoring_mode(deltas)
+    _validate_correct_and_incorrect_shortcuts(
+        rubric,
+        points=points,
+        mode=mode,
+        context=context,
+    )
+    _validate_nested_partial_exact_sum(
+        rubric,
+        points=points,
+        mode=mode,
+        context=context,
     )
 
 
@@ -1043,6 +1103,199 @@ def _questions_for_version(
         )
 
     return document.version_questions[selected]
+
+
+def find_qa_question(
+    document: QADocument,
+    question_id: str,
+    *,
+    version: str | None = None,
+) -> QAQuestion | QASubquestion:
+    for question in _questions_for_version(document, version):
+        if question.id == question_id:
+            return question
+        for subquestion in question.subquestions:
+            if subquestion.id == question_id:
+                return subquestion
+    raise ValueError(f"question not found in QA file: {question_id}")
+
+
+def flatten_rubric_options(
+    rubric_items: list[QARubricItem],
+) -> list[QARubricFlatOption]:
+    """Return rubric leaf options with UI selection metadata."""
+    return _flatten_rubric_options(rubric_items)
+
+
+def qa_rubric_options_for_question(
+    document: QADocument,
+    question_id: str,
+    *,
+    version: str | None = None,
+) -> list[QARubricFlatOption]:
+    question = find_qa_question(document, question_id, version=version)
+    return flatten_rubric_options(question.rubric)
+
+
+def replace_qa_rubric_options(
+    document: QADocument,
+    question_id: str,
+    options: list[QARubricFlatOption],
+    *,
+    version: str | None = None,
+) -> None:
+    question = find_qa_question(document, question_id, version=version)
+    question.rubric = _rubric_from_flat_options(options, points=question.points)
+
+
+def _flatten_rubric_options(
+    items: list[QARubricItem],
+    *,
+    parent_labels: tuple[str, ...] = (),
+) -> list[QARubricFlatOption]:
+    options: list[QARubricFlatOption] = []
+    for item in items:
+        if parent_labels == ("Partially Correct",) and item.label == "Partially Correct":
+            labels = parent_labels
+        else:
+            labels = (*parent_labels, item.label)
+        if item.subitems:
+            options.extend(
+                _flatten_rubric_options(
+                    item.subitems,
+                    parent_labels=labels,
+                )
+            )
+            continue
+
+        if item.points_delta is None:
+            continue
+        kind = _flat_option_kind(labels)
+        # Nested partial leaves compose as a checklist; top-level rows remain shortcuts.
+        selection_mode: RubricSelectionMode = (
+            "checklist"
+            if parent_labels and parent_labels[0] == "Partially Correct"
+            else "exclusive"
+        )
+        options.append(
+            QARubricFlatOption(
+                label=" - ".join(labels),
+                points_delta=item.points_delta,
+                kind=kind,
+                selection_mode=selection_mode,
+            )
+        )
+    return options
+
+
+def _flat_option_kind(labels: tuple[str, ...]) -> RubricOptionKind:
+    """Map flattened label ancestry to the stable rubric option kind."""
+    if labels == ("Correct",):
+        return "correct"
+    if labels == ("Incorrect",):
+        return "incorrect"
+    return "partial"
+
+
+def _rubric_from_flat_options(
+    options: list[QARubricFlatOption],
+    *,
+    points: int,
+) -> list[QARubricItem]:
+    if not options:
+        raise ValueError("rubric must include at least one option")
+
+    labels = [option.label.strip() for option in options]
+    if any(not label for label in labels):
+        raise ValueError("rubric option labels cannot be blank")
+    if len(set(labels)) != len(labels):
+        raise ValueError("rubric option labels must be unique")
+
+    correct_options = [
+        option for option in options if option.label.strip() == "Correct"
+    ]
+    if len(correct_options) != 1:
+        raise ValueError("rubric must contain exactly one Correct option")
+    incorrect_options = [
+        option for option in options if option.label.strip() == "Incorrect"
+    ]
+    if len(incorrect_options) != 1:
+        raise ValueError("rubric must contain exactly one Incorrect option")
+
+    partial_options = [
+        option
+        for option in options
+        if option.label.strip() not in {"Correct", "Incorrect"}
+    ]
+    if not partial_options:
+        raise ValueError("rubric must include at least one partial-credit option")
+
+    mode = rubric_scoring_mode(option.points_delta for option in options)
+    correct_points = correct_options[0].points_delta
+    if mode == "positive_awards":
+        if abs(correct_points - points) > 1e-6:
+            raise ValueError(
+                f"Correct rubric option must award +{points:g} points"
+            )
+    elif abs(correct_points) > 1e-6:
+        raise ValueError("Correct rubric option must have +0 points")
+    incorrect_points = incorrect_options[0].points_delta
+    if mode == "positive_awards":
+        if abs(incorrect_points) > 1e-6:
+            raise ValueError("Incorrect rubric option must award +0 points")
+    elif abs(incorrect_points + points) > 1e-6:
+        raise ValueError(f"Incorrect rubric option must deduct -{points:g} points")
+
+    rubric = [
+        QARubricItem(label="Correct", points_delta=correct_points),
+        _partial_rubric_item(partial_options),
+        QARubricItem(
+            label="Incorrect",
+            points_delta=incorrect_points,
+        ),
+    ]
+    _validate_rubric_points(rubric, points=points, context="updated rubric")
+    return rubric
+
+
+def _partial_rubric_item(
+    partial_options: list[QARubricFlatOption],
+) -> QARubricItem:
+    """Build either a direct partial shortcut or checklist partial subitems."""
+    if len(partial_options) == 1:
+        option = partial_options[0]
+        label = option.label.strip()
+        if (
+            _canonical_rubric_category(label) == "Partially Correct"
+            and option.selection_mode == "exclusive"
+        ):
+            return QARubricItem(
+                label="Partially Correct",
+                points_delta=option.points_delta,
+            )
+
+    subitems: list[QARubricItem] = []
+    for option in partial_options:
+        label = _partial_subitem_label(option.label)
+        subitems.append(
+            QARubricItem(
+                label=label,
+                points_delta=option.points_delta,
+            )
+        )
+    return QARubricItem(label="Partially Correct", subitems=subitems)
+
+
+def _partial_subitem_label(label: str) -> str:
+    stripped = label.strip()
+    prefix = "Partially Correct - "
+    if stripped.startswith(prefix):
+        stripped = stripped[len(prefix) :].strip()
+    if not stripped:
+        raise ValueError("partial-credit rubric option labels cannot be blank")
+    if stripped in {"Correct", "Incorrect"}:
+        raise ValueError(f"{stripped} cannot be used as a partial-credit label")
+    return stripped
 
 
 def qa_to_template_questions(

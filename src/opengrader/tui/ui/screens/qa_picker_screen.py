@@ -66,7 +66,7 @@ class QAPickerScreen(Vertical):
                 yield Static("Highlight a QA to preview it.", id="qa-preview")
                 yield Static(
                     "j/k or up/down  Move\n"
-                    "tab            Switch pane\n"
+                    "tab/shift+tab  Switch pane\n"
                     "click or enter  Grade selected QA\n"
                     "escape          Back to assignments",
                     id="qa-keybinding-ref",
@@ -111,6 +111,7 @@ class QAPickerScreen(Vertical):
             )
         if students:
             student_list.index = 0
+            self._restore_list_highlight(student_list)
         self._sync_active_list_classes()
 
     def focus_questions(self) -> None:
@@ -119,6 +120,25 @@ class QAPickerScreen(Vertical):
             qa_list.index = 0
         self._set_active_list("qa-list")
         qa_list.focus()
+        self._restore_list_highlight(qa_list)
+
+    def focus_students(self) -> None:
+        student_list = self.query_one("#student-list", ListView)
+        if student_list.index is None and self._students:
+            student_list.index = 0
+        if not self._students:
+            self.focus_questions()
+            return
+        self._set_active_list("student-list")
+        student_list.focus()
+        self._restore_list_highlight(student_list)
+        self._restore_student_details()
+        self.set_timer(0.01, self._restore_student_details)
+
+    def _restore_student_details(self) -> None:
+        item = self.selected_student()
+        if item is not None:
+            self.show_student_details(item)
 
     def selected_question(self) -> NavItem | None:
         qa_list = self.query_one("#qa-list", ListView)
@@ -172,20 +192,26 @@ class QAPickerScreen(Vertical):
         graded_text = item.meta.split("/", maxsplit=1)[0] if item.meta else "0"
         return f"{graded_text} / {total_questions} questions graded"
 
-    # Moves the UI selection in the QA list to the given index and updates the preview panel.
     def move_to_index(self, index: int) -> None:
-
-        # Locate the QA list UI component by its selector and expected type
         qa_list = self.query_one("#qa-list", ListView)
+        if not 0 <= index < len(qa_list.children):
+            return
 
-        # Validate the provided index is within the current list bounds
-        if 0 <= index < len(qa_list._nodes):
-            qa_list.index = index
+        self._set_active_list("qa-list")
+        qa_list.index = index
+        self._restore_list_highlight(qa_list)
 
-            # This ensures the preview panel on the right updates too
-            item = self.selected_question()
-            if item:
-                self.show_question_details(item)
+        item = self.selected_question()
+        if item is not None:
+            self.show_question_details(item)
+
+    def move_student_to_index(self, index: int) -> None:
+        student_list = self.query_one("#student-list", ListView)
+        if not 0 <= index < len(student_list.children):
+            return
+
+        student_list.index = index
+        self._restore_list_highlight(student_list)
 
     def set_status(self, text: str) -> None:
         self.query_one("#qa-status", Static).update(text)
@@ -220,16 +246,9 @@ class QAPickerScreen(Vertical):
                 self.show_question_details(item)
             return
 
-        student_list = self.query_one("#student-list", ListView)
         if not self._students:
             return
-        if student_list.index is None:
-            student_list.index = 0
-        self._set_active_list("student-list")
-        student_list.focus()
-        item = self.selected_student()
-        if item is not None:
-            self.show_student_details(item)
+        self.focus_students()
 
     def students_have_focus(self) -> bool:
         student_list = self.query_one("#student-list", ListView)
@@ -249,12 +268,14 @@ class QAPickerScreen(Vertical):
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         if isinstance(event.item, _QAListItem):
-            self.show_question_details(event.item.nav)
-            self.post_message(self.QAHighlighted(event.item.nav))
+            if self._active_list_id == "qa-list":
+                self.show_question_details(event.item.nav)
+                self.post_message(self.QAHighlighted(event.item.nav))
             return
         if isinstance(event.item, _StudentListItem):
-            self.show_student_details(event.item.nav)
-            self.post_message(self.StudentHighlighted(event.item.nav))
+            if self._active_list_id == "student-list":
+                self.show_student_details(event.item.nav)
+                self.post_message(self.StudentHighlighted(event.item.nav))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, _QAListItem):
@@ -314,7 +335,7 @@ class QAPickerScreen(Vertical):
         if event.key == "enter":
             self.confirm()
             event.stop()
-        if event.key == "tab":
+        if event.key in ("tab", "shift+tab"):
             self.switch_active_pane()
             event.stop()
 
@@ -346,6 +367,25 @@ class QAPickerScreen(Vertical):
             self._active_list_id == "student-list",
             "-pane-active",
         )
+
+    @staticmethod
+    def _normalize_list_highlight(list_view: ListView) -> None:
+        target = None
+        if list_view.index is not None and 0 <= list_view.index < len(
+            list_view.children
+        ):
+            target = list_view.children[list_view.index]
+
+        for child in list_view.children:
+            if isinstance(child, ListItem):
+                child.highlighted = child is target
+            else:
+                child.set_class(child is target, "-highlight")
+
+    def _restore_list_highlight(self, list_view: ListView) -> None:
+        self._normalize_list_highlight(list_view)
+        # ListView clear/mount settles later; reapply the restored row highlight.
+        self.set_timer(0.01, lambda: self._normalize_list_highlight(list_view))
 
     def _focused_within(self, widget: Widget) -> bool:
         return self._widget_contains(widget, self.app.focused)

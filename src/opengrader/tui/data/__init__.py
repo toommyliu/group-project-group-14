@@ -1,21 +1,21 @@
 from .models import (
-    AssignmentSummary,
-    AssignmentTemplateSummary,
-    CourseSummary,
     QuestionSeed,
+    RubricEditResult,
     RubricOptionSeed,
+    RubricOptionUpdate,
     StudentSummary,
 )
 from .provider import Provider
+from .submission_files_provider import SubmissionFilesProvider
 from .stub_data_provider import StubDataProvider
 
 __all__ = [
-    "AssignmentSummary",
-    "AssignmentTemplateSummary",
-    "CourseSummary",
     "QuestionSeed",
+    "RubricEditResult",
     "RubricOptionSeed",
+    "RubricOptionUpdate",
     "StudentSummary",
+    "SubmissionFilesProvider",
     "StubDataProvider",
     "Provider",
 ]

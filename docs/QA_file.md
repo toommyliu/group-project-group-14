@@ -4,7 +4,7 @@ This document outlines the structure and format for the question answer file (QA
 
 ## Structure
 
-A QA file is a markdown that uses YAML frontmatter for metadata and bullets for question content. 
+A QA file is a markdown that uses YAML frontmatter for metadata and bullets for question content.
 
 ---
 
@@ -89,7 +89,15 @@ A **rubric item** is a grading category. Top-level rubric categories are fixed t
 
 Each question/subquestion rubric must have **exactly one** of each top-level category.
 
-A point delta is the score adjustment associated with a category or subitem.
+A point value is the score associated with a category or subitem. A rubric can use
+one of two scoring modes:
+
+- **Negative deductions** start from full credit. Use `Correct (+0)` and deduct
+  points for weaker answers.
+- **Positive awards** start from zero credit. Use `Correct (+N)`, where `N` is
+  the question's point value, and award points for partial answers.
+
+A single rubric cannot mix positive awards with negative deductions.
 
 Supported formats:
 
@@ -98,19 +106,99 @@ Supported formats:
 - `Label: +N`
 - `Label: -N`
 
-Weighted criteria are expressed as **subitems** under a top-level category (typically under `Partially Correct`):
+`Correct` and `Incorrect` are exclusive shortcut rows in the grading UI. A direct
+top-level `Partially Correct (+/-N)` value is also exclusive. Nested subitems
+under `Partially Correct` are checklist rows, so graders can select multiple
+items for partial credit or deductions.
 
-- `Partially Correct`
-  - `Major error (-3)`
-  - `Minor error (-1)`
+Weighted criteria are expressed as **subitems** under `Partially Correct`:
 
-You may also put a direct delta on a top-level category:
+- Negative-deduction rubric:
+  - `Correct (+0)`
+  - `Partially Correct`
+    - `Major issue (-3)`
+    - `Minor issue (-2)`
+  - `Incorrect (-5)`
 
-- `Correct (+0)`
-- `Partially Correct (-2)`
-- `Incorrect (-5)`
+- Positive-award rubric:
+  - `Correct (+5)`
+  - `Partially Correct`
+    - `Mostly correct (+3)`
+    - `Minor progress (+2)`
+  - `Incorrect (+0)`
 
-Rubric deductions must be able to reach full deduction for that question/subquestion (e.g., there must be an item or combination of negative deltas summing to `-points`).
+You may also put a direct value on a top-level category:
+
+- Negative-deduction rubric:
+  - `Correct (+0)`
+  - `Partially Correct (-2)`
+  - `Incorrect (-5)`
+
+- Positive-award rubric:
+  - `Correct (+5)`
+  - `Partially Correct (+3)`
+  - `Incorrect (+0)`
+
+Nested `Partially Correct` checklist subitems must exactly cover the full question
+value:
+
+- Negative-deduction checklist subitems must sum to `-points`.
+- Positive-award checklist subitems must sum to `+points`.
+- Direct top-level partial rows are exempt because they are single exclusive
+  choices.
+
+### Award Checklist Example
+
+```md
+- (10 points) Convert decimal 5 to binary.
+  - **Correct**
+    - 101
+  - **Rubric**
+    - Correct (+10)
+    - Partially Correct
+      - Binary digits mostly correct (+7)
+      - Shows conversion setup (+3)
+    - Incorrect (+0)
+```
+
+### Deduction Checklist Example
+
+```md
+- (10 points) Convert decimal 5 to binary.
+  - **Correct**
+    - 101
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct
+      - Wrong binary digit (-3)
+      - Incorrect place values (-7)
+    - Incorrect (-10)
+```
+
+### Direct Partial Example
+
+```md
+- (10 points) Convert decimal 5 to binary.
+  - **Correct**
+    - 101
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+```
+
+### Saved Rubric Labels
+
+Student submission markdown stores the selected rubric labels in the `Rubric:`
+field:
+
+```md
+- Points: 3
+- Rubric: ["Partially Correct - Wrong binary digit","Partially Correct - Incorrect place values"]
+```
+
+No selected labels are saved as `Rubric: `. One selected label is saved as plain
+text. Multiple labels are saved as a compact JSON array.
 
 ---
 
@@ -129,11 +217,11 @@ questions_start_page: 1
   - **Correct**
     - Paris
   - **Rubric**
-    - Correct (+0)
+    - Correct (+50)
     - Partially Correct
-      - Country is correct but city is wrong (-20)
-      - Correct country but no city answer (-30)
-    - Incorrect (-50)
+      - Country is correct but city is wrong (+30)
+      - Correct country but no city answer (+20)
+    - Incorrect (+0)
 
 - (30 points) Answer all parts.
   - (15 points) What is 2 in binary?

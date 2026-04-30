@@ -15,9 +15,11 @@ score: ""
   - Response image: ![q1 response](responses/submission-0001/q1.png)
   - Response text: |
     5
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 5
+  - Rubric: Partially Correct
+    - Testing this is the second rubric item being edited of partial credit
+  - Analysis: q
 
 - q2:
   - Question type: Free Response
@@ -25,9 +27,10 @@ score: ""
   - Response image: ![q2 response](responses/submission-0001/q2.png)
   - Response text: |
     now
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 10
+  - Rubric: Correct
+  - Analysis: hell oworld
 
 - q3:
   - Question type: Free Response
@@ -35,9 +38,10 @@ score: ""
   - Response image: ![q3 response](responses/submission-0001/q3.png)
   - Response text: |
     1
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 10
+  - Rubric: Correct
+  - Analysis:
 
 - q4:
   - Question type: Free Response
@@ -45,9 +49,10 @@ score: ""
   - Response image: ![q4 response](responses/submission-0001/q4.png)
   - Response text: |
     None
-  - Possible points: 
-  - Points: 
-  - Analysis: 
+  - Possible points: 10
+  - Points: 10
+  - Rubric: Correct
+  - Analysis:
 
 - q5a:
   - Question type: Free Response
@@ -55,8 +60,10 @@ score: ""
   - Response image: ![q5a response](responses/submission-0001/q5a.png)
   - Response text: |
     none
-  - Possible points: 
-  - Points: 
+  - Possible points: 8
+  - Points: 5
+  - Rubric: Partially Correct
+    - Identifies it finds a second value but not distinct
   - Analysis: 
 
 - q5b:

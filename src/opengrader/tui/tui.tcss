@@ -93,3 +93,212 @@ $foreground: #E4E4E4EB;
     padding: 0 1;
     height: 1;
 }
+
+#grade-workspace {
+    height: 1fr;
+}
+
+#response-viewer {
+    width: 1fr;
+    height: 1fr;
+    background: #101010;
+    scrollbar-size: 1 1;
+}
+
+#grade-sidebar {
+    width: 42%;
+    min-width: 32;
+    max-width: 72;
+    height: 1fr;
+    padding: 0 1;
+    background: $background;
+    scrollbar-size: 1 1;
+}
+
+.grade-screen__resize-handle {
+    width: 1;
+    height: 1fr;
+    color: $text-muted;
+    background: $surface-lighten-1;
+}
+
+.grade-screen__resize-handle:hover,
+.grade-screen__resize-handle--dragging {
+    color: $accent;
+    background: $accent;
+}
+
+#grade-student-name,
+#total-grade-label,
+#grade-progress {
+    width: 100%;
+    height: auto;
+}
+
+#question-context {
+    width: 100%;
+    height: auto;
+    max-height: 18;
+    margin-bottom: 1;
+}
+
+#rubric-list {
+    width: 100%;
+    height: auto;
+    max-height: 14;
+    background: transparent;
+    scrollbar-size: 1 1;
+}
+
+#rubric-list > ListItem {
+    width: 100%;
+    height: auto;
+    padding: 0 1 0 0;
+    background: transparent;
+}
+
+.rubric-row {
+    width: 100%;
+    height: auto;
+}
+
+.rubric-row-marker {
+    width: 2;
+    color: $accent;
+    text-style: bold;
+}
+
+.rubric-row-index {
+    width: 3;
+    color: $text-muted;
+}
+
+.rubric-row-label {
+    width: 1fr;
+    height: auto;
+    color: $foreground;
+}
+
+.rubric-row-points {
+    width: 8;
+    color: $text-muted;
+    text-align: right;
+}
+
+#rubric-list > ListItem.rubric-selected {
+    background: $accent 15%;
+}
+
+#rubric-list > ListItem.rubric-selected .rubric-row-label,
+#rubric-list > ListItem.rubric-selected .rubric-row-points {
+    color: $accent;
+    text-style: bold;
+}
+
+#rubric-list > ListItem.-highlight {
+    background: #202326;
+}
+
+#rubric-list:focus > ListItem.-highlight {
+    background: $accent 35%;
+}
+
+#rubric-list > ListItem.-highlight .rubric-row-index,
+#rubric-list > ListItem.-highlight .rubric-row-label,
+#rubric-list > ListItem.-highlight .rubric-row-points {
+    color: $foreground;
+    text-style: bold;
+}
+
+#rubric-list:focus > ListItem.-highlight .rubric-row-marker,
+#rubric-list:focus > ListItem.-highlight .rubric-row-index {
+    color: $accent;
+    text-style: bold;
+}
+
+#rubric-editor-panel {
+    width: 100%;
+    height: auto;
+}
+
+#rubric-editor-status {
+    width: 100%;
+    height: auto;
+    color: $text-muted;
+    margin-bottom: 0;
+}
+
+#rubric-editor-correct,
+#rubric-editor-subitems,
+#rubric-editor-incorrect {
+    width: 100%;
+    height: auto;
+}
+
+.rubric-edit-section-title {
+    width: 100%;
+    height: auto;
+    color: $text-muted;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.rubric-edit-row {
+    width: 100%;
+    height: 1;
+    margin-bottom: 0;
+    align-vertical: middle;
+}
+
+.rubric-edit-index {
+    width: 3;
+    color: $text-muted;
+}
+
+.rubric-edit-label {
+    width: 1fr;
+    height: 1;
+    min-height: 1;
+}
+
+.rubric-edit-delta {
+    width: 6;
+    height: 1;
+    min-height: 1;
+    margin-left: 1;
+}
+
+.rubric-edit-delete {
+    width: 3;
+    min-width: 3;
+    height: 1;
+    line-pad: 1;
+    margin-left: 1;
+}
+
+#rubric-subitem-actions,
+#rubric-editor-actions {
+    width: 100%;
+    height: auto;
+    margin-top: 0;
+}
+
+#rubric-subitem-actions Button,
+#rubric-editor-actions Button {
+    min-width: 0;
+    line-pad: 1;
+    margin-right: 1;
+    height: 1;
+}
+
+#question-comment {
+    width: 100%;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+#db-status {
+    width: 100%;
+    height: auto;
+    min-height: 1;
+}

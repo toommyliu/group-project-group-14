@@ -1461,6 +1461,7 @@ def save_layout_debug(
     for page_number, (image, page_w, page_h) in rendered_pages.items():
         overlay = image.convert("RGB")
         draw = ImageDraw.Draw(overlay)
+
         # Include both primitive evidence and final crops so debug images show
         # why each heuristic accepted or rejected a region.
         for primitive in layout.primitives_by_page.get(page_number, []):
@@ -1472,16 +1473,22 @@ def save_layout_debug(
                 "component": (180, 180, 180),
             }[primitive.kind]
             draw.rectangle((x0, y0, x1, y1), outline=color, width=2)
+
+        # Green outlines show accepted metadata field crops.
         for field in layout.fields:
             if field.page_number != page_number:
                 continue
             x0, y0, x1, y1 = bbox_norm_to_px(field.crop_bbox_norm, page_w, page_h)
             draw.rectangle((x0, y0, x1, y1), outline=(60, 180, 75), width=5)
+
+        # Purple outlines show the detected submission title crop.
         if layout.title_region and layout.title_region.page_number == page_number:
             x0, y0, x1, y1 = bbox_norm_to_px(
                 layout.title_region.crop_bbox_norm, page_w, page_h
             )
             draw.rectangle((x0, y0, x1, y1), outline=(180, 60, 180), width=5)
+
+        # Red outlines show final question response crops.
         if question_crop_bboxes_by_page is None:
             for question in layout.questions:
                 if question.page_number != page_number:

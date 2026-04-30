@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 from opengrader.core.ocr.extractor import (
@@ -9,7 +10,7 @@ from opengrader.core.ocr.extractor import (
     QuestionExtractionResult,
     SubmissionResult,
 )
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
+from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResult
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
 
@@ -130,11 +131,14 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         *,
         question_id: str,
         image_path: Path,
-    ) -> list[tuple[str, Path]]:
+    ) -> list[student_file._SplitQuestionImage]:
         split_call_count["count"] += 1
         assert question_id == "q1"
         assert image_path == q1
-        return [("q1a", q1a), ("q1b", q1b)]
+        return [
+            student_file._SplitQuestionImage("q1a", q1a, (0.0, 0.0, 1.0, 0.5)),
+            student_file._SplitQuestionImage("q1b", q1b, (0.0, 0.5, 1.0, 0.5)),
+        ]
 
     def _fake_classify_question_image_path(image_path: Path) -> str:
         if image_path == q1a:
@@ -167,6 +171,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             MULTIPLE_CHOICE,
             FREE_RESPONSE,
         ]
+        assert split_result.document.source_pdf == "../student-0001.pdf"
         assert split_call_count["count"] == 1
 
         split_call_count["count"] = 0
@@ -309,7 +314,346 @@ def test_render_student_submission_markdown_includes_question_type() -> None:
     assert "- q1:\n  - Question type: Multiple Choice\n  - Prompt:" in markdown
 
 
-def test_build_student_submission_document_uses_primary_field_crop_for_ollama_fields(
+def test_parse_student_submission_markdown_reads_frontmatter_and_questions(
+    tmp_path: Path,
+) -> None:
+    submission_path = (
+        Path("samples/cs146-quiz1/student-submissions/submission-0001.submission.md")
+    )
+    document = student_file.load_student_submission_markdown(submission_path)
+
+    assert document.student_name == "Tommy Liu"
+    assert document.student_id == "123456789"
+    assert document.course_code == "CS146"
+    assert document.assignment_title == "Quiz 1"
+    assert document.assignment_version == "A"
+    assert document.questions[0].question_id == "q1"
+    assert document.questions[0].response_text == "no"
+    assert document.questions[0].response_image_path is not None
+    assert Path(document.questions[0].response_image_path).is_absolute()
+    assert Path(document.questions[0].response_image_path).exists()
+
+
+def test_parse_student_submission_markdown_round_trips_rendered_document(
+    tmp_path: Path,
+) -> None:
+    response_dir = tmp_path / "responses"
+    response_dir.mkdir()
+    response_image = response_dir / "q1.png"
+    Image.new("RGB", (10, 10), color=(255, 255, 255)).save(response_image)
+
+    document = student_file.StudentSubmissionDocument(
+        student_name="Taylor Student",
+        student_id="123",
+        course_code="CMPE195",
+        assignment_title="Quiz",
+        assignment_version="A",
+        source_pdf="submission.pdf",
+        questions=[
+            student_file.StudentSubmissionQuestion(
+                question_id="q1",
+                question_type=MULTIPLE_CHOICE,
+                prompt="Which structure is FIFO?",
+                possible_points=2,
+                response_image_path="responses/q1.png",
+                response_text="B\nbecause queue",
+                points_awarded=1.0,
+                analysis="Partial",
+                source_segments=(
+                    student_file.QuestionSourceSegment(
+                        page_number=1,
+                        bbox_norm=(0.1, 0.2, 0.7, 0.3),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    parsed = student_file.parse_student_submission_markdown(
+        student_file.render_student_submission_markdown(document),
+        base_path=tmp_path,
+    )
+
+    assert parsed.student_name == "Taylor Student"
+    assert parsed.questions[0].question_id == "q1"
+    assert parsed.questions[0].question_type == MULTIPLE_CHOICE
+    assert parsed.questions[0].possible_points == 2
+    assert parsed.questions[0].source_segments == (
+        student_file.QuestionSourceSegment(
+            page_number=1,
+            bbox_norm=(0.1, 0.2, 0.7, 0.3),
+        ),
+    )
+    assert parsed.questions[0].response_text == "B\nbecause queue"
+    assert parsed.questions[0].points_awarded == 1.0
+    assert parsed.questions[0].rubric_label == ""
+    assert parsed.questions[0].analysis == "Partial"
+    assert parsed.questions[0].response_image_path == str(response_image.resolve())
+
+
+def test_update_student_submission_markdown_updates_grade_fields() -> None:
+    content = "\n".join(
+        [
+            "---",
+            'name: "Student"',
+            "---",
+            "",
+            "- q1:",
+            "  - Prompt: One",
+            "  - Response image: ![q1 response](responses/q1.png)",
+            "  - Response text: |",
+            "    answer",
+            "  - Possible points: ",
+            "  - Points: ",
+            "  - Analysis: ",
+            "",
+            "- q2:",
+            "  - Prompt: Two",
+            "  - Points: ",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            possible_points=5,
+            points_awarded=2,
+            rubric_labels=("Partially Correct",),
+            analysis="Process was close.",
+        ),
+    )
+
+    assert "  - Response image: ![q1 response](responses/q1.png)" in updated
+    assert "  - Possible points: 5" in updated
+    assert "  - Points: 2" in updated
+    assert "  - Rubric: Partially Correct" in updated
+    assert "  - Analysis: Process was close." in updated
+    assert "- q2:\n  - Prompt: Two\n  - Points: " in updated
+
+
+def test_update_student_submission_markdown_supports_multiline_analysis() -> None:
+    content = "\n".join(
+        [
+            "- q1:",
+            "  - Prompt: One",
+            "  - Points: 1",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            analysis="First line\nSecond line",
+        ),
+    )
+
+    assert (
+        "  - Analysis: |\n"
+        "    First line\n"
+        "    Second line"
+    ) in updated
+
+
+def test_parse_student_submission_markdown_reads_rubric_label() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Points: 1",
+                "  - Rubric: Correct",
+                "  - Analysis: Looks good.",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_label == "Correct"
+    assert document.questions[0].analysis == "Looks good."
+
+
+def test_parse_student_submission_markdown_reads_incorrect_rubric_label() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Rubric: Incorrect",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_labels == ("Incorrect",)
+
+
+def test_parse_student_submission_markdown_reads_top_level_partial_rubric() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Rubric: Partially Correct",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_labels == ("Partially Correct",)
+
+
+def test_parse_student_submission_markdown_reads_multi_label_rubric() -> None:
+    document = student_file.parse_student_submission_markdown(
+        "\n".join(
+            [
+                "- q1:",
+                "  - Prompt: One",
+                "  - Rubric: Partially Correct",
+                "    - A",
+                "    - B",
+                "",
+                "- q2:",
+                "  - Prompt: Two",
+                "  - Rubric: ",
+                "",
+            ]
+        )
+    )
+
+    assert document.questions[0].rubric_labels == (
+        "Partially Correct - A",
+        "Partially Correct - B",
+    )
+    assert document.questions[1].rubric_labels == ()
+
+
+def test_parse_student_submission_markdown_rejects_json_rubric_arrays() -> None:
+    with pytest.raises(
+        ValueError,
+        match="legacy JSON rubric arrays are no longer supported",
+    ):
+        student_file.parse_student_submission_markdown(
+            "\n".join(
+                [
+                    "- q1:",
+                    "  - Prompt: One",
+                    '  - Rubric: ["Partially Correct - A","Partially Correct - B"]',
+                    "",
+                ]
+            )
+        )
+
+
+def test_render_student_submission_markdown_formats_multi_label_rubric() -> None:
+    document = student_file.StudentSubmissionDocument(
+        student_name="Taylor Student",
+        student_id="123",
+        course_code="CMPE195",
+        assignment_title="Quiz",
+        assignment_version="A",
+        source_pdf="submission.pdf",
+        questions=[
+            student_file.StudentSubmissionQuestion(
+                question_id="q1",
+                prompt="One",
+                possible_points=None,
+                response_image_path="",
+                response_text="",
+                rubric_labels=("Partially Correct - A",),
+            ),
+            student_file.StudentSubmissionQuestion(
+                question_id="q2",
+                prompt="Two",
+                possible_points=None,
+                response_image_path="",
+                response_text="",
+                rubric_labels=("Partially Correct - A", "Partially Correct - B"),
+            ),
+        ],
+    )
+
+    rendered = student_file.render_student_submission_markdown(document)
+
+    assert (
+        "  - Rubric: Partially Correct\n"
+        "    - A"
+    ) in rendered
+    assert (
+        "  - Rubric: Partially Correct\n"
+        "    - A\n"
+        "    - B"
+        in rendered
+    )
+
+
+def test_update_student_submission_markdown_clears_grade_fields() -> None:
+    content = "\n".join(
+        [
+            "- q1:",
+            "  - Prompt: One",
+            "  - Possible points: 5",
+            "  - Points: 3",
+            "  - Rubric: Partially Correct",
+            "    - A",
+            "    - B",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            points_awarded=None,
+            rubric_labels=(),
+        ),
+    )
+
+    assert "  - Points:" in updated
+    assert "  - Rubric:" in updated
+    assert "  - Points: 3" not in updated
+    assert "  - Rubric: Partially Correct" not in updated
+    assert "    - A" not in updated
+    assert "    - B" not in updated
+
+
+def test_update_student_submission_markdown_replaces_nested_rubric_children() -> None:
+    content = "\n".join(
+        [
+            "- q1:",
+            "  - Prompt: One",
+            "  - Points: 3",
+            "  - Rubric: Partially Correct",
+            "    - A",
+            "    - B",
+            "  - Analysis: Existing.",
+            "",
+        ]
+    )
+
+    updated = student_file.update_student_submission_markdown(
+        content,
+        student_file.StudentSubmissionGradeUpdate(
+            question_id="q1",
+            points_awarded=2,
+            rubric_labels=("Partially Correct - C",),
+        ),
+    )
+
+    assert (
+        "  - Rubric: Partially Correct\n"
+        "    - C\n"
+        "  - Analysis: Existing."
+    ) in updated
+    assert "    - A" not in updated
+    assert "    - B" not in updated
+
+
+def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
@@ -384,3 +728,72 @@ def test_build_student_submission_document_uses_primary_field_crop_for_ollama_fi
     finally:
         student_file.process_submission_pdf = original_process
         student_file.extract_field_text = original_extract_field_text
+
+
+def test_build_student_submission_document_uses_structured_title_metadata(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "out"
+    response_dir = output_dir / "responses" / "student-0004"
+    field_dir = output_dir / "field_crops" / "student-0004"
+    response_dir.mkdir(parents=True, exist_ok=True)
+    field_dir.mkdir(parents=True, exist_ok=True)
+
+    q1 = response_dir / "q1.png"
+    title_crop = field_dir / "title_p1.png"
+    Image.new("RGB", (300, 160), color=(255, 255, 255)).save(q1)
+    Image.new("RGB", (500, 120), color=(255, 255, 255)).save(title_crop)
+
+    def _fake_process_submission_pdf(
+        *_args: object, **_kwargs: object
+    ) -> SubmissionResult:
+        return SubmissionResult(
+            filename="student-0004.pdf",
+            version_validated=True,
+            title_crop_path=str(title_crop),
+            fields=[],
+            questions=[
+                QuestionExtractionResult(
+                    question_id="q1",
+                    page_number=1,
+                    output_path=str(q1),
+                )
+            ],
+        )
+
+    def _fake_extract_title_metadata(
+        *,
+        image_path: str | Path,
+        config: OllamaVisionConfig,
+    ) -> TitleMetadataResult:
+        _ = image_path, config
+        return TitleMetadataResult(
+            course_code="CS146",
+            assignment_title="Quiz 1",
+            assignment_version="A",
+            raw_title="CS146: Quiz 1 (A)",
+        )
+
+    original_process = student_file.process_submission_pdf
+    original_extract_title_metadata = student_file.extract_title_metadata
+    progress: list[str] = []
+    try:
+        student_file.process_submission_pdf = _fake_process_submission_pdf
+        student_file.extract_title_metadata = _fake_extract_title_metadata
+
+        result = student_file.build_student_submission_document(
+            pdf_path=tmp_path / "student-0004.pdf",
+            output_dir=output_dir,
+            ocr_config=OcrConfig(),
+            ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+            skip_ollama_qa=True,
+            progress_callback=progress.append,
+        )
+
+        assert not [message for message in progress if "title OCR failed" in message]
+        assert result.document.course_code == "CS146"
+        assert result.document.assignment_title == "Quiz 1"
+        assert result.document.assignment_version == "A"
+    finally:
+        student_file.process_submission_pdf = original_process
+        student_file.extract_title_metadata = original_extract_title_metadata

@@ -4,7 +4,7 @@ import fitz
 
 from opengrader.core.pdf.templates.constants import LETTER_H, PRINT_SAFE_MARGIN
 from opengrader.core.pdf.templates import generate_template_pdf
-from opengrader.core.pdf.templates.qa_file import (
+from opengrader.core.qa_file import (
     parse_qa_markdown,
     qa_to_template_questions,
 )

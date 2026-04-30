@@ -6,6 +6,7 @@ from textual.widgets import ContentSwitcher, Footer, Input
 from opengrader.tui.controllers import GradeController, InputController
 from opengrader.tui.controllers.input_controller import InputCommand
 from opengrader.tui.data import Provider
+from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
@@ -21,11 +22,16 @@ class TuiApp(App):
         *,
         default_image_path: str | None = None,
         data_provider: Provider | None = None,
+        qa_file_path: str | Path | None = None,
+        submissions_path: str | Path | None = None,
     ) -> None:
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
         self.workflow_state = TuiWorkflowState()
-        self.data_provider = data_provider or StubDataProvider(self.default_image_path)
+        self.data_provider = data_provider or self._build_data_provider(
+            qa_file_path=qa_file_path,
+            submissions_path=submissions_path,
+        )
         self.grade_controller = GradeController(
             self,
             self.workflow_state,
@@ -41,7 +47,7 @@ class TuiApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._load_demo_grading_queue()
+        self._load_grading_queue()
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
@@ -169,6 +175,22 @@ class TuiApp(App):
             InputCommand.GRADE_FINALIZE_STUDENT,
             self.grade_controller.finalize_student,
         )
+        self.input_controller.register(
+            InputCommand.GRADE_EDIT_RUBRIC,
+            self.grade_controller.open_rubric_editor,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_FOCUS_COMMENT,
+            lambda: self.get_grade_screen().focus_question_comment(),
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_SHRINK_SIDEBAR,
+            self._handle_grade_shrink_sidebar,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_WIDEN_SIDEBAR,
+            self._handle_grade_widen_sidebar,
+        )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
@@ -200,11 +222,31 @@ class TuiApp(App):
     def _handle_qa_switch_pane(self) -> None:
         self.get_qa_picker_screen().switch_active_pane()
 
+    def _handle_grade_shrink_sidebar(self) -> None:
+        grade_screen = self.get_grade_screen()
+        grade_screen.adjust_sidebar_width(-grade_screen.SIDEBAR_RESIZE_STEP)
+
+    def _handle_grade_widen_sidebar(self) -> None:
+        grade_screen = self.get_grade_screen()
+        grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
+
     def _input_command_available(self, command: InputCommand | str) -> bool:
+        if isinstance(self.focused, Input):
+            return False
+
         if not self.input_controller.command_available(command):
             return False
 
         normalized_command = InputController._coerce_command(command)
+
+        # Disable all input commands when editing the rubric and
+        # prioritize GradeScreen on_key.
+        if (
+            self.workflow_state.current_page == PAGE_GRADE
+            and self.get_grade_screen().rubric_edit_active()
+        ):
+            return False
+
         if self.workflow_state.current_page != PAGE_QA_PICKER:
             return True
 
@@ -219,7 +261,21 @@ class TuiApp(App):
 
         return True
 
-    def _load_demo_grading_queue(self) -> None:
+    def _build_data_provider(
+        self,
+        *,
+        qa_file_path: str | Path | None,
+        submissions_path: str | Path | None,
+    ) -> Provider:
+        if qa_file_path is not None and submissions_path is not None:
+            return SubmissionFilesProvider(
+                qa_file_path=qa_file_path,
+                submissions_path=submissions_path,
+                default_image_path=self.default_image_path,
+            )
+        return StubDataProvider(self.default_image_path)
+
+    def _load_grading_queue(self) -> None:
         selection = self.workflow_state.selection
         selection.course_item_id = "c1"
         selection.course_id = 1
@@ -229,10 +285,12 @@ class TuiApp(App):
         selection.student_item_id = None
         selection.student_id = None
 
+        course_label = getattr(self.data_provider, "course_label", "CMPE 195")
+        assignment_label = getattr(self.data_provider, "assignment_label", "HW 1")
         self.workflow_state.selection_labels.update(
             {
-                "course": "CMPE 195",
-                "assignment": "HW 1",
+                "course": str(course_label or "Course"),
+                "assignment": str(assignment_label or "Assignment"),
                 "question": "",
                 "student": "",
             }

@@ -79,9 +79,12 @@ def test_process_submission_pdf_extracts_detected_questions(tmp_path: Path) -> N
         assert question.question_type == MULTIPLE_CHOICE
         assert question.output_path is not None
         assert Path(question.output_path).exists()
+        assert question.source_segments
+        assert question.source_segments[0].page_number == 1
 
     serialized = results_to_dict(result)
     assert serialized["questions"][0]["question_type"] == MULTIPLE_CHOICE
+    assert serialized["questions"][0]["source_segments"][0]["page_number"] == 1
 
 
 def test_question_extraction_result_defaults_to_free_response() -> None:
