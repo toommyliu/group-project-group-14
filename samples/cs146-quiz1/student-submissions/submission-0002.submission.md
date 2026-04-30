@@ -19,7 +19,7 @@ score: ""
   - Possible points: 
   - Points: 
   - Rubric:
-  - Analysis: 
+  - Analysis:
 
 - q2:
   - Question type: Free Response
