@@ -70,11 +70,11 @@ Set up a Python virtual environment and install packages:
 uv sync --all-groups
 ```
 
-## Running the PoC
+## Usage Guide
 
 Run the TUI:
 ```bash
-uv run tui
+uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
 ```
 
 Run CLI tools:
@@ -89,19 +89,91 @@ uv run submission-file --help
 <details>
 <summary>Available Scripts</summary>
 
-- `tui`: The TUI application
-- `automated-grading`: Automatically grades student markdown files
-- `pdf-to-qa`: Convert an answer key PDF into a QA markdown template
-- `qa-file`
-  - `validate`: Validate QA markdown structure
-  - `generate-template`: Generate templates from QA files
-- `submission-splitter`: Split a scan into individual student submission PDFs
-- `submission-file`: Process student submission PDFs into structured markdown
+- `tui`: Launch the TUI. Optionally pass `--qa-file` and `--submissions` together to load real files.
+- `tui-dev`: Launch the TUI with Textual devtools enabled.
+- `qa-file`: Work with QA markdown files.
+  - `validate --qa-file <qa.md>`: Validate QA markdown structure.
+  - `generate-template --qa-file <qa.md> --output-pdf <template.pdf>`: Generate template PDFs from QA markdown.
+- `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
+- `submission-file`: Convert per-student submission PDFs into `.submission.md` files and response image crops.
+- `pdf-to-qa`: Convert an answer-key PDF into a QA markdown draft using OCR.
+- `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
 
 </details>
 
 > [!TIP]
-> Scripts that take flags support `--help` to show available options.
+> Every script supports `--help` to show its current options.
+
+#### CLI Reference
+
+Validate a QA markdown file:
+```bash
+uv run qa-file validate --qa-file samples/qa-single.md
+```
+
+Generate a template PDF from a QA markdown file:
+```bash
+uv run qa-file generate-template \
+  --qa-file samples/qa-single.md \
+  --output-pdf out/template-single.pdf
+```
+
+Useful `qa-file generate-template` options:
+- `--version <ID>`: Generate a specific template version.
+- `--all-versions`: Generate one template per QA version. Output filenames get a `-v<ID>` suffix.
+- `--title <title>`: Override the QA file title. Required if the QA file has no title.
+- `--instructions <text>`: Override the QA file instructions.
+- `--continued-page-header <text>`: Override the continued page header.
+- `--questions-start-page 1|2`: Start questions on page 1 or page 2.
+- `--font-regular-file <path>` and `--font-bold-file <path>`: Use custom template fonts.
+
+Split a scanned submissions PDF:
+```bash
+uv run submission-splitter \
+  --input scans/all-submissions.pdf \
+  --output split/ \
+  --pages-per-submission 6
+```
+
+Useful `submission-splitter` options:
+- `--start-page <N>` and `--end-page <N>`: Split only a page range, using 1-indexed page numbers.
+- `--filename-prefix <prefix>`: Change output names from `submission-0001.pdf`.
+- `--zero-pad-width <N>`: Change output number padding.
+- `--dry-run`: Print planned split ranges without writing files.
+
+Convert per-student PDFs into student submission markdown:
+```bash
+uv run submission-file \
+  --input split/ \
+  --output out/student-submissions/
+```
+
+Useful `submission-file` options:
+- `--dpi <N>`: Set rendering DPI for OCR and cropping. Default is `300`.
+- `--confidence-threshold <N>`: Set OCR field validation threshold. Default is `60.0`.
+- `--lang <codes>`: Set Tesseract layout language codes. Default is `eng`.
+- `--no-deskew`: Disable automatic deskewing.
+- `--no-split-subquestions`: Keep nested subquestion boxes in one response image.
+- `--ollama-model <model>`: Set the Ollama vision model. Default is `qwen2.5vl:7b`.
+- `--ollama-host <url>`: Set the Ollama server URL. Default is `http://127.0.0.1:11434`.
+- `--ollama-timeout <seconds>`: Set the Ollama request timeout. Default is `120`.
+- `--no-ollama-qa`: Skip Ollama question prompt/answer extraction while still using it for name, ID, and title extraction.
+- `--save-layout-debug`: Write layout JSON and overlay PNGs for each submission.
+
+Convert an answer key PDF into a QA markdown draft:
+```bash
+uv run pdf-to-qa \
+  --input samples/exam2b-2-answers.pdf \
+  --output out/qa.md \
+  --title "Midterm 1 Solutions"
+```
+
+Automatically grade student submission markdown files from a solutions file:
+```bash
+uv run automated-grading \
+  --solutions solutions.md \
+  --input out/student-submissions/
+```
 
 #### Example Usage Flow
 
@@ -112,30 +184,45 @@ uv run pdf-to-qa --input /path/to/answer-key.pdf --output /path/to/qa.md
 
 1. Generate a template from a QA file:
 ```bash
-qa-file generate-template --qa-file /path/to/qa.md --output-pdf /path/to/template.pdf
+uv run qa-file generate-template --qa-file /path/to/qa.md --output-pdf /path/to/template.pdf
 ```
 
 2. Process scan into individual student submissions:
 ```bash
-submission-splitter --input /path/to/scan.pdf --output /path/to/output --pages-per-submission N
+uv run submission-splitter --input /path/to/scan.pdf --output /path/to/split --pages-per-submission N
 ```
 
 3. Process student submissions into structured markdown:
 ```bash
-submission-file --input /path/to/output --output /path/to/markdown
+uv run submission-file --input /path/to/split --output /path/to/student-submissions
 ```
 
 Run a vision language model to extract printed and handwritten text from the processed submissions:
-```bash
-# Run your vision model first
-ollama run qwen2.5vl:7b
 
-# Then process the submissions
+Terminal 1: install the Ollama vision model and keep it running:
+```bash
+# Download the model.
+ollama pull qwen2.5vl:7b
+# Start the Ollama server.
+ollama serve
+```
+
+Terminal 2: process the submissions with the model:
+```bash
 uv run submission-file \
   --input samples/cs146-midterm1/split-submissions \
   --output samples/cs146-midterm1/student-submissions \
-  --text-backend ollama \
-  --ollama-model <your-model-name>
+  --ollama-model qwen2.5vl:7b
+```
+
+If `ollama run` cannot connect to Ollama, start the Ollama app or run `ollama serve`
+before processing submissions.
+
+4. Launch the TUI with the generated files:
+```bash
+uv run tui \
+  --qa-file /path/to/qa.md \
+  --submissions /path/to/student-submissions
 ```
 
 #### Global Installation (Optional)
