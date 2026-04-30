@@ -14,9 +14,11 @@ import pytesseract
 from PIL import Image
 
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
+from opengrader.core.source_location import QuestionSourceSegment
 
 from .layout import (
     SubmissionLayout,
+    bbox_px_to_norm as layout_bbox_px_to_norm,
     bbox_norm_to_px as layout_bbox_norm_to_px,
     save_layout_debug as write_layout_debug,
     scan_submission_layout,
@@ -110,6 +112,7 @@ class QuestionExtractionResult:
     skipped: bool = False
     error: str | None = None
     question_type: QuestionType = FREE_RESPONSE
+    source_segments: tuple[QuestionSourceSegment, ...] = ()
 
 
 @dataclass
@@ -755,13 +758,23 @@ def _extract_question_crop_norm(
 ) -> QuestionExtractionResult:
     """Write a single-page question crop artifact from a normalized bbox."""
 
-    bbox_px = _expand_question_bbox_px(
+    expanded_bbox_px = _expand_question_bbox_px(
         _bbox_norm_to_px(bbox_norm, page_w, page_h),
         page_w=page_w,
         page_h=page_h,
     )
-    region = crop_region(page_image, bbox_px)
-    region = _trim_question_region(region)
+    region = crop_region(page_image, expanded_bbox_px)
+    region, trim_bbox_px = _trim_question_region_with_bbox(region)
+    source_bbox_px = _clamp_bbox_px(
+        (
+            expanded_bbox_px[0] + trim_bbox_px[0],
+            expanded_bbox_px[1] + trim_bbox_px[1],
+            expanded_bbox_px[0] + trim_bbox_px[2],
+            expanded_bbox_px[1] + trim_bbox_px[3],
+        ),
+        page_w=page_w,
+        page_h=page_h,
+    )
     question_type = _merge_question_type_votes(
         detected_question_type, classify_question_image(region)
     )
@@ -777,6 +790,12 @@ def _extract_question_crop_norm(
         page_number=page_num,
         question_type=question_type,
         output_path=str(out_path),
+        source_segments=(
+            QuestionSourceSegment(
+                page_number=page_num,
+                bbox_norm=tuple(layout_bbox_px_to_norm(source_bbox_px, page_w, page_h)),
+            ),
+        ),
     )
 
 
@@ -806,20 +825,37 @@ def _extract_question_crop_segments(
         )
 
     crops: list[Image.Image] = []
+    source_segments: list[QuestionSourceSegment] = []
     first_page_number = segments[0][0]
     for page_number, bbox_norm in segments:
         if page_number not in rendered_pages:
             continue
         page_image, page_w, page_h = rendered_pages[page_number]
-        bbox_px = _expand_question_bbox_px(
+        expanded_bbox_px = _expand_question_bbox_px(
             _bbox_norm_to_px(bbox_norm, page_w, page_h),
             page_w=page_w,
             page_h=page_h,
         )
-        region = crop_region(page_image, bbox_px)
-        region = _trim_question_region(region)
+        region = crop_region(page_image, expanded_bbox_px)
+        region, trim_bbox_px = _trim_question_region_with_bbox(region)
         if region.width <= 0 or region.height <= 0:
             continue
+        source_bbox_px = _clamp_bbox_px(
+            (
+                expanded_bbox_px[0] + trim_bbox_px[0],
+                expanded_bbox_px[1] + trim_bbox_px[1],
+                expanded_bbox_px[0] + trim_bbox_px[2],
+                expanded_bbox_px[1] + trim_bbox_px[3],
+            ),
+            page_w=page_w,
+            page_h=page_h,
+        )
+        source_segments.append(
+            QuestionSourceSegment(
+                page_number=page_number,
+                bbox_norm=tuple(layout_bbox_px_to_norm(source_bbox_px, page_w, page_h)),
+            )
+        )
         crops.append(region.convert("RGB"))
 
     if not crops:
@@ -859,6 +895,7 @@ def _extract_question_crop_segments(
             detected_question_type, classify_question_image(stitched)
         ),
         output_path=str(out_path),
+        source_segments=tuple(source_segments),
     )
 
 
@@ -1910,6 +1947,13 @@ def results_to_dict(result: SubmissionResult) -> dict:
                 "output_path": q.output_path,
                 "skipped": q.skipped,
                 "error": q.error,
+                "source_segments": [
+                    {
+                        "page_number": segment.page_number,
+                        "bbox_norm": list(segment.bbox_norm),
+                    }
+                    for segment in q.source_segments
+                ],
             }
             for q in result.questions
         ],

@@ -3,6 +3,7 @@ from .splitter import (
     plan_submission_ranges,
     split_scanned_submission_pdf,
 )
+from opengrader.core.source_location import QuestionSourceSegment
 from .student_file import (
     AssignmentTitleMetadata,
     StudentSubmissionBuildResult,
@@ -22,6 +23,7 @@ __all__ = [
     "SubmissionPageRange",
     "plan_submission_ranges",
     "split_scanned_submission_pdf",
+    "QuestionSourceSegment",
     "AssignmentTitleMetadata",
     "StudentSubmissionBuildResult",
     "StudentSubmissionDocument",

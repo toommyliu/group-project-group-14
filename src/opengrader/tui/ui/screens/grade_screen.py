@@ -876,6 +876,9 @@ class GradeScreen(Vertical):
                 self._focus_rubric_list()
                 event.prevent_default()
                 event.stop()
+                return
+            if len(event.key) == 1:
+                event.stop()
             return
 
         if isinstance(focused, Input):

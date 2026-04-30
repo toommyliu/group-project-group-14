@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ from opengrader.core.ocr.ollama_vlm import (
 )
 from opengrader.core.ocr.scanner import _find_rectangles
 from opengrader.core.ocr.utils import apply_grayscale
+from opengrader.core.source_location import QuestionSourceSegment
 
 
 _TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b")
@@ -82,6 +84,7 @@ class StudentSubmissionQuestion:
     rubric_labels: tuple[str, ...] = ()
     analysis: str = ""
     question_type: QuestionType = FREE_RESPONSE
+    source_segments: tuple[QuestionSourceSegment, ...] = ()
 
     @property
     def rubric_label(self) -> str:
@@ -115,6 +118,17 @@ class StudentSubmissionGradeUpdate:
     points_awarded: float | None = None
     rubric_labels: tuple[str, ...] | None = None
     analysis: str | None = None
+
+
+@dataclass(frozen=True)
+class _SplitQuestionImage:
+    question_id: str
+    image_path: Path
+    bbox_norm: tuple[float, float, float, float]
+
+    def __iter__(self):
+        yield self.question_id
+        yield self.image_path
 
 
 @dataclass(frozen=True)
@@ -272,6 +286,58 @@ def _parse_question_type(raw: str | None) -> QuestionType:
     return FREE_RESPONSE
 
 
+def _parse_source_segments(raw: str | None) -> tuple[QuestionSourceSegment, ...]:
+    text = (raw or "").strip()
+    if not text:
+        return ()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("source segments must be JSON") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("source segments must be a JSON list")
+
+    segments: list[QuestionSourceSegment] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("source segment entries must be objects")
+        page = item.get("page")
+        if page is None:
+            page = item.get("page_number")
+        bbox = item.get("bbox")
+        if not isinstance(page, int) or page < 1:
+            raise ValueError("source segment page must be a positive integer")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            raise ValueError("source segment bbox must contain four numbers")
+        try:
+            x, y, w, h = (float(value) for value in bbox)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("source segment bbox must contain numbers") from exc
+        segments.append(
+            QuestionSourceSegment(
+                page_number=page,
+                bbox_norm=(x, y, w, h),
+            )
+        )
+    return tuple(segments)
+
+
+def _format_source_segments(
+    segments: tuple[QuestionSourceSegment, ...],
+) -> str:
+    if not segments:
+        return ""
+    payload = [
+        {
+            "page": segment.page_number,
+            "bbox": [round(value, 4) for value in segment.bbox_norm],
+        }
+        for segment in segments
+    ]
+    return json.dumps(payload, separators=(",", ":"))
+
+
 def _format_submission_points(value: float | None) -> str:
     if value is None:
         return ""
@@ -419,6 +485,9 @@ def parse_student_submission_markdown(
                 ),
                 analysis=fields.values.get("Analysis", "").strip(),
                 question_type=_parse_question_type(fields.values.get("Question type")),
+                source_segments=_parse_source_segments(
+                    fields.values.get("Source segments")
+                ),
             )
         )
 
@@ -612,6 +681,17 @@ def update_student_submission_file(
     submission_path.write_text(updated)
 
 
+def _normalize_assignment_version(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    text = raw.translate(SUBSCRIPT_TRANSLATION)
+    text = re.sub(r"(?i)^version\s+", "", text.strip())
+    text = text.strip("()[]{}:;,- ")
+    text = re.sub(r"\s+", "", text)
+    text = text.replace("_", "")
+    return text.upper() or None
+
+
 def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetadata:
     normalized = "\n".join(
         line.strip() for line in raw_title.splitlines() if line.strip()
@@ -677,6 +757,22 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
         course_code=course_code,
         assignment_title=assignment_title,
         assignment_version=assignment_version,
+    )
+
+
+def _assignment_metadata_from_title_result(
+    result: TitleMetadataResult,
+) -> AssignmentTitleMetadata:
+    """Convert structured title OCR output into submission metadata."""
+    parsed = parse_assignment_metadata_from_title(result.raw_title)
+    assignment_title = result.assignment_title.strip()
+    if not assignment_title or assignment_title == "Unknown Assignment":
+        assignment_title = parsed.assignment_title
+    return AssignmentTitleMetadata(
+        raw_title=result.raw_title.strip() or parsed.raw_title,
+        course_code=result.course_code or parsed.course_code,
+        assignment_title=assignment_title,
+        assignment_version=result.assignment_version or parsed.assignment_version,
     )
 
 
@@ -754,6 +850,19 @@ def _emit_progress(
 ) -> None:
     if callback is not None:
         callback(message)
+
+
+def _source_pdf_reference(pdf_path: Path, output_dir: Path) -> str:
+    """Return a stable markdown reference from output dir to the source PDF."""
+    resolved_pdf = pdf_path.expanduser().resolve()
+    resolved_output = output_dir.expanduser().resolve()
+    try:
+        return str(resolved_pdf.relative_to(resolved_output))
+    except ValueError:
+        try:
+            return str(Path("..") / resolved_pdf.relative_to(resolved_output.parent))
+        except ValueError:
+            return str(resolved_pdf)
 
 
 def _bbox_norm_to_px(
@@ -1029,7 +1138,7 @@ def _split_question_response_image(
     *,
     question_id: str,
     image_path: Path,
-) -> list[tuple[str, Path]]:
+) -> list[_SplitQuestionImage]:
     if not _TOP_LEVEL_QUESTION_ID_RE.fullmatch(question_id):
         return []
 
@@ -1046,7 +1155,7 @@ def _split_question_response_image(
     if len(boxes) < 2:
         return []
 
-    outputs: list[tuple[str, Path]] = []
+    outputs: list[_SplitQuestionImage] = []
     for idx, box in enumerate(boxes):
         label = chr(ord("a") + idx)
         subquestion_id = f"{question_id}{label}"
@@ -1068,9 +1177,56 @@ def _split_question_response_image(
 
         output_path = image_path.with_name(f"{subquestion_id}{image_path.suffix}")
         crop.save(output_path)
-        outputs.append((subquestion_id, output_path))
+        outputs.append(
+            _SplitQuestionImage(
+                question_id=subquestion_id,
+                image_path=output_path,
+                bbox_norm=(
+                    expanded_box[0],
+                    expanded_box[1],
+                    expanded_box[2],
+                    expanded_box[3],
+                ),
+            )
+        )
 
     return outputs
+
+
+def _map_subquestion_source_segments(
+    parent_segments: tuple[QuestionSourceSegment, ...],
+    child_bbox_norm: tuple[float, float, float, float],
+) -> tuple[QuestionSourceSegment, ...]:
+    """Map a child crop within a parent response image onto source PDF space."""
+    if not parent_segments:
+        return ()
+    parent = parent_segments[0]
+    parent_x, parent_y, parent_w, parent_h = parent.bbox_norm
+    child_x, child_y, child_w, child_h = child_bbox_norm
+    return (
+        QuestionSourceSegment(
+            page_number=parent.page_number,
+            bbox_norm=(
+                parent_x + (child_x * parent_w),
+                parent_y + (child_y * parent_h),
+                child_w * parent_w,
+                child_h * parent_h,
+            ),
+        ),
+    )
+
+
+def _coerce_split_question_image(
+    split_image: _SplitQuestionImage | tuple[str, Path],
+) -> _SplitQuestionImage:
+    if isinstance(split_image, _SplitQuestionImage):
+        return split_image
+    question_id, image_path = split_image
+    return _SplitQuestionImage(
+        question_id=question_id,
+        image_path=image_path,
+        bbox_norm=(0.0, 0.0, 1.0, 1.0),
+    )
 
 
 def _classify_question_image_path(image_path: Path) -> QuestionType:
@@ -1145,6 +1301,9 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             )
         else:
             lines.append("  - Response image: ")
+        lines.append(
+            f"  - Source segments: {_format_source_segments(question.source_segments)}"
+        )
 
         _render_multiline_text(lines, question.response_text, indent=2)
 
@@ -1230,7 +1389,7 @@ def build_student_submission_document(
     if title_crop_path is not None and title_crop_path.exists():
         _emit_progress(progress_callback, "Ollama title OCR")
         try:
-            title_meta = parse_assignment_metadata_from_title(
+            title_meta = _assignment_metadata_from_title_result(
                 extract_title_metadata(
                     image_path=title_crop_path,
                     config=active_ollama_config,
@@ -1246,19 +1405,26 @@ def build_student_submission_document(
         title_meta = parse_assignment_metadata_from_title("")
 
     questions: list[StudentSubmissionQuestion] = []
-    question_jobs: list[tuple[str, Path | None, QuestionType]] = []
+    question_jobs: list[
+        tuple[str, Path | None, QuestionType, tuple[QuestionSourceSegment, ...]]
+    ] = []
 
     for extracted_question in extraction_result.questions:
         qid = extracted_question.question_id
         parent_question_type = extracted_question.question_type
 
-        question_images: list[tuple[str, Path | None, QuestionType]] = [
-            (qid, None, parent_question_type)
+        parent_source_segments = extracted_question.source_segments
+        question_images: list[
+            tuple[str, Path | None, QuestionType, tuple[QuestionSourceSegment, ...]]
+        ] = [
+            (qid, None, parent_question_type, parent_source_segments)
         ]
         if extracted_question.output_path:
             image_path = Path(extracted_question.output_path)
             if image_path.exists():
-                question_images = [(qid, image_path, parent_question_type)]
+                question_images = [
+                    (qid, image_path, parent_question_type, parent_source_segments)
+                ]
                 if split_subquestions:
                     try:
                         split_images = _split_question_response_image(
@@ -1268,19 +1434,27 @@ def build_student_submission_document(
                     except Exception:
                         split_images = []
                     if split_images:
+                        split_question_images = [
+                            _coerce_split_question_image(split_image)
+                            for split_image in split_images
+                        ]
                         question_images = [
                             (
-                                split_qid,
-                                split_image_path,
-                                _classify_question_image_path(split_image_path),
+                                split_image.question_id,
+                                split_image.image_path,
+                                _classify_question_image_path(split_image.image_path),
+                                _map_subquestion_source_segments(
+                                    parent_source_segments,
+                                    split_image.bbox_norm,
+                                ),
                             )
-                            for split_qid, split_image_path in split_images
+                            for split_image in split_question_images
                         ]
 
         question_jobs.extend(question_images)
 
     total_question_jobs = len(question_jobs)
-    for index, (question_id, image_path, question_type) in enumerate(
+    for index, (question_id, image_path, question_type, source_segments) in enumerate(
         question_jobs, start=1
     ):
         response_image_path: str | None = None
@@ -1318,6 +1492,7 @@ def build_student_submission_document(
                 response_image_path=response_image_path,
                 response_text=response_text,
                 question_type=question_type,
+                source_segments=source_segments,
             )
         )
 
@@ -1327,7 +1502,7 @@ def build_student_submission_document(
         course_code=title_meta.course_code,
         assignment_title=title_meta.assignment_title,
         assignment_version=title_meta.assignment_version,
-        source_pdf=pdf.name,
+        source_pdf=_source_pdf_reference(pdf, out_dir),
         score="",
         questions=questions,
     )

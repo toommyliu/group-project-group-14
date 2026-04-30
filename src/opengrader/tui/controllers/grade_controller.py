@@ -149,6 +149,8 @@ class GradeController:
     def on_comment_updated(self, comment: str) -> None:
         self._state.grading_run.update_comment(comment)
         error = self._persist_current_analysis(comment)
+        if not error:
+            error = self._persist_current_comment_annotation(comment)
         if error:
             self.refresh_grade_screen(status=error)
 
@@ -534,6 +536,30 @@ class GradeController:
             )
         except Exception as exc:
             return f"Could not save comment: {exc}"
+        return ""
+
+    def _persist_current_comment_annotation(self, comment: str) -> str:
+        save_annotation = getattr(
+            self._data_provider,
+            "save_question_comment_annotation",
+            None,
+        )
+        if not callable(save_annotation):
+            return ""
+
+        current_student = self._current_student_item()
+        current_question = self._state.grading_run.current_question
+        if current_student is None or current_question is None:
+            return ""
+
+        try:
+            save_annotation(
+                student_item_id=current_student.item_id,
+                question_id=current_question.question_id,
+                comment=comment,
+            )
+        except Exception as exc:
+            return f"Could not annotate PDF: {exc}"
         return ""
 
     def _status_key(self, student_item_id: str) -> tuple[str, str, str]:

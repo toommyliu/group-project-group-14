@@ -231,6 +231,9 @@ class TuiApp(App):
         grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
 
     def _input_command_available(self, command: InputCommand | str) -> bool:
+        if isinstance(self.focused, Input):
+            return False
+
         if not self.input_controller.command_available(command):
             return False
 

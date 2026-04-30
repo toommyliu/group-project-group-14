@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from opengrader.core.pdf.annotations import sync_question_comment_annotation
 from opengrader.core.qa_file import (
     QARubricFlatOption,
     QAQuestion,
@@ -182,6 +183,37 @@ class SubmissionFilesProvider:
         )
         self._reload_submission(student_item_id)
 
+    def save_question_comment_annotation(
+        self,
+        *,
+        student_item_id: str,
+        question_id: str,
+        comment: str,
+    ) -> Path:
+        submission = self._submission_for_student_item(student_item_id)
+        response = submission.questions_by_id.get(question_id)
+        if response is None:
+            raise ValueError(f"question not found in submission: {question_id}")
+        if not response.source_segments:
+            raise ValueError(
+                "Question source metadata missing; regenerate submission files to enable PDF annotations."
+            )
+
+        source_pdf_path = self._source_pdf_path(submission)
+        annotated_pdf_path = (
+            submission.path.parent
+            / "annotated-pdfs"
+            / f"{source_pdf_path.stem}.annotated.pdf"
+        )
+        sync_question_comment_annotation(
+            source_pdf_path=source_pdf_path,
+            annotated_pdf_path=annotated_pdf_path,
+            question_id=question_id,
+            comment=comment,
+            source_segments=response.source_segments,
+        )
+        return annotated_pdf_path
+
     def save_rubric_options(
         self,
         *,
@@ -274,6 +306,13 @@ class SubmissionFilesProvider:
         existing = self._submission_for_student_item(student_item_id)
         index = self._submissions.index(existing)
         self._submissions[index] = self._load_submission(existing.path)
+
+    @staticmethod
+    def _source_pdf_path(submission: _LoadedSubmission) -> Path:
+        source = Path(submission.document.source_pdf).expanduser()
+        if not source.is_absolute():
+            source = submission.path.parent / source
+        return source.resolve()
 
     def _question_context_for_submission(
         self,
