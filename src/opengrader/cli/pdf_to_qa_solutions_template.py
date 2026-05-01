@@ -24,7 +24,7 @@ EPILOG = """
 examples:
   uv run pdf-to-qa --input samples/answer-key.pdf --output out/template.md
   uv run pdf-to-qa --input key.pdf --output out/qa.md --title "Midterm 1 Solutions"
-  uv run pdf-to-qa --input samples/exam2b-2-answers.pdf --output solutions/final_exam_solutions.md --title "Final Exam Solutions"
+  uv run pdf-to-qa --input samples/exam2b-2-answers.pdf --output Solutions/final_exam_solutions.md --title "Final Exam Solutions"
   uv run pdf-to-qa --input samples/exam2b-2-answers.pdf --output solutions.md --title "Midterm 1"
 
 """
@@ -160,11 +160,12 @@ def extract_content(doc, boxes, max_q):
         if qnum not in boxes:
             # Fill in missing question gap with placeholder sections
             block = (
-                f"- {qnum}. (10 points) [Question {qnum} - Text not detected]\n"
+                f"- (10 points) [Question {qnum} - Text not detected]\n"
                 "  - **Correct**\n"
                 "    - No answer detected.\n"
                 "  - **Rubric**\n"
                 "    - Correct (+0)\n"
+                "    - Partially Correct (-5)\n"
                 "    - Incorrect (-10)"
             )
             markdown_questions.append(block)
@@ -219,6 +220,7 @@ def extract_content(doc, boxes, max_q):
         question_stem = re.sub(
             r"\(?\d+\s*points?\)?", "", question_stem, flags=re.IGNORECASE
         ).strip()
+        question_stem = re.sub(r"\s+", " ", question_stem).strip()
 
         # Clean up answer: Remove prefixes if they were accidentally caught in the answer crop
         answer_body = re.sub(r"(?i)^solution\s*:?\s*", "", answer_body).strip()
@@ -229,13 +231,28 @@ def extract_content(doc, boxes, max_q):
         ).strip()
         answer_body = re.sub(r"\s+", " ", answer_body).strip()
 
+        # Calculate half points for rubric
+        try:
+            pts_val = int(points)
+        except ValueError:
+            pts_val = 10
+        half_pts = pts_val / 2
+        if half_pts.is_integer():
+            half_pts = int(half_pts)
+
+        # Split multiple answers delimited by slashes into a bulleted list
+        answer_parts = [a.strip() for a in re.split(r'[\\/]', answer_body)]
+        answer_parts = [a for a in answer_parts if a]
+        correct_section = "\n".join([f"    - {a}" for a in answer_parts]) or "    - No answer detected."
+
         # Format into the Opengrader Markdown structure
         block = (
-            f"- {qnum}. ({points} points) {question_stem}\n"
+            f"- ({points} points) {question_stem}\n"
             f"  - **Correct**\n"
-            f"    - {answer_body}\n"
+            f"{correct_section}\n"
             f"  - **Rubric**\n"
             f"    - Correct (+0)\n"
+            f"    - Partially Correct (-{half_pts})\n"
             f"    - Incorrect (-{points})"
         )
         markdown_questions.append(block)

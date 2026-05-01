@@ -24,7 +24,7 @@ class _StudentListItem(ListItem):
     def __init__(self, nav: NavItem) -> None:
         self.nav = nav
         meta = f" [{nav.meta}]" if nav.meta else ""
-        super().__init__(Label(f"{nav.label}{meta}"))
+        super().__init__(Label(f"{nav.item_id}{meta}"))
 
 
 class QAPickerScreen(Vertical):
@@ -181,7 +181,7 @@ class QAPickerScreen(Vertical):
             question_status = f"\n{question.label} status for this student: {status}"
 
         self.query_one("#qa-preview", Static).update(
-            f"{item.label}\n\n"
+            f"{item.label} ({item.item_id})\n\n"
             f"Progress: {progress}\n\n"
             f"Highlighted QA: {highlighted_question}"
             f"{question_status}"
@@ -280,6 +280,10 @@ class QAPickerScreen(Vertical):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if isinstance(event.item, _QAListItem):
             self.post_message(self.QASelected(event.item.nav))
+        elif isinstance(event.item, _StudentListItem):
+            # Ensure we jump to the correct question when a student is selected via keyboard/click
+            self._set_active_list("student-list")
+            self._jump_to_student_ungraded(event.item)
 
     def on_focus(self, event: events.Focus) -> None:
         self._activate_list_for_widget(event.control)
@@ -294,14 +298,19 @@ class QAPickerScreen(Vertical):
             if student is not None:
                 try:
                     student_list.index = list(student_list.children).index(student)
+                    self._jump_to_student_ungraded(student)
                 except ValueError:
                     pass
-                self.show_student_details(student.nav)
                 event.stop()
                 return
 
             item = self.selected_student()
             if item is not None:
+                # Find the widget associated with this item to trigger the jump
+                for child in student_list.children:
+                    if isinstance(child, _StudentListItem) and child.nav == item:
+                        self._jump_to_student_ungraded(child)
+                        break
                 self.show_student_details(item)
             event.stop()
             return
@@ -316,6 +325,23 @@ class QAPickerScreen(Vertical):
             return
         self.post_message(self.QASelected(item.nav))
         event.stop()
+
+    def _jump_to_student_ungraded(self, student_item: _StudentListItem) -> None:
+        """Helper to jump the question list to the first ungraded item for a student."""
+        target_q_idx = 0
+        for i, q_nav in enumerate(self._items):
+            status = self._student_question_statuses.get(
+                (q_nav.item_id, student_item.nav.item_id), "ungraded"
+            )
+            if status != "graded":
+                target_q_idx = i
+                break
+
+        qa_list = self.query_one("#qa-list", ListView)
+        if 0 <= target_q_idx < len(qa_list.children):
+            qa_list.index = target_q_idx
+            self._restore_list_highlight(qa_list)
+        self.show_student_details(student_item.nav)
 
     def on_key(self, event: events.Key) -> None:
         if event.key in ("j", "down"):

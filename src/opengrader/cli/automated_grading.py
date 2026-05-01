@@ -16,6 +16,7 @@ examples:
   uv run automated-grading --solutions solutions.md --input student-0001.submission.md
   uv run automated-grading --solutions solutions.md --input ./student-submissions/
   uv run automated-grading --solutions Solutions/solutions.md --input samples/student_responses.md
+  uv run automated-grading --solutions Solutions/final_exam_solutions.md --input ./Solutions/student_submissions/
 """
 
 
@@ -27,23 +28,27 @@ def parse_solutions(solutions_path: Path) -> dict:
     solutions = {}
     content = solutions_path.read_text()
 
-    # Find question blocks: "- N. (P points)"
+    # Find question blocks: "- (P points)"
     # Use re.MULTILINE to find the start of bullets and re.DOTALL to capture content between them
     blocks = re.findall(
-        r"^- (\d+)\.\s*\(\s*(\d+)\s*(?:points?|pts)\s*\)(.*?)(?=\n- \d+\.|\Z)",
+        r"^- \(\s*(\d+)\s*(?:points?|pts)\s*\)(.*?)(?=\n- \(|\Z)",
         content,
         re.MULTILINE | re.DOTALL,
     )
 
-    for q_num, pts, body in blocks:
+    for i, (pts, body) in enumerate(blocks, start=1):
         # Extract answer(s) from the **Correct** section
-        ans_match = re.search(r"\*\*Correct\*\*\s*\n\s*-\s+(.*)", body, re.MULTILINE)
-        if ans_match:
-            ans_text = ans_match.group(1).strip()
-
-            # Split by '/' if multiple valid options exist (e.g., "0x95 / 95")
-            valid_answers = [a.strip() for a in ans_text.split("/")]
-            solutions[f"q{q_num}"] = {"answers": valid_answers, "points": int(pts)}
+        # Look for the block under **Correct** until the next bolded section (like Rubric)
+        correct_section_match = re.search(
+            r"\*\*Correct\*\*\s*\n(.*?)(?=\s*- \*\*|$)", body, re.DOTALL
+        )
+        if correct_section_match:
+            ans_text = correct_section_match.group(1)
+            # Find each bullet point in the captured group
+            valid_answers = [
+                m.strip() for m in re.findall(r"^\s*-\s*(.*)", ans_text, re.MULTILINE)
+            ]
+            solutions[f"q{i}"] = {"answers": valid_answers, "points": int(pts)}
     return solutions
 
 
@@ -107,7 +112,7 @@ def grade_student_file(student_path: Path, solutions: dict):
             if is_correct:
                 points_to_write = str(max_pts)
             else:
-                # If incorrect Free Response, leave it blank as requested
+                # If incorrect Free Response, leave it blank
                 points_to_write = ""
 
         # Update the Markdown content for this specific question block
