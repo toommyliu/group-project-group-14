@@ -172,6 +172,14 @@ class TuiApp(App):
             self.grade_controller.previous_ungraded_student,
         )
         self.input_controller.register(
+            InputCommand.GRADE_NEXT_QUESTION,
+            self.grade_controller.next_question,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_PREVIOUS_QUESTION,
+            self.grade_controller.previous_question,
+        )
+        self.input_controller.register(
             InputCommand.GRADE_FINALIZE_STUDENT,
             self.grade_controller.finalize_student,
         )

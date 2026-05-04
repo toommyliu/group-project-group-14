@@ -294,6 +294,15 @@ class GradeScreen(Vertical):
                     id="question-comment",
                 )
                 yield Rule()
+                yield Static(
+                    "ctrl+j/k  Next/Prev Question\n"
+                    "j/k       Next/Prev Student\n"
+                    "n/p       Next/Prev Ungraded\n"
+                    "ctrl+g    Finalize\n"
+                    "e         Edit Rubric\n"
+                    "c         Focus Comment",
+                    id="grade-keybinding-ref",
+                )
                 yield Static("", id="db-status")
 
     def on_mount(self) -> None:

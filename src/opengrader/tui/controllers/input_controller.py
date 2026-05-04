@@ -23,6 +23,8 @@ class InputCommand(str, Enum):
     GRADE_PREVIOUS_STUDENT = "grade_previous_student"
     GRADE_NEXT_UNGRADED_STUDENT = "grade_next_ungraded_student"
     GRADE_PREVIOUS_UNGRADED_STUDENT = "grade_previous_ungraded_student"
+    GRADE_NEXT_QUESTION = "grade_next_question"
+    GRADE_PREVIOUS_QUESTION = "grade_previous_question"
     GRADE_FINALIZE_STUDENT = "grade_finalize_student"
     GRADE_EDIT_RUBRIC = "grade_edit_rubric"
     GRADE_FOCUS_COMMENT = "grade_focus_comment"
@@ -138,6 +140,18 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "p",
         InputCommand.GRADE_PREVIOUS_UNGRADED_STUDENT,
         "Prev Ungraded",
+        (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "ctrl+j",
+        InputCommand.GRADE_NEXT_QUESTION,
+        "Next Question",
+        (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "ctrl+k",
+        InputCommand.GRADE_PREVIOUS_QUESTION,
+        "Prev Question",
         (InputContext.GRADE,),
     ),
     CommandBindingSpec(

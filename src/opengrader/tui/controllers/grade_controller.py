@@ -351,6 +351,26 @@ class GradeController:
             return
         self.open_student_by_index(previous_index)
 
+    def next_question(self) -> None:
+        if not self._on_grade_page():
+            return
+        next_index = self._state.active_question_index + 1
+        if next_index >= len(self._state.grading_run.questions):
+            self.refresh_grade_screen(status="Already on last question.")
+            return
+        self._state.active_question_index = next_index
+        self.open_student_by_index(self._state.active_student_index)
+
+    def previous_question(self) -> None:
+        if not self._on_grade_page():
+            return
+        prev_index = self._state.active_question_index - 1
+        if prev_index < 0:
+            self.refresh_grade_screen(status="Already on first question.")
+            return
+        self._state.active_question_index = prev_index
+        self.open_student_by_index(self._state.active_student_index)
+
     def finalize_student(self) -> None:
         if not self._on_grade_page():
             return
