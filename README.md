@@ -123,6 +123,8 @@ Useful `qa-file generate-template` options:
 - `--questions-start-page 1|2`: Start questions on page 1 or page 2.
 - `--font-regular-file <path>` and `--font-bold-file <path>`: Use custom template fonts.
 
+Generated templates use Computer Modern by default.
+
 Split a scanned submissions PDF:
 ```bash
 uv run submission-splitter \
