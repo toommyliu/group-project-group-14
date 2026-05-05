@@ -124,7 +124,8 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
-    response_dir = output_dir / "responses" / "student-0001"
+    submission_dir = output_dir / "student-0001"
+    response_dir = submission_dir / "responses"
     response_dir.mkdir(parents=True, exist_ok=True)
 
     q1 = response_dir / "q1.png"
@@ -213,7 +214,15 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             MULTIPLE_CHOICE,
             FREE_RESPONSE,
         ]
-        assert split_result.document.source_pdf == "../student-0001.pdf"
+        assert split_result.document.source_pdf == "../../student-0001.pdf"
+        assert split_result.markdown_path.parent.name == "student-0001"
+        assert split_result.responses_dir == (
+            split_result.markdown_path.parent / "responses"
+        )
+        assert (
+            split_result.document.questions[0].response_image_path
+            == "responses/q1a.png"
+        )
         assert split_call_count["count"] == 1
 
         split_call_count["count"] = 0
@@ -238,8 +247,9 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
-    response_dir = output_dir / "responses" / "student-0002"
-    field_dir = output_dir / "field_crops" / "student-0002"
+    submission_dir = output_dir / "student-0002"
+    response_dir = submission_dir / "responses"
+    field_dir = submission_dir / "field_crops"
     response_dir.mkdir(parents=True, exist_ok=True)
     field_dir.mkdir(parents=True, exist_ok=True)
 
@@ -360,7 +370,9 @@ def test_parse_student_submission_markdown_reads_frontmatter_and_questions(
     tmp_path: Path,
 ) -> None:
     submission_path = (
-        Path("samples/cs146-quiz1/student-submissions/submission-0001.submission.md")
+        Path(
+            "samples/cs146-quiz1/student-submissions/submission-0001/submission-0001.submission.md"
+        )
     )
     document = student_file.load_student_submission_markdown(submission_path)
 
@@ -699,8 +711,9 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
-    response_dir = output_dir / "responses" / "student-0003"
-    field_dir = output_dir / "field_crops" / "student-0003"
+    submission_dir = output_dir / "student-0003"
+    response_dir = submission_dir / "responses"
+    field_dir = submission_dir / "field_crops"
     response_dir.mkdir(parents=True, exist_ok=True)
     field_dir.mkdir(parents=True, exist_ok=True)
 
@@ -776,8 +789,9 @@ def test_build_student_submission_document_uses_structured_title_metadata(
     tmp_path: Path,
 ) -> None:
     output_dir = tmp_path / "out"
-    response_dir = output_dir / "responses" / "student-0004"
-    field_dir = output_dir / "field_crops" / "student-0004"
+    submission_dir = output_dir / "student-0004"
+    response_dir = submission_dir / "responses"
+    field_dir = submission_dir / "field_crops"
     response_dir.mkdir(parents=True, exist_ok=True)
     field_dir.mkdir(parents=True, exist_ok=True)
 

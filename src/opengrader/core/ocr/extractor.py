@@ -1639,9 +1639,8 @@ def _save_field_crop(
     field_crop_dir: Path,
     page_number: int,
     suffix: str = "",
-    mirror_dir: Path | None = None,
 ) -> str | None:
-    """Save a field crop and optionally mirror it to a hoisted artifact folder."""
+    """Save a field crop into this submission's artifact folder."""
 
     crop = crop_region(page_image, bbox_px)
     if crop.width <= 0 or crop.height <= 0:
@@ -1652,11 +1651,6 @@ def _save_field_crop(
     field_crop_dir.mkdir(parents=True, exist_ok=True)
     out_path = field_crop_dir / filename
     crop.save(out_path)
-
-    if mirror_dir is not None:
-        mirror_dir.mkdir(parents=True, exist_ok=True)
-        mirror_path = mirror_dir / filename
-        crop.save(mirror_path)
 
     return str(out_path)
 
@@ -1740,7 +1734,7 @@ def process_submission_pdf(
     Args:
         pdf_path: Path to the submission PDF.
         config: OCR configuration used by layout scanning.
-        output_dir: Directory where response artifacts are written.
+        output_dir: Directory where this submission's artifacts are written.
         response_format: Image or PDF format for question response artifacts.
         dpi: Render resolution for OCR and saved crops.
         save_layout_debug: Whether to write JSON and overlay debug artifacts.
@@ -1778,10 +1772,10 @@ def process_submission_pdf(
     result.review_reasons.extend(layout.review_reasons)
 
     all_field_results: list[FieldExtractionResult] = []
-    submission_dir = Path(output_dir) / "responses" / path.stem
-    submission_dir.mkdir(parents=True, exist_ok=True)
+    submission_dir = Path(output_dir)
+    response_dir = submission_dir / "responses"
     field_crop_dir = submission_dir / "field_crops"
-    field_crop_hoist_dir = Path(output_dir) / "field_crops" / path.stem
+    response_dir.mkdir(parents=True, exist_ok=True)
     if (
         layout.title_region is not None
         and layout.title_region.page_number in rendered_pages
@@ -1791,9 +1785,8 @@ def process_submission_pdf(
             page_image,
             layout_bbox_norm_to_px(layout.title_region.crop_bbox_norm, page_w, page_h),
         )
-        title_dir = submission_dir / "field_crops"
-        title_dir.mkdir(parents=True, exist_ok=True)
-        title_path = title_dir / f"title_p{layout.title_region.page_number}.png"
+        field_crop_dir.mkdir(parents=True, exist_ok=True)
+        title_path = field_crop_dir / f"title_p{layout.title_region.page_number}.png"
         title_crop.save(title_path)
         result.title_crop_path = str(title_path)
 
@@ -1820,7 +1813,6 @@ def process_submission_pdf(
             field_type=artifact_field_type,
             field_crop_dir=field_crop_dir,
             page_number=detected.page_number,
-            mirror_dir=field_crop_hoist_dir,
         )
         all_field_results.append(
             FieldExtractionResult(
@@ -1836,7 +1828,7 @@ def process_submission_pdf(
         )
 
     all_question_results: list[QuestionExtractionResult] = []
-    sub_dir = submission_dir
+    sub_dir = response_dir
 
     detected_questions_sorted = sorted(
         layout.questions,
@@ -1900,7 +1892,7 @@ def process_submission_pdf(
         write_layout_debug(
             debug_layout,
             rendered_pages,
-            Path(output_dir) / "layout_debug" / path.stem,
+            submission_dir / "layout_debug",
             question_crop_bboxes_by_page=_final_question_debug_bboxes_by_page(
                 debug_layout,
                 rendered_pages,

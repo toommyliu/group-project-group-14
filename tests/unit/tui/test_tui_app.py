@@ -195,8 +195,8 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
             assert current.question_id == "q1"
             assert current.prompt.startswith("Convert decimal ")
             assert current.response_text
-            assert "/responses/submission-" in current.image_path
-            assert current.image_path.endswith("/q1.png")
+            assert "/student-submissions/submission-" in current.image_path
+            assert current.image_path.endswith("/responses/q1.png")
 
             context = app.get_grade_screen().query_one("#question-context", Static)
             assert current.prompt in str(context.content)

@@ -273,7 +273,9 @@ class SubmissionFilesProvider:
         if path.is_file():
             return [path]
         if path.is_dir():
-            return sorted(path.glob("*.submission.md"))
+            direct = sorted(path.glob("*.submission.md"))
+            nested = sorted(path.glob("*/*.submission.md"))
+            return [*direct, *nested]
         raise FileNotFoundError(f"submissions path not found: {path}")
 
     def _load_submissions(self, path: Path) -> list[_LoadedSubmission]:
