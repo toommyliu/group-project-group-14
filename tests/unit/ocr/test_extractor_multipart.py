@@ -270,11 +270,12 @@ def test_question_crop_expansion_adds_padding() -> None:
     assert expanded[2] > 900
 
 
-def test_process_submission_pdf_saves_field_crops_with_submission_and_hoisted_copy(
+def test_process_submission_pdf_saves_field_crops_in_submission_artifact_dir(
     tmp_path: Path,
 ) -> None:
     pdf_path = tmp_path / "submission.pdf"
     _create_blank_pdf(pdf_path)
+    output_dir = tmp_path / "submission-artifacts"
 
     def _fake_scan_layout(*_args: object, **_kwargs: object) -> SubmissionLayout:
         return SubmissionLayout(
@@ -308,23 +309,23 @@ def test_process_submission_pdf_saves_field_crops_with_submission_and_hoisted_co
         result = process_submission_pdf(
             pdf_path=pdf_path,
             config=OcrConfig(),
-            output_dir=tmp_path,
+            output_dir=output_dir,
             response_format="png",
             dpi=72,
         )
     finally:
         extractor.scan_submission_layout = original_scan_layout
 
-    expected_submission_dir = tmp_path / "responses" / "submission" / "field_crops"
-    expected_hoist_dir = tmp_path / "field_crops" / "submission"
+    expected_field_crop_dir = output_dir / "field_crops"
+    old_hoist_dir = tmp_path / "field_crops" / "submission"
 
     crop_paths = [Path(field.crop_path) for field in result.fields if field.crop_path]
     assert len(crop_paths) == 2
     assert {path.name for path in crop_paths} == {"name_p1.png", "id_p1.png"}
     for crop_path in crop_paths:
-        assert crop_path.parent == expected_submission_dir
+        assert crop_path.parent == expected_field_crop_dir
         assert crop_path.exists()
-        assert (expected_hoist_dir / crop_path.name).exists()
+        assert not (old_hoist_dir / crop_path.name).exists()
 
 
 def test_save_layout_debug_receives_final_question_bboxes_for_continuations(

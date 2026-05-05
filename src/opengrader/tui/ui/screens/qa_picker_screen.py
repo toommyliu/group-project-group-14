@@ -125,23 +125,21 @@ class QAPickerScreen(Vertical):
 
     def focus_questions(self) -> None:
         qa_list = self.query_one("#qa-list", ListView)
-        search_input = self.query_one("#qa-search", Input)
         if qa_list.index is None and self._items:
             qa_list.index = 0
         self._set_active_list("qa-list")
-        search_input.focus()
+        qa_list.focus()
         self._restore_list_highlight(qa_list)
 
     def focus_students(self) -> None:
         student_list = self.query_one("#student-list", ListView)
-        search_input = self.query_one("#student-search", Input)
         if student_list.index is None and self._students:
             student_list.index = 0
         if not self._all_students:
             self.focus_questions()
             return
         self._set_active_list("student-list")
-        search_input.focus()
+        student_list.focus()
         self._restore_list_highlight(student_list)
         self._restore_student_details()
         self.set_timer(0.01, self._restore_student_details)

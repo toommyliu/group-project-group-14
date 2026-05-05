@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -862,11 +863,25 @@ def _assignment_metadata_from_title_result(
         or assignment_title == "Unknown Assignment"
     ):
         assignment_title = parsed.assignment_title
+    assignment_version = (
+        _normalize_assignment_version(result.assignment_version)
+        or parsed.assignment_version
+    )
+    assignment_version_is_assignment_number = (
+        assignment_version is not None
+        and parsed.assignment_version is None
+        and assignment_version.isdigit()
+        and re.search(rf"\b{re.escape(assignment_version)}\b", parsed.assignment_title)
+        and not re.search(rf"\b{re.escape(assignment_version)}\b", assignment_title)
+    )
+    if assignment_version_is_assignment_number:
+        assignment_title = parsed.assignment_title
+        assignment_version = None
     return AssignmentTitleMetadata(
         raw_title=result.raw_title.strip() or parsed.raw_title,
         course_code=_normalize_course_code(result.course_code) or parsed.course_code,
         assignment_title=assignment_title,
-        assignment_version=result.assignment_version or parsed.assignment_version,
+        assignment_version=assignment_version,
     )
 
 
@@ -950,13 +965,7 @@ def _source_pdf_reference(pdf_path: Path, output_dir: Path) -> str:
     """Return a stable markdown reference from output dir to the source PDF."""
     resolved_pdf = pdf_path.expanduser().resolve()
     resolved_output = output_dir.expanduser().resolve()
-    try:
-        return str(resolved_pdf.relative_to(resolved_output))
-    except ValueError:
-        try:
-            return str(Path("..") / resolved_pdf.relative_to(resolved_output.parent))
-        except ValueError:
-            return str(resolved_pdf)
+    return os.path.relpath(resolved_pdf, start=resolved_output)
 
 
 def _bbox_norm_to_px(
@@ -1433,13 +1442,14 @@ def build_student_submission_document(
     progress_callback: Callable[[str], None] | None = None,
 ) -> StudentSubmissionBuildResult:
     pdf = Path(pdf_path)
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    root_out_dir = Path(output_dir)
+    submission_dir = root_out_dir / pdf.stem
+    submission_dir.mkdir(parents=True, exist_ok=True)
 
     extraction_result = process_submission_pdf(
         pdf_path=pdf,
         config=ocr_config,
-        output_dir=out_dir,
+        output_dir=submission_dir,
         response_format="png",
         dpi=dpi,
         save_layout_debug=save_layout_debug,
@@ -1557,7 +1567,7 @@ def build_student_submission_document(
 
         if image_path is not None:
             try:
-                response_image_path = str(image_path.relative_to(out_dir))
+                response_image_path = str(image_path.relative_to(submission_dir))
             except ValueError:
                 response_image_path = str(image_path)
 
@@ -1596,17 +1606,17 @@ def build_student_submission_document(
         course_code=title_meta.course_code,
         assignment_title=title_meta.assignment_title,
         assignment_version=title_meta.assignment_version,
-        source_pdf=_source_pdf_reference(pdf, out_dir),
+        source_pdf=_source_pdf_reference(pdf, submission_dir),
         score="",
         questions=questions,
     )
 
     markdown = render_student_submission_markdown(document)
-    markdown_path = out_dir / f"{pdf.stem}.submission.md"
+    markdown_path = submission_dir / f"{pdf.stem}.submission.md"
     with open(markdown_path, "w") as f:
         f.write(markdown)
 
-    responses_dir = out_dir / "responses" / pdf.stem
+    responses_dir = submission_dir / "responses"
     return StudentSubmissionBuildResult(
         document=document,
         markdown_path=markdown_path,

@@ -137,6 +137,35 @@ def _write_simple_submissions(path: Path, *, count: int = 2) -> None:
         )
 
 
+def test_submission_files_provider_loads_flat_and_nested_submission_files(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "student-submissions"
+    nested_dir = submissions_path / "student-1"
+    nested_dir.mkdir(parents=True)
+    _write_simple_submission(
+        submissions_path / "student-0.submission.md",
+        name="Flat Student",
+    )
+    _write_simple_submission(
+        nested_dir / "student-1.submission.md",
+        name="Nested Student",
+    )
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    assert [student.full_name for student in provider.list_students(course_id=1)] == [
+        "Flat Student",
+        "Nested Student",
+    ]
+
+
 def test_submission_files_provider_loads_students_and_questions() -> None:
     provider = SubmissionFilesProvider(
         qa_file_path="samples/qa-multi.md",
@@ -187,10 +216,49 @@ def test_submission_files_provider_returns_student_specific_response_images() ->
     assert first_student[0].response_text == "no"
     assert second_student[0].response_text != first_student[0].response_text
     assert second_student[0].prompt == "Convert decimal 6 to binary [B]."
-    assert first_student[0].image_path.endswith("responses/submission-0001/q1.png")
-    assert second_student[0].image_path.endswith("responses/submission-0002/q1.png")
+    assert first_student[0].image_path.endswith("submission-0001/responses/q1.png")
+    assert second_student[0].image_path.endswith("submission-0002/responses/q1.png")
     assert Path(first_student[0].image_path).exists()
     assert Path(second_student[0].image_path).exists()
+
+
+def test_submission_files_provider_recovers_version_from_question_markers(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    qa_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Quiz 1",
+                "---",
+                "",
+                "## Version B",
+                "",
+                "- (1 points) Prompt [B]",
+                "  - **Rubric**",
+                "    - Correct (+0)",
+                "    - Partially Correct (-0.5)",
+                "    - Incorrect (-1)",
+                "",
+            ]
+        )
+    )
+    submission_path = tmp_path / "student.submission.md"
+    _write_simple_submission(submission_path, name="Student", version="1")
+    content = submission_path.read_text()
+    submission_path.write_text(
+        content.replace("  - Prompt: Convert.", "  - Prompt: Prompt [B]")
+    )
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submission_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    seeds = provider.build_question_seeds(student_item_id="s1")
+    assert seeds[0].prompt == "Prompt [B]"
 
 
 def test_submission_files_provider_raises_for_unknown_version(tmp_path: Path) -> None:
@@ -267,10 +335,10 @@ def test_submission_files_provider_save_question_grade_updates_selected_file(
     )
 
     first = load_student_submission_markdown(
-        submissions_path / "submission-0001.submission.md"
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     second = load_student_submission_markdown(
-        submissions_path / "submission-0002.submission.md"
+        submissions_path / "submission-0002" / "submission-0002.submission.md"
     )
     assert first.questions[0].possible_points == 10
     assert first.questions[0].points_awarded == 7
@@ -306,7 +374,7 @@ def test_submission_files_provider_save_question_analysis_preserves_grade(
     )
 
     document = load_student_submission_markdown(
-        submissions_path / "submission-0001.submission.md"
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     assert document.questions[0].points_awarded == 7
     assert document.questions[0].rubric_label == "Partially Correct"
