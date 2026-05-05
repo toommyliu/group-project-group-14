@@ -38,6 +38,11 @@ submission-splitter = "opengrader.cli.submission_splitter:run_cli"
 [tool.hatch.build.targets.wheel]
 packages = ["src/opengrader"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"assets/fonts/cmu/cmunrm.ttf" = "assets/fonts/cmu/cmunrm.ttf"
+"assets/fonts/cmu/cmunbx.ttf" = "assets/fonts/cmu/cmunbx.ttf"
+"THIRD_PARTY_LICENSES" = "THIRD_PARTY_LICENSES"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
@@ -49,5 +54,6 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "pip-licenses>=5.0.0",
     "textual-dev>=1.8.0",
 ]
