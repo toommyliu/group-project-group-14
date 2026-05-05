@@ -222,6 +222,45 @@ def test_submission_files_provider_returns_student_specific_response_images() ->
     assert Path(second_student[0].image_path).exists()
 
 
+def test_submission_files_provider_recovers_version_from_question_markers(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    qa_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Quiz 1",
+                "---",
+                "",
+                "## Version B",
+                "",
+                "- (1 points) Prompt [B]",
+                "  - **Rubric**",
+                "    - Correct (+0)",
+                "    - Partially Correct (-0.5)",
+                "    - Incorrect (-1)",
+                "",
+            ]
+        )
+    )
+    submission_path = tmp_path / "student.submission.md"
+    _write_simple_submission(submission_path, name="Student", version="1")
+    content = submission_path.read_text()
+    submission_path.write_text(
+        content.replace("  - Prompt: Convert.", "  - Prompt: Prompt [B]")
+    )
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submission_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    seeds = provider.build_question_seeds(student_item_id="s1")
+    assert seeds[0].prompt == "Prompt [B]"
+
+
 def test_submission_files_provider_raises_for_unknown_version(tmp_path: Path) -> None:
     qa_path = tmp_path / "qa.md"
     qa_path.write_text(

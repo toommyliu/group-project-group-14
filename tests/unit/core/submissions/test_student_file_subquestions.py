@@ -57,6 +57,21 @@ def test_assignment_metadata_from_title_result_prefers_compact_raw_parse() -> No
     assert metadata.assignment_version == "5A"
 
 
+def test_assignment_metadata_from_title_result_ignores_assignment_number_as_version() -> None:
+    metadata = student_file._assignment_metadata_from_title_result(
+        TitleMetadataResult(
+            course_code="CS146",
+            assignment_title="Quiz",
+            assignment_version="1",
+            raw_title="CS146: Quiz 1",
+        )
+    )
+
+    assert metadata.course_code == "CS146"
+    assert metadata.assignment_title == "Quiz 1"
+    assert metadata.assignment_version is None
+
+
 def _draw_subquestion_boxes(path: Path) -> None:
     image = Image.new("RGB", (1200, 1600), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)

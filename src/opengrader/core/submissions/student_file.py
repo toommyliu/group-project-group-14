@@ -863,11 +863,25 @@ def _assignment_metadata_from_title_result(
         or assignment_title == "Unknown Assignment"
     ):
         assignment_title = parsed.assignment_title
+    assignment_version = (
+        _normalize_assignment_version(result.assignment_version)
+        or parsed.assignment_version
+    )
+    assignment_version_is_assignment_number = (
+        assignment_version is not None
+        and parsed.assignment_version is None
+        and assignment_version.isdigit()
+        and re.search(rf"\b{re.escape(assignment_version)}\b", parsed.assignment_title)
+        and not re.search(rf"\b{re.escape(assignment_version)}\b", assignment_title)
+    )
+    if assignment_version_is_assignment_number:
+        assignment_title = parsed.assignment_title
+        assignment_version = None
     return AssignmentTitleMetadata(
         raw_title=result.raw_title.strip() or parsed.raw_title,
         course_code=_normalize_course_code(result.course_code) or parsed.course_code,
         assignment_title=assignment_title,
-        assignment_version=result.assignment_version or parsed.assignment_version,
+        assignment_version=assignment_version,
     )
 
 

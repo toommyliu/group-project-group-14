@@ -334,9 +334,9 @@ class SubmissionFilesProvider:
         if not self._qa_doc.version_questions:
             return None, self._qa_doc.questions
 
-        version = (document.assignment_version or "").strip()
-        if not version:
-            version = self._infer_version_from_submission(document)
+        explicit_version = (document.assignment_version or "").strip()
+        inferred_version = self._infer_version_from_submission(document)
+        version = explicit_version or inferred_version
         if not version:
             available = ", ".join(self._qa_doc.version_questions.keys())
             raise ValueError(
@@ -349,6 +349,8 @@ class SubmissionFilesProvider:
             for candidate in self._qa_doc.version_questions
         }
         selected = version_by_normalized.get(version.lower())
+        if selected is None and explicit_version and inferred_version:
+            selected = version_by_normalized.get(inferred_version.lower())
         if selected is None:
             available = ", ".join(self._qa_doc.version_questions.keys())
             raise ValueError(
