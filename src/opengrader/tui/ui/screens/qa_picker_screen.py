@@ -5,8 +5,14 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Input, Label, ListItem, ListView, Static
 
+from opengrader.tui.statistics import (
+    QuestionStatistics,
+    question_statistics_chart_image,
+    render_question_statistics,
+)
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.nav_item import NavItem
+from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
 
 class _QAListItem(ListItem):
@@ -49,6 +55,7 @@ class QAPickerScreen(Vertical):
         self._students: list[NavItem] = []
         self._all_students: list[NavItem] = []
         self._student_question_statuses: dict[tuple[str, str], str] = {}
+        self._question_statistics: dict[str, QuestionStatistics] = {}
         self._active_list_id = "qa-list"
         super().__init__(id=id)
 
@@ -68,6 +75,13 @@ class QAPickerScreen(Vertical):
             with Vertical(id="qa-details"):
                 yield Label("Question", classes="sidebar-section-title")
                 yield Static("Highlight a QA to preview it.", id="qa-preview")
+                yield SharpImage(
+                    None,
+                    id="qa-statistics-chart",
+                    fit_width_fraction=0.9,
+                    allow_upscale=True,
+                    max_cell_height=18,
+                )
                 yield Static(
                     "j/k or up/down  Move\n"
                     "tab/shift+tab  Switch pane\n"
@@ -85,12 +99,14 @@ class QAPickerScreen(Vertical):
         breadcrumb_labels: list[str],
         assignment_name: str,
         student_question_statuses: dict[tuple[str, str], str] | None = None,
+        question_statistics: dict[str, QuestionStatistics] | None = None,
     ) -> None:
         self._items = list(questions)
         self._all_items = list(questions)
         self._all_students = list(students)
         self._students = list(students)
         self._student_question_statuses = dict(student_question_statuses or {})
+        self._question_statistics = dict(question_statistics or {})
         self.query_one("#qa-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
         self.query_one("#qa-picker-title", Label).update(
             f"Choose QA for {assignment_name}"
@@ -118,6 +134,7 @@ class QAPickerScreen(Vertical):
             self.query_one("#qa-preview", Static).update(
                 "No questions were found for this assignment."
             )
+            self._sync_statistics_chart(None)
         if students:
             student_list.index = 0
             self._restore_list_highlight(student_list)
@@ -172,8 +189,11 @@ class QAPickerScreen(Vertical):
     def show_question_details(self, item: NavItem) -> None:
         status = f"\nStatus: {item.meta}" if item.meta else ""
         self.query_one("#qa-preview", Static).update(
-            f"{item.label}\n\nSelect this QA to grade it for all students.{status}"
+            f"{item.label}\n\n"
+            f"Select this QA to grade it for all students.{status}"
+            f"{self._statistics_text(item)}"
         )
+        self._sync_statistics_chart(item)
 
     def show_student_details(self, item: NavItem) -> None:
         progress = self._progress_for_student(item)
@@ -194,12 +214,37 @@ class QAPickerScreen(Vertical):
             f"Progress: {progress}\n\n"
             f"Highlighted QA: {highlighted_question}"
             f"{question_status}"
+            f"{self._statistics_text(question)}"
         )
+        self._sync_statistics_chart(question)
 
     def _progress_for_student(self, item: NavItem) -> str:
         total_questions = len(self._items)
         graded_text = item.meta.split("/", maxsplit=1)[0] if item.meta else "0"
         return f"{graded_text} / {total_questions} questions graded"
+
+    def _statistics_text(self, question: NavItem | None) -> str:
+        if question is None:
+            return ""
+        stats = self._question_statistics.get(question.item_id)
+        if stats is None:
+            return ""
+        return f"\n\n{render_question_statistics(stats, include_distribution=False)}"
+
+    def _sync_statistics_chart(self, question: NavItem | None) -> None:
+        chart = self.query_one("#qa-statistics-chart", SharpImage)
+        stats = (
+            self._question_statistics.get(question.item_id)
+            if question is not None
+            else None
+        )
+        image = question_statistics_chart_image(stats) if stats is not None else None
+        if image is None:
+            chart.display = False
+            chart.image = None
+            return
+        chart.image = image
+        chart.display = True
 
     def move_to_index(self, index: int) -> None:
         qa_list = self.query_one("#qa-list", ListView)

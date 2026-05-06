@@ -41,3 +41,16 @@ def test_sharp_image_can_reserve_a_fraction_of_container_width(
     image = SharpImage(str(image_path), fit_width_fraction=0.9)
 
     assert image.get_content_width(Size(80, 20), Size(80, 20)) == 72
+
+
+def test_sharp_image_can_limit_width_to_keep_height_bounded(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "chart.png"
+    _write_image(image_path, (1200, 400))
+
+    image = SharpImage(str(image_path), max_cell_height=6)
+    width = image.get_content_width(Size(80, 20), Size(80, 20))
+
+    assert width < 80
+    assert image.get_content_height(Size(80, 20), Size(80, 20), width) <= 6

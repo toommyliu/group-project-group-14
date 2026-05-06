@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 from opengrader.tui.controllers.grade_controller import GradeController
 from opengrader.tui.data import RubricEditResult, RubricOptionSeed
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
+from opengrader.tui.statistics import QuestionStatistics
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
 from .fakes import FakeDataProvider
@@ -54,6 +55,36 @@ class SavedProgressFakeDataProvider(FakeDataProvider):
             else seed
             for seed in seeds
         ]
+
+
+class SavedStatisticsFakeDataProvider(FakeDataProvider):
+    def __init__(self) -> None:
+        self.q1_s1_score = 8.0
+
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        student_item_id = kwargs.get("student_item_id")
+        seeds = super().build_question_seeds(**kwargs)
+        if student_item_id == "s1":
+            return [
+                replace(seed, points=10, points_awarded=self.q1_s1_score)
+                if seed.question_id == "Q1"
+                else replace(seed, points=10)
+                for seed in seeds
+            ]
+        if student_item_id == "s2":
+            return [
+                replace(seed, points=10, points_awarded=6.0)
+                if seed.question_id == "Q1"
+                else replace(seed, points=10)
+                for seed in seeds
+            ]
+        return [replace(seed, points=10) for seed in seeds]
+
+    def save_question_grade(self, **kwargs: object) -> None:
+        if kwargs.get("student_item_id") == "s1" and kwargs.get("question_id") == "Q1":
+            points_awarded = kwargs.get("points_awarded")
+            assert isinstance(points_awarded, float | int)
+            self.q1_s1_score = float(points_awarded)
 
 
 class ChecklistPersistentFakeDataProvider(PersistentFakeDataProvider):
@@ -126,6 +157,7 @@ class FakeQAPickerScreen:
     status: str = ""
     bound_questions: list[NavItem] | None = None
     bound_students: list[NavItem] | None = None
+    question_statistics: dict[str, QuestionStatistics] | None = None
     focused: bool = False
     focused_pane: str | None = None
     active_pane: str = "questions"
@@ -142,10 +174,12 @@ class FakeQAPickerScreen:
         breadcrumb_labels: list[str],
         assignment_name: str,
         student_question_statuses: dict[tuple[str, str], str] | None = None,
+        question_statistics: dict[str, QuestionStatistics] | None = None,
     ) -> None:
         _ = (breadcrumb_labels, assignment_name, student_question_statuses)
         self.bound_questions = questions
         self.bound_students = students
+        self.question_statistics = question_statistics
 
     def set_status(self, text: str) -> None:
         self.status = text
@@ -299,6 +333,46 @@ def test_refresh_qa_picker_updates_student_question_progress() -> None:
         "1/2 graded",
         "0/2 graded",
     ]
+
+
+def test_refresh_qa_picker_passes_question_statistics() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+
+    controller = GradeController(app, state, SavedStatisticsFakeDataProvider())
+    controller.open_question_picker_for_assignment()
+
+    stats = app.qa_screen.question_statistics
+    assert stats is not None
+    assert stats["Q1"].graded_count == 2
+    assert stats["Q1"].average == 7.0
+    assert stats["Q2"].graded_count == 0
+
+
+def test_question_statistics_refresh_after_saved_grade() -> None:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = SavedStatisticsFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+
+    controller.on_rubric_selected(1)
+    controller.return_to_qa_picker()
+
+    stats = app.qa_screen.question_statistics
+    assert stats is not None
+    assert stats["Q1"].graded_count == 2
+    assert stats["Q1"].average == 3.0
 
 
 def test_jump_ungraded_question_uses_hydrated_saved_progress() -> None:
