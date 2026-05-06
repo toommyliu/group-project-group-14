@@ -12,6 +12,12 @@ from opengrader.tui.state import (
     RubricOption,
     TuiWorkflowState,
 )
+from opengrader.tui.statistics import (
+    QuestionStatistics,
+    compute_question_statistics,
+    seed_is_graded,
+    selected_option_indices_for_seed,
+)
 from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
 from opengrader.tui.ui.widgets.nav_item import NavItem
 
@@ -427,6 +433,7 @@ class GradeController:
             assignment_name=self._state.selection_labels.get("assignment")
             or "Assignment",
             student_question_statuses=self._student_question_statuses(),
+            question_statistics=self._question_statistics_by_id(),
         )
         self._restore_qa_picker_question_selection()
         self._restore_qa_picker_student_selection()
@@ -714,6 +721,30 @@ class GradeController:
         )
         return f"Progress: {graded_students} / {total_students} students"
 
+    def _question_statistics_by_id(self) -> dict[str, QuestionStatistics]:
+        if not self._state.student_items or not self._state.grading_run.questions:
+            return {}
+
+        seeds_by_question_id: dict[str, list[QuestionSeed]] = {
+            question.question_id: [] for question in self._state.grading_run.questions
+        }
+        for student in self._state.student_items:
+            for seed in self._build_question_seeds_for_selection(
+                student_item_id=student.item_id
+            ):
+                if seed.question_id in seeds_by_question_id:
+                    seeds_by_question_id[seed.question_id].append(seed)
+
+        total_submissions = len(self._state.student_items)
+        return {
+            question_id: compute_question_statistics(
+                question_id,
+                seeds,
+                total_submissions=total_submissions,
+            )
+            for question_id, seeds in seeds_by_question_id.items()
+        }
+
     def _question_index(self, item_id: str) -> int | None:
         for index, question in enumerate(self._state.grading_run.questions):
             if question.question_id == item_id:
@@ -768,35 +799,12 @@ class GradeController:
         Point-only grades are supported as a fallback only when they map to one
         rubric row, avoiding false progress on ambiguous saved scores.
         """
-        if seed.selected_rubric_labels:
-            selected_labels = set(seed.selected_rubric_labels)
-            return {
-                index
-                for index, option in enumerate(seed.rubric_options)
-                if option.label in selected_labels
-            }
-
-        if seed.points_awarded is None:
-            return set()
-
-        matching_indices = [
-            index
-            for index, option in enumerate(seed.rubric_options)
-            if awarded_points_for_rubric_selection(
-                seed.points,
-                [option.points_delta],
-                [seed_option.points_delta for seed_option in seed.rubric_options],
-            )
-            == seed.points_awarded
-        ]
-        if len(matching_indices) == 1:
-            return {matching_indices[0]}
-        return set()
+        return selected_option_indices_for_seed(seed)
 
     @staticmethod
     def _seed_is_graded(seed: QuestionSeed) -> bool:
         """Return whether a persisted question seed has a resolvable grade."""
-        return bool(GradeController._selected_option_indices(seed))
+        return seed_is_graded(seed)
 
     def _question_items(self, questions: list[QuestionGrade]) -> list[NavItem]:
         items: list[NavItem] = []

@@ -87,9 +87,9 @@ score: ""
   - Response image: ![q5c response](responses/q5c.png)
   - Source segments: [{"page":2,"bbox":[0.1408,0.7403,0.6698,0.06]}]
   - Response text: 
-  - Possible points: 
-  - Points: 
-  - Rubric:
+  - Possible points: 8
+  - Points: 8
+  - Rubric: Correct
   - Analysis: 
 
 - q6a:
@@ -99,9 +99,9 @@ score: ""
   - Source segments: [{"page":3,"bbox":[0.1749,0.1703,0.5251,0.1849]}]
   - Response text: |
     O(1)
-  - Possible points: 
-  - Points: 
-  - Rubric:
+  - Possible points: 5
+  - Points: 0
+  - Rubric: Incorrect
   - Analysis: 
 
 - q6b:

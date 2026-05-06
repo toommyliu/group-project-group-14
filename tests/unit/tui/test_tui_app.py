@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 
 from textual.widgets import Button, Checkbox, ContentSwitcher, Input, ListView, Static
 
@@ -7,6 +8,7 @@ from opengrader.tui.data import RubricEditResult, RubricOptionSeed
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE
 from opengrader.tui.tui import TuiApp
+from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -96,6 +98,27 @@ class LongRubricFakeDataProvider(FakeDataProvider):
         ]
 
 
+class StatisticsFakeDataProvider(FakeDataProvider):
+    def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
+        student_item_id = kwargs.get("student_item_id")
+        seeds = super().build_question_seeds(**kwargs)
+        if student_item_id == "s1":
+            return [
+                replace(seed, points=10, points_awarded=10.0)
+                if seed.question_id == "Q1"
+                else replace(seed, points=10)
+                for seed in seeds
+            ]
+        if student_item_id == "s2":
+            return [
+                replace(seed, points=10, points_awarded=5.0)
+                if seed.question_id == "Q1"
+                else replace(seed, points=10)
+                for seed in seeds
+            ]
+        return [replace(seed, points=10) for seed in seeds]
+
+
 def _list_item_texts(list_view: ListView) -> list[str]:
     return [
         f"{item.nav.label} [{item.nav.meta}]" if item.nav.meta else item.nav.label
@@ -172,6 +195,31 @@ def test_app_loads_file_backed_grading_queue() -> None:
             assert student_labels[0].endswith("/11 graded]")
             assert student_labels[1].startswith("submission-0002.submission [")
             assert student_labels[1].endswith("/11 graded]")
+
+    asyncio.run(run())
+
+
+def test_qa_preview_shows_question_statistics() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=StatisticsFakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            preview = app.get_qa_picker_screen().query_one("#qa-preview", Static)
+            content = str(preview.content)
+            assert "Avg:" in content
+            assert "Median:" in content
+            assert "Std dev:" in content
+            assert "Distribution" not in content
+            chart = app.get_qa_picker_screen().query_one(
+                "#qa-statistics-chart",
+                SharpImage,
+            )
+            assert chart.display is True
 
     asyncio.run(run())
 

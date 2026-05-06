@@ -82,6 +82,11 @@ $foreground: #E4E4E4EB;
     background: transparent;
 }
 
+#qa-statistics-chart {
+    width: 100%;
+    margin-top: 1;
+}
+
 #qa-keybinding-ref {
     dock: bottom;
     color: $text-muted;
