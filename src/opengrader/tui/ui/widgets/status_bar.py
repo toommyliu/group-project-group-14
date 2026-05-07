@@ -56,10 +56,6 @@ class StatusBar(Horizontal):
                 content.append("   ")
             content.append(binding.key, style="bold #f0a000")
             content.append(f" {binding.description}")
-        if content:
-            content.append("   ")
-        content.append("^\\", style="bold #f0a000")
-        content.append(" palette")
         self.query_one("#status-bar-bindings", Static).update(content)
 
     def enter_search(self, *, prompt: str, value: str, status: str) -> None:

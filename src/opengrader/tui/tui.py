@@ -15,7 +15,7 @@ from opengrader.tui.ui.widgets import StatusBar, StatusBarBinding
 
 class TuiApp(App):
     CSS_PATH = Path(__file__).parent / "tui.tcss"
-    COMMAND_PALETTE_BINDING = "ctrl+backslash"
+    ENABLE_COMMAND_PALETTE = False
     BINDINGS = InputController.all_bindings()  # pyright: ignore[reportAssignmentType]
 
     def __init__(

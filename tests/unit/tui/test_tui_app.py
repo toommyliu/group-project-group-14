@@ -217,7 +217,7 @@ def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
             status_text = _status_bar_text(app)
             assert "j/down Next QA" in status_text
             assert "/ Filter" in status_text
-            assert "^\\ palette" in status_text
+            assert "^\\ palette" not in status_text
 
             await pilot.press("enter")
             await pilot.pause()
@@ -1753,6 +1753,22 @@ def test_default_app_uses_stub_data_provider() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
             assert isinstance(app.data_provider, StubDataProvider)
+
+    asyncio.run(run())
+
+
+def test_textual_command_palette_is_disabled() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert app.use_command_palette is False
+            assert "ctrl+backslash" not in app.screen.active_bindings
 
     asyncio.run(run())
 
