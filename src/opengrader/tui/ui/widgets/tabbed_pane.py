@@ -68,8 +68,9 @@ class TabbedPane(Vertical):
 
     def compose(self) -> ComposeResult:
         with Container(classes="pane-tab-content"):
-            widget = self._active_widget()
-            if widget is not None:
+            for index in range(len(self._tabs)):
+                widget = self._widget_for_tab(index)
+                widget.display = index == self._active_tab_index
                 yield widget
 
     def on_mount(self) -> None:
@@ -167,14 +168,15 @@ class TabbedPane(Vertical):
         return self._tabs[self._active_tab_index]
 
     def _active_widget(self) -> Widget | None:
-        active_tab = self._active_tab()
-        if active_tab is None:
+        if not self._tabs:
             return None
+        return self._widget_for_tab(self._active_tab_index)
 
-        widget = self._tab_widgets.get(self._active_tab_index)
+    def _widget_for_tab(self, tab_index: int) -> Widget:
+        widget = self._tab_widgets.get(tab_index)
         if widget is None:
-            widget = active_tab.build()
-            self._tab_widgets[self._active_tab_index] = widget
+            widget = self._tabs[tab_index].build()
+            self._tab_widgets[tab_index] = widget
         return widget
 
     def _active_tab_supports_paging(self) -> bool:
@@ -188,13 +190,18 @@ class TabbedPane(Vertical):
             return
 
         content = self.query_one(".pane-tab-content", Container)
-        widget = self._active_widget()
+        tab_widgets = [
+            self._widget_for_tab(index)
+            for index in range(len(self._tabs))
+        ]
 
-        if widget is not None and widget not in content.children:
-            content.mount(widget)
+        for widget in tab_widgets:
+            if widget not in content.children:
+                content.mount(widget)
 
+        active_widget = self._active_widget()
         for child in content.children:
-            child.display = child is widget
+            child.display = child is active_widget
 
         self._sync_chrome()
         self._sync_focus_class()
@@ -261,7 +268,7 @@ class TabbedPane(Vertical):
     def _title_tab_markup(self, *, active: bool) -> str:
         clickable = f"[@click=pane_activate_tab(0)]{self._title}[/]"
         if active:
-            return clickable
+            return f"[$accent bold]{clickable}[/]"
         return f"[$text-muted]{clickable}[/]"
 
     def _set_active_tab(self, tab_index: int, *, focus: bool) -> bool:
@@ -314,7 +321,7 @@ class TabbedPane(Vertical):
     def _tab_label_markup(tab_index: int, tab_label: str, *, active: bool) -> str:
         clickable = f"[@click=pane_activate_tab({tab_index})]{tab_label}[/]"
         if active:
-            return clickable
+            return f"[$accent bold]{clickable}[/]"
         return f"[$text-muted]{clickable}[/]"
 
     def sync_focus_class(self) -> None:

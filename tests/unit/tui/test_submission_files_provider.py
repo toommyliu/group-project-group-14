@@ -180,6 +180,10 @@ def test_submission_files_provider_loads_students_and_questions() -> None:
         "Tommy Liu",
         "submission-0002.submission",
     ]
+    assert [student.student_id for student in students] == [
+        "123456789",
+        "987654321",
+    ]
     assert [seed.question_id for seed in seeds] == [
         "q1",
         "q2",
