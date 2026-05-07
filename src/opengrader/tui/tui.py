@@ -1,15 +1,16 @@
 from pathlib import Path
 
 from textual.app import App, ComposeResult
-from textual.widgets import ContentSwitcher, Footer, Input
+from textual.widgets import ContentSwitcher, Input
 
 from opengrader.tui.controllers import GradeController, InputController
-from opengrader.tui.controllers.input_controller import InputCommand
+from opengrader.tui.controllers.input_controller import CommandBindingSpec, InputCommand
 from opengrader.tui.data import Provider
 from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
+from opengrader.tui.ui.widgets import StatusBar, StatusBarBinding
 
 
 class TuiApp(App):
@@ -44,10 +45,11 @@ class TuiApp(App):
         with ContentSwitcher(initial=PAGE_QA_PICKER, id="workspace-switcher"):
             yield QAPickerScreen(id=PAGE_QA_PICKER)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
-        yield Footer()
+        yield StatusBar(id="app-status-bar")
 
     def on_mount(self) -> None:
         self._load_grading_queue()
+        self.refresh_bindings()
 
     def switch_to(self, page_id: str) -> None:
         self.workflow_state.current_page = page_id
@@ -64,6 +66,10 @@ class TuiApp(App):
         if not self._input_command_available(command):
             return
         self.input_controller.dispatch(command)
+
+    def refresh_bindings(self) -> None:
+        super().refresh_bindings()
+        self._refresh_status_bar_bindings()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         if action != "dispatch_input":
@@ -109,6 +115,22 @@ class TuiApp(App):
     def on_qapicker_screen_qaselected(self, event: QAPickerScreen.QASelected) -> None:
         self.grade_controller.on_qa_selected(event.item)
 
+    def on_status_bar_search_changed(self, event: StatusBar.SearchChanged) -> None:
+        if self.workflow_state.current_page != PAGE_QA_PICKER:
+            return
+        status = self.get_qa_picker_screen().update_filter(event.value)
+        self.query_one(StatusBar).update_search_status(status)
+
+    def on_status_bar_search_submitted(
+        self, _event: StatusBar.SearchSubmitted
+    ) -> None:
+        self._finish_qa_filter()
+
+    def on_status_bar_search_cancelled(
+        self, _event: StatusBar.SearchCancelled
+    ) -> None:
+        self._finish_qa_filter()
+
     def on_grade_screen_rubric_selected(
         self, event: GradeScreen.RubricSelected
     ) -> None:
@@ -127,6 +149,7 @@ class TuiApp(App):
     def _register_input_handlers(self) -> None:
         self.input_controller.register(InputCommand.APP_QUIT, self.exit)
         self.input_controller.register(InputCommand.APP_BACK, self._handle_back)
+        self.input_controller.register(InputCommand.QA_FILTER, self._handle_qa_filter)
         self.input_controller.register(
             InputCommand.QA_JUMP_UNGRADED,
             self.grade_controller.qa_jump_ungraded_question,
@@ -229,6 +252,24 @@ class TuiApp(App):
 
     def _handle_qa_switch_pane(self) -> None:
         self.get_qa_picker_screen().switch_active_pane()
+        self.refresh_bindings()
+
+    def _handle_qa_filter(self) -> None:
+        qa_screen = self.get_qa_picker_screen()
+        prompt, value = qa_screen.start_filter()
+        status = qa_screen.update_filter(value)
+        self.query_one(StatusBar).enter_search(
+            prompt=prompt,
+            value=value,
+            status=status,
+        )
+        self.refresh_bindings()
+
+    def _finish_qa_filter(self) -> None:
+        self.query_one(StatusBar).exit_search()
+        if self.workflow_state.current_page == PAGE_QA_PICKER:
+            self.get_qa_picker_screen().finish_filter()
+        self.call_after_refresh(self.refresh_bindings)
 
     def _handle_grade_shrink_sidebar(self) -> None:
         grade_screen = self.get_grade_screen()
@@ -268,6 +309,30 @@ class TuiApp(App):
             return not self.get_qa_picker_screen().students_have_focus()
 
         return True
+
+    def _refresh_status_bar_bindings(self) -> None:
+        try:
+            status_bar = self.query_one(StatusBar)
+        except Exception:
+            return
+        if status_bar.search_active():
+            return
+
+        visible_bindings = [
+            self._status_bar_binding(binding)
+            for binding in self.input_controller.visible_bindings()
+            if self._input_command_available(binding.command)
+        ]
+        status_bar.show_bindings(visible_bindings)
+
+    @staticmethod
+    def _status_bar_binding(binding: CommandBindingSpec) -> StatusBarBinding:
+        key = binding.key_display or binding.keys
+        if key == "enter":
+            key = "↩"
+        if key == "escape":
+            key = "esc"
+        return StatusBarBinding(key=key, description=binding.description)
 
     def _build_data_provider(
         self,

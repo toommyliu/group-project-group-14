@@ -99,6 +99,50 @@ $foreground: #E4E4E4EB;
     height: 1;
 }
 
+#app-status-bar {
+    dock: bottom;
+    height: 1;
+    background: #26313a;
+    color: $foreground;
+}
+
+#status-bar-bindings {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+}
+
+#status-bar-search-prompt {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    color: $foreground;
+    text-style: bold;
+}
+
+#status-bar-search-input {
+    width: 1fr;
+    height: 1;
+    padding: 0;
+    border: none;
+    background: #26313a;
+    color: $foreground;
+}
+
+.status-bar-key {
+    color: #f0a000;
+    text-style: bold;
+}
+
+.status-bar-description {
+    color: $foreground;
+}
+
+.status-bar-search-prompt {
+    color: $foreground;
+    text-style: bold;
+}
+
 #grade-workspace {
     height: 1fr;
 }

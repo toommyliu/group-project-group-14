@@ -1,7 +1,15 @@
 import asyncio
 from dataclasses import replace
 
-from textual.widgets import Button, Checkbox, ContentSwitcher, Input, ListView, Static
+from textual.widgets import (
+    Button,
+    Checkbox,
+    ContentSwitcher,
+    Footer,
+    Input,
+    ListView,
+    Static,
+)
 
 from opengrader.tui.controllers.input_controller import InputCommand
 from opengrader.tui.data import RubricEditResult, RubricOptionSeed
@@ -9,6 +17,7 @@ from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
+from opengrader.tui.ui.widgets.status_bar import StatusBar
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -127,6 +136,11 @@ def _list_item_texts(list_view: ListView) -> list[str]:
     ]
 
 
+def _status_bar_text(app: TuiApp) -> str:
+    status_bar = app.query_one(StatusBar)
+    return str(status_bar.query_one("#status-bar-bindings", Static).content)
+
+
 def test_app_launches_directly_to_qa_picker() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -155,6 +169,34 @@ def test_app_launches_directly_to_qa_picker() -> None:
                 "Tommy Liu [0/2 graded]",
                 "Andy Cortes [0/2 graded]",
             ]
+
+    asyncio.run(run())
+
+
+def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            assert not list(app.query(Footer))
+            assert app.query_one("#app-status-bar", StatusBar) is not None
+
+            status_text = _status_bar_text(app)
+            assert "j/down Next QA" in status_text
+            assert "/ Filter" in status_text
+            assert "^\\ palette" in status_text
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            grade_status_text = _status_bar_text(app)
+            assert "j/right Next Student" in grade_status_text
+            assert "c Comment" in grade_status_text
 
     asyncio.run(run())
 
@@ -1323,6 +1365,8 @@ def test_qa_picker_move_binding_label_tracks_active_pane() -> None:
                 is False
             )
             assert app.screen.active_bindings["j"].binding.description == "Next QA"
+            assert "j/down Next QA" in _status_bar_text(app)
+            assert "j/down Next Student" not in _status_bar_text(app)
 
             await pilot.press("tab")
             await pilot.pause()
@@ -1342,6 +1386,154 @@ def test_qa_picker_move_binding_label_tracks_active_pane() -> None:
                 is True
             )
             assert app.screen.active_bindings["j"].binding.description == "Next Student"
+            assert "j/down Next Student" in _status_bar_text(app)
+            assert "j/down Next QA" not in _status_bar_text(app)
+
+    asyncio.run(run())
+
+
+def test_qa_picker_question_search_uses_status_bar_filter_mode() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            status_bar = app.query_one(StatusBar)
+            await pilot.press("/")
+            await pilot.pause()
+
+            search_input = app.query_one("#status-bar-search-input", Input)
+            assert status_bar.search_active() is True
+            assert app.focused is search_input
+            assert (
+                "Search questions:"
+                in str(
+                    status_bar.query_one(
+                        "#status-bar-search-prompt",
+                        Static,
+                    ).content
+                )
+            )
+
+            await pilot.press("Q", "2")
+            await pilot.pause()
+
+            qa_list = app.get_qa_picker_screen().query_one("#qa-list", ListView)
+            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+            qa_status = app.get_qa_picker_screen().query_one("#qa-status", Static)
+            assert (
+                "Search questions: 1/2 matches"
+                in str(qa_status.content)
+            )
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+            switcher = app.query_one(ContentSwitcher)
+            assert switcher.current == "page-qa-picker"
+            assert status_bar.search_active() is False
+            assert app.focused is qa_list
+            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+
+            await pilot.press("/")
+            await pilot.pause()
+            await pilot.press("ctrl+u")
+            await pilot.pause()
+
+            assert search_input.value == ""
+            assert _list_item_texts(qa_list) == [
+                "Q1 [0/2 graded]",
+                "Q2 [0/2 graded]",
+            ]
+
+            await pilot.press("Q", "2")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert switcher.current == "page-qa-picker"
+            assert status_bar.search_active() is False
+            assert app.focused is qa_list
+
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert switcher.current == PAGE_GRADE
+
+    asyncio.run(run())
+
+
+def test_qa_picker_student_search_is_independent_and_handles_no_matches() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            status_bar = app.query_one(StatusBar)
+
+            await pilot.press("/")
+            await pilot.pause()
+            await pilot.press("Q", "2")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+            qa_list = app.get_qa_picker_screen().query_one("#qa-list", ListView)
+            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+
+            await pilot.press("tab")
+            await pilot.pause()
+            await pilot.press("/")
+            await pilot.pause()
+
+            assert (
+                "Search students:"
+                in str(
+                    status_bar.query_one(
+                        "#status-bar-search-prompt",
+                        Static,
+                    ).content
+                )
+            )
+
+            await pilot.press("A", "n", "d", "y")
+            await pilot.pause()
+
+            student_list = app.get_qa_picker_screen().query_one(
+                "#student-list",
+                ListView,
+            )
+            assert _list_item_texts(student_list) == ["Andy Cortes [0/2 graded]"]
+            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+
+            await pilot.press("ctrl+u")
+            await pilot.press("z", "z", "z")
+            await pilot.pause()
+
+            assert _list_item_texts(student_list) == []
+            qa_status = app.get_qa_picker_screen().query_one("#qa-status", Static)
+            assert (
+                "No matches for 'zzz'"
+                in str(qa_status.content)
+            )
+            assert "No matches for 'zzz'" in str(qa_status.content)
+            assert "Select a QA to grade for all students." not in str(
+                qa_status.content
+            )
+
+            await pilot.press("escape")
+            await pilot.pause()
+
+            assert status_bar.search_active() is False
+            assert _list_item_texts(student_list) == []
 
     asyncio.run(run())
 

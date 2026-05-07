@@ -12,6 +12,7 @@ from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
 class InputCommand(str, Enum):
     APP_QUIT = "app_quit"
     APP_BACK = "app_back"
+    QA_FILTER = "qa_filter"
     QA_MOVE_UP = "qa_move_up"
     QA_MOVE_DOWN = "qa_move_down"
     QA_MOVE_STUDENT_UP = "qa_move_student_up"
@@ -67,6 +68,7 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Back",
         (InputContext.QA, InputContext.GRADE),
     ),
+    CommandBindingSpec("/", InputCommand.QA_FILTER, "Filter", (InputContext.QA,)),
     # Duplicated bindings for both QA and Students so they
     # display properly in either pane
     CommandBindingSpec(
@@ -197,6 +199,13 @@ class InputController:
     @classmethod
     def all_bindings(cls) -> list[Binding]:
         return [binding.to_binding() for binding in INPUT_BINDINGS]
+
+    def visible_bindings(self) -> list[CommandBindingSpec]:
+        return [
+            binding
+            for binding in INPUT_BINDINGS
+            if binding.show and self.command_available(binding.command)
+        ]
 
     def register(
         self,

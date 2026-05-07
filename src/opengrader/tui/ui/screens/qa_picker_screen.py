@@ -1,9 +1,9 @@
-from textual import events, on
+from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Input, Label, ListItem, ListView, Static
+from textual.widgets import Label, ListItem, ListView, Static
 
 from opengrader.tui.statistics import (
     QuestionStatistics,
@@ -57,6 +57,9 @@ class QAPickerScreen(Vertical):
         self._student_question_statuses: dict[tuple[str, str], str] = {}
         self._question_statistics: dict[str, QuestionStatistics] = {}
         self._active_list_id = "qa-list"
+        self._filter_target_id: str | None = None
+        self._question_filter = ""
+        self._student_filter = ""
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -69,9 +72,7 @@ class QAPickerScreen(Vertical):
         with Horizontal(id="qa-picker-workspace"):
             with Vertical(id="qa-picker-left-column"):
                 yield ListView(id="qa-list")
-                yield Input(placeholder="Search questions...", id="qa-search")
                 yield ListView(id="student-list")
-                yield Input(placeholder="Search students...", id="student-search")
             with Vertical(id="qa-details"):
                 yield Label("Question", classes="sidebar-section-title")
                 yield Static("Highlight a QA to preview it.", id="qa-preview")
@@ -107,6 +108,7 @@ class QAPickerScreen(Vertical):
         self._students = list(students)
         self._student_question_statuses = dict(student_question_statuses or {})
         self._question_statistics = dict(question_statistics or {})
+        self._filter_target_id = None
         self.query_one("#qa-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
         self.query_one("#qa-picker-title", Label).update(
             f"Choose QA for {assignment_name}"
@@ -118,8 +120,8 @@ class QAPickerScreen(Vertical):
         for question in questions:
             qa_list.append(_QAListItem(question))
 
-        self.query_one("#qa-search", Input).value = ""
-        self.query_one("#student-search", Input).value = ""
+        self._question_filter = ""
+        self._student_filter = ""
 
         student_list = self.query_one("#student-list", ListView)
         student_list.border_title = "Students"
@@ -147,6 +149,7 @@ class QAPickerScreen(Vertical):
         self._set_active_list("qa-list")
         qa_list.focus()
         self._restore_list_highlight(qa_list)
+        self.call_after_refresh(self.app.refresh_bindings)
 
     def focus_students(self) -> None:
         student_list = self.query_one("#student-list", ListView)
@@ -160,6 +163,7 @@ class QAPickerScreen(Vertical):
         self._restore_list_highlight(student_list)
         self._restore_student_details()
         self.set_timer(0.01, self._restore_student_details)
+        self.call_after_refresh(self.app.refresh_bindings)
 
     def _restore_student_details(self) -> None:
         item = self.selected_student()
@@ -270,6 +274,47 @@ class QAPickerScreen(Vertical):
     def set_status(self, text: str) -> None:
         self.query_one("#qa-status", Static).update(text)
 
+    def start_filter(self) -> tuple[str, str]:
+        self._filter_target_id = self._active_list_id
+        if self._filter_target_id == "student-list":
+            return "Search students:", self._student_filter
+        return "Search questions:", self._question_filter
+
+    def update_filter(self, query: str) -> str:
+        target_id = self._filter_target_id or self._active_list_id
+        self._filter_target_id = target_id
+        if target_id == "student-list":
+            matches = self._apply_student_filter(query)
+            status = self._filter_status(
+                target="students",
+                query=query,
+                matches=matches,
+                total=len(self._all_students),
+            )
+            self.set_status(status)
+            return status
+
+        matches = self._apply_question_filter(query)
+        status = self._filter_status(
+            target="questions",
+            query=query,
+            matches=matches,
+            total=len(self._all_items),
+        )
+        self.set_status(status)
+        return status
+
+    def finish_filter(self) -> None:
+        target_id = self._filter_target_id or self._active_list_id
+        self._filter_target_id = None
+        if target_id == "student-list":
+            self.focus_students()
+            return
+        self.focus_questions()
+
+    def filter_mode_active(self) -> bool:
+        return self._filter_target_id is not None
+
     def move_cursor(self, direction: int) -> None:
         self._set_active_list("qa-list")
         qa_list = self.query_one("#qa-list", ListView)
@@ -304,21 +349,16 @@ class QAPickerScreen(Vertical):
             return
         self.focus_students()
 
-    @on(Input.Changed, "#qa-search")
-    def _on_qa_search_changed(self, event: Input.Changed) -> None:
-        query = event.value.strip().lower()
-
+    def _apply_question_filter(self, query: str) -> int:
         qa_list = self.query_one("#qa-list", ListView)
         qa_list.clear()
 
-        if not query:
+        self._question_filter = query
+        normalized_query = query.strip().lower()
+        if not normalized_query:
             self._items = list(self._all_items)
         else:
-            self._items = [
-                q
-                for q in self._all_items
-                if query in q.item_id.lower() or query in q.label.lower()
-            ]
+            self._items = self._filter_items(normalized_query, self._all_items)
 
         for question in self._items:
             qa_list.append(_QAListItem(question))
@@ -327,22 +367,22 @@ class QAPickerScreen(Vertical):
             qa_list.index = 0
             self._restore_list_highlight(qa_list)
             self.show_question_details(self._items[0])
+        else:
+            qa_list.index = None
+            self.query_one("#qa-preview", Static).update("No matching questions.")
+            self._sync_statistics_chart(None)
+        return len(self._items)
 
-    @on(Input.Changed, "#student-search")
-    def _on_student_search_changed(self, event: Input.Changed) -> None:
-        query = event.value.strip().lower()
-
+    def _apply_student_filter(self, query: str) -> int:
         student_list = self.query_one("#student-list", ListView)
         student_list.clear()
 
-        if not query:
+        self._student_filter = query
+        normalized_query = query.strip().lower()
+        if not normalized_query:
             self._students = list(self._all_students)
         else:
-            self._students = [
-                s
-                for s in self._all_students
-                if query in s.item_id.lower() or query in s.label.lower()
-            ]
+            self._students = self._filter_items(normalized_query, self._all_students)
 
         for student in self._students:
             student_list.append(_StudentListItem(student))
@@ -350,12 +390,36 @@ class QAPickerScreen(Vertical):
         if self._students:
             student_list.index = 0
             self._restore_list_highlight(student_list)
-        self._restore_student_details()
+            self._restore_student_details()
+        else:
+            student_list.index = None
+            self.query_one("#qa-preview", Static).update("No matching students.")
+            self._sync_statistics_chart(self.selected_question())
+        return len(self._students)
+
+    @staticmethod
+    def _filter_items(query: str, items: list[NavItem]) -> list[NavItem]:
+        return [
+            item
+            for item in items
+            if query in item.item_id.lower() or query in item.label.lower()
+        ]
+
+    @staticmethod
+    def _filter_status(
+        *,
+        target: str,
+        query: str,
+        matches: int,
+        total: int,
+    ) -> str:
+        if query.strip() and matches == 0:
+            return f"No matches for '{query}'"
+        return f"Search {target}: {matches}/{total} matches"
 
     def students_have_focus(self) -> bool:
         student_list = self.query_one("#student-list", ListView)
-        search_input = self.query_one("#student-search", Input)
-        if self._focused_within(student_list) or self._focused_within(search_input):
+        if self._focused_within(student_list):
             return True
 
         qa_list = self.query_one("#qa-list", ListView)
@@ -452,16 +516,6 @@ class QAPickerScreen(Vertical):
             event.stop()
             return
 
-        if isinstance(self.app.focused, Input):
-            if event.key in ("down", "enter"):
-                # Move focus to the corresponding list
-                if self.app.focused.id == "qa-search":
-                    self.query_one("#qa-list", ListView).focus()
-                else:
-                    self.query_one("#student-list", ListView).focus()
-                event.stop()
-            return
-
         if event.key in ("j", "down"):
             if self.students_have_focus():
                 self.move_student_cursor(1)
@@ -482,18 +536,12 @@ class QAPickerScreen(Vertical):
 
     def _activate_list_for_widget(self, widget: Widget | None) -> None:
         student_list = self.query_one("#student-list", ListView)
-        search_input = self.query_one("#student-search", Input)
-        if self._widget_contains(student_list, widget) or self._widget_contains(
-            search_input, widget
-        ):
+        if self._widget_contains(student_list, widget):
             self._set_active_list("student-list")
             return
 
         qa_list = self.query_one("#qa-list", ListView)
-        qa_search = self.query_one("#qa-search", Input)
-        if self._widget_contains(qa_list, widget) or self._widget_contains(
-            qa_search, widget
-        ):
+        if self._widget_contains(qa_list, widget):
             self._set_active_list("qa-list")
 
     def _set_active_list(self, list_id: str) -> None:
