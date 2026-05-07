@@ -2,8 +2,8 @@
 name: "Ben Davis"
 student_id: "13579110"
 course_code: "SP26"
-assignment_title: "CMPE"
-assignment_version: "142"
+assignment_title: "CMPE 142 Ex"
+assignment_version: null
 source_pdf: "../../split-submissions/submission-0001.pdf"
 score: ""
 ---
@@ -57,11 +57,10 @@ score: ""
 
 - q5:
   - Question type: Free Response
-  - Prompt: 5. (2 points) What does each level of the Multi-Level Feedback Queue (MLFQ) correspond to?
+  - Prompt: 
   - Response image: ![q5 response](responses/q5.png)
   - Source segments: [{"page":2,"bbox":[0.1651,0.177,0.6255,0.0461]}]
-  - Response text: |
-    y13
+  - Response text: 
   - Possible points: 
   - Points: 
   - Rubric:

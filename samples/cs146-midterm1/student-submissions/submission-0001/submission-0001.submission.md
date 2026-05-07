@@ -1,9 +1,9 @@
 ---
 name: ""
 student_id: ""
-course_code: null
-assignment_title: "Unknown Assignment"
-assignment_version: null
+course_code: "CS146"
+assignment_title: "Quiz 1"
+assignment_version: "A"
 source_pdf: "../../split-submissions/submission-0001.pdf"
 score: ""
 ---
@@ -11,10 +11,11 @@ score: ""
 
 - q1:
   - Question type: Free Response
-  - Prompt: 
+  - Prompt: 1. (10 pts) Convert decimal 5 to binary [A].
   - Response image: ![q1 response](responses/q1.png)
   - Source segments: [{"page":1,"bbox":[0.1776,0.3655,0.3278,0.0545]}]
-  - Response text: 
+  - Response text: |
+    5
   - Possible points: 
   - Points: 
   - Rubric:

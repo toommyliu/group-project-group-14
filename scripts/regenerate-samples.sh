@@ -29,6 +29,7 @@ while IFS= read -r split_dir; do
   uv run submission-file \
     --input "$split_dir" \
     --output "$output_dir" \
+    --ollama-timeout 60 \
     "$@"
 done < <(
   find "$SAMPLES_DIR" -mindepth 2 -maxdepth 2 -type d -name split-submissions | sort

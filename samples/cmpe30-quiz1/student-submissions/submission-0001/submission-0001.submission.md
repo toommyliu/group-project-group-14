@@ -1,9 +1,9 @@
 ---
 name: ""
 student_id: ""
-course_code: "CMPE"
-assignment_title: "Quiz"
-assignment_version: "25A"
+course_code: null
+assignment_title: "Unknown Assignment"
+assignment_version: null
 source_pdf: "../../split-submissions/submission-0001.pdf"
 score: ""
 ---
@@ -11,7 +11,7 @@ score: ""
 
 - q1:
   - Question type: Free Response
-  - Prompt: 1. (50 points) 50 points minimum. (You don’t need to do anything for this question.)
+  - Prompt: 
   - Response image: ![q1 response](responses/q1.png)
   - Source segments: [{"page":1,"bbox":[0.1694,0.2179,0.6224,0.0327]}]
   - Response text: 

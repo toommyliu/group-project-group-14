@@ -1,9 +1,9 @@
 ---
 name: ""
 student_id: ""
-course_code: "CMPE"
-assignment_title: "Ex"
-assignment_version: "142"
+course_code: null
+assignment_title: "Unknown Assignment"
+assignment_version: null
 source_pdf: "../../split-submissions/submission-0002.pdf"
 score: ""
 ---
@@ -11,7 +11,7 @@ score: ""
 
 - q1:
   - Question type: Free Response
-  - Prompt: 1. (50 points) Minimum score. You don’t have to do anything for this question.
+  - Prompt: 
   - Response image: ![q1 response](responses/q1.png)
   - Source segments: [{"page":1,"bbox":[0.1318,0.5885,0.5518,0.0533]}]
   - Response text: 
@@ -57,11 +57,10 @@ score: ""
 
 - q5:
   - Question type: Free Response
-  - Prompt: 5. (2 points) What does each level of the Multi-Level Feedback Queue (MLFQ) correspond to?
+  - Prompt: 
   - Response image: ![q5 response](responses/q5.png)
   - Source segments: [{"page":2,"bbox":[0.1678,0.1685,0.6227,0.0548]}]
-  - Response text: |
-    no
+  - Response text: 
   - Possible points: 
   - Points: 
   - Rubric:
@@ -69,11 +68,10 @@ score: ""
 
 - q6:
   - Question type: Free Response
-  - Prompt: 6. (2 points) in MLFQ, rule 5 says: "After some time period S, move all the jobs in the system to the topmost queue." What problem does rule 5 prevent? (one word, all lowercase)
+  - Prompt: 
   - Response image: ![q6 response](responses/q6.png)
   - Source segments: [{"page":2,"bbox":[0.1682,0.233,0.6851,0.0591]}]
-  - Response text: |
-    yws
+  - Response text: 
   - Possible points: 
   - Points: 
   - Rubric:

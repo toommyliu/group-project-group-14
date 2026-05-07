@@ -35,11 +35,10 @@ score: ""
 
 - q3:
   - Question type: Free Response
-  - Prompt: 3. (10 pts) What is the least significant bit (LSB) of the binary number 1101 [B]?
+  - Prompt: 
   - Response image: ![q3 response](responses/q3.png)
   - Source segments: [{"page":1,"bbox":[0.1753,0.7082,0.62,0.1909]},{"page":2,"bbox":[0.162,0.0855,0.6918,0.0197]}]
-  - Response text: |
-    no
+  - Response text: 
   - Possible points: 
   - Points: 
   - Rubric:
