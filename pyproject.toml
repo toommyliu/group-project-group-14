@@ -25,6 +25,7 @@ dependencies = [
   "pyyaml>=6.0.1",
   "numpy>=1.26.0",
   "matplotlib>=3.10,<4.0",
+  "canvas-sak>=1.0",
 ]
 
 [project.scripts]
@@ -35,6 +36,7 @@ automated-grading = "opengrader.cli.automated_grading:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
 submission-file = "opengrader.cli.submission_file:run_cli"
 submission-splitter = "opengrader.cli.submission_splitter:run_cli"
+canvas-export = "opengrader.cli.canvas_export:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opengrader"]
