@@ -25,6 +25,12 @@ class StubDataProvider:
             StudentSummary(
                 id=index + 1,
                 full_name=(row.get("name") or f"Student {index + 1}").strip(),
+                student_id=(
+                    row.get("student_id")
+                    or row.get("sid")
+                    or row.get("id")
+                    or ""
+                ).strip(),
             )
             for index, row in enumerate(rows)
         ]

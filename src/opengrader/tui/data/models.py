@@ -7,6 +7,7 @@ from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMod
 class StudentSummary:
     id: int
     full_name: str
+    student_id: str = ""
 
 
 @dataclass(frozen=True)

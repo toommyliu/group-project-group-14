@@ -175,6 +175,10 @@ class TuiApp(App):
             self._handle_qa_switch_pane,
         )
         self.input_controller.register(
+            InputCommand.QA_TOGGLE_STUDENT_DISPLAY,
+            lambda: self.get_qa_picker_screen().toggle_student_display_mode(),
+        )
+        self.input_controller.register(
             InputCommand.QA_CONFIRM,
             self.grade_controller.qa_confirm,
         )

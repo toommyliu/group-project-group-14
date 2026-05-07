@@ -153,21 +153,27 @@ class TabbedListPane(TabbedPane):
         self.refresh_index_subtitle()
 
     def next_tab(self) -> None:
+        index = self._active_row_index()
         before = self.active_tab_index
         super().next_tab()
         if before != self.active_tab_index:
+            self._restore_active_row_index(index)
             self.refresh_index_subtitle()
 
     def prev_tab(self) -> None:
+        index = self._active_row_index()
         before = self.active_tab_index
         super().prev_tab()
         if before != self.active_tab_index:
+            self._restore_active_row_index(index)
             self.refresh_index_subtitle()
 
     def action_pane_activate_tab(self, tab_index: int) -> None:
+        index = self._active_row_index()
         before = self.active_tab_index
         super().action_pane_activate_tab(tab_index)
         if before != self.active_tab_index:
+            self._restore_active_row_index(index)
             self.refresh_index_subtitle()
 
     def primary_list(self) -> IndexedListView:
@@ -185,6 +191,29 @@ class TabbedListPane(TabbedPane):
         self.set_subtitle(subtitle)
         if active is not None:
             active.border_subtitle = subtitle
+
+    def _active_row_index(self) -> int | None:
+        active = self.active_list()
+        if active is None:
+            return None
+
+        if active.highlighted_child is not None:
+            try:
+                return list(active.children).index(active.highlighted_child)
+            except ValueError:
+                return None
+
+        if isinstance(active.index, int) and active.index >= 0:
+            return active.index
+        return None
+
+    def _restore_active_row_index(self, index: int | None) -> None:
+        active = self.active_list()
+        if active is None or index is None or len(active.children) == 0:
+            return
+
+        active.index = min(index, len(active.children) - 1)
+        active.normalize_highlight_classes()
 
     @staticmethod
     def _make_builder(list_view: IndexedListView):

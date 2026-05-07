@@ -18,6 +18,7 @@ class InputCommand(str, Enum):
     QA_MOVE_STUDENT_UP = "qa_move_student_up"
     QA_MOVE_STUDENT_DOWN = "qa_move_student_down"
     QA_SWITCH_PANE = "qa_switch_pane"
+    QA_TOGGLE_STUDENT_DISPLAY = "qa_toggle_student_display"
     QA_CONFIRM = "qa_confirm"
     QA_JUMP_UNGRADED = "qa_jump_ungraded_question"
     GRADE_NEXT_STUDENT = "grade_next_student"
@@ -105,6 +106,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Switch Pane",
         (InputContext.QA,),
         key_display="tab",
+    ),
+    CommandBindingSpec(
+        "d",
+        InputCommand.QA_TOGGLE_STUDENT_DISPLAY,
+        "Display",
+        (InputContext.QA,),
     ),
     CommandBindingSpec(
         "enter",

@@ -105,7 +105,13 @@ class SubmissionFilesProvider:
             student_id = submission.document.student_id.strip()
             if label in duplicate_labels and student_id:
                 label = f"{label} ({student_id})"
-            students.append(StudentSummary(id=index + 1, full_name=label))
+            students.append(
+                StudentSummary(
+                    id=index + 1,
+                    full_name=label,
+                    student_id=student_id,
+                )
+            )
         return students
 
     def build_question_seeds(

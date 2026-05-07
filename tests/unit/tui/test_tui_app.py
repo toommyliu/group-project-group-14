@@ -7,17 +7,19 @@ from textual.widgets import (
     ContentSwitcher,
     Footer,
     Input,
+    Label,
     ListView,
     Static,
 )
 
 from opengrader.tui.controllers.input_controller import InputCommand
-from opengrader.tui.data import RubricEditResult, RubricOptionSeed
+from opengrader.tui.data import RubricEditResult, RubricOptionSeed, StudentSummary
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 from opengrader.tui.ui.widgets.status_bar import StatusBar
+from opengrader.tui.ui.widgets.tabbed_list_pane import TabbedListPane
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
@@ -128,12 +130,33 @@ class StatisticsFakeDataProvider(FakeDataProvider):
         return [replace(seed, points=10) for seed in seeds]
 
 
+class DuplicateStudentIdFakeDataProvider(FakeDataProvider):
+    def list_students(self, course_id: int | None) -> list[StudentSummary]:
+        if course_id is None:
+            return []
+        return [
+            StudentSummary(1, "Alex One", student_id="123"),
+            StudentSummary(2, "Alex Two", student_id="123"),
+        ]
+
+
 def _list_item_texts(list_view: ListView) -> list[str]:
-    return [
-        f"{item.nav.label} [{item.nav.meta}]" if item.nav.meta else item.nav.label
-        for item in list_view.children
-        if hasattr(item, "nav")
-    ]
+    texts: list[str] = []
+    for item in list_view.children:
+        if not hasattr(item, "nav"):
+            continue
+        texts.append(str(item.query_one(Label).content))
+    return texts
+
+
+def _student_pane(app: TuiApp) -> TabbedListPane:
+    return app.get_qa_picker_screen().query_one("#student-list", TabbedListPane)
+
+
+def _active_student_list(app: TuiApp) -> ListView:
+    active = _student_pane(app).active_list()
+    assert active is not None
+    return active
 
 
 def _status_bar_text(app: TuiApp) -> str:
@@ -161,16 +184,21 @@ def test_app_launches_directly_to_qa_picker() -> None:
                 "Q1",
                 "Q2",
             ]
-            student_list = app.get_qa_picker_screen().query_one(
-                "#student-list",
-                ListView,
-            )
+            student_list = _active_student_list(app)
             assert _list_item_texts(student_list) == [
                 "Tommy Liu [0/2 graded]",
                 "Andy Cortes [0/2 graded]",
             ]
 
     asyncio.run(run())
+
+
+def test_stub_data_provider_reads_roster_sid_as_student_id() -> None:
+    provider = StubDataProvider(DEFAULT_IMAGE_PATH)
+
+    students = provider.list_students(course_id=1)
+
+    assert [student.student_id for student in students[:2]] == ["12345", "67890"]
 
 
 def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
@@ -227,16 +255,182 @@ def test_app_loads_file_backed_grading_queue() -> None:
                 "q6c",
                 "q6d",
             ]
-            student_list = app.get_qa_picker_screen().query_one(
-                "#student-list",
-                ListView,
-            )
+            student_list = _active_student_list(app)
             student_labels = _list_item_texts(student_list)
             assert len(student_labels) == 2
             assert student_labels[0].startswith("Tommy Liu [")
             assert student_labels[0].endswith("/11 graded]")
             assert student_labels[1].startswith("submission-0002.submission [")
             assert student_labels[1].endswith("/11 graded]")
+
+    asyncio.run(run())
+
+
+def test_student_pane_id_tab_displays_submitted_ids() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            pane = _student_pane(app)
+            assert pane.active_tab_index == 0
+            name_labels = _list_item_texts(_active_student_list(app))
+            assert name_labels[0].startswith("Tommy Liu [")
+            assert name_labels[0].endswith("/11 graded]")
+            assert name_labels[1].startswith("submission-0002.submission [")
+            assert name_labels[1].endswith("/11 graded]")
+
+            pane.action_pane_activate_tab(1)
+            await pilot.pause()
+
+            id_labels = _list_item_texts(_active_student_list(app))
+            assert id_labels[0].startswith("123456789 [")
+            assert id_labels[0].endswith("/11 graded]")
+            assert id_labels[1].startswith("987654321 [")
+            assert id_labels[1].endswith("/11 graded]")
+
+    asyncio.run(run())
+
+
+def test_student_pane_id_tab_falls_back_to_internal_student_keys() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            _student_pane(app).action_pane_activate_tab(1)
+            await pilot.pause()
+
+            assert _list_item_texts(_active_student_list(app)) == [
+                "s1 [0/2 graded]",
+                "s2 [0/2 graded]",
+            ]
+
+    asyncio.run(run())
+
+
+def test_student_pane_name_id_hotkey_toggles_display_mode() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            pane = _student_pane(app)
+            assert pane.active_tab_index == 0
+
+            await pilot.press("d")
+            await pilot.pause()
+
+            assert pane.active_tab_index == 1
+            assert _list_item_texts(_active_student_list(app)) == [
+                "s1 [0/2 graded]",
+                "s2 [0/2 graded]",
+            ]
+            status = app.get_qa_picker_screen().query_one("#qa-status", Static)
+            assert "Showing student IDs." in str(status.content)
+
+            await pilot.press("d")
+            await pilot.pause()
+
+            assert pane.active_tab_index == 0
+            assert _list_item_texts(_active_student_list(app)) == [
+                "Tommy Liu [0/2 graded]",
+                "Andy Cortes [0/2 graded]",
+            ]
+
+    asyncio.run(run())
+
+
+def test_student_pane_id_tab_disambiguates_duplicate_submitted_ids() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=DuplicateStudentIdFakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            _student_pane(app).action_pane_activate_tab(1)
+            await pilot.pause()
+
+            assert _list_item_texts(_active_student_list(app)) == [
+                "123 (s1) [0/2 graded]",
+                "123 (s2) [0/2 graded]",
+            ]
+
+    asyncio.run(run())
+
+
+def test_student_pane_selection_is_preserved_when_switching_name_id_tabs() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            qa_screen.focus_students()
+            qa_screen.move_student_to_index(1)
+            await pilot.pause()
+
+            _student_pane(app).action_pane_activate_tab(1)
+            await pilot.pause()
+
+            student_list = _active_student_list(app)
+            assert student_list.index == 1
+            assert student_list.children[1].has_class("-highlight") is True
+            assert qa_screen.selected_student().label == "Andy Cortes"
+
+    asyncio.run(run())
+
+
+def test_student_filter_matches_submitted_ids() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            qa_screen.focus_students()
+            prompt, initial = qa_screen.start_filter()
+            assert (prompt, initial) == ("Search students:", "")
+
+            status = qa_screen.update_filter("987654321")
+            await pilot.pause()
+
+            assert status == "Search students: 1/2 matches"
+            assert _list_item_texts(_active_student_list(app)) == [
+                "submission-0002.submission [0/11 graded]"
+            ]
+
+            _student_pane(app).action_pane_activate_tab(1)
+            await pilot.pause()
+
+            assert _list_item_texts(_active_student_list(app)) == [
+                "987654321 [0/11 graded]"
+            ]
 
     asyncio.run(run())
 
@@ -1058,7 +1252,8 @@ def test_returning_from_question_pane_restores_question_focus() -> None:
 
             qa_screen = app.get_qa_picker_screen()
             qa_list = qa_screen.query_one("#qa-list", ListView)
-            student_list = qa_screen.query_one("#student-list", ListView)
+            student_pane = _student_pane(app)
+            student_list = _active_student_list(app)
             preview = qa_screen.query_one("#qa-preview", Static)
 
             assert qa_list.index == 2
@@ -1067,7 +1262,7 @@ def test_returning_from_question_pane_restores_question_focus() -> None:
             assert qa_list.children[2].has_class("-highlight") is True
             assert student_list.index == 0
             assert qa_list.has_class("-pane-active") is True
-            assert student_list.has_class("-pane-active") is False
+            assert student_pane.has_class("-pane-active") is False
             assert app.focused is qa_list
             assert "q3" in str(preview.content)
 
@@ -1092,7 +1287,7 @@ def test_returning_from_student_pane_restores_student_focus() -> None:
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
-            student_list = qa_screen.query_one("#student-list", ListView)
+            student_list = _active_student_list(app)
             assert student_list.index == 1
 
             await pilot.press("enter")
@@ -1101,7 +1296,8 @@ def test_returning_from_student_pane_restores_student_focus() -> None:
             await pilot.pause()
 
             qa_list = qa_screen.query_one("#qa-list", ListView)
-            student_list = qa_screen.query_one("#student-list", ListView)
+            student_pane = _student_pane(app)
+            student_list = _active_student_list(app)
             preview = qa_screen.query_one("#qa-preview", Static)
 
             assert qa_list.index == 2
@@ -1110,7 +1306,7 @@ def test_returning_from_student_pane_restores_student_focus() -> None:
             assert student_list.children[0].has_class("-highlight") is False
             assert student_list.children[1].has_class("-highlight") is True
             assert qa_list.has_class("-pane-active") is False
-            assert student_list.has_class("-pane-active") is True
+            assert student_pane.has_class("-pane-active") is True
             assert app.focused is student_list
             assert "Highlighted QA: q3" in str(preview.content)
 
@@ -1157,10 +1353,7 @@ def test_student_list_shows_progress_after_finalize() -> None:
             app.grade_controller.return_to_qa_picker()
             await pilot.pause()
 
-            student_list = app.get_qa_picker_screen().query_one(
-                "#student-list",
-                ListView,
-            )
+            student_list = _active_student_list(app)
             assert _list_item_texts(student_list) == [
                 "Tommy Liu [1/2 graded]",
                 "Andy Cortes [0/2 graded]",
@@ -1203,7 +1396,7 @@ def test_student_list_arrow_keys_move_student_focus_not_questions() -> None:
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
-            await pilot.click("#student-list", offset=(2, 1))
+            await pilot.click("#student-name-list", offset=(2, 0))
             await pilot.pause()
 
             await pilot.press("down")
@@ -1233,7 +1426,7 @@ def test_clicking_qa_pane_after_students_restores_question_navigation() -> None:
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
-            await pilot.click("#student-list", offset=(2, 1))
+            await pilot.click("#student-name-list", offset=(2, 0))
             await pilot.pause()
             await pilot.click("#qa-list", offset=(2, 4))
             await pilot.pause()
@@ -1301,15 +1494,15 @@ def test_shift_tab_switches_between_question_and_student_panes() -> None:
 
             qa_screen = app.get_qa_picker_screen()
             qa_list = qa_screen.query_one("#qa-list", ListView)
-            student_list = qa_screen.query_one("#student-list", ListView)
+            student_pane = _student_pane(app)
             assert qa_list.has_class("-pane-active")
-            assert not student_list.has_class("-pane-active")
+            assert not student_pane.has_class("-pane-active")
 
             await pilot.press("shift+tab")
             await pilot.pause()
 
             assert not qa_list.has_class("-pane-active")
-            assert student_list.has_class("-pane-active")
+            assert student_pane.has_class("-pane-active")
 
             await pilot.press("down")
             await pilot.pause()
@@ -1325,7 +1518,7 @@ def test_shift_tab_switches_between_question_and_student_panes() -> None:
             await pilot.pause()
 
             assert qa_list.has_class("-pane-active")
-            assert not student_list.has_class("-pane-active")
+            assert not student_pane.has_class("-pane-active")
 
             await pilot.press("down")
             await pilot.pause()
@@ -1507,10 +1700,7 @@ def test_qa_picker_student_search_is_independent_and_handles_no_matches() -> Non
             await pilot.press("A", "n", "d", "y")
             await pilot.pause()
 
-            student_list = app.get_qa_picker_screen().query_one(
-                "#student-list",
-                ListView,
-            )
+            student_list = _active_student_list(app)
             assert _list_item_texts(student_list) == ["Andy Cortes [0/2 graded]"]
             assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
 

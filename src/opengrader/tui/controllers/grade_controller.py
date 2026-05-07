@@ -663,6 +663,7 @@ class GradeController:
             NavItem(
                 item_id=f"s{student.id}",
                 label=student.full_name,
+                display_id=student.student_id.strip() or f"s{student.id}",
                 meta="",
             )
             for student in self._data_provider.list_students(
@@ -845,6 +846,7 @@ class GradeController:
                 NavItem(
                     item_id=student.item_id,
                     label=student.label,
+                    display_id=student.display_id,
                     meta=f"{graded_count}/{total_questions} graded",
                 )
             )

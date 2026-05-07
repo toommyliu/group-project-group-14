@@ -13,6 +13,7 @@ from opengrader.tui.statistics import (
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
+from opengrader.tui.ui.widgets.tabbed_list_pane import IndexedListView, TabbedListPane
 
 
 class _QAListItem(ListItem):
@@ -27,10 +28,10 @@ class _QAListItem(ListItem):
 
 
 class _StudentListItem(ListItem):
-    def __init__(self, nav: NavItem) -> None:
+    def __init__(self, nav: NavItem, text: str) -> None:
         self.nav = nav
         meta = f" [{nav.meta}]" if nav.meta else ""
-        super().__init__(Label(f"{nav.item_id}{meta}"))
+        super().__init__(Label(f"{text}{meta}"))
 
 
 class QAPickerScreen(Vertical):
@@ -60,6 +61,8 @@ class QAPickerScreen(Vertical):
         self._filter_target_id: str | None = None
         self._question_filter = ""
         self._student_filter = ""
+        self._student_name_list = IndexedListView(id="student-name-list")
+        self._student_id_list = IndexedListView(id="student-id-list")
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -72,7 +75,14 @@ class QAPickerScreen(Vertical):
         with Horizontal(id="qa-picker-workspace"):
             with Vertical(id="qa-picker-left-column"):
                 yield ListView(id="qa-list")
-                yield ListView(id="student-list")
+                yield TabbedListPane(
+                    "Students",
+                    tabs=[
+                        ("Name", self._student_name_list),
+                        ("ID", self._student_id_list),
+                    ],
+                    id="student-list",
+                )
             with Vertical(id="qa-details"):
                 yield Label("Question", classes="sidebar-section-title")
                 yield Static("Highlight a QA to preview it.", id="qa-preview")
@@ -86,6 +96,7 @@ class QAPickerScreen(Vertical):
                 yield Static(
                     "j/k or up/down  Move\n"
                     "tab/shift+tab  Switch pane\n"
+                    "d              Student display\n"
                     "click or enter  Grade selected QA\n"
                     "escape          Back to assignments",
                     id="qa-keybinding-ref",
@@ -123,11 +134,9 @@ class QAPickerScreen(Vertical):
         self._question_filter = ""
         self._student_filter = ""
 
-        student_list = self.query_one("#student-list", ListView)
-        student_list.border_title = "Students"
-        student_list.clear()
-        for student in students:
-            student_list.append(_StudentListItem(student))
+        student_pane = self._student_pane()
+        student_pane.action_pane_activate_tab(0)
+        self._populate_student_lists(students)
 
         if questions:
             qa_list.index = 0
@@ -138,8 +147,7 @@ class QAPickerScreen(Vertical):
             )
             self._sync_statistics_chart(None)
         if students:
-            student_list.index = 0
-            self._restore_list_highlight(student_list)
+            self._set_student_index(0)
         self._sync_active_list_classes()
 
     def focus_questions(self) -> None:
@@ -152,9 +160,9 @@ class QAPickerScreen(Vertical):
         self.call_after_refresh(self.app.refresh_bindings)
 
     def focus_students(self) -> None:
-        student_list = self.query_one("#student-list", ListView)
+        student_list = self._student_active_list()
         if student_list.index is None and self._students:
-            student_list.index = 0
+            self._set_student_index(0)
         if not self._all_students:
             self.focus_questions()
             return
@@ -180,7 +188,7 @@ class QAPickerScreen(Vertical):
         return None
 
     def selected_student(self) -> NavItem | None:
-        student_list = self.query_one("#student-list", ListView)
+        student_list = self._student_active_list()
         child = student_list.highlighted_child
         if isinstance(child, _StudentListItem):
             return child.nav
@@ -214,7 +222,7 @@ class QAPickerScreen(Vertical):
             question_status = f"\n{question.label} status for this student: {status}"
 
         self.query_one("#qa-preview", Static).update(
-            f"{item.label} ({item.item_id})\n\n"
+            f"{item.label} ({self._student_detail_id(item)})\n\n"
             f"Progress: {progress}\n\n"
             f"Highlighted QA: {highlighted_question}"
             f"{question_status}"
@@ -264,12 +272,10 @@ class QAPickerScreen(Vertical):
             self.show_question_details(item)
 
     def move_student_to_index(self, index: int) -> None:
-        student_list = self.query_one("#student-list", ListView)
-        if not 0 <= index < len(student_list.children):
+        if not 0 <= index < len(self._students):
             return
 
-        student_list.index = index
-        self._restore_list_highlight(student_list)
+        self._set_student_index(index)
 
     def set_status(self, text: str) -> None:
         self.query_one("#qa-status", Static).update(text)
@@ -328,7 +334,7 @@ class QAPickerScreen(Vertical):
 
     def move_student_cursor(self, direction: int) -> None:
         self._set_active_list("student-list")
-        student_list = self.query_one("#student-list", ListView)
+        student_list = self._student_active_list()
         if direction < 0:
             student_list.action_cursor_up()
         else:
@@ -348,6 +354,23 @@ class QAPickerScreen(Vertical):
         if not self._students:
             return
         self.focus_students()
+
+    def toggle_student_display_mode(self) -> None:
+        if not self._students:
+            return
+
+        pane = self._student_pane()
+        next_tab_index = 1 if pane.active_tab_index == 0 else 0
+        pane.action_pane_activate_tab(next_tab_index)
+        self._set_active_list("student-list")
+        student_list = self._student_active_list()
+        if student_list.can_focus:
+            student_list.focus()
+        item = self.selected_student()
+        if item is not None:
+            self.show_student_details(item)
+        mode = "IDs" if next_tab_index == 1 else "names"
+        self.set_status(f"Showing student {mode}.")
 
     def _apply_question_filter(self, query: str) -> int:
         qa_list = self.query_one("#qa-list", ListView)
@@ -374,9 +397,6 @@ class QAPickerScreen(Vertical):
         return len(self._items)
 
     def _apply_student_filter(self, query: str) -> int:
-        student_list = self.query_one("#student-list", ListView)
-        student_list.clear()
-
         self._student_filter = query
         normalized_query = query.strip().lower()
         if not normalized_query:
@@ -384,15 +404,13 @@ class QAPickerScreen(Vertical):
         else:
             self._students = self._filter_items(normalized_query, self._all_students)
 
-        for student in self._students:
-            student_list.append(_StudentListItem(student))
+        self._populate_student_lists(self._students)
 
         if self._students:
-            student_list.index = 0
-            self._restore_list_highlight(student_list)
+            self._set_student_index(0)
             self._restore_student_details()
         else:
-            student_list.index = None
+            self._clear_student_indexes()
             self.query_one("#qa-preview", Static).update("No matching students.")
             self._sync_statistics_chart(self.selected_question())
         return len(self._students)
@@ -402,7 +420,9 @@ class QAPickerScreen(Vertical):
         return [
             item
             for item in items
-            if query in item.item_id.lower() or query in item.label.lower()
+            if query in item.item_id.lower()
+            or query in item.label.lower()
+            or query in item.display_id.lower()
         ]
 
     @staticmethod
@@ -418,8 +438,8 @@ class QAPickerScreen(Vertical):
         return f"Search {target}: {matches}/{total} matches"
 
     def students_have_focus(self) -> bool:
-        student_list = self.query_one("#student-list", ListView)
-        if self._focused_within(student_list):
+        student_pane = self._student_pane()
+        if self._focused_within(student_pane):
             return True
 
         qa_list = self.query_one("#qa-list", ListView)
@@ -441,6 +461,7 @@ class QAPickerScreen(Vertical):
             return
         if isinstance(event.item, _StudentListItem):
             if self._active_list_id == "student-list":
+                self._sync_student_index_from_list(event.item)
                 self.show_student_details(event.item.nav)
                 self.post_message(self.StudentHighlighted(event.item.nav))
 
@@ -450,36 +471,35 @@ class QAPickerScreen(Vertical):
         elif isinstance(event.item, _StudentListItem):
             # Ensure we jump to the correct question when a student is selected via keyboard/click
             self._set_active_list("student-list")
+            self._sync_student_index_from_list(event.item)
             self._jump_to_student_ungraded(event.item)
 
     def on_focus(self, event: events.Focus) -> None:
         self._activate_list_for_widget(event.control)
 
     def on_click(self, event: events.Click) -> None:
-        student_list = self.query_one("#student-list", ListView)
-        if self._widget_contains(student_list, event.widget):
+        student_pane = self._student_pane()
+        if self._widget_contains(student_pane, event.widget):
             self._set_active_list("student-list")
-            student_list.focus()
+            student_list = self._student_active_list()
 
             student = self._clicked_student_item(event.widget)
             if student is not None:
+                student_list.focus()
                 try:
-                    student_list.index = list(student_list.children).index(student)
+                    self._set_student_index(list(student_list.children).index(student))
                     self._jump_to_student_ungraded(student)
                 except ValueError:
                     pass
                 event.stop()
                 return
 
-            item = self.selected_student()
-            if item is not None:
-                # Find the widget associated with this item to trigger the jump
-                for child in student_list.children:
-                    if isinstance(child, _StudentListItem) and child.nav == item:
-                        self._jump_to_student_ungraded(child)
-                        break
-                self.show_student_details(item)
-            event.stop()
+            if self._widget_contains(student_list, event.widget):
+                student_list.focus()
+                item = self.selected_student()
+                if item is not None:
+                    self.show_student_details(item)
+                event.stop()
             return
 
         qa_list = self.query_one("#qa-list", ListView)
@@ -535,8 +555,8 @@ class QAPickerScreen(Vertical):
             event.stop()
 
     def _activate_list_for_widget(self, widget: Widget | None) -> None:
-        student_list = self.query_one("#student-list", ListView)
-        if self._widget_contains(student_list, widget):
+        student_pane = self._student_pane()
+        if self._widget_contains(student_pane, widget):
             self._set_active_list("student-list")
             return
 
@@ -554,14 +574,88 @@ class QAPickerScreen(Vertical):
     def _sync_active_list_classes(self) -> None:
         try:
             qa_list = self.query_one("#qa-list", ListView)
-            student_list = self.query_one("#student-list", ListView)
+            student_pane = self._student_pane()
         except Exception:
             return
         qa_list.set_class(self._active_list_id == "qa-list", "-pane-active")
-        student_list.set_class(
+        student_pane.set_class(
             self._active_list_id == "student-list",
             "-pane-active",
         )
+
+    def _student_pane(self) -> TabbedListPane:
+        return self.query_one("#student-list", TabbedListPane)
+
+    def _student_lists(self) -> tuple[IndexedListView, IndexedListView]:
+        return self._student_name_list, self._student_id_list
+
+    def _student_active_list(self) -> IndexedListView:
+        active = self._student_pane().active_list()
+        return active if active is not None else self._student_name_list
+
+    def _populate_student_lists(self, students: list[NavItem]) -> None:
+        name_list, id_list = self._student_lists()
+        name_list.clear()
+        id_list.clear()
+        display_id_counts = self._student_display_id_counts(self._all_students)
+
+        for student in students:
+            name_list.append(_StudentListItem(student, student.label))
+            id_list.append(
+                _StudentListItem(
+                    student,
+                    self._student_display_id(student, display_id_counts),
+                )
+            )
+
+        self._student_pane().refresh_index_subtitle()
+
+    def _set_student_index(self, index: int) -> None:
+        for student_list in self._student_lists():
+            if 0 <= index < len(student_list.children):
+                student_list.index = index
+                self._restore_list_highlight(student_list)
+            else:
+                student_list.index = None
+        self._student_pane().refresh_index_subtitle()
+
+    def _clear_student_indexes(self) -> None:
+        for student_list in self._student_lists():
+            student_list.index = None
+        self._student_pane().refresh_index_subtitle()
+
+    def _sync_student_index_from_list(self, item: _StudentListItem) -> None:
+        active_list = self._student_active_list()
+        try:
+            index = list(active_list.children).index(item)
+        except ValueError:
+            return
+        self._set_student_index(index)
+
+    def _student_detail_id(self, item: NavItem) -> str:
+        return self._student_display_id(
+            item,
+            self._student_display_id_counts(self._all_students),
+        )
+
+    @staticmethod
+    def _student_display_id_counts(students: list[NavItem]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for student in students:
+            display_id = QAPickerScreen._raw_student_display_id(student)
+            counts[display_id] = counts.get(display_id, 0) + 1
+        return counts
+
+    @staticmethod
+    def _student_display_id(item: NavItem, counts: dict[str, int]) -> str:
+        display_id = QAPickerScreen._raw_student_display_id(item)
+        if counts.get(display_id, 0) > 1:
+            return f"{display_id} ({item.item_id})"
+        return display_id
+
+    @staticmethod
+    def _raw_student_display_id(item: NavItem) -> str:
+        return (item.display_id or item.item_id).strip() or item.item_id
 
     @staticmethod
     def _normalize_list_highlight(list_view: ListView) -> None:
