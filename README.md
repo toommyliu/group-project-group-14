@@ -25,7 +25,7 @@ The PoC demonstrates the start of the workflow: generating templates, processing
 
 ## Prerequisites
 
-- [Python v3.13+](https://www.python.org/)
+- [Python v3.12](https://www.python.org/)
 - [Homebrew](https://brew.sh/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
@@ -55,7 +55,7 @@ Install homebrew and dependencies:
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew install tesseract
 brew install uv
-brew install python@3.13
+brew install python@3.12
 brew install ollama
 ```
 
