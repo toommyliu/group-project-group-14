@@ -36,6 +36,7 @@ automated-grading = "opengrader.cli.automated_grading:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
 submission-file = "opengrader.cli.submission_file:run_cli"
 submission-splitter = "opengrader.cli.submission_splitter:run_cli"
+smart-submission-splitter = "opengrader.cli.smart_submission_splitter:run_cli"
 canvas-export = "opengrader.cli.canvas_export:run_cli"
 
 [tool.hatch.build.targets.wheel]

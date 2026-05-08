@@ -3,6 +3,18 @@ from .splitter import (
     plan_submission_ranges,
     split_scanned_submission_pdf,
 )
+from .distribution import (
+    MissingPage,
+    PageEvidence,
+    SubmissionDistributionPlan,
+    SubmissionDistributionRange,
+    collect_page_evidence_from_pdf,
+    distribution_plan_to_dict,
+    distribution_plan_to_json,
+    plan_submission_distribution,
+    split_distributed_submission_pdf,
+    write_distribution_report,
+)
 from opengrader.core.source_location import QuestionSourceSegment
 from .student_file import (
     AssignmentTitleMetadata,
@@ -23,6 +35,16 @@ __all__ = [
     "SubmissionPageRange",
     "plan_submission_ranges",
     "split_scanned_submission_pdf",
+    "MissingPage",
+    "PageEvidence",
+    "SubmissionDistributionPlan",
+    "SubmissionDistributionRange",
+    "collect_page_evidence_from_pdf",
+    "distribution_plan_to_dict",
+    "distribution_plan_to_json",
+    "plan_submission_distribution",
+    "split_distributed_submission_pdf",
+    "write_distribution_report",
     "QuestionSourceSegment",
     "AssignmentTitleMetadata",
     "StudentSubmissionBuildResult",
