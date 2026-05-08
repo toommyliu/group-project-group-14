@@ -21,6 +21,7 @@ from opengrader.core.qa_file.scoring import rubric_scoring_mode
 from opengrader.tui.data import RubricOptionSeed
 from opengrader.tui.state import QuestionGrade, StudentGradingRun
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
+from opengrader.tui.ui.widgets.sharp_image import SharpImage
 from opengrader.tui.ui.widgets.response_viewer import ResponseViewer
 from opengrader.tui.ui.widgets.shortcut_input import ShortcutInput
 
@@ -233,6 +234,7 @@ class GradeScreen(Vertical):
     def __init__(self, default_image_path: str, *, id: str | None = None) -> None:
         self._default_image_path = default_image_path
         self._rubric_count = 0
+        self._last_identity: tuple[int | None, str | None] = (None, None)
         # Keep track of states to avoid frequent reflows during sidebar resizing.
         self._sidebar_width: int | None = None
         self._pending_sidebar_width: int | None = None
@@ -240,6 +242,8 @@ class GradeScreen(Vertical):
         self._rubric_edit_callback = None
         self._rubric_edit_mode = False
         self._rubric_edit_points = 0.0
+        self._zoom_fraction = 1.0
+        self._zoom_at_limit = False
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -252,6 +256,7 @@ class GradeScreen(Vertical):
                 yield Label("", id="grade-student-name")
                 yield Label("Score: 100.0", id="total-grade-label")
                 yield Label("Progress: 0/0", id="grade-progress")
+                yield Label("Zoom: 100%", id="grade-zoom-level")
                 yield Rule()
                 yield Label("Question", classes="sidebar-section-title")
                 yield Static("", id="question-context")
@@ -299,6 +304,7 @@ class GradeScreen(Vertical):
                     "j/k       Next/Prev Student\n"
                     "n/p       Next/Prev Ungraded\n"
                     "ctrl+g    Finalize\n"
+                    "+/-       Zoom\n"
                     "e         Edit Rubric\n"
                     "c         Focus Comment",
                     id="grade-keybinding-ref",
@@ -307,6 +313,9 @@ class GradeScreen(Vertical):
 
     def on_mount(self) -> None:
         self._update_rubric_list_visibility()
+        self._zoom_fraction = 1.0
+        self._zoom_at_limit = False
+        self._update_zoom_label()
 
     def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
         self.query_one("#grade-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
@@ -316,12 +325,21 @@ class GradeScreen(Vertical):
         self.query_one("#total-grade-label", Label).update(
             f"Score: {run.total_score:.1f} / {run.max_points:.1f}"
         )
-        self.query_one("#total-grade-label", Label).set_class(
+        self.query_one("#total-grade-label", Label).set_class(  # type: ignore
             run.total_score < 70.0, "low-grade"
         )
         self.set_progress(f"Progress: {run.graded_count} / {run.total_questions}")
 
         current = run.current_question
+        # Detect if the actual question or student has changed to reset the view
+        identity = (run.student_id, current.question_id if current else None)
+        if identity != self._last_identity:
+            self._last_identity = identity
+            self._zoom_fraction = 1.0
+            self._zoom_at_limit = False
+            self._update_zoom_label()
+            self.query_one("#response-viewer", ResponseViewer).reset_zoom()
+
         if current is None:
             rubric_list = self.query_one("#rubric-list", ListView)
             for child in list(rubric_list.children):
@@ -356,6 +374,15 @@ class GradeScreen(Vertical):
 
     def rubric_edit_active(self) -> bool:
         return self._rubric_edit_mode
+
+    def zoom_in(self) -> None:
+        self.query_one("#response-viewer", ResponseViewer).zoom_in()
+
+    def zoom_out(self) -> None:
+        self.query_one("#response-viewer", ResponseViewer).zoom_out()
+
+    def reset_zoom(self) -> None:
+        self.query_one("#response-viewer", ResponseViewer).reset_zoom()
 
     def focus_question_comment(self) -> None:
         """Move keyboard focus to the question comment input."""
@@ -481,6 +508,11 @@ class GradeScreen(Vertical):
         self._queue_sidebar_width(self._sidebar_width_from_screen_x(screen_x))
 
     def adjust_sidebar_width(self, delta: int) -> None:
+        if delta < 0 and self._zoom_at_limit:
+            # Narrowing the sidebar increases the image pane width.
+            # Prevent this if the image is already failing to render at current size.
+            self.set_status("Cannot narrow sidebar: Image at rendering limit.")
+            return
         self.set_sidebar_width(self._current_sidebar_width() + delta)
 
     def _sidebar_width_from_screen_x(self, screen_x: float) -> int:
@@ -931,7 +963,7 @@ class GradeScreen(Vertical):
                 event.prevent_default()
                 event.stop()
                 return
-            if len(event.key) == 1:
+            if len(event.key) == 1 and event.key not in ("+", "=", "-", "_", "0"):
                 event.stop()
             return
 
@@ -963,6 +995,23 @@ class GradeScreen(Vertical):
         if event.input.id == "question-comment":
             self.post_message(self.CommentUpdated(event.value))
 
+    @on(ResponseViewer.ZoomChanged)
+    def _on_zoom_changed(self, event: ResponseViewer.ZoomChanged) -> None:
+        self._zoom_fraction = event.fraction
+        self._update_zoom_label()
+
+    @on(SharpImage.ScalingError)
+    def _on_scaling_error(self, event: SharpImage.ScalingError) -> None:
+        self._zoom_at_limit = event.at_limit
+        self._update_zoom_label()
+
+    def _update_zoom_label(self) -> None:
+        label = self.query_one("#grade-zoom-level", Label)
+        text = f"Zoom: {round(self._zoom_fraction * 100)}%"
+        if self._zoom_at_limit:
+            text += " (Max reached)"
+        label.update(text)
+
 
 def _render_points_delta(points_delta: float) -> str:
     """Render a signed points delta for rubric inputs."""
@@ -970,7 +1019,6 @@ def _render_points_delta(points_delta: float) -> str:
     if not rendered.startswith("-"):
         rendered = f"+{rendered}"
     return rendered
-
 
 def _partial_subitem_label(label: str) -> str:
     """Strip the partial-credit prefix from a flat rubric label."""

@@ -82,7 +82,15 @@ class TuiApp(App):
             return False
 
         if isinstance(self.focused, Input):
-            return False
+            # Allow zoom commands to bypass the general Input focus block.
+            # Note: The Input widget may still consume the physical key press 
+            # for characters like '+' or '-', but this enables the action system.
+            if command not in (
+                InputCommand.GRADE_ZOOM_IN,
+                InputCommand.GRADE_ZOOM_OUT,
+                InputCommand.GRADE_RESET_ZOOM,
+            ):
+                return False
 
         if len(self.screen_stack) > 1:
             return False
@@ -226,6 +234,18 @@ class TuiApp(App):
             InputCommand.GRADE_WIDEN_SIDEBAR,
             self._handle_grade_widen_sidebar,
         )
+        self.input_controller.register(
+            InputCommand.GRADE_ZOOM_IN,
+            self.grade_controller.grade_zoom_in,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_ZOOM_OUT,
+            self.grade_controller.grade_zoom_out,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_RESET_ZOOM,
+            self.grade_controller.grade_reset_zoom,
+        )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
@@ -285,7 +305,14 @@ class TuiApp(App):
 
     def _input_command_available(self, command: InputCommand | str) -> bool:
         if isinstance(self.focused, Input):
-            return False
+            # Allow zoom commands to bypass the general Input focus block.
+            normalized_command = InputController._coerce_command(command)
+            if normalized_command not in (
+                InputCommand.GRADE_ZOOM_IN,
+                InputCommand.GRADE_ZOOM_OUT,
+                InputCommand.GRADE_RESET_ZOOM,
+            ):
+                return False
 
         if not self.input_controller.command_available(command):
             return False

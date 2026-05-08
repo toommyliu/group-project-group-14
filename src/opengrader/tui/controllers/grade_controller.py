@@ -409,6 +409,21 @@ class GradeController:
         self._app.switch_to(PAGE_QA_PICKER)
         self._focus_qa_picker_after_grade()
 
+    def grade_zoom_in(self) -> None:
+        if not self._on_grade_page():
+            return
+        self._app.get_grade_screen().zoom_in()
+
+    def grade_zoom_out(self) -> None:
+        if not self._on_grade_page():
+            return
+        self._app.get_grade_screen().zoom_out()
+
+    def grade_reset_zoom(self) -> None:
+        if not self._on_grade_page():
+            return
+        self._app.get_grade_screen().reset_zoom()
+
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
         grade_screen.bind_run(

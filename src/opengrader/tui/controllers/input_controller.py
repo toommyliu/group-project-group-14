@@ -32,6 +32,9 @@ class InputCommand(str, Enum):
     GRADE_FOCUS_COMMENT = "grade_focus_comment"
     GRADE_SHRINK_SIDEBAR = "grade_shrink_sidebar"
     GRADE_WIDEN_SIDEBAR = "grade_widen_sidebar"
+    GRADE_ZOOM_IN = "grade_zoom_in"
+    GRADE_ZOOM_OUT = "grade_zoom_out"
+    GRADE_RESET_ZOOM = "grade_reset_zoom"
 
 
 class InputContext(str, Enum):
@@ -193,6 +196,26 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "ctrl+g",
         InputCommand.GRADE_FINALIZE_STUDENT,
         "Finalize",
+        (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "+,=",
+        InputCommand.GRADE_ZOOM_IN,
+        "Zoom In",
+        (InputContext.GRADE,),
+        key_display="+",
+    ),
+    CommandBindingSpec(
+        "-,_",
+        InputCommand.GRADE_ZOOM_OUT,
+        "Zoom Out",
+        (InputContext.GRADE,),
+        key_display="-",
+    ),
+    CommandBindingSpec(
+        "0",
+        InputCommand.GRADE_RESET_ZOOM,
+        "Reset Zoom",
         (InputContext.GRADE,),
     ),
 )

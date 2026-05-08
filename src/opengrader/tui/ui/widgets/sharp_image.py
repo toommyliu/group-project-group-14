@@ -8,6 +8,8 @@ from PIL import Image as PILImage
 from PIL import ImageOps
 from textual.app import RenderResult
 from textual.geometry import Size
+from textual.message import Message
+from textual.reactive import reactive
 from textual_image._geometry import ImageSize
 from textual_image._pixeldata import ensure_image
 from textual_image._terminal import get_cell_size
@@ -25,6 +27,14 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
     filter before the image is handed to the terminal renderable.
     """
 
+    class ScalingError(Message):
+        def __init__(self, at_limit: bool) -> None:
+            self.at_limit = at_limit
+            super().__init__()
+
+    fit_width_fraction = reactive(1.0, layout=True)
+    allow_upscale = reactive(False)
+
     def __init__(
         self,
         image: StrOrBytesPath | IO[bytes] | PILImage.Image | None = None,
@@ -37,11 +47,9 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
         classes: str | None = None,
         disabled: bool = False,
     ) -> None:
-        self.fit_width_fraction = fit_width_fraction
-        self.allow_upscale = allow_upscale
-        self.max_cell_height = max_cell_height
         self._prepared_cache_key: tuple[object, int, int] | None = None
         self._prepared_cache_image: PILImage.Image | None = None
+        self._at_scaling_limit = False
         super().__init__(
             image,
             name=name,
@@ -49,6 +57,9 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
             classes=classes,
             disabled=disabled,
         )
+        self.fit_width_fraction = fit_width_fraction
+        self.allow_upscale = allow_upscale
+        self.max_cell_height = max_cell_height
 
     @TextualImage.image.setter
     def image(
@@ -87,24 +98,32 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
             self._renderable.cleanup()
             self._renderable = None
 
-        width, height = self._target_cell_size()
-        terminal_sizes = get_cell_size()
-        pixel_width = width * terminal_sizes.width
-        pixel_height = height * terminal_sizes.height
-        prepared_image = self._prepare_image(pixel_width, pixel_height)
+        try:
+            width, height = self._target_cell_size()
+            terminal_sizes = get_cell_size()
+            pixel_width = width * terminal_sizes.width
+            pixel_height = height * terminal_sizes.height
+            prepared_image = self._prepare_image(pixel_width, pixel_height)
+            self._renderable = self._Renderable(prepared_image, width, height)
+        except (ValueError, RuntimeError) as exc:
+            if "large" in str(exc).lower() or "too big" in str(exc).lower():
+                if not self._at_scaling_limit:
+                    self._at_scaling_limit = True
+                    self.post_message(self.ScalingError(True))
+                return "Image too large to render"
+            raise
 
-        self._renderable = self._Renderable(prepared_image, width, height)
+        if self._at_scaling_limit:
+            self._at_scaling_limit = False
+            self.post_message(self.ScalingError(False))
+
         return self._renderable
 
     def _target_cell_size(self) -> tuple[int, int]:
         target_width = self._target_cell_width(
             self.parent.size.width if self.parent is not None else 0
         )
-        width = (
-            min(self.content_size.width, target_width)
-            if self.content_size.width
-            else target_width
-        )
+        width = target_width
         if not self._image:
             return 0, 0
 
@@ -124,9 +143,13 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
 
         terminal_sizes = get_cell_size()
         intrinsic_width = max(1, round(self._image_width / terminal_sizes.width))
-        max_width = max(1, floor(container_width * self.fit_width_fraction))
-        if container_width <= 0:
-            max_width = intrinsic_width
+
+        # Use intrinsic_width as a fallback for container_width if it's 0,
+        # to ensure a non-zero target width for initial layout.
+        effective_container_width = max(container_width, intrinsic_width)
+
+        max_width = max(1, floor(effective_container_width * self.fit_width_fraction))
+
         if self.max_cell_height is not None and self._image_height > 0:
             max_height_px = self.max_cell_height * terminal_sizes.height
             height_limited_px = max_height_px * (self._image_width / self._image_height)
@@ -147,7 +170,7 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
         ):
             return self._prepared_cache_image
 
-        with ensure_image(self._image) as opened_image:
+        with ensure_image(self._image) as opened_image:  # type: ignore
             source = ImageOps.exif_transpose(opened_image).copy()
 
         if source.size == (width, height):
