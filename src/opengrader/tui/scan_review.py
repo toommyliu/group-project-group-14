@@ -54,6 +54,19 @@ class ScanReviewApp(App[None]):
         ("down", "cursor_down", "Next"),
         ("k", "cursor_up", "Previous"),
         ("up", "cursor_up", "Previous"),
+        ("d", "detail_scroll_down", "Scroll details down"),
+        ("u", "detail_scroll_up", "Scroll details up"),
+        ("ctrl+d", "detail_scroll_down", "Scroll details down"),
+        ("ctrl+u", "detail_scroll_up", "Scroll details up"),
+        ("ctrl+f", "detail_scroll_down", "Scroll details down"),
+        ("ctrl+b", "detail_scroll_up", "Scroll details up"),
+        ("g", "detail_scroll_home", "Details top"),
+        ("G", "detail_scroll_end", "Details bottom"),
+        ("shift+g", "detail_scroll_end", "Details bottom"),
+        ("pagedown", "detail_scroll_down", "Scroll details down"),
+        ("pageup", "detail_scroll_up", "Scroll details up"),
+        ("home", "detail_scroll_home", "Details top"),
+        ("end", "detail_scroll_end", "Details bottom"),
     ]
 
     class SubmissionSelected(Message):
@@ -111,6 +124,26 @@ class ScanReviewApp(App[None]):
 
     def action_cursor_up(self) -> None:
         self.query_one("#scan-review-list", ListView).action_cursor_up()
+
+    def action_detail_scroll_down(self) -> None:
+        self.query_one("#scan-review-pages", VerticalScroll).scroll_page_down(
+            animate=False
+        )
+
+    def action_detail_scroll_up(self) -> None:
+        self.query_one("#scan-review-pages", VerticalScroll).scroll_page_up(animate=False)
+
+    def action_detail_scroll_home(self) -> None:
+        self.query_one("#scan-review-pages", VerticalScroll).scroll_home(
+            animate=False,
+            x_axis=False,
+        )
+
+    def action_detail_scroll_end(self) -> None:
+        self.query_one("#scan-review-pages", VerticalScroll).scroll_end(
+            animate=False,
+            x_axis=False,
+        )
 
     def _summary_text(self) -> str:
         review_count = sum(

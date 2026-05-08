@@ -9,6 +9,7 @@ from pypdf import PdfReader, PdfWriter
 
 from opengrader.cli import smart_submission_splitter
 from opengrader.core.submissions.distribution import PageEvidence
+from opengrader.tui.scan_review import ScanReviewApp
 
 
 def _write_blank_pdf(path: Path, page_count: int) -> None:
@@ -119,3 +120,42 @@ def test_smart_submission_splitter_writes_split_pdfs_and_report(
         "submission-0001",
         "submission-0002",
     ]
+
+
+def test_smart_submission_splitter_review_flag_opens_review_tui(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    input_pdf = tmp_path / "submissions.pdf"
+    output_dir = tmp_path / "split"
+    _write_blank_pdf(input_pdf, 2)
+
+    def _fake_collect(*_args: object, **_kwargs: object) -> list[PageEvidence]:
+        return _evidence(1, 2)
+
+    review_calls: list[tuple[Path, int]] = []
+
+    def _fake_run(self: ScanReviewApp) -> None:
+        review_calls.append((self.input_pdf, len(self.plan.ranges)))
+
+    monkeypatch.setattr(
+        smart_submission_splitter,
+        "collect_page_evidence_from_pdf",
+        _fake_collect,
+    )
+    monkeypatch.setattr(ScanReviewApp, "run", _fake_run)
+
+    _run_cli(
+        monkeypatch,
+        "--input",
+        str(input_pdf),
+        "--output",
+        str(output_dir),
+        "--pages-per-submission",
+        "2",
+        "--review",
+        "--dry-run",
+    )
+
+    assert review_calls == [(input_pdf, 1)]
+    assert not list(output_dir.glob("*.pdf"))
