@@ -90,7 +90,8 @@ uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
 - `qa-file`: Work with QA markdown files.
   - `validate --qa-file <qa.md>`: Validate QA markdown structure.
   - `generate-template --qa-file <qa.md> --output-pdf <template.pdf>`: Generate template PDFs from QA markdown.
-- `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
+- `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs using a fixed page count.
+- `smart-submission-splitter`: Split one scanned PDF into per-student PDFs by inferring page sequences, missing pages, and uncertain boundaries from footer page-number evidence.
 - `submission-file`: Convert per-student submission PDFs into `.submission.md` files and response image crops.
 - `pdf-to-qa`: Convert an answer-key PDF into a QA markdown draft using OCR.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
@@ -138,6 +139,27 @@ Useful `submission-splitter` options:
 - `--filename-prefix <prefix>`: Change output names from `submission-0001.pdf`.
 - `--zero-pad-width <N>`: Change output number padding.
 - `--dry-run`: Print planned split ranges without writing files.
+
+Smart-split a scanned submissions PDF when scans may include missing, duplicated, or out-of-order pages:
+```bash
+uv run smart-submission-splitter \
+  --input scans/all-submissions.pdf \
+  --output split/ \
+  --pages-per-submission 6 \
+  --report-json split-plan.json
+```
+
+`smart-submission-splitter` uses OCR on page-number evidence to infer logical page sequences. Pages or submissions with uncertain ownership are written with the review prefix (`needs-review` by default) and flagged in the printed/JSON report.
+
+Useful `smart-submission-splitter` options:
+- `--start-page <N>` and `--end-page <N>`: Infer splits from only a 1-indexed physical page range.
+- `--filename-prefix <prefix>`: Change normal output names from `submission-0001.pdf`.
+- `--review-prefix <prefix>`: Change output names for unknown-owner pages from `needs-review-0001.pdf`.
+- `--report-json <path>`: Write a machine-readable split report.
+- `--dpi <N>`: Set rendering DPI for page-number OCR. Default is `200`.
+- `--min-page-number-confidence <N>`: Set the minimum OCR confidence for trusting footer page numbers. Default is `60.0`.
+- `--review`: Open an interactive TUI to inspect inferred split submissions.
+- `--dry-run`: Print and optionally write the report without writing split PDFs.
 
 Convert per-student PDFs into student submission markdown:
 ```bash
@@ -188,6 +210,11 @@ uv run qa-file generate-template --qa-file /path/to/qa.md --output-pdf /path/to/
 2. Process scan into individual student submissions:
 ```bash
 uv run submission-splitter --input /path/to/scan.pdf --output /path/to/split --pages-per-submission N
+```
+
+If the bulk scan may contain missing, duplicated, or out-of-order pages, use the smart splitter instead:
+```bash
+uv run smart-submission-splitter --input /path/to/scan.pdf --output /path/to/split --pages-per-submission N --report-json /path/to/split-plan.json
 ```
 
 3. Process student submissions into structured markdown:
