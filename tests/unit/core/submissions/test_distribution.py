@@ -100,15 +100,34 @@ def test_unknown_page_between_known_neighbors_is_inferred() -> None:
     assert plan.ranges[0].confidence < 100.0
 
 
+def test_ranges_are_hard_capped_at_pages_per_submission() -> None:
+    plan = plan_submission_distribution(
+        page_evidence=_evidence(1, 2, 3, None, 2, 3),
+        pages_per_submission=3,
+    )
+
+    assert [page_range.physical_pages for page_range in plan.ranges] == [
+        (1, 2, 3),
+        (4, 5, 6),
+    ]
+    assert all(
+        len(page_range.physical_pages) <= 3 for page_range in plan.ranges
+    )
+
+
 def test_duplicate_logical_page_marks_range_for_review() -> None:
     plan = plan_submission_distribution(
         page_evidence=_evidence(1, 2, 2, 3),
         pages_per_submission=3,
     )
 
-    assert len(plan.ranges) == 1
+    assert len(plan.ranges) == 2
+    assert plan.ranges[0].physical_pages == (1, 2, 3)
     assert plan.ranges[0].needs_review
     assert "duplicate_logical_page_2" in plan.ranges[0].review_reasons
+    assert all(
+        len(page_range.physical_pages) <= 3 for page_range in plan.ranges
+    )
 
 
 def test_non_monotonic_non_reset_marks_range_for_review() -> None:

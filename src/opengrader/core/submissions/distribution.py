@@ -86,6 +86,13 @@ def _starts_new_submission(
     if not group:
         return True
 
+    # pges_per_submission is both the expected logical page count and a
+    # safety cap for emitted PDFs.  Once a range already has that many
+    # physical pages, the next scanned page must start a new range even when
+    # OCR cannot confidently read its logical page number.
+    if len(group) >= pages_per_submission:
+        return True
+
     if page.is_first_page or page.logical_page == 1:
         return True
 

@@ -43,7 +43,7 @@ def _build_parser() -> ArgumentParser:
         "--pages-per-submission",
         type=int,
         required=True,
-        help="Expected logical number of pages per student submission.",
+        help="Expected and maximum logical/physical pages per student submission.",
     )
     parser.add_argument(
         "--start-page",

@@ -149,7 +149,7 @@ uv run smart-submission-splitter \
   --report-json split-plan.json
 ```
 
-`smart-submission-splitter` uses OCR on page-number evidence to infer logical page sequences. Pages or submissions with uncertain ownership are written with the review prefix (`needs-review` by default) and flagged in the printed/JSON report.
+`smart-submission-splitter` uses OCR on page-number evidence to infer logical page sequences. `--pages-per-submission` is treated as both the expected logical page count and a hard cap for each emitted PDF. Pages or submissions with uncertain ownership are written with the review prefix (`needs-review` by default) and flagged in the printed/JSON report.
 
 Useful `smart-submission-splitter` options:
 - `--start-page <N>` and `--end-page <N>`: Infer splits from only a 1-indexed physical page range.
