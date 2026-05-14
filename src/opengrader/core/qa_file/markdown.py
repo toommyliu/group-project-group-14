@@ -246,12 +246,23 @@ def _parse_points(raw: str | None) -> int | None:
 
 
 def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
+    """Strip an ``(N points)`` marker from the start of a question prompt.
+
+    The marker only ever appears on the first line of a bullet; subsequent
+    lines (e.g., a fenced code block embedded in the prompt) are preserved
+    so multi-line prompts retain their body while their points are still
+    extracted.
+    """
     text = prompt.strip()
-    matched = _INLINE_POINTS_RE.match(text)
+    first_line, sep, rest = text.partition("\n")
+    matched = _INLINE_POINTS_RE.match(first_line.strip())
     if matched is None:
         return text, None
     points = int(float(matched.group(1)))
-    cleaned = matched.group(2).strip()
+    cleaned_first = matched.group(2).strip()
+    cleaned = cleaned_first if not rest else (
+        f"{cleaned_first}{sep}{rest}" if cleaned_first else rest
+    )
     return cleaned, points
 
 
