@@ -58,12 +58,19 @@ examples:
 
 # Patterns applied to fitz-extracted text from a PDF text layer (blank exam
 # or text-layer student PDF).
+#
+# Points spec accepts the regular form ``(N points)`` plus the two bonus
+# forms we render: ``(N bonus points)`` and ``(N points (bonus))``.
+_POINTS_SPEC = (
+    r"\(\s*(\d+(?:\.\d+)?)\s*(?:bonus\s+)?"
+    r"(?:points?|pts)(?:\s*\(\s*bonus\s*\))?\s*\)"
+)
 _QUESTION_PREFIX_RE = re.compile(
-    r"^\s*(\d+)\.\s*\((\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.*)$",
+    r"^\s*(\d+)\.\s*" + _POINTS_SPEC + r"\s*(.*)$",
     re.IGNORECASE,
 )
 _QUESTION_INLINE_RE = re.compile(
-    r"(\d+)\.\s*\((\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.+?)(?=\n\s*\d+\.\s*\(|\Z)",
+    r"(\d+)\.\s*" + _POINTS_SPEC + r"\s*(.+?)(?=\n\s*\d+\.\s*\(|\Z)",
     re.DOTALL | re.IGNORECASE,
 )
 _ID_VALUE_RE = re.compile(r"(?:Student\s*)?ID\s*:?\s*(\w+)", re.IGNORECASE)
@@ -80,7 +87,7 @@ _FORM_LABEL_RE = re.compile(
 # used purely for *alignment* (locating question prefixes and the Name/ID
 # labels), not for value extraction.
 _SCAN_QUESTION_LINE_RE = re.compile(
-    r"^\s*(\d{1,2})\s*[\.)]\s*\(\s*(\d+(?:\.\d+)?)\s*(?:points?|pts)\b",
+    r"^\s*(\d{1,2})\s*[\.)]\s*\(\s*(\d+(?:\.\d+)?)\s*(?:bonus\s+)?(?:points?|pts)\b",
     re.IGNORECASE,
 )
 _SCAN_NAME_WORD_RE = re.compile(r"^name[:.,]?$", re.IGNORECASE)
