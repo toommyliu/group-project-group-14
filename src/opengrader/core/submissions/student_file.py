@@ -1352,7 +1352,10 @@ def _yaml_field(lines: list[str], key: str, value: str | None) -> None:
             lines.append(f"  {line}")
         return
 
-    safe = value.replace('"', '\\"')
+    # YAML double-quoted strings must have both backslash and double-quote
+    # escaped; escape backslash first to avoid double-escaping our quote
+    # marker.
+    safe = value.replace("\\", "\\\\").replace('"', '\\"')
     lines.append(f'{key}: "{safe}"')
 
 
