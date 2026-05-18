@@ -18,6 +18,18 @@ class TuiApp(App):
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = InputController.all_bindings()  # pyright: ignore[reportAssignmentType]
 
+    DEFAULT_CSS = """
+    Screen {
+        padding: 0;
+        margin: 0;
+    }
+
+    #workspace-switcher {
+        padding: 0;
+        margin: 0;
+    }
+    """
+
     def __init__(
         self,
         *,
@@ -89,6 +101,15 @@ class TuiApp(App):
                 InputCommand.GRADE_ZOOM_IN,
                 InputCommand.GRADE_ZOOM_OUT,
                 InputCommand.GRADE_RESET_ZOOM,
+                InputCommand.GRADE_TOGGLE_LAYOUT,
+                InputCommand.GRADE_SHRINK_SIDEBAR,
+                InputCommand.GRADE_WIDEN_SIDEBAR,
+                InputCommand.GRADE_NEXT_STUDENT,
+                InputCommand.GRADE_PREVIOUS_STUDENT,
+                InputCommand.GRADE_NEXT_QUESTION,
+                InputCommand.GRADE_PREVIOUS_QUESTION,
+                InputCommand.GRADE_NEXT_UNGRADED_STUDENT,
+                InputCommand.GRADE_PREVIOUS_UNGRADED_STUDENT,
             ):
                 return False
 
@@ -142,7 +163,16 @@ class TuiApp(App):
     def on_grade_screen_rubric_selected(
         self, event: GradeScreen.RubricSelected
     ) -> None:
-        self.grade_controller.on_rubric_selected(event.option_index)
+        self._handle_rubric_selection(event)
+
+    def on_grade_rubric_selected(self, event: GradeScreen.RubricSelected) -> None:
+        """ID-based handler fallback for the grade screen."""
+        self._handle_rubric_selection(event)
+
+    def _handle_rubric_selection(self, event: GradeScreen.RubricSelected) -> None:
+        self.grade_controller.on_rubric_selected(
+            event.option_index, finalize=event.finalize
+        )
 
     def on_grade_screen_comment_updated(
         self, event: GradeScreen.CommentUpdated
@@ -246,6 +276,10 @@ class TuiApp(App):
             InputCommand.GRADE_RESET_ZOOM,
             self.grade_controller.grade_reset_zoom,
         )
+        self.input_controller.register(
+            InputCommand.GRADE_TOGGLE_LAYOUT,
+            self.grade_controller.grade_toggle_layout,
+        )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
@@ -297,11 +331,17 @@ class TuiApp(App):
 
     def _handle_grade_shrink_sidebar(self) -> None:
         grade_screen = self.get_grade_screen()
-        grade_screen.adjust_sidebar_width(-grade_screen.SIDEBAR_RESIZE_STEP)
+        if grade_screen.query_one("#grade-workspace").has_class("-layout-top-bottom"):
+            grade_screen.adjust_sidebar_height(-grade_screen.SIDEBAR_RESIZE_STEP)
+        else:
+            grade_screen.adjust_sidebar_width(-grade_screen.SIDEBAR_RESIZE_STEP)
 
     def _handle_grade_widen_sidebar(self) -> None:
         grade_screen = self.get_grade_screen()
-        grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
+        if grade_screen.query_one("#grade-workspace").has_class("-layout-top-bottom"):
+            grade_screen.adjust_sidebar_height(grade_screen.SIDEBAR_RESIZE_STEP)
+        else:
+            grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
 
     def _input_command_available(self, command: InputCommand | str) -> bool:
         if isinstance(self.focused, Input):
@@ -311,6 +351,15 @@ class TuiApp(App):
                 InputCommand.GRADE_ZOOM_IN,
                 InputCommand.GRADE_ZOOM_OUT,
                 InputCommand.GRADE_RESET_ZOOM,
+                InputCommand.GRADE_TOGGLE_LAYOUT,
+                InputCommand.GRADE_SHRINK_SIDEBAR,
+                InputCommand.GRADE_WIDEN_SIDEBAR,
+                InputCommand.GRADE_NEXT_STUDENT,
+                InputCommand.GRADE_PREVIOUS_STUDENT,
+                InputCommand.GRADE_NEXT_QUESTION,
+                InputCommand.GRADE_PREVIOUS_QUESTION,
+                InputCommand.GRADE_NEXT_UNGRADED_STUDENT,
+                InputCommand.GRADE_PREVIOUS_UNGRADED_STUDENT,
             ):
                 return False
 

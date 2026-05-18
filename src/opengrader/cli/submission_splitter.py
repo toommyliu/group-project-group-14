@@ -4,9 +4,11 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
 from opengrader.core.submissions import (
+    reorder_pdf_pages,
     plan_submission_ranges,
     split_scanned_submission_pdf,
 )
+from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, ensure_model_available
 
 from pypdf import PdfReader
 
@@ -19,6 +21,7 @@ examples:
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --start-page 3
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
 """
 
 
@@ -71,6 +74,27 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help="Only print planned split ranges without writing files.",
     )
+    parser.add_argument(
+        "--reorder",
+        action="store_true",
+        help="Use OCR to detect page numbers and reorder pages within each split PDF.",
+    )
+    parser.add_argument(
+        "--ollama-model",
+        default="qwen2.5vl:7b",
+        help="Ollama vision model for reorder verification.",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        default="http://127.0.0.1:11434",
+        help="Ollama server URL for reorder verification.",
+    )
+    parser.add_argument(
+        "--ollama-timeout",
+        type=float,
+        default=120.0,
+        help="Ollama request timeout in seconds (default: 120).",
+    )
     return parser
 
 
@@ -117,8 +141,28 @@ def run_cli() -> None:
         output_dir=args.output,
         ranges=ranges,
     )
-
+    
     print(f"Wrote {len(created)} split PDFs to: {Path(args.output)}")
+
+    if args.reorder:
+        print("Checking page order and reordering if necessary...")
+        ollama_config = OllamaVisionConfig(
+            model=args.ollama_model,
+            host=args.ollama_host,
+            timeout_seconds=args.ollama_timeout,
+        )
+        # Only verify model if we actually use Ollama as fallback
+        try:
+            ensure_model_available(ollama_config)
+        except Exception as exc:
+            print(f"Warning: Ollama reorder fallback unavailable: {exc}")
+            ollama_config = None
+
+        for pdf_path in created:
+            if reorder_pdf_pages(pdf_path, ollama_config=ollama_config):
+                print(f"  - Reordered: {pdf_path.name}")
+            else:
+                print(f"  - Order verified: {pdf_path.name}")
 
 
 if __name__ == "__main__":

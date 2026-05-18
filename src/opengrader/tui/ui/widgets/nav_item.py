@@ -7,3 +7,4 @@ class NavItem:
     label: str
     meta: str = ""
     display_id: str = ""
+    description: str = ""

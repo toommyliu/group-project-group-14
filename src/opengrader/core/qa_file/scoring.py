@@ -4,7 +4,7 @@ from typing import Literal
 
 EPSILON = 1e-6
 ScoringMode = Literal["positive_awards", "negative_deductions"]
-RubricOptionKind = Literal["correct", "partial", "incorrect"]
+RubricOptionKind = Literal["correct", "partial", "incorrect", "bonus"]
 RubricSelectionMode = Literal["exclusive", "checklist"]
 
 
@@ -30,9 +30,13 @@ def rubric_scoring_mode(points_values: Iterable[float]) -> ScoringMode:
     values = list(points_values)
     has_positive = any(value > EPSILON for value in values)
     has_negative = any(value < -EPSILON for value in values)
-    if has_positive and has_negative:
-        raise ValueError("rubric cannot mix positive awards and negative deductions")
-    return "positive_awards" if has_positive else "negative_deductions"
+
+    if has_negative:
+        # If there are deductions, it's a deduction rubric (bonuses are allowed).
+        return "negative_deductions"
+    if has_positive:
+        return "positive_awards"
+    return "negative_deductions"
 
 
 def rubric_uses_positive_awards(points_values: Iterable[float]) -> bool:
@@ -44,25 +48,36 @@ def awarded_points_for_rubric_selection(
     possible_points: float,
     selected_points_values: Iterable[float],
     rubric_points_values: Iterable[float],
+    *,
+    bonus_points_values: Iterable[float] = (),
 ) -> float:
     """Compute awarded points for a set of selected rubric values."""
+    base_points = possible_points if possible_points is not None else 0.0
     selected_total = sum(selected_points_values)
     # Award rubrics store earned points; deduction rubrics store adjustments from full credit.
+    # Bonus deltas are always added after clamping the base score.
     if rubric_uses_positive_awards(rubric_points_values):
-        return clamp_points(selected_total, max_points=possible_points)
-    return clamp_points(possible_points + selected_total, max_points=possible_points)
+        base_score = clamp_points(selected_total, max_points=base_points)
+    else:
+        base_score = clamp_points(
+            base_points + selected_total, max_points=base_points
+        )
+    return base_score + sum(bonus_points_values)
 
 
 def score_adjustment_for_rubric_selection(
     possible_points: float,
     selected_points_values: Iterable[float],
     rubric_points_values: Iterable[float],
+    *,
+    bonus_points_values: Iterable[float] = (),
 ) -> float:
     """Compute the selected rubric values' contribution to total score."""
     awarded = awarded_points_for_rubric_selection(
         possible_points,
         selected_points_values,
         rubric_points_values,
+        bonus_points_values=bonus_points_values,
     )
     return awarded - possible_points
 

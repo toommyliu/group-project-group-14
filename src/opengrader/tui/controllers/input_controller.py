@@ -35,6 +35,7 @@ class InputCommand(str, Enum):
     GRADE_ZOOM_IN = "grade_zoom_in"
     GRADE_ZOOM_OUT = "grade_zoom_out"
     GRADE_RESET_ZOOM = "grade_reset_zoom"
+    GRADE_TOGGLE_LAYOUT = "grade_toggle_layout"
 
 
 class InputContext(str, Enum):
@@ -129,39 +130,39 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.QA,),
     ),
     CommandBindingSpec(
-        "j,right",
+        "ctrl+k,right",
         InputCommand.GRADE_NEXT_STUDENT,
         "Next Student",
         (InputContext.GRADE,),
-        key_display="j/right",
+        key_display="ctrl+k/right",
     ),
     CommandBindingSpec(
-        "k,left",
+        "ctrl+j,left",
         InputCommand.GRADE_PREVIOUS_STUDENT,
         "Prev Student",
         (InputContext.GRADE,),
-        key_display="k/left",
+        key_display="ctrl+j/left",
     ),
     CommandBindingSpec(
-        "n",
+        "m",
         InputCommand.GRADE_NEXT_UNGRADED_STUDENT,
         "Next Ungraded",
         (InputContext.GRADE,),
     ),
     CommandBindingSpec(
-        "p",
+        "n",
         InputCommand.GRADE_PREVIOUS_UNGRADED_STUDENT,
         "Prev Ungraded",
         (InputContext.GRADE,),
     ),
     CommandBindingSpec(
-        "ctrl+j",
+        "k",
         InputCommand.GRADE_NEXT_QUESTION,
         "Next Question",
         (InputContext.GRADE,),
     ),
     CommandBindingSpec(
-        "ctrl+k",
+        "j",
         InputCommand.GRADE_PREVIOUS_QUESTION,
         "Prev Question",
         (InputContext.GRADE,),
@@ -216,6 +217,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "0",
         InputCommand.GRADE_RESET_ZOOM,
         "Reset Zoom",
+        (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "ctrl+v",
+        InputCommand.GRADE_TOGGLE_LAYOUT,
+        "Toggle Layout",
         (InputContext.GRADE,),
     ),
 )

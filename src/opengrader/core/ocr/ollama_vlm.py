@@ -311,3 +311,26 @@ def extract_question_prompt_and_answer(
     answer = str(parsed.get("answer", "")).strip()
     question_prompt = re.sub(r"\s+", " ", question_prompt)
     return question_prompt, answer
+
+
+def extract_page_number(
+    *,
+    image_path: str | Path,
+    config: OllamaVisionConfig,
+) -> int | None:
+    prompt = (
+        "You are a strict OCR transcription engine for scanned exams. "
+        "Read only the page number visible at the bottom of the image. "
+        "Return strict JSON only with this shape: {\"value\": \"...\"} "
+        "where value is the integer page number. If not found, return null."
+    )
+    raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
+    parsed = _parse_json_from_response(raw)
+    if parsed is not None:
+        val = parsed.get("value")
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                pass
+    return None
