@@ -32,8 +32,11 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
             self.at_limit = at_limit
             super().__init__()
 
-    fit_width_fraction = reactive(1.0, layout=True)
+    fit_width_fraction = reactive(0.6, layout=True)
     allow_upscale = reactive(False)
+
+    MAX_RENDER_PIXELS = 8_000_000  # 8 MP safety limit for terminal rendering
+    MAX_DIMENSION = 4096  # Max dimension for Kitty protocol/compatibility
 
     def __init__(
         self,
@@ -103,19 +106,33 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
             terminal_sizes = get_cell_size()
             pixel_width = width * terminal_sizes.width
             pixel_height = height * terminal_sizes.height
+
+            # Proactively clamp resolution to safety limits to avoid memory/terminal errors.
+            # If the requested zoom exceeds this, we downscale the pixel data while keeping 
+            # the cell layout size the same. This provides a "sharp as possible" view.
+            total_pixels = pixel_width * pixel_height
+            if total_pixels > self.MAX_RENDER_PIXELS:
+                scale = (self.MAX_RENDER_PIXELS / total_pixels) ** 0.5
+                pixel_width = int(pixel_width * scale)
+                pixel_height = int(pixel_height * scale)
+                at_limit = True
+            else:
+                at_limit = False
+
+            if at_limit != self._at_scaling_limit:
+                self._at_scaling_limit = at_limit
+                self.post_message(self.ScalingError(at_limit))
+
             prepared_image = self._prepare_image(pixel_width, pixel_height)
             self._renderable = self._Renderable(prepared_image, width, height)
         except (ValueError, RuntimeError) as exc:
-            if "large" in str(exc).lower() or "too big" in str(exc).lower():
+            # Catch unexpected downstream errors (e.g. from the terminal protocol)
+            if any(k in str(exc).lower() for k in ("large", "too big", "size", "pixels")):
                 if not self._at_scaling_limit:
                     self._at_scaling_limit = True
                     self.post_message(self.ScalingError(True))
                 return "Image too large to render"
             raise
-
-        if self._at_scaling_limit:
-            self._at_scaling_limit = False
-            self.post_message(self.ScalingError(False))
 
         return self._renderable
 

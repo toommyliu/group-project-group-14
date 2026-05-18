@@ -438,6 +438,12 @@ class GradeController:
             return
         self._app.get_grade_screen().toggle_layout()
 
+    def first_student_for_question(self) -> None:
+        if not self._on_grade_page():
+            return
+        self._state.active_student_index = 0
+        self.open_student_by_index(0)
+
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
         grade_screen.bind_run(

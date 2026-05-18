@@ -280,6 +280,10 @@ class TuiApp(App):
             InputCommand.GRADE_TOGGLE_LAYOUT,
             self.grade_controller.grade_toggle_layout,
         )
+        self.input_controller.register(
+            InputCommand.GRADE_FIRST_STUDENT,
+            self.grade_controller.first_student_for_question,
+        )
 
     def _handle_back(self) -> None:
         if self.workflow_state.current_page == PAGE_GRADE:
@@ -352,6 +356,7 @@ class TuiApp(App):
                 InputCommand.GRADE_ZOOM_OUT,
                 InputCommand.GRADE_RESET_ZOOM,
                 InputCommand.GRADE_TOGGLE_LAYOUT,
+                InputCommand.GRADE_FIRST_STUDENT,
                 InputCommand.GRADE_SHRINK_SIDEBAR,
                 InputCommand.GRADE_WIDEN_SIDEBAR,
                 InputCommand.GRADE_NEXT_STUDENT,

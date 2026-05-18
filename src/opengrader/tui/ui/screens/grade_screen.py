@@ -301,6 +301,7 @@ class GradeScreen(Vertical):
         Binding("ctrl+7", "rubric_finalize(6)", show=False, priority=True),
         Binding("ctrl+8", "rubric_finalize(7)", show=False, priority=True),
         Binding("ctrl+9", "rubric_finalize(8)", show=False, priority=True),
+        Binding("a", "dispatch_input('grade_first_student')", "First Student", show=False),
         Binding("ctrl+0", "rubric_finalize(9)", show=False, priority=True),
     ]
 
@@ -342,7 +343,7 @@ class GradeScreen(Vertical):
         self._rubric_edit_callback = None
         self._rubric_edit_mode = False
         self._rubric_edit_points = 0.0
-        self._zoom_fraction = 1.0
+        self._zoom_fraction = 0.7
         self._zoom_at_limit = False
         super().__init__(id=id)
 
@@ -397,7 +398,7 @@ class GradeScreen(Vertical):
     def on_mount(self) -> None:
         self._update_rubric_list_visibility()
         self._update_hotkey_ref()
-        self._zoom_fraction = 1.0
+        self._zoom_fraction = 0.7
         self._zoom_at_limit = False
         self._update_zoom_label()
 
@@ -419,7 +420,7 @@ class GradeScreen(Vertical):
         identity = (run.student_id, current.question_id if current else None)
         if identity != self._last_identity:
             self._last_identity = identity
-            self._zoom_fraction = 1.0
+            self._zoom_fraction = 0.7
             self._zoom_at_limit = False
             self._update_zoom_label()
             self.query_one("#response-viewer", ResponseViewer).reset_zoom()
@@ -466,6 +467,7 @@ class GradeScreen(Vertical):
         self.query_one("#response-viewer", ResponseViewer).zoom_in()
 
     def zoom_out(self) -> None:
+        self.set_status("")  # Proactively clear limit warnings when zooming out
         self.query_one("#response-viewer", ResponseViewer).zoom_out()
 
     def reset_zoom(self) -> None:
@@ -674,6 +676,8 @@ class GradeScreen(Vertical):
             # Prevent this if the image is already failing to render at current size.
             self.set_status("Cannot narrow sidebar: Image at rendering limit.")
             return
+        if delta > 0:
+            self.set_status("")  # Clear warning when widening (image gets smaller)
         self.set_sidebar_width(self._current_sidebar_width() + delta)
 
     def adjust_sidebar_height(self, delta: int) -> None:
@@ -686,6 +690,8 @@ class GradeScreen(Vertical):
             # Shrinking the sidebar height expands the image pane vertically.
             self.set_status("Cannot shrink sidebar: Image at rendering limit.")
             return
+        if delta > 0:
+            self.set_status("")  # Clear warning when expanding (image gets smaller)
 
         sidebar = self.query_one("#grade-sidebar", VerticalScroll)
         current_height = self._sidebar_height if self._sidebar_height is not None else 30
@@ -1304,6 +1310,7 @@ class GradeScreen(Vertical):
             "ctrl+1-9 Rubric+Finalize\n"
             "ctrl+g   Finalize\n"
             "+/-      Zoom\n"
+            "a        First Student\n"
             f"\\[/\\]      {resize_label}\n"
             "e        Edit Rubric\n"
             "c        Focus Comment\n"

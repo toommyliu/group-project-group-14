@@ -36,6 +36,7 @@ class InputCommand(str, Enum):
     GRADE_ZOOM_OUT = "grade_zoom_out"
     GRADE_RESET_ZOOM = "grade_reset_zoom"
     GRADE_TOGGLE_LAYOUT = "grade_toggle_layout"
+    GRADE_FIRST_STUDENT = "grade_first_student"
 
 
 class InputContext(str, Enum):
@@ -223,6 +224,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "ctrl+v",
         InputCommand.GRADE_TOGGLE_LAYOUT,
         "Toggle Layout",
+        (InputContext.GRADE,),
+    ),
+    CommandBindingSpec(
+        "a",
+        InputCommand.GRADE_FIRST_STUDENT,
+        "First Student",
         (InputContext.GRADE,),
     ),
 )
