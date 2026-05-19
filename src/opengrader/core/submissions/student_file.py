@@ -74,12 +74,14 @@ _SUBMISSION_FIELD_RE = re.compile(r"^\s{2}-\s+([^:]+):\s*(.*)$")
 _SUBMISSION_CHILD_BULLET_RE = re.compile(r"^\s{4}-\s+(.*)$")
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 _PROMPT_POINTS_RE = re.compile(
-    r"^\((\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.*)$",
+    r"^(?:[a-z0-9][\)\.]\s+)?\(\s*(\d+(?:\.\d+)?)\s*(?:points?|pts)\)\s*(.*)$",
     re.IGNORECASE,
 )
 _PARTIAL_RUBRIC_CATEGORY = "Partially Correct"
 _PARTIAL_RUBRIC_PREFIX = f"{_PARTIAL_RUBRIC_CATEGORY} - "
-_RUBRIC_CATEGORIES = {"Correct", _PARTIAL_RUBRIC_CATEGORY, "Incorrect"}
+_BONUS_RUBRIC_CATEGORY = "Bonus"
+_BONUS_RUBRIC_PREFIX = f"{_BONUS_RUBRIC_CATEGORY} - "
+_RUBRIC_CATEGORIES = {"Correct", _PARTIAL_RUBRIC_CATEGORY, "Incorrect", _BONUS_RUBRIC_CATEGORY}
 
 
 @dataclass(frozen=True)
@@ -386,6 +388,11 @@ def _partial_rubric_label(child_label: str) -> str:
     return f"{_PARTIAL_RUBRIC_PREFIX}{child_label.strip()}"
 
 
+def _bonus_rubric_label(child_label: str) -> str:
+    """Return the flat internal label for a bonus child bullet."""
+    return f"{_BONUS_RUBRIC_PREFIX}{child_label.strip()}"
+
+
 def _strip_partial_rubric_prefix(label: str) -> str:
     """Return a partial-credit label without its category prefix."""
     stripped = label.strip()
@@ -423,11 +430,26 @@ def _parse_rubric_labels(
         return ()
     if stripped not in _RUBRIC_CATEGORIES:
         raise ValueError(f"unsupported rubric category: {stripped}")
-    if stripped != _PARTIAL_RUBRIC_CATEGORY and child_labels:
-        raise ValueError(f"{stripped} rubric selections cannot have child bullets")
-    if stripped == _PARTIAL_RUBRIC_CATEGORY and child_labels:
-        return tuple(_partial_rubric_label(child) for child in child_labels)
-    return (stripped,)
+
+    results: list[str] = [stripped] if stripped != _BONUS_RUBRIC_CATEGORY else []
+    for child in child_labels:
+        # Handle bonus labels regardless of parent category
+        is_bonus = child.startswith(_BONUS_RUBRIC_PREFIX) or child.startswith("Bonus - ")
+        
+        if child.startswith("Bonus - "):
+            # Normalize variation in prefix if any
+            results.append(_bonus_rubric_label(child[len("Bonus - "):]))
+        elif stripped == _PARTIAL_RUBRIC_CATEGORY:
+            results.append(_partial_rubric_label(child))
+        elif stripped == _BONUS_RUBRIC_CATEGORY:
+            results.append(_bonus_rubric_label(child))
+        elif is_bonus:
+            results.append(child)
+        else:
+            # Reject non-bonus child bullets for non-partial headers
+            raise ValueError(f"{stripped} rubric selections cannot have non-bonus child bullets")
+
+    return tuple(results)
 
 
 def _format_rubric_field_lines(
@@ -453,16 +475,38 @@ def _format_rubric_field_lines(
     if len(labels) == 1 and labels[0] in _RUBRIC_CATEGORIES:
         return [f"{prefix}- Rubric: {labels[0]}"]
 
-    child_labels: list[str] = []
-    for label in labels:
-        if not label.startswith(_PARTIAL_RUBRIC_PREFIX):
-            raise ValueError(f"unsupported rubric label: {label}")
-        child_label = _strip_partial_rubric_prefix(label)
-        if not child_label:
-            raise ValueError("partial-credit rubric child labels cannot be blank")
-        child_labels.append(child_label)
+    # 1. Identify primary (non-bonus) labels and bonus labels
+    standard_labels = [l for l in labels if not l.startswith(_BONUS_RUBRIC_PREFIX)]
+    bonus_labels = [l for l in labels if l.startswith(_BONUS_RUBRIC_PREFIX)]
 
-    lines = [f"{prefix}- Rubric: {_PARTIAL_RUBRIC_CATEGORY}"]
+    # 2. Determine header category
+    if "Correct" in standard_labels:
+        category = "Correct"
+    elif "Incorrect" in standard_labels:
+        category = "Incorrect"
+    elif standard_labels:
+        category = _PARTIAL_RUBRIC_CATEGORY
+    else:
+        category = _BONUS_RUBRIC_CATEGORY
+
+    # 3. Collect child bullets
+    child_labels: list[str] = []
+    for l in standard_labels:
+        if l == category:
+            continue
+        if l.startswith(_PARTIAL_RUBRIC_PREFIX):
+            child_labels.append(l[len(_PARTIAL_RUBRIC_PREFIX) :].strip())
+        else:
+            child_labels.append(l)
+
+    # Add bonuses as child bullets
+    for l in bonus_labels:
+        if category == _BONUS_RUBRIC_CATEGORY:
+            child_labels.append(l[len(_BONUS_RUBRIC_PREFIX) :].strip())
+        else:
+            child_labels.append(l)  # Keep "Bonus - " prefix for mixed headers
+
+    lines = [f"{prefix}- Rubric: {category}"]
     lines.extend(f"{prefix}  - {child_label}" for child_label in child_labels)
     return lines
 

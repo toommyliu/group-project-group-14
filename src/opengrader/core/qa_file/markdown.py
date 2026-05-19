@@ -47,6 +47,13 @@ class QARubricItem:
     subitems: list["QARubricItem"] = field(default_factory=list)
 
 
+def _is_bonus(item: QARubricItem | QARubricFlatOption) -> bool:
+    """Return whether a rubric item is categorized as Bonus/Extra Credit."""
+    if isinstance(item, QARubricFlatOption):
+        return item.kind == "bonus"
+    return item.label == "Bonus"
+
+
 @dataclass(frozen=True)
 class QARubricFlatOption:
     """Flattened rubric leaf option with grading selection semantics."""
@@ -509,6 +516,8 @@ def _canonical_rubric_category(label: str) -> str | None:
         "partial": "Partially Correct",
         "incorrect": "Incorrect",
         "wrong": "Incorrect",
+        "bonus": "Bonus",
+        "extra credit": "Bonus",
     }
     return mapping.get(normalized)
 
@@ -568,11 +577,16 @@ def _parse_rubric_section(item: _BulletItem) -> list[QARubricItem]:
 
     rubric = [_parse_rubric_category(child) for child in item.children]
 
-    counts = {"Correct": 0, "Partially Correct": 0, "Incorrect": 0}
+    counts = {"Correct": 0, "Partially Correct": 0, "Incorrect": 0, "Bonus": 0}
     for rubric_item in rubric:
         counts[rubric_item.label] += 1
 
-    duplicates = [label for label, count in counts.items() if count > 1]
+    # Correct, Partial, and Incorrect must be unique. Bonus can be omitted.
+    duplicates = [
+        label
+        for label, count in counts.items()
+        if count > 1 and label != "Bonus"
+    ]
     if duplicates:
         raise ValueError(
             "rubric section must contain exactly one top-level "
@@ -580,7 +594,11 @@ def _parse_rubric_section(item: _BulletItem) -> list[QARubricItem]:
             + ", ".join(duplicates)
         )
 
-    missing = [label for label, count in counts.items() if count == 0]
+    missing = [
+        label
+        for label, count in counts.items()
+        if count == 0 and label != "Bonus"
+    ]
     if missing:
         raise ValueError(
             "rubric section must contain exactly one top-level "
@@ -606,22 +624,25 @@ def _rubric_effective_deltas(
                     )
                 sub_deltas.append(sub.points_delta)
 
-            if item.points_delta is not None:
-                total = sum(sub_deltas)
-                if abs(total - item.points_delta) > 1e-6:
-                    raise ValueError(
-                        f"{context} rubric item {item.label!r} has points "
-                        f"{item.points_delta:+g} but subitems sum to {total:+g}"
-                    )
+            # Skip sum validation for Bonus items; they are unrestricted.
+            if not _is_bonus(item):
+                if item.points_delta is not None:
+                    total = sum(sub_deltas)
+                    if abs(total - item.points_delta) > 1e-6:
+                        raise ValueError(
+                            f"{context} rubric item {item.label!r} has points "
+                            f"{item.points_delta:+g} but subitems sum to {total:+g}"
+                        )
 
-            deltas.extend(sub_deltas)
+                deltas.extend(sub_deltas)
             continue
 
-        if item.points_delta is None:
-            raise ValueError(
-                f"{context} rubric item {item.label!r} must include points or weighted subitems"
-            )
-        deltas.append(item.points_delta)
+        if not _is_bonus(item):
+            if item.points_delta is None:
+                raise ValueError(
+                    f"{context} rubric item {item.label!r} must include points or weighted subitems"
+                )
+            deltas.append(item.points_delta)
 
     return deltas
 
@@ -667,7 +688,12 @@ def _validate_nested_partial_exact_sum(
     context: str,
 ) -> None:
     """Ensure checklist partial weights exactly cover the question value."""
-    partial = next((item for item in rubric if item.label == "Partially Correct"), None)
+    # Filter out bonus items before validating checklist sum.
+    standard_items = [item for item in rubric if not _is_bonus(item)]
+
+    partial = next(
+        (item for item in standard_items if item.label == "Partially Correct"), None
+    )
     if partial is None or not partial.subitems:
         return
 
@@ -688,16 +714,21 @@ def _validate_rubric_points(
     if not rubric:
         return
 
-    deltas = _rubric_effective_deltas(rubric, context=context)
+    # Validation only applies to standard items.
+    standard_rubric = [item for item in rubric if not _is_bonus(item)]
+    deltas = _rubric_effective_deltas(standard_rubric, context=context)
+    if not deltas:
+        return
+
     mode = rubric_scoring_mode(deltas)
     _validate_correct_and_incorrect_shortcuts(
-        rubric,
+        standard_rubric,
         points=points,
         mode=mode,
         context=context,
     )
     _validate_nested_partial_exact_sum(
-        rubric,
+        standard_rubric,
         points=points,
         mode=mode,
         context=context,
@@ -1182,10 +1213,11 @@ def _flatten_rubric_options(
         if item.points_delta is None:
             continue
         kind = _flat_option_kind(labels)
-        # Nested partial leaves compose as a checklist; top-level rows remain shortcuts.
+        # Nested partial and bonus leaves compose as a checklist; 
+        # top-level rows (Correct/Incorrect) remain exclusive shortcuts.
         selection_mode: RubricSelectionMode = (
             "checklist"
-            if parent_labels and parent_labels[0] == "Partially Correct"
+            if parent_labels and parent_labels[0] in ("Partially Correct", "Bonus")
             else "exclusive"
         )
         options.append(
@@ -1205,6 +1237,8 @@ def _flat_option_kind(labels: tuple[str, ...]) -> RubricOptionKind:
         return "correct"
     if labels == ("Incorrect",):
         return "incorrect"
+    if labels and labels[0] == "Bonus":
+        return "bonus"
     return "partial"
 
 
@@ -1236,36 +1270,32 @@ def _rubric_from_flat_options(
     partial_options = [
         option
         for option in options
-        if option.label.strip() not in {"Correct", "Incorrect"}
+        if option.kind == "partial"
     ]
     if not partial_options:
         raise ValueError("rubric must include at least one partial-credit option")
 
-    mode = rubric_scoring_mode(option.points_delta for option in options)
-    correct_points = correct_options[0].points_delta
-    if mode == "positive_awards":
-        if abs(correct_points - points) > 1e-6:
-            raise ValueError(
-                f"Correct rubric option must award +{points:g} points"
-            )
-    elif abs(correct_points) > 1e-6:
-        raise ValueError("Correct rubric option must have +0 points")
-    incorrect_points = incorrect_options[0].points_delta
-    if mode == "positive_awards":
-        if abs(incorrect_points) > 1e-6:
-            raise ValueError("Incorrect rubric option must award +0 points")
-    elif abs(incorrect_points + points) > 1e-6:
-        raise ValueError(f"Incorrect rubric option must deduct -{points:g} points")
+    bonus_options = [o for o in options if o.kind == "bonus"]
 
     rubric = [
-        QARubricItem(label="Correct", points_delta=correct_points),
+        QARubricItem(label="Correct", points_delta=correct_options[0].points_delta),
         _partial_rubric_item(partial_options),
+    ]
+
+    if bonus_options:
+        subitems = [
+            QARubricItem(label=_bonus_subitem_label(o.label), points_delta=o.points_delta)
+            for o in bonus_options
+        ]
+        rubric.append(QARubricItem(label="Bonus", subitems=subitems))
+
+    rubric.append(
         QARubricItem(
             label="Incorrect",
-            points_delta=incorrect_points,
-        ),
-    ]
-    _validate_rubric_points(rubric, points=points, context="updated rubric")
+            points_delta=incorrect_options[0].points_delta,
+        )
+    )
+
     return rubric
 
 
@@ -1359,3 +1389,25 @@ def save_qa_markdown(document: QADocument, path: str | Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         f.write(render_qa_markdown(document))
+
+
+def _partial_subitem_label(label: str) -> str:
+    """Strip the partial-credit prefix from a flat rubric label."""
+    stripped = label.strip()
+    prefix = "Partially Correct - "
+    if stripped.startswith(prefix):
+        stripped = stripped[len(prefix) :].strip()
+    if not stripped:
+        raise ValueError("partial-credit rubric option labels cannot be blank")
+    return stripped
+
+
+def _bonus_subitem_label(label: str) -> str:
+    """Strip the bonus prefix from a flat rubric label."""
+    stripped = label.strip()
+    prefix = "Bonus - "
+    if stripped.startswith(prefix):
+        stripped = stripped[len(prefix) :].strip()
+    if not stripped:
+        raise ValueError("bonus rubric option labels cannot be blank")
+    return stripped

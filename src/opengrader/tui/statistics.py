@@ -64,13 +64,14 @@ def selected_option_indices_for_seed(seed: QuestionSeed) -> set[int]:
     if seed.points_awarded is None:
         return set()
 
+    standard_rubric_deltas = [o.points_delta for o in seed.rubric_options if o.kind != "bonus"]
     matching_indices = [
         index
         for index, option in enumerate(seed.rubric_options)
-        if awarded_points_for_rubric_selection(
+        if option.kind != "bonus" and awarded_points_for_rubric_selection(
             seed.points,
             [option.points_delta],
-            [seed_option.points_delta for seed_option in seed.rubric_options],
+            standard_rubric_deltas,
         )
         == seed.points_awarded
     ]
@@ -91,14 +92,20 @@ def score_from_seed(seed: QuestionSeed) -> float | None:
     if not selected_indices:
         return None
 
+    standard_selected = []
+    bonus_selected = []
+    for index, option in enumerate(seed.rubric_options):
+        if index in selected_indices:
+            if option.kind == "bonus":
+                bonus_selected.append(option.points_delta)
+            else:
+                standard_selected.append(option.points_delta)
+
     return awarded_points_for_rubric_selection(
         seed.points,
-        [
-            option.points_delta
-            for index, option in enumerate(seed.rubric_options)
-            if index in selected_indices
-        ],
-        [option.points_delta for option in seed.rubric_options],
+        standard_selected,
+        [o.points_delta for o in seed.rubric_options if o.kind != "bonus"],
+        bonus_points_values=bonus_selected,
     )
 
 

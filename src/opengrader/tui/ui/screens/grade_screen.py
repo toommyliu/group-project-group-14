@@ -4,7 +4,8 @@ from collections.abc import Callable
 
 from textual import events, on
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.binding import Binding
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import (
@@ -69,11 +70,16 @@ class _RubricEditRow(Horizontal):
     ) -> None:
         self.row_index = row_index
         self.row_kind = row_kind
-        self.index_label = Label(f"{row_index + 1}.", classes="rubric-edit-index")
+        self.index_label = Label(
+            f"{row_index + 1}.",
+            classes="rubric-edit-index",
+        )
         self.label_input = ShortcutInput(
             value=(
                 _partial_subitem_label(option.label)
                 if row_kind == "partial"
+                else _bonus_subitem_label(option.label)
+                if row_kind == "bonus"
                 else option.label
             ),
             classes="rubric-edit-label",
@@ -101,13 +107,11 @@ class _RubricEditRow(Horizontal):
     def _apply_required_state(self) -> None:
         """Disable editing controls for schema-owned rubric rows."""
         if self.row_kind == "correct":
-            self.index_label.update("")
             self.label_input.disabled = True
             self.delete_button.disabled = True
             self.delete_button.display = False
             return
         if self.row_kind == "incorrect":
-            self.index_label.update("")
             self.label_input.disabled = True
             self.delete_button.disabled = True
             self.delete_button.display = False
@@ -119,6 +123,10 @@ class _RubricEditRow(Horizontal):
         selection_mode = "checklist"
         if self.row_kind == "partial":
             label = f"Partially Correct - {_partial_subitem_label(label)}"
+        elif self.row_kind == "bonus":
+            label = f"Bonus - {_bonus_subitem_label(label)}"
+            kind = "bonus"
+            selection_mode = "checklist"
         elif self.row_kind == "correct":
             kind = "correct"
             selection_mode = "exclusive"
@@ -206,9 +214,101 @@ class GradeScreen(Vertical):
     RESPONSE_MIN_WIDTH = 28
     SIDEBAR_RESIZE_STEP = 4
 
+    DEFAULT_CSS = """
+    GradeScreen {
+        padding: 0;
+        margin: 0;
+        width: 100%;
+    }
+
+    #grade-workspace {
+        layout: horizontal;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+
+    #grade-workspace.-layout-top-bottom {
+        layout: vertical;
+    }
+
+    #grade-workspace.-layout-top-bottom > #grade-sidebar {
+        layout: grid;
+        grid-size: 2 2;
+        width: 100%;
+        min-width: 100%;
+        max-width: 100%;
+        margin: 0;
+        height: 1fr;
+        border-bottom: tall $accent;
+        border-left: none;
+        padding: 0;
+        overflow-y: hidden;
+    }
+
+    #grade-sidebar {
+        border-left: tall $accent;
+        padding: 0 1;
+    }
+
+    #grade-workspace.-layout-top-bottom .sidebar-quadrant {
+        border: round $accent;
+        background: $boost;
+        height: 1fr;
+        width: 100%;
+        padding: 0;
+    }
+
+    #db-status {
+        color: $accent;
+        text-style: bold;
+        margin-top: 1;
+    }
+
+    #rubric-editor-panel {
+        height: auto;
+    }
+
+    #rubric-editor-panel > Vertical {
+        height: auto;
+    }
+
+    /* Standard vertical sidebar layout */
+    .sidebar-quadrant {
+        height: auto;
+        border: none;
+        background: transparent;
+        padding: 0;
+    }
+
+    #grade-workspace.-layout-top-bottom > #response-viewer {
+        width: 1fr;
+        height: 1fr;
+    }
+
+    #grade-workspace.-layout-top-bottom > #grade-sidebar-resize-handle {
+        display: none;
+    }
+    """
+
+    BINDINGS = [
+        Binding("ctrl+1", "rubric_finalize(0)", show=False, priority=True),
+        Binding("ctrl+2", "rubric_finalize(1)", show=False, priority=True),
+        Binding("ctrl+3", "rubric_finalize(2)", show=False, priority=True),
+        Binding("ctrl+4", "rubric_finalize(3)", show=False, priority=True),
+        Binding("ctrl+5", "rubric_finalize(4)", show=False, priority=True),
+        Binding("ctrl+6", "rubric_finalize(5)", show=False, priority=True),
+        Binding("ctrl+7", "rubric_finalize(6)", show=False, priority=True),
+        Binding("ctrl+8", "rubric_finalize(7)", show=False, priority=True),
+        Binding("ctrl+9", "rubric_finalize(8)", show=False, priority=True),
+        Binding("a", "dispatch_input('grade_first_student')", "First Student", show=False),
+        Binding("ctrl+0", "rubric_finalize(9)", show=False, priority=True),
+    ]
+
     class RubricSelected(Message):
-        def __init__(self, option_index: int) -> None:
+        def __init__(self, option_index: int, finalize: bool = False) -> None:
             self.option_index = option_index
+            self.finalize = finalize
             super().__init__()
 
     class CommentUpdated(Message):
@@ -237,90 +337,75 @@ class GradeScreen(Vertical):
         self._last_identity: tuple[int | None, str | None] = (None, None)
         # Keep track of states to avoid frequent reflows during sidebar resizing.
         self._sidebar_width: int | None = None
+        self._sidebar_height: int | None = None
         self._pending_sidebar_width: int | None = None
         self._sidebar_resize_scheduled = False
         self._rubric_edit_callback = None
         self._rubric_edit_mode = False
         self._rubric_edit_points = 0.0
-        self._zoom_fraction = 1.0
+        self._zoom_fraction = 0.7
         self._zoom_at_limit = False
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
         yield Breadcrumb(id="grade-breadcrumb")
-        with Horizontal(id="grade-workspace"):
+        with Container(id="grade-workspace"):
             yield ResponseViewer(self._default_image_path, id="response-viewer")
             # Invisible drag target for resizing the grading sidebar.
             yield _SidebarResizeHandle()
             with VerticalScroll(id="grade-sidebar"):
-                yield Label("", id="grade-student-name")
-                yield Label("Score: 100.0", id="total-grade-label")
-                yield Label("Progress: 0/0", id="grade-progress")
-                yield Label("Zoom: 100%", id="grade-zoom-level")
-                yield Rule()
-                yield Label("Question", classes="sidebar-section-title")
-                yield Static("", id="question-context")
-                yield Rule()
-                yield Label("Rubric", classes="sidebar-section-title")
-                yield ListView(id="rubric-list")
-                with Vertical(id="rubric-editor-panel"):
-                    yield Static("", id="rubric-editor-status")
-                    yield Label("Correct", classes="rubric-edit-section-title")
-                    with Vertical(id="rubric-editor-correct"):
-                        pass
-                    yield Label(
-                        "Partial-credit subitems",
-                        classes="rubric-edit-section-title",
-                    )
-                    with Vertical(id="rubric-editor-subitems"):
-                        pass
-                    with Horizontal(id="rubric-subitem-actions"):
-                        yield Button(
-                            "+ Subitem",
-                            id="rubric-edit-add",
-                            compact=True,
-                        )
-                    yield Label("Incorrect", classes="rubric-edit-section-title")
-                    with Vertical(id="rubric-editor-incorrect"):
-                        pass
-                    with Horizontal(id="rubric-editor-actions"):
-                        yield Button(
-                            "Save",
-                            id="rubric-edit-save",
-                            compact=True,
-                        )
-                        yield Button(
-                            "Cancel",
-                            id="rubric-edit-cancel",
-                            compact=True,
-                        )
-                yield ShortcutInput(
-                    placeholder="Comment for this question...",
-                    id="question-comment",
-                )
-                yield Rule()
-                yield Static(
-                    "ctrl+j/k  Next/Prev Question\n"
-                    "j/k       Next/Prev Student\n"
-                    "n/p       Next/Prev Ungraded\n"
-                    "ctrl+g    Finalize\n"
-                    "+/-       Zoom\n"
-                    "e         Edit Rubric\n"
-                    "c         Focus Comment",
-                    id="grade-keybinding-ref",
-                )
-                yield Static("", id="db-status")
+                with Vertical(id="sidebar-quadrant-info", classes="sidebar-quadrant"):
+                    yield Label("", id="grade-student-name")
+                    yield Label("Score: 100.0", id="total-grade-label")
+                    yield Label("Progress: 0/0", id="grade-progress")
+                    yield Label("Zoom: 100%", id="grade-zoom-level")
+                
+                yield Rule(id="sidebar-sep-1", classes="sidebar-separator")
+                
+                with VerticalScroll(id="sidebar-quadrant-question", classes="sidebar-quadrant"):
+                    yield Label("Question", classes="sidebar-section-title")
+                    yield Static("", id="question-context")
+                    yield ShortcutInput(placeholder="Comment...", id="question-comment")
+
+                yield Rule(id="sidebar-sep-2", classes="sidebar-separator")
+
+                with VerticalScroll(id="sidebar-quadrant-rubric", classes="sidebar-quadrant"):
+                    yield Label("Rubric", classes="sidebar-section-title")
+                    yield ListView(id="rubric-list")
+                    with Vertical(id="rubric-editor-panel"):
+                        yield Static("", id="rubric-editor-status")
+                        yield Label("Correct", id="rubric-edit-title-correct", classes="rubric-edit-section-title")
+                        with Vertical(id="rubric-editor-correct"): pass
+                        yield Label("Partial-credit subitems", id="rubric-edit-title-partial", classes="rubric-edit-section-title")
+                        with Vertical(id="rubric-editor-subitems"): pass
+                        yield Label("Bonus", id="rubric-edit-title-bonus", classes="rubric-edit-section-title")
+                        with Vertical(id="rubric-editor-bonus"): pass
+                        yield Label("Incorrect", id="rubric-edit-title-incorrect", classes="rubric-edit-section-title")
+                        with Vertical(id="rubric-editor-incorrect"): pass
+                        with Horizontal(id="rubric-editor-actions"):
+                            yield Button("+ Subitem", id="rubric-edit-add", compact=True)
+                            yield Button("+ Bonus", id="rubric-edit-add-bonus", compact=True)
+                            yield Button("Save", id="rubric-edit-save", compact=True)
+                            yield Button("Cancel", id="rubric-edit-cancel", compact=True)
+
+                yield Rule(id="sidebar-sep-3", classes="sidebar-separator")
+
+                with VerticalScroll(id="sidebar-quadrant-help", classes="sidebar-quadrant"):
+                    yield Label("Hotkeys", classes="sidebar-section-title")
+                    yield Static("", id="grade-keybinding-ref")
+                    yield Static("", id="db-status")
 
     def on_mount(self) -> None:
         self._update_rubric_list_visibility()
-        self._zoom_fraction = 1.0
+        self._update_hotkey_ref()
+        self._zoom_fraction = 0.7
         self._zoom_at_limit = False
         self._update_zoom_label()
 
     def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
         self.query_one("#grade-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
         self.query_one("#grade-student-name", Label).update(
-            f"{run.assignment_name}  -  {run.student_name}"
+            f"{run.assignment_name}  -  {run.student_name}"  # student_name now contains display_id
         )
         self.query_one("#total-grade-label", Label).update(
             f"Score: {run.total_score:.1f} / {run.max_points:.1f}"
@@ -335,7 +420,7 @@ class GradeScreen(Vertical):
         identity = (run.student_id, current.question_id if current else None)
         if identity != self._last_identity:
             self._last_identity = identity
-            self._zoom_fraction = 1.0
+            self._zoom_fraction = 0.7
             self._zoom_at_limit = False
             self._update_zoom_label()
             self.query_one("#response-viewer", ResponseViewer).reset_zoom()
@@ -376,13 +461,75 @@ class GradeScreen(Vertical):
         return self._rubric_edit_mode
 
     def zoom_in(self) -> None:
+        if self._zoom_at_limit:
+            self.set_status("Cannot zoom in: Image at rendering limit.")
+            return
         self.query_one("#response-viewer", ResponseViewer).zoom_in()
 
     def zoom_out(self) -> None:
+        self.set_status("")  # Proactively clear limit warnings when zooming out
         self.query_one("#response-viewer", ResponseViewer).zoom_out()
 
     def reset_zoom(self) -> None:
         self.query_one("#response-viewer", ResponseViewer).reset_zoom()
+
+    def toggle_layout(self) -> None:
+        """Toggle the screen between vertical split and horizontal split."""
+        workspace = self.query_one("#grade-workspace", Container)
+        sidebar = self.query_one("#grade-sidebar", VerticalScroll)
+        viewer = self.query_one("#response-viewer")
+        handle = self.query_one("#grade-sidebar-resize-handle")
+        
+        info = self.query_one("#sidebar-quadrant-info")
+        question = self.query_one("#sidebar-quadrant-question")
+        rubric = self.query_one("#sidebar-quadrant-rubric")
+        help = self.query_one("#sidebar-quadrant-help")
+        rules = self.query("Rule.sidebar-separator")
+
+        if workspace.has_class("-layout-top-bottom"):
+            workspace.remove_class("-layout-top-bottom")
+            # Explicitly set horizontal order: [Viewer, Handle, Sidebar]
+            workspace.move_child(viewer, before=0)
+            workspace.move_child(handle, after=viewer)
+            workspace.move_child(sidebar, after=handle)
+            
+            # Restore Original Vertical flow: Info, Question, Rubric, Help
+            sidebar.move_child(info, before=0)
+            sidebar.move_child(self.query_one("#sidebar-sep-1"), after=info)
+            sidebar.move_child(question, after=self.query_one("#sidebar-sep-1"))
+            sidebar.move_child(self.query_one("#sidebar-sep-2"), after=question)
+            sidebar.move_child(rubric, after=self.query_one("#sidebar-sep-2"))
+            sidebar.move_child(self.query_one("#sidebar-sep-3"), after=rubric)
+            sidebar.move_child(help, after=self.query_one("#sidebar-sep-3"))
+            
+            for r in rules: r.display = True
+            # Reset styles to let CSS and sidebar tracking take over
+            sidebar.styles.height = "1fr"
+            sidebar.styles.width = self._sidebar_width if self._sidebar_width else 40
+            sidebar.styles.max_width = None
+        else:
+            workspace.add_class("-layout-top-bottom")
+            # Explicitly set vertical order: [Sidebar, Handle, Viewer]
+            workspace.move_child(sidebar, before=0)
+            workspace.move_child(handle, after=sidebar)
+            workspace.move_child(viewer, after=handle)
+            
+            # Reorder for Grid (Row 1: Info, Rubric | Row 2: Question, Help)
+            sidebar.move_child(info, before=0)
+            sidebar.move_child(rubric, after=info)
+            sidebar.move_child(question, after=rubric)
+            sidebar.move_child(help, after=question)
+
+            for r in rules: r.display = False
+
+            # Force edge-to-edge width for the top panel
+            sidebar.styles.width = "100%"
+            sidebar.styles.max_width = "100%"
+            sidebar.styles.height = self._sidebar_height if self._sidebar_height else 30
+
+        self._update_hotkey_ref()
+        self._focus_rubric_list()
+        self.refresh(layout=True)
 
     def focus_question_comment(self) -> None:
         """Move keyboard focus to the question comment input."""
@@ -410,11 +557,13 @@ class GradeScreen(Vertical):
         self._clear_rubric_editor_rows()
         correct_rows = self.query_one("#rubric-editor-correct", Vertical)
         partial_rows = self.query_one("#rubric-editor-subitems", Vertical)
+        bonus_rows = self.query_one("#rubric-editor-bonus", Vertical)
         incorrect_rows = self.query_one("#rubric-editor-incorrect", Vertical)
 
         correct_option: tuple[int, RubricOptionSeed] | None = None
         incorrect_option: tuple[int, RubricOptionSeed] | None = None
         partial_options: list[tuple[int, RubricOptionSeed]] = []
+        bonus_options: list[tuple[int, RubricOptionSeed]] = []
         for option_index, option in enumerate(question.rubric_options):
             seed = RubricOptionSeed(
                 label=option.label,
@@ -426,6 +575,8 @@ class GradeScreen(Vertical):
                 correct_option = (option_index, seed)
             elif option.label == "Incorrect":
                 incorrect_option = (option_index, seed)
+            elif option.kind == "bonus":
+                bonus_options.append((option_index, seed))
             else:
                 partial_options.append((option_index, seed))
 
@@ -458,6 +609,17 @@ class GradeScreen(Vertical):
             if target is not None:
                 focus_target_by_option_index[option_index] = target
 
+        for option_index, option in bonus_options:
+            row = _RubricEditRow(
+                len(bonus_rows.children),
+                option,
+                row_kind="bonus",
+            )
+            bonus_rows.mount(row)
+            target = self._rubric_edit_row_initial_focus(row)
+            if target is not None:
+                focus_target_by_option_index[option_index] = target
+
         incorrect_index = incorrect_option[0] if incorrect_option is not None else None
         incorrect_row = _RubricEditRow(
             0,
@@ -479,9 +641,10 @@ class GradeScreen(Vertical):
             if target is not None:
                 focus_target_by_option_index[incorrect_index] = target
 
-        self.query_one("#rubric-editor-status", Static).update(
-            ""
-        )
+        status = self.query_one("#rubric-editor-status", Static)
+        status.update("")
+        status.display = False
+        self._renumber_rubric_edit_rows()
         self._update_rubric_list_visibility()
         target = (
             focus_target_by_option_index.get(initial_option_index)
@@ -513,11 +676,45 @@ class GradeScreen(Vertical):
             # Prevent this if the image is already failing to render at current size.
             self.set_status("Cannot narrow sidebar: Image at rendering limit.")
             return
+        if delta > 0:
+            self.set_status("")  # Clear warning when widening (image gets smaller)
         self.set_sidebar_width(self._current_sidebar_width() + delta)
+
+    def adjust_sidebar_height(self, delta: int) -> None:
+        """Adjust the sidebar height in top-bottom layout mode."""
+        workspace = self.query_one("#grade-workspace", Container)
+        if not workspace.has_class("-layout-top-bottom"):
+            return
+
+        if delta < 0 and self._zoom_at_limit:
+            # Shrinking the sidebar height expands the image pane vertically.
+            self.set_status("Cannot shrink sidebar: Image at rendering limit.")
+            return
+        if delta > 0:
+            self.set_status("")  # Clear warning when expanding (image gets smaller)
+
+        sidebar = self.query_one("#grade-sidebar", VerticalScroll)
+        current_height = self._sidebar_height if self._sidebar_height is not None else 30
+        new_height = current_height + delta
+
+        # Clamp logic: Leave space for viewer and cap at sanity limits.
+        available_height = workspace.size.height
+        if available_height > 0:
+            max_height = min(42, max(10, available_height - 10))
+        else:
+            max_height = 42
+
+        new_height = max(10, min(new_height, max_height))
+        if new_height == self._sidebar_height:
+            return
+
+        self._sidebar_height = new_height
+        sidebar.styles.height = new_height
+        self._refresh_sidebar_layout(sidebar)
 
     def _sidebar_width_from_screen_x(self, screen_x: float) -> int:
         """Convert a resize-handle x-coordinate into sidebar width."""
-        workspace = self.query_one("#grade-workspace", Horizontal)
+        workspace = self.query_one("#grade-workspace", Container)
         handle = self.query_one("#grade-sidebar-resize-handle", _SidebarResizeHandle)
         desired_width = (
             workspace.region.x + workspace.size.width - int(round(screen_x))
@@ -567,12 +764,16 @@ class GradeScreen(Vertical):
     def _refresh_sidebar_layout(self, sidebar: VerticalScroll) -> None:
         """Refresh widgets affected by a sidebar width change."""
         sidebar.refresh(layout=True)
-        self.query_one("#grade-workspace", Horizontal).refresh(layout=True)
+        self.query_one("#grade-workspace", Container).refresh(layout=True)
 
     def _bounded_sidebar_width(self, width: int) -> int:
         """Clamp sidebar width to keep the response pane usable."""
         try:
-            workspace = self.query_one("#grade-workspace", Horizontal)
+            workspace = self.query_one("#grade-workspace", Container)
+            if workspace.has_class("-layout-top-bottom"):
+                # In top-bottom mode, width is always 100% and height is handled separately.
+                return width
+
             handle = self.query_one(
                 "#grade-sidebar-resize-handle",
                 _SidebarResizeHandle,
@@ -659,17 +860,19 @@ class GradeScreen(Vertical):
         """Validate editor rows and return options or an error message."""
         options: list[RubricOptionSeed] = []
         partial_rows: list[_RubricEditRow] = []
+        bonus_rows: list[_RubricEditRow] = []
+
         for row in self.query(_RubricEditRow):
-            label = (
-                _partial_subitem_label(row.label_input.value)
-                if row.row_kind == "partial"
-                else row.label_input.value.strip()
-            )
-            if not label:
-                return "Rubric labels cannot be blank."
             if row.row_kind == "partial":
                 partial_rows.append(row)
                 continue
+            if row.row_kind == "bonus":
+                bonus_rows.append(row)
+                continue
+
+            label = row.label_input.value.strip()
+            if not label:
+                return "Rubric labels cannot be blank."
             try:
                 option = row.option()
             except ValueError:
@@ -679,7 +882,9 @@ class GradeScreen(Vertical):
         partial_result = self._collect_partial_rubric_options(partial_rows)
         if isinstance(partial_result, str):
             return partial_result
+
         options[1:1] = partial_result
+        options[len(options)-1 : len(options)-1] = [r.option() for r in bonus_rows]
 
         labels = [option.label for option in options]
         if len(set(labels)) != len(labels):
@@ -693,13 +898,17 @@ class GradeScreen(Vertical):
             option for option in options if option.label not in {"Correct", "Incorrect"}
         ]:
             return "At least one partial-credit option is required."
+
+        # Determine scoring mode from non-bonus options.
+        standard_options = [o for o in options if o.kind != "bonus"]
         try:
-            mode = rubric_scoring_mode(option.points_delta for option in options)
+            mode = rubric_scoring_mode(option.points_delta for option in standard_options)
         except ValueError:
-            return "Use either positive awards or negative deductions, not both."
-        correct_delta = correct_options[0].points_delta
-        incorrect_options = [option for option in options if option.label == "Incorrect"]
-        incorrect_delta = incorrect_options[0].points_delta
+            return "Standard rubric items cannot mix positive awards and negative deductions."
+
+        correct_delta = next(o.points_delta for o in options if o.label == "Correct")
+        incorrect_delta = next(o.points_delta for o in options if o.label == "Incorrect")
+
         if mode == "positive_awards":
             if abs(correct_delta - self._rubric_edit_points) > 1e-6:
                 return f"Correct must award +{self._rubric_edit_points:g} points."
@@ -709,9 +918,11 @@ class GradeScreen(Vertical):
             return "Correct must use +0 points for deduction rubrics."
         elif abs(incorrect_delta + self._rubric_edit_points) > 1e-6:
             return f"Incorrect must deduct -{self._rubric_edit_points:g} points."
-        exact_sum_error = self._validate_partial_exact_sum(options, mode)
+
+        exact_sum_error = self._validate_partial_exact_sum(standard_options, mode)
         if exact_sum_error:
             return exact_sum_error
+
         return options
 
     def _collect_partial_rubric_options(
@@ -779,7 +990,9 @@ class GradeScreen(Vertical):
         """Validate and submit rubric editor changes."""
         result = self._collect_rubric_edit_options()
         if isinstance(result, str):
-            self.query_one("#rubric-editor-status", Static).update(result)
+            status = self.query_one("#rubric-editor-status", Static)
+            status.update(result)
+            status.display = True
             return
         callback = self._rubric_edit_callback
         self.exit_rubric_edit_mode()
@@ -792,6 +1005,12 @@ class GradeScreen(Vertical):
         self.exit_rubric_edit_mode()
         if callable(callback):
             callback(None)
+
+    def action_rubric_finalize(self, index: int | str) -> None:
+        """Action handler for rubric selection with automatic finalization."""
+        idx = int(index)
+        if 0 <= idx < self._rubric_count:
+            self.post_message(self.RubricSelected(idx, finalize=True))
 
     def _rubric_editor_focus_chain(self) -> list[Widget]:
         """Return enabled focus targets inside the rubric editor."""
@@ -838,8 +1057,9 @@ class GradeScreen(Vertical):
     @staticmethod
     def _question_context_text(current) -> str:
         """Render the current question details shown above the rubric."""
+        awarded = f"{current.points_awarded:g}" if current.points_awarded is not None else "--"
         parts = [
-            f"{current.question_id} ({current.points:g} points)",
+            f"{current.question_id} (Score: {awarded} / {current.points:g} points)",
             "",
             current.prompt or "No prompt available.",
         ]
@@ -873,16 +1093,37 @@ class GradeScreen(Vertical):
             row_kind="partial",
         )
         rows.mount(row)
+        self._renumber_rubric_edit_rows()
+        self.call_next(row.label_input.focus)
+
+    @on(Button.Pressed, "#rubric-edit-add-bonus")
+    def _on_rubric_add_bonus_pressed(self, event: Button.Pressed) -> None:
+        """Add a new bonus item row."""
+        event.stop()
+        rows = self.query_one("#rubric-editor-bonus", Vertical)
+        row = _RubricEditRow(
+            len(rows.children),
+            RubricOptionSeed(
+                "Bonus - Extra Credit",
+                1.0,
+                "bonus",
+                "checklist",
+            ),
+            row_kind="bonus",
+        )
+        rows.mount(row)
+        self._renumber_rubric_edit_rows()
         self.call_next(row.label_input.focus)
 
     def _current_editor_mode(self) -> str:
         """Return the current rubric editor scoring mode."""
         options: list[float] = []
         for row in self.query(_RubricEditRow):
-            try:
-                options.append(float(row.delta_input.value.strip()))
-            except ValueError:
-                continue
+            if row.row_kind != "bonus":
+                try:
+                    options.append(float(row.delta_input.value.strip()))
+                except ValueError:
+                    continue
         try:
             return rubric_scoring_mode(options)
         except ValueError:
@@ -911,28 +1152,48 @@ class GradeScreen(Vertical):
 
     def _renumber_rubric_edit_rows(self) -> None:
         """Refresh partial-credit row numbers after deletion."""
-        rows = [
-            row
-            for row in self.query(_RubricEditRow)
-            if row.row_kind == "partial"
-        ]
-        for index, row in enumerate(rows):
-            row.row_index = index
-            label = row.query_one(".rubric-edit-index", Label)
-            label.update(f"{index + 1}.")
+        current_index = 1
+        for kind in ("correct", "partial", "bonus", "incorrect"):
+            container_id = _container_id(kind)
+            rows = list(self.query(f"#{container_id} _RubricEditRow"))
+            has_rows = len(rows) > 0
+            
+            # Update section visibility
+            self.query_one(f"#rubric-edit-title-{kind}").display = has_rows
+            self.query_one(f"#{container_id}").display = has_rows
 
-    def _clear_rubric_editor_rows(self) -> None:
-        """Remove all mounted rubric editor rows."""
-        for container_id in (
-            "#rubric-editor-correct",
-            "#rubric-editor-subitems",
-            "#rubric-editor-incorrect",
-        ):
-            container = self.query_one(container_id, Vertical)
-            for child in list(container.children):
-                child.remove()
+            for row in rows:
+                row.row_index = current_index - 1
+                label = row.query_one(".rubric-edit-index", Label)
+                label.update(f"{current_index}.")
+                current_index += 1
+
 
     def on_key(self, event: events.Key) -> None:
+        key_name = event.name
+
+        # Allow navigation keys to bubble to focused widgets (like ListView)
+        # or global bindings (like student left/right) regardless of focus.
+        if event.key in ("up", "down", "left", "right", "home", "end", "pageup", "pagedown"):
+            return
+
+        # Handle ctrl+1..9 and symbols for rubric selection
+        idx = None
+        if key_name.startswith("ctrl+") and key_name[-1].isdigit():
+            digit = int(key_name[-1])
+            idx = 9 if digit == 0 else digit - 1
+        elif len(event.key) == 1 and event.key in "!@#$%^&*()":
+            idx = "!@#$%^&*()".find(event.key)
+
+        if idx is not None and 0 <= idx < self._rubric_count:
+            event.stop()
+            self.action_rubric_finalize(idx)
+            return
+
+        # Let modifiers (like ctrl+v) bubble to App bindings
+        if any(m in key_name for m in ("ctrl+", "alt+", "super+", "cmd+")):
+            return
+
         if self._rubric_edit_mode:
             focused = self.app.focused
             if event.key in ("ctrl+s", "super+s", "cmd+s"):
@@ -952,8 +1213,6 @@ class GradeScreen(Vertical):
                     event.prevent_default()
             elif isinstance(focused, Input):
                 return
-            event.stop()
-            return
 
         focused = self.app.focused
         if isinstance(focused, Input) and focused.id == "question-comment":
@@ -963,20 +1222,46 @@ class GradeScreen(Vertical):
                 event.prevent_default()
                 event.stop()
                 return
-            if len(event.key) == 1 and event.key not in ("+", "=", "-", "_", "0"):
+
+            # Forward vertical arrows to rubric list while typing
+            if event.key == "up":
+                self.query_one("#rubric-list", ListView).action_cursor_up()
+                event.stop()
+                return
+            if event.key == "down":
+                self.query_one("#rubric-list", ListView).action_cursor_down()
+                event.stop()
+                return
+            if len(event.key) == 1 and event.key not in ("+", "=", "-", "_", "0", "[", "]"):
                 event.stop()
             return
 
-        if isinstance(focused, Input):
+        # Only block plain text keys (length 1) from bubbling up when an input is focused
+        if isinstance(focused, Input) and len(event.key) == 1:
             return
 
-        # 1-9 to select the corresponding rubric item.
+        # Number keys to select the corresponding rubric item.
         if len(event.key) == 1 and event.key.isdigit() and event.key != "0":
-            option_index = int(event.key) - 1
-            if 0 <= option_index < self._rubric_count:
+            idx = int(event.key) - 1
+            if 0 <= idx < self._rubric_count:
                 event.stop()
-                event.prevent_default()
-                self.post_message(self.RubricSelected(option_index))
+                self.post_message(self.RubricSelected(idx))
+                return
+
+        # Standard keys (Arrows, j/k) are NOT stopped here, allowing
+        # focused widgets (ListView) or App bindings to handle them.
+
+    def _clear_rubric_editor_rows(self) -> None:
+        """Remove all mounted rubric editor rows."""
+        for container_id in (
+            "#rubric-editor-correct",
+            "#rubric-editor-subitems",
+            "#rubric-editor-bonus",
+            "#rubric-editor-incorrect",
+        ):
+            container = self.query_one(container_id, Vertical)
+            for child in list(container.children):
+                child.remove()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.index is None:
@@ -1012,13 +1297,26 @@ class GradeScreen(Vertical):
             text += " (Max reached)"
         label.update(text)
 
+    def _update_hotkey_ref(self) -> None:
+        """Update the hotkey reference text with the current layout state."""
+        workspace = self.query_one("#grade-workspace", Container)
+        layout_mode = "Top-bottom" if workspace.has_class("-layout-top-bottom") else "Side-by-side"
+        resize_label = "Height" if workspace.has_class("-layout-top-bottom") else "Width"
 
-def _render_points_delta(points_delta: float) -> str:
-    """Render a signed points delta for rubric inputs."""
-    rendered = f"{points_delta:g}"
-    if not rendered.startswith("-"):
-        rendered = f"+{rendered}"
-    return rendered
+        self.query_one("#grade-keybinding-ref", Static).update(
+            "j/k      Prev/Next Question\n"
+            "ctrl+j/k Prev/Next Student\n"
+            "n/m      Prev/Next Ungraded\n"
+            "ctrl+1-9 Rubric+Finalize\n"
+            "ctrl+g   Finalize\n"
+            "+/-      Zoom\n"
+            "a        First Student\n"
+            f"\\[/\\]      {resize_label}\n"
+            "e        Edit Rubric\n"
+            "c        Focus Comment\n"
+            f"[b]ctrl+v   Layout: {layout_mode}[/b]"
+        )
+
 
 def _partial_subitem_label(label: str) -> str:
     """Strip the partial-credit prefix from a flat rubric label."""
@@ -1027,3 +1325,30 @@ def _partial_subitem_label(label: str) -> str:
     if stripped.startswith(prefix):
         stripped = stripped[len(prefix) :].strip()
     return stripped
+
+
+def _bonus_subitem_label(label: str) -> str:
+    """Strip the bonus prefix from a flat rubric label."""
+    stripped = label.strip()
+    prefix = "Bonus - "
+    if stripped.startswith(prefix):
+        stripped = stripped[len(prefix) :].strip()
+    return stripped
+
+
+def _container_id(kind: str) -> str:
+    mapping = {
+        "correct": "rubric-editor-correct",
+        "partial": "rubric-editor-subitems",
+        "bonus": "rubric-editor-bonus",
+        "incorrect": "rubric-editor-incorrect",
+    }
+    return mapping.get(kind, "")
+
+
+def _render_points_delta(points_delta: float) -> str:
+    """Render a signed points delta for rubric inputs."""
+    rendered = f"{points_delta:g}"
+    if not rendered.startswith("-"):
+        rendered = f"+{rendered}"
+    return rendered

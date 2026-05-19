@@ -125,11 +125,11 @@ class GradeController:
         student_item = self._state.student_items[index]
         self._state.selection.student_item_id = student_item.item_id
         self._state.selection.student_id = self._numeric_id(student_item.item_id)
-        self._state.selection_labels["student"] = student_item.label
+        self._state.selection_labels["student"] = student_item.display_id
 
         self._state.grading_run.reset(
             student_id=self._state.selection.student_id,
-            student_name=student_item.label,
+            student_name=student_item.display_id,
             assignment_name=self._state.selection_labels.get("assignment")
             or "Assignment",
         )
@@ -147,10 +147,13 @@ class GradeController:
         self.refresh_grade_screen(status="")
         self._app.switch_to(PAGE_GRADE)
 
-    def on_rubric_selected(self, option_index: int) -> None:
+    def on_rubric_selected(self, option_index: int, finalize: bool = False) -> None:
         self._state.grading_run.apply_option(option_index)
         status = self._persist_current_grade()
-        self.refresh_grade_screen(status=status)
+        if finalize:
+            self.finalize_student()
+        else:
+            self.refresh_grade_screen(status=status)
 
     def on_comment_updated(self, comment: str) -> None:
         self._state.grading_run.update_comment(comment)
@@ -398,11 +401,16 @@ class GradeController:
             start=self._state.active_student_index + 1,
             direction=1,
         )
+        status = "QA finalized. Loaded next ungraded student."
+
+        if next_index is None:
+            # Wrap around to check for any earlier ungraded students for this QA
+            next_index = self._find_ungraded_student_index(start=0, direction=1)
+            status = "QA finalized. Wrapped to find ungraded student."
+
         if next_index is not None:
             self.open_student_by_index(next_index)
-            self.refresh_grade_screen(
-                status="QA finalized. Loaded next ungraded student."
-            )
+            self.refresh_grade_screen(status=status)
             return
 
         self.refresh_qa_picker(status="All students finalized for this QA.")
@@ -423,6 +431,18 @@ class GradeController:
         if not self._on_grade_page():
             return
         self._app.get_grade_screen().reset_zoom()
+
+    def grade_toggle_layout(self) -> None:
+        """Toggle between side-by-side and top-bottom grading layouts."""
+        if not self._on_grade_page():
+            return
+        self._app.get_grade_screen().toggle_layout()
+
+    def first_student_for_question(self) -> None:
+        if not self._on_grade_page():
+            return
+        self._state.active_student_index = 0
+        self.open_student_by_index(0)
 
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
@@ -532,11 +552,16 @@ class GradeController:
             return ""
         selected_options = current_question.selected_options()
         rubric_labels = current_question.selected_rubric_labels()
+
+        standard_selected = [o for o in selected_options if o.kind != "bonus"]
+        bonus_selected = [o for o in selected_options if o.kind == "bonus"]
+
         points_awarded = (
             awarded_points_for_rubric_selection(
-                current_question.points,
-                [option.points_delta for option in selected_options],
-                [option.points_delta for option in current_question.rubric_options],
+                current_question.points or 0.0,
+                [o.points_delta for o in standard_selected],
+                [o.points_delta for o in current_question.rubric_options if o.kind != "bonus"],
+                bonus_points_values=[o.points_delta for o in bonus_selected],
             )
             if selected_options
             else None
@@ -784,7 +809,13 @@ class GradeController:
                 image_path=seed.image_path,
                 rubric_options=[
                     RubricOption(
-                        label=option.label,
+                        label=(
+                            f"Bonus - {option.label}"
+                            if option.kind == "bonus" and not option.label.startswith("Bonus - ")
+                            else f"Partially Correct - {option.label}"
+                            if option.kind == "partial" and not (option.label.startswith("Partially Correct - ") or option.label == "Partially Correct")
+                            else option.label
+                        ),
                         points_delta=option.points_delta,
                         kind=option.kind,
                         selection_mode=option.selection_mode,
@@ -840,6 +871,7 @@ class GradeController:
                     item_id=question.question_id,
                     label=question.question_id,
                     meta=f"{graded_count}/{total_students} graded",
+                    description=question.prompt or "",
                 )
             )
         return items

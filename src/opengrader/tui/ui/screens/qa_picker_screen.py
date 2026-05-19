@@ -78,8 +78,8 @@ class QAPickerScreen(Vertical):
                 yield TabbedListPane(
                     "Students",
                     tabs=[
-                        ("Name", self._student_name_list),
                         ("ID", self._student_id_list),
+                        ("Name", self._student_name_list),
                     ],
                     id="student-list",
                 )
@@ -198,10 +198,36 @@ class QAPickerScreen(Vertical):
             return self._students[student_list.index]
         return None
 
+    def _extract_prompt(self, item: NavItem) -> str:
+        """Extract the question prompt text from a NavItem or its payload."""
+        # Try NavItem attributes directly
+        for attr in ("prompt", "description"):
+            val = getattr(item, attr, None)
+            if val and isinstance(val, str):
+                return val
+
+        # Try item.payload, supporting both objects and dictionaries
+        payload = getattr(item, "payload", None)
+        if payload:
+            if isinstance(payload, dict):
+                for key in ("prompt", "description", "text"):
+                    val = payload.get(key)
+                    if val and isinstance(val, str):
+                        return val
+            else:
+                for attr in ("prompt", "description", "text"):
+                    val = getattr(payload, attr, None)
+                    if val and isinstance(val, str):
+                        return val
+
+        # Fallback to the NavItem's label (usually q1, q2...)
+        return item.label
+
     def show_question_details(self, item: NavItem) -> None:
         status = f"\nStatus: {item.meta}" if item.meta else ""
+        prompt = self._extract_prompt(item)
         self.query_one("#qa-preview", Static).update(
-            f"{item.label}\n\n"
+            f"[b]{prompt}[/b]\n\n"
             f"Select this QA to grade it for all students.{status}"
             f"{self._statistics_text(item)}"
         )
@@ -214,12 +240,13 @@ class QAPickerScreen(Vertical):
             highlighted_question = "none"
             question_status = ""
         else:
-            highlighted_question = question.label
+            q_prompt = self._extract_prompt(question)
             status = self._student_question_statuses.get(
                 (question.item_id, item.item_id),
                 "ungraded",
             )
             question_status = f"\n{question.label} status for this student: {status}"
+            highlighted_question = q_prompt
 
         self.query_one("#qa-preview", Static).update(
             f"{item.label} ({self._student_detail_id(item)})\n\n"
@@ -369,7 +396,7 @@ class QAPickerScreen(Vertical):
         item = self.selected_student()
         if item is not None:
             self.show_student_details(item)
-        mode = "IDs" if next_tab_index == 1 else "names"
+        mode = "names" if next_tab_index == 1 else "IDs"
         self.set_status(f"Showing student {mode}.")
 
     def _apply_question_filter(self, query: str) -> int:
@@ -587,14 +614,14 @@ class QAPickerScreen(Vertical):
         return self.query_one("#student-list", TabbedListPane)
 
     def _student_lists(self) -> tuple[IndexedListView, IndexedListView]:
-        return self._student_name_list, self._student_id_list
+        return self._student_id_list, self._student_name_list
 
     def _student_active_list(self) -> IndexedListView:
         active = self._student_pane().active_list()
-        return active if active is not None else self._student_name_list
+        return active if active is not None else self._student_id_list
 
     def _populate_student_lists(self, students: list[NavItem]) -> None:
-        name_list, id_list = self._student_lists()
+        id_list, name_list = self._student_lists()
         name_list.clear()
         id_list.clear()
         display_id_counts = self._student_display_id_counts(self._all_students)

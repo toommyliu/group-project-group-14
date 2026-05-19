@@ -106,8 +106,8 @@ class ResponseViewer(ScrollableContainer):
     def reset_zoom(self) -> None:
         if self._image_widget:
             self._at_limit = False
-            self._image_widget.fit_width_fraction = 1.0
-            self.post_message(self.ZoomChanged(1.0))
+            self._image_widget.fit_width_fraction = 0.7
+            self.post_message(self.ZoomChanged(0.7))
             self.scroll_home(animate=False)
             self.call_after_refresh(self.refresh, layout=True)
 
