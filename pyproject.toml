@@ -31,14 +31,12 @@ dependencies = [
 [project.scripts]
 tui = "opengrader.tui.main:run_app"
 tui-dev = "opengrader.tui.main:run_app_dev"
-pdf-to-qa = "opengrader.cli.pdf_to_qa_solutions_template:run_cli"
+pdf-to-qa-solutions = "opengrader.cli.pdf_to_qa_solutions_template:run_cli"
 automated-grading = "opengrader.cli.automated_grading:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
-qa-from-text2qti = "opengrader.cli.qa_from_text2qti:run_cli"
-submission-file = "opengrader.cli.submission_file:run_cli"
+text2qti-to-qa = "opengrader.cli.text2qti_to_qa:run_cli"
 submission-splitter = "opengrader.cli.submission_splitter:run_cli"
-submission-extractor = "opengrader.cli.submission_extractor:run_cli"
-submission-OCR = "opengrader.cli.submission_ocr:run_cli"
+submission-extractor = "opengrader.cli.submission_extractor:run_cli" # submission-OCR functionality is now merged here
 canvas-export = "opengrader.cli.canvas_export:run_cli"
 
 [tool.hatch.build.targets.wheel]

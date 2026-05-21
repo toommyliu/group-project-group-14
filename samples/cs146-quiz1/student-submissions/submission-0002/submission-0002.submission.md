@@ -1,11 +1,11 @@
 ---
-name: ""
+student_name: ""
 student_id: "987654321"
 course_code: "CS146"
 assignment_title: "Quiz"
 assignment_version: "1"
 source_pdf: "../../split-submissions/submission-0002.pdf"
-score: ""
+student_score: ""
 ---
 
 

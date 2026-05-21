@@ -16,10 +16,10 @@ from opengrader.core.ocr.question_classifier import classify_question_image
 from opengrader.core.ocr.constants import SUBSCRIPT_TRANSLATION
 from opengrader.core.ocr.extractor import (
     OcrConfig,
-    _safe_image_to_data,
     _trim_question_region,
     process_submission_pdf,
 )
+from opengrader.core.pdf_utils import safe_image_to_data
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
     TitleMetadataResult,
@@ -119,7 +119,9 @@ class StudentSubmissionDocument:
     assignment_title: str
     assignment_version: str | None
     source_pdf: str
-    score: str = ""
+    student_score: str = ""
+    name_image_path: str | None = None
+    id_image_path: str | None = None
     questions: list[StudentSubmissionQuestion] = field(default_factory=list)
 
 
@@ -553,13 +555,15 @@ def parse_student_submission_markdown(
         )
 
     return StudentSubmissionDocument(
-        student_name=_frontmatter_str(frontmatter, "name"),
+        student_name=_frontmatter_str(frontmatter, "student_name"),
         student_id=_frontmatter_str(frontmatter, "student_id"),
         course_code=_frontmatter_optional_str(frontmatter, "course_code"),
         assignment_title=_frontmatter_str(frontmatter, "assignment_title"),
         assignment_version=_frontmatter_optional_str(frontmatter, "assignment_version"),
         source_pdf=_frontmatter_str(frontmatter, "source_pdf"),
-        score=_frontmatter_str(frontmatter, "score"),
+        student_score=_frontmatter_str(frontmatter, "student_score"),
+        name_image_path=_frontmatter_optional_str(frontmatter, "name_image"),
+        id_image_path=_frontmatter_optional_str(frontmatter, "id_image"),
         questions=questions,
     )
 
@@ -1156,7 +1160,7 @@ def _parse_subquestion_marker_token(token: str) -> str | None:
 def _detect_subquestion_markers_ocr(
     question_image: Image.Image,
 ) -> list[tuple[str, int, int]]:
-    data = _safe_image_to_data(question_image, lang="eng", config="--psm 6")
+    data = safe_image_to_data(question_image, lang="eng", config="--psm 6")
     n = len(data.get("text", []))
 
     lines: dict[tuple[int, int, int], list[tuple[str, int, int, int]]] = {}
@@ -1422,13 +1426,15 @@ def _format_question_type(question_type: QuestionType) -> str:
 
 def render_student_submission_markdown(document: StudentSubmissionDocument) -> str:
     lines: list[str] = ["---"]
-    _yaml_field(lines, "name", document.student_name)
+    _yaml_field(lines, "student_name", document.student_name)
     _yaml_field(lines, "student_id", document.student_id)
     _yaml_field(lines, "course_code", document.course_code)
     _yaml_field(lines, "assignment_title", document.assignment_title)
     _yaml_field(lines, "assignment_version", document.assignment_version)
     _yaml_field(lines, "source_pdf", document.source_pdf)
-    _yaml_field(lines, "score", document.score)
+    _yaml_field(lines, "student_score", document.student_score)
+    _yaml_field(lines, "name_image", document.name_image_path)
+    _yaml_field(lines, "id_image", document.id_image_path)
     lines.append("---")
     lines.append("")
     lines.append("")
@@ -1503,7 +1509,7 @@ def build_student_submission_document(
     )
 
     fields_by_id = {
-        field.field_id: (field.ocr_result.text.strip() if field.ocr_result else "")
+        field.field_id: (field.ocr_result.text.strip() if field.ocr_result else "") # This line is fine
         for field in extraction_result.fields
     }
     field_crop_by_id = {
@@ -1538,7 +1544,7 @@ def build_student_submission_document(
         else None
     )
     if title_crop_path is not None and title_crop_path.exists():
-        _emit_progress(progress_callback, "Ollama title OCR")
+        _emit_progress(progress_callback, "Ollama title OCR") # This line is fine
         try:
             title_meta = _assignment_metadata_from_title_result(
                 extract_title_metadata(
@@ -1604,6 +1610,22 @@ def build_student_submission_document(
 
         question_jobs.extend(question_images)
 
+    # Resolve name/id image paths for the document
+    name_image_path = None
+    id_image_path = None
+    for field_res in extraction_result.fields:
+        if field_res.crop_path:
+            rel_path = ""
+            try:
+                rel_path = str(Path(field_res.crop_path).relative_to(submission_dir))
+            except ValueError:
+                rel_path = field_res.crop_path
+            
+            if field_res.field_id == "student_name":
+                name_image_path = rel_path
+            elif field_res.field_id == "student_id":
+                id_image_path = rel_path
+
     total_question_jobs = len(question_jobs)
     for index, (question_id, image_path, question_type, source_segments) in enumerate(
         question_jobs, start=1
@@ -1654,7 +1676,9 @@ def build_student_submission_document(
         assignment_title=title_meta.assignment_title,
         assignment_version=title_meta.assignment_version,
         source_pdf=_source_pdf_reference(pdf, submission_dir),
-        score="",
+        student_score="",
+        name_image_path=str(field_crop_by_id["student_name"].relative_to(submission_dir)) if "student_name" in field_crop_by_id else None,
+        id_image_path=str(field_crop_by_id["student_id"].relative_to(submission_dir)) if "student_id" in field_crop_by_id else None,
         questions=questions,
     )
 

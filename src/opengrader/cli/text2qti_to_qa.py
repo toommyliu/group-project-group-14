@@ -23,9 +23,9 @@ Supported text2qti question types:
 
 EPILOG = """
 examples:
-  uv run qa-from-text2qti --input exam.md --output qa.md
-  uv run qa-from-text2qti --input exam.md --output qa.md --questions-start-page 2
-  uv run qa-from-text2qti --input exam.md --output qa.md --title "CMPE 30 Final"
+  uv run text2qti_to_qa --input exam.md --output qa.md
+  uv run text2qti_to_qa --input exam.md --output qa.md --questions-start-page 2
+  uv run text2qti_to_qa --input exam.md --output qa.md --title "CMPE 30 Final"
 """
 
 _TITLE_RE = re.compile(r"^\s*Quiz\s+title\s*:\s*(.*)$", re.IGNORECASE)

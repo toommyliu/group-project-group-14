@@ -1476,6 +1476,7 @@ def _detect_questions(
 def scan_submission_layout(
     rendered_pages: dict[int, tuple[Image.Image, int, int]],
     config: "OcrConfig",
+    split_subquestions: bool = True,
 ) -> SubmissionLayout:
     """Detect semantic regions for a rendered submission."""
 

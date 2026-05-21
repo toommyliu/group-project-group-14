@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -10,16 +9,19 @@ from typing import Literal
 import cv2
 import fitz
 import numpy as np
-import pytesseract
 from PIL import Image
 
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
 from opengrader.core.source_location import QuestionSourceSegment
 
+from opengrader.core.pdf_utils import (
+    render_page_to_image,
+    bbox_norm_to_px,
+    clamp_bbox_px,
+)
+
 from .layout import (
     SubmissionLayout,
-    bbox_px_to_norm as layout_bbox_px_to_norm,
-    bbox_norm_to_px as layout_bbox_norm_to_px,
     save_layout_debug as write_layout_debug,
     scan_submission_layout,
 )
@@ -182,65 +184,11 @@ def _normalize_sid_text(raw: str) -> str:
     return "".join(re.findall(r"\d", raw))
 
 
-def _clamp_bbox_norm(bbox: list[float]) -> list[float]:
-    """Clamp a normalized bbox to page bounds."""
-
-    x, y, w, h = bbox
-    x = max(0.0, min(1.0, x))
-    y = max(0.0, min(1.0, y))
-    w = max(0.0, min(1.0 - x, w))
-    h = max(0.0, min(1.0 - y, h))
-    return [x, y, w, h]
-
-
-def _bbox_norm_to_px(
-    bbox_norm: list[float], page_w: int, page_h: int
-) -> tuple[int, int, int, int]:
-    """Convert a normalized bbox to a non-empty pixel bbox."""
-
-    x, y, w, h = _clamp_bbox_norm(bbox_norm)
-    x0 = int(round(x * page_w))
-    y0 = int(round(y * page_h))
-    x1 = int(round((x + w) * page_w))
-    y1 = int(round((y + h) * page_h))
-    x0 = max(0, min(page_w, x0))
-    x1 = max(0, min(page_w, x1))
-    y0 = max(0, min(page_h, y0))
-    y1 = max(0, min(page_h, y1))
-    if x1 <= x0:
-        x1 = min(page_w, x0 + 1)
-    if y1 <= y0:
-        y1 = min(page_h, y0 + 1)
-    return x0, y0, x1, y1
-
-
-def render_page_to_image(
-    doc: fitz.Document, page_idx: int, dpi: int = 300
-) -> tuple[Image.Image, int, int]:
-    """
-    Render one PDF page into a PIL image.
-
-    Args:
-        doc: Open PyMuPDF document.
-        page_idx: Zero-based page index.
-        dpi: Render resolution used for OCR and crop artifacts.
-
-    Returns:
-        The rendered image plus its width and height in pixels.
-    """
-
-    page = doc[page_idx]
-    zoom = dpi / 72.0
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat, alpha=False)
-    buf = pix.tobytes("png")
-    img = Image.open(io.BytesIO(buf))
-    w, h = img.size
-    return img, w, h
-
-
 def crop_region(image: Image.Image, bbox_px: tuple[int, int, int, int]) -> Image.Image:
     """Crop a PIL image using a pixel bbox."""
+    # We use a helper here because manual slicing with (x0, y0, x1, y1)
+    # is often slightly offset from what users expect compared to 
+    # normalized boxes.
 
     x0, y0, x1, y1 = bbox_px
     return image.crop((x0, y0, x1, y1))
@@ -258,7 +206,7 @@ def _expand_question_bbox_px(
     x_pad = max(4, int(round(page_w * QUESTION_CROP_PAD_X_NORM)))
     top_pad = max(2, int(round(page_h * QUESTION_CROP_PAD_TOP_NORM)))
     bottom_pad = max(4, int(round(page_h * QUESTION_CROP_PAD_BOTTOM_NORM)))
-    return _clamp_bbox_px(
+    return clamp_bbox_px(
         (x0 - x_pad, y0 - top_pad, x1 + x_pad, y1 + bottom_pad),
         page_w=page_w,
         page_h=page_h,
@@ -645,15 +593,15 @@ def _question_final_crop_bbox_px(
     """Compute the final expanded-and-trimmed question crop bbox in page pixels."""
 
     expanded_bbox_px = _expand_question_bbox_px(
-        _bbox_norm_to_px(bbox_norm, page_w, page_h),
+        bbox_norm_to_px(bbox_norm, page_w, page_h),
         page_w=page_w,
         page_h=page_h,
     )
     region = crop_region(page_image, expanded_bbox_px)
     _trimmed, trim_bbox_px = _trim_question_region_with_bbox(region)
-    x0, y0, _x1, _y1 = expanded_bbox_px
+    x0, y0, _, _ = expanded_bbox_px
     tx0, ty0, tx1, ty1 = trim_bbox_px
-    return _clamp_bbox_px(
+    return clamp_bbox_px(
         (x0 + tx0, y0 + ty0, x0 + tx1, y0 + ty1),
         page_w=page_w,
         page_h=page_h,
@@ -661,35 +609,6 @@ def _question_final_crop_bbox_px(
 
 
 # TODO: this can be shared
-
-
-def _safe_image_to_data(
-    image: Image.Image,
-    *,
-    lang: str,
-    config: str,
-) -> dict:
-    """Run Tesseract word extraction and return an empty result on failure."""
-
-    try:
-        return pytesseract.image_to_data(
-            image,
-            lang=lang,
-            config=config,
-            output_type=pytesseract.Output.DICT,
-        )
-    except Exception:
-        return {
-            "text": [],
-            "conf": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "block_num": [],
-            "par_num": [],
-            "line_num": [],
-        }
 
 
 def _group_words_by_line(
@@ -759,13 +678,13 @@ def _extract_question_crop_norm(
     """Write a single-page question crop artifact from a normalized bbox."""
 
     expanded_bbox_px = _expand_question_bbox_px(
-        _bbox_norm_to_px(bbox_norm, page_w, page_h),
+        bbox_norm_to_px(bbox_norm, page_w, page_h),
         page_w=page_w,
         page_h=page_h,
     )
     region = crop_region(page_image, expanded_bbox_px)
     region, trim_bbox_px = _trim_question_region_with_bbox(region)
-    source_bbox_px = _clamp_bbox_px(
+    source_bbox_px = clamp_bbox_px(
         (
             expanded_bbox_px[0] + trim_bbox_px[0],
             expanded_bbox_px[1] + trim_bbox_px[1],
@@ -793,7 +712,12 @@ def _extract_question_crop_norm(
         source_segments=(
             QuestionSourceSegment(
                 page_number=page_num,
-                bbox_norm=tuple(layout_bbox_px_to_norm(source_bbox_px, page_w, page_h)),
+                bbox_norm=tuple(
+                    (
+                        source_bbox_px[0] / page_w, source_bbox_px[1] / page_h,
+                        (source_bbox_px[2] - source_bbox_px[0]) / page_w, (source_bbox_px[3] - source_bbox_px[1]) / page_h
+                    )
+                ),
             ),
         ),
     )
@@ -832,7 +756,7 @@ def _extract_question_crop_segments(
             continue
         page_image, page_w, page_h = rendered_pages[page_number]
         expanded_bbox_px = _expand_question_bbox_px(
-            _bbox_norm_to_px(bbox_norm, page_w, page_h),
+            bbox_norm_to_px(bbox_norm, page_w, page_h),
             page_w=page_w,
             page_h=page_h,
         )
@@ -840,7 +764,7 @@ def _extract_question_crop_segments(
         region, trim_bbox_px = _trim_question_region_with_bbox(region)
         if region.width <= 0 or region.height <= 0:
             continue
-        source_bbox_px = _clamp_bbox_px(
+        source_bbox_px = clamp_bbox_px(
             (
                 expanded_bbox_px[0] + trim_bbox_px[0],
                 expanded_bbox_px[1] + trim_bbox_px[1],
@@ -853,7 +777,12 @@ def _extract_question_crop_segments(
         source_segments.append(
             QuestionSourceSegment(
                 page_number=page_number,
-                bbox_norm=tuple(layout_bbox_px_to_norm(source_bbox_px, page_w, page_h)),
+                bbox_norm=tuple(
+                    (
+                        source_bbox_px[0] / page_w, source_bbox_px[1] / page_h,
+                        (source_bbox_px[2] - source_bbox_px[0]) / page_w, (source_bbox_px[3] - source_bbox_px[1]) / page_h
+                    )
+                ),
             )
         )
         crops.append(region.convert("RGB"))
@@ -1168,26 +1097,6 @@ def _find_student_id_label(words: list[_OcrWord]) -> tuple[int, int, int, int] |
     return None
 
 
-def _clamp_bbox_px(
-    bbox_px: tuple[int, int, int, int],
-    *,
-    page_w: int,
-    page_h: int,
-) -> tuple[int, int, int, int]:
-    """Clamp a pixel bbox to a non-empty page region."""
-
-    x0, y0, x1, y1 = bbox_px
-    x0 = max(0, min(page_w - 1, x0))
-    y0 = max(0, min(page_h - 1, y0))
-    x1 = max(1, min(page_w, x1))
-    y1 = max(1, min(page_h, y1))
-    if x1 <= x0:
-        x1 = min(page_w, x0 + 1)
-    if y1 <= y0:
-        y1 = min(page_h, y0 + 1)
-    return x0, y0, x1, y1
-
-
 def _value_bbox_to_field_slice_px(
     value_bbox_px: tuple[int, int, int, int],
     *,
@@ -1248,7 +1157,7 @@ def _value_bbox_to_field_slice_px(
         y0 = int(round(center_y - half_h * 1.08))
         y1 = int(round(center_y + half_h * 0.92))
 
-    return _clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
+    return clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
 
 
 def _label_to_field_bbox_px(
@@ -1264,7 +1173,7 @@ def _label_to_field_bbox_px(
 
     candidates: list[tuple[float, tuple[int, int, int, int]]] = []
     for box in boxes_norm:
-        x0, y0, x1, y1 = _bbox_norm_to_px(box, page_w, page_h)
+        x0, y0, x1, y1 = bbox_norm_to_px(box, page_w, page_h)
         if x0 < lx1 - int(page_w * 0.02):
             continue
         if abs(((y0 + y1) / 2.0) - label_center_y) > page_h * 0.09:
@@ -1405,7 +1314,7 @@ def _underline_to_field_slice_px(
     y0 = uy0 - int(round(page_h * HEADER_CONTEXT_TOP_PAD_NORM))
     y1 = uy1 + int(round(page_h * HEADER_CONTEXT_BOTTOM_PAD_NORM))
 
-    return _clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
+    return clamp_bbox_px((x0, y0, x1, y1), page_w=page_w, page_h=page_h)
 
 
 def _set_field_slices_from_underline(
@@ -1590,7 +1499,7 @@ def _detect_dynamic_field_slices(
         if "name" not in out:
             out["name"] = {
                 "primary": _value_bbox_to_field_slice_px(
-                    _bbox_norm_to_px(name_box, page_w, page_h),
+                    bbox_norm_to_px(name_box, page_w, page_h),
                     page_w=page_w,
                     page_h=page_h,
                 )
@@ -1598,7 +1507,7 @@ def _detect_dynamic_field_slices(
         if "sid" not in out:
             out["sid"] = {
                 "primary": _value_bbox_to_field_slice_px(
-                    _bbox_norm_to_px(sid_box, page_w, page_h),
+                    bbox_norm_to_px(sid_box, page_w, page_h),
                     page_w=page_w,
                     page_h=page_h,
                 )
@@ -1726,6 +1635,7 @@ def process_submission_pdf(
     output_dir: str | Path,
     response_format: Literal["png", "pdf"] = "png",
     dpi: int = 300,
+    split_subquestions: bool = True,
     save_layout_debug: bool = False,
 ) -> SubmissionResult:
     """
@@ -1765,7 +1675,7 @@ def process_submission_pdf(
 
     # Layout detection owns crop discovery; this layer writes artifacts and
     # carries review metadata forward without re-deciding geometry.
-    layout = scan_submission_layout(rendered_pages, config)
+    layout = scan_submission_layout(rendered_pages, config, split_subquestions=split_subquestions)
 
     result.version_validated = True
     result.version_error = None
@@ -1774,7 +1684,7 @@ def process_submission_pdf(
     all_field_results: list[FieldExtractionResult] = []
     submission_dir = Path(output_dir)
     response_dir = submission_dir / "responses"
-    field_crop_dir = submission_dir / "field_crops"
+    field_crop_dir = submission_dir / "identifiers"
     response_dir.mkdir(parents=True, exist_ok=True)
     if (
         layout.title_region is not None
@@ -1783,7 +1693,7 @@ def process_submission_pdf(
         page_image, page_w, page_h = rendered_pages[layout.title_region.page_number]
         title_crop = crop_region(
             page_image,
-            layout_bbox_norm_to_px(layout.title_region.crop_bbox_norm, page_w, page_h),
+            bbox_norm_to_px(layout.title_region.crop_bbox_norm, page_w, page_h),
         )
         field_crop_dir.mkdir(parents=True, exist_ok=True)
         title_path = field_crop_dir / f"title_p{layout.title_region.page_number}.png"
@@ -1809,7 +1719,7 @@ def process_submission_pdf(
         artifact_field_type = "id" if field_id == "student_id" else detected.field_kind
         crop_path = _save_field_crop(
             page_image=page_image,
-            bbox_px=layout_bbox_norm_to_px(detected.crop_bbox_norm, page_w, page_h),
+            bbox_px=bbox_norm_to_px(detected.crop_bbox_norm, page_w, page_h),
             field_type=artifact_field_type,
             field_crop_dir=field_crop_dir,
             page_number=detected.page_number,

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import re
-
-import pytesseract
 from PIL import Image
 
 from opengrader.core.question_types import (
@@ -10,6 +8,7 @@ from opengrader.core.question_types import (
     MULTIPLE_CHOICE,
     QuestionType,
 )
+from opengrader.core.pdf_utils import safe_image_to_data
 
 CHOICE_LABEL_MIN_Y_NORM = 0.12
 CHOICE_LABEL_MAX_X_NORM = 0.35
@@ -21,34 +20,6 @@ CHOICE_LABEL_MIN_ROW_GAP_NORM = 0.015
 
 _CHOICE_LABEL_RE = re.compile(r"^([A-Za-z])[\).:]?$")
 _CHOICE_PUNCTUATION = {")", ".", ":"}
-
-
-def _safe_image_to_data(
-    image: Image.Image,
-    *,
-    lang: str,
-    config: str,
-) -> dict:
-    try:
-        return pytesseract.image_to_data(
-            image,
-            lang=lang,
-            config=config,
-            output_type=pytesseract.Output.DICT,
-        )
-    except Exception:
-        return {
-            "text": [],
-            "conf": [],
-            "left": [],
-            "top": [],
-            "width": [],
-            "height": [],
-            "block_num": [],
-            "par_num": [],
-            "line_num": [],
-        }
-
 
 def _choice_label_from_token(token: str) -> str | None:
     normalized = token.strip()
@@ -107,7 +78,7 @@ def _iter_choice_label_candidates(
     lang: str,
     config: str,
 ) -> list[tuple[str, int, int]]:
-    data = _safe_image_to_data(image, lang=lang, config=config)
+    data = safe_image_to_data(image, lang=lang, config=config)
     texts = data.get("text", [])
     count = len(texts)
     candidates: list[tuple[str, int, int]] = []

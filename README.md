@@ -91,7 +91,7 @@ uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
   - `validate --qa-file <qa.md>`: Validate QA markdown structure.
   - `generate-template --qa-file <qa.md> --output-pdf <template.pdf>`: Generate template PDFs from QA markdown.
 - `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
-- `submission-file`: Convert per-student submission PDFs into `.submission.md` files and response image crops.
+- `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR.
 - `pdf-to-qa`: Convert an answer-key PDF into a QA markdown draft using OCR.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
 
@@ -141,7 +141,7 @@ Useful `submission-splitter` options:
 
 Convert per-student PDFs into student submission markdown:
 ```bash
-uv run submission-file \
+uv run submission-extractor \
   --input split/ \
   --output out/student-submissions/
 ```

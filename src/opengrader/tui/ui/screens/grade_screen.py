@@ -514,11 +514,11 @@ class GradeScreen(Vertical):
             workspace.move_child(handle, after=sidebar)
             workspace.move_child(viewer, after=handle)
             
-            # Reorder for Grid (Row 1: Info, Rubric | Row 2: Question, Help)
+            # Reorder for Grid (Row 1: Info, Help | Row 2: Question, Rubric)
             sidebar.move_child(info, before=0)
-            sidebar.move_child(rubric, after=info)
-            sidebar.move_child(question, after=rubric)
-            sidebar.move_child(help, after=question)
+            sidebar.move_child(help, after=info)
+            sidebar.move_child(question, after=help)
+            sidebar.move_child(rubric, after=question)
 
             for r in rules: r.display = False
 

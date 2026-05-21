@@ -67,8 +67,8 @@ def parse_student_submission(student_path: Path) -> dict:
     )
 
     for q_id, body in q_blocks:
-        # Extract "Type"
-        type_match = re.search(r"^\s*-\s*Type:\s*(.*)", body, re.MULTILINE)
+        # Extract "Question type" (Updated to match student_file.py renderer)
+        type_match = re.search(r"^\s*-\s*Question type:\s*(.*)", body, re.MULTILINE)
 
         # Extract "Student Response"
         resp_match = re.search(r"^\s*-\s*Response text:\s*(.*)", body, re.MULTILINE)

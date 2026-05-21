@@ -1,11 +1,11 @@
 ---
-name: "Tommy Liu"
+student_name: "Tommy Liu"
 student_id: "123456789"
 course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "A"
 source_pdf: "../../split-submissions/submission-0001.pdf"
-score: ""
+student_score: ""
 ---
 
 
