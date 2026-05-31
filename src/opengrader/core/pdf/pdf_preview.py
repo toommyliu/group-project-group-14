@@ -24,7 +24,7 @@ def pdf_page_to_image(
             )
         pdf_page = doc[page]
         mat = fitz.Matrix(dpi / 72, dpi / 72)
-        pixmap = pdf_page.get_pixmap(matrix=mat)
+        pixmap = pdf_page.get_pixmap(matrix=mat, annots=True)
         return PILImage.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
     finally:
         doc.close()

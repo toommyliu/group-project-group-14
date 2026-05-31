@@ -5,7 +5,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from opengrader.core.pdf.annotations import sync_question_comment_annotation
+from opengrader.core.pdf.annotations import (
+    sync_question_comment_annotation,
+    sync_total_score_annotation,
+)
 from opengrader.core.qa_file import (
     QARubricFlatOption,
     QAQuestion,
@@ -171,6 +174,7 @@ class SubmissionFilesProvider:
             ),
         )
         self._reload_submission(student_item_id)
+        self._sync_pdf_annotations(student_item_id, question_id)
 
     def save_question_analysis(
         self,
@@ -188,6 +192,7 @@ class SubmissionFilesProvider:
             ),
         )
         self._reload_submission(student_item_id)
+        self._sync_pdf_annotations(student_item_id, question_id)
 
     def save_question_comment_annotation(
         self,
@@ -196,28 +201,45 @@ class SubmissionFilesProvider:
         question_id: str,
         comment: str,
     ) -> Path:
+        """Forces a manual sync of PDF annotations for a specific question."""
+        return self._sync_pdf_annotations(student_item_id, question_id, comment_override=comment)
+
+    def _sync_pdf_annotations(
+        self,
+        student_item_id: str,
+        question_id: str,
+        *,
+        comment_override: str | None = None,
+    ) -> Path:
         submission = self._submission_for_student_item(student_item_id)
         response = submission.questions_by_id.get(question_id)
         if response is None:
             raise ValueError(f"question not found in submission: {question_id}")
-        if not response.source_segments:
-            raise ValueError(
-                "Question source metadata missing; regenerate submission files to enable PDF annotations."
-            )
 
         source_pdf_path = self._source_pdf_path(submission)
-        annotated_pdf_path = (
-            submission.path.parent
-            / "annotated-pdfs"
-            / f"{source_pdf_path.stem}.annotated.pdf"
-        )
-        sync_question_comment_annotation(
+        annotated_pdf_path = submission.path.parent / "annotated-pdfs" / f"{source_pdf_path.stem}.annotated.pdf"
+
+        # 1. Sync the Total Score on page 1
+        total_awarded = sum(q.points_awarded for q in submission.document.questions if q.points_awarded is not None)
+        total_possible = sum(q.possible_points for q in submission.document.questions if q.possible_points is not None)
+        sync_total_score_annotation(
             source_pdf_path=source_pdf_path,
             annotated_pdf_path=annotated_pdf_path,
-            question_id=question_id,
-            comment=comment,
-            source_segments=response.source_segments,
+            total_points=total_awarded,
+            possible_points=total_possible,
         )
+
+        # 2. Sync the specific Question Score and Comment if layout metadata exists
+        if response.source_segments:
+            sync_question_comment_annotation(
+                source_pdf_path=source_pdf_path,
+                annotated_pdf_path=annotated_pdf_path,
+                question_id=question_id,
+                comment=comment_override if comment_override is not None else (response.analysis or ""),
+                points_awarded=response.points_awarded,
+                possible_points=response.possible_points,
+                source_segments=response.source_segments,
+            )
         return annotated_pdf_path
 
     def save_rubric_options(

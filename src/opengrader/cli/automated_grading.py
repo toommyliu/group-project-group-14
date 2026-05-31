@@ -117,11 +117,11 @@ def grade_student_file(student_path: Path, solutions: dict):
 
         # Update the Markdown content for this specific question block
         # We look for the block starting with "- qN:" and replace the Points field within it
-        pattern = rf"(- {q_id}:.*?\n\s*- Points:)\s*(?=\n)"
+        pattern = rf"(- {q_id}:.*?\n\s*- Points:)[^\n]*"
 
         # First, update 'Possible points'
         content = re.sub(
-            rf"(- {q_id}:.*?\n\s*- Possible points:)\s*(?=\n)",
+            rf"(- {q_id}:.*?\n\s*- Possible points:)[^\n]*",
             rf"\1 {max_pts}",
             content,
             flags=re.DOTALL,
@@ -133,7 +133,7 @@ def grade_student_file(student_path: Path, solutions: dict):
         # Third, update 'Analysis'
         analysis_to_write = "Correct" if is_correct else ""
         content = re.sub(
-            rf"(- {q_id}:.*?\n\s*- Analysis:)\s*(?=\n)",
+            rf"(- {q_id}:.*?\n\s*- Analysis:)[^\n]*",
             rf"\1 {analysis_to_write}",
             content,
             flags=re.DOTALL,
