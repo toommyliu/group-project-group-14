@@ -19,9 +19,9 @@ from .splitter import (
 )
 from .reorder import reorder_pdf_pages, _load_page_number_layout
 from .processor import (
-    _BlankExamTemplate,
+    _BlankAssignmentTemplate,
     build_student_submission_document_unified,
-    _load_blank_exam_template,
+    _load_blank_assignment_template,
     _load_roster, # Added for roster loading
     _RosterEntry,
 )
@@ -42,10 +42,10 @@ __all__ = [
     "build_student_submission_document",
     "load_student_submission_markdown",
     "_load_roster", # Added for roster loading
-    "_BlankExamTemplate",
+    "_BlankAssignmentTemplate",
     "_RosterEntry",
     "build_student_submission_document_unified",
-    "_load_blank_exam_template",
+    "_load_blank_assignment_template",
     "parse_student_submission_markdown",
     "parse_assignment_metadata_from_title",
     "render_student_submission_markdown",

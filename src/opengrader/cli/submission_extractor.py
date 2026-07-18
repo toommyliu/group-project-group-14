@@ -16,8 +16,8 @@ from opengrader.core.ocr.ollama_vlm import (
     ensure_model_available,
 )
 from opengrader.core.submissions import (
-    _BlankExamTemplate,
-    _load_blank_exam_template,
+    _BlankAssignmentTemplate,
+    _load_blank_assignment_template,
     _RosterEntry,
     _load_roster, # Import _load_roster
     build_student_submission_document_unified,
@@ -26,12 +26,12 @@ from opengrader.core.submissions import (
 """
 Extract per-student .submission.md files from PDFs.
 
-Without --blank-exam: each --input PDF must have a real text layer. fitz
+Without --blank-template: each --input PDF must have a real text layer. fitz
 text extraction + regex pulls out the assignment title, student name/ID,
 and question prompts/points. The command exits with an error if the PDF
 has no text layer.
 
-With --blank-exam PATH.pdf: PATH.pdf is the blank version of the exam
+With --blank-template PATH.pdf: PATH.pdf is the blank version of the assignment
 (same layout as the scans, no answers, real text layer required). Its
 question prompts, points, answer-region bboxes, and name/ID field bboxes
 are extracted once and applied to every scan in --input. The scans
@@ -39,15 +39,15 @@ themselves do not need a text layer; each scan page is rendered and run
 through pytesseract to find the actual on-paper positions of question
 prefixes (``N. (M points) ...``) and Name/ID labels, so per-question
 response crops land on the real student-writing region even when the scan
-sits at a slightly different vertical position than the blank exam.
+sits at a slightly different vertical position than the blank template.
 
 
 OPERATIONAL MODES:
 1. Template-Based Alignment (The "Scan with Template" Mode)
-Trigger: You provide --blank-exam PATH.pdf.
-Process: The script reads the "source of truth" (the blank exam) to know exactly where questions and Name/ID fields should be. Since scanned 
-         student papers are often slightly shifted or skewed, it uses Tesseract to find the "anchor" text (like "Name:" or "1. (10 points)") 
-         on the student's paper.
+Trigger: You provide --blank-template PATH.pdf.
+Process: The script reads the "source of truth" (the blank assignment template) to know exactly where questions and Name/ID fields should be. 
+         Since scanned student papers are often slightly shifted or skewed, it uses Tesseract to find the "anchor" text 
+         (like "Name:" or "1. (10 points)") on the student's paper.
 Result: It calculates a median vertical offset and "snaps" the crop boxes to the student's handwriting. It saves image crops but does not 
          transcribe text yet (that is left for a downstream OCR pass).
 
@@ -89,7 +89,6 @@ Skip PDF Rendering and Layout Detection: If --update is set, the engine assumes 
 and responses/ directories) already exist. It skips the rendering and "dark scan" layout detection phases entirely.
 
 
-
 """
 
 EPILOG = """
@@ -114,7 +113,7 @@ def _collect_input_pdfs(input_path: str) -> list[Path]:
     raise FileNotFoundError(f"input path not found: {path}")
 
 
-def run_cli() -> None:
+def run_cli(argv: list[str] | None = None) -> None:
     parser = ArgumentParser(
         description=(
             "Convert scanned per-student submission PDFs into markdown student "
@@ -134,11 +133,11 @@ def run_cli() -> None:
         help="Output directory for generated *.submission.md files.",
     )
     parser.add_argument(
-        "--blank-exam",
+        "--blank-template",
         metavar="PDF",
         default=None,
         help=(
-            "Path to a blank version of the exam PDF (same layout as the "
+            "Path to a blank version of the assignment template PDF (same layout as the "
             "scans, real text layer required). When given, its question "
             "prompts/points/bboxes and name/ID field bboxes populate every "
             "scan's .submission.md, and the scans no longer need a text "
@@ -230,16 +229,16 @@ def run_cli() -> None:
         action="store_true",
         help="Only update student metadata (name/ID) and transcription in existing .submission.md files.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     pdfs = _collect_input_pdfs(args.input)
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    blank_exam_template: _BlankExamTemplate | None = None
-    if args.blank_exam:
+    blank_assignment_template: _BlankAssignmentTemplate | None = None
+    if args.blank_template:
         try:
-            blank_exam_template = _load_blank_exam_template(Path(args.blank_exam))
+            blank_assignment_template = _load_blank_assignment_template(Path(args.blank_template))
         except (FileNotFoundError, ValueError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)
@@ -310,9 +309,9 @@ def run_cli() -> None:
     ocr_config = None
     ollama_config = None
 
-    # Only prepare OCR/Ollama configs if we are NOT using a blank exam template
+    # Only prepare OCR/Ollama configs if we are NOT using a blank template
     # and thus might fall back to OCR.
-    if not args.blank_exam:
+    if not args.blank_template:
         ocr_config = OcrConfig(
             lang=args.lang,
             deskew=not args.no_deskew,
@@ -356,7 +355,7 @@ def run_cli() -> None:
                     ollama_config=ollama_config,
                     skip_ollama_qa=args.no_ollama_qa,
                     save_layout_debug=args.save_layout_debug,
-                    blank_exam_template=blank_exam_template,
+                    blank_assignment_template=blank_assignment_template,
                     roster=roster,
                     update=performing_update,
                     refresh_layout=args.refresh_layout,

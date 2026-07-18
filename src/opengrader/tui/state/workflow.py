@@ -32,6 +32,9 @@ class TuiWorkflowState:
     student_items: list[NavItem] = field(default_factory=list)
     active_student_index: int = -1
     active_question_index: int = -1
+    # Grading is anonymous by default: screens show student IDs and only
+    # reveal names while teacher mode is toggled on.
+    teacher_mode: bool = False
     student_status: dict[tuple[str, str, str], str] = field(default_factory=dict)
     qa_student_status: dict[tuple[str, str, str, str], str] = field(
         default_factory=dict

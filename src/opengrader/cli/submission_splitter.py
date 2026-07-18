@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
+import sys
 import tempfile
 import subprocess
 import time
@@ -50,7 +51,6 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--pages-per-submission",
         type=int,
-        required=True,
         help="Fixed number of pages per student submission.",
     )
     parser.add_argument(
@@ -87,11 +87,11 @@ def _build_parser() -> ArgumentParser:
         help="Use OCR to detect page numbers and reorder pages within each split PDF.",
     )
     parser.add_argument(
-        "--blank-exam",
+        "--blank-template",
         metavar="PDF",
         default=None,
         help=(
-            "Path to a blank version of the exam PDF. "
+            "Path to a blank version of the assignment template PDF. "
             "Used to locate page numbers more accurately for reordering. "
             "Providing this implicitly enables --reorder."
         ),
@@ -134,7 +134,22 @@ def run_cli() -> None:
     if total_pages <= 0:
         raise ValueError(f"input PDF has no pages: {input_pdf}")
 
+    blank_template_layout = None
+    if args.blank_template:
+        blank_template_path = Path(args.blank_template)
+        if not blank_template_path.exists():
+            print(f"Error: Blank template file not found at {blank_template_path}", file=sys.stderr)
+            sys.exit(1)
+        blank_template_layout = _load_page_number_layout(blank_template_path)
+
     pages_per_submission = args.pages_per_submission
+    if pages_per_submission is None:
+        if blank_template_layout:
+            pages_per_submission = blank_template_layout.total_pages
+            print(f"Inferred {pages_per_submission} pages per submission from blank template.")
+        else:
+            print("Error: --pages-per-submission is required when no --blank-template is provided.", file=sys.stderr)
+            sys.exit(1)
 
     ranges = plan_submission_ranges(
         total_pages=total_pages,
@@ -221,7 +236,7 @@ def run_cli() -> None:
             print(f"Ensuring model '{args.ollama_model}' is available...")
             subprocess.run(["ollama", "pull", args.ollama_model], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        if args.reorder or args.blank_exam:
+        if args.reorder or args.blank_template:
             print("Checking page order and reordering if necessary...")
             ollama_config = OllamaVisionConfig(
                 model=args.ollama_model,
@@ -242,19 +257,15 @@ def run_cli() -> None:
                 print("!" * 80 + "\n")
                 ollama_config = None
 
-            blank_exam_layout = None
-            if args.blank_exam:
-                blank_exam_path = Path(args.blank_exam)
-                if not blank_exam_path.exists():
-                    print(f"Error: Blank exam file not found at {blank_exam_path}", file=sys.stderr)
-                    sys.exit(1)
-                print(f"Loading page number layout from blank exam: {blank_exam_path}")
-                blank_exam_layout = _load_page_number_layout(blank_exam_path)
-                if blank_exam_layout is None:
-                    print("Warning: Could not detect page number layout from blank exam. Falling back to generic detection.", file=sys.stderr)
+            if args.blank_template and not blank_template_layout:
+                print("Warning: Could not detect page number layout from blank template. Falling back to generic detection.", file=sys.stderr)
+
+            if blank_template_layout and pages_per_submission != blank_template_layout.total_pages:
+                print(f"Warning: --pages-per-submission ({pages_per_submission}) does not match "
+                      f"the blank template page count ({blank_template_layout.total_pages}).")
 
             for pdf_path in created:
-                if reorder_pdf_pages(pdf_path, ollama_config=ollama_config, blank_exam_page_number_layout=blank_exam_layout):
+                if reorder_pdf_pages(pdf_path, ollama_config=ollama_config, blank_template_layout=blank_template_layout):
                     print(f"  - Reordered: {pdf_path.name}")
                 else:
                     print(f"  - Order verified: {pdf_path.name}")

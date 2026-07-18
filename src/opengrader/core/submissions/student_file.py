@@ -433,7 +433,17 @@ def _parse_rubric_labels(
     if stripped not in _RUBRIC_CATEGORIES:
         raise ValueError(f"unsupported rubric category: {stripped}")
 
-    results: list[str] = [stripped] if stripped != _BONUS_RUBRIC_CATEGORY else []
+    # A "Partially Correct" header with partial child bullets is only a
+    # container for those selections; it becomes a selected label itself
+    # only when alone or when its children are all bonus rows.
+    has_partial_children = stripped == _PARTIAL_RUBRIC_CATEGORY and any(
+        not child.startswith(_BONUS_RUBRIC_PREFIX) for child in child_labels
+    )
+    results: list[str] = (
+        []
+        if stripped == _BONUS_RUBRIC_CATEGORY or has_partial_children
+        else [stripped]
+    )
     for child in child_labels:
         # Handle bonus labels regardless of parent category
         is_bonus = child.startswith(_BONUS_RUBRIC_PREFIX) or child.startswith("Bonus - ")

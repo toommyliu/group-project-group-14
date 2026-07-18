@@ -67,3 +67,40 @@ def test_response_viewer_updates_existing_image_widget_for_new_path(
             assert updated_widget.image == str(second_path)
 
     asyncio.run(run())
+
+
+def test_new_image_triggers_full_screen_repaint(tmp_path: Path) -> None:
+    """Changing the displayed image must repaint the whole screen.
+
+    Terminal graphics (sixel pixels, TGP placeholders) survive Textual's
+    partial repaints, so a smaller replacement image would otherwise leave
+    remnants of the previous, larger one on screen.
+    """
+
+    async def run() -> None:
+        first_path = tmp_path / "first.png"
+        second_path = tmp_path / "second.png"
+        _write_image(first_path, (255, 255, 255))
+        _write_image(second_path, (0, 0, 0))
+
+        app = ResponseViewerTestApp(str(first_path))
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            viewer = app.query_one("#viewer", ResponseViewer)
+            screen_refreshes = 0
+            original_refresh = app.screen.refresh
+
+            def counting_refresh(*args, **kwargs):
+                nonlocal screen_refreshes
+                if not args and not kwargs:
+                    screen_refreshes += 1
+                return original_refresh(*args, **kwargs)
+
+            app.screen.refresh = counting_refresh
+            viewer.set_image_path(str(second_path))
+            await pilot.pause()
+
+            assert screen_refreshes >= 1
+
+    asyncio.run(run())

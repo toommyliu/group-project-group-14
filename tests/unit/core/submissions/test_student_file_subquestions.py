@@ -118,10 +118,10 @@ def test_split_question_response_image_falls_back_to_ocr_markers(
         }
 
     original_detect_boxes = student_file._detect_subquestion_boxes_norm
-    original_safe_image_to_data = student_file._safe_image_to_data
+    original_safe_image_to_data = student_file.safe_image_to_data
     try:
         student_file._detect_subquestion_boxes_norm = lambda _image: []
-        student_file._safe_image_to_data = _fake_safe_image_to_data
+        student_file.safe_image_to_data = _fake_safe_image_to_data
 
         split = student_file._split_question_response_image(
             question_id="q6",
@@ -132,7 +132,7 @@ def test_split_question_response_image_falls_back_to_ocr_markers(
         assert all(path.exists() for _, path in split)
     finally:
         student_file._detect_subquestion_boxes_norm = original_detect_boxes
-        student_file._safe_image_to_data = original_safe_image_to_data
+        student_file.safe_image_to_data = original_safe_image_to_data
 
 
 def test_build_student_submission_document_respects_split_subquestions_flag(
@@ -397,7 +397,8 @@ def test_parse_student_submission_markdown_reads_frontmatter_and_questions(
     assert document.assignment_title == "Quiz 1"
     assert document.assignment_version == "A"
     assert document.questions[0].question_id == "q1"
-    assert document.questions[0].response_text == "no"
+    # The regenerated samples carry no OCR transcription for responses.
+    assert document.questions[0].response_text == ""
     assert document.questions[0].response_image_path is not None
     assert Path(document.questions[0].response_image_path).is_absolute()
     assert Path(document.questions[0].response_image_path).exists()

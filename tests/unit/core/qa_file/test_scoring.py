@@ -1,5 +1,3 @@
-import pytest
-
 from opengrader.core.qa_file.scoring import (
     awarded_points_for_rubric_selection,
     rubric_scoring_mode,
@@ -26,6 +24,25 @@ def test_positive_award_rubric_starts_from_zero_credit() -> None:
     assert ungraded_score_adjustment(10, rubric_values) == -10
 
 
-def test_mixed_positive_awards_and_negative_deductions_are_rejected() -> None:
-    with pytest.raises(ValueError, match="cannot mix positive awards"):
-        rubric_scoring_mode([10.0, -3.0, 0.0])
+def test_mixed_values_resolve_to_negative_deductions() -> None:
+    # Positive deltas alongside deductions are bonus rows, so the rubric
+    # still starts from full credit rather than being rejected.
+    assert rubric_scoring_mode([10.0, -3.0, 0.0]) == "negative_deductions"
+
+
+def test_bonus_points_are_added_after_clamping() -> None:
+    rubric_values = [0.0, -3.0, -10.0]
+
+    assert (
+        awarded_points_for_rubric_selection(
+            10, [-3], rubric_values, bonus_points_values=[2.0]
+        )
+        == 9
+    )
+    # Bonus can push the awarded score above the question's possible points.
+    assert (
+        awarded_points_for_rubric_selection(
+            10, [], rubric_values, bonus_points_values=[2.0]
+        )
+        == 12
+    )

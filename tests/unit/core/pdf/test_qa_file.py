@@ -248,7 +248,9 @@ def test_replace_qa_rubric_options_rejects_mixed_awards_and_deductions() -> None
 """
     )
 
-    with pytest.raises(ValueError, match="cannot mix positive awards"):
+    # A positive partial delta alongside deductions resolves to deduction
+    # mode, where the checklist sum validation rejects the rubric.
+    with pytest.raises(ValueError, match="checklist partial items must sum"):
         replace_qa_rubric_options(
             document,
             "q1",
@@ -751,3 +753,33 @@ questions_start_page: 1
         ("C", "6"),
     ]
     assert version_a[1].subquestions[0].correct_choice_label == "B"
+
+
+def test_flatten_rubric_options_lists_bonus_after_incorrect() -> None:
+    from opengrader.core.qa_file import flatten_rubric_options, parse_qa_markdown
+
+    content = "\n".join(
+        [
+            "- (10 points) Question?",
+            "  - **Correct**",
+            "    - Yes",
+            "  - **Rubric**",
+            "    - Correct (+0)",
+            "    - Partially Correct (-5)",
+            "    - Bonus",
+            "      - Elegant solution (+2)",
+            "    - Incorrect (-10)",
+        ]
+    )
+    document = parse_qa_markdown(content)
+    options = flatten_rubric_options(document.questions[0].rubric)
+
+    labels = [option.label for option in options]
+    assert labels == [
+        "Correct",
+        "Partially Correct",
+        "Incorrect",
+        "Bonus - Elegant solution",
+    ]
+    assert options[-1].kind == "bonus"
+    assert options[-1].selection_mode == "checklist"

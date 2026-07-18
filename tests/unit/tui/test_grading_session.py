@@ -121,3 +121,98 @@ def test_deduction_mode_computes_from_max_points() -> None:
 
     assert run.current_question is not None
     assert run.current_question.score_adjustment == -2
+
+
+def _bonus(label: str, points_delta: float) -> RubricOption:
+    return RubricOption(label, points_delta, "bonus", "checklist")
+
+
+def _standard_with_bonus() -> list[RubricOption]:
+    """Deduction rubric (10 pts) with one bonus option at index 4."""
+    return [
+        _option("Correct", 0),
+        _option("Partially Correct - A", -2, "checklist"),
+        _option("Partially Correct - B", -8, "checklist"),
+        _option("Incorrect", -10),
+        _bonus("Bonus - Elegant solution", 2),
+    ]
+
+
+def test_bonus_combines_with_exclusive_selection() -> None:
+    run = _run(_standard_with_bonus())
+
+    run.apply_option(0)  # Correct
+    run.apply_option(4)  # Bonus
+
+    assert run.current_question is not None
+    assert run.current_question.selected_option_indices == {0, 4}
+    # Full credit plus the bonus: exceeds the question maximum.
+    assert run.current_question.score_adjustment == 2
+
+
+def test_exclusive_selection_keeps_bonus() -> None:
+    run = _run(_standard_with_bonus())
+
+    run.apply_option(4)  # Bonus first
+    run.apply_option(0)  # Correct
+    assert run.current_question is not None
+    assert run.current_question.selected_option_indices == {0, 4}
+
+    run.apply_option(3)  # Switch to Incorrect: bonus survives
+    assert run.current_question.selected_option_indices == {3, 4}
+    # Zero base credit plus the bonus.
+    assert run.current_question.score_adjustment == -8
+
+
+def test_bonus_combines_with_partial_checklist() -> None:
+    run = _run(_standard_with_bonus())
+
+    run.apply_option(1)  # Partial A (-2)
+    run.apply_option(4)  # Bonus (+2)
+
+    assert run.current_question is not None
+    assert run.current_question.selected_option_indices == {1, 4}
+    assert run.current_question.score_adjustment == 0  # -2 + 2
+
+    run.apply_option(2)  # Partial B (-8) composes as usual
+    assert run.current_question.selected_option_indices == {1, 2, 4}
+
+
+def test_bonus_toggles_off_without_touching_base() -> None:
+    run = _run(_standard_with_bonus())
+
+    run.apply_option(0)
+    run.apply_option(4)
+    run.apply_option(4)
+
+    assert run.current_question is not None
+    assert run.current_question.selected_option_indices == {0}
+    assert run.current_question.score_adjustment == 0
+
+
+def test_bonus_only_selection_adds_to_ungraded_base() -> None:
+    run = _run(_standard_with_bonus())
+
+    run.apply_option(4)
+
+    assert run.current_question is not None
+    assert run.current_question.selected_option_indices == {4}
+    # Deduction rubric: ungraded base adjustment is 0, plus the bonus.
+    assert run.current_question.score_adjustment == 2
+
+
+def test_bonus_added_after_clamp_in_award_mode() -> None:
+    run = _run(
+        [
+            _option("Correct", 10),
+            _option("Incorrect", 0),
+            _bonus("Bonus - Extra insight", 3),
+        ]
+    )
+
+    run.apply_option(0)
+    run.apply_option(2)
+
+    assert run.current_question is not None
+    # Base clamps at 10, bonus lands on top: 13 total, adjustment +3.
+    assert run.current_question.score_adjustment == 3

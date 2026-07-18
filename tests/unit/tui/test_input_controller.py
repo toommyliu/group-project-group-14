@@ -75,11 +75,19 @@ def test_single_keymap_merges_standard_and_vim_navigation_keys() -> None:
     )
     assert bindings_by_command[InputCommand.QA_FILTER].keys == "/"
     assert bindings_by_command[InputCommand.QA_FILTER].description == "Filter"
-    assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].keys == "j,right"
-    assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].key_display == "j/right"
-    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].keys == "k,left"
+    # On the grade page j/k step through questions; students move with
+    # ctrl+k/right and ctrl+j/left.
+    assert bindings_by_command[InputCommand.GRADE_NEXT_QUESTION].keys == "k"
+    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_QUESTION].keys == "j"
+    assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].keys == "ctrl+k,right"
     assert (
-        bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display == "k/left"
+        bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].key_display
+        == "ctrl+k/right"
+    )
+    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].keys == "ctrl+j,left"
+    assert (
+        bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display
+        == "ctrl+j/left"
     )
     assert bindings_by_command[InputCommand.GRADE_FOCUS_COMMENT].keys == "c"
     assert bindings_by_command[InputCommand.GRADE_FOCUS_COMMENT].description == "Comment"

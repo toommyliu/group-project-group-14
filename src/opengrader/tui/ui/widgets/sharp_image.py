@@ -15,10 +15,35 @@ from textual_image._pixeldata import ensure_image
 from textual_image._terminal import get_cell_size
 from textual_image._utils import StrOrBytesPath
 from textual_image.renderable import Image as AutoRenderable
+from textual_image.renderable import TGPImage
+from textual_image.renderable import tgp as _tgp
 from textual_image.widget import Image as TextualImage
 
 
-class SharpImage(TextualImage, Renderable=AutoRenderable):
+class _TGPImageWithValidDelete(TGPImage):
+    """TGP renderable whose delete command actually removes the image.
+
+    ``tgp.Image.cleanup`` sends ``a=d,I=<id>``, but the image was registered
+    under an image *id* (``i=``), not an image *number* (``I=``), so terminals
+    following the Kitty graphics spec ignore the delete. The previous image
+    then stays alive in the terminal, and any of its unicode placeholder
+    cells that survive a partial repaint keep showing slices of it. Send the
+    spec-correct ``a=d,d=I,i=<id>`` (drop placements and free the data), with
+    ``q=2`` so the terminal does not write a response into Textual's stdin.
+    """
+
+    def cleanup(self) -> None:
+        if self.terminal_image_id:
+            _tgp._send_tgp_message(a="d", d="I", i=self.terminal_image_id, q=2)
+            self.terminal_image_id = None
+
+
+_Renderable = (
+    _TGPImageWithValidDelete if AutoRenderable is TGPImage else AutoRenderable
+)
+
+
+class SharpImage(TextualImage, Renderable=_Renderable):
     """Image widget tuned for document scans in a kitty-capable terminal.
 
     ``textual-image`` renders terminal graphics on a cell-aligned pixel grid.
@@ -71,6 +96,13 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
         self._prepared_cache_key = None
         self._prepared_cache_image = None
         TextualImage.image.fset(self, value)
+
+    def on_unmount(self) -> None:
+        # The library widget never frees the terminal-side image when the
+        # widget is removed, leaking it in the terminal's image storage.
+        if self._renderable is not None:
+            self._renderable.cleanup()
+            self._renderable = None
 
     def get_content_width(self, container: Size, viewport: Size) -> int:
         _ = viewport
@@ -163,7 +195,9 @@ class SharpImage(TextualImage, Renderable=AutoRenderable):
 
         # Use intrinsic_width as a fallback for container_width if it's 0,
         # to ensure a non-zero target width for initial layout.
-        effective_container_width = max(container_width, intrinsic_width)
+        effective_container_width = (
+            container_width if container_width > 0 else intrinsic_width
+        )
 
         max_width = max(1, floor(effective_container_width * self.fit_width_fraction))
 

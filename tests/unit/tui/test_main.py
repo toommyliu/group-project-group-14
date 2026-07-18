@@ -15,8 +15,10 @@ def test_enable_textual_feature_merges_and_deduplicates(monkeypatch) -> None:
 
 
 def test_run_app_launches_tui_app() -> None:
+    # Pass an explicit empty argv; a bare run_app() would parse pytest's own
+    # command line from sys.argv.
     with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
-        run_app()
+        run_app([])
 
     app_cls.assert_called_once_with()
     app_cls.return_value.run.assert_called_once_with()

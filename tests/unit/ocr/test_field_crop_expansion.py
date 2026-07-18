@@ -187,7 +187,7 @@ def test_question_final_crop_bbox_tracks_expansion_and_trim() -> None:
     draw.rectangle((290, 360, 360, 420), fill=(110, 110, 110))
     draw.rectangle((330, 330, 520, 365), fill=(90, 90, 90))
 
-    raw_px = extractor._bbox_norm_to_px(raw_bbox, 1000, 1000)
+    raw_px = extractor.bbox_norm_to_px(raw_bbox, 1000, 1000)
     expanded_px = extractor._expand_question_bbox_px(
         raw_px,
         page_w=1000,

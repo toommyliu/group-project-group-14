@@ -390,7 +390,7 @@ def test_jump_ungraded_question_uses_hydrated_saved_progress() -> None:
     controller.qa_jump_ungraded_question()
 
     assert app.qa_screen.moved_to_index == 1
-    assert app.qa_screen.status == "Jumped to Q2 (0/2 graded)"
+    assert app.qa_screen.status == "Jumped to Question 2 (0/2 graded)"
 
 
 def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
@@ -404,7 +404,7 @@ def test_finalize_student_marks_status_and_advances_to_next_student() -> None:
     assert refreshed == ["called"]
     assert state.student_status[("1", "1", "s1")] == "graded"
     assert state.active_student_index == 1
-    assert state.selection_labels["student"] == "Andy Cortes"
+    assert state.selection_labels["student"] == "s2"
     assert app.grade_screen.status == "QA finalized. Loaded next ungraded student."
     assert app.grade_screen.progress == "Progress: 1 / 2 students"
 
@@ -418,7 +418,7 @@ def test_next_previous_ungraded_student_skip_graded_for_selected_qa() -> None:
     controller.next_ungraded_student()
 
     assert state.active_student_index == 1
-    assert state.selection_labels["student"] == "Andy Cortes"
+    assert state.selection_labels["student"] == "s2"
 
     state.qa_student_status[("1", "1", "Q1", "s2")] = "graded"
     controller.previous_ungraded_student()
@@ -429,6 +429,9 @@ def test_next_previous_ungraded_student_skip_graded_for_selected_qa() -> None:
 def test_finalize_last_student_returns_to_qa_picker() -> None:
     app, state, controller = build_controller()
 
+    # Finalizing wraps around to earlier ungraded students, so the picker is
+    # only shown once every other student is already graded for this QA.
+    state.qa_student_status[("1", "1", "Q1", "s1")] = "graded"
     controller.open_student_by_index(1)
     state.current_page = PAGE_GRADE
     controller.finalize_student()

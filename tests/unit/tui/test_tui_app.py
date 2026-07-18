@@ -186,8 +186,8 @@ def test_app_launches_directly_to_qa_picker() -> None:
             ]
             student_list = _active_student_list(app)
             assert _list_item_texts(student_list) == [
-                "Tommy Liu [0/2 graded]",
-                "Andy Cortes [0/2 graded]",
+                "s1 [0/2 graded]",
+                "s2 [0/2 graded]",
             ]
 
     asyncio.run(run())
@@ -223,7 +223,7 @@ def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
             await pilot.pause()
 
             grade_status_text = _status_bar_text(app)
-            assert "j/right Next Student" in grade_status_text
+            assert "ctrl+k/right Next Student" in grade_status_text
             assert "c Comment" in grade_status_text
 
     asyncio.run(run())
@@ -258,10 +258,49 @@ def test_app_loads_file_backed_grading_queue() -> None:
             student_list = _active_student_list(app)
             student_labels = _list_item_texts(student_list)
             assert len(student_labels) == 2
-            assert student_labels[0].startswith("Tommy Liu [")
+            assert student_labels[0].startswith("123456789 [")
             assert student_labels[0].endswith("/11 graded]")
-            assert student_labels[1].startswith("submission-0002.submission [")
+            assert student_labels[1].startswith("987654321 [")
             assert student_labels[1].endswith("/11 graded]")
+
+    asyncio.run(run())
+
+
+def test_grade_screen_shows_source_pdf_name_for_file_backed_runs() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path="samples/cs146-quiz1/student-submissions",
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            pdf_label = app.query_one("#grade-source-pdf", Label)
+            assert pdf_label.display is True
+            assert str(pdf_label.content).startswith("PDF: submission-000")
+            assert str(pdf_label.content).endswith(".pdf")
+
+    asyncio.run(run())
+
+
+def test_grade_screen_hides_source_pdf_label_without_source_pdf() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            pdf_label = app.query_one("#grade-source-pdf", Label)
+            assert pdf_label.display is False
 
     asyncio.run(run())
 
@@ -279,20 +318,27 @@ def test_student_pane_id_tab_displays_submitted_ids() -> None:
 
             pane = _student_pane(app)
             assert pane.active_tab_index == 0
-            name_labels = _list_item_texts(_active_student_list(app))
-            assert name_labels[0].startswith("Tommy Liu [")
-            assert name_labels[0].endswith("/11 graded]")
-            assert name_labels[1].startswith("submission-0002.submission [")
-            assert name_labels[1].endswith("/11 graded]")
-
-            pane.action_pane_activate_tab(1)
-            await pilot.pause()
-
             id_labels = _list_item_texts(_active_student_list(app))
             assert id_labels[0].startswith("123456789 [")
             assert id_labels[0].endswith("/11 graded]")
             assert id_labels[1].startswith("987654321 [")
             assert id_labels[1].endswith("/11 graded]")
+
+            # The Name tab is hidden while grading anonymously.
+            pane.action_pane_activate_tab(1)
+            await pilot.pause()
+            assert pane.active_tab_index == 0
+
+            await pilot.press("t")
+            await pilot.pause()
+            pane.action_pane_activate_tab(1)
+            await pilot.pause()
+
+            name_labels = _list_item_texts(_active_student_list(app))
+            assert name_labels[0].startswith("Tommy Liu [")
+            assert name_labels[0].endswith("/11 graded]")
+            assert name_labels[1].startswith("submission-0002.submission [")
+            assert name_labels[1].endswith("/11 graded]")
 
     asyncio.run(run())
 
@@ -307,9 +353,7 @@ def test_student_pane_id_tab_falls_back_to_internal_student_keys() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            _student_pane(app).action_pane_activate_tab(1)
-            await pilot.pause()
-
+            assert _student_pane(app).active_tab_index == 0
             assert _list_item_texts(_active_student_list(app)) == [
                 "s1 [0/2 graded]",
                 "s2 [0/2 graded]",
@@ -329,26 +373,48 @@ def test_student_pane_name_id_hotkey_toggles_display_mode() -> None:
             await pilot.pause()
 
             pane = _student_pane(app)
+            status = app.get_qa_picker_screen().query_one("#qa-status", Static)
             assert pane.active_tab_index == 0
 
+            # Anonymous grading: names are unavailable, d only hints at t.
+            await pilot.press("d")
+            await pilot.pause()
+
+            assert pane.active_tab_index == 0
+            assert "Enable teacher mode (t)" in str(status.content)
+
+            await pilot.press("t")
+            await pilot.pause()
             await pilot.press("d")
             await pilot.pause()
 
             assert pane.active_tab_index == 1
             assert _list_item_texts(_active_student_list(app)) == [
-                "s1 [0/2 graded]",
-                "s2 [0/2 graded]",
+                "Tommy Liu [0/2 graded]",
+                "Andy Cortes [0/2 graded]",
             ]
-            status = app.get_qa_picker_screen().query_one("#qa-status", Static)
-            assert "Showing student IDs." in str(status.content)
+            assert "Showing student names." in str(status.content)
 
             await pilot.press("d")
             await pilot.pause()
 
             assert pane.active_tab_index == 0
             assert _list_item_texts(_active_student_list(app)) == [
-                "Tommy Liu [0/2 graded]",
-                "Andy Cortes [0/2 graded]",
+                "s1 [0/2 graded]",
+                "s2 [0/2 graded]",
+            ]
+
+            # Turning teacher mode off while on the Name tab snaps back to IDs.
+            await pilot.press("d")
+            await pilot.pause()
+            assert pane.active_tab_index == 1
+
+            await pilot.press("t")
+            await pilot.pause()
+            assert pane.active_tab_index == 0
+            assert _list_item_texts(_active_student_list(app)) == [
+                "s1 [0/2 graded]",
+                "s2 [0/2 graded]",
             ]
 
     asyncio.run(run())
@@ -364,9 +430,7 @@ def test_student_pane_id_tab_disambiguates_duplicate_submitted_ids() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            _student_pane(app).action_pane_activate_tab(1)
-            await pilot.pause()
-
+            assert _student_pane(app).active_tab_index == 0
             assert _list_item_texts(_active_student_list(app)) == [
                 "123 (s1) [0/2 graded]",
                 "123 (s2) [0/2 graded]",
@@ -386,6 +450,8 @@ def test_student_pane_selection_is_preserved_when_switching_name_id_tabs() -> No
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
+            app.workflow_state.teacher_mode = True
+            qa_screen.apply_teacher_mode()
             qa_screen.focus_students()
             qa_screen.move_student_to_index(1)
             await pilot.pause()
@@ -422,14 +488,16 @@ def test_student_filter_matches_submitted_ids() -> None:
 
             assert status == "Search students: 1/2 matches"
             assert _list_item_texts(_active_student_list(app)) == [
-                "submission-0002.submission [0/11 graded]"
+                "987654321 [0/11 graded]"
             ]
 
+            app.workflow_state.teacher_mode = True
+            qa_screen.apply_teacher_mode()
             _student_pane(app).action_pane_activate_tab(1)
             await pilot.pause()
 
             assert _list_item_texts(_active_student_list(app)) == [
-                "987654321 [0/11 graded]"
+                "submission-0002.submission [0/11 graded]"
             ]
 
     asyncio.run(run())
@@ -478,13 +546,21 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
             assert app.workflow_state.grading_run.max_points == 85
             assert current.question_id == "q1"
             assert current.prompt.startswith("Convert decimal ")
-            assert current.response_text
+            # The regenerated samples carry no OCR transcription, so the
+            # student-specific context is asserted via the image crops.
             assert "/student-submissions/submission-" in current.image_path
             assert current.image_path.endswith("/responses/q1.png")
 
+            # The section title names the question; the context below starts
+            # with the score so "Question" never appears twice.
+            title = app.get_grade_screen().query_one(
+                "#question-section-title", Label
+            )
+            assert str(title.content) == "Question 1"
             context = app.get_grade_screen().query_one("#question-context", Static)
+            assert str(context.content).startswith("Score: ")
+            assert "Question" not in str(context.content)
             assert current.prompt in str(context.content)
-            assert "Response text:" in str(context.content)
 
     asyncio.run(run())
 
@@ -589,8 +665,8 @@ def test_happy_path_selects_qa_then_opens_grading() -> None:
 
             switcher = app.query_one(ContentSwitcher)
             assert switcher.current == "page-grade"
-            assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
-            assert app.workflow_state.selection_labels["question"] == "Q1"
+            assert app.workflow_state.selection_labels["student"] == "s1"
+            assert app.workflow_state.selection_labels["question"] == "Question 1"
 
             rubric_list = app.get_grade_screen().query_one("#rubric-list", ListView)
             assert len(rubric_list.children) == 2
@@ -887,7 +963,11 @@ def test_grade_rubric_editor_rejects_mixed_positive_and_negative_scoring() -> No
             await pilot.pause()
 
             status = grade_screen.query_one("#rubric-editor-status", Static)
-            assert "positive awards" in str(status.content)
+            # A negative delta flips the rubric to deduction mode, so the
+            # positive Correct row is rejected with a mode-specific message.
+            assert "Correct must use +0 points for deduction rubrics." in str(
+                status.content
+            )
 
     asyncio.run(run())
 
@@ -1154,7 +1234,9 @@ def test_rubric_editor_validation_error_keeps_focus_trap() -> None:
             await pilot.pause()
 
             status = grade_screen.query_one("#rubric-editor-status", Static)
-            assert "positive awards" in str(status.content)
+            assert "Correct must use +0 points for deduction rubrics." in str(
+                status.content
+            )
             assert grade_screen.query_one("#rubric-editor-panel").display is True
 
             await pilot.press("tab")
@@ -1243,7 +1325,7 @@ def test_returning_from_question_pane_restores_question_focus() -> None:
             await pilot.pause()
 
             assert app.workflow_state.active_question_index == 2
-            await pilot.press("j")
+            await pilot.press("right")
             await pilot.pause()
             assert app.workflow_state.active_student_index == 1
 
@@ -1264,7 +1346,8 @@ def test_returning_from_question_pane_restores_question_focus() -> None:
             assert qa_list.has_class("-pane-active") is True
             assert student_pane.has_class("-pane-active") is False
             assert app.focused is qa_list
-            assert "q3" in str(preview.content)
+            # The preview shows the highlighted question's prompt (q3).
+            assert "most significant bit" in str(preview.content)
 
     asyncio.run(run())
 
@@ -1308,7 +1391,7 @@ def test_returning_from_student_pane_restores_student_focus() -> None:
             assert qa_list.has_class("-pane-active") is False
             assert student_pane.has_class("-pane-active") is True
             assert app.focused is student_list
-            assert "Highlighted QA: q3" in str(preview.content)
+            assert "Question 3 status for this student" in str(preview.content)
 
     asyncio.run(run())
 
@@ -1325,12 +1408,12 @@ def test_finalize_loads_next_student() -> None:
             await pilot.press("enter")
             await pilot.pause()
 
-            assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
+            assert app.workflow_state.selection_labels["student"] == "s1"
 
             await pilot.press("ctrl+g")
             await pilot.pause()
 
-            assert app.workflow_state.selection_labels["student"] == "Andy Cortes"
+            assert app.workflow_state.selection_labels["student"] == "s2"
             assert app.workflow_state.active_student_index == 1
 
     asyncio.run(run())
@@ -1355,8 +1438,8 @@ def test_student_list_shows_progress_after_finalize() -> None:
 
             student_list = _active_student_list(app)
             assert _list_item_texts(student_list) == [
-                "Tommy Liu [1/2 graded]",
-                "Andy Cortes [0/2 graded]",
+                "s1 [1/2 graded]",
+                "s2 [0/2 graded]",
             ]
 
     asyncio.run(run())
@@ -1378,9 +1461,84 @@ def test_highlighting_student_updates_details() -> None:
             qa_screen.show_student_details(student)
             await pilot.pause()
 
+            # Anonymous grading by default: the details pane shows the
+            # student ID, never the name.
             preview = qa_screen.query_one("#qa-preview", Static)
-            assert "Tommy Liu" in str(preview.content)
+            assert "s1" in str(preview.content)
+            assert "Tommy Liu" not in str(preview.content)
             assert "Progress: 0 / 2 questions graded" in str(preview.content)
+
+    asyncio.run(run())
+
+
+def test_teacher_mode_toggle_reveals_names_in_details_pane() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            qa_screen = app.get_qa_picker_screen()
+            await pilot.press("tab")  # focus the students pane
+            await pilot.pause()
+
+            preview = qa_screen.query_one("#qa-preview", Static)
+            assert "Tommy Liu" not in str(preview.content)
+
+            await pilot.press("t")
+            await pilot.pause()
+
+            assert app.workflow_state.teacher_mode is True
+            assert "Tommy Liu" in str(preview.content)
+            status = qa_screen.query_one("#qa-status", Static)
+            assert "Teacher mode on" in str(status.content)
+
+            await pilot.press("t")
+            await pilot.pause()
+
+            assert app.workflow_state.teacher_mode is False
+            assert "Tommy Liu" not in str(preview.content)
+
+    asyncio.run(run())
+
+
+def test_teacher_mode_toggle_reveals_name_on_grade_screen() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            name_label = app.get_grade_screen().query_one(
+                "#grade-student-name", Label
+            )
+            assert app.workflow_state.selection_labels["student"] == "s1"
+            assert "s1" in str(name_label.content)
+            assert "Tommy Liu" not in str(name_label.content)
+
+            await pilot.press("t")
+            await pilot.pause()
+
+            assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
+            assert "Tommy Liu" in str(name_label.content)
+
+            # The revealed name follows student navigation until toggled off.
+            await pilot.press("right")
+            await pilot.pause()
+            assert app.workflow_state.selection_labels["student"] == "Andy Cortes"
+
+            await pilot.press("t")
+            await pilot.pause()
+            assert app.workflow_state.selection_labels["student"] == "s2"
+            assert "s2" in str(name_label.content)
 
     asyncio.run(run())
 
@@ -1396,7 +1554,7 @@ def test_student_list_arrow_keys_move_student_focus_not_questions() -> None:
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
-            await pilot.click("#student-name-list", offset=(2, 0))
+            await pilot.click("#student-id-list", offset=(2, 0))
             await pilot.pause()
 
             await pilot.press("down")
@@ -1410,7 +1568,8 @@ def test_student_list_arrow_keys_move_student_focus_not_questions() -> None:
             assert selected_student.label == "Andy Cortes"
 
             preview = qa_screen.query_one("#qa-preview", Static)
-            assert "Andy Cortes" in str(preview.content)
+            assert "s2" in str(preview.content)
+            assert "Andy Cortes" not in str(preview.content)
 
     asyncio.run(run())
 
@@ -1426,7 +1585,7 @@ def test_clicking_qa_pane_after_students_restores_question_navigation() -> None:
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
-            await pilot.click("#student-name-list", offset=(2, 0))
+            await pilot.click("#student-id-list", offset=(2, 0))
             await pilot.pause()
             await pilot.click("#qa-list", offset=(2, 4))
             await pilot.pause()
@@ -1616,7 +1775,7 @@ def test_qa_picker_question_search_uses_status_bar_filter_mode() -> None:
             await pilot.pause()
 
             qa_list = app.get_qa_picker_screen().query_one("#qa-list", ListView)
-            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+            assert _list_item_texts(qa_list) == ["Question 2 [0/2 graded]"]
             qa_status = app.get_qa_picker_screen().query_one("#qa-status", Static)
             assert (
                 "Search questions: 1/2 matches"
@@ -1630,7 +1789,7 @@ def test_qa_picker_question_search_uses_status_bar_filter_mode() -> None:
             assert switcher.current == "page-qa-picker"
             assert status_bar.search_active() is False
             assert app.focused is qa_list
-            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+            assert _list_item_texts(qa_list) == ["Question 2 [0/2 graded]"]
 
             await pilot.press("/")
             await pilot.pause()
@@ -1639,8 +1798,8 @@ def test_qa_picker_question_search_uses_status_bar_filter_mode() -> None:
 
             assert search_input.value == ""
             assert _list_item_texts(qa_list) == [
-                "Q1 [0/2 graded]",
-                "Q2 [0/2 graded]",
+                "Question 1 [0/2 graded]",
+                "Question 2 [0/2 graded]",
             ]
 
             await pilot.press("Q", "2")
@@ -1680,7 +1839,7 @@ def test_qa_picker_student_search_is_independent_and_handles_no_matches() -> Non
             await pilot.pause()
 
             qa_list = app.get_qa_picker_screen().query_one("#qa-list", ListView)
-            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+            assert _list_item_texts(qa_list) == ["Question 2 [0/2 graded]"]
 
             await pilot.press("tab")
             await pilot.pause()
@@ -1701,8 +1860,8 @@ def test_qa_picker_student_search_is_independent_and_handles_no_matches() -> Non
             await pilot.pause()
 
             student_list = _active_student_list(app)
-            assert _list_item_texts(student_list) == ["Andy Cortes [0/2 graded]"]
-            assert _list_item_texts(qa_list) == ["Q2 [0/2 graded]"]
+            assert _list_item_texts(student_list) == ["s2 [0/2 graded]"]
+            assert _list_item_texts(qa_list) == ["Question 2 [0/2 graded]"]
 
             await pilot.press("ctrl+u")
             await pilot.press("z", "z", "z")
@@ -1796,5 +1955,116 @@ def test_dispatch_input_check_action_uses_single_command_parameter() -> None:
                 )
                 is False
             )
+
+    asyncio.run(run())
+
+
+def test_ctrl_digit_selects_and_finalizes_rubric() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            assert "graded" not in app.workflow_state.student_status.values()
+
+            await pilot.press("ctrl+1")
+            await pilot.pause()
+
+            assert "graded" in app.workflow_state.student_status.values()
+
+    asyncio.run(run())
+
+
+def test_alt_digit_selects_and_finalizes_rubric() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            await pilot.press("alt+1")
+            await pilot.pause()
+
+            assert "graded" in app.workflow_state.student_status.values()
+
+    asyncio.run(run())
+
+
+def test_shifted_digit_selects_and_finalizes_rubric() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # shift+1 on a US layout: the protocol-independent ctrl+1 fallback.
+            await pilot.press("exclamation_mark")
+            await pilot.pause()
+
+            assert "graded" in app.workflow_state.student_status.values()
+
+    asyncio.run(run())
+
+
+def test_shifted_digit_beyond_rubric_count_does_nothing() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            # shift+4 targets rubric slot 4, but only 2 options exist.
+            await pilot.press("dollar_sign")
+            await pilot.pause()
+
+            assert "graded" not in app.workflow_state.student_status.values()
+
+    asyncio.run(run())
+
+
+def test_shifted_digit_types_into_comment_without_finalizing() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+            await pilot.press("c")
+            await pilot.pause()
+            assert app.focused is not None
+            assert app.focused.id == "question-comment"
+
+            await pilot.press("exclamation_mark")
+            await pilot.pause()
+
+            comment_input = app.get_grade_screen().query_one("#question-comment", Input)
+            assert comment_input.value == "!"
+            assert "graded" not in app.workflow_state.student_status.values()
 
     asyncio.run(run())

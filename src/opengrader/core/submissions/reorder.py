@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 import tempfile
+from collections import defaultdict, deque
 from pathlib import Path
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from statistics import median
 from typing import Callable
 
@@ -108,6 +109,41 @@ class PageNumberLayoutInfo:
     # Page dimensions (width, height) from the blank exam for context
     page_w: int
     page_h: int
+    # The total number of pages in the blank exam template
+    total_pages: int
+    # Printed page number per template page position, in the template's
+    # (correct) page order. None means no number is printed there — e.g. an
+    # unnumbered title page when questions start on page 2.
+    page_labels: tuple[int | None, ...] = field(default=())
+
+
+def _crop_layout_region(
+    image: Image.Image,
+    bbox_norm: tuple[float, float, float, float],
+) -> Image.Image | None:
+    """Crop the page-number region from a rendered page, or None if degenerate."""
+    x_norm, y_norm, w_norm, h_norm = bbox_norm
+    x0 = max(0, int(x_norm * image.width))
+    y0 = max(0, int(y_norm * image.height))
+    x1 = min(image.width, int((x_norm + w_norm) * image.width))
+    y1 = min(image.height, int((y_norm + h_norm) * image.height))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return image.crop((x0, y0, x1, y1))
+
+
+def _detect_page_number_in_layout(
+    image: Image.Image,
+    bbox_norm: tuple[float, float, float, float],
+    max_pages: int,
+) -> int | None:
+    cropped = _crop_layout_region(image, bbox_norm)
+    if cropped is None:
+        return None
+    return detect_page_number_tesseract(
+        cropped, already_cropped=True, max_pages=max_pages
+    )
+
 
 def _load_page_number_layout(blank_exam_path: Path) -> PageNumberLayoutInfo | None:
     """
@@ -187,16 +223,121 @@ def _load_page_number_layout(blank_exam_path: Path) -> PageNumberLayoutInfo | No
             page_dims[0], page_dims[1],
             x0=final_x0, y0=final_y0, x1=final_x1, y1=final_y1
         )
-        return PageNumberLayoutInfo(bbox_norm=bbox_norm_result, page_w=page_dims[0], page_h=page_dims[1])
+
+        # The template is in the correct order, so the number printed at this
+        # region on each page defines the reference sequence that scanned
+        # submissions are reordered against. Pages without a printed number
+        # (e.g. an unnumbered title page) are recorded as None.
+        page_labels: list[int | None] = []
+        for pg_idx in range(len(doc)):
+            page_image, _, _ = render_page_to_image(doc, pg_idx, dpi=150)
+            page_labels.append(
+                _detect_page_number_in_layout(
+                    page_image, bbox_norm_result, max_pages=len(doc)
+                )
+            )
+
+        return PageNumberLayoutInfo(
+            bbox_norm=bbox_norm_result,
+            page_w=page_dims[0],
+            page_h=page_dims[1],
+            total_pages=len(doc),
+            page_labels=tuple(page_labels),
+        )
 
     finally:
         doc.close()
+
+def _order_pages_by_template(
+    detected: list[int | None],
+    page_labels: tuple[int | None, ...],
+) -> tuple[list[int], list[str]]:
+    """Order scanned pages to match the blank template's label sequence.
+
+    The template is assumed to be in the correct order, so each template
+    position's printed label is the reference. A scanned page detected as
+    label N goes to the template position printing N. Pages with no detected
+    label — and detections the template never prints (OCR misreads) or prints
+    fewer times than detected (duplicates) — fill the remaining template
+    positions in their original scan order, so an unnumbered title page stays
+    at the front instead of being pushed to the back.
+    """
+    warnings: list[str] = []
+    printed_labels = {label for label in page_labels if label is not None}
+
+    label_slots: dict[int, deque[int]] = defaultdict(deque)
+    for position, label in enumerate(page_labels):
+        if label is not None:
+            label_slots[label].append(position)
+
+    assigned: dict[int, int] = {}
+    unassigned: list[int] = []
+    for scan_index, num in enumerate(detected):
+        slots = label_slots.get(num) if num is not None else None
+        if slots:
+            assigned[scan_index] = slots.popleft()
+            continue
+        if num is not None:
+            if num in printed_labels:
+                warnings.append(
+                    f"Page number {num} was detected on more scanned pages than "
+                    f"the template prints it; keeping the first occurrence."
+                )
+            else:
+                warnings.append(
+                    f"Detected page number {num} is not printed anywhere in the "
+                    f"blank template; treating the page as unnumbered."
+                )
+        unassigned.append(scan_index)
+
+    used_positions = set(assigned.values())
+    free_positions = deque(
+        position
+        for position in range(len(page_labels))
+        if position not in used_positions
+    )
+    overflow_position = len(page_labels)
+    for scan_index in unassigned:
+        if free_positions:
+            assigned[scan_index] = free_positions.popleft()
+        else:
+            # More scanned pages than template positions (extra scratch paper).
+            assigned[scan_index] = overflow_position
+            overflow_position += 1
+
+    order = sorted(assigned, key=lambda scan_index: (assigned[scan_index], scan_index))
+    return order, warnings
+
+
+def _order_pages_by_detected_number(
+    detected: list[int | None],
+) -> tuple[list[int], list[str]]:
+    """Order pages by detected number; undetected pages move to the back."""
+    warnings: list[str] = []
+    page_map = [
+        (num if num is not None else float("inf"), i)
+        for i, num in enumerate(detected)
+    ]
+    sorted_map = sorted(page_map, key=lambda x: x[0])
+
+    # Check for large jumps in the detected sequence
+    detected_sequence = [m[0] for m in sorted_map if m[0] != float("inf")]
+    for i in range(len(detected_sequence) - 1):
+        if abs(detected_sequence[i + 1] - detected_sequence[i]) > 2:
+            warnings.append(
+                f"Large page number jump detected between detected pages: "
+                f"{detected_sequence[i]} followed by {detected_sequence[i + 1]}."
+            )
+            break
+
+    return [m[1] for m in sorted_map], warnings
+
 
 def reorder_pdf_pages(
     pdf_path: str | Path,
     *,
     ollama_config: OllamaVisionConfig | None = None,
-    blank_exam_page_number_layout: PageNumberLayoutInfo | None = None,
+    blank_template_layout: PageNumberLayoutInfo | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> bool:
     """
@@ -210,116 +351,76 @@ def reorder_pdf_pages(
 
     doc = fitz.open(path)
     num_pages = len(doc)
-    page_map: list[tuple[int | float, int]] = []
 
+    # When a blank template layout is provided, we use its total page count as the
+    # expected sequence length and the upper bound for valid page number detection.
+    expected_total = num_pages
+    if blank_template_layout:
+        expected_total = blank_template_layout.total_pages
+        if num_pages != expected_total:
+            print(f"Warning: PDF {path.name} has {num_pages} pages, but the template expects {expected_total}.", file=sys.stderr)
+
+    detected: list[int | None] = []
     with tempfile.TemporaryDirectory() as tmp_dir:
-        num_undetected_pages = 0
         tmp_path = Path(tmp_dir)
-        for i in range(len(doc)):
+        for i in range(num_pages):
             # Render at lower DPI for faster reordering check, but high enough for OCR
             img, _, _ = render_page_to_image(doc, i, dpi=150)
-            
-            num = None
-            if blank_exam_page_number_layout:
-                # Use the provided layout to crop a specific region
-                layout_x_norm, layout_y_norm, layout_w_norm, layout_h_norm = blank_exam_page_number_layout.bbox_norm
-                
-                # Scale normalized bbox to current image dimensions
-                x0 = int(layout_x_norm * img.width)
-                y0 = int(layout_y_norm * img.height)
-                x1 = int((layout_x_norm + layout_w_norm) * img.width)
-                y1 = int((layout_y_norm + layout_h_norm) * img.height)
-                
-                # Ensure crop coordinates are within image bounds
-                x0 = max(0, x0)
-                y0 = max(0, y0)
-                x1 = min(img.width, x1)
-                y1 = min(img.height, y1)
 
-                if x1 <= x0 or y1 <= y0: # Invalid crop area, fall back to generic
-                    num = detect_page_number_tesseract(img, max_pages=num_pages)
-                else:
-                    cropped_img_for_layout = img.crop((x0, y0, x1, y1))
-                    num = detect_page_number_tesseract(
-                        cropped_img_for_layout, already_cropped=True, max_pages=num_pages
-                    )
+            num = None
+            if blank_template_layout:
+                # Look where the template prints page numbers first.
+                num = _detect_page_number_in_layout(
+                    img, blank_template_layout.bbox_norm, max_pages=expected_total
+                )
 
             if num is None:
-                num = detect_page_number_tesseract(img, max_pages=num_pages)
-            
+                num = detect_page_number_tesseract(img, max_pages=expected_total)
+
             if num is None and ollama_config:
                 img_file = tmp_path / f"p{i}.png"
                 img.save(img_file)
                 num = extract_page_number(image_path=img_file, config=ollama_config)
-            if num is None:
-                num_undetected_pages += 1
 
-            page_map.append((num if num is not None else float("inf"), i))
+            detected.append(num)
 
     doc.close()
 
-    # Fill "holes" (inf values) to avoid reordering pages where detection failed
-    # but the page is likely in the correct spot.
-    final_nums = [p[0] for p in page_map]
-    i = 0
-    while i < num_pages:
-        if final_nums[i] == float("inf"):
-            start_idx = i
-            while i < num_pages and final_nums[i] == float("inf"):
-                i += 1
-            end_idx = i - 1
-            
-            prev_val = final_nums[start_idx - 1] if start_idx > 0 else 0
-            next_val = final_nums[i] if i < num_pages else float("inf")
-            
-            if next_val != float("inf"):
-                # Linear interpolation for the gap
-                step = (next_val - prev_val) / (end_idx - start_idx + 2)
-                for j in range(start_idx, end_idx + 1):
-                    final_nums[j] = prev_val + step * (j - start_idx + 1)
-            else:
-                # No upper bound, just increment
-                for j in range(start_idx, end_idx + 1):
-                    final_nums[j] = prev_val + (j - start_idx + 1)
-        else:
-            i += 1
-
-    page_map = [(final_nums[idx], idx) for idx in range(num_pages)]
-
-    # Sort by detected page number, keeping original order for ties/failures
-    sorted_map = sorted(page_map, key=lambda x: x[0])
-
     reorder_warnings: list[str] = []
 
-    if num_undetected_pages > 0:
+    template_labels = blank_template_layout.page_labels if blank_template_layout else ()
+    expected_unnumbered = 0
+    if any(label is not None for label in template_labels):
+        # The blank template is in the correct order: use its printed label
+        # sequence as the ordering reference. Pages the template leaves
+        # unnumbered (e.g. a title page) are expected to be undetected.
+        new_order, order_warnings = _order_pages_by_template(detected, template_labels)
+        expected_unnumbered = sum(1 for label in template_labels if label is None)
+    else:
+        new_order, order_warnings = _order_pages_by_detected_number(detected)
+    reorder_warnings.extend(order_warnings)
+
+    num_undetected_pages = sum(1 for num in detected if num is None)
+    if num_undetected_pages > expected_unnumbered:
         reorder_warnings.append(f"Page numbers could not be detected for {num_undetected_pages} out of {num_pages} pages.")
 
     # Calculate how many pages were actually moved from their original position
-    original_indices = list(range(num_pages))
-    current_indices_in_new_order = [m[1] for m in sorted_map]
-    num_pages_moved = sum(1 for i, (orig_idx, curr_idx) in enumerate(zip(original_indices, current_indices_in_new_order)) if orig_idx != curr_idx)
-
+    num_pages_moved = sum(
+        1 for position, scan_index in enumerate(new_order) if position != scan_index
+    )
     if num_pages_moved > 0 and num_pages_moved / num_pages > 0.15: # If more than 15% of pages were moved
         reorder_warnings.append(f"Significant reordering detected: {num_pages_moved} out of {num_pages} pages were moved.")
-
-    # Check for large jumps in the final sequence (after interpolation)
-    for i in range(num_pages - 1):
-        if final_nums[i] != float("inf") and final_nums[i+1] != float("inf"):
-            if abs(final_nums[i+1] - final_nums[i]) > 2: # A jump of more than 2 pages is suspicious
-                reorder_warnings.append(f"Large page number jump detected: page {i+1} (detected {final_nums[i]}) followed by page {i+2} (detected {final_nums[i+1]}).")
-                break # Only report the first large jump
 
     if reorder_warnings:
         print(f"Warning: Reordering of {path.name} completed with concerns:", file=sys.stderr)
         for warning in reorder_warnings:
             print(f"  - {warning}", file=sys.stderr)
 
-    # Sort by detected page number, keeping original order for ties/failures
-    if [m[1] for m in sorted_map] == list(range(len(reader.pages))):
+    if new_order == list(range(num_pages)):
         return False
 
     writer = PdfWriter()
-    for _, original_index in sorted_map:
+    for original_index in new_order:
         writer.add_page(reader.pages[original_index])
 
     with open(path, "wb") as f:

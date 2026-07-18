@@ -145,9 +145,9 @@ def setup_args() -> ArgumentParser:
     return parser
 
 
-def run_cli() -> None:
+def run_cli(argv: list[str] | None = None) -> None:
     parser = setup_args()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not _check_canvas_sak_installed():
         print(

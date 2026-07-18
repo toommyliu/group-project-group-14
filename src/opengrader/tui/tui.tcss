@@ -185,10 +185,15 @@ $foreground: #E4E4E4EB;
 }
 
 #grade-student-name,
+#grade-source-pdf,
 #total-grade-label,
 #grade-progress {
     width: 100%;
     height: auto;
+}
+
+#grade-source-pdf {
+    color: $text-muted;
 }
 
 #question-context {

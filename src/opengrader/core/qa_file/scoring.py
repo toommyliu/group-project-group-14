@@ -24,8 +24,9 @@ def rubric_scoring_mode(points_values: Iterable[float]) -> ScoringMode:
     - Positive awards start from zero credit. `Correct (+10)` means award
       full credit, while `Incorrect (+0)` means award no points.
 
-    Mixing positive and negative non-zero values makes the base score
-    ambiguous, so callers should reject that rubric.
+    Positive values alongside deductions are bonus rows, so any rubric that
+    contains a deduction resolves to negative deductions. Callers that need
+    pure base-rubric inference should filter bonus deltas out first.
     """
     values = list(points_values)
     has_positive = any(value > EPSILON for value in values)

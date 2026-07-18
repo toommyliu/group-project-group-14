@@ -9,12 +9,15 @@ def format_output_filename(filename: str, start_page: int, end_page: int) -> str
     return f"{filename}-pages_{start_page}-{end_page}.pdf"
 
 
-def pdf_splitter(path: Path, pages_per_chunk: int = 1) -> None:
+def pdf_splitter(path: Path, pages_per_chunk: int = 1, output_dir: Path | None = None) -> None:
     filename = path.stem  # filename without extension
     pdf = PdfReader(path)
 
     if len(pdf.pages) == 0:
         raise ValueError(f"{path.name} has no pages!")
+
+    if output_dir:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     for i in range(0, len(pdf.pages), pages_per_chunk):
         pdf_writer = PdfWriter()
@@ -29,7 +32,8 @@ def pdf_splitter(path: Path, pages_per_chunk: int = 1) -> None:
             filename, start_page_number, end_page_number
         )
 
-        with open(output_filename, "wb") as out:
+        output_path = output_dir / output_filename if output_dir else Path(output_filename)
+        with open(output_path, "wb") as out:
             pdf_writer.write(out)
 
-        print(f"Created: {output_filename}")
+        print(f"Created: {output_path}")

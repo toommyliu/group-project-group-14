@@ -9,8 +9,10 @@ from opengrader.tui.data import Provider
 from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER, TuiWorkflowState
-from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen
+from opengrader.tui.ui.screens import GradeScreen, QAPickerScreen, SetupScreen
 from opengrader.tui.ui.widgets import StatusBar, StatusBarBinding
+
+PAGE_SETUP = "setup"
 
 
 class TuiApp(App):
@@ -25,8 +27,51 @@ class TuiApp(App):
     }
 
     #workspace-switcher {
+        height: 1fr;
+        width: 100%;
         padding: 0;
         margin: 0;
+    }
+
+    .hidden {
+        display: none;
+    }
+
+    #setup {
+        width: 100%;
+        height: 100%;
+        background: $surface;
+    }
+
+    #setup-container {
+        width: 100%;
+        height: 100%;
+        padding: 1 2 4 2;
+        scrollbar-gutter: stable;
+    }
+
+    #setup-title {
+        width: 100%;
+        content-align: center middle;
+        background: $accent;
+        color: $text;
+        height: 3;
+        margin-bottom: 1;
+    }
+
+    #setup-subtitle {
+        width: 100%;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+
+    .flag-input-group {
+        height: auto;
+        align: left middle;
+    }
+
+    #setup-spacer {
+        height: 2;
     }
     """
 
@@ -54,13 +99,17 @@ class TuiApp(App):
         self._register_input_handlers()
 
     def compose(self) -> ComposeResult:
-        with ContentSwitcher(initial=PAGE_QA_PICKER, id="workspace-switcher"):
+        initial_page = PAGE_SETUP if isinstance(self.data_provider, StubDataProvider) else PAGE_QA_PICKER
+        with ContentSwitcher(initial=initial_page, id="workspace-switcher"):
+            yield SetupScreen(id=PAGE_SETUP)
             yield QAPickerScreen(id=PAGE_QA_PICKER)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield StatusBar(id="app-status-bar")
 
     def on_mount(self) -> None:
-        self._load_grading_queue()
+        # Only auto-load the queue if we aren't using the setup stub
+        if not isinstance(self.data_provider, StubDataProvider):
+            self._load_grading_queue()
         self.refresh_bindings()
 
     def switch_to(self, page_id: str) -> None:
@@ -123,25 +172,7 @@ class TuiApp(App):
     ) -> None:
         self.grade_controller.on_qa_highlighted(event.item)
 
-    def on_qa_picker_screen_q_a_highlighted(
-        self, event: QAPickerScreen.QAHighlighted
-    ) -> None:
-        self.grade_controller.on_qa_highlighted(event.item)
-
-    def on_qapicker_screen_qahighlighted(
-        self, event: QAPickerScreen.QAHighlighted
-    ) -> None:
-        self.grade_controller.on_qa_highlighted(event.item)
-
     def on_qa_picker_screen_qa_selected(self, event: QAPickerScreen.QASelected) -> None:
-        self.grade_controller.on_qa_selected(event.item)
-
-    def on_qa_picker_screen_q_a_selected(
-        self, event: QAPickerScreen.QASelected
-    ) -> None:
-        self.grade_controller.on_qa_selected(event.item)
-
-    def on_qapicker_screen_qaselected(self, event: QAPickerScreen.QASelected) -> None:
         self.grade_controller.on_qa_selected(event.item)
 
     def on_status_bar_search_changed(self, event: StatusBar.SearchChanged) -> None:
@@ -183,6 +214,33 @@ class TuiApp(App):
         self, _event: GradeScreen.ReturnToHomeRequested
     ) -> None:
         self.grade_controller.return_to_qa_picker()
+
+    def on_setup_screen_launch_requested(self, event: SetupScreen.LaunchRequested) -> None:
+        """Re-initialize the app with real data from the setup screen."""
+        try:
+            # 1. Reset the workflow state to clear any stale stub data
+            self.workflow_state = TuiWorkflowState()
+            
+            # 2. Initialize the real data provider and controller
+            self.data_provider = SubmissionFilesProvider(
+                qa_file_path=event.qa_path,
+                submissions_path=event.submissions_path,
+                default_image_path=self.default_image_path,
+            )
+            self.grade_controller = GradeController(
+                self, self.workflow_state, self.data_provider
+            )
+            
+            # 3. Re-register input handlers to link them to the new controller
+            self.input_controller = InputController(self.workflow_state)
+            self._register_input_handlers()
+
+            # 4. Load the grading queue and transition to the picker
+            self._load_grading_queue()
+            self.switch_to(PAGE_QA_PICKER)
+            self.notify("TUI Loaded Successfully")
+        except Exception as e:
+            self.notify(f"Error loading files: {e}", severity="error")
 
     def _register_input_handlers(self) -> None:
         self.input_controller.register(InputCommand.APP_QUIT, self.exit)
@@ -283,6 +341,10 @@ class TuiApp(App):
         self.input_controller.register(
             InputCommand.GRADE_FIRST_STUDENT,
             self.grade_controller.first_student_for_question,
+        )
+        self.input_controller.register(
+            InputCommand.APP_TOGGLE_TEACHER_MODE,
+            self.grade_controller.toggle_teacher_mode,
         )
 
     def _handle_back(self) -> None:

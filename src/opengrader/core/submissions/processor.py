@@ -119,11 +119,12 @@ class _ScanLayout:
 
 
 @dataclass(frozen=True)
-class _BlankExamTemplate:
+class _BlankAssignmentTemplate:
     assignment_title: str
     name_field: _FieldLocation | None
     student_id_field: _FieldLocation | None
     questions: tuple[StudentSubmissionQuestion, ...]
+    total_pages: int
 
 
 @dataclass(frozen=True)
@@ -269,7 +270,10 @@ def _label_box_starting_at(
     )
 
 
-def _detect_scan_layout(rendered_pages: dict[int, Image.Image]) -> _ScanLayout:
+def _detect_scan_layout(
+    rendered_pages: dict[int, Image.Image],
+    max_page: int | None = None,
+) -> _ScanLayout:
     """Find question prefixes, totals, and Name/ID label boxes on the scan.
 
     Each page is OCR'd with pytesseract; words are grouped by their reported
@@ -287,6 +291,8 @@ def _detect_scan_layout(rendered_pages: dict[int, Image.Image]) -> _ScanLayout:
     line_boxes_by_page: dict[int, list[tuple[float, float, float]]] = {}
 
     for page_number, image in sorted(rendered_pages.items()):
+        if max_page is not None and page_number > max_page:
+            continue
         data = safe_image_to_data(image, config="--psm 6")
         if not data["text"]:
             continue
@@ -618,10 +624,13 @@ def _ocr_image_digits(image_path: Path) -> str:
 # STRATEGY HELPERS
 # ==============================================================================
 
-def _load_blank_exam_template(pdf_path: Path) -> _BlankExamTemplate:
-    """Extract the structural template from a blank exam PDF."""
+def _load_blank_assignment_template(pdf_path: Path) -> _BlankAssignmentTemplate:
+    """Extract the structural template from a blank assignment PDF."""
     lines = _read_pdf_lines(pdf_path)
     _ensure_text_layer(lines, pdf_path)
+
+    with fitz.open(str(pdf_path)) as doc:
+        total_pages = len(doc)
 
     name_field = None
     id_field = None
@@ -631,11 +640,12 @@ def _load_blank_exam_template(pdf_path: Path) -> _BlankExamTemplate:
         elif _ID_LABEL_RE.match(line.text):
             id_field = _FieldLocation(line.page, _norm_bbox(line))
 
-    return _BlankExamTemplate(
+    return _BlankAssignmentTemplate(
         assignment_title=_assignment_title_from_lines(lines),
         name_field=name_field,
         student_id_field=id_field,
         questions=tuple(_extract_questions_from_text(lines)),
+        total_pages=total_pages,
     )
 
 def _select_field(
@@ -669,7 +679,7 @@ def _save_field_crop(
     return str(Path(output_dir.name) / filename)
 
 def _scan_offset_by_page(
-    template: _BlankExamTemplate,
+    template: _BlankAssignmentTemplate,
     scan_layout: _ScanLayout,
 ) -> dict[int, float]:
     """Calculate median vertical shift per page between template and scan."""
@@ -685,7 +695,7 @@ def _scan_offset_by_page(
     return calculate_page_offsets(deltas)
 
 def _combined_question_positions(
-    template: _BlankExamTemplate,
+    template: _BlankAssignmentTemplate,
     scan_layout: _ScanLayout,
     page_offsets: dict[int, float],
 ) -> dict[int, tuple[int, float]]:
@@ -750,10 +760,10 @@ def _render_submission_markdown(
 # STRATEGY: EXTRACT FROM RAW TEMPLATE OR TEXT LAYERS
 # ==============================================================================
 
-def _build_document_from_template(
+def _build_document_from_assignment_template(
     pdf_path: Path,
     submission_dir: Path,
-    template: _BlankExamTemplate,
+    template: _BlankAssignmentTemplate,
 ) -> tuple[
     StudentSubmissionDocument,
     _FieldLocation | None,
@@ -771,7 +781,7 @@ def _build_document_from_template(
     downstream OCR pass is expected to populate those fields.
     """
     rendered_pages = _render_scan_all_pages(pdf_path)
-    scan_layout = _detect_scan_layout(rendered_pages)
+    scan_layout = _detect_scan_layout(rendered_pages, max_page=template.total_pages)
 
     field_crops_dir = submission_dir / "identifiers"
     responses_dir = submission_dir / "responses"
@@ -991,7 +1001,7 @@ def build_student_submission_document_unified(
     ollama_config: OllamaVisionConfig | None,
     skip_ollama_qa: bool,
     save_layout_debug: bool,
-    blank_exam_template: _BlankExamTemplate | None,
+    blank_assignment_template: _BlankAssignmentTemplate | None,
     progress_callback: Callable[[str], None],
     roster: list[_RosterEntry] | None = None,
     update: bool = False,
@@ -1005,10 +1015,10 @@ def build_student_submission_document_unified(
     submission_dir = output_dir / pdf_path.stem
     submission_dir.mkdir(parents=True, exist_ok=True)
 
-    if blank_exam_template:
-        progress_callback("Using blank exam template for extraction...")
+    if blank_assignment_template:
+        progress_callback("Using blank assignment template for extraction...")
         document, name_field, id_field, name_image, id_image = (
-            _build_document_from_template(pdf_path, submission_dir, blank_exam_template)
+            _build_document_from_assignment_template(pdf_path, submission_dir, blank_assignment_template)
         )
         markdown_path = submission_dir / f"{pdf_path.stem}.submission.md"
         markdown_path.write_text(render_student_submission_markdown(document))

@@ -316,8 +316,8 @@ def test_process_submission_pdf_saves_field_crops_in_submission_artifact_dir(
     finally:
         extractor.scan_submission_layout = original_scan_layout
 
-    expected_field_crop_dir = output_dir / "field_crops"
-    old_hoist_dir = tmp_path / "field_crops" / "submission"
+    expected_field_crop_dir = output_dir / "identifiers"
+    old_hoist_dir = tmp_path / "identifiers" / "submission"
 
     crop_paths = [Path(field.crop_path) for field in result.fields if field.crop_path]
     assert len(crop_paths) == 2

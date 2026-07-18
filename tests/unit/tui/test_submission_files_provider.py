@@ -65,13 +65,13 @@ def _write_simple_submission(path: Path, *, name: str, version: str = "") -> Non
         "\n".join(
             [
                 "---",
-                f'name: "{name}"',
+                f'student_name: "{name}"',
                 'student_id: "1"',
                 'course_code: "CMPE"',
                 'assignment_title: "Quiz"',
                 f'assignment_version: "{version}"',
                 'source_pdf: "student.pdf"',
-                'score: ""',
+                'student_score: ""',
                 "---",
                 "",
                 "- q1:",
@@ -97,13 +97,13 @@ def _write_submission_with_source_metadata(
         "\n".join(
             [
                 "---",
-                'name: "Student 1"',
+                'student_name: "Student 1"',
                 'student_id: "1"',
                 'course_code: "CMPE"',
                 'assignment_title: "Quiz"',
                 'assignment_version: ""',
                 f'source_pdf: "{source_pdf}"',
-                'score: ""',
+                'student_score: ""',
                 "---",
                 "",
                 "- q1:",
@@ -205,6 +205,9 @@ def test_submission_files_provider_loads_students_and_questions() -> None:
         "Partially Correct - Conversion process mostly incorrect",
         "Incorrect",
     ]
+    types_by_id = {seed.question_id: seed.question_type for seed in seeds}
+    assert types_by_id["q1"] == "free_response"
+    assert types_by_id["q3"] == "multiple_choice"
 
 
 def test_submission_files_provider_returns_student_specific_response_images() -> None:
@@ -217,8 +220,9 @@ def test_submission_files_provider_returns_student_specific_response_images() ->
     first_student = provider.build_question_seeds(student_item_id="s1")
     second_student = provider.build_question_seeds(student_item_id="s2")
 
-    assert first_student[0].response_text == "no"
-    assert second_student[0].response_text != first_student[0].response_text
+    # The regenerated samples carry no OCR transcription, so student-specific
+    # content is asserted through the per-version prompts and image crops.
+    assert first_student[0].prompt == "Convert decimal 5 to binary [A]."
     assert second_student[0].prompt == "Convert decimal 6 to binary [B]."
     assert first_student[0].image_path.endswith("submission-0001/responses/q1.png")
     assert second_student[0].image_path.endswith("submission-0002/responses/q1.png")
@@ -290,13 +294,13 @@ def test_submission_files_provider_raises_for_unknown_version(tmp_path: Path) ->
         "\n".join(
             [
                 "---",
-                'name: "Student"',
+                'student_name: "Student"',
                 'student_id: "1"',
                 'course_code: "CMPE"',
                 'assignment_title: "Quiz"',
                 'assignment_version: "Z"',
                 'source_pdf: "student.pdf"',
-                'score: ""',
+                'student_score: ""',
                 "---",
                 "",
                 "- q1:",
@@ -414,11 +418,16 @@ def test_submission_files_provider_saves_question_comment_annotation(
 
     assert annotated_path == submissions_path / "annotated-pdfs" / "student.annotated.pdf"
     with fitz.open(annotated_path) as document:
-        annot = document[0].first_annot
-        assert annot is not None
-        info = annot.info
+        # The total-score annotation is synced alongside the comment, so
+        # find the comment by its subject prefix instead of assuming order.
+        comment_annots = [
+            annot
+            for annot in document[0].annots()
+            if annot.info.get("subject", "").startswith("cm:")
+        ]
+        assert len(comment_annots) == 1
+        info = comment_annots[0].info
         assert info.get("title", "") == ""
-        assert info["subject"].startswith("cm:")
         assert "opengrader" not in info["subject"].lower()
         assert "q1" not in info["subject"].lower()
         assert info["content"] == "Show the conversion steps."

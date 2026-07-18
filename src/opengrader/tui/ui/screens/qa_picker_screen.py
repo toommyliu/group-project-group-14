@@ -5,11 +5,13 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
+from opengrader.tui.formatting import format_question_type
 from opengrader.tui.statistics import (
     QuestionStatistics,
     question_statistics_chart_image,
     render_question_statistics,
 )
+from opengrader.tui.ui.screens.canvas_export_screen import CanvasExportScreen
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
@@ -35,6 +37,8 @@ class _StudentListItem(ListItem):
 
 
 class QAPickerScreen(Vertical):
+    _STUDENT_NAME_TAB_INDEX = 1
+
     class QAHighlighted(Message):
         def __init__(self, item: NavItem) -> None:
             self.item = item
@@ -97,6 +101,8 @@ class QAPickerScreen(Vertical):
                     "j/k or up/down  Move\n"
                     "tab/shift+tab  Switch pane\n"
                     "d              Student display\n"
+                    "t              Teacher mode (names)\n"
+                    "x              Export to Canvas\n"
                     "click or enter  Grade selected QA\n"
                     "escape          Back to assignments",
                     id="qa-keybinding-ref",
@@ -226,11 +232,15 @@ class QAPickerScreen(Vertical):
     def show_question_details(self, item: NavItem) -> None:
         status = f"\nStatus: {item.meta}" if item.meta else ""
         prompt = self._extract_prompt(item)
-        self.query_one("#qa-preview", Static).update(
-            f"[b]{prompt}[/b]\n\n"
+        type_label = format_question_type(item.question_type)
+        parts = [f"Question: [b]{prompt}[/b]"]
+        if type_label:
+            parts.append(f"[dim]Type: {type_label}[/dim]")
+        parts.append(
             f"Select this QA to grade it for all students.{status}"
             f"{self._statistics_text(item)}"
         )
+        self.query_one("#qa-preview", Static).update("\n\n".join(parts))
         self._sync_statistics_chart(item)
 
     def show_student_details(self, item: NavItem) -> None:
@@ -248,8 +258,12 @@ class QAPickerScreen(Vertical):
             question_status = f"\n{question.label} status for this student: {status}"
             highlighted_question = q_prompt
 
+        detail_id = self._student_detail_id(item)
+        identity = (
+            f"{item.label} ({detail_id})" if self._teacher_mode() else detail_id
+        )
         self.query_one("#qa-preview", Static).update(
-            f"{item.label} ({self._student_detail_id(item)})\n\n"
+            f"{identity}\n\n"
             f"Progress: {progress}\n\n"
             f"Highlighted QA: {highlighted_question}"
             f"{question_status}"
@@ -382,8 +396,29 @@ class QAPickerScreen(Vertical):
             return
         self.focus_students()
 
+    def on_mount(self) -> None:
+        self.apply_teacher_mode()
+
+    def apply_teacher_mode(self) -> None:
+        """Sync the Students pane tabs with the current anonymity mode.
+
+        Anonymous grading hides the Name tab entirely; teacher mode brings
+        it back.
+        """
+        self._student_pane().set_tab_hidden(
+            self._STUDENT_NAME_TAB_INDEX,
+            not self._teacher_mode(),
+        )
+
     def toggle_student_display_mode(self) -> None:
         if not self._students:
+            return
+
+        if not self._teacher_mode():
+            self.set_status(
+                "Anonymous grading shows IDs only. "
+                "Enable teacher mode (t) to view student names."
+            )
             return
 
         pane = self._student_pane()
@@ -580,6 +615,25 @@ class QAPickerScreen(Vertical):
         if event.key == "enter":
             self.confirm()
             event.stop()
+            return
+        if event.key == "x":
+            self._open_canvas_export()
+            event.stop()
+
+    def _open_canvas_export(self) -> None:
+        """Open the Canvas export dialog, prefilled from the current session."""
+        provider = getattr(self.app, "data_provider", None)
+        submissions = str(getattr(provider, "submissions_path", "") or "")
+
+        workflow_state = getattr(self.app, "workflow_state", None)
+        labels = workflow_state.selection_labels if workflow_state else {}
+        self.app.push_screen(
+            CanvasExportScreen(
+                submissions_path=submissions,
+                course=labels.get("course", ""),
+                assignment=labels.get("assignment", ""),
+            )
+        )
 
     def _activate_list_for_widget(self, widget: Widget | None) -> None:
         student_pane = self._student_pane()
@@ -658,6 +712,11 @@ class QAPickerScreen(Vertical):
         except ValueError:
             return
         self._set_student_index(index)
+
+    def _teacher_mode(self) -> bool:
+        """Whether names may be revealed; grading is anonymous by default."""
+        state = getattr(self.app, "workflow_state", None)
+        return bool(getattr(state, "teacher_mode", False))
 
     def _student_detail_id(self, item: NavItem) -> str:
         return self._student_display_id(

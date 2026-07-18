@@ -1165,8 +1165,17 @@ def find_qa_question(
 def flatten_rubric_options(
     rubric_items: list[QARubricItem],
 ) -> list[QARubricFlatOption]:
-    """Return rubric leaf options with UI selection metadata."""
-    return _flatten_rubric_options(rubric_items)
+    """Return rubric leaf options with UI selection metadata.
+
+    Bonus options are listed after the base outcome rows (below Incorrect)
+    regardless of where the QA file declares them: they combine with the
+    base outcome rather than replacing it, so the base rows keep the low
+    selection slots.
+    """
+    options = _flatten_rubric_options(rubric_items)
+    base = [option for option in options if option.kind != "bonus"]
+    bonus = [option for option in options if option.kind == "bonus"]
+    return base + bonus
 
 
 def qa_rubric_options_for_question(
@@ -1187,7 +1196,15 @@ def replace_qa_rubric_options(
     version: str | None = None,
 ) -> None:
     question = find_qa_question(document, question_id, version=version)
-    question.rubric = _rubric_from_flat_options(options, points=question.points)
+    rubric = _rubric_from_flat_options(options, points=question.points)
+    # Validate before assigning so invalid option sets can never be written
+    # into the QA file and fail only on the next load.
+    _validate_rubric_points(
+        rubric,
+        points=question.points,
+        context=f"question {question_id!r}",
+    )
+    question.rubric = rubric
 
 
 def _flatten_rubric_options(
@@ -1213,11 +1230,13 @@ def _flatten_rubric_options(
         if item.points_delta is None:
             continue
         kind = _flat_option_kind(labels)
-        # Nested partial and bonus leaves compose as a checklist; 
-        # top-level rows (Correct/Incorrect) remain exclusive shortcuts.
+        # Partial subitems compose as a checklist; top-level rows
+        # (Correct/Incorrect) remain exclusive shortcuts. Bonus options are
+        # always checklist: extra credit stacks on top of any base outcome.
         selection_mode: RubricSelectionMode = (
             "checklist"
-            if parent_labels and parent_labels[0] in ("Partially Correct", "Bonus")
+            if kind == "bonus"
+            or (parent_labels and parent_labels[0] == "Partially Correct")
             else "exclusive"
         )
         options.append(

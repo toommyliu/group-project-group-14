@@ -20,6 +20,7 @@ from textual.widgets import (
 
 from opengrader.core.qa_file.scoring import rubric_scoring_mode
 from opengrader.tui.data import RubricOptionSeed
+from opengrader.tui.formatting import format_question_label
 from opengrader.tui.state import QuestionGrade, StudentGradingRun
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
@@ -291,19 +292,39 @@ class GradeScreen(Vertical):
     }
     """
 
+    # ctrl+digit only reaches the app in terminals that implement an enhanced
+    # keyboard protocol (Kitty keyboard protocol, xterm modifyOtherKeys); the
+    # legacy terminal input protocol cannot encode it at all. Each slot is
+    # therefore also bound to alt+digit (ESC-prefixed, understood by
+    # effectively every terminal) and, as a printable-character fallback that
+    # needs no protocol support, shift+digit (! @ # ...) handled in on_key.
     BINDINGS = [
-        Binding("ctrl+1", "rubric_finalize(0)", show=False, priority=True),
-        Binding("ctrl+2", "rubric_finalize(1)", show=False, priority=True),
-        Binding("ctrl+3", "rubric_finalize(2)", show=False, priority=True),
-        Binding("ctrl+4", "rubric_finalize(3)", show=False, priority=True),
-        Binding("ctrl+5", "rubric_finalize(4)", show=False, priority=True),
-        Binding("ctrl+6", "rubric_finalize(5)", show=False, priority=True),
-        Binding("ctrl+7", "rubric_finalize(6)", show=False, priority=True),
-        Binding("ctrl+8", "rubric_finalize(7)", show=False, priority=True),
-        Binding("ctrl+9", "rubric_finalize(8)", show=False, priority=True),
         Binding("a", "dispatch_input('grade_first_student')", "First Student", show=False),
-        Binding("ctrl+0", "rubric_finalize(9)", show=False, priority=True),
+        *(
+            Binding(
+                f"ctrl+{digit},alt+{digit}",
+                f"rubric_finalize({(digit - 1) % 10})",
+                show=False,
+                priority=True,
+            )
+            for digit in (1, 2, 3, 4, 5, 6, 7, 8, 9, 0)
+        ),
     ]
+
+    # Shifted digits on a US layout, in rubric-slot order (shift+1 .. shift+0).
+    # Textual reports printable keys by their Unicode names.
+    _SHIFTED_DIGIT_FINALIZE_KEYS = {
+        "exclamation_mark": 0,
+        "at": 1,
+        "number_sign": 2,
+        "dollar_sign": 3,
+        "percent_sign": 4,
+        "circumflex_accent": 5,
+        "ampersand": 6,
+        "asterisk": 7,
+        "left_parenthesis": 8,
+        "right_parenthesis": 9,
+    }
 
     class RubricSelected(Message):
         def __init__(self, option_index: int, finalize: bool = False) -> None:
@@ -356,6 +377,7 @@ class GradeScreen(Vertical):
             with VerticalScroll(id="grade-sidebar"):
                 with Vertical(id="sidebar-quadrant-info", classes="sidebar-quadrant"):
                     yield Label("", id="grade-student-name")
+                    yield Label("", id="grade-source-pdf")
                     yield Label("Score: 100.0", id="total-grade-label")
                     yield Label("Progress: 0/0", id="grade-progress")
                     yield Label("Zoom: 100%", id="grade-zoom-level")
@@ -363,7 +385,11 @@ class GradeScreen(Vertical):
                 yield Rule(id="sidebar-sep-1", classes="sidebar-separator")
                 
                 with VerticalScroll(id="sidebar-quadrant-question", classes="sidebar-quadrant"):
-                    yield Label("Question", classes="sidebar-section-title")
+                    yield Label(
+                        "Question",
+                        id="question-section-title",
+                        classes="sidebar-section-title",
+                    )
                     yield Static("", id="question-context")
                     yield ShortcutInput(placeholder="Comment...", id="question-comment")
 
@@ -378,10 +404,10 @@ class GradeScreen(Vertical):
                         with Vertical(id="rubric-editor-correct"): pass
                         yield Label("Partial-credit subitems", id="rubric-edit-title-partial", classes="rubric-edit-section-title")
                         with Vertical(id="rubric-editor-subitems"): pass
-                        yield Label("Bonus", id="rubric-edit-title-bonus", classes="rubric-edit-section-title")
-                        with Vertical(id="rubric-editor-bonus"): pass
                         yield Label("Incorrect", id="rubric-edit-title-incorrect", classes="rubric-edit-section-title")
                         with Vertical(id="rubric-editor-incorrect"): pass
+                        yield Label("Bonus", id="rubric-edit-title-bonus", classes="rubric-edit-section-title")
+                        with Vertical(id="rubric-editor-bonus"): pass
                         with Horizontal(id="rubric-editor-actions"):
                             yield Button("+ Subitem", id="rubric-edit-add", compact=True)
                             yield Button("+ Bonus", id="rubric-edit-add-bonus", compact=True)
@@ -405,8 +431,14 @@ class GradeScreen(Vertical):
     def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
         self.query_one("#grade-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
         self.query_one("#grade-student-name", Label).update(
-            f"{run.assignment_name}  -  {run.student_name}"  # student_name now contains display_id
+            # student_name holds the anonymity-aware label: the student ID by
+            # default, or the real name while teacher mode is on.
+            f"{run.assignment_name}  -  {run.student_name}"
         )
+        source_pdf_label = self.query_one("#grade-source-pdf", Label)
+        source_pdf_label.update(f"PDF: {run.source_pdf_name}")
+        # Stub/demo submissions have no source PDF; drop the empty line.
+        source_pdf_label.display = bool(run.source_pdf_name)
         self.query_one("#total-grade-label", Label).update(
             f"Score: {run.total_score:.1f} / {run.max_points:.1f}"
         )
@@ -430,6 +462,7 @@ class GradeScreen(Vertical):
             for child in list(rubric_list.children):
                 child.remove()
             self._rubric_count = 0
+            self.query_one("#question-section-title", Label).update("Question")
             self.query_one("#question-context", Static).update("")
             comment_input = self.query_one("#question-comment", Input)
             if comment_input.value:
@@ -439,6 +472,11 @@ class GradeScreen(Vertical):
 
         viewer = self.query_one("#response-viewer", ResponseViewer)
         viewer.set_image_path(current.image_path)
+        # The section title carries the question label so the context text
+        # below it doesn't repeat the word "Question".
+        self.query_one("#question-section-title", Label).update(
+            format_question_label(current.question_id)
+        )
         self.query_one("#question-context", Static).update(
             self._question_context_text(current)
         )
@@ -1008,6 +1046,10 @@ class GradeScreen(Vertical):
 
     def action_rubric_finalize(self, index: int | str) -> None:
         """Action handler for rubric selection with automatic finalization."""
+        if self._rubric_edit_mode:
+            # Option indices may be mid-change while the rubric is being
+            # edited; finalizing against them could grade the wrong option.
+            return
         idx = int(index)
         if 0 <= idx < self._rubric_count:
             self.post_message(self.RubricSelected(idx, finalize=True))
@@ -1056,10 +1098,14 @@ class GradeScreen(Vertical):
 
     @staticmethod
     def _question_context_text(current) -> str:
-        """Render the current question details shown above the rubric."""
+        """Render the current question details shown above the rubric.
+
+        The question itself is named by the section title above this text,
+        so the context starts directly with the score.
+        """
         awarded = f"{current.points_awarded:g}" if current.points_awarded is not None else "--"
         parts = [
-            f"{current.question_id} (Score: {awarded} / {current.points:g} points)",
+            f"Score: {awarded} / {current.points:g} points",
             "",
             current.prompt or "No prompt available.",
         ]
@@ -1164,8 +1210,9 @@ class GradeScreen(Vertical):
 
             for row in rows:
                 row.row_index = current_index - 1
-                label = row.query_one(".rubric-edit-index", Label)
-                label.update(f"{current_index}.")
+                # Use the direct reference: rows may not have mounted their
+                # children yet, which would make a DOM query come up empty.
+                row.index_label.update(f"{current_index}.")
                 current_index += 1
 
 
@@ -1177,18 +1224,7 @@ class GradeScreen(Vertical):
         if event.key in ("up", "down", "left", "right", "home", "end", "pageup", "pagedown"):
             return
 
-        # Handle ctrl+1..9 and symbols for rubric selection
-        idx = None
-        if key_name.startswith("ctrl+") and key_name[-1].isdigit():
-            digit = int(key_name[-1])
-            idx = 9 if digit == 0 else digit - 1
-        elif len(event.key) == 1 and event.key in "!@#$%^&*()":
-            idx = "!@#$%^&*()".find(event.key)
-
-        if idx is not None and 0 <= idx < self._rubric_count:
-            event.stop()
-            self.action_rubric_finalize(idx)
-            return
+        # ctrl+digit and alt+digit are handled by BINDINGS above.
 
         # Let modifiers (like ctrl+v) bubble to App bindings
         if any(m in key_name for m in ("ctrl+", "alt+", "super+", "cmd+")):
@@ -1196,21 +1232,28 @@ class GradeScreen(Vertical):
 
         if self._rubric_edit_mode:
             focused = self.app.focused
+            # Stop the events as well: otherwise the screen's default
+            # focus/back bindings still run and move focus out of the editor.
             if event.key in ("ctrl+s", "super+s", "cmd+s"):
                 self._save_rubric_edit()
                 event.prevent_default()
+                event.stop()
             elif event.key == "escape":
                 self._cancel_rubric_edit()
                 event.prevent_default()
+                event.stop()
             elif event.key == "tab":
                 self._move_rubric_editor_focus(reverse=False)
                 event.prevent_default()
+                event.stop()
             elif event.key == "shift+tab":
                 self._move_rubric_editor_focus(reverse=True)
                 event.prevent_default()
+                event.stop()
             elif event.key in ("enter", "space"):
                 if self._press_focused_rubric_button():
                     event.prevent_default()
+                    event.stop()
             elif isinstance(focused, Input):
                 return
 
@@ -1247,6 +1290,15 @@ class GradeScreen(Vertical):
                 event.stop()
                 self.post_message(self.RubricSelected(idx))
                 return
+
+        # Shifted number keys select and finalize — the protocol-independent
+        # fallback for ctrl+digit (see the BINDINGS note). Placed after the
+        # Input-focus guard above so "!" can still be typed into the comment.
+        shifted_idx = self._SHIFTED_DIGIT_FINALIZE_KEYS.get(event.key)
+        if shifted_idx is not None and 0 <= shifted_idx < self._rubric_count:
+            event.stop()
+            self.action_rubric_finalize(shifted_idx)
+            return
 
         # Standard keys (Arrows, j/k) are NOT stopped here, allowing
         # focused widgets (ListView) or App bindings to handle them.
@@ -1308,6 +1360,7 @@ class GradeScreen(Vertical):
             "ctrl+j/k Prev/Next Student\n"
             "n/m      Prev/Next Ungraded\n"
             "ctrl+1-9 Rubric+Finalize\n"
+            "         (or alt/shift+1-9)\n"
             "ctrl+g   Finalize\n"
             "+/-      Zoom\n"
             "a        First Student\n"

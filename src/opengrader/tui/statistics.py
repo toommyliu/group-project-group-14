@@ -9,6 +9,7 @@ from matplotlib.ticker import MaxNLocator
 from PIL import Image as PILImage
 
 from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
+from opengrader.tui.formatting import format_question_label
 from opengrader.tui.data import QuestionSeed
 
 
@@ -236,7 +237,7 @@ def question_statistics_chart_image(
     bars = axis.bar(labels, counts, color=colors, edgecolor="#D8DEE9", linewidth=0.8)
 
     axis.set_title(
-        f"{stats.question_id} score distribution",
+        f"{format_question_label(stats.question_id)} score distribution",
         color="#E4E4E4",
         fontsize=10,
         loc="left",

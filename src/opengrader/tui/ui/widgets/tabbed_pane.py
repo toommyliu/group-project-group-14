@@ -17,6 +17,7 @@ class TabbedPaneTab:
     label: str
     build: Callable[[], Widget]
     supports_paging: bool = False
+    hidden: bool = False
 
 
 class TabbedPane(Vertical):
@@ -108,20 +109,44 @@ class TabbedPane(Vertical):
         self._render_active_tab()
 
     def next_tab(self) -> None:
-        if len(self._tabs) <= 1:
-            return
-        self._set_active_tab(
-            (self._active_tab_index + 1) % len(self._tabs),
-            focus=False,
-        )
+        self._step_tab(1)
 
     def prev_tab(self) -> None:
-        if len(self._tabs) <= 1:
+        self._step_tab(-1)
+
+    def _step_tab(self, delta: int) -> None:
+        visible = self._visible_tab_indexes()
+        if len(visible) <= 1:
             return
-        self._set_active_tab(
-            (self._active_tab_index - 1) % len(self._tabs),
-            focus=False,
-        )
+        if self._active_tab_index in visible:
+            position = visible.index(self._active_tab_index)
+            target = visible[(position + delta) % len(visible)]
+        else:
+            target = visible[0]
+        self._set_active_tab(target, focus=False)
+
+    def _visible_tab_indexes(self) -> list[int]:
+        return [index for index, tab in enumerate(self._tabs) if not tab.hidden]
+
+    def set_tab_hidden(self, tab_index: int, hidden: bool) -> None:
+        """Hide or reveal a tab.
+
+        Hidden tabs are dropped from the border title and refuse activation.
+        Hiding the active tab falls back to the first visible tab.
+        """
+        if tab_index < 0 or tab_index >= len(self._tabs):
+            return
+        tab = self._tabs[tab_index]
+        if tab.hidden == hidden:
+            return
+        tab.hidden = hidden
+        if hidden and self._active_tab_index == tab_index:
+            visible = self._visible_tab_indexes()
+            if visible and self._set_active_tab(
+                visible[0], focus=self.has_focus_within
+            ):
+                return
+        self._render_active_tab()
 
     def action_pane_activate_tab(self, tab_index: int) -> None:
         self._set_active_tab(tab_index, focus=True)
@@ -235,7 +260,9 @@ class TabbedPane(Vertical):
 
         title_as_first_tab = len(self._tabs) > 1 and not self._tabs[0].label
         visible_tabs = [
-            (index, tab) for index, tab in enumerate(self._tabs) if tab.label
+            (index, tab)
+            for index, tab in enumerate(self._tabs)
+            if tab.label and not tab.hidden
         ]
 
         if title_as_first_tab:
@@ -273,6 +300,8 @@ class TabbedPane(Vertical):
 
     def _set_active_tab(self, tab_index: int, *, focus: bool) -> bool:
         if tab_index < 0 or tab_index >= len(self._tabs):
+            return False
+        if self._tabs[tab_index].hidden:
             return False
 
         changed = tab_index != self._active_tab_index

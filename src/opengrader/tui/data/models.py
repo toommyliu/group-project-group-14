@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
+from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 
 
 @dataclass(frozen=True)
@@ -48,3 +49,7 @@ class QuestionSeed:
     points_awarded: float | None = None
     selected_rubric_labels: tuple[str, ...] = ()
     analysis: str = ""
+    warnings: list[str] = field(default_factory=list)
+    question_type: QuestionType = FREE_RESPONSE
+    # Submission-level: file name of the student's scanned source PDF.
+    source_pdf_name: str = ""

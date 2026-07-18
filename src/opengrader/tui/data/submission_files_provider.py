@@ -9,6 +9,7 @@ from opengrader.core.pdf.annotations import (
     sync_question_comment_annotation,
     sync_total_score_annotation,
 )
+from opengrader.core.pdf.pdf_preview import get_pdf_page_count
 from opengrader.core.qa_file import (
     QARubricFlatOption,
     QAQuestion,
@@ -20,6 +21,7 @@ from opengrader.core.qa_file import (
     save_qa_markdown,
 )
 from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
+from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
@@ -46,6 +48,7 @@ class _QuestionContext:
     points: float
     expected_answers: list[str]
     rubric: list[QARubricItem]
+    question_type: QuestionType = FREE_RESPONSE
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,11 @@ class SubmissionFilesProvider:
         self._qa_doc = load_qa_markdown(self._qa_path)
         self._submissions = self._load_submissions(self._submissions_path)
         self._validate_question_sets()
+
+    @property
+    def submissions_path(self) -> Path:
+        """The file or directory the loaded submissions came from."""
+        return self._submissions_path
 
     @property
     def course_label(self) -> str:
@@ -126,9 +134,23 @@ class SubmissionFilesProvider:
     ) -> list[QuestionSeed]:
         _ = (assignment_id, assignment_title)
         submission = self._submission_for_student_item(student_item_id)
+
+        # Detect submission-level warnings (e.g. extra pages from reordering)
+        submission_warnings = []
+        source_pdf_path = self._source_pdf_path(submission)
+        if source_pdf_path.exists():
+            actual_pages = get_pdf_page_count(source_pdf_path)
+            max_template_page = 0
+            for q in submission.document.questions:
+                for seg in q.source_segments:
+                    max_template_page = max(max_template_page, seg.page_number)
+            if actual_pages > max_template_page and max_template_page > 0:
+                extra = actual_pages - max_template_page
+                submission_warnings.append(f"Submission has {extra} extra page(s) (scratch paper) moved to the end.")
+
         seeds: list[QuestionSeed] = []
 
-        for context in submission.question_contexts:
+        for i, context in enumerate(submission.question_contexts):
             response = submission.questions_by_id.get(context.question_id)
             image_path = self._image_path_for_response(response)
             seeds.append(
@@ -147,6 +169,20 @@ class SubmissionFilesProvider:
                         response.rubric_labels if response is not None else ()
                     ),
                     analysis=response.analysis if response is not None else "",
+                    warnings=submission_warnings if i == 0 else [],
+                    # The QA file is authoritative when it declares choices;
+                    # otherwise fall back to the type the extractor classified
+                    # from the scanned page.
+                    question_type=(
+                        context.question_type
+                        if context.question_type == MULTIPLE_CHOICE or response is None
+                        else response.question_type
+                    ),
+                    # Name only (not the resolved path): the frontmatter may
+                    # hold a relative path and an empty value must stay empty.
+                    source_pdf_name=Path(submission.document.source_pdf).name
+                    if submission.document.source_pdf
+                    else "",
                 )
             )
 
@@ -174,7 +210,7 @@ class SubmissionFilesProvider:
             ),
         )
         self._reload_submission(student_item_id)
-        self._sync_pdf_annotations(student_item_id, question_id)
+        self._sync_pdf_annotations_best_effort(student_item_id, question_id)
 
     def save_question_analysis(
         self,
@@ -192,7 +228,7 @@ class SubmissionFilesProvider:
             ),
         )
         self._reload_submission(student_item_id)
-        self._sync_pdf_annotations(student_item_id, question_id)
+        self._sync_pdf_annotations_best_effort(student_item_id, question_id)
 
     def save_question_comment_annotation(
         self,
@@ -203,6 +239,22 @@ class SubmissionFilesProvider:
     ) -> Path:
         """Forces a manual sync of PDF annotations for a specific question."""
         return self._sync_pdf_annotations(student_item_id, question_id, comment_override=comment)
+
+    def _sync_pdf_annotations_best_effort(
+        self,
+        student_item_id: str,
+        question_id: str,
+    ) -> None:
+        """Sync annotations after a save without failing the save itself.
+
+        Grades are already persisted to the submission markdown at this
+        point; a missing or relocated source PDF should not surface as a
+        failed save.
+        """
+        try:
+            self._sync_pdf_annotations(student_item_id, question_id)
+        except FileNotFoundError:
+            pass
 
     def _sync_pdf_annotations(
         self,
@@ -215,6 +267,10 @@ class SubmissionFilesProvider:
         response = submission.questions_by_id.get(question_id)
         if response is None:
             raise ValueError(f"question not found in submission: {question_id}")
+        if comment_override is not None and not response.source_segments:
+            raise ValueError(
+                "Question source metadata missing; regenerate submission files to enable PDF annotations."
+            )
 
         source_pdf_path = self._source_pdf_path(submission)
         annotated_pdf_path = submission.path.parent / "annotated-pdfs" / f"{source_pdf_path.stem}.annotated.pdf"
@@ -439,6 +495,10 @@ class SubmissionFilesProvider:
                 question.correct_choice_label,
             ),
             rubric=question.rubric,
+            question_type=SubmissionFilesProvider._question_type_from_qa(
+                question.choices,
+                question.correct_choice_label,
+            ),
         )
 
     @staticmethod
@@ -452,7 +512,20 @@ class SubmissionFilesProvider:
                 subquestion.correct_choice_label,
             ),
             rubric=subquestion.rubric,
+            question_type=SubmissionFilesProvider._question_type_from_qa(
+                subquestion.choices,
+                subquestion.correct_choice_label,
+            ),
         )
+
+    @staticmethod
+    def _question_type_from_qa(
+        choices: list[object],
+        correct_choice_label: str | None,
+    ) -> QuestionType:
+        if choices or correct_choice_label:
+            return MULTIPLE_CHOICE
+        return FREE_RESPONSE
 
     @staticmethod
     def _expected_answers(
@@ -619,14 +692,23 @@ class SubmissionFilesProvider:
             return 0
 
         label_changes = {change.old_label: change for change in changes}
-        old_value_map = {
-            option.label: option.points_delta
+        old_option_map = {
+            option.label: option
             for option in self._rubric_leaf_options(context.rubric)
         }
-        new_value_map = dict(old_value_map)
+        new_option_map = dict(old_option_map)
         for change in changes:
-            new_value_map.pop(change.old_label, None)
-            new_value_map[change.new_label] = change.new_points_delta
+            # Edits rename/reweight within a section, so the option keeps
+            # its kind (bonus stays bonus) and selection mode.
+            old_option = new_option_map.pop(change.old_label, None)
+            new_option_map[change.new_label] = RubricOptionSeed(
+                label=change.new_label,
+                points_delta=change.new_points_delta,
+                kind=old_option.kind if old_option else "partial",
+                selection_mode=(
+                    old_option.selection_mode if old_option else "checklist"
+                ),
+            )
 
         propagated_count = 0
         for submission in self._submissions:
@@ -640,7 +722,7 @@ class SubmissionFilesProvider:
             old_points = self._awarded_points_for_labels(
                 context.points,
                 response.rubric_labels,
-                old_value_map,
+                old_option_map,
             )
             if response.points_awarded is None or abs(response.points_awarded - old_points) > 1e-6:
                 continue
@@ -652,7 +734,7 @@ class SubmissionFilesProvider:
             new_points = self._awarded_points_for_labels(
                 context.points,
                 new_labels,
-                new_value_map,
+                new_option_map,
             )
 
             update_student_submission_file(
@@ -671,56 +753,40 @@ class SubmissionFilesProvider:
     def _awarded_points_for_labels(
         points: float,
         labels: tuple[str, ...],
-        rubric_value_map: dict[str, float],
+        option_map: dict[str, RubricOptionSeed],
     ) -> float:
-        """Compute saved points from persisted labels and rubric weights."""
-        selected_values = [
-            rubric_value_map[label] for label in labels if label in rubric_value_map
-        ]
+        """Compute saved points from persisted labels and rubric weights.
+
+        Bonus options are passed separately so extra credit is added after
+        the base score is clamped and never skews scoring-mode inference.
+        """
+        selected = [option_map[label] for label in labels if label in option_map]
         return awarded_points_for_rubric_selection(
             points,
-            selected_values,
-            rubric_value_map.values(),
+            [o.points_delta for o in selected if o.kind != "bonus"],
+            [o.points_delta for o in option_map.values() if o.kind != "bonus"],
+            bonus_points_values=[
+                o.points_delta for o in selected if o.kind == "bonus"
+            ],
         )
 
     @classmethod
     def _rubric_leaf_options(
         cls,
         items: list[QARubricItem],
-        *,
-        parent_labels: tuple[str, ...] = (),
     ) -> list[RubricOptionSeed]:
-        """Flatten QA rubric leaves for grade propagation helpers."""
-        options: list[RubricOptionSeed] = []
-        for item in items:
-            labels = (*parent_labels, item.label)
-            if item.subitems:
-                options.extend(
-                    cls._rubric_leaf_options(
-                        item.subitems,
-                        parent_labels=labels,
-                    )
-                )
-                continue
+        """Flatten QA rubric leaves for grade propagation helpers.
 
-            if item.points_delta is None:
-                continue
-            options.append(
-                RubricOptionSeed(
-                    label=" - ".join(labels),
-                    points_delta=item.points_delta,
-                    kind=(
-                        "correct"
-                        if labels == ("Correct",)
-                        else "incorrect"
-                        if labels == ("Incorrect",)
-                        else "partial"
-                    ),
-                    selection_mode=(
-                        "checklist"
-                        if parent_labels and parent_labels[0] == "Partially Correct"
-                        else "exclusive"
-                    ),
-                )
+        Delegates to the canonical flattener so labels, kinds (including
+        bonus), and selection modes always match the options the grading UI
+        was seeded with.
+        """
+        return [
+            RubricOptionSeed(
+                label=option.label,
+                points_delta=option.points_delta,
+                kind=option.kind,
+                selection_mode=option.selection_mode,
             )
-        return options
+            for option in flatten_rubric_options(items)
+        ]

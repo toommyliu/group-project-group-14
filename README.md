@@ -17,11 +17,16 @@
 
 ## Project Description
 
-Opengrader is a set of Python scripts to orchestrate an efficient grading workflow. Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. Timely, quality feedback helps improve student learning outcomes, and yet, today's tools fail to meet these needs.
+Opengrader is a local, offline-first exam-grading toolchain — think Gradescope, but on your own machine. Existing grading solutions aren't flexible enough to enable educators to grade assignments efficiently. Timely, quality feedback helps improve student learning outcomes, and yet, today's tools fail to meet these needs.
 
-## Proof of Concept Scope
+## Capabilities
 
-The PoC demonstrates the start of the workflow: generating templates, processing scans into structured markdown files, and a mocked TUI application. The PoC lacks the cohension of the artifact files to be used in the TUI, as most of the TUI inputs is hardcoded.
+- **Template generation** — turn a QA-format markdown answer key into printable exam PDFs (Computer Modern fonts, answer boxes, multi-version exams). Draft the QA file itself from an existing answer-key PDF or a text2qti exam.
+- **Scan ingestion** — split a bulk scanner PDF into per-student PDFs, fix out-of-order pages, and extract each response via OCR (Tesseract + OpenCV) and a local vision LLM (Ollama) into structured per-student markdown files with response image crops.
+- **Grading TUI** — Gradescope-style question-by-question rubric grading in the terminal: in-terminal response images, rubric editing, per-question statistics, anonymous grading by default (teacher mode reveals names), and automatic write-back of grades to submission files and annotated PDFs.
+- **Automated grading** — auto-score submissions against a solutions file (exact answer matching; unmatched free responses are left for manual grading).
+- **Canvas export** — push scores and per-question comments to Canvas LMS via `canvas-sak`, from the CLI or from inside the TUI.
+- **Offline-first** — no cloud APIs, no database; all state lives in files. The only network use is the localhost Ollama server and optional Canvas export.
 
 ## Prerequisites
 
@@ -70,6 +75,17 @@ Set up a Python virtual environment and install packages:
 uv sync --all-groups
 ```
 
+### Desktop App (Optional)
+
+To create a double-clickable **Opengrader** icon on your Desktop, run once from the checkout:
+
+```bash
+bash packaging/install.sh                                        # macOS / Linux
+powershell -ExecutionPolicy Bypass -File packaging\install.ps1   # Windows
+```
+
+The icon opens a terminal window and launches the TUI, quietly installing/repairing `uv`, Python 3.12, and dependencies on the way (first launch takes a minute or two; later launches are instant). While this checkout exists, every launch also re-syncs the installed copy from it, so the icon always runs the latest code. See [packaging/README.md](packaging/README.md) for details and uninstall steps.
+
 ## Usage Guide
 
 Run CLI tools:
@@ -92,8 +108,10 @@ uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
   - `generate-template --qa-file <qa.md> --output-pdf <template.pdf>`: Generate template PDFs from QA markdown.
 - `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
 - `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR.
-- `pdf-to-qa`: Convert an answer-key PDF into a QA markdown draft using OCR.
+- `pdf-to-qa-solutions`: Convert an answer-key PDF into a QA markdown draft using OCR.
+- `text2qti-to-qa`: Convert a [text2qti](https://github.com/gpoore/text2qti) exam file into QA markdown.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
+- `canvas-export`: Push scores and per-question comments from `.submission.md` files to Canvas LMS (requires `canvas-sak` setup; supports `--dry-run`).
 
 </details>
 
@@ -146,7 +164,7 @@ uv run submission-extractor \
   --output out/student-submissions/
 ```
 
-Useful `submission-file` options:
+Useful `submission-extractor` options:
 - `--dpi <N>`: Set rendering DPI for OCR and cropping. Default is `300`.
 - `--confidence-threshold <N>`: Set OCR field validation threshold. Default is `60.0`.
 - `--lang <codes>`: Set Tesseract layout language codes. Default is `eng`.
@@ -160,7 +178,7 @@ Useful `submission-file` options:
 
 Convert an answer key PDF into a QA markdown draft:
 ```bash
-uv run pdf-to-qa \
+uv run pdf-to-qa-solutions \
   --input samples/exam2b-2-answers.pdf \
   --output out/qa.md \
   --title "Midterm 1 Solutions"
@@ -173,11 +191,20 @@ uv run automated-grading \
   --input out/student-submissions/
 ```
 
+Export grades and comments to Canvas (preview with `--dry-run` first):
+```bash
+uv run canvas-export \
+  --submissions out/student-submissions/ \
+  --course "CS146" \
+  --assignment "Quiz 1" \
+  --dry-run
+```
+
 #### Example Usage Flow
 
-0. (Optional) Convert an existing answer key PDF to a template:
+0. (Optional) Convert an existing answer key PDF to a QA file:
 ```bash
-uv run pdf-to-qa --input /path/to/answer-key.pdf --output /path/to/qa.md
+uv run pdf-to-qa-solutions --input /path/to/answer-key.pdf --output /path/to/qa.md
 ```
 
 1. Generate a template from a QA file:
@@ -192,7 +219,7 @@ uv run submission-splitter --input /path/to/scan.pdf --output /path/to/split --p
 
 3. Process student submissions into structured markdown:
 ```bash
-uv run submission-file --input /path/to/split --output /path/to/student-submissions
+uv run submission-extractor --input /path/to/split --output /path/to/student-submissions
 ```
 
 Run a vision language model to extract printed and handwritten text from the processed submissions:
@@ -207,7 +234,7 @@ ollama serve
 
 Terminal 2: process the submissions with the model:
 ```bash
-uv run submission-file \
+uv run submission-extractor \
   --input samples/cs146-midterm1/split-submissions \
   --output samples/cs146-midterm1/student-submissions \
   --ollama-model qwen2.5vl:7b
@@ -216,11 +243,21 @@ uv run submission-file \
 If `ollama run` cannot connect to Ollama, start the Ollama app or run `ollama serve`
 before processing submissions.
 
-4. Launch the TUI with the generated files:
+4. (Optional) Auto-score what can be matched against a solutions file:
+```bash
+uv run automated-grading --solutions /path/to/solutions.md --input /path/to/student-submissions
+```
+
+5. Launch the TUI with the generated files:
 ```bash
 uv run tui \
   --qa-file /path/to/qa.md \
   --submissions /path/to/student-submissions
+```
+
+6. (Optional) Export grades to Canvas when grading is done:
+```bash
+uv run canvas-export --submissions /path/to/student-submissions --course "CS146" --assignment "Quiz 1" --dry-run
 ```
 
 #### Global Installation (Optional)
@@ -274,7 +311,7 @@ https://github.com/user-attachments/assets/f8938fa9-d64f-4d88-a8e4-62a48111a471
 
 - Website syncing: Sync local data to the web information securely.
 
-- Automated grading: Speed up grading for certain questions with an automated evaluator. 
+- Automated grading: Extend the current exact-match evaluator (`automated-grading`) with fuzzy, numeric, and LLM-based answer matching.
 
 - Assignment variety: Support the capability to grade Programming or Group assignments.
 

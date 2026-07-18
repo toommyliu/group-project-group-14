@@ -87,7 +87,7 @@ examples:
   uv run pdf-to-qa-solutions --input key.pdf --output out/qa.md --title "Midterm 1 Solutions"
   uv run pdf-to-qa-solutions --input samples/exam2b-2-answers.pdf --output Solutions/final_exam_solutions.md --title "Final Exam Solutions"
   uv run pdf-to-qa-solutions --input samples/exam2b-2-answers.pdf --output solutions.md --title "Midterm 1"
-  uv run pdf-to-qa-solutions --input solution_scan.pdf --output qa.md --blank-exam master_blank.pdf
+  uv run pdf-to-qa-solutions --input solution_scan.pdf --output qa.md --blank-template master_blank.pdf
 
 """
 
@@ -205,20 +205,20 @@ def find_answer_box(img_pil: Image.Image):
     return None
 
 
-def _load_blank_exam_layout(blank_exam_doc: fitz.Document) -> BlankExamTemplate:
+def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankExamTemplate:
     """
-    Parses a blank exam PDF to extract question numbers, prompts, points,
+    Parses a blank template PDF to extract question numbers, prompts, points,
     and their normalized bounding boxes from the text layer.
     """
-    questions: dict[int, QuestionLayoutInfo] = {}
+    blank_template_doc = blank_template_doc # Rename variable if needed, but keeping for now
     current_qnum: int | None = None
     current_points: float | None = None
     current_prompt_lines: list[str] = []
     # (page, y0, x0, page_w, page_h)
     current_start: tuple[int, float, float, float, float] | None = None
 
-    for pg_idx in range(len(blank_exam_doc)):
-        page = blank_exam_doc[pg_idx]
+    for pg_idx in range(len(blank_template_doc)):
+        page = blank_template_doc[pg_idx]
         page_w, page_h = page.rect.width, page.rect.height
         text_blocks = page.get_text("dict")["blocks"]
 
@@ -491,11 +491,11 @@ def setup_args() -> ArgumentParser:
         help="Title to be used in the Markdown header.",
     )
     parser.add_argument(
-        "--blank-exam",
+        "--blank-template",
         metavar="PDF",
         default=None,
         help=(
-            "Path to a blank version of the exam PDF (same layout as the "
+            "Path to a blank version of the assignment template PDF (same layout as the "
             "answer key, real text layer required). Used for layout alignment."
         ),
     )
@@ -523,9 +523,9 @@ def setup_args() -> ArgumentParser:
     return parser
 
 
-def run_cli() -> None:
+def run_cli(argv: list[str] | None = None) -> None:
     parser = setup_args()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not shutil.which("tesseract"):
         print(
@@ -590,24 +590,24 @@ def run_cli() -> None:
             print(f"Warning: Ollama VLM unavailable ({exc}). Proceeding with Tesseract only.")
             ollama_config = None
 
-    if args.blank_exam:
-        blank_exam_path = Path(args.blank_exam)
-        if not blank_exam_path.exists():
-            print(f"Error: Blank exam file not found at {blank_exam_path}", file=sys.stderr)
+    if args.blank_template:
+        blank_template_path = Path(args.blank_template)
+        if not blank_template_path.exists():
+            print(f"Error: Blank template file not found at {blank_template_path}", file=sys.stderr)
             if ollama_server_proc:
                 ollama_server_proc.terminate()
             if ollama_log_file:
                 ollama_log_file.close()
             sys.exit(1)
         
-        blank_exam_doc = fitz.open(blank_exam_path)
-        print(f"Loading blank exam layout from {blank_exam_path}...")
-        blank_layout = _load_blank_exam_layout(blank_exam_doc)
-        blank_exam_doc.close()
+        blank_template_doc = fitz.open(blank_template_path)
+        print(f"Loading blank template layout from {blank_template_path}...")
+        blank_layout = _load_blank_template_layout(blank_template_doc)
+        blank_template_doc.close()
 
         if not blank_layout.questions:
-            print("Warning: No questions detected in blank exam. Falling back to text layer extraction.", file=sys.stderr)
-            # Fallback to text layer extraction if blank exam is empty
+            print("Warning: No questions detected in blank template. Falling back to text layer extraction.", file=sys.stderr)
+            # Fallback to text layer extraction if blank template is empty
             q_starts, max_q = detect_question_positions(answer_key_doc)
             boxes = compute_bounding_boxes(q_starts, max_q)
             for qnum, page_ranges in boxes.items():

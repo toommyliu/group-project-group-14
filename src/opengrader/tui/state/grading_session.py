@@ -6,6 +6,7 @@ from opengrader.core.qa_file.scoring import (
     score_adjustment_for_rubric_selection,
     ungraded_score_adjustment,
 )
+from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class QuestionGrade:
     points_awarded: float | None = None
     selected_option_indices: set[int] = field(default_factory=set)
     comment: str = ""
+    question_type: QuestionType = FREE_RESPONSE
 
     @property
     def points_delta(self) -> float:
@@ -51,13 +53,28 @@ class QuestionGrade:
 
     @property
     def score_adjustment(self) -> float:
-        rubric_values = [option.points_delta for option in self.rubric_options]
-        if not self.selected_option_indices:
-            return ungraded_score_adjustment(self.points, rubric_values)
+        # Bonus deltas are additive extra credit: they never take part in
+        # base-score clamping or in inferring the rubric's scoring mode.
+        base_values = [
+            option.points_delta
+            for option in self.rubric_options
+            if option.kind != "bonus"
+        ]
+        selected = self.selected_options()
+        selected_base = [o.points_delta for o in selected if o.kind != "bonus"]
+        selected_bonus = [o.points_delta for o in selected if o.kind == "bonus"]
+        if not selected:
+            return ungraded_score_adjustment(self.points, base_values)
+        if not selected_base:
+            # Only bonus picked: the base outcome is still ungraded.
+            return ungraded_score_adjustment(self.points, base_values) + sum(
+                selected_bonus
+            )
         return score_adjustment_for_rubric_selection(
             self.points,
-            [option.points_delta for option in self.selected_options()],
-            rubric_values,
+            selected_base,
+            base_values,
+            bonus_points_values=selected_bonus,
         )
 
     @property
@@ -75,6 +92,7 @@ class StudentGradingRun:
     questions: list[QuestionGrade] = field(default_factory=list)
     current_question_index: int = 0
     max_points: float = 100.0
+    source_pdf_name: str = ""
 
     def reset(
         self, *, student_id: int | None, student_name: str, assignment_name: str
@@ -84,6 +102,7 @@ class StudentGradingRun:
         self.assignment_name = assignment_name
         self.current_question_index = 0
         self.questions = []
+        self.source_pdf_name = ""
 
     @property
     def current_question(self) -> QuestionGrade | None:
@@ -128,24 +147,43 @@ class StudentGradingRun:
         self.select_question(self.current_question_index - 1)
 
     def apply_option(self, option_index: int) -> None:
-        """Apply exclusive or checklist selection semantics for one rubric row."""
+        """Apply selection semantics for one rubric row.
+
+        Bonus rows toggle independently — extra credit stacks on top of the
+        base outcome. Base rows never disturb bonus picks: Correct/Incorrect
+        replace the other base rows (exclusive shortcuts), while
+        partial-credit rows compose as a checklist.
+        """
         question = self.current_question
         if question is None:
             return
         if option_index < 0 or option_index >= len(question.rubric_options):
             return
-        option = question.rubric_options[option_index]
-        # Exclusive rows are shortcuts for full-credit or zero-credit outcomes; checklist rows compose.
-        if option.selection_mode == "exclusive":
-            question.selected_option_indices = {option_index}
+        options = question.rubric_options
+        option = options[option_index]
+
+        if option.kind == "bonus":
+            if option_index in question.selected_option_indices:
+                question.selected_option_indices.remove(option_index)
+            else:
+                question.selected_option_indices.add(option_index)
             return
 
-        exclusive_indices = {
+        if option.selection_mode == "exclusive":
+            kept_bonus = {
+                index
+                for index in question.selected_option_indices
+                if options[index].kind == "bonus"
+            }
+            question.selected_option_indices = kept_bonus | {option_index}
+            return
+
+        exclusive_base_indices = {
             index
-            for index, candidate in enumerate(question.rubric_options)
-            if candidate.selection_mode == "exclusive"
+            for index, candidate in enumerate(options)
+            if candidate.selection_mode == "exclusive" and candidate.kind != "bonus"
         }
-        question.selected_option_indices.difference_update(exclusive_indices)
+        question.selected_option_indices.difference_update(exclusive_base_indices)
         if option_index in question.selected_option_indices:
             question.selected_option_indices.remove(option_index)
         else:

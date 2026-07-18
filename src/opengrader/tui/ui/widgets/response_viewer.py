@@ -77,14 +77,27 @@ class ResponseViewer(ScrollableContainer):
             self._image_widget.styles.width = "auto"
             self._image_widget.styles.height = "auto"
             self.mount(self._image_widget)
-            self.call_after_refresh(self.refresh, layout=True)
+            self.call_after_refresh(self._refresh_after_image_change)
             self.scroll_home(animate=False)
             return
 
         self._image_widget.image = image_path
         self._at_limit = False
-        self.call_after_refresh(self.refresh, layout=True)
+        self.call_after_refresh(self._refresh_after_image_change)
         self.scroll_home(animate=False)
+
+    def _refresh_after_image_change(self) -> None:
+        """Relayout, then repaint the whole screen.
+
+        Terminal graphics outlive Textual's cell diffing: sixel pixels stay
+        painted (the sixel renderable's cleanup is a no-op) and stale TGP
+        placeholders can survive a partial repaint. When the new image is
+        smaller than the previous one, the freed cells would keep showing the
+        previous image unless every cell is re-emitted.
+        """
+        self.refresh(layout=True)
+        if self.is_attached:
+            self.screen.refresh()
 
     def zoom_in(self) -> None:
         if self._image_widget and not self._at_limit:
@@ -101,7 +114,8 @@ class ResponseViewer(ScrollableContainer):
                 max(self._image_widget.fit_width_fraction - 0.1, 0.1), 1
             )
             self.post_message(self.ZoomChanged(self._image_widget.fit_width_fraction))
-            self.call_after_refresh(self.refresh, layout=True)
+            # Shrinking leaves graphics remnants just like an image swap.
+            self.call_after_refresh(self._refresh_after_image_change)
 
     def reset_zoom(self) -> None:
         if self._image_widget:
@@ -109,7 +123,7 @@ class ResponseViewer(ScrollableContainer):
             self._image_widget.fit_width_fraction = 0.7
             self.post_message(self.ZoomChanged(0.7))
             self.scroll_home(animate=False)
-            self.call_after_refresh(self.refresh, layout=True)
+            self.call_after_refresh(self._refresh_after_image_change)
 
     def on_mouse_scroll_up(self, event: events.MouseScrollUp) -> None:
         if event.ctrl or event.meta:

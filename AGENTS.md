@@ -22,3 +22,4 @@ Long term maintainability is a core priority. Prefer extracting shared logic int
 - `src/opengrader/core`: Core data models and utilities for PDF processing, OCR, submissions, and grading workflow primitives
 - `src/opengrader/cli`: Standalone CLI tools for template generation, submission splitting, OCR extraction, and converting PDFs to markdown format
 - `src/opengrader/tui`: The main TUI application. Orchestrates grading by ingesting parsed student submission markdown files and enabling question-by-question grading.
+- `packaging`: End-user distribution — self-updating bootstrap launchers and desktop-shortcut installers for macOS/Linux/Windows (see `packaging/README.md`).

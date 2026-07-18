@@ -5,6 +5,7 @@ from typing import Protocol
 
 from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
 from opengrader.tui.data import Provider, QuestionSeed, RubricOptionSeed
+from opengrader.tui.formatting import format_question_label
 from opengrader.tui.state import (
     PAGE_GRADE,
     PAGE_QA_PICKER,
@@ -107,7 +108,9 @@ class GradeController:
             return
 
         self._state.selection.question_id = current.question_id
-        self._state.selection_labels["question"] = current.question_id
+        self._state.selection_labels["question"] = format_question_label(
+            current.question_id
+        )
 
         first_ungraded = self._find_ungraded_student_index(start=0, direction=1)
         student_index = first_ungraded if first_ungraded is not None else 0
@@ -125,16 +128,21 @@ class GradeController:
         student_item = self._state.student_items[index]
         self._state.selection.student_item_id = student_item.item_id
         self._state.selection.student_id = self._numeric_id(student_item.item_id)
-        self._state.selection_labels["student"] = student_item.display_id
+        self._state.selection_labels["student"] = self._student_display_label(
+            student_item
+        )
 
         self._state.grading_run.reset(
             student_id=self._state.selection.student_id,
-            student_name=student_item.display_id,
+            student_name=self._student_display_label(student_item),
             assignment_name=self._state.selection_labels.get("assignment")
             or "Assignment",
         )
-        self._state.grading_run.questions = self._question_grades(
-            self._build_question_seeds_for_selection()
+        seeds = self._build_question_seeds_for_selection()
+        self._state.grading_run.questions = self._question_grades(seeds)
+        # Submission-level: every seed carries the same source PDF name.
+        self._state.grading_run.source_pdf_name = (
+            seeds[0].source_pdf_name if seeds else ""
         )
         self._state.grading_run.max_points = self._max_points(
             self._state.grading_run.questions
@@ -299,7 +307,8 @@ class GradeController:
                 qa_screen = self._app.get_qa_picker_screen()
                 qa_screen.move_to_index(index)
                 qa_screen.set_status(
-                    f"Jumped to {question.question_id} ({graded_count}/{total_students} graded)"
+                    f"Jumped to {format_question_label(question.question_id)} "
+                    f"({graded_count}/{total_students} graded)"
                 )
                 return
 
@@ -443,6 +452,43 @@ class GradeController:
             return
         self._state.active_student_index = 0
         self.open_student_by_index(0)
+
+    def _student_display_label(self, student_item: NavItem) -> str:
+        """Return the student label for the current anonymity mode."""
+        if self._state.teacher_mode:
+            return student_item.label
+        return student_item.display_id
+
+    def toggle_teacher_mode(self) -> None:
+        """Toggle between anonymous grading (IDs) and teacher mode (names)."""
+        self._state.teacher_mode = not self._state.teacher_mode
+        status = (
+            "Teacher mode on: showing student names."
+            if self._state.teacher_mode
+            else "Teacher mode off: anonymous grading by student ID."
+        )
+
+        current_student = self._current_student_item()
+        if current_student is not None:
+            label = self._student_display_label(current_student)
+            self._state.selection_labels["student"] = label
+            self._state.grading_run.student_name = label
+
+        # Keep the picker's Students tabs in sync even when toggling from the
+        # grade page, so the Name tab is ready (or gone) on return.
+        qa_screen = self._app.get_qa_picker_screen()
+        apply_teacher_mode = getattr(qa_screen, "apply_teacher_mode", None)
+        if callable(apply_teacher_mode):
+            apply_teacher_mode()
+
+        if self._on_grade_page():
+            self.refresh_grade_screen(status=status)
+            return
+
+        student = qa_screen.selected_student()
+        if student is not None and qa_screen.students_have_focus():
+            qa_screen.show_student_details(student)
+        qa_screen.set_status(status)
 
     def refresh_grade_screen(self, status: str) -> None:
         grade_screen = self._app.get_grade_screen()
@@ -829,6 +875,7 @@ class GradeController:
                 points_awarded=seed.points_awarded,
                 selected_option_indices=GradeController._selected_option_indices(seed),
                 comment=seed.analysis,
+                question_type=seed.question_type,
             )
             for seed in seeds
         ]
@@ -869,9 +916,10 @@ class GradeController:
             items.append(
                 NavItem(
                     item_id=question.question_id,
-                    label=question.question_id,
+                    label=format_question_label(question.question_id),
                     meta=f"{graded_count}/{total_students} graded",
                     description=question.prompt or "",
+                    question_type=question.question_type,
                 )
             )
         return items

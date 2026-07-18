@@ -23,4 +23,4 @@ def test_jump_ungraded_question_moves_to_first_incomplete_question() -> None:
     controller.qa_jump_ungraded_question()
 
     assert app.qa_screen.moved_to_index == 1
-    assert "Jumped to Q2" in app.qa_screen.status
+    assert "Jumped to Question 2" in app.qa_screen.status
