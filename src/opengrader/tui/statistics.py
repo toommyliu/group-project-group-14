@@ -4,8 +4,6 @@ from dataclasses import dataclass
 from io import BytesIO
 import statistics
 
-from matplotlib.figure import Figure
-from matplotlib.ticker import MaxNLocator
 from PIL import Image as PILImage
 
 from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
@@ -221,6 +219,12 @@ def question_statistics_chart_image(
     if stats.graded_count == 0 or not stats.buckets:
         return None
 
+    # Import lazily: matplotlib (~500ms cold) is only needed when a chart is
+    # actually drawn, and importing at module load would tax every TUI startup
+    # (statistics.py is on the grade-controller import chain).
+    from matplotlib.figure import Figure
+    from matplotlib.ticker import MaxNLocator
+
     dpi = 140
     figure = Figure(
         figsize=(width / dpi, height / dpi),
@@ -267,6 +271,244 @@ def question_statistics_chart_image(
             fontsize=8,
             fontweight="bold",
         )
+
+    figure.tight_layout(pad=0.7)
+    buffer = BytesIO()
+    figure.savefig(buffer, format="png", facecolor=figure.get_facecolor())
+    buffer.seek(0)
+    return PILImage.open(buffer).convert("RGB")
+
+
+# Separation band → bar color, matching tui/formatting.py's palette so the
+# chart and the on-screen chips read as one system.
+_SEPARATION_CHART_COLOR = {
+    "excellent": "#A3BE8C",
+    "good": "#8FBCBB",
+    "fair": "#EBCB8B",
+    "weak": "#D08770",
+    "negative": "#BF616A",
+    "insufficient_data": "#5B6472",
+}
+
+
+def item_analysis_overview_chart_image(
+    report,
+    *,
+    width: int = 1100,
+    height: int = 520,
+) -> PILImage.Image | None:
+    """Horizontal difficulty bars, colored by separation, one row per question.
+
+    A single at-a-glance read of the whole assignment: bar length is difficulty
+    (longer = easier), bar color is how well the item separates strong from
+    weak students (green good → red negative), and a shaded band marks the
+    healthy 50–85% difficulty zone. Returns ``None`` when nothing is gradeable.
+    """
+    items = [item for item in report.items if item.difficulty is not None]
+    if not items:
+        return None
+
+    # Import lazily: see question_statistics_chart_image — matplotlib is only
+    # needed on this opt-in chart-rendering path.
+    from matplotlib.figure import Figure
+
+    dpi = 140
+    row_height = 0.32
+    fig_height = max(2.4, 1.1 + row_height * len(items))
+    figure = Figure(
+        figsize=(width / dpi, min(height / dpi, fig_height)),
+        dpi=dpi,
+        facecolor="#181818",
+    )
+    axis = figure.subplots()
+    axis.set_facecolor("#181818")
+
+    # Top-to-bottom in question order.
+    ordered = list(items)
+    positions = list(range(len(ordered)))[::-1]
+    difficulties = [item.difficulty * 100 for item in ordered]
+    colors = [
+        _SEPARATION_CHART_COLOR.get(
+            str(getattr(item.separation_band, "value", item.separation_band)),
+            "#5B6472",
+        )
+        for item in ordered
+    ]
+
+    # Healthy difficulty zone.
+    axis.axvspan(50, 85, color="#2E3440", alpha=0.55, zorder=0)
+
+    bars = axis.barh(
+        positions,
+        difficulties,
+        color=colors,
+        edgecolor="#D8DEE9",
+        linewidth=0.6,
+        height=0.62,
+        zorder=3,
+    )
+
+    for item, bar in zip(ordered, bars, strict=True):
+        label = (
+            f"{item.separation:+.2f}" if item.separation is not None else "n/a"
+        )
+        axis.text(
+            min(bar.get_width() + 2, 101),
+            bar.get_y() + bar.get_height() / 2,
+            label,
+            va="center",
+            ha="left",
+            color="#AEB6BF",
+            fontsize=7,
+        )
+
+    axis.set_yticks(positions)
+    axis.set_yticklabels(
+        [format_question_label(item.question_id) for item in ordered],
+        color="#D8DEE9",
+        fontsize=8,
+    )
+    axis.set_xlim(0, 112)
+    axis.set_xticks([0, 25, 50, 75, 100])
+    axis.set_xlabel("Difficulty (% of points earned) · label = separation", color="#AEB6BF", fontsize=8)
+    axis.set_title(
+        "Item difficulty & separation",
+        color="#E4E4E4",
+        fontsize=10,
+        loc="left",
+        pad=8,
+    )
+    axis.grid(axis="x", color="#3B424A", linewidth=0.8, alpha=0.6)
+    axis.set_axisbelow(True)
+    axis.tick_params(axis="x", colors="#AEB6BF", labelsize=7, length=0)
+    axis.tick_params(axis="y", colors="#D8DEE9", length=0)
+    for spine in axis.spines.values():
+        spine.set_color("#4B5563")
+        spine.set_linewidth(0.8)
+
+    figure.tight_layout(pad=0.7)
+    buffer = BytesIO()
+    figure.savefig(buffer, format="png", facecolor=figure.get_facecolor())
+    buffer.seek(0)
+    return PILImage.open(buffer).convert("RGB")
+
+
+def _percent_bucket_index(percent: float) -> int:
+    """Map a 0-100(+) percentage to a decile bucket index (0..10; 10 = 100+)."""
+    if percent >= 100.0:
+        return 10
+    if percent < 0.0:
+        return 0
+    return int(percent // 10)
+
+
+_CURVE_BUCKET_LABELS: tuple[str, ...] = (
+    "0-9",
+    "10s",
+    "20s",
+    "30s",
+    "40s",
+    "50s",
+    "60s",
+    "70s",
+    "80s",
+    "90s",
+    "100+",
+)
+
+
+def curve_distribution_chart_image(
+    distribution: list[tuple[float, float | None]],
+    curve,
+    *,
+    width: int = 1100,
+    height: int = 420,
+) -> PILImage.Image | None:
+    """Grouped raw-vs-curved score histogram (percentage deciles) for a curve.
+
+    ``distribution`` is ``(raw_total, possible)`` per student. Only students with
+    a known, positive possible contribute (percentages need a denominator); when
+    none do, returns ``None`` so the modal hides the chart.
+    """
+    from opengrader.core.curve import apply_curve
+
+    raw_pcts: list[float] = []
+    curved_pcts: list[float] = []
+    for raw, possible in distribution:
+        if not possible or possible <= 0:
+            continue
+        raw_pcts.append(raw / possible * 100.0)
+        curved_pcts.append(apply_curve(raw, possible, curve) / possible * 100.0)
+
+    if not raw_pcts:
+        return None
+
+    # Import lazily: see question_statistics_chart_image — matplotlib is only
+    # needed on this opt-in chart-rendering path.
+    from matplotlib.figure import Figure
+    from matplotlib.ticker import MaxNLocator
+
+    n_buckets = len(_CURVE_BUCKET_LABELS)
+    raw_counts = [0] * n_buckets
+    curved_counts = [0] * n_buckets
+    for pct in raw_pcts:
+        raw_counts[_percent_bucket_index(pct)] += 1
+    for pct in curved_pcts:
+        curved_counts[_percent_bucket_index(pct)] += 1
+
+    dpi = 140
+    figure = Figure(
+        figsize=(width / dpi, height / dpi),
+        dpi=dpi,
+        facecolor="#181818",
+    )
+    axis = figure.subplots()
+    axis.set_facecolor("#181818")
+
+    positions = list(range(n_buckets))
+    bar_width = 0.4
+    axis.bar(
+        [p - bar_width / 2 for p in positions],
+        raw_counts,
+        width=bar_width,
+        color="#5B6472",
+        edgecolor="#D8DEE9",
+        linewidth=0.6,
+        label="Raw",
+    )
+    axis.bar(
+        [p + bar_width / 2 for p in positions],
+        curved_counts,
+        width=bar_width,
+        color="#A3BE8C" if curve.is_active else "#81A1C1",
+        edgecolor="#D8DEE9",
+        linewidth=0.6,
+        label="Curved" if curve.is_active else "Raw (no curve)",
+    )
+
+    max_count = max([*raw_counts, *curved_counts, 1])
+    axis.set_title(
+        "Score distribution — raw vs curved (% of possible)",
+        color="#E4E4E4",
+        fontsize=10,
+        loc="left",
+        pad=8,
+    )
+    axis.set_ylabel("Students", color="#AEB6BF", fontsize=8)
+    axis.set_ylim(0, max_count * 1.18)
+    axis.set_xticks(positions)
+    axis.set_xticklabels(_CURVE_BUCKET_LABELS)
+    axis.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=4))
+    axis.grid(axis="y", color="#3B424A", linewidth=0.8, alpha=0.7)
+    axis.set_axisbelow(True)
+    axis.tick_params(axis="x", colors="#AEB6BF", labelsize=7, length=0, pad=5)
+    axis.tick_params(axis="y", colors="#AEB6BF", labelsize=7, length=0)
+    for spine in axis.spines.values():
+        spine.set_color("#4B5563")
+        spine.set_linewidth(0.8)
+    legend = axis.legend(loc="upper left", fontsize=7, framealpha=0.0)
+    for text in legend.get_texts():
+        text.set_color("#D8DEE9")
 
     figure.tight_layout(pad=0.7)
     buffer = BytesIO()

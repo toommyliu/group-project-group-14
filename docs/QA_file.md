@@ -187,6 +187,103 @@ value:
     - Incorrect (-10)
 ```
 
+### Default Comments (auto-inserted feedback)
+
+Any rubric option — a top-level `Correct`/`Incorrect`, a direct `Partially Correct`,
+or a checklist subitem — may carry a `**Comment**` bullet. When a grader selects
+that option in the TUI, its comment text is appended to the question's comment box
+automatically, so the most common feedback is written with a single keystroke.
+
+```md
+- (10 points) Explain recursion.
+  - **Rubric**
+    - Correct (+0)
+      - **Comment** Clear explanation of the base and recursive cases.
+    - Partially Correct
+      - Missing base case (-4)
+        - **Comment** Remember to state the base case that stops the recursion.
+      - Vague wording (-6)
+    - Incorrect (-10)
+      - **Comment** This does not describe recursion; see me in office hours.
+```
+
+Behavior:
+
+- **Append-only and de-duplicated.** The comment is added only when it is not
+  already present, so re-picking or toggling an option never repeats it, and
+  switching options never deletes text you have already written or edited.
+- **Distinct from grader notes.** Other bullets under an option remain
+  grader-facing notes; only the `**Comment**` bullet is auto-inserted.
+- **Optional.** An option with no `**Comment**` bullet inserts nothing.
+- The inline form (`**Comment** text`) shown above is canonical; the text
+  round-trips onto one line when the QA file is re-saved.
+
+### Learning Outcomes (`**Outcome**`)
+
+Any question may be tagged with the learning outcomes it measures, using an
+optional, repeatable `**Outcome**` bullet. This is what turns a pile of graded
+exams into the per-outcome mastery evidence a programme or accreditation review
+asks for.
+
+```md
+- (10 points) Derive the recurrence for merge sort.
+  - **Correct**
+    - T(n) = 2T(n/2) + O(n)
+  - **Outcome** CLO3
+  - **Outcome** ABET-1
+```
+
+Three authoring forms are accepted and all mean the same thing:
+
+```md
+  - **Outcome** CLO3                  # inline, one per bullet (canonical)
+  - **Outcomes** CLO1, CLO2           # comma-separated
+  - **Outcomes**                      # nested
+    - CLO1
+    - CLO2
+```
+
+Behavior:
+
+- **Optional and free-form.** The name is *your* vocabulary — `CLO3`,
+  `ABET-2`, `Applies Bayes' rule`. It is never interpreted, and never
+  normalized, so two outcomes you meant to keep apart stay apart.
+- **Repeatable.** One question can serve several outcomes, and one outcome is
+  normally spread across several questions — that is the point.
+- **Subquestions inherit.** Tagging a multi-part question once applies the tag
+  to every part; a part with its own `**Outcome**` overrides it.
+
+  ```md
+  - (6 points) Two-part question.
+    - **Outcome** CLO2          # applies to (a)
+    - (3 points) Part a.
+      - **Correct**
+        - ...
+    - (3 points) Part b.
+      - **Correct**
+        - ...
+      - **Outcome** CLO4        # overrides for (b)
+  ```
+- **Costs nothing when unused.** A QA file with no `**Outcome**` bullets is
+  byte-identical after a load/save, and every consumer below simply omits the
+  outcome section.
+
+Where the tags show up (all read the answer key, since that is where the tags
+live — the submissions carry only points):
+
+| Where | How |
+| --- | --- |
+| `item-analysis --solutions solutions.md` | a per-outcome mastery section |
+| `grades-export --solutions solutions.md` | one `outcome:<NAME> %` column per outcome |
+| `return-bundle --solutions solutions.md` | a Learning outcomes page in the analysis PDF |
+| `course-grades --course course.toml` | mastery pooled across every assignment |
+
+Mastery is measured in **points, not questions** — an outcome carried by a
+20-point essay and a 2-point definition is dominated by the essay, which is what
+your own point weighting already said. A student is counted as having mastered
+an outcome at 70% of its points by default (`--mastery-threshold`), and a
+question nobody has graded yet contributes nothing rather than a zero.
+
 ### Saved Rubric Labels
 
 Student submission markdown stores the selected rubric labels in the `Rubric:`

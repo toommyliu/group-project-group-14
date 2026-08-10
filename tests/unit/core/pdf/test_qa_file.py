@@ -6,10 +6,12 @@ from opengrader.core.qa_file import (
     QARubricFlatOption,
     flatten_rubric_options,
     parse_qa_markdown,
+    qa_question_type,
     qa_to_template_questions,
     render_qa_markdown,
     replace_qa_rubric_options,
 )
+from opengrader.core.question_types import MULTIPLE_ANSWER
 
 
 def _flat(
@@ -586,27 +588,39 @@ def test_parse_rejects_multiple_choice_question_with_non_contiguous_labels() -> 
         parse_qa_markdown(content)
 
 
-def test_parse_rejects_multiple_choice_question_without_single_correct_label() -> None:
+def test_parse_rejects_multiple_choice_question_without_a_correct_label() -> None:
     missing_correct = """
 - (1 points) Bad multiple choice
   - **Choices**
     - A) one
     - B) two
 """
-    multiple_correct = """
-- (1 points) Bad multiple choice
-  - **Choices**
-    - A) one
-    - B) two
-  - **Correct**
-    - A
-    - B
-"""
-
-    with pytest.raises(ValueError, match="exactly one correct option label"):
+    with pytest.raises(ValueError, match="at least one correct option label"):
         parse_qa_markdown(missing_correct)
-    with pytest.raises(ValueError, match="exactly one correct option label"):
-        parse_qa_markdown(multiple_correct)
+
+
+def test_parse_multiple_correct_labels_is_select_all_that_apply() -> None:
+    """Two or more correct labels make a 'select all that apply' question."""
+    select_all = """
+- (2 points) Pick every prime
+  - **Choices**
+    - A) 2
+    - B) 4
+    - C) 5
+  - **Correct**
+    - C
+    - A
+"""
+    document = parse_qa_markdown(select_all)
+    question = document.questions[0]
+    assert question.correct_choice_label is None
+    # Canonicalized to choice order regardless of how they were listed.
+    assert question.correct_choice_labels == ("A", "C")
+    assert qa_question_type(question) == MULTIPLE_ANSWER
+    # Round-trips through render without loss.
+    assert parse_qa_markdown(render_qa_markdown(document)).questions[
+        0
+    ].correct_choice_labels == ("A", "C")
 
 
 def test_parse_rejects_multiple_choice_question_with_invalid_correct_label() -> None:
@@ -783,3 +797,100 @@ def test_flatten_rubric_options_lists_bonus_after_incorrect() -> None:
     ]
     assert options[-1].kind == "bonus"
     assert options[-1].selection_mode == "checklist"
+
+
+def _rubric_with_comments() -> str:
+    return "\n".join(
+        [
+            "- (10 points) Explain recursion.",
+            "  - **Rubric**",
+            "    - Correct (+0)",
+            "      - **Comment** Clear explanation of the base case.",
+            "    - Partially Correct",
+            "      - Missing base case (-4)",
+            "        - **Comment** You did not mention the base case.",
+            "      - Vague wording (-6)",
+            "    - Bonus",
+            "      - Elegant (+2)",
+            "        - **Comment** Beautifully concise.",
+            "    - Incorrect (-10)",
+            "      - **Comment** This does not describe recursion.",
+            "      - grader note: be lenient on wording",
+        ]
+    )
+
+
+def test_parse_rubric_default_comments_on_leaf_options() -> None:
+    document = parse_qa_markdown(_rubric_with_comments())
+    options = flatten_rubric_options(document.questions[0].rubric)
+    by_label = {option.label: option for option in options}
+
+    assert by_label["Correct"].default_comment == "Clear explanation of the base case."
+    assert (
+        by_label["Partially Correct - Missing base case"].default_comment
+        == "You did not mention the base case."
+    )
+    # A partial leaf without a **Comment** bullet has no default comment.
+    assert by_label["Partially Correct - Vague wording"].default_comment is None
+    assert by_label["Bonus - Elegant"].default_comment == "Beautifully concise."
+    assert (
+        by_label["Incorrect"].default_comment == "This does not describe recursion."
+    )
+
+
+def test_rubric_comment_is_kept_apart_from_notes() -> None:
+    document = parse_qa_markdown(_rubric_with_comments())
+    incorrect = next(
+        item for item in document.questions[0].rubric if item.label == "Incorrect"
+    )
+    # The **Comment** bullet becomes the default comment; other bullets remain
+    # grader-facing notes, never mixed in.
+    assert incorrect.default_comment == "This does not describe recursion."
+    assert incorrect.notes == ["grader note: be lenient on wording"]
+
+
+def test_rubric_default_comments_round_trip() -> None:
+    document = parse_qa_markdown(_rubric_with_comments())
+    rendered = render_qa_markdown(document)
+
+    assert "**Comment** Clear explanation of the base case." in rendered
+    # Re-rendering is byte-stable (canonical **Comment** placement).
+    assert render_qa_markdown(parse_qa_markdown(rendered)) == rendered
+
+    reparsed = flatten_rubric_options(parse_qa_markdown(rendered).questions[0].rubric)
+    assert [o.default_comment for o in reparsed] == [
+        o.default_comment
+        for o in flatten_rubric_options(document.questions[0].rubric)
+    ]
+
+
+def test_replace_qa_rubric_options_preserves_default_comments() -> None:
+    document = parse_qa_markdown(_rubric_with_comments())
+    options = flatten_rubric_options(document.questions[0].rubric)
+
+    # The rubric editor's save path re-derives the rubric from flat options;
+    # authored comments must survive that round-trip.
+    replace_qa_rubric_options(document, "q1", options)
+    preserved = flatten_rubric_options(document.questions[0].rubric)
+
+    assert [o.default_comment for o in preserved] == [
+        o.default_comment for o in options
+    ]
+
+
+def test_rubric_without_comments_is_unaffected() -> None:
+    document = parse_qa_markdown(
+        "\n".join(
+            [
+                "- (10 points) Question?",
+                "  - **Rubric**",
+                "    - Correct (+0)",
+                "    - Partially Correct (-5)",
+                "    - Incorrect (-10)",
+            ]
+        )
+    )
+    options = flatten_rubric_options(document.questions[0].rubric)
+    assert all(option.default_comment is None for option in options)
+    # No **Comment** bullet is emitted when none was authored.
+    assert "**Comment**" not in render_qa_markdown(document)

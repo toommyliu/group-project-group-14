@@ -1,20 +1,36 @@
+from __future__ import annotations
+
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import fitz
+from opengrader.core.qr_codes import OpengraderCode, render_qr_png
+from opengrader.core.roster import RosterStudent, assign_student_ids
 
 from .constants import LETTER_H, LETTER_W
 from .draw import (
     build_info_section,
     create_page,
     draw_continued_page_header,
+    draw_qr_on_page,
     draw_questions_on_page,
 )
 from .fonts import register_page_fonts, resolve_template_fonts
-from .utils import default_subquestion_label
+from .master_key import draw_master_key_page
 
-QuestionInput = tuple[str, int, str] | dict[str, Any]
+# Re-exported so ``opengrader.core.pdf.templates.generate.QuestionInput`` keeps
+# working for existing callers — the definition itself lives in ``.utils``
+# (see there for why) so importing it doesn't require this fitz-heavy module.
+from .utils import QuestionInput, default_subquestion_label
+
+# fitz is only needed for type annotations here and for the two functions
+# below that actually build a document (``_build_template_doc`` and
+# ``generate_personalized_batch``), which import it locally right before
+# constructing a ``fitz.Document()``. Keeping it out of module scope matters
+# because this module sits on the TUI startup chain (reached while building
+# the qa-file setup screen) even for sessions that never generate a template.
+if TYPE_CHECKING:
+    import fitz
 
 
 def _resolve_continued_page_header(title: str, override: str | None) -> str:
@@ -131,6 +147,7 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
     seen_ids: set[str] = set()
 
     for i, raw_question in enumerate(questions):
+        answer_hint = ""
         if isinstance(raw_question, tuple):
             if len(raw_question) != 3:
                 raise ValueError(
@@ -147,6 +164,7 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
             points = raw_question.get("points", 0)
             prompt = raw_question.get("prompt", "")
             subquestions_raw = raw_question.get("subquestions", [])
+            answer_hint = str(raw_question.get("answer_hint", "")).strip()
             choices = _normalize_choices(
                 raw_question.get("choices", []),
                 context=f"question[{i}]",
@@ -170,6 +188,7 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
                 "points": _normalize_points(points, context=f"question[{qid_str!r}]"),
                 "prompt": str(prompt).strip(),
                 "choices": choices,
+                "answer_hint": answer_hint,
                 "subquestions": _normalize_subquestions(
                     qid_str,
                     subquestions_raw,
@@ -181,107 +200,27 @@ def _normalize_questions(questions: list[QuestionInput]) -> list[dict[str, Any]]
     return normalized
 
 
-def generate_template_pdf(
-    output_path: Path,
-    version: str,
-    questions: list[QuestionInput],
-    title: str,
-    instructions: str | None = None,
-    continued_page_header: str | None = None,
-    page_w: float = LETTER_W,
-    page_h: float = LETTER_H,
-    font_regular_file: str | Path | None = None,
-    font_bold_file: str | Path | None = None,
-    start_questions_on_first_page: bool = True,
-) -> None:
-    fonts = resolve_template_fonts(
-        regular_file=font_regular_file, bold_file=font_bold_file
-    )
-    if fonts.warning:
-        print(fonts.warning, file=sys.stderr)
-
-    normalized_questions = _normalize_questions(questions)
-
-    continued_header_text = _resolve_continued_page_header(title, continued_page_header)
-    doc = fitz.Document()
-    page = create_page(doc, page_w, page_h)
-    register_page_fonts(page, fonts)
-    start_y, _ = build_info_section(
-        page,
-        "",
-        "",
-        page_w,
-        f"{title} ({version})",
-        instructions,
-        fonts,
-    )
-
-    remaining = normalized_questions[:]
-    page_number = 1
-    current_page = page
-    current_start_y = start_y
-
-    if not start_questions_on_first_page and remaining:
-        page_number = 2
-        current_page = create_page(doc, page_w, page_h)
-        register_page_fonts(current_page, fonts)
-        current_start_y = draw_continued_page_header(
-            page=current_page,
-            page_w=page_w,
-            header_text=continued_header_text,
-            fonts=fonts,
-        )
-
-    while remaining:
-        drawn_count, _ = draw_questions_on_page(
-            current_page,
-            page_number,
-            remaining,
-            page_w,
-            page_h,
-            current_start_y,
-            fonts,
-        )
-        if drawn_count <= 0:
-            raise ValueError("No questions could be drawn on the current page")
-        remaining = remaining[drawn_count:]
-        if not remaining:
-            break
-
-        page_number += 1
-        current_page = create_page(doc, page_w, page_h)
-        register_page_fonts(current_page, fonts)
-        current_start_y = draw_continued_page_header(
-            page=current_page,
-            page_w=page_w,
-            header_text=continued_header_text,
-            fonts=fonts,
-        )
-
-    doc.save(str(output_path), garbage=4, deflate=True)
-    doc.close()
-
-
-def generate_submission_pdf(
-    output_path: Path,
-    version: str,
+def _build_template_doc(
     name: str,
     student_id: str,
     questions: list[QuestionInput],
     title: str,
-    instructions: str | None = None,
-    continued_page_header: str | None = None,
-    page_w: float = LETTER_W,
-    page_h: float = LETTER_H,
-    font_regular_file: str | Path | None = None,
-    font_bold_file: str | Path | None = None,
-    start_questions_on_first_page: bool = True,
-) -> None:
-    fonts = resolve_template_fonts(
-        regular_file=font_regular_file, bold_file=font_bold_file
-    )
-    if fonts.warning:
-        print(fonts.warning, file=sys.stderr)
+    instructions: str | None,
+    continued_page_header: str | None,
+    page_w: float,
+    page_h: float,
+    fonts,
+    start_questions_on_first_page: bool,
+) -> fitz.Document:
+    """Build (but do not save) one template/submission PDF.
+
+    Shared spine of :func:`generate_template_pdf`, :func:`generate_submission_pdf`,
+    and the personalized batch. ``title`` is the *final* composed title (any
+    ``(version)`` suffix is added by the caller); a blank ``name``/``student_id``
+    prints an empty field for handwritten entry.
+    """
+    # Import lazily: see the module-level note above — same reason.
+    import fitz
 
     normalized_questions = _normalize_questions(questions)
 
@@ -341,5 +280,188 @@ def generate_submission_pdf(
             fonts=fonts,
         )
 
+    return doc
+
+
+def _stamp_qr_codes(
+    doc: fitz.Document,
+    *,
+    version: str | None,
+    student_id: str | None,
+    page_w: float,
+) -> None:
+    """Stamp an Opengrader QR on every page: identity + version + page + count.
+
+    Called once the doc is fully built so the total page count is known.
+    ``student_id=None`` produces *generic* codes (version/page/count only).
+    """
+    total = len(doc)
+    for index in range(total):
+        code = OpengraderCode(
+            student_id=student_id,
+            version=version,
+            page=index + 1,
+            total_pages=total,
+        )
+        draw_qr_on_page(doc[index], render_qr_png(code), page_w)
+
+
+def generate_template_pdf(
+    output_path: Path,
+    version: str,
+    questions: list[QuestionInput],
+    title: str,
+    instructions: str | None = None,
+    continued_page_header: str | None = None,
+    page_w: float = LETTER_W,
+    page_h: float = LETTER_H,
+    font_regular_file: str | Path | None = None,
+    font_bold_file: str | Path | None = None,
+    start_questions_on_first_page: bool = True,
+    qr: bool = False,
+) -> None:
+    """Generate one blank template PDF.
+
+    ``qr=True`` stamps a *generic* QR (version + page + count, no student id) on
+    every page — a stack of identical sheets that still splits and reorders
+    deterministically. For per-student identity use :func:`generate_personalized_batch`.
+    """
+    fonts = resolve_template_fonts(
+        regular_file=font_regular_file, bold_file=font_bold_file
+    )
+    if fonts.warning:
+        print(fonts.warning, file=sys.stderr)
+
+    doc = _build_template_doc(
+        "",
+        "",
+        questions,
+        f"{title} ({version})",
+        instructions,
+        continued_page_header,
+        page_w,
+        page_h,
+        fonts,
+        start_questions_on_first_page,
+    )
+    if qr:
+        _stamp_qr_codes(doc, version=version, student_id=None, page_w=page_w)
+
     doc.save(str(output_path), garbage=4, deflate=True)
     doc.close()
+
+
+def generate_submission_pdf(
+    output_path: Path,
+    version: str,
+    name: str,
+    student_id: str,
+    questions: list[QuestionInput],
+    title: str,
+    instructions: str | None = None,
+    continued_page_header: str | None = None,
+    page_w: float = LETTER_W,
+    page_h: float = LETTER_H,
+    font_regular_file: str | Path | None = None,
+    font_bold_file: str | Path | None = None,
+    start_questions_on_first_page: bool = True,
+) -> None:
+    fonts = resolve_template_fonts(
+        regular_file=font_regular_file, bold_file=font_bold_file
+    )
+    if fonts.warning:
+        print(fonts.warning, file=sys.stderr)
+
+    doc = _build_template_doc(
+        name,
+        student_id,
+        questions,
+        title,
+        instructions,
+        continued_page_header,
+        page_w,
+        page_h,
+        fonts,
+        start_questions_on_first_page,
+    )
+    doc.save(str(output_path), garbage=4, deflate=True)
+    doc.close()
+
+
+def generate_personalized_batch(
+    output_path: Path,
+    students: list[RosterStudent],
+    version: str,
+    questions: list[QuestionInput],
+    title: str,
+    instructions: str | None = None,
+    continued_page_header: str | None = None,
+    page_w: float = LETTER_W,
+    page_h: float = LETTER_H,
+    font_regular_file: str | Path | None = None,
+    font_bold_file: str | Path | None = None,
+    start_questions_on_first_page: bool = True,
+    include_master_key: bool = True,
+) -> list[RosterStudent]:
+    """Generate one combined PDF: master key (page 1) + one QR sheet per student.
+
+    Every roster student gets a personalized, **anonymous** template — the sheet
+    prints their student **id** (never their name) plus a QR encoding
+    ``id + version + page + count``. Rows missing an id are given a stable 6-digit
+    id (:func:`assign_student_ids`). The master key (id → name) is prepended as
+    page 1 for the teacher to keep and detach before distribution.
+
+    Returns the roster with ids assigned (the teacher's authoritative mapping).
+    """
+    if not students:
+        raise ValueError("a personalized batch needs at least one roster student")
+
+    # Import lazily: see the module-level note above — same reason.
+    import fitz
+
+    fonts = resolve_template_fonts(
+        regular_file=font_regular_file, bold_file=font_bold_file
+    )
+    if fonts.warning:
+        print(fonts.warning, file=sys.stderr)
+
+    assigned = assign_student_ids(students)
+
+    combined = fitz.Document()
+    if include_master_key:
+        entries = sorted(
+            ((s.student_id, s.name) for s in assigned),
+            key=lambda pair: pair[1].lower(),
+        )
+        draw_master_key_page(
+            combined,
+            entries,
+            title=title,
+            fonts=fonts,
+            page_w=page_w,
+            page_h=page_h,
+        )
+
+    composed_title = f"{title} ({version})"
+    for student in assigned:
+        student_doc = _build_template_doc(
+            "",
+            student.student_id,
+            questions,
+            composed_title,
+            instructions,
+            continued_page_header,
+            page_w,
+            page_h,
+            fonts,
+            start_questions_on_first_page,
+        )
+        _stamp_qr_codes(
+            student_doc, version=version, student_id=student.student_id, page_w=page_w
+        )
+        combined.insert_pdf(student_doc)
+        student_doc.close()
+
+    combined.save(str(output_path), garbage=4, deflate=True)
+    combined.close()
+    return assigned

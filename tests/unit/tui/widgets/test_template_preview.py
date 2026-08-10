@@ -6,7 +6,7 @@ from pathlib import Path
 import fitz
 from textual.app import App, ComposeResult
 from textual.widgets import Static
-from textual_image.widget import Image
+from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
 from opengrader.tui.ui.widgets.template_preview import TemplatePreview
 
@@ -37,7 +37,7 @@ def test_template_preview_reuses_the_same_image_widget_when_paging(
             await pilot.pause()
 
             preview = app.query_one(TemplatePreview)
-            image = preview.query_one(Image)
+            image = preview.query_one(SharpImage)
             header = preview.query_one(Static)
 
             assert "Page 1 of 3" in str(header.content)
@@ -45,13 +45,13 @@ def test_template_preview_reuses_the_same_image_widget_when_paging(
             preview.next_page()
             await pilot.pause()
 
-            assert preview.query_one(Image) is image
+            assert preview.query_one(SharpImage) is image
             assert "Page 2 of 3" in str(header.content)
 
             preview.prev_page()
             await pilot.pause()
 
-            assert preview.query_one(Image) is image
+            assert preview.query_one(SharpImage) is image
             assert "Page 1 of 3" in str(header.content)
 
     asyncio.run(run())

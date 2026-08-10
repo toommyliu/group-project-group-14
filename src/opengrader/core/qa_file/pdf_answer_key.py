@@ -1,19 +1,18 @@
-import fitz  # PyMuPDF
-import pytesseract
+from __future__ import annotations
+
 import re
-import shutil
 import sys
 import tempfile
-import subprocess
-import time
-import socket
-from urllib.parse import urlparse
-import cv2
-import numpy as np
-from PIL import Image
-from pathlib import Path
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Callable
+
+import cv2
+import fitz  # PyMuPDF
+import numpy as np
+import pytesseract
+from PIL import Image
+
 from opengrader.core.pdf_utils import (
     QUESTION_PREFIX_RE,
     SCAN_QUESTION_LINE_RE,
@@ -21,7 +20,7 @@ from opengrader.core.pdf_utils import (
     SCAN_QUESTION_MAX_X_NORM,
     POINTS_SPEC,
     QuestionLayoutInfo,
-    BlankExamTemplate,
+    BlankAssignmentTemplate,
     ScanQuestionPosition,
     calculate_page_offsets,
     crop_norm,
@@ -30,65 +29,22 @@ from opengrader.core.pdf_utils import (
 )
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
-    ensure_model_available,
     extract_question_prompt_and_answer,
 )
 
 
-"""
-Takes an answer-key PDF, extracts solution text, and writes the results to a Markdown file.
+"""Extract a QA-format answer key from an answer-key PDF (OCR/OpenCV/VLM).
 
-1. Layout Discovery & Alignment
-The script first identifies where questions are located on the page. It has two strategies:
-Text Layer Analysis: If no blank exam is provided, it scans the PDF text layer (via PyMuPDF) 
-                    for markers like 1., 2., and (Points). It calculates bounding boxes by measuring the vertical 
-                    distance between these markers.
-Template Alignment: If a --blank-exam is provided, it uses the blank exam's text layer to define the "ideal" 
-                    coordinates. It then renders the answer key scan and uses Tesseract to find the actual positions 
-                    of the question numbers on the paper. It calculates a median offset to account for printer/scanner 
-                    shifts, ensuring crops are perfectly aligned with the handwriting.
+The heavy backend of ``create-answer-key`` for ``.pdf`` inputs. Two layout
+strategies: text-layer analysis (locate ``N. (Points)`` markers via PyMuPDF) or,
+with a blank assignment template, Tesseract-anchored alignment. OpenCV finds the
+answer box in each question region; an optional Ollama vision model cleanly
+separates the printed prompt from the handwritten solution. Output is imperfect
+by nature — the generated markdown is meant to be reviewed/edited before grading.
 
-
-2. Advanced Computer Vision
-Answer Box Detection: The script uses OpenCV (Canny edge detection and contour approximation) 
-                    to look for rectangular boxes inside the question regions. If it finds one, 
-                    it assumes that anything inside or after that box is the solution text.
-VLM Integration (Ollama): This is the most powerful feature. When using a Vision Language Model 
-                    (like qwen2.5-vl), the script doesn't just "see" text; it "understands" context. 
-                    It can accurately separate the question prompt from the written solution, even if 
-                    they are visually overlapping or the layout is complex. This significantly reduces 
-                    the manual "cleanup" phase for the instructor.
-
-
-3. Automatic Infrastructure
-With the --auto-ollama flag, the script becomes self-sufficient. It will:
-
-Check if the Ollama server is running.
-If not, start the server in the background.
-Automatically download (pull) the required vision model if it’s missing.
-Gracefully shut down the server process once the extraction is complete.
-
-
-4. Markdown Generation
-Finally, it outputs a standardized .md file containing:
-
-Frontmatter: Metadata like the assignment title.
-Question Blocks: Cleaned question prompts and associated point values.
-Solutions: The extracted "Correct" answers formatted as bullet points.
-Rubric Templates: A default rubric (Correct, Partially Correct, Incorrect) based on the question's point value, ready for manual refinement in the TUI.
-
-
-Note: Extraction is imperfect — you’ll need to review and edit the generated Markdown to correct any errors. The edited Markdown is then used to automate grading.
-"""
-
-EPILOG = """
-examples:
-  uv run pdf-to-qa-solutions --input samples/answer-key.pdf --output out/template.md
-  uv run pdf-to-qa-solutions --input key.pdf --output out/qa.md --title "Midterm 1 Solutions"
-  uv run pdf-to-qa-solutions --input samples/exam2b-2-answers.pdf --output Solutions/final_exam_solutions.md --title "Final Exam Solutions"
-  uv run pdf-to-qa-solutions --input samples/exam2b-2-answers.pdf --output solutions.md --title "Midterm 1"
-  uv run pdf-to-qa-solutions --input solution_scan.pdf --output qa.md --blank-template master_blank.pdf
-
+``extract_qa_markdown_from_pdf`` is the entry point; it takes an already-verified
+``ollama_config`` (server boot/verification is the caller's job) and returns the
+QA markdown string.
 """
 
 
@@ -205,12 +161,12 @@ def find_answer_box(img_pil: Image.Image):
     return None
 
 
-def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankExamTemplate:
+def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssignmentTemplate:
     """
     Parses a blank template PDF to extract question numbers, prompts, points,
     and their normalized bounding boxes from the text layer.
     """
-    blank_template_doc = blank_template_doc # Rename variable if needed, but keeping for now
+    questions: dict[int, QuestionLayoutInfo] = {}
     current_qnum: int | None = None
     current_points: float | None = None
     current_prompt_lines: list[str] = []
@@ -278,7 +234,7 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankExamT
             if current_q_info.page == next_q_info.page:
                 questions[qnum] = replace(current_q_info, y_bottom_norm=next_q_info.y_top_norm)
 
-    return BlankExamTemplate(questions=questions)
+    return BlankAssignmentTemplate(questions=questions)
 
 
 def _detect_scan_question_alignments(
@@ -315,7 +271,7 @@ def _calculate_page_offsets(
     scan_alignments: dict[int, list[ScanQuestionPosition]]
 ) -> dict[int, float]:
     """
-    Calculates the median vertical offset per page between blank exam layout
+    Calculates the median vertical offset per page between blank assignment layout
     and detected scan question positions.
     """
     deltas_by_page: dict[int, list[float]] = {}
@@ -330,21 +286,99 @@ def _calculate_page_offsets(
     return calculate_page_offsets(deltas_by_page)
 
 
+# Below this many characters, a question region's text layer is treated as
+# absent (a stray header/page number, not real content) and we fall back to OCR.
+_TEXT_LAYER_MIN_CHARS = 10
+
+# OCR→VLM cascade thresholds. Tesseract reads clean printed answer keys well, so
+# the (slow) vision model runs only when OCR looks unreliable. Empty/near-empty
+# output is the strongest handwriting signal (Tesseract returns little or nothing
+# on cursive); mean word confidence below the threshold is the secondary one.
+# 60.0 matches the main extractor's DEFAULT_CONFIDENCE_THRESHOLD.
+_OCR_CONFIDENCE_THRESHOLD = 60.0
+_OCR_MIN_CHARS = 3
+
+
+def _ocr_mean_confidence(image: Image.Image) -> float:
+    """Mean Tesseract word confidence over a crop; 0.0 when nothing was read.
+
+    Non-text rows (Tesseract reports ``conf == -1``) and blank tokens are
+    ignored so the average reflects only actual recognized words.
+    """
+    data = safe_image_to_data(image)
+    confidences: list[float] = []
+    for conf, text in zip(data.get("conf", []), data.get("text", [])):
+        if not str(text).strip():
+            continue
+        try:
+            value = float(conf)
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            confidences.append(value)
+    return sum(confidences) / len(confidences) if confidences else 0.0
+
+
+def _ocr_looks_unreliable(text: str, mean_confidence: float) -> bool:
+    """Whether Tesseract's read of a region should be escalated to the VLM.
+
+    True when the result is empty/near-empty (handwriting Tesseract couldn't
+    read) or its mean word confidence is below the threshold.
+    """
+    if len(text.strip()) < _OCR_MIN_CHARS:
+        return True
+    return mean_confidence < _OCR_CONFIDENCE_THRESHOLD
+
+
+def _text_from_region(
+    doc: fitz.Document,
+    page_num: int,
+    bbox_norm: tuple[float, float, float, float],
+) -> str:
+    """Read the born-digital text layer inside a question's region.
+
+    Returns the region's exact text for a born-digital PDF, or ``""`` for a
+    scanned/image page (no text layer) so the caller falls back to OCR.
+    """
+    try:
+        page = doc[page_num - 1]
+    except (IndexError, KeyError):
+        return ""
+    x, y, w, h = bbox_norm
+    page_w, page_h = page.rect.width, page.rect.height
+    rect = fitz.Rect(x * page_w, y * page_h, (x + w) * page_w, (y + h) * page_h)
+    try:
+        text = page.get_text("text", clip=rect) or ""
+    except Exception:
+        return ""
+    return text.strip()
+
+
 def extract_content(
     doc: fitz.Document,
     rendered_pages: dict[int, Image.Image],
     question_bboxes: dict[int, tuple[int, tuple[float, float, float, float]]], # qnum -> (page, bbox_norm)
     max_q: int,
     ollama_config: OllamaVisionConfig | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ):
     """
     Crops the PDF based on boxes and extracts text to find Points, Question, and Answer.
     Fills in missing questions between 1 and max_q.
     Uses rendered_pages and normalized bboxes for extraction.
+
+    Reading cascades cheapest-first: a born-digital region is read straight from
+    its text layer (exact; skips OCR and the vision model). A scanned region is
+    read with Tesseract, and the Ollama vision model runs only when
+    ``ollama_config`` is given *and* the OCR looks unreliable (empty/low
+    confidence — the signals of handwriting), so clean printed keys never pay the
+    VLM cost. ``progress(current_question, total_questions)`` fires once per question.
     """
     markdown_questions = []
 
     for qnum in range(1, max_q + 1):
+        if progress is not None:
+            progress(qnum, max_q)
         if qnum not in question_bboxes:
             # Fill in missing question gap with placeholder sections
             block = (
@@ -370,29 +404,39 @@ def extract_content(
             print(f"Warning: Could not crop image for question {qnum}. Skipping.", file=sys.stderr)
             continue
 
-        full_text = ""
         inner_box_y_frac = None
-        
-        # 1. Primary OCR Scan (Tesseract)
-        inner_box_y_frac = find_answer_box(cropped_image)
-        tesseract_text = pytesseract.image_to_string(cropped_image).strip()
-        full_text = tesseract_text
-
-        # 2. Optional VLM Double Check
         vlm_answer = None
-        if ollama_config:
-            with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
-                cropped_image.save(tmp.name)
-                try:
-                    # VLM is much better at separating prompt from answer and cleaning noise
-                    vlm_prompt, vlm_answer = extract_question_prompt_and_answer(
-                        image_path=Path(tmp.name), 
-                        config=ollama_config
-                    )
-                    if vlm_prompt:
-                        full_text = vlm_prompt # Use VLM's cleaner prompt extraction
-                except Exception as e:
-                    print(f"  Warning: Ollama check failed for Q{qnum}: {e}", file=sys.stderr)
+
+        # 0. Born-digital fast path: read the exact text layer for this region.
+        #    When present, it's exact and needs no OCR/VLM — so even if Ollama is
+        #    enabled, it doesn't run here (it's the fallback for scans only).
+        text_layer = _text_from_region(doc, pg_num, bbox_norm)
+        if len(text_layer) >= _TEXT_LAYER_MIN_CHARS:
+            full_text = text_layer
+        else:
+            # 1. Primary OCR Scan (Tesseract) for scanned/image pages.
+            inner_box_y_frac = find_answer_box(cropped_image)
+            full_text = pytesseract.image_to_string(cropped_image).strip()
+
+            # 2. VLM fallback — only when Ollama is enabled AND OCR looks
+            #    unreliable (empty/low-confidence: the marks of handwriting). A
+            #    clean printed answer key reads fine with Tesseract and skips the
+            #    slow vision model entirely.
+            if ollama_config and _ocr_looks_unreliable(
+                full_text, _ocr_mean_confidence(cropped_image)
+            ):
+                with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+                    cropped_image.save(tmp.name)
+                    try:
+                        # VLM is much better at separating prompt from answer and cleaning noise
+                        vlm_prompt, vlm_answer = extract_question_prompt_and_answer(
+                            image_path=Path(tmp.name),
+                            config=ollama_config
+                        )
+                        if vlm_prompt:
+                            full_text = vlm_prompt # Use VLM's cleaner prompt extraction
+                    except Exception as e:
+                        print(f"  Warning: Ollama check failed for Q{qnum}: {e}", file=sys.stderr)
 
         pts_match = re.search(POINTS_SPEC, full_text, re.IGNORECASE)
         points = pts_match.group(1) if pts_match else "10"
@@ -465,228 +509,103 @@ def extract_content(
     return markdown_questions
 
 
-def setup_args() -> ArgumentParser:
+def extract_qa_markdown_from_pdf(
+    pdf_path: str | Path,
+    *,
+    title: str,
+    instructions: str = "Auto-generated",
+    blank_template_path: str | Path | None = None,
+    ollama_config: OllamaVisionConfig | None = None,
+    emit: Callable[[str], None] | None = None,
+    progress: Callable[[int, int], None] | None = None,
+) -> str:
+    """Extract a QA-format answer key from an answer-key PDF and return markdown.
+
+    ``ollama_config`` must already be verified (server boot is the caller's job);
+    pass ``None`` to run Tesseract-only. Raises ``FileNotFoundError``/``ValueError``
+    on unusable inputs rather than exiting, so callers control error reporting.
+    ``progress(current_question, total_questions)`` is called once per question.
     """
-    Configures the argument parser for the PDF to QA template conversion utility.
+    say = emit or (lambda _message: None)
 
-    This tool is designed to take a single 'Answer Key' PDF and produce a
-    structured Markdown file for use with the Opengrader TUI.
-    """
-    parser = ArgumentParser(
-        description="Convert Answer Key PDF to Markdown Template via OCR extraction.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input", required=True, help="Path to the Answer Key PDF file."
-    )
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Path where the generated Markdown file will be saved.",
-    )
-    parser.add_argument(
-        "--title",
-        default="CS146: Extracted Quiz",
-        help="Title to be used in the Markdown header.",
-    )
-    parser.add_argument(
-        "--blank-template",
-        metavar="PDF",
-        default=None,
-        help=(
-            "Path to a blank version of the assignment template PDF (same layout as the "
-            "answer key, real text layer required). Used for layout alignment."
-        ),
-    )
-    parser.add_argument(
-        "--ollama-model",
-        default="qwen2.5vl:7b",
-        help="Ollama vision model for extraction verification.",
-    )
-    parser.add_argument(
-        "--ollama-host",
-        default="http://127.0.0.1:11434",
-        help="Ollama server URL.",
-    )
-    parser.add_argument(
-        "--ollama-timeout",
-        type=float,
-        default=120.0,
-        help="Ollama request timeout in seconds.",
-    )
-    parser.add_argument(
-        "--auto-ollama",
-        action="store_true",
-        help="Automatically start the Ollama server and pull the model.",
-    )
-    return parser
+    answer_key_doc = fitz.open(str(pdf_path))
+    try:
+        rendered_answer_key_pages: dict[int, Image.Image] = {}
+        final_question_bboxes: dict[int, tuple[int, tuple[float, float, float, float]]] = {}
+        max_q = 0
 
+        if blank_template_path:
+            blank_template_path = Path(blank_template_path)
+            if not blank_template_path.exists():
+                raise FileNotFoundError(f"blank template not found: {blank_template_path}")
 
-def run_cli(argv: list[str] | None = None) -> None:
-    parser = setup_args()
-    args = parser.parse_args(argv)
+            blank_template_doc = fitz.open(str(blank_template_path))
+            say(f"Loading blank template layout from {blank_template_path}...")
+            blank_layout = _load_blank_template_layout(blank_template_doc)
+            blank_template_doc.close()
 
-    if not shutil.which("tesseract"):
-        print(
-            "Error: Tesseract OCR binary not found. Please install it (e.g., 'brew install tesseract')."
-        )
-        sys.exit(1)
+            if not blank_layout.questions:
+                say("Warning: No questions detected in blank template. Falling back to text layer extraction.")
+                q_starts, max_q = detect_question_positions(answer_key_doc)
+                boxes = compute_bounding_boxes(q_starts, max_q)
+                for qnum, page_ranges in boxes.items():
+                    pg, y_s, y_e = page_ranges[0]
+                    page = answer_key_doc[pg - 1]
+                    page_w, page_h = page.rect.width, page.rect.height
+                    final_question_bboxes[qnum] = (pg, norm_bbox(page_w, page_h, x0=0.0, y0=y_s * page_h, x1=page_w, y1=y_e * page_h))
+                for pg_idx in range(len(answer_key_doc)):
+                    img, _, _ = render_page_to_image(answer_key_doc, pg_idx)
+                    rendered_answer_key_pages[pg_idx + 1] = img
+            else:
+                say("Rendering answer key PDF for alignment...")
+                for pg_idx in range(len(answer_key_doc)):
+                    img, _, _ = render_page_to_image(answer_key_doc, pg_idx)
+                    rendered_answer_key_pages[pg_idx + 1] = img
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+                say("Detecting question alignments on answer key scan...")
+                scan_alignments = _detect_scan_question_alignments(rendered_answer_key_pages)
 
-    answer_key_doc = fitz.open(args.input)
-    rendered_answer_key_pages: dict[int, Image.Image] = {}
-    final_question_bboxes: dict[int, tuple[int, tuple[float, float, float, float]]] = {}
-    max_q = 0
-    ollama_config = None
-    ollama_server_proc = None
-    ollama_log_file = None
+                say("Calculating page offsets...")
+                page_offsets = _calculate_page_offsets(blank_layout.questions, scan_alignments)
 
-    # Handle Ollama Auto-start
-    if args.auto_ollama:
-        parsed_url = urlparse(args.ollama_host)
-        host = parsed_url.hostname or "127.0.0.1"
-        port = parsed_url.port or 11434
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex((host, port)) != 0:
-                print(f"Ollama server not found at {args.ollama_host}. Starting 'ollama serve'...")
-                try:
-                    ollama_log_file = tempfile.TemporaryFile(mode='w+', encoding='utf-8')
-                    ollama_server_proc = subprocess.Popen(
-                        ["ollama", "serve"],
-                        stdout=ollama_log_file,
-                        stderr=ollama_log_file
+                say("Applying offsets to blank assignment layout...")
+                for qnum, blank_info in blank_layout.questions.items():
+                    offset = page_offsets.get(blank_info.page, 0.0)
+                    adjusted_y_top = max(0.0, min(1.0, blank_info.y_top_norm + offset))
+                    adjusted_y_bottom = max(adjusted_y_top + 0.01, min(1.0, blank_info.y_bottom_norm + offset))
+                    final_question_bboxes[qnum] = (
+                        blank_info.page,
+                        (blank_info.x_left_norm, adjusted_y_top, blank_info.x_right_norm - blank_info.x_left_norm, adjusted_y_bottom - adjusted_y_top),
                     )
-                    start_time = time.time()
-                    while time.time() - start_time < 30:
-                        time.sleep(1)
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                            if s2.connect_ex((host, port)) == 0:
-                                break
-                    else:
-                        print("Warning: Timed out waiting for Ollama to start.", file=sys.stderr)
-                except Exception as e:
-                    print(f"Error starting Ollama: {e}", file=sys.stderr)
-
-        print(f"Ensuring model '{args.ollama_model}' is available...")
-        subprocess.run(
-            ["ollama", "pull", args.ollama_model], 
-            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-
-    # Prepare Config
-    if args.auto_ollama or args.ollama_model != "qwen2.5vl:7b" or args.ollama_host != "http://127.0.0.1:11434":
-        ollama_config = OllamaVisionConfig(
-            model=args.ollama_model,
-            host=args.ollama_host,
-            timeout_seconds=args.ollama_timeout,
-        )
-        try:
-            ensure_model_available(ollama_config)
-        except Exception as exc:
-            print(f"Warning: Ollama VLM unavailable ({exc}). Proceeding with Tesseract only.")
-            ollama_config = None
-
-    if args.blank_template:
-        blank_template_path = Path(args.blank_template)
-        if not blank_template_path.exists():
-            print(f"Error: Blank template file not found at {blank_template_path}", file=sys.stderr)
-            if ollama_server_proc:
-                ollama_server_proc.terminate()
-            if ollama_log_file:
-                ollama_log_file.close()
-            sys.exit(1)
-        
-        blank_template_doc = fitz.open(blank_template_path)
-        print(f"Loading blank template layout from {blank_template_path}...")
-        blank_layout = _load_blank_template_layout(blank_template_doc)
-        blank_template_doc.close()
-
-        if not blank_layout.questions:
-            print("Warning: No questions detected in blank template. Falling back to text layer extraction.", file=sys.stderr)
-            # Fallback to text layer extraction if blank template is empty
+                max_q = max(final_question_bboxes.keys()) if final_question_bboxes else 0
+        else:
+            say("Locating question coordinates from text layer...")
             q_starts, max_q = detect_question_positions(answer_key_doc)
             boxes = compute_bounding_boxes(q_starts, max_q)
             for qnum, page_ranges in boxes.items():
-                # Assuming single page for simplicity, take the first range
-                pg, y_s, y_e = page_ranges[0] 
-                # Need page dimensions to normalize
-                page = answer_key_doc[pg-1]
+                pg, y_s, y_e = page_ranges[0]
+                page = answer_key_doc[pg - 1]
                 page_w, page_h = page.rect.width, page.rect.height
-                final_question_bboxes[qnum] = (pg, norm_bbox(page_w, page_h, x0=0.0, y0=y_s*page_h, x1=page_w, y1=y_e*page_h))
-            
-            # Render all pages of the answer key for extract_content
+                final_question_bboxes[qnum] = (pg, norm_bbox(page_w, page_h, x0=0.0, y0=y_s * page_h, x1=page_w, y1=y_e * page_h))
             for pg_idx in range(len(answer_key_doc)):
                 img, _, _ = render_page_to_image(answer_key_doc, pg_idx)
                 rendered_answer_key_pages[pg_idx + 1] = img
 
-        else:
-            print(f"Rendering answer key PDF {args.input} for alignment...")
-            for pg_idx in range(len(answer_key_doc)):
-                img, _, _ = render_page_to_image(answer_key_doc, pg_idx)
-                rendered_answer_key_pages[pg_idx + 1] = img
-            
-            print("Detecting question alignments on answer key scan...")
-            scan_alignments = _detect_scan_question_alignments(rendered_answer_key_pages)
-            
-            print("Calculating page offsets...")
-            page_offsets = _calculate_page_offsets(blank_layout.questions, scan_alignments)
+        if not final_question_bboxes:
+            raise ValueError(
+                "No questions were detected. Check that the PDF layout matches the "
+                "expected 'N. (Points)' format."
+            )
 
-            print("Applying offsets to blank exam layout...")
-            for qnum, blank_info in blank_layout.questions.items():
-                offset = page_offsets.get(blank_info.page, 0.0)
-                adjusted_y_top = max(0.0, min(1.0, blank_info.y_top_norm + offset))
-                adjusted_y_bottom = max(adjusted_y_top + 0.01, min(1.0, blank_info.y_bottom_norm + offset))
-                final_question_bboxes[qnum] = (
-                    blank_info.page,
-                    (blank_info.x_left_norm, adjusted_y_top, blank_info.x_right_norm - blank_info.x_left_norm, adjusted_y_bottom - adjusted_y_top)
-                )
-            max_q = max(final_question_bboxes.keys()) if final_question_bboxes else 0
+        say(f"Found {len(final_question_bboxes)} questions (Max ID: {max_q})")
+        say("Extracting content via OCR...")
+        qa_blocks = extract_content(
+            answer_key_doc, rendered_answer_key_pages, final_question_bboxes, max_q,
+            ollama_config=ollama_config,
+            progress=progress,
+        )
 
-    else:
-        print("Locating question coordinates from text layer...")
-        q_starts, max_q = detect_question_positions(answer_key_doc)
-        boxes = compute_bounding_boxes(q_starts, max_q)
-        for qnum, page_ranges in boxes.items():
-            pg, y_s, y_e = page_ranges[0] # Assuming single page for simplicity, take the first range
-            page = answer_key_doc[pg-1]
-            page_w, page_h = page.rect.width, page.rect.height
-            final_question_bboxes[qnum] = (pg, norm_bbox(page_w, page_h, x0=0.0, y0=y_s*page_h, x1=page_w, y1=y_e*page_h))
-        
-        # Render all pages of the answer key for extract_content
-        for pg_idx in range(len(answer_key_doc)):
-            img, _, _ = render_page_to_image(answer_key_doc, pg_idx)
-            rendered_answer_key_pages[pg_idx + 1] = img
-
-    if not final_question_bboxes:
-        print("Warning: No questions were detected. Check if the PDF layout matches the expected 'N. (Points)' format.", file=sys.stderr)
-        if ollama_server_proc:
-            ollama_server_proc.terminate()
-        if ollama_log_file:
-            ollama_log_file.close()
-        sys.exit(1)
-
-    print(f"Found {len(final_question_bboxes)} questions (Max ID: {max_q})")
-    print("Extracting content via OCR...")
-    qa_blocks = extract_content(answer_key_doc, rendered_answer_key_pages, final_question_bboxes, max_q, ollama_config=ollama_config)
-
-    # Construct final Markdown
-    header = f"---\ntitle: {args.title}\ninstructions: Auto-generated\n---\n\n## Version A\n\n"
-    final_md = header + "\n\n".join(qa_blocks)
-
-    output_path.write_text(final_md)
-
-    if ollama_server_proc:
-        ollama_server_proc.terminate()
-    if ollama_log_file:
-        ollama_log_file.close()
-
-    answer_key_doc.close()
-    print(f"Success! Template saved to {output_path}")
-
-
-if __name__ == "__main__":
-    run_cli()
+        header = f"---\ntitle: {title}\ninstructions: {instructions}\n---\n\n"
+        return header + "\n\n".join(qa_blocks) + "\n"
+    finally:
+        answer_key_doc.close()

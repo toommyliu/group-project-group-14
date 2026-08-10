@@ -35,23 +35,38 @@ Opengrader is a local, offline-first exam-grading toolchain — think Gradescope
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
 - [Ollama](https://ollama.com/)
-- Compatible Terminal Emulator
+- A terminal emulator (any — see below)
 
 ### Terminal Compatibility
 
-For images to render in the TUI correctly[^1], you may need a terminal emulator that supports the
-[Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
+Opengrader shows each student's scanned answer *inside* the terminal. It speaks three
+image protocols and picks the right one for your terminal automatically[^1]:
 
-On macOS, the following terminal emulators were tested and work correctly:
+| Protocol | Terminals |
+| --- | --- |
+| [Kitty graphics](https://sw.kovidgoyal.net/kitty/graphics-protocol/) | [Ghostty](https://github.com/ghostty-org/ghostty), [kitty](https://sw.kovidgoyal.net/kitty/), Contour |
+| [iTerm2 inline images](https://iterm2.com/documentation-images.html) | [iTerm2](https://iterm2.com/), [WezTerm](https://wezfurlong.org/wezterm/), VS Code |
+| [Sixel](https://en.wikipedia.org/wiki/Sixel) | Konsole, foot, mlterm, Windows Terminal 1.22+, Rio, XTerm |
 
-- [Ghostty](https://github.com/ghostty-org/ghostty)
-- [iTerm2](https://iterm2.com/)
-- [WezTerm](https://wezfurlong.org/wezterm/)
+**No compatible terminal? Opengrader still works.** On macOS Terminal.app, GNOME
+Terminal, PuTTY, or inside tmux, answer crops fall back to a coarse colour-block
+preview and the app tells you so — press **`o`** while grading to open the
+full-resolution crop in your normal desktop image viewer.
+
+Check what was detected (and paste this into any bug report):
+
+```bash
+uv run tui --check-graphics
+```
+
+If detection guesses wrong, force a protocol with `--graphics {kitty,iterm2,sixel,halfcell,unicode}`
+or `OPENGRADER_GRAPHICS=<protocol>`. Choose a specific external viewer with
+`OPENGRADER_IMAGE_VIEWER` (e.g. `OPENGRADER_IMAGE_VIEWER="feh {}"`).
 
 > [!NOTE]
-> Visual Studio Code's integrated terminal should work as of [version 1.110](https://code.visualstudio.com/updates/v1_110#_kitty-graphics-protocol). Enable the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
+> Visual Studio Code's integrated terminal needs the `terminal.integrated.enableImages` setting. See [Image Support](https://code.visualstudio.com/docs/terminal/advanced#_image-support) for details.
 
-[^1]: https://github.com/lnqs/textual-image#supported-terminals
+[^1]: Detection is environment-first (recognising the terminal from the variables it exports) and falls back to querying the terminal's capabilities. See `src/opengrader/tui/terminal_graphics.py`.
 
 ## Installation
 
@@ -98,19 +113,43 @@ Run the TUI:
 uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
 ```
 
+### The short version: one command
+
+If you have a stack of scans and an answer key, you do not need to learn the
+tools below. One command checks the scan, splits it, reads every answer,
+auto-grades what it can, and opens the grading app on the result:
+
+```bash
+uv run opengrader-run --scan scans/all-submissions.pdf --qa qa.md --out cohort/
+```
+
+Interrupted? Re-scanned a page? Changed your mind? **Run the exact same command
+again.** Every step that is still valid is reused rather than repeated, so a
+second run on an unchanged class takes seconds, and the summary at the end says
+which steps were reused. Add `--dry-run` to see what it would do without doing
+any of it. If you would rather not use a terminal, the setup screen has the same
+thing in its own section, "RUN THE WHOLE PIPELINE", directly under Start
+grading — open "Run every step — one scan in, graded work out" and fill in the
+same three paths.
+
 <details>
 <summary>Available Scripts</summary>
 
+- `opengrader-run`: The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
 - `tui`: Launch the TUI. Optionally pass `--qa-file` and `--submissions` together to load real files.
 - `tui-dev`: Launch the TUI with Textual devtools enabled.
 - `qa-file`: Work with QA markdown files.
   - `validate --qa-file <qa.md>`: Validate QA markdown structure.
   - `generate-template --qa-file <qa.md> --output-pdf <template.pdf>`: Generate template PDFs from QA markdown.
+- `scan-check`: Pre-flight a scan before grading it — rotated pages, blank sheets, low resolution, clipped margins, and a page count that isn't a whole number of submissions. `--fix` writes an upright copy (your original is never modified).
+- `region-map`: Grade an assignment Opengrader didn't generate. Draw the answer regions once on a blank copy of your own assignment (Word, LaTeX, or a scan of a paper original — no text layer needed) and save them as `<assignment>.regions.json`; every scan of that assignment then extracts against those boxes. `propose` drafts the boxes for you, `preview` renders the assignment with them outlined so you can check a map in ten seconds, and `validate` reports anything that would crop the wrong thing. Feed it to `submission-extractor --region-map`.
+- `photo-import`: Turn a folder of phone photos (JPEG/HEIC/PNG) into per-student PDFs. Each photo is deskewed and perspective-corrected — by the sheet's corner registration marks when it has them, by the page's own edges otherwise — then the photos belonging to one student are bound into a single PDF for `submission-extractor`. Your photos are only ever read. For a class that submits photos instead of a scanned bundle; it lands where `submission-splitter` lands, so the rest of the pipeline is unchanged.
 - `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
-- `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR.
+- `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR. Runs submissions in parallel across CPU cores (`--jobs`) and can pick up where an interrupted run stopped (`--resume`).
 - `pdf-to-qa-solutions`: Convert an answer-key PDF into a QA markdown draft using OCR.
 - `text2qti-to-qa`: Convert a [text2qti](https://github.com/gpoore/text2qti) exam file into QA markdown.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
+- `claim`: Divide grading between several TAs. `claim divide --graders alice,bob,carol` splits the cohort into contiguous slices; `claim status` shows coverage, gaps and any double-booked work. Claiming work someone else holds is refused.
 - `canvas-export`: Push scores and per-question comments from `.submission.md` files to Canvas LMS (requires `canvas-sak` setup; supports `--dry-run`).
 
 </details>
@@ -156,6 +195,13 @@ Useful `submission-splitter` options:
 - `--filename-prefix <prefix>`: Change output names from `submission-0001.pdf`.
 - `--zero-pad-width <N>`: Change output number padding.
 - `--dry-run`: Print planned split ranges without writing files.
+- `--fix-rotation`: Check the scan first and turn upside-down/sideways pages upright before splitting (`--scan-check` reports without fixing). Worth doing: a stack fed into the scanner the wrong way round still splits and still extracts — it just transcribes to nothing and grades to zeros, with no error anywhere.
+
+Check a scan before you split it:
+```bash
+uv run scan-check --input scans/all-submissions.pdf --pages-per-submission 6
+uv run scan-check --input scans/all-submissions.pdf --fix   # writes all-submissions-upright.pdf
+```
 
 Convert per-student PDFs into student submission markdown:
 ```bash
@@ -165,14 +211,17 @@ uv run submission-extractor \
 ```
 
 Useful `submission-extractor` options:
+- `--jobs <N|auto>` (`-j`): Extract several submissions at once, one process per job. Default is `auto` (the CPU count, capped at 8 — or 4 while the vision model transcribes, since Ollama only serves a few requests at a time). Use `--jobs 1` to go back to one submission at a time. On a 16-core Mac, 12 three-page scans went from 230s to 45s.
+- `--resume`: Skip submissions an earlier run already finished. A submission is only skipped when the scan, the settings, and all of its output files are unchanged, so editing a scan or changing a flag correctly re-extracts. The ledger (`<output>/.opengrader/extraction-manifest.jsonl`) is written on every run, so a run interrupted *without* `--resume` is still resumable afterwards. Grades saved in the TUI are never re-extracted over.
+- `--fail-fast`: Stop at the first failed submission. By default the batch finishes and lists every failure at the end, so one unreadable scan doesn't discard hours of work; re-run with `--resume` to retry only those.
 - `--dpi <N>`: Set rendering DPI for OCR and cropping. Default is `300`.
 - `--confidence-threshold <N>`: Set OCR field validation threshold. Default is `60.0`.
 - `--lang <codes>`: Set Tesseract layout language codes. Default is `eng`.
 - `--no-deskew`: Disable automatic deskewing.
 - `--no-split-subquestions`: Keep nested subquestion boxes in one response image.
-- `--ollama-model <model>`: Set the Ollama vision model. Default is `qwen2.5vl:7b`.
-- `--ollama-host <url>`: Set the Ollama server URL. Default is `http://127.0.0.1:11434`.
-- `--ollama-timeout <seconds>`: Set the Ollama request timeout. Default is `120`.
+- `--ollama-model <model>`: Set the Ollama vision model. Defaults to the saved AI settings, falling back to `qwen2.5vl:7b` if not configured.
+- `--ollama-host <url>`: Set the Ollama server URL. Defaults to the saved AI settings, falling back to `http://127.0.0.1:11434` if not configured.
+- `--ollama-timeout <seconds>`: Set the Ollama request timeout. Defaults to the saved AI settings, falling back to `120` if not configured.
 - `--no-ollama-qa`: Skip Ollama question prompt/answer extraction while still using it for name, ID, and title extraction.
 - `--save-layout-debug`: Write layout JSON and overlay PNGs for each submission.
 
@@ -242,6 +291,14 @@ uv run submission-extractor \
 
 If `ollama run` cannot connect to Ollama, start the Ollama app or run `ollama serve`
 before processing submissions.
+
+#### AI Settings
+
+Opengrader saves your AI configuration once in a settings file — which models to use, where they live, and how confident they must be before suggesting a grade — so every tool uses the same settings without re-entering them. The settings live in your user config directory (`~/Library/Application Support/Opengrader/ai.json` on macOS, `~/.config/opengrader/ai.json` on Linux, `%APPDATA%\Opengrader\ai.json` on Windows). Blank fields mean "follow Opengrader's recommended default," so upgrading Opengrader can move you forward to a newer model without overwriting your deliberate choices.
+
+Settings are resolved in this order (highest priority first): an explicit `--ollama-model` / `--ollama-host` / `--ollama-timeout` CLI flag, then an `OPENGRADER_AI_VISION_MODEL` / `OPENGRADER_AI_HOST` / `OPENGRADER_AI_TIMEOUT` environment variable, then the saved settings file, then Opengrader's built-in defaults. To point the whole system at a different settings file, set `OPENGRADER_AI_CONFIG=/path/to/settings.json`.
+
+Edit the settings from the TUI: launch it and open the "AI setup" tool under "Helper Tools" in the setup screen.
 
 4. (Optional) Auto-score what can be matched against a solutions file:
 ```bash

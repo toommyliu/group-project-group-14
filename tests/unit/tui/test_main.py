@@ -48,3 +48,46 @@ def test_run_app_dev_enables_devtools_before_launch(monkeypatch) -> None:
 
     assert os.environ["TEXTUAL"] == "devtools"
     run_app_mock.assert_called_once()
+
+
+def test_check_graphics_reports_and_exits_without_launching(monkeypatch) -> None:
+    """The support command: an instructor runs it and pastes the answer."""
+    monkeypatch.setenv("OPENGRADER_GRAPHICS", "sixel")
+
+    with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
+        with pytest.raises(SystemExit) as excinfo:
+            run_app(["--check-graphics"])
+
+    assert excinfo.value.code == 0
+    app_cls.assert_not_called()
+
+
+def test_graphics_override_is_applied_before_the_app_starts(monkeypatch) -> None:
+    """Probing the terminal is impossible once Textual owns stdin, so the
+    protocol must be settled before TuiApp is constructed."""
+    from opengrader.tui import terminal_graphics
+
+    monkeypatch.delenv("OPENGRADER_GRAPHICS", raising=False)
+    terminal_graphics.set_active_graphics(None)
+    seen: list[str] = []
+
+    class RecordingApp:
+        def __init__(self, **kwargs) -> None:
+            seen.append(terminal_graphics.active_graphics().protocol)
+
+        def run(self) -> None:
+            pass
+
+    monkeypatch.setattr("opengrader.tui.main.TuiApp", RecordingApp)
+    try:
+        run_app(["--graphics", "iterm2"])
+    finally:
+        terminal_graphics.set_active_graphics(None)
+
+    assert seen == ["iterm2"]
+
+
+def test_unknown_graphics_protocol_is_rejected() -> None:
+    # argparse rejects it before our own validation ever runs.
+    with pytest.raises(SystemExit):
+        run_app(["--graphics", "jpeg"])

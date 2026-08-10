@@ -1,5 +1,6 @@
 from .models import (
     QuestionSeed,
+    ReviewItem,
     RubricEditResult,
     RubricOptionSeed,
     RubricOptionUpdate,
@@ -11,6 +12,7 @@ from .stub_data_provider import StubDataProvider
 
 __all__ = [
     "QuestionSeed",
+    "ReviewItem",
     "RubricEditResult",
     "RubricOptionSeed",
     "RubricOptionUpdate",

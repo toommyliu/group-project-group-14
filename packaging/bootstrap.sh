@@ -177,12 +177,14 @@ else
 fi
 
 # --- Friendly capability notes (never fatal) ----------------------------------
-# In-terminal images need the Kitty graphics protocol; Apple's Terminal.app
-# doesn't support it, so response images degrade to character art there.
+# In-terminal images need a graphics protocol (Kitty / iTerm2 / Sixel); Apple's
+# Terminal.app implements none of them, so scans degrade to character art. Not
+# a blocker — the TUI says so and offers 'o' to open a crop in Preview.app.
 if [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
   say ""
-  say "  note: Terminal.app can't show images. For crisp in-app scan previews,"
-  say "        install Ghostty, iTerm2, WezTerm, or kitty and relaunch."
+  say "  note: Terminal.app can't show images. Grading still works — press 'o'"
+  say "        to open a scan in Preview. For crisp in-app previews, install"
+  say "        Ghostty, iTerm2, WezTerm, or kitty and relaunch."
 fi
 # Ollama is only needed for handwriting extraction — mention, don't install.
 if ! command -v ollama >/dev/null 2>&1; then

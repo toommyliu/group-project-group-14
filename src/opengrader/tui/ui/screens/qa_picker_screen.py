@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -5,14 +7,21 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
-from opengrader.tui.formatting import format_question_type
+from opengrader.tui.formatting import (
+    format_curve_label,
+    format_hotkey_reference,
+    format_question_type,
+)
 from opengrader.tui.statistics import (
     QuestionStatistics,
     question_statistics_chart_image,
     render_question_statistics,
 )
 from opengrader.tui.ui.screens.canvas_export_screen import CanvasExportScreen
+from opengrader.tui.ui.screens.curve_screen import CurveScreen
+from opengrader.tui.ui.screens.return_bundle_screen import ReturnBundleScreen
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
+from opengrader.tui.ui.widgets.grading_log_pane import GradingLogPane
 from opengrader.tui.ui.widgets.nav_item import NavItem
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 from opengrader.tui.ui.widgets.tabbed_list_pane import IndexedListView, TabbedListPane
@@ -67,6 +76,7 @@ class QAPickerScreen(Vertical):
         self._student_filter = ""
         self._student_name_list = IndexedListView(id="student-name-list")
         self._student_id_list = IndexedListView(id="student-id-list")
+        self._grading_log_pane = GradingLogPane(id="grading-log")
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -87,26 +97,44 @@ class QAPickerScreen(Vertical):
                     ],
                     id="student-list",
                 )
-            with Vertical(id="qa-details"):
-                yield Label("Question", classes="sidebar-section-title")
-                yield Static("Highlight a QA to preview it.", id="qa-preview")
-                yield SharpImage(
-                    None,
-                    id="qa-statistics-chart",
-                    fit_width_fraction=0.9,
-                    allow_upscale=True,
-                    max_cell_height=18,
-                )
-                yield Static(
-                    "j/k or up/down  Move\n"
-                    "tab/shift+tab  Switch pane\n"
-                    "d              Student display\n"
-                    "t              Teacher mode (names)\n"
-                    "x              Export to Canvas\n"
-                    "click or enter  Grade selected QA\n"
-                    "escape          Back to assignments",
-                    id="qa-keybinding-ref",
-                )
+            with Vertical(id="qa-picker-right-column"):
+                with Vertical(id="qa-details") as details:
+                    details.border_title = "Details"
+                    yield Static("Highlight a QA to preview it.", id="qa-preview")
+                    yield SharpImage(
+                        None,
+                        id="qa-statistics-chart",
+                        fit_width_fraction=0.9,
+                        allow_upscale=True,
+                        max_cell_height=18,
+                    )
+                    yield Static(
+                        format_hotkey_reference(
+                            [
+                                ("j/k · ↑/↓", "Move"),
+                                ("tab", "Switch pane"),
+                                ("enter · click", "Grade selected QA"),
+                                ("/", "Search"),
+                                ("u", "Jump to ungraded"),
+                                ("d", "Student display"),
+                                ("t", "Teacher mode (names)"),
+                                # Shift+letter, like every other report — these
+                                # three read `r`/`s`/`h` until 2026-08-05, which
+                                # were the *pre-2026-08-02* keys and had been
+                                # bound to nothing since the keymap moved
+                                # reports behind Shift. The card was telling
+                                # people to press keys that did nothing.
+                                ("shift+R", "Needs-review queue"),
+                                ("shift+S", "Item analysis"),
+                                ("shift+H", "Grade history · teacher"),
+                                ("x", "Export to Canvas"),
+                                ("?", "Help"),
+                            ],
+                            key_width=15,
+                        ),
+                        id="qa-keybinding-ref",
+                    )
+                yield self._grading_log_pane
         yield Static("", id="qa-status")
 
     def bind_assignment(
@@ -155,6 +183,7 @@ class QAPickerScreen(Vertical):
         if students:
             self._set_student_index(0)
         self._sync_active_list_classes()
+        self.refresh_grading_log()
 
     def focus_questions(self) -> None:
         qa_list = self.query_one("#qa-list", ListView)
@@ -230,10 +259,13 @@ class QAPickerScreen(Vertical):
         return item.label
 
     def show_question_details(self, item: NavItem) -> None:
+        # "Question Details" (not just "Question") so the pane cannot be
+        # mistaken for the "Questions" list next to it.
+        self.query_one("#qa-details").border_title = "Question Details"
         status = f"\nStatus: {item.meta}" if item.meta else ""
         prompt = self._extract_prompt(item)
         type_label = format_question_type(item.question_type)
-        parts = [f"Question: [b]{prompt}[/b]"]
+        parts = [f"[b]{prompt}[/b]"]
         if type_label:
             parts.append(f"[dim]Type: {type_label}[/dim]")
         parts.append(
@@ -242,8 +274,10 @@ class QAPickerScreen(Vertical):
         )
         self.query_one("#qa-preview", Static).update("\n\n".join(parts))
         self._sync_statistics_chart(item)
+        self.refresh_grading_log()
 
     def show_student_details(self, item: NavItem) -> None:
+        self.query_one("#qa-details").border_title = "Student Details"
         progress = self._progress_for_student(item)
         question = self.selected_question()
         if question is None:
@@ -270,6 +304,7 @@ class QAPickerScreen(Vertical):
             f"{self._statistics_text(question)}"
         )
         self._sync_statistics_chart(question)
+        self.refresh_grading_log()
 
     def _progress_for_student(self, item: NavItem) -> str:
         total_questions = len(self._items)
@@ -403,11 +438,28 @@ class QAPickerScreen(Vertical):
         """Sync the Students pane tabs with the current anonymity mode.
 
         Anonymous grading hides the Name tab entirely; teacher mode brings
-        it back.
+        it back. The grading log follows the same rule: its Student/Question
+        tabs (and student names in rows) exist only in teacher mode.
         """
         self._student_pane().set_tab_hidden(
             self._STUDENT_NAME_TAB_INDEX,
             not self._teacher_mode(),
+        )
+        self.refresh_grading_log()
+
+    def refresh_grading_log(self) -> None:
+        """Re-render the grading log pane from the shared session log."""
+        state = getattr(self.app, "workflow_state", None)
+        log = getattr(state, "grading_log", None)
+        if log is None or not self.is_mounted:
+            return
+        student = self.selected_student()
+        question = self.selected_question()
+        self._grading_log_pane.update_log(
+            log,
+            teacher_mode=self._teacher_mode(),
+            student_item_id=student.item_id if student is not None else None,
+            question_id=question.item_id if question is not None else None,
         )
 
     def toggle_student_display_mode(self) -> None:
@@ -619,6 +671,66 @@ class QAPickerScreen(Vertical):
         if event.key == "x":
             self._open_canvas_export()
             event.stop()
+            return
+        if event.key == "b":
+            self._open_return_bundle()
+            event.stop()
+            return
+        if event.key == "c":
+            self._open_curve()
+            event.stop()
+
+    def _open_curve(self) -> None:
+        """Open the score-curve editor; persist the chosen curve on save."""
+        provider = getattr(self.app, "data_provider", None)
+        read_curve = getattr(provider, "read_curve", None)
+        distribution_fn = getattr(provider, "curve_score_distribution", None)
+        save_curve = getattr(provider, "save_curve", None)
+        if not (callable(read_curve) and callable(distribution_fn) and callable(save_curve)):
+            return
+
+        def _on_result(result: object) -> None:
+            if result is None:
+                return
+            try:
+                save_curve(result)
+                self.app.notify(f"Curve saved: {format_curve_label(result)}")
+            except Exception as exc:  # surface a save failure, keep grading
+                self.app.notify(f"Could not save curve: {exc}", severity="error")
+
+        self.app.push_screen(
+            CurveScreen(read_curve(), distribution_fn()), _on_result
+        )
+
+    def _open_return_bundle(self) -> None:
+        """Open the return-bundle export dialog, prefilled from the session.
+
+        The destination defaults to the submissions folder and the folder name to
+        the cohort's suggested bundle name, so a one-keystroke Export produces a
+        complete, professionally-named hand-back package.
+        """
+        provider = getattr(self.app, "data_provider", None)
+        submissions = str(getattr(provider, "submissions_path", "") or "")
+        default_output = ""
+        if submissions:
+            base = Path(submissions)
+            default_output = str(base if base.is_dir() else base.parent)
+
+        default_name = ""
+        name_fn = getattr(provider, "default_bundle_name", None)
+        if callable(name_fn):
+            try:
+                default_name = name_fn()
+            except Exception:
+                default_name = ""
+
+        self.app.push_screen(
+            ReturnBundleScreen(
+                submissions_path=submissions,
+                output_path=default_output,
+                default_name=default_name,
+            )
+        )
 
     def _open_canvas_export(self) -> None:
         """Open the Canvas export dialog, prefilled from the current session."""

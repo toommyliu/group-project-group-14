@@ -26,18 +26,78 @@ dependencies = [
   "numpy>=1.26.0",
   "matplotlib>=3.10,<4.0",
   "canvas-sak>=1.0",
+  "python-docx>=1.1.0,<2.0.0",
+  "segno>=1.6.0,<2.0.0",
+  # AES-GCM for the two artifacts that leave the machine (a grader packet and a
+  # backup archive) — see core/crypto.py. Deliberately a *base* dependency and
+  # not an optional extra like `math` below: a protection you have to install
+  # before you can use it is one that is missing on the laptop that gets stolen.
+  # Unlike pix2tex this is a small, ubiquitous wheel, so it costs the offline
+  # install almost nothing. Key derivation stays on stdlib hashlib; only the
+  # cipher comes from here, keeping the third-party surface as small as possible.
+  "cryptography>=42.0,<47.0",
+]
+
+# Deliberately optional. pix2tex pulls in torch — a gigabyte-scale download an
+# offline-first tool that runs on a laptop cannot make mandatory for the many
+# instructors whose exams contain no mathematics at all. Everything degrades
+# without it: `--math-backend pix2tex` refuses at startup naming this extra, and
+# `--llm-math` keeps working through the Ollama vision model.
+#   uv sync --extra math
+[project.optional-dependencies]
+math = [
+  "pix2tex>=0.1.2",
+]
+
+# Deliberately optional, same reasoning as `math` above. pillow-heif exists
+# solely so Pillow can decode HEIC/HEIF — the default photo format on iPhones
+# — and plenty of instructors' students send plain JPEGs, for whom requiring
+# it would be a pointless install. Everything degrades without it: JPEG/PNG
+# folders work exactly the same, and `photo-import` only refuses (naming this
+# extra) the moment it actually meets a .heic/.heif file it can't decode.
+#   uv sync --extra photos
+photos = [
+  "pillow-heif>=0.18,<1.0",
 ]
 
 [project.scripts]
 tui = "opengrader.tui.main:run_app"
+# The one command that chains the rest: scan-check → split → extract →
+# auto-grade, resumable per stage. See src/opengrader/cli/run.py.
+opengrader-run = "opengrader.cli.run:main"
 tui-dev = "opengrader.tui.main:run_app_dev"
-pdf-to-qa-solutions = "opengrader.cli.pdf_to_qa_solutions_template:run_cli"
+doctor = "opengrader.cli.doctor:main"
+create-answer-key = "opengrader.cli.answer_key:run_cli"
 automated-grading = "opengrader.cli.automated_grading:run_cli"
 qa-file = "opengrader.cli.qa_file:run_cli"
-text2qti-to-qa = "opengrader.cli.text2qti_to_qa:run_cli"
+scan-check = "opengrader.cli.scan_check:run_cli"
+region-map = "opengrader.cli.region_map:run_cli"
 submission-splitter = "opengrader.cli.submission_splitter:run_cli"
+photo-import = "opengrader.cli.photo_import:run_cli"
 submission-extractor = "opengrader.cli.submission_extractor:run_cli" # submission-OCR functionality is now merged here
 canvas-export = "opengrader.cli.canvas_export:run_cli"
+claim = "opengrader.cli.claim:run_cli"
+grades-export = "opengrader.cli.grades_export:run_cli"
+llm-eval = "opengrader.cli.llm_eval:main"
+transcribe-eval = "opengrader.cli.transcribe_eval:main"
+course-grades = "opengrader.cli.course_grades:run_cli"
+return-bundle = "opengrader.cli.return_bundle:run_cli"
+review-queue = "opengrader.cli.review_queue:run_cli"
+consistency-audit = "opengrader.cli.consistency_audit:run_cli"
+similarity-audit = "opengrader.cli.similarity_audit:run_cli"
+item-analysis = "opengrader.cli.item_analysis:run_cli"
+grade-check = "opengrader.cli.grade_check:main"
+grade-release = "opengrader.cli.grade_release:run_cli"
+grade-history = "opengrader.cli.grade_history:run_cli"
+grade-restore = "opengrader.cli.grade_restore:run_cli"
+grade-merge = "opengrader.cli.grade_merge:run_cli"
+grade-backup = "opengrader.cli.grade_backup:run_cli"
+grading-stats = "opengrader.cli.grading_stats:run_cli"
+grading-policy = "opengrader.cli.grading_policy:run_cli"
+curve = "opengrader.cli.curve:run_cli"
+regrade = "opengrader.cli.regrade:run_cli"
+answer-groups = "opengrader.cli.answer_groups:run_cli"
+calibrate = "opengrader.cli.calibrate:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opengrader"]
@@ -51,6 +111,14 @@ packages = ["src/opengrader"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-v"
+# Silence DeprecationWarnings raised inside third-party dependencies we don't
+# control (PyMuPDF/SWIG at import, python-dateutil, textual-image). These are not
+# our code — our own deprecations still surface. Revisit when the deps update.
+filterwarnings = [
+    "ignore:builtin type [Ss]wig:DeprecationWarning",
+    "ignore:datetime.datetime.utcfromtimestamp:DeprecationWarning",
+    "ignore:Image.Image.getdata is deprecated:DeprecationWarning",
+]
 
 [build-system]
 requires = ["hatchling"]

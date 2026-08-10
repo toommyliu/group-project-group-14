@@ -6,7 +6,7 @@ from typing import IO
 
 from PIL import Image as PILImage
 from PIL import ImageOps
-from textual.app import RenderResult
+from textual.app import ComposeResult, RenderResult
 from textual.geometry import Size
 from textual.message import Message
 from textual.reactive import reactive
@@ -14,10 +14,18 @@ from textual_image._geometry import ImageSize
 from textual_image._pixeldata import ensure_image
 from textual_image._terminal import get_cell_size
 from textual_image._utils import StrOrBytesPath
-from textual_image.renderable import Image as AutoRenderable
-from textual_image.renderable import TGPImage
 from textual_image.renderable import tgp as _tgp
-from textual_image.widget import Image as TextualImage
+from textual_image.renderable.halfcell import Image as HalfcellRenderable
+from textual_image.renderable.tgp import Image as TGPImage
+from textual_image.renderable.unicode import Image as UnicodeRenderable
+
+# The widget base class without ``textual-image``'s own protocol auto-choice:
+# Opengrader picks the protocol itself (see `tui/terminal_graphics.py`), so we
+# take the plain base and supply the renderable ourselves.
+from textual_image.widget._base import Image as BaseImageWidget
+
+from opengrader.tui.terminal_graphics import GraphicsCapability, active_graphics
+from opengrader.tui.ui.widgets.inline_graphics import InlineGraphicsPane
 
 
 class _TGPImageWithValidDelete(TGPImage):
@@ -38,18 +46,45 @@ class _TGPImageWithValidDelete(TGPImage):
             self.terminal_image_id = None
 
 
-_Renderable = (
-    _TGPImageWithValidDelete if AutoRenderable is TGPImage else AutoRenderable
-)
+#: Protocols rendered through a Rich renderable. Sixel and iTerm2 are absent
+#: on purpose: they are raw escape blobs and go through `InlineGraphicsPane`.
+_RENDERABLE_BY_PROTOCOL = {
+    "kitty": _TGPImageWithValidDelete,
+    "halfcell": HalfcellRenderable,
+    "unicode": UnicodeRenderable,
+}
+
+_INLINE_PROTOCOLS = frozenset({"sixel", "iterm2"})
+
+#: Clockwise display rotation → the PIL transpose that achieves it. Transposes
+#: are used rather than ``Image.rotate`` because a quarter turn is then an exact
+#: pixel remapping: no resampling, no interpolation blur on the thin pen strokes
+#: this widget exists to keep legible. PIL's ``ROTATE_n`` names count
+#: *counter*-clockwise, hence the apparent inversion.
+_ROTATION_TRANSPOSE = {
+    90: PILImage.Transpose.ROTATE_270,
+    180: PILImage.Transpose.ROTATE_180,
+    270: PILImage.Transpose.ROTATE_90,
+}
 
 
-class SharpImage(TextualImage, Renderable=_Renderable):
-    """Image widget tuned for document scans in a kitty-capable terminal.
+class SharpImage(BaseImageWidget, Renderable=UnicodeRenderable):
+    """Image widget tuned for document scans, on whatever the terminal supports.
 
-    ``textual-image`` renders terminal graphics on a cell-aligned pixel grid.
-    This wrapper keeps the display size at or below the source image's native
-    pixel size by default and performs any necessary resize with a high-quality
-    filter before the image is handed to the terminal renderable.
+    Sizing is protocol-independent: the display size stays at or below the
+    source image's native pixel size by default, and any resize happens with a
+    high-quality filter before the pixels reach the terminal.
+
+    Rendering is protocol-dependent, and the split is invisible to callers:
+
+    * Kitty / half-block / unicode go through a Rich renderable produced by
+      :meth:`render`, chosen per instance from the detected capability.
+    * Sixel and iTerm2 are raw escape blobs Rich cannot carry, so the widget
+      composes an :class:`InlineGraphicsPane` child that writes them straight
+      into Textual's output. :meth:`render` then yields nothing.
+
+    Either way the same :meth:`_prepare_image` pipeline does the scaling, so a
+    crop looks the same (modulo protocol fidelity) in every terminal.
     """
 
     class ScalingError(Message):
@@ -59,6 +94,9 @@ class SharpImage(TextualImage, Renderable=_Renderable):
 
     fit_width_fraction = reactive(0.6, layout=True)
     allow_upscale = reactive(False)
+    #: Clockwise display rotation in degrees (0/90/180/270). Purely a view
+    #: transform — the file on disk is never touched.
+    rotation = reactive(0, layout=True)
 
     MAX_RENDER_PIXELS = 8_000_000  # 8 MP safety limit for terminal rendering
     MAX_DIMENSION = 4096  # Max dimension for Kitty protocol/compatibility
@@ -70,6 +108,7 @@ class SharpImage(TextualImage, Renderable=_Renderable):
         fit_width_fraction: float = 1.0,
         allow_upscale: bool = False,
         max_cell_height: int | None = None,
+        capability: GraphicsCapability | None = None,
         name: str | None = None,
         id: str | None = None,
         classes: str | None = None,
@@ -78,6 +117,11 @@ class SharpImage(TextualImage, Renderable=_Renderable):
         self._prepared_cache_key: tuple[object, int, int] | None = None
         self._prepared_cache_image: PILImage.Image | None = None
         self._at_scaling_limit = False
+        # Snapshot the protocol per widget: detection is process-wide and
+        # settled before the app starts, and an instance-level copy keeps the
+        # widget testable against any protocol.
+        self._capability = capability or active_graphics()
+        self._inline_pane: InlineGraphicsPane | None = None
         super().__init__(
             image,
             name=name,
@@ -85,17 +129,67 @@ class SharpImage(TextualImage, Renderable=_Renderable):
             classes=classes,
             disabled=disabled,
         )
+        self._Renderable = _RENDERABLE_BY_PROTOCOL.get(
+            self._capability.protocol, UnicodeRenderable
+        )
         self.fit_width_fraction = fit_width_fraction
         self.allow_upscale = allow_upscale
         self.max_cell_height = max_cell_height
 
-    @TextualImage.image.setter
+    @property
+    def capability(self) -> GraphicsCapability:
+        """The graphics protocol this widget renders with."""
+        return self._capability
+
+    @property
+    def uses_inline_graphics(self) -> bool:
+        return self._capability.protocol in _INLINE_PROTOCOLS
+
+    @property
+    def _display_size(self) -> tuple[int, int]:
+        """The image's size *as displayed*, i.e. after any rotation.
+
+        A quarter turn swaps width and height, and every sizing decision below
+        works from the displayed shape — without this a rotated portrait scan
+        would be laid out into a portrait cell box and squashed.
+        """
+        if self.rotation in (90, 270):
+            return self._image_height, self._image_width
+        return self._image_width, self._image_height
+
+    def watch_rotation(self, old_rotation: int, new_rotation: int) -> None:
+        """Drop the prepared/encoded pixels so the new orientation is drawn."""
+        if old_rotation == new_rotation:
+            return
+        self._prepared_cache_key = None
+        self._prepared_cache_image = None
+        # Same reasoning as the ``image`` setter: the inline pane keeps its own
+        # encoded-escape cache and reads pixels back through our pipeline.
+        pane = getattr(self, "_inline_pane", None)
+        if pane is not None and pane.is_attached:
+            pane.invalidate()
+
+    def compose(self) -> ComposeResult:
+        if self.uses_inline_graphics:
+            self._inline_pane = InlineGraphicsPane(
+                self._capability.protocol,  # type: ignore[arg-type]
+                self._prepare_image_or_none,
+                self._image_cache_token,
+            )
+            yield self._inline_pane
+
+    @BaseImageWidget.image.setter
     def image(
         self, value: StrOrBytesPath | IO[bytes] | PILImage.Image | None
     ) -> None:
         self._prepared_cache_key = None
         self._prepared_cache_image = None
-        TextualImage.image.fset(self, value)
+        BaseImageWidget.image.fset(self, value)
+        # The inline pane reads the image lazily through our pipeline, so it
+        # only needs its encoded-data cache dropped.
+        pane = getattr(self, "_inline_pane", None)
+        if pane is not None and pane.is_attached:
+            pane.invalidate()
 
     def on_unmount(self) -> None:
         # The library widget never frees the terminal-side image when the
@@ -117,9 +211,10 @@ class SharpImage(TextualImage, Renderable=_Renderable):
 
         max_height = self.max_cell_height or container.height or 2**32
         terminal_sizes = get_cell_size()
+        display_width, display_height = self._display_size
         _, height = ImageSize(
-            self._image_width,
-            self._image_height,
+            display_width,
+            display_height,
             width,
             "auto",
         ).get_cell_size(width, max_height, terminal_sizes)
@@ -127,6 +222,11 @@ class SharpImage(TextualImage, Renderable=_Renderable):
 
     def render(self) -> RenderResult:
         if not self._image:
+            return ""
+
+        # Sixel/iTerm2 paint through the composed child; drawing anything here
+        # would overwrite the pixels the pane just wrote.
+        if self.uses_inline_graphics:
             return ""
 
         if self._renderable:
@@ -140,7 +240,7 @@ class SharpImage(TextualImage, Renderable=_Renderable):
             pixel_height = height * terminal_sizes.height
 
             # Proactively clamp resolution to safety limits to avoid memory/terminal errors.
-            # If the requested zoom exceeds this, we downscale the pixel data while keeping 
+            # If the requested zoom exceeds this, we downscale the pixel data while keeping
             # the cell layout size the same. This provides a "sharp as possible" view.
             total_pixels = pixel_width * pixel_height
             if total_pixels > self.MAX_RENDER_PIXELS:
@@ -178,20 +278,22 @@ class SharpImage(TextualImage, Renderable=_Renderable):
 
         terminal_sizes = get_cell_size()
         max_height = self.max_cell_height or 2**32
+        display_width, display_height = self._display_size
         _, height = ImageSize(
-            self._image_width,
-            self._image_height,
+            display_width,
+            display_height,
             width,
             "auto",
         ).get_cell_size(width, max_height, terminal_sizes)
         return max(1, width), max(1, height)
 
     def _target_cell_width(self, container_width: int) -> int:
-        if not self._image or self._image_width <= 0:
+        display_width, display_height = self._display_size
+        if not self._image or display_width <= 0:
             return 0
 
         terminal_sizes = get_cell_size()
-        intrinsic_width = max(1, round(self._image_width / terminal_sizes.width))
+        intrinsic_width = max(1, round(display_width / terminal_sizes.width))
 
         # Use intrinsic_width as a fallback for container_width if it's 0,
         # to ensure a non-zero target width for initial layout.
@@ -201,9 +303,9 @@ class SharpImage(TextualImage, Renderable=_Renderable):
 
         max_width = max(1, floor(effective_container_width * self.fit_width_fraction))
 
-        if self.max_cell_height is not None and self._image_height > 0:
+        if self.max_cell_height is not None and display_height > 0:
             max_height_px = self.max_cell_height * terminal_sizes.height
-            height_limited_px = max_height_px * (self._image_width / self._image_height)
+            height_limited_px = max_height_px * (display_width / display_height)
             height_limited_width = max(
                 1,
                 floor(height_limited_px / terminal_sizes.width),
@@ -212,6 +314,14 @@ class SharpImage(TextualImage, Renderable=_Renderable):
         if self.allow_upscale:
             return max_width
         return min(intrinsic_width, max_width)
+
+    def _prepare_image_or_none(
+        self, width: int, height: int
+    ) -> PILImage.Image | None:
+        """`_prepare_image` for the inline pane, tolerant of a missing image."""
+        if not self._image:
+            return None
+        return self._prepare_image(width, height)
 
     def _prepare_image(self, width: int, height: int) -> PILImage.Image:
         cache_key = (self._image_cache_token(), width, height)
@@ -223,6 +333,13 @@ class SharpImage(TextualImage, Renderable=_Renderable):
 
         with ensure_image(self._image) as opened_image:  # type: ignore
             source = ImageOps.exif_transpose(opened_image).copy()
+
+        # Rotate before resizing: the target size is already expressed in the
+        # displayed orientation, and turning first means the LANCZOS resize
+        # below sees the shape it is actually scaling to.
+        transpose = _ROTATION_TRANSPOSE.get(self.rotation % 360)
+        if transpose is not None:
+            source = source.transpose(transpose)
 
         if source.size == (width, height):
             prepared = source
@@ -239,6 +356,13 @@ class SharpImage(TextualImage, Renderable=_Renderable):
         return prepared
 
     def _image_cache_token(self) -> object:
+        # Rotation is part of the identity of the *pixels*, not just of the
+        # layout, so it belongs in the token: it keys both this widget's
+        # prepared-image cache and the inline pane's encoded-escape cache, and
+        # without it a turned crop would keep serving the previous orientation.
+        return (self._source_cache_token(), self.rotation % 360)
+
+    def _source_cache_token(self) -> object:
         if isinstance(self._image, bytes):
             return (self._image, None)
         if isinstance(self._image, (str, Path)):

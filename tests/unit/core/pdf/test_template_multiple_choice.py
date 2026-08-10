@@ -90,3 +90,25 @@ def test_continued_header_and_page_number_are_inside_printable_area(
 
     assert header_bbox.y0 >= PRINT_SAFE_MARGIN - 1
     assert page_number_bbox.y1 <= LETTER_H - PRINT_SAFE_MARGIN + 1
+
+
+def test_generate_template_pdf_renders_numeric_answer_hint(tmp_path: Path) -> None:
+    content = """
+- (5 points) How many milliliters are in a liter?
+  - **Correct**
+    - 1000 ±10 units:mL
+
+- (2 points) The Earth is flat.
+  - **Correct**
+    - False
+"""
+    document = parse_qa_markdown(content)
+    questions = qa_to_template_questions(document)
+    output = tmp_path / "numeric.pdf"
+    generate_template_pdf(output, "A", questions, "Numeric Quiz")
+
+    text = _extract_pdf_text(output)
+    # Numeric questions print a units hint; True/False renders its two options.
+    assert "Answer in mL" in text
+    assert "True" in text
+    assert "False" in text

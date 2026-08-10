@@ -4,12 +4,52 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
-from opengrader.core.pdf.templates.generate import QuestionInput
+from opengrader.core.bubble_sheet import (
+    DEFAULT_CHOICE_LABELS as DEFAULT_BUBBLE_CHOICE_LABELS,
+)
 from opengrader.core.pdf.templates.utils import default_subquestion_label
+from opengrader.core.question_types import (
+    FALSE_CHOICE_TEXT,
+    FREE_RESPONSE,
+    MULTIPLE_ANSWER,
+    MULTIPLE_CHOICE,
+    NUMERIC,
+    TRUE_CHOICE_TEXT,
+    QuestionType,
+    is_boolean_answer,
+    normalize_boolean,
+)
 
+from .numeric import format_numeric_spec, parse_numeric_answers
 from .scoring import RubricOptionKind, RubricSelectionMode, rubric_scoring_mode
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from opengrader.core.bubble_sheet import BubbleQuestion
+    # QuestionInput is only used in annotations here (this module has
+    # ``from __future__ import annotations``, so it's never evaluated at
+    # runtime); deferring it avoids importing anything from the
+    # ``pdf.templates`` package at qa_file import time.
+    from opengrader.core.pdf.templates.utils import QuestionInput
+
+# Values accepted in a question's optional ``**Type**`` section. True/False
+# forces the two-option multiple-choice expansion; the others are documentary
+# (the type is otherwise inferred from the answer key), but a wrong spelling is
+# rejected so typos surface at validation time.
+_TYPE_TRUE_FALSE_ALIASES = {
+    "true/false",
+    "true false",
+    "truefalse",
+    "true_false",
+    "t/f",
+    "tf",
+    "boolean",
+    "bool",
+}
+_TYPE_NUMERIC_ALIASES = {"numeric", "number", "num"}
+_TYPE_FREE_RESPONSE_ALIASES = {"free response", "free_response", "free-response", "free"}
+_TYPE_MULTIPLE_CHOICE_ALIASES = {"multiple choice", "multiple_choice", "mc"}
 
 # "(10 points) Question prompt" -> points=10, prompt="Question prompt"
 _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGNORECASE)
@@ -20,6 +60,33 @@ _CHOICE_ITEM_RE = re.compile(r"^(?P<label>[A-Za-z])[\)\.\:]\s*(?P<text>.+?)\s*$"
 _RUBRIC_OPTION_RE = re.compile(
     r"^(?P<label>.+?)\s*(?:\(\s*(?P<paren>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?\s*\)|:\s*(?P<colon>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?)\s*$",
     re.IGNORECASE,
+)
+# A ``**Comment**`` child bullet under a rubric option supplies the default
+# feedback text auto-inserted when a grader picks that option. It is stored
+# apart from freeform ``notes`` (which are grader-facing guidance). Both the
+# inline form (``**Comment** text``) and a nested-bullet form are accepted.
+_RUBRIC_COMMENT_RE = re.compile(
+    r"^\*\*\s*Comment\s*\*\*\s*(?P<text>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# An ``**Outcome**`` child bullet tags a question with a learning outcome it
+# measures (``CLO3``, ``ABET-2``, "Applies Bayes' rule" — the text is the
+# instructor's, we never interpret it). Repeatable: one question can serve
+# several outcomes, and one outcome is usually spread over several questions.
+# Same shape as ``**Comment**``: an inline form (``**Outcome** CLO3``) and a
+# nested-bullet form (``**Outcome**`` with one outcome per child bullet) are
+# both accepted, and the section is emitted only when non-empty so files that
+# don't use outcomes round-trip byte-identically.
+#
+# Matched by its own regex rather than through `_normalize_section_name`, for
+# the same reason `**Comment**` is: that helper only recognizes a *bare*
+# ``**Header**`` bullet, and the inline ``**Outcome** CLO3`` form — the one
+# instructors actually write — would fall through it to be mistaken for a
+# subquestion.
+_OUTCOME_SECTION_RE = re.compile(
+    r"^\*\*\s*Outcomes?\s*\*\*\s*(?P<text>.*)$",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -45,6 +112,9 @@ class QARubricItem:
     points_delta: float | None = None
     notes: list[str] = field(default_factory=list)
     subitems: list["QARubricItem"] = field(default_factory=list)
+    # Feedback auto-inserted into the comment box when a grader selects this
+    # option, authored as a ``**Comment**`` child bullet in the QA file.
+    default_comment: str | None = None
 
 
 def _is_bonus(item: QARubricItem | QARubricFlatOption) -> bool:
@@ -62,6 +132,10 @@ class QARubricFlatOption:
     points_delta: float
     kind: RubricOptionKind
     selection_mode: RubricSelectionMode
+    # Feedback auto-inserted into the comment box when this option is selected
+    # (carried through from the option's ``**Comment**`` bullet). ``None`` when
+    # the option declares no default comment.
+    default_comment: str | None = None
 
 
 @dataclass
@@ -83,8 +157,15 @@ class QASubquestion:
     answers: list[str] = field(default_factory=list)
     choices: list[QAChoice] = field(default_factory=list)
     correct_choice_label: str | None = None
+    # Populated (with 2+ labels) only for "select all that apply" questions; a
+    # single-correct multiple choice uses correct_choice_label instead.
+    correct_choice_labels: tuple[str, ...] = ()
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
+    # Learning outcomes this part measures (``**Outcome**`` bullets). A
+    # subquestion carries its own because it is separately graded — "q5a tests
+    # CLO2, q5b tests CLO4" is the normal case for a multi-part question.
+    outcomes: tuple[str, ...] = ()
 
 
 @dataclass
@@ -97,9 +178,48 @@ class QAQuestion:
     answers: list[str] = field(default_factory=list)
     choices: list[QAChoice] = field(default_factory=list)
     correct_choice_label: str | None = None
+    # Populated (with 2+ labels) only for "select all that apply" questions; a
+    # single-correct multiple choice uses correct_choice_label instead.
+    correct_choice_labels: tuple[str, ...] = ()
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
     subquestions: list[QASubquestion] = field(default_factory=list)
+    # Learning outcomes this question measures (``**Outcome**`` bullets).
+    # Optional and repeatable; empty for the overwhelming majority of QA files,
+    # which is why nothing downstream may require it.
+    outcomes: tuple[str, ...] = ()
+
+    @property
+    def graded_outcomes(self) -> tuple[str, ...]:
+        """This question's outcomes, or the union of its subquestions'.
+
+        A parent with subquestions is not itself graded — its parts are — so
+        when only the parent is tagged, the tag has to reach the parts that
+        actually carry points. Tagging both is allowed and the parent's tag
+        applies to every part that doesn't override it.
+        """
+        if not self.subquestions:
+            return self.outcomes
+        merged: list[str] = []
+        for subquestion in self.subquestions:
+            for outcome in subquestion.outcomes or self.outcomes:
+                if outcome not in merged:
+                    merged.append(outcome)
+        return tuple(merged)
+
+    def outcomes_for(self, question_id: str) -> tuple[str, ...]:
+        """The outcomes that apply to one graded id under this question.
+
+        For a plain question that is its own id; for a subquestion id (``q5a``)
+        it is the subquestion's own tags, falling back to the parent's — the
+        inheritance that lets an instructor tag a multi-part question once.
+        """
+        if not self.subquestions:
+            return self.outcomes if question_id == self.id else ()
+        for subquestion in self.subquestions:
+            if subquestion.id == question_id:
+                return subquestion.outcomes or self.outcomes
+        return ()
 
 
 @dataclass
@@ -446,9 +566,14 @@ def _validate_multiple_choice(
     choices: list[QAChoice],
     correct_values: list[str],
     context: str,
-) -> str | None:
+) -> list[str]:
+    """Validate a choice question and return its correct labels (in choice order).
+
+    One correct label is a normal multiple choice; two or more make it a
+    "select all that apply" question. Zero is always an error.
+    """
     if not choices:
-        return None
+        return []
 
     if len(choices) < 2:
         raise ValueError(f"{context} must define at least two choices")
@@ -463,22 +588,104 @@ def _validate_multiple_choice(
             f"{context} choices must use contiguous labels starting at A: {', '.join(expected_labels)}"
         )
 
-    if len(correct_values) != 1:
+    if not correct_values:
         raise ValueError(
-            f"{context} multiple-choice questions must contain exactly one correct option label"
+            f"{context} multiple-choice questions must contain at least one correct option label"
         )
 
-    correct_label = _normalize_choice_label(
-        correct_values[0],
-        context=f"{context} correct answer",
-        allow_prefixed_choice=True,
+    correct_labels: list[str] = []
+    for value in correct_values:
+        correct_label = _normalize_choice_label(
+            value,
+            context=f"{context} correct answer",
+            allow_prefixed_choice=True,
+        )
+        if correct_label not in labels:
+            raise ValueError(
+                f"{context} correct answer {correct_label!r} is not one of the defined choices"
+            )
+        if correct_label not in correct_labels:  # dedupe, keep first-seen order
+            correct_labels.append(correct_label)
+
+    # Canonicalize to choice order so a re-render is stable regardless of the
+    # order the correct labels were listed in.
+    return [label for label in labels if label in correct_labels]
+
+
+def _split_correct_labels(
+    correct_labels: list[str],
+) -> tuple[str | None, tuple[str, ...]]:
+    """Route validated correct labels into the single vs. multi-answer fields.
+
+    Exactly one correct label ⇒ ``correct_choice_label`` (a normal multiple
+    choice); two or more ⇒ ``correct_choice_labels`` (select all that apply).
+    """
+    if len(correct_labels) <= 1:
+        return (correct_labels[0] if correct_labels else None), ()
+    return None, tuple(correct_labels)
+
+
+def _normalize_type_hint(raw: str | None) -> str | None:
+    """Canonicalize a ``**Type**`` value, or raise on an unknown spelling."""
+    if raw is None:
+        return None
+    normalized = " ".join(raw.strip().lower().split())
+    if not normalized:
+        return None
+    if normalized in _TYPE_TRUE_FALSE_ALIASES:
+        return "true_false"
+    if normalized in _TYPE_NUMERIC_ALIASES:
+        return NUMERIC
+    if normalized in _TYPE_FREE_RESPONSE_ALIASES:
+        return FREE_RESPONSE
+    if normalized in _TYPE_MULTIPLE_CHOICE_ALIASES:
+        return MULTIPLE_CHOICE
+    raise ValueError(
+        f"unknown question type {raw!r}; use True/False, Numeric, "
+        "Multiple Choice, or Free Response"
     )
-    if correct_label not in labels:
+
+
+def _maybe_expand_true_false(
+    *,
+    type_hint: str | None,
+    correct_values: list[str],
+    choices: list[QAChoice],
+    context: str,
+) -> tuple[list[QAChoice], list[str]]:
+    """Expand a True/False shortcut into a constrained two-option multiple choice.
+
+    A True/False question is authored concisely (``**Correct** True`` or an
+    explicit ``**Type** True/False``) but stored as a normal multiple-choice
+    question — ``A) True`` / ``B) False`` with the correct label — so it reuses
+    the entire multiple-choice pipeline (template rendering, OCR classification,
+    grading, statistics) with no parallel question type. Returns the inputs
+    unchanged when the question is not True/False.
+    """
+    if choices:
+        return choices, correct_values
+
+    explicit_tf = type_hint == "true_false"
+    inferred_tf = (
+        type_hint is None
+        and len(correct_values) == 1
+        and is_boolean_answer(correct_values[0])
+    )
+    if not (explicit_tf or inferred_tf):
+        return choices, correct_values
+
+    truth = normalize_boolean(correct_values[0]) if len(correct_values) == 1 else None
+    if truth is None:
         raise ValueError(
-            f"{context} correct answer {correct_label!r} is not one of the defined choices"
+            f"{context} True/False questions need exactly one correct answer "
+            "of True or False"
         )
 
-    return correct_label
+    tf_choices = [
+        QAChoice(label="A", text=TRUE_CHOICE_TEXT),
+        QAChoice(label="B", text=FALSE_CHOICE_TEXT),
+    ]
+    return tf_choices, ["A" if truth else "B"]
 
 
 def _parse_rubric_label_and_delta(
@@ -522,16 +729,82 @@ def _canonical_rubric_category(label: str) -> str | None:
     return mapping.get(normalized)
 
 
+def _extract_rubric_comment(child: _BulletItem) -> str | None:
+    """Return the feedback text of a ``**Comment**`` bullet, or ``None``.
+
+    Accepts the inline form (``**Comment** great work``) and the nested form
+    (``**Comment**`` with the text on child bullets), joining multi-line text
+    with single spaces so it round-trips onto one rendered line.
+    """
+    matched = _RUBRIC_COMMENT_RE.match(child.text.strip())
+    if matched is None:
+        return None
+    parts = [matched.group("text").strip(), *_section_values(child)]
+    comment = " ".join(part for part in parts if part).strip()
+    return comment or None
+
+
+def _parse_outcomes_section(child: _BulletItem) -> list[str]:
+    """Read one ``**Outcome**`` bullet into its outcome names.
+
+    Accepts the inline form (``**Outcome** CLO3``), the nested form (child
+    bullets), and a comma-separated inline list (``**Outcome** CLO2, CLO3``) —
+    an instructor writing three tags on one line is the obvious shorthand and
+    refusing it would be pedantry. Names are kept **verbatim apart from
+    surrounding whitespace**: they are the instructor's own vocabulary (CLO3,
+    ABET-2, "Applies Bayes' rule") and normalizing case or punctuation would
+    silently merge two outcomes they meant to keep apart.
+    """
+    matched = _OUTCOME_SECTION_RE.match(child.text.strip())
+    values: list[str] = []
+    if matched is not None and matched.group("text").strip():
+        values.append(matched.group("text").strip())
+    values.extend(_section_values(child))
+
+    outcomes: list[str] = []
+    for value in values:
+        for part in value.split(","):
+            name = part.strip()
+            # Deduplicated per question: tagging CLO3 twice is a typo, and a
+            # double-count would inflate that outcome's coverage.
+            if name and name not in outcomes:
+                outcomes.append(name)
+    return outcomes
+
+
+def _render_outcomes(lines: list[str], outcomes: tuple[str, ...], *, indent: int) -> None:
+    """Render the outcomes back as one ``**Outcome**`` bullet per tag.
+
+    One bullet each rather than a comma list, so the round trip is stable no
+    matter which input form was used — and emitted only when there are any, so
+    a QA file without outcomes is byte-identical after a load/save cycle.
+    """
+    for outcome in outcomes:
+        if outcome.strip():
+            _append_bullet(lines, indent=indent, text=f"**Outcome** {outcome.strip()}")
+
+
 def _parse_rubric_subitem(item: _BulletItem) -> QARubricItem:
     label, points_delta = _parse_rubric_label_and_delta(
         item.text,
         line_no=item.line_no,
         require_delta=True,
     )
+    default_comment: str | None = None
+    notes: list[str] = []
+    for child in item.children:
+        if not child.text.strip():
+            continue
+        comment = _extract_rubric_comment(child)
+        if comment is not None and default_comment is None:
+            default_comment = comment
+            continue
+        notes.append(child.text.strip())
     return QARubricItem(
         label=label,
         points_delta=points_delta,
-        notes=_section_values(item),
+        notes=notes,
+        default_comment=default_comment,
     )
 
 
@@ -552,9 +825,15 @@ def _parse_rubric_category(item: _BulletItem) -> QARubricItem:
 
     notes: list[str] = []
     subitems: list[QARubricItem] = []
+    default_comment: str | None = None
     for child in item.children:
         if _RUBRIC_OPTION_RE.match(child.text.strip()):
             subitems.append(_parse_rubric_subitem(child))
+            continue
+
+        comment = _extract_rubric_comment(child)
+        if comment is not None and default_comment is None:
+            default_comment = comment
             continue
 
         if child.text.strip():
@@ -566,6 +845,7 @@ def _parse_rubric_category(item: _BulletItem) -> QARubricItem:
         points_delta=points_delta,
         notes=notes,
         subitems=subitems,
+        default_comment=default_comment,
     )
 
 
@@ -746,10 +1026,18 @@ def _parse_subquestion_item(
     choices: list[QAChoice] = []
     rubric: list[QARubricItem] = []
     image_markdown: str | None = None
+    type_hint: str | None = None
+    outcomes: list[str] = []
     unknown_nested: list[_BulletItem] = []
 
     for child in item.children:
         section_name = _normalize_section_name(child.text)
+
+        if _OUTCOME_SECTION_RE.match(child.text.strip()) is not None:
+            for outcome in _parse_outcomes_section(child):
+                if outcome not in outcomes:
+                    outcomes.append(outcome)
+            continue
 
         if section_name in {"correct", "answer", "answers"}:
             correct_values.extend(_section_values(child))
@@ -757,6 +1045,11 @@ def _parse_subquestion_item(
 
         if section_name == "choices":
             choices.extend(_parse_choices_section(child))
+            continue
+
+        if section_name == "type":
+            values = _section_values(child)
+            type_hint = _normalize_type_hint(values[0] if values else None)
             continue
 
         if section_name == "image":
@@ -782,10 +1075,18 @@ def _parse_subquestion_item(
     label = default_subquestion_label(index)
     subquestion_id = f"{parent_id}{label}"
     points = inline_points or 0
-    correct_choice_label = _validate_multiple_choice(
-        choices=choices,
+    choices, correct_values = _maybe_expand_true_false(
+        type_hint=type_hint,
         correct_values=correct_values,
+        choices=choices,
         context=f"subquestion {subquestion_id!r}",
+    )
+    correct_choice_label, correct_choice_labels = _split_correct_labels(
+        _validate_multiple_choice(
+            choices=choices,
+            correct_values=correct_values,
+            context=f"subquestion {subquestion_id!r}",
+        )
     )
     answers = [] if choices else correct_values
     _validate_rubric_points(
@@ -802,8 +1103,10 @@ def _parse_subquestion_item(
         answers=answers,
         choices=choices,
         correct_choice_label=correct_choice_label,
+        correct_choice_labels=correct_choice_labels,
         rubric=rubric,
         image_markdown=image_markdown,
+        outcomes=tuple(outcomes),
     )
 
 
@@ -817,10 +1120,18 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
     choices: list[QAChoice] = []
     rubric: list[QARubricItem] = []
     image_markdown: str | None = None
+    type_hint: str | None = None
+    outcomes: list[str] = []
     subquestion_items: list[_BulletItem] = []
 
     for child in item.children:
         section_name = _normalize_section_name(child.text)
+
+        if _OUTCOME_SECTION_RE.match(child.text.strip()) is not None:
+            for outcome in _parse_outcomes_section(child):
+                if outcome not in outcomes:
+                    outcomes.append(outcome)
+            continue
 
         if section_name in {"correct", "answer", "answers"}:
             correct_values.extend(_section_values(child))
@@ -828,6 +1139,11 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
 
         if section_name == "choices":
             choices.extend(_parse_choices_section(child))
+            continue
+
+        if section_name == "type":
+            values = _section_values(child)
+            type_hint = _normalize_type_hint(values[0] if values else None)
             continue
 
         if section_name == "image":
@@ -860,10 +1176,18 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
     ]
 
     points = inline_points or 0
-    correct_choice_label = _validate_multiple_choice(
-        choices=choices,
+    choices, correct_values = _maybe_expand_true_false(
+        type_hint=type_hint,
         correct_values=correct_values,
+        choices=choices,
         context=f"question {qid!r}",
+    )
+    correct_choice_label, correct_choice_labels = _split_correct_labels(
+        _validate_multiple_choice(
+            choices=choices,
+            correct_values=correct_values,
+            context=f"question {qid!r}",
+        )
     )
     answers = [] if choices else correct_values
     _validate_rubric_points(rubric, points=points, context=f"question {qid!r}")
@@ -875,9 +1199,11 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
         answers=answers,
         choices=choices,
         correct_choice_label=correct_choice_label,
+        correct_choice_labels=correct_choice_labels,
         rubric=rubric,
         image_markdown=image_markdown,
         subquestions=subquestions,
+        outcomes=tuple(outcomes),
     )
 
 
@@ -1014,13 +1340,24 @@ def _render_choices(lines: list[str], choices: list[QAChoice], *, indent: int) -
 
 
 def _render_correct_choice(
-    lines: list[str], correct_choice_label: str | None, *, indent: int
+    lines: list[str],
+    correct_choice_label: str | None,
+    correct_choice_labels: tuple[str, ...] = (),
+    *,
+    indent: int,
 ) -> None:
-    if correct_choice_label is None:
+    # Multi-answer questions carry 2+ labels; single choice carries one.
+    labels = (
+        list(correct_choice_labels)
+        if correct_choice_labels
+        else ([correct_choice_label] if correct_choice_label else [])
+    )
+    if not labels:
         return
 
     _append_bullet(lines, indent=indent, text="**Correct**")
-    _append_bullet(lines, indent=indent + 2, text=correct_choice_label)
+    for label in labels:
+        _append_bullet(lines, indent=indent + 2, text=label)
 
 
 def _render_points_delta(points_delta: float) -> str:
@@ -1043,6 +1380,7 @@ def _render_rubric(
             item_text = f"{item.label} ({_render_points_delta(item.points_delta)})"
         _append_bullet(lines, indent=indent + 2, text=item_text)
 
+        _render_rubric_comment(lines, item.default_comment, indent=indent + 4)
         for note in item.notes:
             _append_bullet(lines, indent=indent + 4, text=note)
 
@@ -1054,8 +1392,17 @@ def _render_rubric(
                 indent=indent + 4,
                 text=f"{subitem.label} ({_render_points_delta(subitem.points_delta)})",
             )
+            _render_rubric_comment(lines, subitem.default_comment, indent=indent + 6)
             for note in subitem.notes:
                 _append_bullet(lines, indent=indent + 6, text=note)
+
+
+def _render_rubric_comment(
+    lines: list[str], comment: str | None, *, indent: int
+) -> None:
+    if comment is None or not comment.strip():
+        return
+    _append_bullet(lines, indent=indent, text=f"**Comment** {comment.strip()}")
 
 
 def _render_image(lines: list[str], image_markdown: str | None, *, indent: int) -> None:
@@ -1076,9 +1423,15 @@ def _render_subquestion(
     )
     _render_image(lines, subquestion.image_markdown, indent=indent + 2)
     _render_choices(lines, subquestion.choices, indent=indent + 2)
-    _render_correct_choice(lines, subquestion.correct_choice_label, indent=indent + 2)
+    _render_correct_choice(
+        lines,
+        subquestion.correct_choice_label,
+        subquestion.correct_choice_labels,
+        indent=indent + 2,
+    )
     _render_answers(lines, subquestion.answers, indent=indent + 2)
     _render_rubric(lines, subquestion.rubric, indent=indent + 2)
+    _render_outcomes(lines, subquestion.outcomes, indent=indent + 2)
 
 
 def _render_question(
@@ -1091,9 +1444,15 @@ def _render_question(
     )
     _render_image(lines, question.image_markdown, indent=indent + 2)
     _render_choices(lines, question.choices, indent=indent + 2)
-    _render_correct_choice(lines, question.correct_choice_label, indent=indent + 2)
+    _render_correct_choice(
+        lines,
+        question.correct_choice_label,
+        question.correct_choice_labels,
+        indent=indent + 2,
+    )
     _render_answers(lines, question.answers, indent=indent + 2)
     _render_rubric(lines, question.rubric, indent=indent + 2)
+    _render_outcomes(lines, question.outcomes, indent=indent + 2)
 
     for subquestion in question.subquestions:
         _render_subquestion(lines, subquestion, indent=indent + 2)
@@ -1160,6 +1519,35 @@ def find_qa_question(
             if subquestion.id == question_id:
                 return subquestion
     raise ValueError(f"question not found in QA file: {question_id}")
+
+
+def qa_question_type(question: QAQuestion | QASubquestion) -> QuestionType:
+    """Infer a QA question's grading type from its structure and answer key.
+
+    Multiple choice (including a materialized True/False) is detected by its
+    choices; a question whose every accepted answer parses as a numeric spec is
+    numeric; everything else is free response. A parent question with
+    subquestions is reported as free response — the meaningful type lives on each
+    subquestion.
+    """
+    if question.correct_choice_labels:
+        return MULTIPLE_ANSWER
+    if question.choices or question.correct_choice_label:
+        return MULTIPLE_CHOICE
+    if getattr(question, "subquestions", None):
+        return FREE_RESPONSE
+    if parse_numeric_answers(question.answers) is not None:
+        return NUMERIC
+    return FREE_RESPONSE
+
+
+def _numeric_answer_hint(question: QAQuestion | QASubquestion) -> str | None:
+    """A short printed-template hint for a numeric answer box, or ``None``."""
+    specs = parse_numeric_answers(question.answers)
+    if specs is None:
+        return None
+    units = next((spec.units for spec in specs if spec.units), None)
+    return f"Answer in {units}" if units else "Numeric answer"
 
 
 def flatten_rubric_options(
@@ -1245,6 +1633,7 @@ def _flatten_rubric_options(
                 points_delta=item.points_delta,
                 kind=kind,
                 selection_mode=selection_mode,
+                default_comment=item.default_comment,
             )
         )
     return options
@@ -1297,13 +1686,21 @@ def _rubric_from_flat_options(
     bonus_options = [o for o in options if o.kind == "bonus"]
 
     rubric = [
-        QARubricItem(label="Correct", points_delta=correct_options[0].points_delta),
+        QARubricItem(
+            label="Correct",
+            points_delta=correct_options[0].points_delta,
+            default_comment=correct_options[0].default_comment,
+        ),
         _partial_rubric_item(partial_options),
     ]
 
     if bonus_options:
         subitems = [
-            QARubricItem(label=_bonus_subitem_label(o.label), points_delta=o.points_delta)
+            QARubricItem(
+                label=_bonus_subitem_label(o.label),
+                points_delta=o.points_delta,
+                default_comment=o.default_comment,
+            )
             for o in bonus_options
         ]
         rubric.append(QARubricItem(label="Bonus", subitems=subitems))
@@ -1312,6 +1709,7 @@ def _rubric_from_flat_options(
         QARubricItem(
             label="Incorrect",
             points_delta=incorrect_options[0].points_delta,
+            default_comment=incorrect_options[0].default_comment,
         )
     )
 
@@ -1332,6 +1730,7 @@ def _partial_rubric_item(
             return QARubricItem(
                 label="Partially Correct",
                 points_delta=option.points_delta,
+                default_comment=option.default_comment,
             )
 
     subitems: list[QARubricItem] = []
@@ -1341,6 +1740,7 @@ def _partial_rubric_item(
             QARubricItem(
                 label=label,
                 points_delta=option.points_delta,
+                default_comment=option.default_comment,
             )
         )
     return QARubricItem(label="Partially Correct", subitems=subitems)
@@ -1364,7 +1764,18 @@ def qa_to_template_questions(
     questions: list[QuestionInput] = []
     for question in _questions_for_version(document, version):
         if not question.subquestions and not question.choices:
-            questions.append((question.id, question.points, question.prompt))
+            hint = _numeric_answer_hint(question)
+            if hint is None:
+                questions.append((question.id, question.points, question.prompt))
+            else:
+                questions.append(
+                    {
+                        "id": question.id,
+                        "points": question.points,
+                        "prompt": question.prompt,
+                        "answer_hint": hint,
+                    }
+                )
             continue
 
         question_input: dict[str, object] = {
@@ -1403,6 +1814,49 @@ def qa_to_template_questions(
     return questions
 
 
+def qa_to_bubble_questions(
+    document: QADocument, version: str | None = None
+) -> list["BubbleQuestion"]:
+    """Bridge a QA file to a bubble answer sheet's question list.
+
+    The sibling of :func:`qa_to_template_questions`, and the reason a bubble
+    sheet can be *generated* and later *read* from nothing but the QA file:
+    both sides call this, so the sheet's rows and the reader's expectations are
+    derived from one source.
+
+    Only questions a bubble can express are included — a single-answer multiple
+    choice (which is also what a True/False question materializes into) and its
+    multiple-choice subquestions. Free-response, numeric and select-all
+    questions are skipped: a row of circles cannot capture them, and silently
+    printing one would lose the student's answer entirely. Callers that need to
+    know what was left out compare the result against the QA questions.
+    """
+    from opengrader.core.bubble_sheet import BubbleQuestion
+
+    bubbles: list[BubbleQuestion] = []
+    for question in _questions_for_version(document, version):
+        candidates: list[QAQuestion | QASubquestion] = (
+            list(question.subquestions) if question.subquestions else [question]
+        )
+        for item in candidates:
+            if qa_question_type(item) != MULTIPLE_CHOICE:
+                continue
+            labels = tuple(choice.label for choice in item.choices)
+            if not labels:
+                # A question keyed by `correct_choice_label` with no printed
+                # choices still needs somewhere to mark; fall back to the
+                # standard five so the row exists.
+                labels = DEFAULT_BUBBLE_CHOICE_LABELS
+            bubbles.append(
+                BubbleQuestion(
+                    question_id=item.id,
+                    choice_labels=labels,
+                    points=float(item.points),
+                )
+            )
+    return bubbles
+
+
 def save_qa_markdown(document: QADocument, path: str | Path) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1430,3 +1884,66 @@ def _bonus_subitem_label(label: str) -> str:
     if not stripped:
         raise ValueError("bonus rubric option labels cannot be blank")
     return stripped
+
+
+def outcomes_by_question(document: "QADocument") -> dict[str, tuple[str, ...]]:
+    """Map every *graded* question id in a QA document to its learning outcomes.
+
+    The single bridge from the answer key to the outcome analytics, so the item
+    report, the analysis PDF, the gradebook and the course roll-up can never
+    disagree about which questions measure what. Graded ids only: a parent
+    question with subquestions contributes ``q5a``/``q5b``, never ``q5``, since
+    that is what the ``.submission.md`` files carry and what has points.
+
+    Multi-version assignments are merged across versions, because an outcome is
+    a property of the *material* rather than of which form a student sat. Where
+    two versions tag the same id differently the tags union, which is the safe
+    direction: an outcome is reported as covered when any version covers it.
+    """
+    merged: dict[str, tuple[str, ...]] = {}
+
+    def add(question: QAQuestion) -> None:
+        ids = (
+            [sub.id for sub in question.subquestions]
+            if question.subquestions
+            else [question.id]
+        )
+        for graded_id in ids:
+            outcomes = question.outcomes_for(graded_id)
+            if not outcomes:
+                continue
+            existing = merged.get(graded_id, ())
+            merged[graded_id] = existing + tuple(
+                o for o in outcomes if o not in existing
+            )
+
+    for question in document.questions:
+        add(question)
+    for questions in document.version_questions.values():
+        for question in questions:
+            add(question)
+    return merged
+
+
+def possible_points_by_question(document: "QADocument") -> dict[str, float]:
+    """Map every graded question id to its point value, merged across versions.
+
+    The companion to :func:`outcomes_by_question`: outcome mastery is measured
+    in points, and the answer key is the authoritative source for them (an
+    extracted ``.submission.md`` often leaves ``Possible points`` blank).
+    """
+    points: dict[str, float] = {}
+
+    def add(question: QAQuestion) -> None:
+        if question.subquestions:
+            for sub in question.subquestions:
+                points.setdefault(sub.id, float(sub.points))
+            return
+        points.setdefault(question.id, float(question.points))
+
+    for question in document.questions:
+        add(question)
+    for questions in document.version_questions.values():
+        for question in questions:
+            add(question)
+    return points

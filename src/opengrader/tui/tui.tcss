@@ -3,18 +3,43 @@ $accent: #81A1C1;
 $background: #181818;
 $foreground: #E4E4E4EB;
 
+/* ── Shared chrome ─────────────────────────────────────────── */
+Breadcrumb {
+    width: 100%;
+    height: 1;
+    padding: 0 2;
+    background: $boost;
+    color: $text-muted;
+}
+
+.sidebar-section-title {
+    color: $text-muted;
+    text-style: bold;
+}
+
+Checkbox {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+Checkbox:focus {
+    background: $boost;
+}
+
 #qa-picker-title {
-    margin: 1 1 0 1;
+    margin: 1 2 0 2;
     text-style: bold;
 }
 
 #qa-picker-subtitle {
-    margin: 0 1 1 1;
+    margin: 0 2 1 2;
     color: $text-muted;
 }
 
 #qa-picker-workspace {
     height: 1fr;
+    margin: 0 1;
 }
 
 #qa-picker-left-column {
@@ -33,8 +58,8 @@ $foreground: #E4E4E4EB;
 
 #qa-list.-pane-active {
     border-title-color: $accent;
+    border-title-style: bold;
     border: round $accent;
-    text-style: bold;
 }
 
 #student-list {
@@ -51,8 +76,8 @@ $foreground: #E4E4E4EB;
 
 #student-list.-pane-active {
     border-title-color: $accent;
+    border-title-style: bold;
     border: round $accent;
-    text-style: bold;
 }
 
 #student-list > .pane-tab-content > IndexedListView {
@@ -80,13 +105,53 @@ $foreground: #E4E4E4EB;
     text-style: bold;
 }
 
-#qa-details {
-    border: round $surface-lighten-1;
+#qa-picker-right-column {
+    width: 1fr;
+    height: 1fr;
     margin-left: 1;
-    padding: 1;
+}
+
+#qa-details {
+    border: round $surface-lighten-2;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    padding: 1 2;
     width: 1fr;
     height: 1fr;
     background: transparent;
+}
+
+/* Grading log: same muted card chrome as the lists on the left. It never
+   takes focus, so it never gets the accent "-pane-active" treatment. */
+#grading-log {
+    height: 11;
+    margin-top: 1;
+    border: round $surface-lighten-2;
+    border-title-color: $text-muted;
+    background: transparent;
+}
+
+#grading-log > .pane-tab-content > IndexedListView {
+    border: none;
+    background: transparent;
+}
+
+#grading-log IndexedListView > ListItem,
+#grading-log IndexedListView > ListItem.-highlight,
+#grading-log IndexedListView > ListItem.-hovered {
+    background: transparent;
+    color: $foreground;
+    text-style: none;
+}
+
+/* Log rows are clickable (they reopen that grade); hover is the affordance.
+   !important outweighs IndexedListView's transparent-hover default. */
+#grading-log IndexedListView > ListItem.grading-log-entry.-hovered {
+    background: #344352 !important;
+}
+
+.grading-log-empty {
+    color: $text-muted;
 }
 
 #qa-statistics-chart {
@@ -101,8 +166,8 @@ $foreground: #E4E4E4EB;
 
 #qa-status {
     background: transparent;
-    color: $foreground;
-    padding: 0 1;
+    color: $text-muted;
+    padding: 0 2;
     height: 1;
 }
 
@@ -113,8 +178,20 @@ $foreground: #E4E4E4EB;
     color: $foreground;
 }
 
-#status-bar-bindings {
+#status-bar-bindings-scroll {
     width: 1fr;
+    height: 1;
+    background: #26313a;
+    /* Scrollable horizontally, but the scrollbar is hidden (size 0) so the bar
+       stays a single row — scroll via shift+wheel / trackpad swipe. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-size: 0 0;
+}
+
+#status-bar-bindings {
+    /* Auto width so the line can exceed the viewport and become scrollable. */
+    width: auto;
     height: 1;
     padding: 0 1;
 }
@@ -137,7 +214,7 @@ $foreground: #E4E4E4EB;
 }
 
 .status-bar-key {
-    color: #f0a000;
+    color: #EBCB8B;
     text-style: bold;
 }
 
@@ -166,7 +243,7 @@ $foreground: #E4E4E4EB;
     min-width: 32;
     max-width: 72;
     height: 1fr;
-    padding: 0 1;
+    padding: 1 1 0 1;
     background: $background;
     scrollbar-size: 1 1;
 }
@@ -187,12 +264,27 @@ $foreground: #E4E4E4EB;
 #grade-student-name,
 #grade-source-pdf,
 #total-grade-label,
-#grade-progress {
+#grade-progress,
+#grade-zoom-level {
     width: 100%;
     height: auto;
 }
 
-#grade-source-pdf {
+#grade-student-name {
+    text-style: bold;
+}
+
+#grade-source-pdf,
+#grade-zoom-level {
+    color: $text-muted;
+}
+
+#total-grade-label.low-grade {
+    color: #BF616A;
+    text-style: bold;
+}
+
+#grade-keybinding-ref {
     color: $text-muted;
 }
 
@@ -306,9 +398,22 @@ $foreground: #E4E4E4EB;
 
 .rubric-edit-row {
     width: 100%;
+    height: auto;
+    margin-bottom: 1;
+}
+
+.rubric-edit-controls {
+    width: 100%;
     height: 1;
-    margin-bottom: 0;
     align-vertical: middle;
+}
+
+.rubric-edit-comment {
+    width: 100%;
+    height: 1;
+    min-height: 1;
+    margin-left: 3;
+    color: $text-muted;
 }
 
 .rubric-edit-index {

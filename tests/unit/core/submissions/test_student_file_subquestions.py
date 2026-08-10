@@ -3,6 +3,9 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
+from opengrader.core import pdf_utils
+from opengrader.core.ocr import extractor as ocr_extractor
+from opengrader.core.ocr import ollama_vlm as ocr_ollama_vlm
 from opengrader.core.ocr.extractor import (
     FieldExtractionResult,
     OcrConfig,
@@ -13,6 +16,14 @@ from opengrader.core.ocr.extractor import (
 from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResult
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
+
+# student_file's build half imports process_submission_pdf/extract_*/
+# safe_image_to_data *locally*, right at their call sites (deferred so cv2,
+# fitz and pytesseract stay out of sys.modules for every TUI startup — see
+# core/submissions/student_file.py). A function-local ``from X import name``
+# reads ``X.name`` at call time, so patching must target the source module
+# (``ocr_extractor``/``ocr_ollama_vlm``/``pdf_utils``) rather than
+# ``student_file``, which never binds these names at module scope.
 
 
 def test_parse_assignment_metadata_extracts_compact_suffix_version() -> None:
@@ -118,10 +129,10 @@ def test_split_question_response_image_falls_back_to_ocr_markers(
         }
 
     original_detect_boxes = student_file._detect_subquestion_boxes_norm
-    original_safe_image_to_data = student_file.safe_image_to_data
+    original_safe_image_to_data = pdf_utils.safe_image_to_data
     try:
         student_file._detect_subquestion_boxes_norm = lambda _image: []
-        student_file.safe_image_to_data = _fake_safe_image_to_data
+        pdf_utils.safe_image_to_data = _fake_safe_image_to_data
 
         split = student_file._split_question_response_image(
             question_id="q6",
@@ -132,7 +143,7 @@ def test_split_question_response_image_falls_back_to_ocr_markers(
         assert all(path.exists() for _, path in split)
     finally:
         student_file._detect_subquestion_boxes_norm = original_detect_boxes
-        student_file.safe_image_to_data = original_safe_image_to_data
+        pdf_utils.safe_image_to_data = original_safe_image_to_data
 
 
 def test_build_student_submission_document_respects_split_subquestions_flag(
@@ -203,11 +214,11 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
             return MULTIPLE_CHOICE
         return FREE_RESPONSE
 
-    original_process = student_file.process_submission_pdf
+    original_process = ocr_extractor.process_submission_pdf
     original_split = student_file._split_question_response_image
     original_classify = student_file._classify_question_image_path
     try:
-        student_file.process_submission_pdf = _fake_process_submission_pdf
+        ocr_extractor.process_submission_pdf = _fake_process_submission_pdf
         student_file._split_question_response_image = (
             _fake_split_question_response_image
         )
@@ -253,7 +264,7 @@ def test_build_student_submission_document_respects_split_subquestions_flag(
         assert no_split_result.document.questions[0].question_type == MULTIPLE_CHOICE
         assert split_call_count["count"] == 0
     finally:
-        student_file.process_submission_pdf = original_process
+        ocr_extractor.process_submission_pdf = original_process
         student_file._split_question_response_image = original_split
         student_file._classify_question_image_path = original_classify
 
@@ -328,13 +339,13 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         _ = image_path, config
         return "State Big-O complexity.", "O(n log n)"
 
-    original_process = student_file.process_submission_pdf
-    original_extract_field_text = student_file.extract_field_text
-    original_extract_qa = student_file.extract_question_prompt_and_answer
+    original_process = ocr_extractor.process_submission_pdf
+    original_extract_field_text = ocr_ollama_vlm.extract_field_text
+    original_extract_qa = ocr_ollama_vlm.extract_question_prompt_and_answer
     try:
-        student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file.extract_field_text = _fake_extract_field_text
-        student_file.extract_question_prompt_and_answer = (
+        ocr_extractor.process_submission_pdf = _fake_process_submission_pdf
+        ocr_ollama_vlm.extract_field_text = _fake_extract_field_text
+        ocr_ollama_vlm.extract_question_prompt_and_answer = (
             _fake_extract_question_prompt_and_answer
         )
 
@@ -351,9 +362,9 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         assert result.document.questions[0].prompt == "State Big-O complexity."
         assert result.document.questions[0].response_text == "O(n log n)"
     finally:
-        student_file.process_submission_pdf = original_process
-        student_file.extract_field_text = original_extract_field_text
-        student_file.extract_question_prompt_and_answer = original_extract_qa
+        ocr_extractor.process_submission_pdf = original_process
+        ocr_ollama_vlm.extract_field_text = original_extract_field_text
+        ocr_ollama_vlm.extract_question_prompt_and_answer = original_extract_qa
 
 
 def test_render_student_submission_markdown_includes_question_type() -> None:
@@ -781,11 +792,11 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
             return "Taylor Student"
         return "name"
 
-    original_process = student_file.process_submission_pdf
-    original_extract_field_text = student_file.extract_field_text
+    original_process = ocr_extractor.process_submission_pdf
+    original_extract_field_text = ocr_ollama_vlm.extract_field_text
     try:
-        student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file.extract_field_text = _fake_extract_field_text
+        ocr_extractor.process_submission_pdf = _fake_process_submission_pdf
+        ocr_ollama_vlm.extract_field_text = _fake_extract_field_text
 
         result = student_file.build_student_submission_document(
             pdf_path=tmp_path / "student-0003.pdf",
@@ -797,8 +808,8 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
 
         assert result.document.student_name == "Taylor Student"
     finally:
-        student_file.process_submission_pdf = original_process
-        student_file.extract_field_text = original_extract_field_text
+        ocr_extractor.process_submission_pdf = original_process
+        ocr_ollama_vlm.extract_field_text = original_extract_field_text
 
 
 def test_build_student_submission_document_uses_structured_title_metadata(
@@ -846,12 +857,12 @@ def test_build_student_submission_document_uses_structured_title_metadata(
             raw_title="CS146: Quiz 1 (A)",
         )
 
-    original_process = student_file.process_submission_pdf
-    original_extract_title_metadata = student_file.extract_title_metadata
+    original_process = ocr_extractor.process_submission_pdf
+    original_extract_title_metadata = ocr_ollama_vlm.extract_title_metadata
     progress: list[str] = []
     try:
-        student_file.process_submission_pdf = _fake_process_submission_pdf
-        student_file.extract_title_metadata = _fake_extract_title_metadata
+        ocr_extractor.process_submission_pdf = _fake_process_submission_pdf
+        ocr_ollama_vlm.extract_title_metadata = _fake_extract_title_metadata
 
         result = student_file.build_student_submission_document(
             pdf_path=tmp_path / "student-0004.pdf",
@@ -867,5 +878,5 @@ def test_build_student_submission_document_uses_structured_title_metadata(
         assert result.document.assignment_title == "Quiz 1"
         assert result.document.assignment_version == "A"
     finally:
-        student_file.process_submission_pdf = original_process
-        student_file.extract_title_metadata = original_extract_title_metadata
+        ocr_extractor.process_submission_pdf = original_process
+        ocr_ollama_vlm.extract_title_metadata = original_extract_title_metadata

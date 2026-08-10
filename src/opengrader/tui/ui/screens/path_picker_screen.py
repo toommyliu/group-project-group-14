@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DirectoryTree, Label, Static, Tree
+from textual.widgets import Button, DirectoryTree, Static, Tree
 
 PathPickMode = Literal["file", "directory", "any"]
 
@@ -41,20 +41,29 @@ class PathPickerScreen(ModalScreen[Path | None]):
         max-width: 100;
         height: 80%;
         background: $surface;
-        border: thick $accent;
+        border: round $accent;
+        border-title-align: left;
+        border-title-color: $accent;
+        border-title-style: bold;
         padding: 1 2;
     }
 
-    #path-picker-title {
+    #path-picker-hint {
         width: 100%;
-        content-align: center middle;
-        text-style: bold;
+        height: auto;
+        color: $text-muted;
     }
 
     #path-picker-tree {
         height: 1fr;
         margin: 1 0;
-        border: solid $primary;
+        border: round $surface-lighten-2;
+        background: transparent;
+        padding: 0 1;
+    }
+
+    #path-picker-tree:focus {
+        border: round $accent;
     }
 
     #path-picker-current {
@@ -90,14 +99,23 @@ class PathPickerScreen(ModalScreen[Path | None]):
             start = Path.home()
         self._start_path = start
 
+    _MODE_HINTS: dict[PathPickMode, str] = {
+        "file": "Click a file to choose it.",
+        "directory": "Highlight a directory, then press Select.",
+        "any": "Click a file to choose it, or highlight a directory and press Select.",
+    }
+
     def compose(self) -> ComposeResult:
-        with Vertical(id="path-picker-dialog"):
-            yield Label(self._title, id="path-picker-title")
+        with Vertical(id="path-picker-dialog") as dialog:
+            dialog.border_title = f"▸ {self._title}"
+            yield Static(self._MODE_HINTS[self._mode], id="path-picker-hint")
             yield _FilteredDirectoryTree(self._start_path, id="path-picker-tree")
             yield Static(str(self._start_path), id="path-picker-current")
             with Horizontal(id="path-picker-buttons"):
-                yield Button("Select", variant="primary", id="path-picker-select")
-                yield Button("Cancel", id="path-picker-cancel")
+                yield Button(
+                    "Select", variant="primary", id="path-picker-select", compact=True
+                )
+                yield Button("Cancel", id="path-picker-cancel", compact=True)
 
     def on_mount(self) -> None:
         self.query_one("#path-picker-tree", _FilteredDirectoryTree).focus()

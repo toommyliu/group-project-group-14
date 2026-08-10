@@ -1,15 +1,24 @@
+import os
 from pathlib import Path
 import shutil
 
 import fitz
 import pytest
 
+from opengrader.core.concurrency import ConcurrentModificationError, file_mtime_ns
 from opengrader.core.qa_file import (
     QARubricFlatOption,
     flatten_rubric_options,
     load_qa_markdown,
 )
-from opengrader.core.submissions import load_student_submission_markdown
+from opengrader.core.submissions import (
+    StudentSubmissionGradeUpdate,
+    load_student_submission_markdown,
+    update_student_submission_file,
+)
+from opengrader.core.history import GradeJournal, resolve_history_dir
+from opengrader.core.submissions.regrade import add_regrade_request
+from opengrader.core.submissions.review import ReviewReason
 from opengrader.tui.data import RubricOptionSeed
 from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 
@@ -269,7 +278,9 @@ def test_submission_files_provider_recovers_version_from_question_markers(
     assert seeds[0].prompt == "Prompt [B]"
 
 
-def test_submission_files_provider_raises_for_unknown_version(tmp_path: Path) -> None:
+def test_submission_files_provider_falls_back_to_first_version_when_unknown(
+    tmp_path: Path,
+) -> None:
     qa_path = tmp_path / "qa.md"
     qa_path.write_text(
         "\n".join(
@@ -316,12 +327,15 @@ def test_submission_files_provider_raises_for_unknown_version(tmp_path: Path) ->
         )
     )
 
-    with pytest.raises(ValueError, match="available QA versions: A"):
-        SubmissionFilesProvider(
-            qa_file_path=qa_path,
-            submissions_path=submission_path,
-            default_image_path=DEFAULT_IMAGE_PATH,
-        )
+    # A version that matches no QA version ("Z") is treated like a missing one:
+    # it falls back to the first (only) version rather than blocking grading.
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submission_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    seeds = provider.build_question_seeds(student_item_id="s1")
+    assert seeds[0].prompt == "Prompt"
 
 
 def test_submission_files_provider_save_question_grade_updates_selected_file(
@@ -356,6 +370,411 @@ def test_submission_files_provider_save_question_grade_updates_selected_file(
     reloaded = provider.build_question_seeds(student_item_id="s1")
     assert reloaded[0].points_awarded == 7
     assert reloaded[0].selected_rubric_labels == ("Partially Correct",)
+
+
+def test_save_question_transcription_persists_text_and_marks_verified(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    provider.save_question_transcription(
+        student_item_id="s1",
+        question_id="q1",
+        response_text="corrected handwriting reading",
+    )
+
+    saved = load_student_submission_markdown(
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    assert saved.questions[0].response_text == "corrected handwriting reading"
+    # A human-verified reading is recorded at full confidence, so it drops out
+    # of the low-confidence review queue.
+    assert saved.questions[0].response_confidence == 100.0
+
+    # The change is attributed in the durable audit journal.
+    history = provider.read_grade_history()
+    assert any(entry.kind == "transcription" for entry in history)
+
+
+def test_comment_library_round_trips_through_the_provider(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    # A fresh folder has no saved snippets.
+    assert provider.read_comment_library().snippets == ()
+
+    library = provider.read_comment_library().with_snippet("See Lecture 5")
+    provider.save_comment_library(library)
+
+    # Persisted into the folder's .opengrader dot-dir, so it travels with it.
+    assert (submissions_path / ".opengrader" / "comments.json").exists()
+    reloaded = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    assert [s.text for s in reloaded.read_comment_library().snippets] == [
+        "See Lecture 5"
+    ]
+
+
+def test_regrade_requests_flow_through_the_provider(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    # A fresh folder has no disputes.
+    assert provider.build_regrade_items() == []
+
+    # File a dispute for a real student (id 987654321 == submission-0001 == s1).
+    add_regrade_request(
+        submissions_path, student_id="987654321", reason="Q1 method valid", question_id="q1"
+    )
+
+    items = provider.build_regrade_items()
+    assert len(items) == 1
+    item = items[0]
+    assert item.is_navigable  # mapped to a real submission's nav id
+    assert item.student_item_id  # the "s{n}" the grade screen opens by
+    assert item.question_id == "q1"
+    assert item.reason == "Q1 method valid"
+
+    # It also surfaces in the unified review triage, high severity, at the top,
+    # bound to the same nav id so opening it routes to the right student.
+    review = provider.build_review_items()
+    assert any(r.reason is ReviewReason.OPEN_REGRADE_REQUEST for r in review)
+    assert review[0].reason is ReviewReason.OPEN_REGRADE_REQUEST
+    assert review[0].student_item_id == item.student_item_id
+
+    # Resolving it removes it from the open queue and the triage.
+    provider.resolve_regrade(item.request_id, note="regraded +3")
+    assert provider.build_regrade_items() == []
+    assert not any(
+        r.reason is ReviewReason.OPEN_REGRADE_REQUEST
+        for r in provider.build_review_items()
+    )
+
+
+def test_regrade_unmatched_student_still_listed_but_not_navigable(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    add_regrade_request(submissions_path, student_id="000000000", reason="not on file")
+    items = provider.build_regrade_items()
+    assert len(items) == 1
+    assert items[0].student_item_id == ""
+    assert not items[0].is_navigable
+
+
+def test_saving_a_grade_writes_an_accountability_journal_entry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENGRADER_GRADER", "prof_kim")
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=7,
+        rubric_labels=("Partially Correct",),
+    )
+    provider.save_question_analysis(
+        student_item_id="s1",
+        question_id="q1",
+        analysis="Missed the edge case.",
+    )
+
+    from opengrader.core.history import read_journal, resolve_history_dir
+
+    history_dir = resolve_history_dir(submissions_path)
+    # Namespaced dot-dir, co-located with the exam data.
+    assert history_dir == submissions_path / ".opengrader" / "history"
+    entries = read_journal(history_dir)
+    assert [e.kind for e in entries] == ["grade", "comment"]
+    grade = entries[0]
+    assert grade.actor == "prof_kim"
+    assert grade.student_id == "123456789"
+    assert grade.new == {"points": 7, "rubric": ["Partially Correct"]}
+    assert grade.old["points"] is None
+    assert entries[1].new == {"analysis": "Missed the edge case."}
+
+
+def test_build_review_items_binds_flags_to_nav_ids(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    items = provider.build_review_items()
+
+    assert items, "sample submissions have blank responses to flag"
+    # Every item is addressable by the same nav id the grade screen opens.
+    assert all(item.student_item_id in {"s1", "s2"} for item in items)
+    # Sorted most-severe-first.
+    ranks = [item.severity_rank for item in items]
+    assert ranks == sorted(ranks)
+    # A flag carries a display id for anonymous rendering.
+    assert all(item.student_display_id for item in items)
+
+
+def _write_ambiguous_submission(path: Path) -> None:
+    """A duplicate-name submission: blank id + recorded roster candidates."""
+    path.write_text(
+        "\n".join(
+            [
+                "---",
+                'student_name: "Tommy Liu"',
+                'student_id: ""',
+                'course_code: "CS146"',
+                'assignment_title: "Quiz 1"',
+                'assignment_version: "A"',
+                'source_pdf: "../../split-submissions/submission-0009.pdf"',
+                'student_score: ""',
+                "id_candidates:",
+                '  - id: "123456789"',
+                '    name: "Tommy Liu"',
+                '  - id: "987654321"',
+                '    name: "Tommy Liu"',
+                "---",
+                "",
+                "- q1:",
+                "  - Question type: Free Response",
+                "  - Prompt: Convert.",
+                "  - Response image: ",
+                "  - Response text: something",
+                "  - Possible points: ",
+                "  - Points: ",
+                "  - Analysis: ",
+                "",
+            ]
+        )
+    )
+
+
+def test_build_review_items_carries_source_pdf_and_candidates(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    _write_ambiguous_submission(
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    items = provider.build_review_items()
+    identity = next(item for item in items if item.is_identity_flag)
+
+    # The reviewer can find the paper and pick from the tied roster people.
+    assert identity.source_pdf_name == "submission-0009.pdf"
+    assert [(c.student_id, c.name) for c in identity.id_candidates] == [
+        ("123456789", "Tommy Liu"),
+        ("987654321", "Tommy Liu"),
+    ]
+
+
+def test_assign_student_identity_persists_id_and_clears_candidates(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    sub_path = submissions_path / "submission-0001" / "submission-0001.submission.md"
+    _write_ambiguous_submission(sub_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    provider.assign_student_identity(
+        student_item_id="s1",
+        student_id="987654321",
+        student_name="Tommy Liu",
+    )
+
+    reloaded = load_student_submission_markdown(sub_path)
+    assert reloaded.student_id == "987654321"
+    assert reloaded.id_candidates == ()
+    # The flag is gone on the next triage pass.
+    assert not any(
+        item.is_identity_flag and item.student_item_id == "s1"
+        for item in provider.build_review_items()
+    )
+
+
+def test_assign_student_identity_writes_journal_entry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENGRADER_GRADER", "ta_bob")
+    submissions_path = _copy_sample_submissions(tmp_path)
+    _write_ambiguous_submission(
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    provider.assign_student_identity(
+        student_item_id="s1", student_id="987654321", student_name="Tommy Liu"
+    )
+
+    history = provider.read_grade_history()
+    assert [(e.actor, e.kind) for e in history] == [("ta_bob", "identity")]
+    assert "987654321" in history[0].summary
+
+
+def test_read_grade_history_returns_journal_entries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OPENGRADER_GRADER", "ta_bob")
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    assert provider.read_grade_history() == []
+
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=9,
+        rubric_labels=("Correct",),
+    )
+    history = provider.read_grade_history()
+    assert [e.actor for e in history] == ["ta_bob"]
+    assert history[0].kind == "grade"
+
+
+def test_journal_write_failure_never_blocks_a_grade(
+    tmp_path: Path, monkeypatch
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    def _boom(**kwargs):  # noqa: ANN003, ANN202
+        raise OSError("history dir is read-only")
+
+    monkeypatch.setattr(provider._journal, "append", _boom)
+
+    # The grade must still persist even though journalling fails.
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=5,
+        rubric_labels=("Correct",),
+    )
+    reloaded = provider.build_question_seeds(student_item_id="s1")
+    assert reloaded[0].points_awarded == 5
+
+
+def test_update_student_submission_file_rejects_stale_mtime(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    submission_file = (
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    stale_mtime = file_mtime_ns(submission_file)
+    assert stale_mtime is not None
+
+    # Another writer touches the file after we recorded its mtime.
+    os.utime(submission_file, ns=(stale_mtime + 1_000_000, stale_mtime + 1_000_000))
+
+    with pytest.raises(ConcurrentModificationError):
+        update_student_submission_file(
+            submission_file,
+            StudentSubmissionGradeUpdate(question_id="q1", points_awarded=5),
+            expected_mtime_ns=stale_mtime,
+        )
+
+
+def test_submission_files_provider_detects_external_submission_change(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    # Simulate a second grader saving this submission after we loaded it.
+    submission_file = (
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    current = file_mtime_ns(submission_file)
+    assert current is not None
+    os.utime(submission_file, ns=(current + 1_000_000, current + 1_000_000))
+
+    with pytest.raises(ConcurrentModificationError):
+        provider.save_question_grade(
+            student_item_id="s1",
+            question_id="q1",
+            possible_points=10,
+            points_awarded=7,
+            rubric_labels=("Partially Correct",),
+        )
+
+
+def test_submission_files_provider_save_succeeds_after_reload(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    # Two consecutive saves: the provider reloads (recapturing mtime) after
+    # each write, so the second save must not trip the concurrency guard.
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=7,
+        rubric_labels=("Partially Correct",),
+    )
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=10,
+        rubric_labels=("Correct",),
+    )
+
+    reloaded = provider.build_question_seeds(student_item_id="s1")
+    assert reloaded[0].points_awarded == 10
+    assert reloaded[0].selected_rubric_labels == ("Correct",)
 
 
 def test_submission_files_provider_save_question_analysis_preserves_grade(
@@ -834,3 +1253,1128 @@ title: Quiz
     ]
     assert first.questions[0].points_awarded == 5
     assert second.questions[0].points_awarded == 8
+
+
+def _write_graded_submission(
+    path: Path,
+    *,
+    student_id: str,
+    student_name: str,
+    response: str,
+    points: float,
+) -> None:
+    from opengrader.core.submissions import (
+        StudentSubmissionDocument,
+        StudentSubmissionQuestion,
+        render_student_submission_markdown,
+    )
+
+    document = StudentSubmissionDocument(
+        student_name=student_name,
+        student_id=student_id,
+        course_code="CMPE195A",
+        assignment_title="Quiz 1",
+        assignment_version=None,
+        source_pdf=f"submission-{student_id}.pdf",
+        questions=[
+            StudentSubmissionQuestion(
+                question_id="q1",
+                prompt="What is the capital of France?",
+                possible_points=50,
+                response_image_path=None,
+                response_text=response,
+                points_awarded=points,
+                question_type="free_response",
+            )
+        ],
+    )
+    path.write_text(render_student_submission_markdown(document))
+
+
+def test_build_consistency_report_flags_same_answer_different_grade(
+    tmp_path: Path,
+) -> None:
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    # Two students give the same answer, graded differently → one conflict.
+    _write_graded_submission(
+        submissions_path / "ann.submission.md",
+        student_id="111111111",
+        student_name="Ann Smith",
+        response="Paris",
+        points=50,
+    )
+    _write_graded_submission(
+        submissions_path / "bob.submission.md",
+        student_id="222222222",
+        student_name="Bob Lee",
+        response="paris.",  # same answer up to cosmetics
+        points=30,
+    )
+
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-single.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    items = provider.build_consistency_report()
+
+    assert len(items) == 1
+    item = items[0]
+    assert item.question_id == "q1"
+    assert item.severity == "high"
+    assert item.member_count == 2
+    assert {v.points_awarded for v in item.variants} == {50, 30}
+
+    # Every member is bound to a real nav id the grade screen opens by, and the
+    # id resolves back to the submission whose answer produced that grade.
+    members = [m for variant in item.variants for m in variant.members]
+    assert {m.student_item_id for m in members} == {"s1", "s2"}
+    assert all(m.is_navigable for m in members)
+    by_item_id = {m.student_item_id: m for m in members}
+    # ann (111…) sorts first → s1 and holds the 50-pt answer; bob → s2, 30 pts.
+    assert by_item_id["s1"].student_id == "111111111"
+    assert by_item_id["s2"].student_id == "222222222"
+
+
+def _write_submission_without_possible_points(
+    path: Path, *, name: str, student_id: str, points: float
+) -> None:
+    """A submission with Points filled but Possible points left blank.
+
+    Mirrors real extractions, where the point value lives in the QA file, not
+    the submission — the case the provider's QA-points override handles.
+    """
+    path.write_text(
+        "\n".join(
+            [
+                "---",
+                f'student_name: "{name}"',
+                f'student_id: "{student_id}"',
+                'course_code: "CMPE"',
+                'assignment_title: "Quiz"',
+                'assignment_version: ""',
+                f'source_pdf: "{name}.pdf"',
+                'student_score: ""',
+                "---",
+                "",
+                "- q1:",
+                "  - Question type: Free Response",
+                "  - Prompt: Convert.",
+                "  - Response image: ",
+                "  - Response text: an answer",
+                "  - Possible points: ",
+                f"  - Points: {points}",
+                "  - Rubric: Correct",
+                "  - Analysis: ",
+                "",
+            ]
+        )
+    )
+
+
+def test_build_item_analysis_report_uses_qa_points_for_difficulty(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)  # q1 is worth 10 points
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    _write_submission_without_possible_points(
+        submissions_path / "a.submission.md", name="Ann", student_id="1", points=10
+    )
+    _write_submission_without_possible_points(
+        submissions_path / "b.submission.md", name="Bob", student_id="2", points=0
+    )
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    report = provider.build_item_analysis_report()
+
+    assert report.class_size == 2
+    (item,) = report.items
+    assert item.question_id == "q1"
+    # Difficulty resolves from the QA file's 10 points even though the
+    # submissions left "Possible points" blank: (10 + 0) / 2 / 10 == 0.5.
+    assert item.difficulty == 0.5
+
+
+# --- Per-section item analysis --------------------------------------------------
+
+
+def _write_sectioned_submission(
+    path: Path, *, name: str, student_id: str, section: str, points: float
+) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "---",
+                f'student_name: "{name}"',
+                f'student_id: "{student_id}"',
+                'course_code: "CMPE"',
+                'assignment_title: "Quiz"',
+                'assignment_version: ""',
+                f'section: "{section}"',
+                f'source_pdf: "{name}.pdf"',
+                'student_score: ""',
+                "---",
+                "",
+                "- q1:",
+                "  - Question type: Free Response",
+                "  - Prompt: Convert.",
+                "  - Response image: ",
+                "  - Response text: an answer",
+                "  - Possible points: ",
+                f"  - Points: {points}",
+                "  - Rubric: Correct",
+                "  - Analysis: ",
+                "",
+            ]
+        )
+    )
+
+
+def _sectioned_provider(tmp_path: Path) -> SubmissionFilesProvider:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)  # q1 worth 10 points
+    subs = tmp_path / "student-submissions"
+    subs.mkdir()
+    _write_sectioned_submission(
+        subs / "a.submission.md", name="Ann", student_id="1", section="MW", points=10
+    )
+    _write_sectioned_submission(
+        subs / "b.submission.md", name="Bob", student_id="2", section="MW", points=0
+    )
+    _write_sectioned_submission(
+        subs / "c.submission.md", name="Cy", student_id="3", section="TTh", points=5
+    )
+    return SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=subs,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+
+def test_available_sections_lists_distinct_sorted(tmp_path: Path) -> None:
+    provider = _sectioned_provider(tmp_path)
+    assert provider.available_sections() == ["MW", "TTh"]
+
+
+def test_available_sections_empty_without_sections(tmp_path: Path) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    subs = tmp_path / "student-submissions"
+    subs.mkdir()
+    _write_submission_without_possible_points(
+        subs / "a.submission.md", name="Ann", student_id="1", points=10
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=subs,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    assert provider.available_sections() == []
+
+
+def test_item_analysis_all_sections_covers_whole_cohort(tmp_path: Path) -> None:
+    provider = _sectioned_provider(tmp_path)
+    report = provider.build_item_analysis_report()
+    assert report.class_size == 3
+
+
+def test_item_analysis_scoped_to_section(tmp_path: Path) -> None:
+    provider = _sectioned_provider(tmp_path)
+    mw = provider.build_item_analysis_report(section="MW")
+    assert mw.class_size == 2
+    tth = provider.build_item_analysis_report(section="TTh")
+    assert tth.class_size == 1
+
+
+# --------------------------------------------------------------------------- #
+# Whole-page context (the grade screen's `w` view)
+# --------------------------------------------------------------------------- #
+
+
+def _page_context_fixture(
+    tmp_path: Path,
+    *,
+    pages: int,
+    extra_pages_frontmatter: str = "",
+) -> SubmissionFilesProvider:
+    """A one-question submission whose scan has `pages` pages, only page 1 cropped."""
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    split_dir = tmp_path / "split-submissions"
+    split_dir.mkdir()
+    doc = fitz.open()
+    for _ in range(pages):
+        doc.new_page(width=300, height=400)
+    doc.save(split_dir / "student.pdf")
+    doc.close()
+
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    md = submissions_path / "student.submission.md"
+    _write_submission_with_source_metadata(
+        md, source_pdf="../split-submissions/student.pdf"
+    )
+    if extra_pages_frontmatter:
+        md.write_text(
+            md.read_text().replace(
+                "student_score:", f"{extra_pages_frontmatter}\nstudent_score:", 1
+            )
+        )
+
+    return SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+
+def test_page_context_starts_with_the_question_source_page(tmp_path: Path) -> None:
+    provider = _page_context_fixture(tmp_path, pages=1)
+    seed = provider.build_question_seeds(student_item_id="s1")[0]
+
+    assert seed.source_pdf_path.endswith("student.pdf")
+    assert [(e.page_number, e.kind) for e in seed.page_context] == [(1, "response")]
+    # The crop's own bbox is what gets outlined on that page.
+    assert seed.page_context[0].highlights == ((0.2, 0.3, 0.5, 0.2),)
+
+
+def test_uncovered_pages_are_offered_as_extra_work(tmp_path: Path) -> None:
+    # A 3-page scan where only page 1 was cropped: pages 2-3 are the student's
+    # "continued on back" work, invisible before this feature.
+    provider = _page_context_fixture(tmp_path, pages=3)
+    seed = provider.build_question_seeds(student_item_id="s1")[0]
+
+    assert [(e.page_number, e.kind) for e in seed.page_context] == [
+        (1, "response"),
+        (2, "extra"),
+        (3, "extra"),
+    ]
+    assert "outside the answer crops" in seed.warnings[0]
+
+
+def test_extra_pages_frontmatter_wins_over_inference(tmp_path: Path) -> None:
+    # The extractor recorded page 3 only (the splitter's --extra-work-pages
+    # verdict); page 2 is a template page nothing happened to be cropped from.
+    provider = _page_context_fixture(
+        tmp_path, pages=3, extra_pages_frontmatter="extra_pages: [3]"
+    )
+    seed = provider.build_question_seeds(student_item_id="s1")[0]
+
+    assert [(e.page_number, e.kind) for e in seed.page_context] == [
+        (1, "response"),
+        (3, "extra"),
+    ]
+
+
+def test_extra_pages_are_clamped_to_the_pdf(tmp_path: Path) -> None:
+    # A stale record pointing past the end must not offer a page that can't render.
+    provider = _page_context_fixture(
+        tmp_path, pages=2, extra_pages_frontmatter="extra_pages: [2, 9]"
+    )
+    seed = provider.build_question_seeds(student_item_id="s1")[0]
+
+    assert [e.page_number for e in seed.page_context] == [1, 2]
+
+
+def test_missing_source_pdf_yields_no_page_context(tmp_path: Path) -> None:
+    # Nothing to render from: the grade screen hides the toggle rather than
+    # offering a view that would always fail.
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    _write_submission_with_source_metadata(
+        submissions_path / "student.submission.md", source_pdf="../missing.pdf"
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    seed = provider.build_question_seeds(student_item_id="s1")[0]
+    assert seed.page_context == ()
+    assert seed.source_pdf_path == ""
+
+
+# --- Objective answer patterns (the similarity modal's `o` view) -----------
+
+
+def _write_mc_qa(path: Path, questions: int) -> None:
+    lines = ["---", "title: Pattern", "---", ""]
+    for number in range(1, questions + 1):
+        lines += [
+            f"- (1 points) Question {number}?",
+            "  - **Choices**",
+            "    - A) option A",
+            "    - B) option B",
+            "    - C) option C",
+            "    - D) option D",
+            "  - **Correct**",
+            "    - A",
+            "",
+        ]
+    path.write_text("\n".join(lines))
+
+
+def _write_mc_submission(path: Path, *, student_id: str, name: str, answers: list[str]) -> None:
+    lines = [
+        "---",
+        f'student_name: "{name}"',
+        f'student_id: "{student_id}"',
+        'course_code: "CS146"',
+        'assignment_title: "Quiz"',
+        'assignment_version: ""',
+        f'source_pdf: "{student_id}.pdf"',
+        'student_score: ""',
+        "---",
+        "",
+    ]
+    for position, answer in enumerate(answers, start=1):
+        lines += [
+            f"- q{position}:",
+            "  - Question type: Multiple Choice",
+            "  - Prompt: ",
+            f"  - Response text: {answer}",
+            "  - Possible points: 1",
+            "  - Points: ",
+            "  - Rubric:",
+            "  - Analysis: ",
+            "",
+        ]
+    path.write_text("\n".join(lines))
+
+
+def _mc_cohort(tmp_path: Path, *, copier: bool = True) -> SubmissionFilesProvider:
+    import random
+
+    rng = random.Random(11)
+    qa_path = tmp_path / "qa.md"
+    _write_mc_qa(qa_path, 40)
+    submissions = tmp_path / "subs"
+    submissions.mkdir()
+    answers = {
+        index: ["A" if rng.random() < 0.65 else rng.choice("BCD") for _ in range(40)]
+        for index in range(40)
+    }
+    if copier:
+        answers[1] = list(answers[0])
+    for index, row in answers.items():
+        _write_mc_submission(
+            submissions / f"s{index}.submission.md",
+            student_id=f"{index:03d}",
+            name=f"Student {index:03d}",
+            answers=row,
+        )
+    return SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+
+def test_answer_pattern_report_binds_members_to_nav_ids(tmp_path) -> None:
+    """The audit is only useful if a flagged student can be opened in place."""
+    provider = _mc_cohort(tmp_path)
+
+    view = provider.build_answer_pattern_report()
+
+    assert len(view.items) == 1
+    item = view.items[0]
+    assert {member.student_id for member in item.members} == {"000", "001"}
+    assert all(member.is_navigable for member in item.members)
+    assert all(member.student_item_id.startswith("s") for member in item.members)
+    assert item.first_question_id == item.shared_wrong[0].question_id
+
+
+def test_answer_pattern_report_carries_its_own_scope(tmp_path) -> None:
+    """Findings without the comparison count behind them cannot be judged."""
+    provider = _mc_cohort(tmp_path, copier=False)
+
+    view = provider.build_answer_pattern_report()
+
+    assert view.items == ()
+    assert view.analyzed
+    assert view.analyzed_question_count == 40
+    assert view.pairs_compared > 0
+    assert view.threshold > 0
+    assert view.expected_by_chance > 0
+
+
+def test_answer_pattern_report_needs_no_answer_key_argument() -> None:
+    """The TUI is the one front end that never has to be told where the key is."""
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path="samples/cs146-quiz1/student-submissions",
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    view = provider.build_answer_pattern_report()
+
+    # Two students and nothing marked wrong: the report exists but says it had
+    # nothing to analyze, which is not the same as a clean result.
+    assert view.items == ()
+    assert not view.analyzed
+
+
+def test_a_correction_records_the_reading_it_replaced_as_ground_truth(
+    tmp_path: Path,
+) -> None:
+    """The pipeline's only labelled data, collected at no cost to the grader.
+
+    `transcribe-eval` measures transcription accuracy from exactly this pair, so
+    the `old` payload has to carry the machine's confidence and reader and not
+    only its words.
+    """
+    submissions_path = _copy_sample_submissions(tmp_path)
+    markdown_path = (
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    # Give the answer a machine reading to be corrected.
+    update_student_submission_file(
+        markdown_path,
+        StudentSubmissionGradeUpdate(
+            question_id="q1",
+            response_text="Ohm's Iaw",
+            response_confidence=42.0,
+            response_source="tesseract",
+        ),
+    )
+    provider.reload_all()
+
+    provider.save_question_transcription(
+        student_item_id="s1",
+        question_id="q1",
+        response_text="Ohm's law",
+    )
+
+    entry = next(
+        entry for entry in provider.read_grade_history() if entry.kind == "transcription"
+    )
+    assert entry.old["response_text"] == "Ohm's Iaw"
+    assert entry.old["response_confidence"] == 42.0
+    assert entry.old["response_source"] == "tesseract"
+    assert entry.new["response_source"] == "human"
+
+    saved = load_student_submission_markdown(markdown_path)
+    assert saved.questions[0].response_source == "human"
+
+
+def test_undoing_a_correction_restores_the_whole_reading(tmp_path: Path) -> None:
+    """Words, confidence and reader move together, or the file tells a lie."""
+    submissions_path = _copy_sample_submissions(tmp_path)
+    markdown_path = (
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    update_student_submission_file(
+        markdown_path,
+        StudentSubmissionGradeUpdate(
+            question_id="q1",
+            response_text="model reading",
+            clear_response_confidence=True,
+            response_source="vision-model",
+        ),
+    )
+    provider.reload_all()
+
+    provider.save_question_transcription(
+        student_item_id="s1", question_id="q1", response_text="human reading"
+    )
+    # The undo path: hand back the previous reading exactly as it was.
+    provider.save_question_transcription(
+        student_item_id="s1",
+        question_id="q1",
+        response_text="model reading",
+        response_confidence=None,
+        response_source="vision-model",
+    )
+
+    saved = load_student_submission_markdown(markdown_path)
+    assert saved.questions[0].response_text == "model reading"
+    assert saved.questions[0].response_source == "vision-model"
+    # A model reading has no measured confidence: the correction's 100 must not
+    # survive next to words the model produced.
+    assert saved.questions[0].response_confidence is None
+
+
+def test_review_items_include_grades_awarded_before_a_rubric_edit(
+    tmp_path: Path,
+) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    # The journal files a grade under the student's real id, which is what
+    # `detect_rubric_drift` keys on and what the provider maps back to "s1".
+    student_id = load_student_submission_markdown(
+        submissions_path / "submission-0001" / "submission-0001.submission.md"
+    ).student_id
+
+    journal = GradeJournal(resolve_history_dir(submissions_path), actor="prof_kim")
+    journal.append(
+        kind="grade",
+        student_id=student_id,
+        student_name="",
+        question_id="q1",
+        summary="8/10",
+        old={"points": None, "rubric": []},
+        new={"points": 8.0, "rubric": ["Correct"]},
+    )
+    journal.append(
+        kind="rubric",
+        student_id="",
+        student_name="",
+        question_id="q1",
+        summary="Rubric edited",
+        old={"options": ["Correct", "Incorrect"]},
+        new={"options": ["Correct", "Partial", "Incorrect"]},
+    )
+
+    items = provider.build_review_items()
+    stale = [
+        item
+        for item in items
+        if item.reason is ReviewReason.GRADED_BEFORE_RUBRIC_CHANGE
+    ]
+
+    assert len(stale) == 1
+    assert stale[0].question_id == "q1"
+    # Bound to a nav id, so the review modal can route straight to the answer.
+    assert stale[0].student_item_id == "s1"
+    # ...and the release gate reads the same finding.
+    readiness = provider.build_readiness_report()
+    assert any(
+        issue.kind.value == "stale_rubric_grades" for issue in readiness.issues
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Background extraction fold-in (`load_new_submissions`, `core/submissions/watch.py`)
+# --------------------------------------------------------------------------- #
+
+
+def _write_nested_submission(submissions_path: Path, key: str, *, name: str) -> None:
+    """Write a submission the way the extractor lays it out: <key>/<key>.submission.md."""
+    submission_dir = submissions_path / key
+    submission_dir.mkdir(parents=True, exist_ok=True)
+    _write_simple_submission(submission_dir / f"{key}.submission.md", name=name)
+
+
+def test_load_new_submissions_appends_only_new_submissions(tmp_path: Path) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "submissions"
+    submissions_path.mkdir()
+    _write_nested_submission(submissions_path, "student-1", name="Student 1")
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    assert [s.full_name for s in provider.list_students(1)] == ["Student 1"]
+
+    _write_nested_submission(submissions_path, "student-2", name="Student 2")
+    result = provider.load_new_submissions(["student-2"])
+
+    assert result.added == ("Student 2",)
+    assert result.skipped == ()
+    assert [s.full_name for s in provider.list_students(1)] == [
+        "Student 1",
+        "Student 2",
+    ]
+
+    # Calling it again with the same key is a no-op — already loaded.
+    again = provider.load_new_submissions(["student-2"])
+    assert again.added == ()
+    assert [s.full_name for s in provider.list_students(1)] == [
+        "Student 1",
+        "Student 2",
+    ]
+
+
+def test_load_new_submissions_leaves_existing_recorded_mtimes_untouched(
+    tmp_path: Path,
+) -> None:
+    """The whole point of the incremental path: an untouched submission's
+    recorded mtime must not change, or the next save on it trips the
+    "changed on disk" concurrency guard for no reason (`core/concurrency.py`)."""
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "submissions"
+    submissions_path.mkdir()
+    _write_nested_submission(submissions_path, "student-1", name="Student 1")
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    original_mtime = provider._submissions[0].mtime_ns
+    original_object = provider._submissions[0]
+
+    _write_nested_submission(submissions_path, "student-2", name="Student 2")
+    provider.load_new_submissions(["student-2"])
+
+    # The already-loaded submission is the exact same object — never
+    # re-read, re-parsed, or re-stat'd — and its recorded mtime is identical.
+    assert provider._submissions[0] is original_object
+    assert provider._submissions[0].mtime_ns == original_mtime
+
+    # And a save on it still works: a wrongly-refreshed mtime would make this
+    # raise `ConcurrentModificationError` even though nothing external
+    # touched the file.
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=10,
+        rubric_labels=("Correct",),
+    )
+
+
+def test_load_new_submissions_ignores_a_key_with_no_file_yet(tmp_path: Path) -> None:
+    """A manifest key with nothing on disk yet (the watcher's own next poll
+    will bring it back) must not be treated as "loaded" or crash the fold-in."""
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "submissions"
+    submissions_path.mkdir()
+    _write_nested_submission(submissions_path, "student-1", name="Student 1")
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    result = provider.load_new_submissions(["student-2"])
+    assert result == provider.load_new_submissions([])  # both empty
+    assert [s.full_name for s in provider.list_students(1)] == ["Student 1"]
+
+
+def _write_multi_version_qa(qa_path: Path) -> None:
+    """Version A has one question; Version B has two — genuinely different
+    question-id sets, unlike the single-question-per-version QA used
+    elsewhere in this file (where both versions happen to auto-number to
+    the same "q1")."""
+    qa_path.write_text(
+        """---
+title: Quiz
+---
+
+## Version A
+
+- (10 points) Convert A.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+
+## Version B
+
+- (10 points) Convert B, part 1.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+- (10 points) Convert B, part 2.
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+    )
+
+
+def test_load_new_submissions_skips_a_mismatched_question_set_instead_of_raising(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_multi_version_qa(qa_path)
+    submissions_path = tmp_path / "submissions"
+    submissions_path.mkdir()
+    submission_dir = submissions_path / "student-a"
+    submission_dir.mkdir()
+    _write_simple_submission(
+        submission_dir / "student-a.submission.md", name="Student A", version="A"
+    )
+
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    assert [s.full_name for s in provider.list_students(1)] == ["Student A"]
+
+    # Version B has two questions where the cohort's version (A) has one —
+    # a real question-set mismatch, not just a relabeling.
+    _write_nested_submission(submissions_path, "student-b", name="Student B")
+    (submissions_path / "student-b" / "student-b.submission.md").write_text(
+        (submissions_path / "student-b" / "student-b.submission.md")
+        .read_text()
+        .replace('assignment_version: ""', 'assignment_version: "B"')
+    )
+
+    result = provider.load_new_submissions(["student-b"])
+
+    assert result.added == ()
+    assert result.skipped == ("Student B",)
+    # The session keeps going on everyone else — not torn down by one file.
+    assert [s.full_name for s in provider.list_students(1)] == ["Student A"]
+
+
+def test_empty_folder_message_names_a_wrong_path_when_extraction_never_ran(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+
+    with pytest.raises(ValueError, match="no \\*\\.submission\\.md files found"):
+        SubmissionFilesProvider(
+            qa_file_path=qa_path,
+            submissions_path=empty_dir,
+            default_image_path=DEFAULT_IMAGE_PATH,
+        )
+
+
+def test_empty_folder_message_says_extraction_in_progress_when_manifest_is_live(
+    tmp_path: Path,
+) -> None:
+    """Opening a folder mid-extraction (someone else's run, or a restarted
+    app) must not read as "you gave me the wrong folder" — see
+    `SubmissionFilesProvider._empty_folder_message`."""
+    from opengrader.core.submissions.manifest import ExtractionRecord, append_record
+
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    # A manifest with a record — recently written, so it "appears active" —
+    # but nothing has landed as a `*.submission.md` in the top-level glob yet
+    # (imagine the very first submission is still a few files away).
+    append_record(
+        output_dir,
+        ExtractionRecord(
+            key="student-1",
+            source="/scans/student-1.pdf",
+            source_sha256="aaa",
+            settings_id="sss",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Extraction is in progress"):
+        SubmissionFilesProvider(
+            qa_file_path=qa_path,
+            submissions_path=output_dir,
+            default_image_path=DEFAULT_IMAGE_PATH,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Report cache
+# --------------------------------------------------------------------------- #
+
+
+def _spy(monkeypatch: pytest.MonkeyPatch, name: str) -> list[int]:
+    """Wrap a `core` engine function the provider imported by name, counting calls.
+
+    Patches the name as it lives in `submission_files_provider`'s own module
+    namespace (`from opengrader.core... import build_x`), which is the copy
+    the provider actually calls — patching the origin module wouldn't be seen.
+    """
+    import opengrader.tui.data.submission_files_provider as provider_module
+
+    calls: list[int] = []
+    original = getattr(provider_module, name)
+
+    def wrapper(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(provider_module, name, wrapper)
+    return calls
+
+
+def test_similarity_report_is_memoized_until_a_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    _write_graded_submission(
+        submissions_path / "ann.submission.md",
+        student_id="111111111",
+        student_name="Ann Smith",
+        response="Paris",
+        points=50,
+    )
+    _write_graded_submission(
+        submissions_path / "bob.submission.md",
+        student_id="222222222",
+        student_name="Bob Lee",
+        response="Paris, France",
+        points=50,
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-single.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    calls = _spy(monkeypatch, "build_similarity_flags")
+
+    first = provider.build_similarity_report()
+    second = provider.build_similarity_report()
+
+    assert first == second
+    assert len(calls) == 1, "a repeat call must not recompute the O(n^2) audit"
+
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=50,
+        points_awarded=40,
+        rubric_labels=("Partially Correct",),
+    )
+    provider.build_similarity_report()
+    assert len(calls) == 2, "a grade save must invalidate the cached report"
+
+
+def test_item_analysis_report_is_memoized_until_a_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)  # q1 worth 10 points
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    _write_submission_without_possible_points(
+        submissions_path / "a.submission.md", name="Ann", student_id="1", points=10
+    )
+    _write_submission_without_possible_points(
+        submissions_path / "b.submission.md", name="Bob", student_id="2", points=0
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    calls = _spy(monkeypatch, "build_item_analysis")
+
+    first = provider.build_item_analysis_report()
+    second = provider.build_item_analysis_report()
+
+    assert first == second
+    assert len(calls) == 1
+
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=5,
+        rubric_labels=(),
+    )
+    provider.build_item_analysis_report()
+    assert len(calls) == 2
+
+
+def test_item_analysis_section_argument_is_not_confused_with_unscoped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A section-scoped call must never be served the all-sections report
+    (or vice versa) — the easiest way to get the cache key wrong."""
+    provider = _sectioned_provider(tmp_path)
+    calls = _spy(monkeypatch, "build_item_analysis")
+
+    everyone = provider.build_item_analysis_report()
+    mw_only = provider.build_item_analysis_report(section="MW")
+    everyone_again = provider.build_item_analysis_report()
+    mw_again = provider.build_item_analysis_report(section="MW")
+
+    assert everyone.class_size == 3
+    assert mw_only.class_size == 2
+    assert everyone_again == everyone
+    assert mw_again == mw_only
+    # Two distinct cache entries, each computed once — not four recomputes,
+    # and critically not one entry stomping the other.
+    assert len(calls) == 2
+
+
+def test_outcome_mastery_section_argument_is_not_confused_with_unscoped(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    qa_path.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Quiz",
+                "---",
+                "",
+                "- (10 points) Convert.",
+                "  - **Outcome** LO1",
+                "  - **Rubric**",
+                "    - Correct (+0)",
+                "    - Partially Correct (-5)",
+                "    - Incorrect (-10)",
+                "",
+            ]
+        )
+    )
+    subs = tmp_path / "student-submissions"
+    subs.mkdir()
+    _write_sectioned_submission(
+        subs / "a.submission.md", name="Ann", student_id="1", section="MW", points=10
+    )
+    _write_sectioned_submission(
+        subs / "b.submission.md", name="Bob", student_id="2", section="MW", points=0
+    )
+    _write_sectioned_submission(
+        subs / "c.submission.md", name="Cy", student_id="3", section="TTh", points=5
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=subs,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    everyone = provider.build_outcome_mastery_report()
+    mw_only = provider.build_outcome_mastery_report(section="MW")
+
+    assert everyone is not None and mw_only is not None
+    assert everyone.class_size == 3
+    assert mw_only.class_size == 2
+    # Calling the unscoped report again must still see all three students,
+    # not the two-student report a prior scoped call might have cached under
+    # the same key.
+    assert provider.build_outcome_mastery_report().class_size == 3
+
+
+def test_filing_a_regrade_invalidates_the_review_queue(tmp_path: Path) -> None:
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    before = provider.build_review_items()
+    assert not any(item.reason is ReviewReason.OPEN_REGRADE_REQUEST for item in before)
+
+    provider.file_regrade(student_id="987654321", reason="Q1 method valid", question_id="q1")
+
+    after = provider.build_review_items()
+    assert any(item.reason is ReviewReason.OPEN_REGRADE_REQUEST for item in after)
+
+    provider.resolve_regrade(
+        next(
+            item
+            for item in provider.build_regrade_items()
+            if item.question_id == "q1"
+        ).request_id
+    )
+    resolved = provider.build_review_items()
+    assert not any(item.reason is ReviewReason.OPEN_REGRADE_REQUEST for item in resolved)
+
+
+def test_reload_all_invalidates_the_similarity_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    submissions_path = tmp_path / "student-submissions"
+    submissions_path.mkdir()
+    _write_graded_submission(
+        submissions_path / "ann.submission.md",
+        student_id="111111111",
+        student_name="Ann Smith",
+        response="Paris",
+        points=50,
+    )
+    _write_graded_submission(
+        submissions_path / "bob.submission.md",
+        student_id="222222222",
+        student_name="Bob Lee",
+        response="Paris, France",
+        points=50,
+    )
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-single.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    calls = _spy(monkeypatch, "build_similarity_flags")
+
+    provider.build_similarity_report()
+    provider.build_similarity_report()
+    assert len(calls) == 1
+
+    # Something outside this session rewrites a submission file directly
+    # (e.g. `grade-merge`) without going through any provider save path.
+    _write_graded_submission(
+        submissions_path / "bob.submission.md",
+        student_id="222222222",
+        student_name="Bob Lee",
+        response="a completely different answer",
+        points=10,
+    )
+    provider.reload_all()
+    provider.build_similarity_report()
+    assert len(calls) == 2, "reload_all must invalidate the cached report"
+
+
+def test_review_queue_notices_another_process_writing_the_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A journal write is the one report input no *submission* write accompanies.
+
+    A second grader on a shared folder, `grade-restore` or `grade-merge apply`
+    appends its own session file and touches nothing else. The review queue's
+    rubric-drift flags are read out of that journal, so the cached report has
+    to be thrown away — which is what putting `journal_fingerprint` in the
+    cohort fingerprint buys.
+    """
+    submissions_path = _copy_sample_submissions(tmp_path)
+    provider = SubmissionFilesProvider(
+        qa_file_path="samples/qa-multi.md",
+        submissions_path=submissions_path,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+    calls = _spy(monkeypatch, "read_journal")
+
+    provider.build_review_items()
+    after_first = len(calls)
+    provider.build_review_items()
+    assert len(calls) == after_first, "a repeat call must be served from the cache"
+
+    # Another process grades: a whole new session file, written directly, with
+    # no provider save path and no submission file touched.
+    GradeJournal(
+        resolve_history_dir(submissions_path), actor="ta_other", session_id="other"
+    ).append(
+        kind="grade",
+        student_id="987654321",
+        student_name="Andy Cortes",
+        question_id="q1",
+        summary="6/10 pts",
+    )
+
+    provider.build_review_items()
+    assert len(calls) > after_first, "an outside journal write must invalidate the cache"

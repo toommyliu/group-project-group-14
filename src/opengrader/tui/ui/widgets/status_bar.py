@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from rich.text import Text
 from textual import events, on
 from textual.app import ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, HorizontalScroll
 from textual.message import Message
 from textual.widgets import Static
 
@@ -39,7 +39,10 @@ class StatusBar(Horizontal):
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="status-bar-bindings")
+        # The bindings live inside a horizontal scroller so a long hotkey list
+        # can be scrolled into view rather than clipped on a narrow terminal.
+        with HorizontalScroll(id="status-bar-bindings-scroll"):
+            yield Static("", id="status-bar-bindings")
         yield Static("", id="status-bar-search-prompt", classes="status-bar-search")
         yield ShortcutInput(id="status-bar-search-input", classes="status-bar-search")
 
@@ -54,13 +57,13 @@ class StatusBar(Horizontal):
         for binding in bindings:
             if content:
                 content.append("   ")
-            content.append(binding.key, style="bold #f0a000")
+            content.append(binding.key, style="bold #EBCB8B")
             content.append(f" {binding.description}")
         self.query_one("#status-bar-bindings", Static).update(content)
 
     def enter_search(self, *, prompt: str, value: str, status: str) -> None:
         self._search_active = True
-        self.query_one("#status-bar-bindings", Static).display = False
+        self.query_one("#status-bar-bindings-scroll").display = False
         self.query_one("#status-bar-search-prompt", Static).update(prompt)
         search_input = self.query_one("#status-bar-search-input", ShortcutInput)
         search_input.value = value
@@ -74,7 +77,7 @@ class StatusBar(Horizontal):
     def exit_search(self) -> None:
         self._search_active = False
         self._set_search_display(False)
-        self.query_one("#status-bar-bindings", Static).display = True
+        self.query_one("#status-bar-bindings-scroll").display = True
 
     def search_active(self) -> bool:
         return self._search_active

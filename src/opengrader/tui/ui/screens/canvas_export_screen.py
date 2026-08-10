@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, RichLog
+from textual.widgets import Button, Checkbox, Input, RichLog, Static
 
 from opengrader.cli.canvas_export import run_cli as run_canvas_export_cli
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
@@ -36,15 +36,23 @@ class CanvasExportScreen(ModalScreen[None]):
         max-width: 110;
         height: 80%;
         background: $surface;
-        border: thick $accent;
+        border: round $accent;
+        border-title-align: left;
+        border-title-color: $accent;
+        border-title-style: bold;
         padding: 1 2;
     }
 
-    #canvas-export-title {
+    #canvas-export-hint {
         width: 100%;
-        content-align: center middle;
-        text-style: bold;
-        margin-bottom: 1;
+        height: auto;
+        color: $text-muted;
+    }
+
+    CanvasExportScreen .field-label {
+        width: 100%;
+        height: auto;
+        margin-top: 1;
     }
 
     CanvasExportScreen .path-row {
@@ -59,12 +67,21 @@ class CanvasExportScreen(ModalScreen[None]):
         min-width: 10;
         width: auto;
         margin-left: 1;
+        margin-top: 1;
+    }
+
+    CanvasExportScreen Checkbox {
+        margin-top: 1;
     }
 
     #canvas-export-log {
         height: 1fr;
         margin-top: 1;
-        border: solid $primary;
+        border: round $surface-lighten-2;
+        border-title-align: left;
+        border-title-color: $text-muted;
+        background: transparent;
+        padding: 0 1;
     }
 
     #canvas-export-buttons {
@@ -92,24 +109,43 @@ class CanvasExportScreen(ModalScreen[None]):
         self._initial_course = course
         self._initial_assignment = assignment
 
+    @staticmethod
+    def _field_label(text: str, detail: str = "") -> Static:
+        """A bold label with an optional muted detail, as on the setup screen."""
+        markup = f"[b]{text}[/b]"
+        if detail:
+            markup = f"{markup}  [dim]{detail}[/dim]"
+        return Static(markup, classes="field-label")
+
     def compose(self) -> ComposeResult:
-        with Vertical(id="canvas-export-dialog"):
-            yield Label("Export Grades to Canvas", id="canvas-export-title")
+        with Vertical(id="canvas-export-dialog") as dialog:
+            dialog.border_title = "▸ Export grades to Canvas"
+            yield Static(
+                "Posts scores and per-question comments via canvas-sak.",
+                id="canvas-export-hint",
+            )
+            yield self._field_label(
+                "Submissions", ".submission.md file or directory"
+            )
             with Horizontal(classes="path-row"):
                 yield Input(
                     value=self._initial_submissions,
-                    placeholder="Submissions file or directory",
+                    placeholder="Path to submissions…",
                     id="canvas-export-submissions",
                 )
-                yield Button("Browse", id="canvas-export-browse")
+                yield Button("Browse", id="canvas-export-browse", compact=True)
+            yield self._field_label("Course", "Canvas course name, fuzzy matched")
             yield Input(
                 value=self._initial_course,
-                placeholder="Canvas course name (fuzzy matched)",
+                placeholder="e.g. CS146",
                 id="canvas-export-course",
+            )
+            yield self._field_label(
+                "Assignment", "Canvas assignment name, fuzzy matched"
             )
             yield Input(
                 value=self._initial_assignment,
-                placeholder="Canvas assignment name (fuzzy matched)",
+                placeholder="e.g. Quiz 1",
                 id="canvas-export-assignment",
             )
             yield Checkbox(
@@ -117,10 +153,14 @@ class CanvasExportScreen(ModalScreen[None]):
                 value=True,
                 id="canvas-export-dry-run",
             )
-            yield RichLog(id="canvas-export-log", wrap=True, auto_scroll=True)
+            log = RichLog(id="canvas-export-log", wrap=True, auto_scroll=True)
+            log.border_title = "Output"
+            yield log
             with Horizontal(id="canvas-export-buttons"):
-                yield Button("Export", variant="primary", id="canvas-export-run")
-                yield Button("Close", id="canvas-export-close")
+                yield Button(
+                    "Export", variant="primary", id="canvas-export-run", compact=True
+                )
+                yield Button("Close", id="canvas-export-close", compact=True)
 
     def on_mount(self) -> None:
         self.query_one("#canvas-export-submissions", Input).focus()

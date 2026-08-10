@@ -79,9 +79,11 @@ subsequent launches are instant.
 ### Forcing a terminal window
 
 - **macOS**: the app bundle's executable picks the best installed terminal —
-  Ghostty → iTerm2 → WezTerm → kitty → Terminal.app (Kitty-graphics terminals
-  first so scan images render; Terminal.app users get a note that images will
-  degrade) — and opens `Opengrader.command` in it.
+  Ghostty → iTerm2 → WezTerm → kitty → Terminal.app (graphics-capable
+  terminals first, so scan images render at full fidelity) — and opens
+  `Opengrader.command` in it. Terminal.app is a working last resort: the TUI
+  detects it, shows a coarse preview, and offers the `o` hotkey to open a crop
+  in Preview.app.
 - **Linux**: `Terminal=true` in the `.desktop` entry makes the DE spawn its
   default terminal emulator.
 - **Windows**: the `.lnk` targets `wt.exe` (or `powershell.exe`), which always

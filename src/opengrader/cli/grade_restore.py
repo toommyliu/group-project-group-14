@@ -1,0 +1,417 @@
+"""Rewind grades to an earlier point in the audit journal — the undo that outlives a session.
+
+The journal (`core/history/journal.py`) has always recorded the *old* value of
+every grade, comment and transcription it saw change; this is the tool that
+reads it back. Three shapes, all one replay (`core/history/restore.py`):
+
+    # what did this look like before lunch?
+    uv run grade-restore show --submissions out/subs/ --at 2026-08-02T12:00
+
+    # what changed since then, and what would go back?
+    uv run grade-restore diff --submissions out/subs/ --at 2h
+
+    # put it back (dry run first — always shown before anything is written)
+    uv run grade-restore apply --submissions out/subs/ --at 2h --yes
+
+    # undo one grader — or one bad batch run — wherever nobody overwrote them
+    uv run grade-restore apply --submissions out/subs/ --without-actor ollama-bot --yes
+
+``apply`` is itself journalled, so a restore is an ordinary, reversible grade
+change rather than a hole in the audit trail.
+"""
+
+from __future__ import annotations
+
+import sys
+from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
+from datetime import datetime
+from pathlib import Path
+
+from opengrader.core.export.gradebook import discover_submission_paths
+from opengrader.core.history import (
+    RESTORABLE_ASPECTS,
+    Aspect,
+    GradeJournal,
+    RestoreError,
+    RestorePlan,
+    apply_restore_plan,
+    current_cells_from_documents,
+    document_student_key,
+    format_aspect_value,
+    parse_restore_time,
+    plan_restore,
+    read_journal,
+    replay_journal,
+    resolve_history_dir,
+)
+from opengrader.core.submissions.student_file import load_student_submission_markdown
+
+EPILOG = """
+examples:
+  uv run grade-restore show --submissions out/subs/ --at 2026-08-02T12:00
+  uv run grade-restore show --submissions out/subs/ --at 2h --student 012345
+  uv run grade-restore diff --submissions out/subs/ --at 90m
+  uv run grade-restore apply --submissions out/subs/ --at 2026-08-02T12:00 --yes
+  uv run grade-restore apply --submissions out/subs/ --question q3 --at 1d --yes
+  uv run grade-restore apply --submissions out/subs/ --without-actor bot --yes
+  uv run grade-restore log --submissions out/subs/          # who touched what, when
+
+times:
+  --at accepts 2026-08-02T14:30, 2026-08-02 14:30, 2026-08-02 (start of day),
+  a full ISO timestamp with an offset, or a relative age: 90s / 30m / 2h / 1d / 1w.
+  A time without a timezone is read as this machine's local clock.
+"""
+
+
+def _add_common(parser: ArgumentParser) -> None:
+    parser.add_argument(
+        "--submissions",
+        required=True,
+        help="Submissions directory (or a single .submission.md file).",
+    )
+    parser.add_argument(
+        "--student",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="Limit to this student id (repeatable).",
+    )
+    parser.add_argument(
+        "--question",
+        action="append",
+        default=[],
+        metavar="QID",
+        help="Limit to this question id, e.g. q3 (repeatable).",
+    )
+    parser.add_argument(
+        "--only",
+        default="",
+        metavar="ASPECTS",
+        help=(
+            "Comma-separated aspects to consider: grade, comment, transcription "
+            "(default: all three)."
+        ),
+    )
+    parser.add_argument(
+        "--at",
+        default="",
+        metavar="TIME",
+        help="The point in time to reconstruct (see 'times' below).",
+    )
+    parser.add_argument(
+        "--without-actor",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "Replay as if this grader never acted (repeatable). Their changes "
+            "are undone only where nobody edited the same answer afterwards."
+        ),
+    )
+
+
+def _build_parser() -> ArgumentParser:
+    parser = ArgumentParser(
+        description=(
+            "Reconstruct and restore grades from the audit journal: inspect the "
+            "state at any past moment, diff it against today, and write it back."
+        ),
+        epilog=EPILOG,
+        formatter_class=RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    show = subparsers.add_parser(
+        "show", help="Print the reconstructed grades at a point in time."
+    )
+    _add_common(show)
+
+    diff = subparsers.add_parser(
+        "diff", help="Show what differs between then and the files as they are now."
+    )
+    _add_common(diff)
+
+    apply_cmd = subparsers.add_parser(
+        "apply", help="Write the reconstructed grades back to the submission files."
+    )
+    _add_common(apply_cmd)
+    apply_cmd.add_argument(
+        "--yes",
+        action="store_true",
+        help="Actually write. Without it the changes are only previewed.",
+    )
+    apply_cmd.add_argument(
+        "--reason",
+        default="",
+        help="Why the restore was performed; recorded in the audit journal.",
+    )
+
+    log = subparsers.add_parser(
+        "log", help="Summarize the journal: actors, time span, and what is restorable."
+    )
+    log.add_argument(
+        "--submissions",
+        required=True,
+        help="Submissions directory (or a single .submission.md file).",
+    )
+
+    return parser
+
+
+def _resolve_submissions(raw: str) -> Path:
+    path = Path(raw).expanduser()
+    if not path.exists():
+        print(f"Error: submissions path not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    return path
+
+
+def _parse_aspects(raw: str) -> tuple[Aspect, ...]:
+    if not raw.strip():
+        return RESTORABLE_ASPECTS
+    chosen: list[Aspect] = []
+    for token in raw.split(","):
+        name = token.strip().lower()
+        if not name:
+            continue
+        if name not in RESTORABLE_ASPECTS:
+            print(
+                f"Error: unknown aspect {name!r} — choose from "
+                f"{', '.join(RESTORABLE_ASPECTS)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        chosen.append(name)  # type: ignore[arg-type]
+    return tuple(chosen) or RESTORABLE_ASPECTS
+
+
+def _parse_at(raw: str) -> datetime | None:
+    if not raw.strip():
+        return None
+    try:
+        return parse_restore_time(raw)
+    except RestoreError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _load_documents(path: Path) -> list[tuple[Path, object]]:
+    """Parse every submission in the cohort, skipping ones that will not read.
+
+    A single malformed file must not stop a restore of the other thirty — it
+    is reported and the run continues, matching how the extractor treats one
+    bad scan.
+    """
+    loaded: list[tuple[Path, object]] = []
+    for submission_path in discover_submission_paths(path):
+        try:
+            loaded.append(
+                (submission_path, load_student_submission_markdown(submission_path))
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Warning: skipping {submission_path.name}: {exc}", file=sys.stderr)
+    return loaded
+
+
+def _prepare(args: Namespace):  # noqa: ANN202 - a small internal bundle
+    """Everything the three grade commands share: journal, files, plan."""
+    path = _resolve_submissions(args.submissions)
+    entries = read_journal(resolve_history_dir(path))
+    if not entries:
+        print(
+            f"No grade history recorded for {path}.\n"
+            "Nothing can be restored: the journal is written as grades are saved "
+            "in the TUI (or by automated-grading), so a folder graded before "
+            "journalling — or never graded — has no history to rewind.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    at = _parse_at(args.at)
+    snapshot = replay_journal(entries, at=at, exclude_actors=args.without_actor)
+
+    documents = _load_documents(path)
+    paths_by_key = {}
+    for submission_path, document in documents:
+        key = document_student_key(document)  # type: ignore[arg-type]
+        if key:
+            paths_by_key.setdefault(key, submission_path)
+    current = current_cells_from_documents(doc for _, doc in documents)  # type: ignore[misc]
+
+    plan = plan_restore(
+        snapshot,
+        current,
+        students=args.student,
+        questions=args.question,
+        aspects=_parse_aspects(args.only),
+        known_students=paths_by_key.keys(),
+    )
+    return path, snapshot, plan, paths_by_key
+
+
+def _describe_scope(args: Namespace, snapshot) -> str:  # noqa: ANN001
+    parts = []
+    if snapshot.at is None:
+        parts.append("the whole journal")
+    else:
+        parts.append(f"the state at {snapshot.at.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    if args.without_actor:
+        parts.append(f"without {', '.join(args.without_actor)}")
+    if args.student:
+        parts.append(f"students {', '.join(args.student)}")
+    if args.question:
+        parts.append(f"questions {', '.join(args.question)}")
+    return "; ".join(parts)
+
+
+def _print_unresolved(plan: RestorePlan) -> None:
+    if not plan.unresolved:
+        return
+    # Stated before any summary line, so "nothing to restore" can never be
+    # read as "everything is accounted for".
+    print(
+        f"\n{len(plan.unresolved)} student(s) in the history have no submission "
+        "file here and were skipped:",
+        file=sys.stderr,
+    )
+    for key in plan.unresolved:
+        print(f"  - {key}", file=sys.stderr)
+
+
+def _cmd_show(args: Namespace) -> None:
+    path, snapshot, plan, _paths = _prepare(args)
+    print(f"Reconstructed {_describe_scope(args, snapshot)} for {path}.\n")
+
+    wanted_students = {s.strip().casefold() for s in args.student if s.strip()}
+    wanted_questions = {q.strip().casefold() for q in args.question if q.strip()}
+    aspects = _parse_aspects(args.only)
+
+    by_student: dict[str, list[tuple[str, str]]] = {}
+    for (key, question_id), cell in snapshot.cells.items():
+        if wanted_students and key not in wanted_students:
+            continue
+        if wanted_questions and question_id.strip().casefold() not in wanted_questions:
+            continue
+        for aspect in aspects:
+            value = cell.value(aspect)
+            if value is None:
+                continue
+            by_student.setdefault(snapshot.label_for(key), []).append(
+                (question_id, f"{aspect}: {format_aspect_value(aspect, value)}")
+            )
+
+    if not by_student:
+        print("The journal has no record matching that scope.")
+        return
+
+    for label in sorted(by_student, key=str.lower):
+        print(label)
+        for question_id, rendered in sorted(by_student[label]):
+            print(f"  {question_id:<6} {rendered}")
+        print()
+
+    if snapshot.unattributed_entries:
+        print(
+            f"Note: {snapshot.unattributed_entries} journal entry(ies) could not be "
+            "tied to a student (no id and no name recorded) and were ignored.",
+            file=sys.stderr,
+        )
+    _print_unresolved(plan)
+
+
+def _print_plan(plan: RestorePlan) -> None:
+    for change in plan.changes:
+        print(f"  {change.describe()}")
+
+
+def _cmd_diff(args: Namespace) -> None:
+    _path, snapshot, plan, _paths = _prepare(args)
+    scope = _describe_scope(args, snapshot)
+    if not plan:
+        print(f"No differences: the files already match {scope}.")
+        _print_unresolved(plan)
+        return
+    print(
+        f"{len(plan.changes)} change(s) across {plan.student_count} student(s) "
+        f"between {scope} and the files as they are now:\n"
+    )
+    _print_plan(plan)
+    _print_unresolved(plan)
+
+
+def _cmd_apply(args: Namespace) -> None:
+    path, snapshot, plan, paths_by_key = _prepare(args)
+    scope = _describe_scope(args, snapshot)
+    if not plan:
+        print(f"Nothing to restore: the files already match {scope}.")
+        _print_unresolved(plan)
+        return
+
+    print(
+        f"{len(plan.changes)} change(s) across {plan.student_count} student(s) "
+        f"to restore {scope}:\n"
+    )
+    _print_plan(plan)
+    _print_unresolved(plan)
+
+    if not args.yes:
+        # Preview is the default because a restore overwrites real grades; the
+        # confirmation is an explicit flag rather than a prompt so the tool
+        # stays scriptable.
+        print("\nPreview only. Re-run with --yes to write these changes.")
+        return
+
+    journal = GradeJournal(resolve_history_dir(path))
+    outcome = apply_restore_plan(
+        plan, paths_by_key, journal=journal, reason=args.reason
+    )
+    print(
+        f"\nRestored {len(outcome.written)} change(s) across "
+        f"{outcome.files_touched} student(s)."
+    )
+    if outcome.failed:
+        print(f"{len(outcome.failed)} change(s) could not be written:", file=sys.stderr)
+        for change, error in outcome.failed:
+            print(f"  {change.describe()}\n    {error}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_log(args: Namespace) -> None:
+    path = _resolve_submissions(args.submissions)
+    entries = read_journal(resolve_history_dir(path))
+    if not entries:
+        print(f"No grade history recorded for {path}.")
+        return
+
+    by_actor: dict[str, int] = {}
+    by_kind: dict[str, int] = {}
+    for entry in entries:
+        by_actor[entry.actor] = by_actor.get(entry.actor, 0) + 1
+        by_kind[entry.kind] = by_kind.get(entry.kind, 0) + 1
+
+    restorable = sum(by_kind.get(aspect, 0) for aspect in RESTORABLE_ASPECTS)
+    first = entries[0].timestamp
+    last = entries[-1].timestamp
+    print(f"{len(entries)} journal entries for {path}")
+    print(f"  span:       {first}  →  {last}")
+    print(f"  restorable: {restorable} (grade/comment/transcription)")
+    print("  by actor:")
+    for actor, count in sorted(by_actor.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"    {actor:<20} {count}")
+    print("  by kind:")
+    for kind, count in sorted(by_kind.items(), key=lambda kv: (-kv[1], kv[0])):
+        note = "" if kind in RESTORABLE_ASPECTS else "  (not restorable)"
+        print(f"    {kind:<20} {count}{note}")
+
+
+_COMMANDS = {
+    "show": _cmd_show,
+    "diff": _cmd_diff,
+    "apply": _cmd_apply,
+    "log": _cmd_log,
+}
+
+
+def run_cli(argv: list[str] | None = None) -> None:
+    args = _build_parser().parse_args(argv)
+    _COMMANDS[args.command](args)

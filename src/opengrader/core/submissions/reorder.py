@@ -7,15 +7,20 @@ from pathlib import Path
 import sys
 from dataclasses import dataclass, field
 from statistics import median
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
-import fitz
-import pytesseract
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
 from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, extract_page_number
 from opengrader.core.pdf_utils import norm_bbox, render_page_to_image, safe_image_to_data
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # fitz/pytesseract (~110ms each cold) are imported lazily at each call
+    # site below — this reorder pass is one strategy among several the setup
+    # screen offers, not something every TUI startup needs, and this module
+    # is loaded eagerly by core/submissions/__init__.py.
+    import fitz
 
 
 _ROMAN_RE = re.compile(r"^[IVXLCDM]+$", re.IGNORECASE)
@@ -43,17 +48,13 @@ def _word_to_int(s: str) -> int | None:
     return words.get(s.lower())
 
 
-def detect_page_number_tesseract(
-    image: Image.Image, already_cropped: bool = False, max_pages: int | None = None
-) -> int | None:
-    """Extract page number from the bottom of a page image using Tesseract."""
-    if not already_cropped:
-        w, h = image.size
-        # Focus on the bottom 15% where page numbers usually reside
-        image = image.crop((0, int(h * 0.85), w, h))
+def _parse_page_number(text: str, max_pages: int | None = None) -> int | None:
+    """Parse a page number out of a footer-ish text string.
 
-    # PSM 6 (single block) is better for finding structured text lines like footers
-    text = pytesseract.image_to_string(image, config="--psm 6").strip()
+    Shared by the Tesseract path (OCR of a rendered scan) and the born-digital
+    path (a page's embedded text layer), so both interpret "Page 12", "12 / 45",
+    Roman numerals, and number words identically.
+    """
     if not text:
         return None
 
@@ -102,14 +103,57 @@ def detect_page_number_tesseract(
     return None
 
 
+def detect_page_number_tesseract(
+    image: Image.Image, already_cropped: bool = False, max_pages: int | None = None
+) -> int | None:
+    """Extract page number from the bottom of a page image using Tesseract."""
+    import pytesseract  # see the TYPE_CHECKING import above for why this is deferred
+
+    if not already_cropped:
+        w, h = image.size
+        # Focus on the bottom 15% where page numbers usually reside
+        image = image.crop((0, int(h * 0.85), w, h))
+
+    # PSM 6 (single block) is better for finding structured text lines like footers
+    text = pytesseract.image_to_string(image, config="--psm 6").strip()
+    return _parse_page_number(text, max_pages=max_pages)
+
+
+def detect_page_number_text_layer(
+    page: "fitz.Page", max_pages: int | None = None
+) -> int | None:
+    """Read a page number from a born-digital page's embedded text layer.
+
+    The fastest, most exact tier: no rasterization or OCR. Only the bottom of
+    the page is considered (where footers live), so a "Page 3" printed in a
+    question body can't masquerade as the page number. Returns None when the
+    page has no text layer (a scanned image), so the caller falls back to OCR.
+    """
+    try:
+        page_height = page.rect.height or 1.0
+        footer_top = page_height * 0.85
+        footer_words = [
+            word[4]
+            for word in page.get_text("words")
+            # word = (x0, y0, x1, y1, text, block, line, word_no)
+            if word[1] >= footer_top
+        ]
+        text = " ".join(footer_words).strip()
+    except Exception:
+        return None
+    if not text:
+        return None
+    return _parse_page_number(text, max_pages=max_pages)
+
+
 @dataclass(frozen=True)
 class PageNumberLayoutInfo:
     # Normalized bounding box (x, y, w, h) where page numbers are expected
     bbox_norm: tuple[float, float, float, float]
-    # Page dimensions (width, height) from the blank exam for context
+    # Page dimensions (width, height) from the blank assignment for context
     page_w: int
     page_h: int
-    # The total number of pages in the blank exam template
+    # The total number of pages in the blank assignment template
     total_pages: int
     # Printed page number per template page position, in the template's
     # (correct) page order. None means no number is printed there — e.g. an
@@ -145,12 +189,14 @@ def _detect_page_number_in_layout(
     )
 
 
-def _load_page_number_layout(blank_exam_path: Path) -> PageNumberLayoutInfo | None:
+def _load_page_number_layout(blank_template_path: Path) -> PageNumberLayoutInfo | None:
     """
-    Analyzes a blank exam PDF to find the expected location of page numbers.
+    Analyzes a blank assignment PDF to find the expected location of page numbers.
     Returns PageNumberLayoutInfo if a consistent region is found, otherwise None.
     """
-    doc = fitz.open(blank_exam_path)
+    import fitz  # see the TYPE_CHECKING import above for why this is deferred
+
+    doc = fitz.open(blank_template_path)
     try:
         # Try to find page numbers on the first few pages to get a robust layout
         candidate_bboxes_px: list[tuple[int, int, int, int]] = []
@@ -251,16 +297,29 @@ def _load_page_number_layout(blank_exam_path: Path) -> PageNumberLayoutInfo | No
 def _order_pages_by_template(
     detected: list[int | None],
     page_labels: tuple[int | None, ...],
-) -> tuple[list[int], list[str]]:
+    *,
+    extra_work_pages: bool = False,
+) -> tuple[list[int], list[str], set[int]]:
     """Order scanned pages to match the blank template's label sequence.
 
     The template is assumed to be in the correct order, so each template
     position's printed label is the reference. A scanned page detected as
-    label N goes to the template position printing N. Pages with no detected
-    label — and detections the template never prints (OCR misreads) or prints
-    fewer times than detected (duplicates) — fill the remaining template
-    positions in their original scan order, so an unnumbered title page stays
-    at the front instead of being pushed to the back.
+    label N goes to the template position printing N.
+
+    Pages the detector couldn't place (no detected label, or a detection the
+    template never prints / prints fewer times than detected) fill the remaining
+    template positions in scan order, so an unnumbered title page stays at the
+    front instead of being pushed to the back.
+
+    With ``extra_work_pages`` set, only the positions the template *deliberately*
+    leaves unnumbered (e.g. a title page) are filled from those leftovers;
+    everything else is treated as an extra student-work page and appended after
+    the template pages, so downstream extraction sees the graded pages first.
+
+    Returns the new page order, any warnings, and the set of **scan indices**
+    that overflowed past the template — the extra work pages. The caller turns
+    those into final page positions and records them so the grade screen can
+    offer the scratch work from every question (see ``extra_pages.py``).
     """
     warnings: list[str] = []
     printed_labels = {label for label in page_labels if label is not None}
@@ -291,22 +350,40 @@ def _order_pages_by_template(
         unassigned.append(scan_index)
 
     used_positions = set(assigned.values())
-    free_positions = deque(
-        position
-        for position in range(len(page_labels))
-        if position not in used_positions
-    )
+    if extra_work_pages:
+        # Fill only the template's intentionally-unnumbered slots; push the rest
+        # to the end as extra work pages.
+        free_positions = deque(
+            position
+            for position, label in enumerate(page_labels)
+            if label is None and position not in used_positions
+        )
+    else:
+        free_positions = deque(
+            position
+            for position in range(len(page_labels))
+            if position not in used_positions
+        )
     overflow_position = len(page_labels)
+    overflowed: set[int] = set()
     for scan_index in unassigned:
         if free_positions:
             assigned[scan_index] = free_positions.popleft()
         else:
-            # More scanned pages than template positions (extra scratch paper).
+            # More scanned pages than template positions (extra scratch paper),
+            # or an extra work page when extra_work_pages is set.
             assigned[scan_index] = overflow_position
             overflow_position += 1
+            overflowed.add(scan_index)
+
+    if extra_work_pages and overflowed:
+        warnings.append(
+            f"Moved {len(overflowed)} extra page(s) to the end (not matched to a "
+            f"template page)."
+        )
 
     order = sorted(assigned, key=lambda scan_index: (assigned[scan_index], scan_index))
-    return order, warnings
+    return order, warnings, overflowed
 
 
 def _order_pages_by_detected_number(
@@ -333,21 +410,50 @@ def _order_pages_by_detected_number(
     return [m[1] for m in sorted_map], warnings
 
 
+@dataclass(frozen=True)
+class ReorderResult:
+    """Outcome of one PDF's ordering pass.
+
+    Truthy exactly when the file was rewritten, so the historical
+    ``if reorder_pdf_pages(...)`` reads unchanged, while callers that care can
+    also read which pages ended up as extra student work.
+    """
+
+    changed: bool
+    # Final 1-based page positions (after reordering) of pages that could not be
+    # matched to a template page — the student's scratch/overflow sheets. Only
+    # ever populated when ``extra_work_pages`` was requested *and* a template
+    # gave us something to match against; empty otherwise, because without a
+    # reference sequence "extra" is not a conclusion we can draw.
+    extra_work_pages: tuple[int, ...] = ()
+
+    def __bool__(self) -> bool:
+        return self.changed
+
+
 def reorder_pdf_pages(
     pdf_path: str | Path,
     *,
     ollama_config: OllamaVisionConfig | None = None,
     blank_template_layout: PageNumberLayoutInfo | None = None,
+    extra_work_pages: bool = False,
     progress_callback: Callable[[str], None] | None = None,
-) -> bool:
+) -> ReorderResult:
     """
     Checks page numbers in a PDF and rearranges them if out of order.
-    Returns True if the file was modified, False otherwise.
+
+    When ``extra_work_pages`` is set, pages the detector can't match to the
+    template sequence (extra scratch/work sheets) are moved to the end so
+    downstream extraction processes the graded template pages first, and their
+    final page positions are reported on the result so the caller can record
+    them for the grader (see ``extra_pages.py``).
     """
+    import fitz  # see the TYPE_CHECKING import above for why this is deferred
+
     path = Path(pdf_path)
     reader = PdfReader(path)
     if len(reader.pages) <= 1:
-        return False
+        return ReorderResult(changed=False)
 
     doc = fitz.open(path)
     num_pages = len(doc)
@@ -364,23 +470,38 @@ def reorder_pdf_pages(
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
         for i in range(num_pages):
-            # Render at lower DPI for faster reordering check, but high enough for OCR
-            img, _, _ = render_page_to_image(doc, i, dpi=150)
+            # Tier 1 — born-digital text layer: fastest and exact, and needs no
+            # rasterization. Only born-digital PDFs have one; a scan returns None.
+            num = detect_page_number_text_layer(doc[i], max_pages=expected_total)
 
-            num = None
-            if blank_template_layout:
-                # Look where the template prints page numbers first.
-                num = _detect_page_number_in_layout(
-                    img, blank_template_layout.bbox_norm, max_pages=expected_total
-                )
-
+            # Only rasterize when the text layer didn't answer (scanned pages).
             if num is None:
-                num = detect_page_number_tesseract(img, max_pages=expected_total)
+                # Render at lower DPI for a faster check, but high enough for OCR.
+                img, _, _ = render_page_to_image(doc, i, dpi=150)
 
-            if num is None and ollama_config:
-                img_file = tmp_path / f"p{i}.png"
-                img.save(img_file)
-                num = extract_page_number(image_path=img_file, config=ollama_config)
+                # Tier 1.5 — Opengrader QR: if the sheet was generated with QR
+                # codes, the page number is encoded exactly. Free here — the page
+                # is already rasterized — and beats every OCR tier below.
+                from opengrader.core.ocr.qr_reader import read_code_from_image
+
+                code = read_code_from_image(img)
+                if code is not None and code.page is not None:
+                    num = code.page
+
+                # Tier 2 — OCR: look where the template prints page numbers first,
+                # then the generic bottom strip.
+                if num is None and blank_template_layout:
+                    num = _detect_page_number_in_layout(
+                        img, blank_template_layout.bbox_norm, max_pages=expected_total
+                    )
+                if num is None:
+                    num = detect_page_number_tesseract(img, max_pages=expected_total)
+
+                # Tier 3 — Ollama VLM: handwritten/stylized numbers OCR can't read.
+                if num is None and ollama_config:
+                    img_file = tmp_path / f"p{i}.png"
+                    img.save(img_file)
+                    num = extract_page_number(image_path=img_file, config=ollama_config)
 
             detected.append(num)
 
@@ -390,15 +511,29 @@ def reorder_pdf_pages(
 
     template_labels = blank_template_layout.page_labels if blank_template_layout else ()
     expected_unnumbered = 0
+    overflowed: set[int] = set()
     if any(label is not None for label in template_labels):
         # The blank template is in the correct order: use its printed label
         # sequence as the ordering reference. Pages the template leaves
         # unnumbered (e.g. a title page) are expected to be undetected.
-        new_order, order_warnings = _order_pages_by_template(detected, template_labels)
+        new_order, order_warnings, overflowed = _order_pages_by_template(
+            detected, template_labels, extra_work_pages=extra_work_pages
+        )
         expected_unnumbered = sum(1 for label in template_labels if label is None)
     else:
         new_order, order_warnings = _order_pages_by_detected_number(detected)
     reorder_warnings.extend(order_warnings)
+
+    # Translate the overflowed *scan* indices into the page positions they hold
+    # in the reordered file — that is what a grader (and the submission
+    # frontmatter) refers to. Computed before the "nothing moved" early return
+    # below, because a scan that was already in order can still carry extra
+    # pages worth recording.
+    extra_positions = tuple(
+        position + 1
+        for position, scan_index in enumerate(new_order)
+        if scan_index in overflowed
+    )
 
     num_undetected_pages = sum(1 for num in detected if num is None)
     if num_undetected_pages > expected_unnumbered:
@@ -417,7 +552,7 @@ def reorder_pdf_pages(
             print(f"  - {warning}", file=sys.stderr)
 
     if new_order == list(range(num_pages)):
-        return False
+        return ReorderResult(changed=False, extra_work_pages=extra_positions)
 
     writer = PdfWriter()
     for original_index in new_order:
@@ -425,4 +560,4 @@ def reorder_pdf_pages(
 
     with open(path, "wb") as f:
         writer.write(f)
-    return True
+    return ReorderResult(changed=True, extra_work_pages=extra_positions)

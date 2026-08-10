@@ -11,7 +11,6 @@ from pathlib import Path
 from statistics import median
 from typing import TYPE_CHECKING, Any, Literal
 
-import cv2
 import numpy as np
 import pytesseract
 from PIL import Image, ImageDraw
@@ -377,6 +376,14 @@ def _merge_boxes_px(
 
 def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
     """Detect structural marks that can bound fields and questions."""
+
+    # Import lazily: cv2 (OpenCV) is a heavy import (~30-40ms cold, its own
+    # native extension) and this is the only function in the module that
+    # touches it. This module sits on the TUI startup chain (setup screen ->
+    # submission extractor -> ocr.extractor -> here), so importing cv2 at
+    # module scope would tax every TUI launch even though layout detection
+    # only runs during actual OCR extraction.
+    import cv2
 
     gray = apply_grayscale(np.array(image))
     page_h, page_w = gray.shape[:2]

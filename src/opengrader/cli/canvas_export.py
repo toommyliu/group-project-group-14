@@ -6,6 +6,7 @@ import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+from opengrader.core.curve import Curve, apply_curve, read_curve
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
@@ -169,8 +170,12 @@ def run_cli(argv: list[str] | None = None) -> None:
         print(f"error: no *.submission.md files found in {submissions_path}", file=sys.stderr)
         sys.exit(1)
 
+    curve = read_curve(submissions_path)
     mode = "[DRY RUN] " if args.dry_run else ""
-    print(f"{mode}Exporting grades to Canvas: course={args.course!r} assignment={args.assignment!r}\n")
+    print(f"{mode}Exporting grades to Canvas: course={args.course!r} assignment={args.assignment!r}")
+    if curve.is_active:
+        print("A score curve is active — posting curved totals (raw shown alongside).")
+    print()
 
     ready = skipped = failed = 0
 
@@ -189,11 +194,18 @@ def run_cli(argv: list[str] | None = None) -> None:
             skipped += 1
             continue
 
-        total = _total_score(doc)
+        raw_total = _total_score(doc)
         possible = _possible_score(doc)
+        total = apply_curve(raw_total, possible, curve)
         student_label = doc.student_name.strip() or f"(SID: {doc.student_id})"
         print(f"    Student: {student_label} (SID: {doc.student_id})")
-        print(f"    Score: {total:.10g} / {possible:.10g}")
+        if curve.is_active:
+            print(
+                f"    Score: {total:.10g} / {possible:.10g}"
+                f"  (raw {raw_total:.10g})"
+            )
+        else:
+            print(f"    Score: {total:.10g} / {possible:.10g}")
 
         attachment: Path | None = None
         if args.attach_pdf:

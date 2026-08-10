@@ -5,31 +5,35 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 import numpy as np
 import yaml
 from PIL import Image, ImageOps
 
-from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, QuestionType
-from opengrader.core.ocr.question_classifier import classify_question_image
+from opengrader.core.concurrency import check_unmodified
+from opengrader.core.question_types import (
+    FREE_RESPONSE,
+    MULTIPLE_CHOICE,
+    NUMERIC,
+    QuestionType,
+)
+# SUBSCRIPT_TRANSLATION is a bare str.maketrans table with no dependencies;
+# safe to import eagerly now that opengrader.core.ocr's package __init__ is
+# lazy (see core/ocr/__init__.py) and no longer drags cv2/fitz/pytesseract in
+# behind it.
 from opengrader.core.ocr.constants import SUBSCRIPT_TRANSLATION
-from opengrader.core.ocr.extractor import (
-    OcrConfig,
-    _trim_question_region,
-    process_submission_pdf,
-)
-from opengrader.core.pdf_utils import safe_image_to_data
-from opengrader.core.ocr.ollama_vlm import (
-    OllamaVisionConfig,
-    TitleMetadataResult,
-    extract_field_text,
-    extract_question_prompt_and_answer,
-    extract_title_metadata,
-)
-from opengrader.core.ocr.scanner import _find_rectangles
-from opengrader.core.ocr.utils import apply_grayscale
 from opengrader.core.source_location import QuestionSourceSegment
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # This module's build half (extraction) uses these at runtime via local
+    # imports right where they're needed — see build_student_submission_document
+    # and its helpers below — so cv2 (opencv, ~120ms cold), fitz (PyMuPDF, via
+    # pdf_utils/ocr.extractor, ~110ms) and pytesseract (~110ms) stay out of
+    # sys.modules for the parse/render/update half the TUI actually exercises
+    # on every startup.
+    from opengrader.core.ocr.extractor import OcrConfig
+    from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResult
 
 
 _TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b", re.IGNORECASE)
@@ -104,11 +108,42 @@ class StudentSubmissionQuestion:
     analysis: str = ""
     question_type: QuestionType = FREE_RESPONSE
     source_segments: tuple[QuestionSourceSegment, ...] = ()
+    # Transcription confidence (0-100) for this response's text: aggregated
+    # Tesseract word confidence, or 100 when read exactly from a PDF text layer.
+    # ``None`` means "unverified" — either a VLM (Ollama) transcription, which
+    # has no calibrated confidence, or a submission extracted before confidence
+    # was tracked. Emitted as a ``Confidence:`` line only when present, so older
+    # files round-trip byte-identically.
+    response_confidence: float | None = None
+    # Which reader produced `response_text` — one of the strings in
+    # `core/submissions/transcription.py` ("tesseract", "vision-model",
+    # "human", …). ``None`` means the reading predates this field, which is a
+    # different thing from any recorded value and is reported as such rather
+    # than guessed at. Kept as a plain string rather than an enum so a file
+    # written by a newer version (naming a reader this one has never heard of)
+    # round-trips unchanged instead of silently losing the value. Emitted as a
+    # ``Read by:`` line only when present, so older files stay byte-identical.
+    response_source: str | None = None
 
     @property
     def rubric_label(self) -> str:
         """Return the legacy single-label view of selected rubric labels."""
         return self.rubric_labels[0] if len(self.rubric_labels) == 1 else ""
+
+
+@dataclass(frozen=True)
+class IdentityCandidate:
+    """A roster student who could be the author of an ambiguous submission.
+
+    When a handwritten name matches several roster people (duplicate names) the
+    extractor refuses to guess and leaves the id blank. It records the tied
+    roster entries here so a human can later pick the right one — from the exact
+    set the matcher considered — instead of re-typing an id from memory and
+    risking a valid-but-wrong assignment.
+    """
+
+    student_id: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -119,9 +154,32 @@ class StudentSubmissionDocument:
     assignment_title: str
     assignment_version: str | None
     source_pdf: str
+    # The class section this submission belongs to (e.g. "SectionA"), stamped by
+    # the extractor when grading an assignment given to multiple sections. None
+    # (rendered as `section: null`, like the other optional scalars) for a
+    # single-section assignment.
+    section: str | None = None
     student_score: str = ""
     name_image_path: str | None = None
     id_image_path: str | None = None
+    # OCR confidence (0-100) for the read name / student-id fields, mirroring the
+    # per-question ``response_confidence``: a Tesseract number, or ``None`` when
+    # the field was read by the VLM (unverified) or predates confidence tracking.
+    # Rendered as ``student_name_confidence`` / ``student_id_confidence`` only
+    # when present; dropped once a human assigns the identity (then it's verified).
+    name_confidence: float | None = None
+    id_confidence: float | None = None
+    # Roster people tied on this submission's name; non-empty only while the id
+    # is unresolved (see `_apply_roster_identity`). Cleared once an id is set.
+    id_candidates: tuple[IdentityCandidate, ...] = ()
+    # 1-based pages of `source_pdf` that no question crop covers — scratch and
+    # overflow work ("continued on back"). Submission-level on purpose: nothing
+    # ties a scratch sheet to one question, so the grade screen offers these
+    # pages from *every* question. Recorded by `submission-splitter
+    # --extra-work-pages` (via `extra_pages.py`) or inferred from page coverage
+    # at extraction; emitted only when non-empty so older files round-trip
+    # byte-identically. See `core/submissions/page_context.py`.
+    extra_pages: tuple[int, ...] = ()
     questions: list[StudentSubmissionQuestion] = field(default_factory=list)
 
 
@@ -139,6 +197,35 @@ class StudentSubmissionGradeUpdate:
     points_awarded: float | None = None
     rubric_labels: tuple[str, ...] | None = None
     analysis: str | None = None
+    # A corrected transcription of the handwritten response, and the confidence
+    # to record for it. ``None`` on either means "leave unchanged" (matching the
+    # other fields). A grader fixing an OCR misread passes the corrected text
+    # plus a confidence of 100.0 (a human-verified reading), which clears the
+    # low-confidence review flag exactly as an exact text-layer read would.
+    response_text: str | None = None
+    response_confidence: float | None = None
+    # Remove the ``Confidence`` line entirely, restoring the "unverified" state
+    # a vision-model reading has. ``response_confidence=None`` cannot express
+    # this — it means "leave unchanged", like every other field — and the
+    # distinction matters: when a *model* re-reads a low-confidence Tesseract
+    # transcription (``submission-extractor --refine``), the new text has no
+    # measured confidence at all, and leaving the old number in place would
+    # attach a score of 42 to words nothing scored.
+    clear_response_confidence: bool = False
+    # Which reader produced `response_text` (see
+    # `core/submissions/transcription.py`). ``None`` means "leave unchanged",
+    # like every other field here — so a caller that rewrites a transcription
+    # without saying who read it keeps whatever the file already claimed, and a
+    # caller that knows (the grade screen's editor writing "human", a refine
+    # pass writing the model it escalated to) says so.
+    response_source: str | None = None
+    # Remove the ``Read by`` line entirely, restoring the "never recorded"
+    # state. The exact counterpart of ``clear_response_confidence`` and needed
+    # for the same reason: ``response_source=None`` means "leave unchanged", so
+    # undoing a grader's correction of an answer whose reader was never
+    # recorded would otherwise leave the file claiming a human typed the
+    # machine's words.
+    clear_response_source: bool = False
 
 
 @dataclass(frozen=True)
@@ -281,6 +368,68 @@ def _frontmatter_optional_str(
     return text or None
 
 
+def _parse_id_candidates(
+    frontmatter: dict[str, object],
+) -> tuple[IdentityCandidate, ...]:
+    """Read the optional ``id_candidates`` frontmatter list.
+
+    Rendered by `_yaml_candidates_field` as a YAML list of ``{id, name}``
+    mappings; absent (the common case) means an empty tuple.
+    """
+    raw = frontmatter.get("id_candidates")
+    if not isinstance(raw, list):
+        return ()
+    candidates: list[IdentityCandidate] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        student_id = str(item.get("id", "")).strip()
+        name = str(item.get("name", "")).strip()
+        if student_id or name:
+            candidates.append(IdentityCandidate(student_id=student_id, name=name))
+    return tuple(candidates)
+
+
+def _parse_extra_pages(frontmatter: dict[str, object]) -> tuple[int, ...]:
+    """Read the optional ``extra_pages`` frontmatter list.
+
+    A flow-style YAML list of 1-based page numbers in the student's source PDF
+    that carry work no question crop covers (scratch sheets, a "continued on
+    back" page). Absent — the common case — means an empty tuple, and the grade
+    screen falls back to inferring them from page coverage. Non-integer or
+    out-of-range entries are dropped rather than raising: a bad hint should
+    cost a page toggle, never the ability to open the submission.
+    """
+    raw = frontmatter.get("extra_pages")
+    if not isinstance(raw, list):
+        return ()
+    pages = {
+        int(item)
+        for item in raw
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 1
+    }
+    return tuple(sorted(pages))
+
+
+def _format_confidence(value: float) -> str:
+    """Render a 0-100 confidence without a trailing ``.0`` on whole numbers."""
+    return f"{value:g}"
+
+
+def _parse_reading_source(raw: str | None) -> str | None:
+    """Read the ``Read by:`` line, keeping an unrecognized value verbatim.
+
+    Deliberately *not* validated against the known reader names: a submission
+    written by a newer version records a reader this one has never heard of, and
+    dropping it would silently lose provenance on a round trip. An empty or
+    absent line stays ``None`` — "never recorded", which is its own answer.
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    return text or None
+
+
 def _parse_optional_float(raw: str | None) -> float | None:
     if raw is None:
         return None
@@ -304,6 +453,8 @@ def _parse_question_type(raw: str | None) -> QuestionType:
     normalized = (raw or "").strip().lower().replace("-", " ")
     if normalized in {"multiple choice", "multiple_choice"}:
         return MULTIPLE_CHOICE
+    if normalized in {"numeric", "number"}:
+        return NUMERIC
     return FREE_RESPONSE
 
 
@@ -561,6 +712,8 @@ def parse_student_submission_markdown(
                 source_segments=_parse_source_segments(
                     fields.values.get("Source segments")
                 ),
+                response_confidence=_parse_optional_float(fields.values.get("Confidence")),
+                response_source=_parse_reading_source(fields.values.get("Read by")),
             )
         )
 
@@ -570,10 +723,19 @@ def parse_student_submission_markdown(
         course_code=_frontmatter_optional_str(frontmatter, "course_code"),
         assignment_title=_frontmatter_str(frontmatter, "assignment_title"),
         assignment_version=_frontmatter_optional_str(frontmatter, "assignment_version"),
+        section=_frontmatter_optional_str(frontmatter, "section"),
         source_pdf=_frontmatter_str(frontmatter, "source_pdf"),
         student_score=_frontmatter_str(frontmatter, "student_score"),
         name_image_path=_frontmatter_optional_str(frontmatter, "name_image"),
         id_image_path=_frontmatter_optional_str(frontmatter, "id_image"),
+        name_confidence=_parse_optional_float(
+            _frontmatter_optional_str(frontmatter, "student_name_confidence")
+        ),
+        id_confidence=_parse_optional_float(
+            _frontmatter_optional_str(frontmatter, "student_id_confidence")
+        ),
+        id_candidates=_parse_id_candidates(frontmatter),
+        extra_pages=_parse_extra_pages(frontmatter),
         questions=questions,
     )
 
@@ -597,6 +759,14 @@ def _format_update_field_lines(
         return _format_rubric_field_lines(value)
     if not isinstance(value, str):
         raise TypeError(f"{field_name} updates require string values")
+    if field_name == "Response text":
+        # Mirror render's multiline literal-block form so a corrected
+        # transcription round-trips exactly like an extracted one.
+        if not value.strip():
+            return ["  - Response text: "]
+        lines = ["  - Response text: |"]
+        lines.extend(f"    {line}" for line in value.splitlines())
+        return lines
     if field_name == "Analysis" and "\n" in value:
         lines = ["  - Analysis: |"]
         lines.extend(f"    {line}" for line in value.splitlines())
@@ -640,6 +810,23 @@ def _replace_question_field(
 
         end = _question_field_end(block, index)
         block[index:end] = _format_update_field_lines(field_name, value)
+        return True
+    return False
+
+
+def _remove_question_field(block: list[str], field_name: str) -> bool:
+    """Delete a question field and any literal body or child bullets it owns.
+
+    The counterpart of :func:`_replace_question_field`, used where a field's
+    *absence* is a meaningful state rather than a missing value — today only
+    ``Confidence``, where "no line" means an unmeasured reading and any number
+    would be a claim nobody made.
+    """
+    field_re = re.compile(rf"^  -\s+{re.escape(field_name)}:\s*(.*)$")
+    for index, line in enumerate(block):
+        if field_re.match(line) is None:
+            continue
+        del block[index : _question_field_end(block, index)]
         return True
     return False
 
@@ -711,6 +898,47 @@ def update_student_submission_markdown(
 
     start, end = block_range
     block = lines[start:end]
+    # Transcription correction: upsert Confidence before Response text so the
+    # (new, if absent) Confidence line lands between Source segments and the
+    # Response text — the same order render emits.
+    # Provenance first, so a new `Read by` line lands *above* a new `Confidence`
+    # line — the order a full re-render emits, which is what keeps a surgically
+    # updated file and a re-rendered one byte-identical.
+    if update.clear_response_source:
+        # Checked before the upsert so the two can never both apply, mirroring
+        # the confidence pair below.
+        _remove_question_field(block, "Read by")
+    elif update.response_source is not None:
+        _upsert_question_field(
+            block,
+            field_name="Read by",
+            value=update.response_source,
+            after_fields=("Source segments", "Response image", "Prompt"),
+        )
+    if update.clear_response_confidence:
+        # Checked before the upsert so the two can never both apply; the writer
+        # is either recording a measured confidence or saying there isn't one.
+        _remove_question_field(block, "Confidence")
+    elif update.response_confidence is not None:
+        _upsert_question_field(
+            block,
+            field_name="Confidence",
+            value=_format_confidence(update.response_confidence),
+            after_fields=("Read by", "Source segments", "Response image", "Prompt"),
+        )
+    if update.response_text is not None:
+        _upsert_question_field(
+            block,
+            field_name="Response text",
+            value=update.response_text,
+            after_fields=(
+                "Confidence",
+                "Read by",
+                "Source segments",
+                "Response image",
+                "Prompt",
+            ),
+        )
     if update.possible_points is not None:
         _upsert_question_field(
             block,
@@ -750,10 +978,211 @@ def update_student_submission_markdown(
 def update_student_submission_file(
     path: str | Path,
     update: StudentSubmissionGradeUpdate,
-) -> None:
+    *,
+    expected_mtime_ns: int | None = None,
+) -> int:
+    """Apply a grade update to a submission file, returning its new mtime (ns).
+
+    When ``expected_mtime_ns`` is provided, the file's current modification
+    time must still match it or ``ConcurrentModificationError`` is raised
+    before any write — this is how the TUI avoids clobbering a save made by
+    another grader since it loaded the file. CLI callers that own the file
+    exclusively omit the argument and keep the previous behavior.
+    """
     submission_path = Path(path)
+    check_unmodified(submission_path, expected_mtime_ns)
     updated = update_student_submission_markdown(submission_path.read_text(), update)
     submission_path.write_text(updated)
+    return submission_path.stat().st_mtime_ns
+
+
+def _frontmatter_top_level_key(line: str) -> str | None:
+    """Return the key of a top-level frontmatter line, or None (indented/other)."""
+    if not line or line[:1].isspace():
+        return None
+    match = re.match(r"^([A-Za-z0-9_]+):", line)
+    return match.group(1) if match is not None else None
+
+
+def _drop_frontmatter_block(fm_lines: list[str], key: str) -> list[str]:
+    """Remove ``key:`` and any indented child lines that belong to it."""
+    out: list[str] = []
+    skipping = False
+    for line in fm_lines:
+        if skipping:
+            # Child lines of a block key are indented; a non-indented line ends
+            # the block (it is the next top-level key).
+            if line[:1].isspace():
+                continue
+            skipping = False
+        if _frontmatter_top_level_key(line) == key:
+            skipping = True
+            continue
+        out.append(line)
+    return out
+
+
+def _drop_frontmatter_scalar(fm_lines: list[str], key: str) -> list[str]:
+    """Remove a top-level scalar line ``key: …`` from the frontmatter, if present."""
+    return [line for line in fm_lines if _frontmatter_top_level_key(line) != key]
+
+
+def _set_frontmatter_scalar(fm_lines: list[str], key: str, value: str) -> list[str]:
+    """Set (or append) a double-quoted top-level scalar in the frontmatter."""
+    rendered = f"{key}: {_yaml_double_quote(value)}"
+    for index, line in enumerate(fm_lines):
+        if _frontmatter_top_level_key(line) == key:
+            fm_lines[index] = rendered
+            return fm_lines
+    fm_lines.append(rendered)
+    return fm_lines
+
+
+def set_student_identity_markdown(
+    content: str,
+    *,
+    student_id: str,
+    student_name: str | None = None,
+) -> str:
+    """Assign the student id (and optionally name) in a submission's frontmatter.
+
+    Surgical: only the ``student_id``/``student_name`` scalars are rewritten and
+    the now-resolved ``id_candidates`` block is dropped, leaving every question
+    block byte-identical (unlike a full re-render). This is how a human resolves
+    a duplicate-name/missing-id flag from the review queue.
+    """
+    had_trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("submission markdown is missing YAML frontmatter")
+    end = next(
+        (i for i in range(1, len(lines)) if lines[i].strip() == "---"),
+        None,
+    )
+    if end is None:
+        raise ValueError("submission markdown frontmatter is not terminated")
+
+    fm = lines[1:end]
+    fm = _drop_frontmatter_block(fm, "id_candidates")
+    fm = _set_frontmatter_scalar(fm, "student_id", student_id)
+    # A human-assigned id is verified, so any OCR confidence for it is stale.
+    fm = _drop_frontmatter_scalar(fm, "student_id_confidence")
+    if student_name is not None:
+        fm = _set_frontmatter_scalar(fm, "student_name", student_name)
+        fm = _drop_frontmatter_scalar(fm, "student_name_confidence")
+
+    lines[1:end] = fm
+    updated = "\n".join(lines)
+    return updated + "\n" if had_trailing_newline else updated
+
+
+def set_student_identity_file(
+    path: str | Path,
+    *,
+    student_id: str,
+    student_name: str | None = None,
+    expected_mtime_ns: int | None = None,
+) -> int:
+    """Persist a resolved student id to a submission file, returning new mtime.
+
+    Mirrors `update_student_submission_file`'s optimistic concurrency guard so
+    a review-queue assignment can't clobber a concurrent edit.
+    """
+    submission_path = Path(path)
+    check_unmodified(submission_path, expected_mtime_ns)
+    updated = set_student_identity_markdown(
+        submission_path.read_text(),
+        student_id=student_id,
+        student_name=student_name,
+    )
+    submission_path.write_text(updated)
+    return submission_path.stat().st_mtime_ns
+
+
+def _set_scalar_surgically(content: str, key: str, value: str) -> str:
+    """Rewrite one top-level frontmatter scalar, leaving everything else alone.
+
+    Shared by the small single-field editors below. Only the named line is
+    rewritten (or appended); every question block stays byte-identical, which is
+    what lets a field be corrected after extraction without re-rendering — and
+    therefore reformatting — the whole file.
+    """
+    had_trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("submission markdown is missing YAML frontmatter")
+    end = next(
+        (i for i in range(1, len(lines)) if lines[i].strip() == "---"),
+        None,
+    )
+    if end is None:
+        raise ValueError("submission markdown frontmatter is not terminated")
+
+    fm = lines[1:end]
+    fm = _set_frontmatter_scalar(fm, key, value)
+    lines[1:end] = fm
+    updated = "\n".join(lines)
+    return updated + "\n" if had_trailing_newline else updated
+
+
+def set_student_section_markdown(content: str, *, section: str) -> str:
+    """Set the ``section`` scalar in a submission's frontmatter, surgically.
+
+    Lets a grader correct a mis-routed section without touching anything else.
+    """
+    return _set_scalar_surgically(content, "section", section)
+
+
+# Frontmatter keys that point at files which do not travel with a redacted copy
+# of a submission: the scan (the student's name is written on every sheet) and
+# the two identity crops (pictures of that name and id). Their *paths* can carry
+# a name on their own — a split named ``Tommy_Liu.pdf`` — so the references go
+# too, not just the files.
+_FILE_REFERENCE_KEYS = ("source_pdf", "name_image_path", "id_image_path")
+
+
+def blank_submission_file_references_markdown(content: str) -> str:
+    """Blank the frontmatter references to files that do not travel, surgically.
+
+    Written for the redacted grader packet (`core/handoff/packet.py`). Only keys
+    the file *already has* are rewritten, so a submission that never recorded an
+    identity crop does not grow an empty line for one — an untouched file must
+    stay byte-identical apart from what was actually redacted.
+    """
+    had_trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("submission markdown is missing YAML frontmatter")
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+    if end is None:
+        raise ValueError("submission markdown frontmatter is not terminated")
+
+    for index in range(1, end):
+        if _frontmatter_top_level_key(lines[index]) in _FILE_REFERENCE_KEYS:
+            key = _frontmatter_top_level_key(lines[index])
+            lines[index] = f"{key}: {_yaml_double_quote('')}"
+    updated = "\n".join(lines)
+    return updated + "\n" if had_trailing_newline else updated
+
+
+def set_student_section_file(
+    path: str | Path,
+    *,
+    section: str,
+    expected_mtime_ns: int | None = None,
+) -> int:
+    """Persist a section assignment to a submission file, returning new mtime.
+
+    Mirrors `set_student_identity_file`'s optimistic concurrency guard.
+    """
+    submission_path = Path(path)
+    check_unmodified(submission_path, expected_mtime_ns)
+    updated = set_student_section_markdown(
+        submission_path.read_text(),
+        section=section,
+    )
+    submission_path.write_text(updated)
+    return submission_path.stat().st_mtime_ns
 
 
 def _normalize_assignment_version(raw: str | None) -> str | None:
@@ -985,6 +1414,11 @@ def _extract_best_ollama_field_text(
     config: OllamaVisionConfig,
     fallback_value: str,
 ) -> str:
+    # Import lazily: extraction-time only (Ollama VLM field re-read). See
+    # build_student_submission_document for why the ocr.ollama_vlm import
+    # itself is deferred rather than eager.
+    from opengrader.core.ocr.ollama_vlm import extract_field_text
+
     best_value = fallback_value.strip()
     best_score = _score_ollama_field_value(best_value, field_kind)
 
@@ -1085,6 +1519,13 @@ def _dedupe_boxes_norm(boxes: list[list[float]]) -> list[list[float]]:
 
 
 def _detect_subquestion_boxes_norm(question_image: Image.Image) -> list[list[float]]:
+    # Import lazily: this is extraction-time subquestion splitting only, and
+    # cv2 (opencv, ~120ms cold) backs both apply_grayscale and _find_rectangles
+    # — a cost the parse/render/update half of this module (what the TUI loads
+    # on every startup) never needs to pay.
+    from opengrader.core.ocr.scanner import _find_rectangles
+    from opengrader.core.ocr.utils import apply_grayscale
+
     arr = np.array(question_image)
     gray = apply_grayscale(arr)
     page_h, page_w = gray.shape[:2]
@@ -1170,6 +1611,12 @@ def _parse_subquestion_marker_token(token: str) -> str | None:
 def _detect_subquestion_markers_ocr(
     question_image: Image.Image,
 ) -> list[tuple[str, int, int]]:
+    # Import lazily: extraction-time only. opengrader.core.pdf_utils imports
+    # fitz (PyMuPDF, ~110ms cold) at module scope, and pytesseract itself
+    # (deferred inside safe_image_to_data already) would otherwise be dragged
+    # along too — neither belongs on the parse/render/update path.
+    from opengrader.core.pdf_utils import safe_image_to_data
+
     data = safe_image_to_data(question_image, lang="eng", config="--psm 6")
     n = len(data.get("text", []))
 
@@ -1292,6 +1739,12 @@ def _subquestion_boxes_from_markers(
 
 
 def _trim_response_crop(image: Image.Image, *, margin_px: int = 8) -> Image.Image:
+    # Import lazily: extraction-time only. opengrader.core.ocr.extractor
+    # imports both cv2 and fitz at module scope (~230ms combined cold) for its
+    # scan-processing pipeline, none of which the parse/render/update half
+    # needs to trim a response crop.
+    from opengrader.core.ocr.extractor import _trim_question_region
+
     return _trim_question_region(image, margin_px=margin_px)
 
 
@@ -1391,6 +1844,12 @@ def _coerce_split_question_image(
 
 
 def _classify_question_image_path(image_path: Path) -> QuestionType:
+    # Import lazily: extraction-time subquestion classification only.
+    # question_classifier pulls in opengrader.core.pdf_utils (fitz, ~110ms
+    # cold) for its own OCR fallback, which the parse/render/update half never
+    # touches.
+    from opengrader.core.ocr.question_classifier import classify_question_image
+
     try:
         with Image.open(image_path) as source_image:
             image = ImageOps.exif_transpose(source_image).convert("RGB")
@@ -1417,6 +1876,30 @@ def _yaml_field(lines: list[str], key: str, value: str | None) -> None:
     lines.append(f'{key}: "{safe}"')
 
 
+def _yaml_double_quote(value: str) -> str:
+    """Quote a scalar for YAML frontmatter, escaping backslash then quote."""
+    safe = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{safe}"'
+
+
+def _yaml_candidates_field(
+    lines: list[str],
+    key: str,
+    candidates: tuple[IdentityCandidate, ...],
+) -> None:
+    """Render the roster-candidate list, or nothing when there are none.
+
+    Omitting the key entirely for the common (resolved) case keeps existing
+    submission files byte-identical through a round trip.
+    """
+    if not candidates:
+        return
+    lines.append(f"{key}:")
+    for candidate in candidates:
+        lines.append(f"  - id: {_yaml_double_quote(candidate.student_id)}")
+        lines.append(f"    name: {_yaml_double_quote(candidate.name)}")
+
+
 def _render_multiline_text(lines: list[str], text: str, *, indent: int) -> None:
     prefix = " " * indent
     if not text.strip():
@@ -1431,6 +1914,8 @@ def _render_multiline_text(lines: list[str], text: str, *, indent: int) -> None:
 def _format_question_type(question_type: QuestionType) -> str:
     if question_type == MULTIPLE_CHOICE:
         return "Multiple Choice"
+    if question_type == NUMERIC:
+        return "Numeric"
     return "Free Response"
 
 
@@ -1441,10 +1926,25 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
     _yaml_field(lines, "course_code", document.course_code)
     _yaml_field(lines, "assignment_title", document.assignment_title)
     _yaml_field(lines, "assignment_version", document.assignment_version)
+    _yaml_field(lines, "section", document.section)
     _yaml_field(lines, "source_pdf", document.source_pdf)
     _yaml_field(lines, "student_score", document.student_score)
     _yaml_field(lines, "name_image", document.name_image_path)
     _yaml_field(lines, "id_image", document.id_image_path)
+    # Confidence scalars are emitted only when present so files without them
+    # (older extractions, VLM-read fields) round-trip byte-identically.
+    if document.name_confidence is not None:
+        lines.append(f"student_name_confidence: {_format_confidence(document.name_confidence)}")
+    if document.id_confidence is not None:
+        lines.append(f"student_id_confidence: {_format_confidence(document.id_confidence)}")
+    _yaml_candidates_field(lines, "id_candidates", document.id_candidates)
+    # Emitted only when the submission actually has uncovered pages, so files
+    # without extra work round-trip byte-identically (same rule as the
+    # confidence scalars and `id_candidates`). Flow style keeps it one short
+    # line a human can read at a glance.
+    if document.extra_pages:
+        pages = ", ".join(str(page) for page in document.extra_pages)
+        lines.append(f"extra_pages: [{pages}]")
     lines.append("---")
     lines.append("")
     lines.append("")
@@ -1470,6 +1970,14 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
         lines.append(
             f"  - Source segments: {_format_source_segments(question.source_segments)}"
         )
+        # Provenance before its confidence: "read by Tesseract, which scored
+        # itself 42" is the order the two facts are actually read in. Both are
+        # emitted only when present, so a file from before either existed
+        # round-trips byte-identically.
+        if question.response_source:
+            lines.append(f"  - Read by: {question.response_source}")
+        if question.response_confidence is not None:
+            lines.append(f"  - Confidence: {_format_confidence(question.response_confidence)}")
 
         _render_multiline_text(lines, question.response_text, indent=2)
 
@@ -1504,6 +2012,18 @@ def build_student_submission_document(
     save_layout_debug: bool = False,
     progress_callback: Callable[[str], None] | None = None,
 ) -> StudentSubmissionBuildResult:
+    # Import lazily: extraction is a one-shot CLI/setup-screen operation, not
+    # something the TUI does on every startup. opengrader.core.ocr.extractor
+    # pulls cv2 + fitz (~230ms combined cold) and ocr.ollama_vlm pulls its own
+    # HTTP client stack; neither belongs on the module-load path of a file
+    # whose parse/render/update half is imported every time the TUI starts.
+    from opengrader.core.ocr.extractor import process_submission_pdf
+    from opengrader.core.ocr.ollama_vlm import (
+        OllamaVisionConfig,
+        extract_question_prompt_and_answer,
+        extract_title_metadata,
+    )
+
     pdf = Path(pdf_path)
     root_out_dir = Path(output_dir)
     submission_dir = root_out_dir / pdf.stem

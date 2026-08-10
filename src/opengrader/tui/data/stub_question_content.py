@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import fitz
-
 from opengrader.tui.data.models import QuestionSeed, RubricOptionSeed
 
 
@@ -92,6 +90,12 @@ class StubQuestionContent:
 
     @staticmethod
     def _render_pdf_page_to_png(pdf_path: Path, image_path: Path) -> None:
+        # Import lazily: this is a stub/dev data provider that most TUI
+        # sessions never exercise, but the class is still imported on every
+        # startup (via tui.data). Importing fitz (PyMuPDF) at module scope
+        # would pay its cost even when the stub path never runs.
+        import fitz
+
         doc = fitz.open(str(pdf_path))
         try:
             page = doc[0]

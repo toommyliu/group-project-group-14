@@ -1,0 +1,763 @@
+"""Configure the AI once, for every tool that can use it.
+
+Before this screen, "which model, which server, how confident is confident
+enough" was asked separately by Split, Extract, Create-answer-key and
+Auto-grade — four copies of one answer, each easy to leave inconsistent with
+the others, and all of them properties of the *machine* rather than of the run
+being set up. The AI configuration lived where the work lived, which is exactly
+backwards: nobody wants to pick a vision model, they want their handwriting
+read.
+
+So the four disclosures are gone and this is the one place. What it saves is
+written to the user's config directory (``core/ai_config.settings_path``) and
+every CLI resolves its own defaults from that file, so a change here reaches
+``submission-extractor``, ``automated-grading``, ``opengrader-run``, ``doctor``
+and the pipeline card without any of them being told about it — including runs
+started from a plain terminal, which is what makes this a *setting* rather than
+a form field.
+
+That includes *whether* the AI runs at all. The six checkboxes that used to
+live on the setup screen's numbered steps ("Transcribe answers with the AI",
+"Grade written answers with the AI", and the rest) are gone too, replaced by
+the "What the AI does here" group at the top of this form. This screen is
+therefore not only where the AI is configured but where it is switched on and
+off — a distinction worth naming because a teacher who never opens this screen
+should get an AI that stays off, not one running on whatever a per-run
+checkbox happened to default to.
+
+Three rules this screen keeps:
+
+* **Blank means "use the recommended default".** Every model/host field is
+  optional and its placeholder names what blank resolves to. Pre-filling the
+  current default would save a value the user never chose, freezing them onto
+  today's recommendation forever; see the "blank is load-bearing" paragraph in
+  ``core/ai_config``.
+* **Nothing is written until Save.** Testing a connection resolves the *typed*
+  values without touching the file, so a user can try a model name they turn
+  out not to have and close the dialog with their working setup intact.
+* **The test says what to do, not just that it failed.** A failed connection
+  prints the provider's own ``setup_hint`` — the command that fixes it — for
+  the same reason ``core/environment.py`` attaches a fix to every finding.
+
+The provider dropdown is built from ``ai_config.registered_providers()``, so
+the day a cloud provider is registered it appears here with its own defaults,
+its own summary line, and — because ``requires_api_key`` drives the key row —
+its own key instructions, with no edit to this file.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from textual import on
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
+
+from opengrader.core import ai_config
+from opengrader.core.ai_config import AISettings, ResolvedAI
+from opengrader.core.ocr.math_ocr import (
+    DEFAULT_MATH_BACKEND,
+    MATH_BACKEND_NAMES,
+    describe_backend,
+)
+
+# The maths readers, labelled by the job rather than by the package — the
+# instructor is choosing between "prose with working" and "the answer is an
+# equation", not between a transformer and a VLM. Kept in step with the same
+# mapping the extractor's own docs use.
+_MATH_BACKEND_LABELS = {
+    "vlm": "Vision model — answers that mix writing and maths",
+    "pix2tex": "pix2tex — answers that are equations",
+}
+_MATH_BACKEND_CHOICES = [
+    (_MATH_BACKEND_LABELS[name], name) for name in MATH_BACKEND_NAMES
+]
+
+
+class AISettingsScreen(ModalScreen[AISettings | None]):
+    """Pick the provider, the two models, and the confidence gate — once.
+
+    Dismisses with the saved :class:`AISettings` when the user pressed Save, and
+    with ``None`` on cancel. The caller uses that to refresh anything showing a
+    model name; nothing depends on the return value to *apply* the settings,
+    because applying them is the settings file's job.
+    """
+
+    DEFAULT_CSS = """
+    AISettingsScreen {
+        align: center middle;
+    }
+
+    #ai-dialog {
+        width: 84%;
+        max-width: 104;
+        height: 86%;
+        background: $surface;
+        border: round $accent;
+        border-title-align: left;
+        border-title-color: $accent;
+        border-title-style: bold;
+        padding: 1 2;
+    }
+
+    /* The form scrolls rather than sizing to its content: a dialog with
+       height: auto whose disclosure rows expand draws its buttons outside
+       itself, where they look fine and cannot be clicked. */
+    #ai-form {
+        height: 1fr;
+        scrollbar-size: 1 1;
+    }
+
+    #ai-hint, .ai-note {
+        width: 100%;
+        height: auto;
+        color: $text-muted;
+    }
+
+    .ai-label {
+        width: 100%;
+        height: auto;
+        margin-top: 1;
+        color: $text;
+    }
+
+    #ai-provider-summary {
+        width: 100%;
+        height: auto;
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+
+    #ai-key-row {
+        height: auto;
+    }
+
+    AISettingsScreen Checkbox {
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin-top: 1;
+    }
+
+    AISettingsScreen Checkbox:focus {
+        background: $boost;
+    }
+
+    #ai-log {
+        height: 8;
+        margin-top: 1;
+        border: round $surface-lighten-2;
+        border-title-align: left;
+        border-title-color: $text-muted;
+        background: transparent;
+        padding: 0 1;
+    }
+
+    #ai-buttons {
+        height: auto;
+        align-horizontal: right;
+        margin-top: 1;
+    }
+
+    #ai-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "close", "Close")]
+
+    def __init__(self, settings: AISettings | None = None) -> None:
+        super().__init__()
+        # Load here rather than in compose so a caller (and a test) can hand in
+        # settings that were never on disk.
+        self._settings = settings if settings is not None else ai_config.load_settings()
+        # Filled in by a connection test that timed a real generate call; the
+        # "Use suggested limit" button reads this rather than re-deriving it.
+        # ``None`` until a test has run, and reset to ``None`` at the start of
+        # every new test so a stale recommendation can never be applied.
+        self._timeout_recommendation: float | None = None
+
+    # ── Layout ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _label(text: str, detail: str = "") -> Static:
+        """A bold field label with an optional muted detail — the house style."""
+        markup = f"[b]{text}[/b]"
+        if detail:
+            markup = f"{markup}  [dim]{detail}[/dim]"
+        return Static(markup, classes="ai-label")
+
+    @staticmethod
+    def _hidden_unless(shown: bool) -> str:
+        """The ``classes=`` string for a sub-option Vertical at compose time."""
+        return "" if shown else "hidden"
+
+    def compose(self) -> ComposeResult:
+        current = ai_config.resolve(self._settings)
+        provider = current.provider
+
+        with Vertical(id="ai-dialog") as dialog:
+            dialog.border_title = "▸ AI setup"
+            yield Static(
+                "Set up the AI once here and every part of Opengrader uses it — "
+                "reading handwriting during Extract, suggesting grades for "
+                "written answers, the one-shot pipeline, and the same commands "
+                "run from a terminal. The AI is always optional: leave it "
+                "unconfigured and everything still works without it.",
+                id="ai-hint",
+            )
+
+            with VerticalScroll(id="ai-form"):
+                yield self._label("What the AI does here")
+                yield Static(
+                    "These switches are what every tool reads — including "
+                    "submission-extractor, automated-grading and "
+                    "opengrader-run started from a plain terminal — so this "
+                    "is where the AI is turned on, not a per-run question "
+                    "any more.",
+                    classes="ai-note",
+                )
+
+                yield Checkbox(
+                    "Read handwriting on scans",
+                    value=self._settings.read_handwriting,
+                    id="ai-read-handwriting",
+                )
+                yield Static(
+                    "Fills each answer's transcription from the answer "
+                    "image, which is what Extract needs on a scanned exam. "
+                    "It is also the last resort for page-number footers "
+                    "during Split, and for reading a scanned answer key.",
+                    classes="ai-note",
+                )
+                with Vertical(
+                    id="ai-handwriting-options",
+                    classes=self._hidden_unless(self._settings.read_handwriting),
+                ):
+                    yield Checkbox(
+                        "Only re-read what the text recognition read badly",
+                        value=self._settings.escalate_only,
+                        id="ai-escalate-only",
+                    )
+                    yield Static(
+                        "The fast local OCR reads every answer first and a "
+                        "model call is spent only where it read poorly or "
+                        "not at all — much faster on an exam whose answers "
+                        "are mostly short and legible, and it cannot lose "
+                        "an answer, since a model that reads nothing leaves "
+                        "the OCR text standing.",
+                        classes="ai-note",
+                    )
+                    yield Checkbox(
+                        "Transcribe handwritten maths as LaTeX",
+                        value=self._settings.transcribe_math,
+                        id="ai-transcribe-math",
+                    )
+                    yield Static(
+                        "Fractions, exponents and integrals survive instead "
+                        "of being flattened to plain text, and the grade "
+                        "screen renders them. The \"Maths reader\" setting "
+                        "below chooses which model does it.",
+                        classes="ai-note",
+                    )
+
+                yield Checkbox(
+                    "Suggest grades for written answers",
+                    value=self._settings.grade_written,
+                    id="ai-grade-written",
+                )
+                yield Static(
+                    "The model only picks options from your rubric and "
+                    "never invents a score; every suggestion is tagged for "
+                    "you to confirm or change.",
+                    classes="ai-note",
+                )
+                with Vertical(
+                    id="ai-grading-options",
+                    classes=self._hidden_unless(self._settings.grade_written),
+                ):
+                    yield Checkbox(
+                        "Only use suggestions I have measured",
+                        value=self._settings.require_calibration,
+                        id="ai-require-calibration",
+                    )
+                    yield Static(
+                        "With this on, grading refuses to write AI "
+                        "suggestions until you have run \"Calibrate AI "
+                        "grading\" in Helper Tools against work you already "
+                        "marked and accepted its recommendation — so the "
+                        "confidence below is a measurement rather than a "
+                        "guess.",
+                        classes="ai-note",
+                    )
+
+                yield Checkbox(
+                    "Grade what it can as soon as extraction finishes",
+                    value=self._settings.auto_grade,
+                    id="ai-auto-grade",
+                )
+                yield Static(
+                    "The one-shot pipeline scores every answer a rubric "
+                    "can settle on its own the moment extraction is done, "
+                    "leaving only the genuinely uncertain ones for you. "
+                    "Turn it off to stop after extraction. On by default.",
+                    classes="ai-note",
+                )
+
+                yield self._label("Where the AI runs")
+                yield Select(
+                    [(spec.label, spec.name) for spec in ai_config.registered_providers()],
+                    value=provider.name,
+                    allow_blank=False,
+                    id="ai-provider",
+                )
+                yield Static(
+                    self._provider_summary(current),
+                    id="ai-provider-summary",
+                )
+
+                yield self._label(
+                    "Handwriting model",
+                    f"blank = recommended ({provider.default_vision_model})",
+                )
+                yield Input(
+                    value=self._settings.vision_model,
+                    placeholder=provider.default_vision_model,
+                    id="ai-vision-model",
+                )
+                yield Static(
+                    "Reads what a student wrote out of each answer image, so "
+                    "the words end up in the submission alongside the picture. "
+                    "This is the model Extract uses.",
+                    classes="ai-note",
+                )
+
+                yield self._label(
+                    "Grading model",
+                    f"blank = recommended ({provider.default_text_model})",
+                )
+                yield Input(
+                    value=self._settings.text_model,
+                    placeholder=provider.default_text_model,
+                    id="ai-text-model",
+                )
+                yield Static(
+                    "Reads a written answer that has already been transcribed "
+                    "and picks options from your rubric. It never invents a "
+                    "score — the points come from the rubric you wrote — and "
+                    "every suggestion is tagged for you to confirm or change.",
+                    classes="ai-note",
+                )
+
+                yield self._label(
+                    "Server address", f"blank = {provider.default_host}"
+                )
+                yield Input(
+                    value=self._settings.host,
+                    placeholder=provider.default_host,
+                    id="ai-host",
+                )
+
+                yield self._label(
+                    "How long to wait for the AI",
+                    f"blank = {ai_config.DEFAULT_TIMEOUT_SECONDS:g}s",
+                )
+                yield Input(
+                    value=(
+                        ""
+                        if self._settings.timeout_seconds is None
+                        else f"{self._settings.timeout_seconds:g}"
+                    ),
+                    placeholder=(
+                        f"e.g. {ai_config.DEFAULT_TIMEOUT_SECONDS:g} — raise "
+                        "it if extraction on this computer times out"
+                    ),
+                    id="ai-timeout",
+                )
+                yield Static(
+                    "This is how long one request may take before "
+                    "Opengrader gives up on it. The symptom of it being too "
+                    "low is answers coming back empty, not an error. Test "
+                    "connection below can tell you whether it's enough, "
+                    "rather than you having to guess.",
+                    classes="ai-note",
+                )
+
+                # Present only for a provider that needs a key. The row is built
+                # from the spec, so a registered cloud provider gets it for free.
+                with Vertical(id="ai-key-row", classes=self._key_row_classes(provider)):
+                    yield self._label("API key", "read from the environment")
+                    yield Static(
+                        self._key_status(current),
+                        id="ai-key-status",
+                        classes="ai-note",
+                    )
+
+                yield self._label(
+                    "Maths reader", "which model turns handwritten maths into LaTeX"
+                )
+                yield Select(
+                    _MATH_BACKEND_CHOICES,
+                    value=current.math_backend
+                    if current.math_backend in MATH_BACKEND_NAMES
+                    else DEFAULT_MATH_BACKEND,
+                    allow_blank=False,
+                    id="ai-math-backend",
+                )
+                yield Static(
+                    describe_backend(current.math_backend).detail,
+                    id="ai-math-hint",
+                    classes="ai-note",
+                )
+
+                yield self._label(
+                    "Minimum confidence for a grade suggestion",
+                    f"0-1; blank = {ai_config.DEFAULT_MIN_CONFIDENCE:g}",
+                )
+                yield Input(
+                    value=(
+                        ""
+                        if self._settings.min_confidence is None
+                        else f"{self._settings.min_confidence:g}"
+                    ),
+                    placeholder=f"e.g. {ai_config.DEFAULT_MIN_CONFIDENCE:g}",
+                    id="ai-min-confidence",
+                )
+                yield Static(
+                    "Suggestions the model is less sure of than this are left "
+                    "for you to grade by hand. Don't guess it — grade some "
+                    "written answers yourself, then run \"Calibrate AI "
+                    "grading\" in Helper Tools to measure how often this model "
+                    "agrees with you and fill this in from the evidence.",
+                    classes="ai-note",
+                )
+
+                yield Checkbox(
+                    "Start the AI automatically when needed",
+                    value=self._settings.auto_start,
+                    id="ai-auto-start",
+                )
+                yield Static(
+                    "Starts the local AI server and downloads a missing model "
+                    "instead of stopping a run to ask. Turn it off if you would "
+                    "rather start it yourself.",
+                    classes="ai-note",
+                )
+
+            log = RichLog(id="ai-log", wrap=True, auto_scroll=False, markup=False)
+            log.border_title = "Connection test"
+            yield log
+
+            with Horizontal(id="ai-buttons"):
+                yield Button("Test connection", id="ai-test", compact=True)
+                yield Button(
+                    "Use suggested limit",
+                    id="ai-apply-timeout",
+                    compact=True,
+                    classes="hidden",
+                    disabled=True,
+                )
+                yield Button("Save", variant="primary", id="ai-save", compact=True)
+                yield Button("Cancel", id="ai-cancel", compact=True)
+
+    @staticmethod
+    def _key_row_classes(provider: ai_config.ProviderSpec) -> str:
+        return "" if provider.requires_api_key else "hidden"
+
+    @staticmethod
+    def _provider_summary(current: ResolvedAI) -> str:
+        """The provider's own one-liner, plus the privacy fact when it applies.
+
+        ``sends_data_off_machine`` is a property of the provider rather than a
+        sentence in this file, so every surface that names a provider can state
+        the same thing the same way.
+        """
+        summary = current.provider.summary
+        if current.sends_data_off_machine:
+            summary = (
+                f"{summary}  Answers and handwriting are sent to this service."
+            )
+        return f"[dim]{summary}[/dim]"
+
+    @staticmethod
+    def _key_status(current: ResolvedAI) -> str:
+        env = current.provider.api_key_env
+        if not env:
+            return ""
+        if current.api_key:
+            return f"Found in {env}."
+        return (
+            f"Not set. Opengrader never stores a key — put it in the {env} "
+            "environment variable and it is picked up from there."
+        )
+
+    # ── Reading the form ────────────────────────────────────────────────────
+
+    def collect(self) -> AISettings | None:
+        """The typed values as :class:`AISettings`, or ``None`` if invalid.
+
+        Validation lives here rather than in the save handler so the connection
+        test refuses the same input the save would — a test that quietly ran
+        against the old confidence value while the box held nonsense would be
+        worse than no test.
+        """
+        raw_confidence = self.query_one("#ai-min-confidence", Input).value.strip()
+        confidence: float | None = None
+        if raw_confidence:
+            try:
+                confidence = float(raw_confidence)
+            except ValueError:
+                self.app.notify(
+                    "Minimum confidence must be a number between 0 and 1.",
+                    severity="error",
+                )
+                return None
+            if not 0.0 <= confidence <= 1.0:
+                self.app.notify(
+                    "Minimum confidence must be between 0 and 1.", severity="error"
+                )
+                return None
+
+        raw_timeout = self.query_one("#ai-timeout", Input).value.strip()
+        timeout_seconds: float | None = None
+        if raw_timeout:
+            # Reuse the exact rule ai_config applies when loading the file
+            # from disk (must parse as a number > 0), so a value the screen
+            # accepts and one a hand-edited ai.json is checked against can
+            # never disagree.
+            timeout_seconds = ai_config.parse_timeout_seconds(raw_timeout)
+            if timeout_seconds is None:
+                self.app.notify(
+                    "Timeout must be a number of seconds greater than 0.",
+                    severity="error",
+                )
+                return None
+
+        # min_confidence_measured is provenance, not a knob (see AISettings'
+        # docstring): it is only true when the confidence being saved is the
+        # exact value that was already on disk, i.e. nobody retyped it. Any
+        # change — including clearing the box — means a human chose this
+        # number, so the "measured" claim no longer holds and must be dropped.
+        min_confidence_measured = (
+            self._settings.min_confidence_measured
+            if confidence == self._settings.min_confidence
+            else False
+        )
+
+        math_backend = str(self.query_one("#ai-math-backend", Select).value)
+        return AISettings(
+            provider=str(self.query_one("#ai-provider", Select).value),
+            host=self.query_one("#ai-host", Input).value.strip(),
+            vision_model=self.query_one("#ai-vision-model", Input).value.strip(),
+            text_model=self.query_one("#ai-text-model", Input).value.strip(),
+            # Only recorded when it differs from the default, for the same
+            # reason every other field is: an unset value keeps following
+            # Opengrader's recommendation.
+            math_backend="" if math_backend == DEFAULT_MATH_BACKEND else math_backend,
+            timeout_seconds=timeout_seconds,
+            min_confidence=confidence,
+            auto_start=self.query_one("#ai-auto-start", Checkbox).value,
+            read_handwriting=self.query_one("#ai-read-handwriting", Checkbox).value,
+            escalate_only=self.query_one("#ai-escalate-only", Checkbox).value,
+            transcribe_math=self.query_one("#ai-transcribe-math", Checkbox).value,
+            grade_written=self.query_one("#ai-grade-written", Checkbox).value,
+            auto_grade=self.query_one("#ai-auto-grade", Checkbox).value,
+            require_calibration=self.query_one(
+                "#ai-require-calibration", Checkbox
+            ).value,
+            min_confidence_measured=min_confidence_measured,
+        )
+
+    # ── Reacting to the form ────────────────────────────────────────────────
+
+    @on(Checkbox.Changed, "#ai-read-handwriting")
+    def _on_read_handwriting_changed(self, event: Checkbox.Changed) -> None:
+        """The escalation and maths sub-options are choices *about* reading
+        handwriting, and meaningless until reading handwriting is on."""
+        event.stop()
+        self.query_one("#ai-handwriting-options").set_class(
+            not event.value, "hidden"
+        )
+
+    @on(Checkbox.Changed, "#ai-grade-written")
+    def _on_grade_written_changed(self, event: Checkbox.Changed) -> None:
+        """"Require a measured confidence" only means something once grade
+        suggestions are being written at all."""
+        event.stop()
+        self.query_one("#ai-grading-options").set_class(not event.value, "hidden")
+
+    @on(Select.Changed, "#ai-provider")
+    def _on_provider_changed(self, event: Select.Changed) -> None:
+        """Re-point every placeholder and note at the newly chosen provider.
+
+        Placeholders, not values: switching provider must not overwrite a model
+        name the user typed, only change what leaving it blank would mean.
+        """
+        event.stop()
+        provider = ai_config.get_provider(str(event.value))
+        preview = ai_config.resolve(replace(self._settings, provider=provider.name))
+
+        self.query_one("#ai-vision-model", Input).placeholder = (
+            provider.default_vision_model
+        )
+        self.query_one("#ai-text-model", Input).placeholder = provider.default_text_model
+        self.query_one("#ai-host", Input).placeholder = provider.default_host
+        self.query_one("#ai-provider-summary", Static).update(
+            self._provider_summary(preview)
+        )
+        self.query_one("#ai-key-row").set_class(
+            not provider.requires_api_key, "hidden"
+        )
+        self.query_one("#ai-key-status", Static).update(self._key_status(preview))
+
+    @on(Select.Changed, "#ai-math-backend")
+    def _on_math_backend_changed(self, event: Select.Changed) -> None:
+        """Say whether the chosen maths reader is actually installed here.
+
+        Availability belongs in the UI and not only in a later error: offering
+        pix2tex to someone who hasn't installed it, and only saying so after a
+        long extraction fails, is worse than not offering it.
+        """
+        event.stop()
+        self.query_one("#ai-math-hint", Static).update(
+            describe_backend(str(event.value)).detail
+        )
+
+    # ── Buttons ─────────────────────────────────────────────────────────────
+
+    @on(Button.Pressed, "#ai-test")
+    def _on_test(self, event: Button.Pressed) -> None:
+        event.stop()
+        pending = self.collect()
+        if pending is None:
+            return
+        for button in self.query(Button):
+            button.disabled = True
+        log = self.query_one("#ai-log", RichLog)
+        log.clear()
+        log.write("Testing…")
+        # A thread worker: this reaches out to a server over HTTP and must not
+        # block the UI event loop.
+        self.run_worker(
+            lambda: self._test(ai_config.resolve(pending)), thread=True, exclusive=True
+        )
+
+    def _test(self, current: ResolvedAI) -> None:
+        """Ask the configured server which models it has. Never raises."""
+        lines: list[str] = list(current.problems())
+        try:
+            from opengrader.core.llm import list_models
+
+            available = list_models(ai_config.text_config(current))
+        except Exception as exc:  # noqa: BLE001 - any failure is a report, not a crash
+            lines.append(f"Could not reach {current.host}: {exc}")
+            lines.append(current.provider.setup_hint)
+            self.app.call_from_thread(self._show, lines, None)
+            return
+
+        lines.append(f"Connected to {current.host}.")
+        if available:
+            lines.append(f"Models installed: {', '.join(available)}")
+        else:
+            lines.append("No models installed yet.")
+        # Naming a missing model is the whole point of the test: a run that
+        # fails on a typo an hour into extraction is the failure this prevents.
+        for role, name in (
+            ("Handwriting", current.vision_model),
+            ("Grading", current.text_model),
+        ):
+            if available and name not in available:
+                if current.provider.kind == "local":
+                    lines.append(
+                        f"{role} model {name!r} is not installed. "
+                        f"Install it with: ollama pull {name}"
+                    )
+                else:
+                    lines.append(
+                        f"{role} model {name!r} was not offered by this service."
+                    )
+            else:
+                lines.append(f"{role} model: {name} — ready.")
+
+        # Time one small real generate call so the timeout above is measured,
+        # not guessed — the same reason llm-eval exists so nobody guesses
+        # --llm-min-confidence. Skipped when the handwriting model isn't
+        # installed: there is nothing to time and the call would just fail
+        # slowly, duplicating the "not installed" line above.
+        recommendation: float | None = None
+        if available and current.vision_model not in available:
+            lines.append(
+                "Skipping the timing check: the handwriting model isn't "
+                "installed here, so a call to it would just fail slowly."
+            )
+        else:
+            measurement = ai_config.measure_generate_latency(
+                current, role="handwriting"
+            )
+            lines.append(measurement.describe())
+            if measurement.ok:
+                recommendation = ai_config.recommend_timeout(
+                    measurement.seconds, current.timeout_seconds
+                )
+                if recommendation is not None:
+                    lines.append(
+                        "That is most of your limit. A limit of "
+                        f"{recommendation:g} s would leave room for a "
+                        "longer answer."
+                    )
+        self.app.call_from_thread(self._show, lines, recommendation)
+
+    def _show(self, lines: list[str], recommendation: float | None) -> None:
+        if not self.is_attached:
+            return
+        self._timeout_recommendation = recommendation
+        for button in self.query(Button):
+            button.disabled = False
+        # The loop above just re-enabled every button, including the apply
+        # button — undo that when there is nothing to apply, so it neither
+        # un-hides nor stays clickable with no recommendation behind it.
+        apply_button = self.query_one("#ai-apply-timeout", Button)
+        apply_button.set_class(recommendation is None, "hidden")
+        apply_button.disabled = recommendation is None
+        log = self.query_one("#ai-log", RichLog)
+        log.clear()
+        for line in lines:
+            log.write(line)
+
+    @on(Button.Pressed, "#ai-apply-timeout")
+    def _on_apply_timeout(self, event: Button.Pressed) -> None:
+        """Fill the box with the measured recommendation. Nothing is saved
+        here — same rule as everywhere else on this screen: only Save writes."""
+        event.stop()
+        if self._timeout_recommendation is None:
+            return
+        value = f"{self._timeout_recommendation:g}"
+        self.query_one("#ai-timeout", Input).value = value
+        self.app.notify(f"Filled in {value} s — press Save to keep it.")
+
+    @on(Button.Pressed, "#ai-save")
+    def _on_save(self, event: Button.Pressed) -> None:
+        event.stop()
+        pending = self.collect()
+        if pending is None:
+            return
+        try:
+            destination = ai_config.save_settings(pending)
+        except OSError as exc:
+            # Deliberately not swallowed: a save that silently failed would
+            # leave the user believing they had configured something.
+            self.app.notify(f"Could not save AI settings: {exc}", severity="error")
+            return
+        self.app.notify(f"AI settings saved to {destination}.")
+        self.dismiss(pending)
+
+    @on(Button.Pressed, "#ai-cancel")
+    def _on_cancel(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)

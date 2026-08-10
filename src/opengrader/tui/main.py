@@ -1,6 +1,13 @@
 from argparse import ArgumentParser
 import os
 
+from opengrader.tui.terminal_graphics import (
+    ENV_OVERRIDE,
+    PROTOCOL_CHOICES,
+    GraphicsOverrideError,
+    configure_graphics,
+    graphics_report,
+)
 from opengrader.tui.tui import TuiApp
 
 # https://github.com/Textualize/textual/blob/f044be2a115a1f3655b8de9f734d2ba57ab2207e/src/textual/features.py#L10
@@ -25,12 +32,43 @@ def _build_parser() -> ArgumentParser:
         "--submissions",
         help="Path to a .submission.md file or directory containing submission files.",
     )
+    parser.add_argument(
+        "--graphics",
+        choices=PROTOCOL_CHOICES,
+        default="auto",
+        help=(
+            "Terminal image protocol for answer crops. 'auto' detects it; "
+            "force one when detection guesses wrong (also settable via "
+            f"{ENV_OVERRIDE})."
+        ),
+    )
+    parser.add_argument(
+        "--check-graphics",
+        action="store_true",
+        help=(
+            "Print which image protocol this terminal will use (and why), "
+            "then exit. Paste this into a bug report."
+        ),
+    )
     return parser
 
 
 def run_app(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # Settle the graphics protocol before the app starts: probing the terminal
+    # is impossible once Textual owns stdin, and every image widget snapshots
+    # the answer when it is built.
+    try:
+        capability = configure_graphics(args.graphics)
+    except GraphicsOverrideError as exc:
+        parser.error(str(exc))
+        return
+
+    if args.check_graphics:
+        parser.exit(0, graphics_report(capability) + "\n")
+        return
 
     if bool(args.qa_file) != bool(args.submissions):
         parser.error("--qa-file and --submissions must be provided together")

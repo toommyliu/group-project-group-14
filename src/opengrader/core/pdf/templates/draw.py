@@ -1,4 +1,6 @@
-import fitz
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from .constants import (
     BOX_LINE,
@@ -19,6 +21,15 @@ from .constants import (
 )
 from .fonts import ResolvedTemplateFonts, measure_text_width
 
+# fitz (PyMuPDF) is only needed for the type annotations below and for the
+# runtime calls each drawing function imports locally right before using it
+# (see the first such import, in _draw_centered_text, for why it's local
+# rather than up here at module scope). `from __future__ import annotations`
+# above means the `fitz.Page` / `fitz.Document` annotations never need fitz
+# bound at import time, so this stays TYPE_CHECKING-only.
+if TYPE_CHECKING:
+    import fitz
+
 QUESTION_FONTSIZE = 11
 SUBQUESTION_FONTSIZE = 9
 CHOICE_ROW_GAP = 4
@@ -38,6 +49,15 @@ def _draw_centered_text(
     color: ColorType = COLOR_BLACK,
 ) -> None:
     """Draw a single line centered at ``center_x`` using the given baseline."""
+    # Import lazily: fitz (PyMuPDF) is a heavy import (~85ms cold, pulls in
+    # its own mupdf C extension), and this module sits on the TUI startup
+    # chain (it's reached while building the setup/qa-file screens). Every
+    # function below that touches ``fitz.`` at runtime repeats this same
+    # one-line import — after the first call it's just a sys.modules lookup,
+    # so the repetition costs nothing but keeps each function correct on its
+    # own without relying on module-level state.
+    import fitz
+
     width = measure_text_width(text, fontsize, bold=bold, fonts=fonts)
     fontname = fonts.bold_name if bold else fonts.regular_name
     page.insert_text(
@@ -166,6 +186,9 @@ def _draw_choice_rows(
     context: str,
 ) -> None:
     """Draw a vertical list of labeled choices within a fixed answer area."""
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
     if not choices:
         return
 
@@ -269,6 +292,9 @@ def draw_field_box(
     fonts: ResolvedTemplateFonts,
 ) -> None:
     """Draw a name or student-id field with an underline for handwritten input."""
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
     center_x = (x0 + x1) / 2.0
 
     underline_y = y0 + (y1 - y0) * 0.63
@@ -311,6 +337,30 @@ def draw_page_number(
     )
 
 
+QR_SIZE = 60.0  # points (~0.83 in) — big enough for a phone/scan camera to read.
+
+
+def draw_qr_on_page(
+    page: fitz.Page,
+    png_bytes: bytes,
+    page_w: float,
+) -> None:
+    """Stamp a QR-code image in the page's top-right corner.
+
+    Sits above and right of the centered title block (which starts near y=116),
+    so it never collides with title, fields, or questions. Reusable for both the
+    first page and continuation pages.
+    """
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
+    x1 = page_w - PAGE_EDGE_MARGIN
+    x0 = x1 - QR_SIZE
+    y0 = float(PAGE_EDGE_MARGIN)
+    y1 = y0 + QR_SIZE
+    page.insert_image(fitz.Rect(x0, y0, x1, y1), stream=png_bytes)
+
+
 def draw_continued_page_header(
     page: fitz.Page,
     page_w: float,
@@ -328,6 +378,9 @@ def draw_continued_page_header(
     Returns:
         The y-coordinate where question content should begin.
     """
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
     content_x0 = CONTENT_SIDE_MARGIN
     content_x1 = page_w - CONTENT_SIDE_MARGIN
     text = header_text.strip() or "Quiz"
@@ -453,6 +506,39 @@ def _subquestion_answer_rect(
     return (x0 + 10, answer_top, x1 - 10, answer_bottom)
 
 
+def _draw_answer_hint(
+    page: fitz.Page,
+    answer_rect: tuple[float, float, float, float],
+    hint: str,
+    fonts: ResolvedTemplateFonts,
+) -> None:
+    """Draw a small muted hint (e.g. expected units) in a numeric answer box."""
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
+    text = hint.strip()
+    if not text:
+        return
+    ax0, ay0, ax1, _ay1 = answer_rect
+    fontsize = 9.0
+    trimmed = _truncate_text_to_width(
+        text,
+        max_width=max(20.0, ax1 - ax0 - 4),
+        fontsize=fontsize,
+        bold=False,
+        fonts=fonts,
+    )
+    if not trimmed:
+        return
+    page.insert_text(
+        fitz.Point(ax0, ay0 + fontsize),
+        trimmed,
+        fontsize=fontsize,
+        fontname=fonts.regular_name,
+        color=COLOR_FIELD_LABEL,
+    )
+
+
 def draw_question_box(
     page: fitz.Page,
     x0: float,
@@ -465,6 +551,7 @@ def draw_question_box(
     fonts: ResolvedTemplateFonts,
     choices: list[dict] | None = None,
     subquestions: list[dict] | None = None,
+    answer_hint: str = "",
 ) -> list[dict]:
     """Draw one question and return layout metadata for downstream extraction.
 
@@ -484,6 +571,9 @@ def draw_question_box(
     Returns:
         Metadata for drawn subquestions, including prompt and answer regions.
     """
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
     # Question Prompt
 
     header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
@@ -535,6 +625,10 @@ def draw_question_box(
                 color=COLOR_QUESTION_TEXT,
                 context=f"Question {qid!r}",
             )
+        elif answer_hint:
+            answer_rect = _question_answer_rect(x0, y0, x1, y1)
+            if answer_rect is not None:
+                _draw_answer_hint(page, answer_rect, answer_hint, fonts)
         return []
 
     # Subquestion layout
@@ -677,6 +771,9 @@ def build_info_section(
         A tuple of ``(start_y, regions)`` where ``start_y`` is the first y-position
         available for questions and ``regions`` contains key bounding boxes.
     """
+    # Import lazily: see _draw_centered_text above — same reason.
+    import fitz
+
     # Content bounds
 
     content_x0 = CONTENT_SIDE_MARGIN
@@ -972,6 +1069,7 @@ def draw_questions_on_page(
             fonts,
             choices=choices,
             subquestions=subquestions,
+            answer_hint=question.get("answer_hint", ""),
         )
 
         question_meta = {

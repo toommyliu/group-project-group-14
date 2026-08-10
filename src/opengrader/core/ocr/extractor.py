@@ -6,8 +6,6 @@ from pathlib import Path
 from statistics import median
 from typing import Literal
 
-import cv2
-import fitz
 import numpy as np
 from PIL import Image
 
@@ -326,6 +324,14 @@ def _trim_question_region_once_with_bbox(
     removed before computing the content bounds. The original region is returned
     when the trim looks unsafe.
     """
+
+    # Import lazily: cv2 (OpenCV) is a heavy import (~30-40ms cold, its own
+    # native extension) and this module is reached through the TUI startup
+    # chain (setup screen -> submission extractor -> here), even though
+    # trimming only runs during actual OCR extraction. Repeated below in
+    # _detect_header_underlines, the other function in this module that
+    # needs cv2 — after the first call it's just a sys.modules lookup.
+    import cv2
 
     gray = np.array(region.convert("L"))
     if gray.size == 0:
@@ -1207,6 +1213,10 @@ def _detect_header_underlines(
 ) -> list[tuple[int, int, int, int]]:
     """Detect horizontal header underlines that can represent metadata blanks."""
 
+    # Import lazily: see _trim_question_region_once_with_bbox above — same
+    # reason.
+    import cv2
+
     gray = np.array(page_image.convert("L"))
     page_h, page_w = gray.shape[:2]
     if page_h <= 0 or page_w <= 0:
@@ -1653,6 +1663,12 @@ def process_submission_pdf(
         A submission result containing artifact paths, detected question types,
         and any review reasons raised during layout or extraction.
     """
+
+    # Import lazily: fitz (PyMuPDF) is a heavy import (~85ms cold) and this
+    # module is reached through the TUI startup chain (setup screen ->
+    # submission extractor -> here), even though a submission PDF is only
+    # opened once real extraction runs.
+    import fitz
 
     path = Path(pdf_path)
     result = SubmissionResult(filename=path.name)

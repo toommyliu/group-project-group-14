@@ -1,7 +1,8 @@
 import asyncio
 from pathlib import Path
 
-from textual.widgets import Input
+from textual.pilot import Pilot
+from textual.widgets import Collapsible, Input
 
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens import PathPickerScreen
@@ -14,6 +15,17 @@ def _setup_app() -> TuiApp:
     return TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
 
 
+async def _expand_splitter_section(app: TuiApp, pilot: Pilot) -> None:
+    # The splitter form lives in a pipeline step that is collapsed by
+    # default; its widgets must be visible before they can be clicked.
+    # Wait out the expand/scroll animations so clicks land where the
+    # final layout puts the widgets.
+    app.query_one("#section-splitter", Collapsible).collapsed = False
+    await pilot.pause()
+    await pilot.wait_for_scheduled_animations()
+    await pilot.pause()
+
+
 def test_browse_button_opens_picker_and_file_click_fills_input(tmp_path: Path) -> None:
     sample_pdf = tmp_path / "scan.pdf"
     sample_pdf.write_bytes(b"%PDF-1.4")
@@ -22,6 +34,7 @@ def test_browse_button_opens_picker_and_file_click_fills_input(tmp_path: Path) -
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            await _expand_splitter_section(app, pilot)
 
             # Seed the input so the picker opens rooted at tmp_path.
             split_input = app.query_one("#split-input", Input)
@@ -47,6 +60,7 @@ def test_picker_escape_cancels_without_touching_input(tmp_path: Path) -> None:
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            await _expand_splitter_section(app, pilot)
 
             split_input = app.query_one("#split-input", Input)
             split_input.value = str(tmp_path)
@@ -71,6 +85,7 @@ def test_directory_mode_select_button_confirms_highlighted_directory(
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            await _expand_splitter_section(app, pilot)
 
             output_input = app.query_one("#split-output", Input)
             output_input.value = str(tmp_path)
@@ -94,6 +109,7 @@ def test_file_mode_select_button_rejects_directory(tmp_path: Path) -> None:
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
+            await _expand_splitter_section(app, pilot)
 
             split_input = app.query_one("#split-input", Input)
             split_input.value = str(tmp_path)

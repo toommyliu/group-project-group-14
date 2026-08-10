@@ -227,6 +227,66 @@ def _has_strong_choice_sequence(
     return False
 
 
+_TRUE_FALSE_WORD_RE = re.compile(r"^(true|false)$")
+
+
+def _normalize_word_token(token: str) -> str | None:
+    """Return a lowercased True/False word token, ignoring choice punctuation."""
+    cleaned = re.sub(r"[^A-Za-z]", "", token).lower()
+    match = _TRUE_FALSE_WORD_RE.fullmatch(cleaned)
+    return match.group(1) if match is not None else None
+
+
+def _has_true_false_pair(
+    image: Image.Image,
+    *,
+    lang: str,
+    config: str,
+) -> bool:
+    """Whether the crop shows a stacked ``True`` / ``False`` option pair.
+
+    A True/False question is a constrained multiple choice, but when it is
+    rendered without letter labels (just the two words) the choice-label
+    detector misses it. This conservative fallback requires *both* words, in the
+    left answer region, with ``True`` stacked above ``False`` and roughly
+    left-aligned — the layout of a two-option question — so a free-response
+    answer that merely mentions "true" or "false" is not misclassified.
+    """
+    if image.width <= 0 or image.height <= 0:
+        return False
+
+    data = safe_image_to_data(image, lang=lang, config=config)
+    texts = data.get("text", [])
+    positions: dict[str, tuple[int, int]] = {}
+    for i in range(len(texts)):
+        word = _normalize_word_token(str(texts[i]).strip())
+        if word is None or word in positions or _token_confidence(data, i) <= 0:
+            continue
+        if not _is_choice_label_candidate(
+            data=data,
+            index=i,
+            image_width=image.width,
+            image_height=image.height,
+        ):
+            continue
+        try:
+            top = int(data.get("top", [])[i])
+            left = int(data.get("left", [])[i])
+        except (TypeError, ValueError, IndexError):
+            continue
+        positions[word] = (top, left)
+
+    if "true" not in positions or "false" not in positions:
+        return False
+
+    true_top, true_left = positions["true"]
+    false_top, false_left = positions["false"]
+    column_tolerance = max(
+        18, int(round(image.width * CHOICE_LABEL_COLUMN_TOLERANCE_NORM))
+    )
+    return false_top > true_top and abs(false_left - true_left) <= column_tolerance
+
+
 def classify_question_image(
     image: Image.Image,
     *,
@@ -235,11 +295,12 @@ def classify_question_image(
 ) -> QuestionType:
     """Classify a question crop conservatively from visible answer-choice labels."""
     candidates = _iter_choice_label_candidates(image, lang=lang, config=config)
-    if not candidates:
-        return FREE_RESPONSE
-
-    if _has_strong_choice_sequence(
+    if candidates and _has_strong_choice_sequence(
         candidates, image_width=image.width, image_height=image.height
     ):
         return MULTIPLE_CHOICE
+
+    if _has_true_false_pair(image, lang=lang, config=config):
+        return MULTIPLE_CHOICE
+
     return FREE_RESPONSE

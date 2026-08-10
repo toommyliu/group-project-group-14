@@ -10,13 +10,15 @@ from textual.widgets import (
     Label,
     ListView,
     Static,
+    TextArea,
 )
 
 from opengrader.tui.controllers.input_controller import InputCommand
 from opengrader.tui.data import RubricEditResult, RubricOptionSeed, StudentSummary
 from opengrader.tui.data.stub_data_provider import StubDataProvider
-from opengrader.tui.state import PAGE_GRADE
+from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER
 from opengrader.tui.tui import TuiApp
+from opengrader.tui.ui.screens import HelpScreen
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 from opengrader.tui.ui.widgets.status_bar import StatusBar
 from opengrader.tui.ui.widgets.tabbed_list_pane import TabbedListPane
@@ -217,14 +219,21 @@ def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
             status_text = _status_bar_text(app)
             assert "j/down Next QA" in status_text
             assert "/ Filter" in status_text
+            assert "? Help" in status_text
             assert "^\\ palette" not in status_text
+            # The QA picker is the root screen: no Back offered there.
+            assert "esc Back" not in status_text
 
             await pilot.press("enter")
             await pilot.pause()
 
             grade_status_text = _status_bar_text(app)
-            assert "ctrl+k/right Next Student" in grade_status_text
-            assert "c Comment" in grade_status_text
+            assert "ctrl+j/right Next Student" in grade_status_text
+            assert "esc Back" in grade_status_text
+            # Commands documented on the grade screen's Hotkeys card stay
+            # out of the status bar to keep it readable.
+            assert "c Comment" not in grade_status_text
+            assert "Zoom" not in grade_status_text
 
     asyncio.run(run())
 
@@ -561,6 +570,200 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
             assert str(context.content).startswith("Score: ")
             assert "Question" not in str(context.content)
             assert current.prompt in str(context.content)
+
+    asyncio.run(run())
+
+
+def test_comment_library_inserts_snippet_into_comment_box(tmp_path) -> None:
+    import shutil
+
+    from opengrader.core.comments import (
+        CommentLibrary,
+        read_comments,
+        write_comments,
+    )
+    from opengrader.tui.ui.screens import CommentLibraryScreen
+
+    submissions = tmp_path / "student-submissions"
+    shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
+    # Pre-seed a saved snippet so the insert path has something to pick.
+    write_comments(submissions, CommentLibrary().with_snippet("See Lecture 5"))
+
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(submissions),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")  # into the grade screen
+            await pilot.pause()
+
+            await pilot.press("l")  # open the comment library
+            await pilot.pause()
+            assert isinstance(app.screen, CommentLibraryScreen)
+
+            await pilot.press("1")  # insert the first snippet, closing the modal
+            await pilot.pause()
+
+            comment = app.get_grade_screen().query_one("#question-comment", Input)
+            assert "See Lecture 5" in comment.value
+
+            # Inserting bumped the global use count and recorded it against the
+            # current question (q1), and persisted both to the folder.
+            reloaded = read_comments(submissions)
+            assert reloaded.snippets[0].text == "See Lecture 5"
+            assert reloaded.snippets[0].uses == 1
+            assert reloaded.snippets[0].uses_on("q1") == 1
+
+    asyncio.run(run())
+
+
+def test_transcription_editor_opens_with_x_and_saves_correction(tmp_path) -> None:
+    import shutil
+
+    from opengrader.core.submissions import load_student_submission_markdown
+
+    submissions = tmp_path / "student-submissions"
+    shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
+
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(submissions),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")  # into the grade screen
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            editor = grade_screen.query_one("#transcription-editor")
+            assert not editor.has_class("editing")
+
+            # The `x` hotkey opens the inline editor (check_action lets it
+            # through since no Input/TextArea holds focus yet).
+            await pilot.press("x")
+            await pilot.pause()
+            assert editor.has_class("editing")
+
+            # Replace the text and save through the button.
+            text_area = grade_screen.query_one("#transcription-text", TextArea)
+            text_area.text = "corrected reading via TUI"
+            await pilot.click("#transcription-save")
+            await pilot.pause()
+
+            assert not editor.has_class("editing")
+
+            first = load_student_submission_markdown(
+                submissions / "submission-0001" / "submission-0001.submission.md"
+            )
+            q1 = next(q for q in first.questions if q.question_id == "q1")
+            assert q1.response_text == "corrected reading via TUI"
+            assert q1.response_confidence == 100.0
+
+    asyncio.run(run())
+
+
+def test_comment_library_scope_toggle_reorders_by_question(tmp_path) -> None:
+    import shutil
+
+    from opengrader.core.comments import CommentLibrary, write_comments
+    from opengrader.tui.ui.screens import CommentLibraryScreen
+    from opengrader.tui.ui.screens.comment_library_screen import (
+        SCOPE_GLOBAL,
+        SCOPE_QUESTION,
+        _SnippetItem,
+    )
+
+    submissions = tmp_path / "student-submissions"
+    shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
+    # "global favorite" leads globally; "loop note" leads only on q1.
+    library = (
+        CommentLibrary()
+        .with_snippet("global favorite")
+        .with_snippet("loop note")
+        .record_use("global favorite", "q2")
+        .record_use("global favorite", "q3")
+        .record_use("loop note", "q1")
+    )
+    write_comments(submissions, library)
+
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(submissions),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")  # grade screen, on q1
+            await pilot.pause()
+            await pilot.press("l")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, CommentLibraryScreen)
+
+            def top_row_text() -> str:
+                items = list(screen.query(_SnippetItem))
+                return items[0].snippet.text
+
+            # Default is the stable global order.
+            assert screen._scope == SCOPE_GLOBAL
+            assert top_row_text() == "global favorite"
+
+            # Toggling to per-question surfaces the q1-specific phrase first.
+            await pilot.press("g")
+            await pilot.pause()
+            assert screen._scope == SCOPE_QUESTION
+            assert top_row_text() == "loop note"
+
+            # The choice is remembered on the app for the session.
+            assert app._comment_library_scope == SCOPE_QUESTION
+
+    asyncio.run(run())
+
+
+def test_comment_library_saves_a_new_snippet_from_the_modal(tmp_path) -> None:
+    import shutil
+
+    from opengrader.core.comments import read_comments
+    from opengrader.tui.ui.screens import CommentLibraryScreen
+
+    submissions = tmp_path / "student-submissions"
+    shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
+
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(submissions),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("l")
+            await pilot.pause()
+            assert isinstance(app.screen, CommentLibraryScreen)
+
+            new_input = app.screen.query_one("#comment-library-new", Input)
+            new_input.focus()
+            new_input.value = "Off-by-one in loop bound"
+            await pilot.pause()
+            await pilot.press("enter")  # save the new snippet, modal stays open
+            await pilot.pause()
+
+            assert isinstance(app.screen, CommentLibraryScreen)  # still open
+            assert [s.text for s in read_comments(submissions).snippets] == [
+                "Off-by-one in loop bound"
+            ]
 
     asyncio.run(run())
 
@@ -1003,6 +1206,52 @@ def test_rubric_editor_ctrl_s_saves() -> None:
             assert provider.saved_options[1] == _seed("Partially Correct", -4.0)
             assert grade_screen.query_one("#rubric-list", ListView).display is True
             assert grade_screen.query_one("#rubric-editor-panel").display is False
+
+    asyncio.run(run())
+
+
+def test_rubric_editor_authors_default_comment() -> None:
+    async def run() -> None:
+        provider = RubricEditingFakeDataProvider()
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=provider,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("e")
+            await pilot.pause()
+
+            grade_screen = app.get_grade_screen()
+            # Type a default comment into the Correct row's comment field.
+            correct_container = grade_screen.query_one("#rubric-editor-correct")
+            comment_input = next(
+                widget
+                for widget in correct_container.query(".rubric-edit-comment")
+                if isinstance(widget, Input)
+            )
+            comment_input.value = "Well reasoned throughout."
+
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+
+            assert provider.saved_options is not None
+            correct = next(
+                option
+                for option in provider.saved_options
+                if option.label == "Correct"
+            )
+            assert correct.default_comment == "Well reasoned throughout."
+            # Untouched rows carry no comment.
+            incorrect = next(
+                option
+                for option in provider.saved_options
+                if option.label == "Incorrect"
+            )
+            assert incorrect.default_comment is None
 
     asyncio.run(run())
 
@@ -1887,7 +2136,9 @@ def test_qa_picker_student_search_is_independent_and_handles_no_matches() -> Non
     asyncio.run(run())
 
 
-def test_escape_on_qa_picker_shows_status_message() -> None:
+def test_escape_on_qa_picker_is_not_a_back_action() -> None:
+    """The QA picker is the root screen: esc offers no Back there."""
+
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -1896,11 +2147,58 @@ def test_escape_on_qa_picker_shows_status_message() -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
+            assert not app.input_controller.command_available(InputCommand.APP_BACK)
+
             await pilot.press("escape")
             await pilot.pause()
 
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
             status = app.get_qa_picker_screen().query_one("#qa-status", Static)
-            assert "Already viewing the grading queue." in str(status.content)
+            assert "Already viewing" not in str(status.content)
+
+    asyncio.run(run())
+
+
+def test_question_mark_opens_and_closes_help() -> None:
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("question_mark")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, HelpScreen)
+
+    asyncio.run(run())
+
+
+def test_setup_page_scopes_out_qa_picker_hotkeys() -> None:
+    """The start-up page offers only global commands plus its own Templates
+    hotkey — never the QA picker / grading ones."""
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(app.data_provider, StubDataProvider)
+
+            visible = {
+                binding.command
+                for binding in app.input_controller.visible_bindings()
+            }
+            assert visible == {
+                InputCommand.APP_QUIT,
+                InputCommand.APP_HELP,
+                InputCommand.OPEN_FORMAT_GUIDE,
+            }
 
     asyncio.run(run())
 
@@ -2068,3 +2366,329 @@ def test_shifted_digit_types_into_comment_without_finalizing() -> None:
             assert "graded" not in app.workflow_state.student_status.values()
 
     asyncio.run(run())
+
+
+def _copy_quiz_fixture(tmp_path):
+    import shutil
+    from pathlib import Path
+
+    subs = tmp_path / "student-submissions"
+    shutil.copytree(
+        Path("samples/cs146-quiz1/student-submissions"), subs
+    )
+    return subs
+
+
+def test_review_hotkey_opens_modal_and_row_jumps_to_grade(tmp_path) -> None:
+    from opengrader.tui.ui.screens import ReviewQueueScreen
+
+    async def run() -> None:
+        subs = _copy_quiz_fixture(tmp_path)
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(subs),
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Shift+R on the QA picker opens the needs-review modal.
+            await pilot.press("R")
+            await pilot.pause()
+            assert isinstance(app.screen, ReviewQueueScreen)
+
+            # Selecting the top row dismisses the modal and jumps to that grade.
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, ReviewQueueScreen)
+            assert app.workflow_state.current_page == PAGE_GRADE
+            assert app.workflow_state.selection.student_item_id in {"s1", "s2"}
+
+    asyncio.run(run())
+
+
+def test_history_hotkey_opens_modal_after_a_graded_change(tmp_path) -> None:
+    from opengrader.tui.ui.screens import GradeHistoryScreen
+    from textual.widgets import ListView
+
+    async def run() -> None:
+        subs = _copy_quiz_fixture(tmp_path)
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(subs),
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")  # grade screen
+            await pilot.press("1")      # persist a grade -> journal entry
+            await pilot.pause()
+
+            # History is teacher-mode only: it must not open while anonymous.
+            await pilot.press("H")
+            await pilot.pause()
+            assert not isinstance(app.screen, GradeHistoryScreen)
+
+            await pilot.press("t")  # enter teacher mode
+            await pilot.press("H")
+            await pilot.pause()
+            assert isinstance(app.screen, GradeHistoryScreen)
+            rows = app.screen.query_one("#history-list", ListView)
+            assert len(rows.children) >= 1
+
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, GradeHistoryScreen)
+
+    asyncio.run(run())
+
+
+def test_pressing_o_opens_the_current_crop_in_an_external_viewer() -> None:
+    """The escape hatch out of the terminal: works on any terminal, and
+    reports back in the grade screen's status line."""
+    import opengrader.tui.ui.widgets.response_viewer as viewer_module
+
+    async def run() -> None:
+        opened: list[str] = []
+        original = viewer_module.open_in_external_viewer
+        viewer_module.open_in_external_viewer = lambda path: (
+            opened.append(str(path)) or "crop.png"
+        )
+        try:
+            app = TuiApp(
+                default_image_path=DEFAULT_IMAGE_PATH,
+                data_provider=FakeDataProvider(),
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                assert app.workflow_state.current_page == PAGE_GRADE
+
+                await pilot.press("o")
+                await pilot.pause()
+
+                status = app.get_grade_screen().query_one("#db-status", Static)
+                assert "crop.png" in str(status.render())
+        finally:
+            viewer_module.open_in_external_viewer = original
+
+        assert opened == [DEFAULT_IMAGE_PATH]
+
+    asyncio.run(run())
+
+
+def test_external_viewer_failure_is_reported_not_raised() -> None:
+    """A missing viewer must not take the grading session down with it."""
+    import opengrader.tui.ui.widgets.response_viewer as viewer_module
+    from opengrader.tui.external_viewer import ExternalViewerError
+
+    async def run() -> None:
+        def explode(path):  # noqa: ANN001, ANN202
+            raise ExternalViewerError("could not launch 'xdg-open'")
+
+        original = viewer_module.open_in_external_viewer
+        viewer_module.open_in_external_viewer = explode
+        try:
+            app = TuiApp(
+                default_image_path=DEFAULT_IMAGE_PATH,
+                data_provider=FakeDataProvider(),
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+
+                await pilot.press("o")
+                await pilot.pause()
+
+                status = app.get_grade_screen().query_one("#db-status", Static)
+                assert "xdg-open" in str(status.render())
+        finally:
+            viewer_module.open_in_external_viewer = original
+
+    asyncio.run(run())
+
+
+def test_open_in_viewer_is_not_dispatched_while_typing_a_comment() -> None:
+    """'o' is a printable character; it must reach the comment box, not the
+    external viewer, whenever an Input holds focus."""
+    async def run() -> None:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            data_provider=FakeDataProvider(),
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            app.get_grade_screen().query_one("#question-comment", Input).focus()
+            await pilot.pause()
+
+            assert not app.check_action(
+                "dispatch_input", (InputCommand.GRADE_OPEN_EXTERNAL.value,)
+            )
+
+    asyncio.run(run())
+
+
+# --------------------------------------------------------------------------- #
+# Grade while extracting — the app-level wiring of the fold-in loop
+# --------------------------------------------------------------------------- #
+
+
+def _student_count(app) -> int:  # noqa: ANN001
+    """How many students the open session can actually reach.
+
+    Asked through the provider's own listing rather than a private attribute,
+    so it counts what a grader would see in the student pane. A file-backed
+    folder is one assignment, which the provider presents as course 1.
+    """
+    return len(app.data_provider.list_students(course_id=1))
+
+
+def _partially_extracted_folder(tmp_path):  # noqa: ANN001
+    """A submissions folder with one student finished and one still to come.
+
+    Returns ``(folder, arrive)`` where calling ``arrive()`` completes the second
+    submission the way the extractor does: files first, manifest record last —
+    the ordering the whole fold-in design rests on.
+    """
+    import shutil
+    from pathlib import Path
+
+    from opengrader.core.submissions.manifest import ExtractionRecord, append_record
+
+    source = Path("samples/cs146-quiz1/student-submissions")
+    folder = tmp_path / "student-submissions"
+    folder.mkdir()
+    shutil.copytree(source / "submission-0001", folder / "submission-0001")
+    append_record(
+        folder,
+        ExtractionRecord(
+            key="submission-0001",
+            source="/scans/submission-0001.pdf",
+            source_sha256="aaa",
+            settings_id="sss",
+            outputs=("submission-0001/submission-0001.submission.md",),
+        ),
+    )
+
+    def arrive() -> None:
+        shutil.copytree(source / "submission-0002", folder / "submission-0002")
+        append_record(
+            folder,
+            ExtractionRecord(
+                key="submission-0002",
+                source="/scans/submission-0002.pdf",
+                source_sha256="bbb",
+                settings_id="sss",
+                outputs=("submission-0002/submission-0002.submission.md",),
+            ),
+        )
+
+    return folder, arrive
+
+
+def test_a_submission_that_finishes_later_folds_into_an_open_session(tmp_path) -> None:  # noqa: ANN001
+    """The feature end to end: open on a half-extracted folder, and the student
+    who finishes while you are grading appears without a restart."""
+
+    async def run() -> tuple[int, int]:
+        folder, arrive = _partially_extracted_folder(tmp_path)
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(folder),
+        )
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            before = _student_count(app)
+
+            arrive()
+            app._poll_extraction()
+            await pilot.pause()
+
+            return before, _student_count(app)
+
+    before, after = asyncio.run(run())
+    assert before == 1
+    assert after == 2
+
+
+def test_the_fold_in_watch_starts_on_a_folder_opened_directly(tmp_path) -> None:  # noqa: ANN001
+    """A CLI launch (or a restarted app reopening where it left off) may land on
+    a folder someone else is still extracting into, so the watch is not
+    something only the setup screen's button can turn on."""
+
+    async def run() -> bool:
+        folder, _arrive = _partially_extracted_folder(tmp_path)
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(folder),
+        )
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            return app._extraction_watcher is not None
+
+    assert asyncio.run(run()) is True
+
+
+def test_grade_while_extracting_opens_the_workspace_with_certainty(tmp_path) -> None:  # noqa: ANN001
+    """The setup screen's own run is the one case with a definite answer to "is
+    extraction still going?", and it must be threaded through rather than
+    re-guessed from the manifest's mtime."""
+    from opengrader.tui.ui.screens.setup_screen import SetupScreen
+
+    async def run() -> tuple[bool, bool, int]:
+        folder, _arrive = _partially_extracted_folder(tmp_path)
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            app.post_message(
+                SetupScreen.GradeWhileExtractingRequested(
+                    "samples/qa-multi.md", str(folder)
+                )
+            )
+            await pilot.pause()
+            await pilot.pause()
+
+            watching = app._extraction_watcher is not None
+            # The probe is a callable read fresh on every poll, not a bool
+            # captured at launch — the worker can finish at any moment.
+            probe = app._extraction_known_active
+            return watching, callable(probe), _student_count(app)
+
+    watching, probe_is_callable, students = asyncio.run(run())
+    assert watching is True
+    assert probe_is_callable is True
+    assert students == 1
+
+
+def test_the_watch_stops_once_the_extractor_worker_reports_done(tmp_path) -> None:  # noqa: ANN001
+    """Certainty is the one signal allowed to end the loop promptly — and the
+    poll that sees it still folds in whatever landed first, so the last
+    submission of a run is never lost to the stop."""
+
+    async def run() -> tuple[int, bool]:
+        folder, arrive = _partially_extracted_folder(tmp_path)
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/qa-multi.md",
+            submissions_path=str(folder),
+        )
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            app._extraction_known_active = lambda: False
+
+            arrive()
+            app._poll_extraction()
+            await pilot.pause()
+
+            return _student_count(app), (
+                app._extraction_watcher is None
+            )
+
+    students, stopped = asyncio.run(run())
+    assert students == 2
+    assert stopped is True

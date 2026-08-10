@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 
 from textual import events, on
 from textual.app import ComposeResult
@@ -14,13 +16,23 @@ from textual.widgets import (
     Label,
     ListItem,
     ListView,
-    Rule,
     Static,
+    TextArea,
 )
 
+from opengrader.core.qa_file.numeric import format_numeric_spec, parse_numeric_answer
 from opengrader.core.qa_file.scoring import rubric_scoring_mode
+from opengrader.core.question_types import NUMERIC
 from opengrader.tui.data import RubricOptionSeed
-from opengrader.tui.formatting import format_question_label
+from opengrader.tui.external_viewer import ExternalViewerError
+from opengrader.tui.formatting import (
+    format_confidence_chip,
+    format_hotkey_reference,
+    format_page_context_label,
+    format_question_label,
+)
+from opengrader.tui.latex_render import render_response_latex_png, response_has_latex
+from opengrader.tui.page_render import PageRenderOutcome, render_page_context_png
 from opengrader.tui.state import QuestionGrade, StudentGradingRun
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
@@ -29,6 +41,12 @@ from opengrader.tui.ui.widgets.shortcut_input import ShortcutInput
 
 RubricEditorResult = list[RubricOptionSeed] | None
 RubricEditorCallback = Callable[[RubricEditorResult], None]
+
+
+def _format_numeric_expected(answer: str) -> str:
+    """Render a numeric answer key legibly ("42 ±0.5units:mL" -> "42 ± 0.5 mL")."""
+    spec = parse_numeric_answer(answer)
+    return format_numeric_spec(spec) if spec is not None else answer
 
 
 class _RubricListItem(ListItem):
@@ -61,7 +79,7 @@ class _RubricListItem(ListItem):
         self.set_class(selected, "rubric-selected")
 
 
-class _RubricEditRow(Horizontal):
+class _RubricEditRow(Vertical):
     def __init__(
         self,
         row_index: int,
@@ -96,14 +114,33 @@ class _RubricEditRow(Horizontal):
             classes="rubric-edit-delete",
             compact=True,
         )
-        super().__init__(
+        # Second line: the option's default comment, auto-inserted into the
+        # grade comment box when a grader picks this option. Editable for every
+        # row kind (Correct/Incorrect included), even where the label is fixed.
+        self.comment_input = ShortcutInput(
+            value=option.default_comment or "",
+            placeholder="Auto-comment when picked (optional)…",
+            classes="rubric-edit-comment",
+            compact=True,
+        )
+        controls = Horizontal(
             self.index_label,
             self.label_input,
             self.delta_input,
             self.delete_button,
+            classes="rubric-edit-controls",
+        )
+        super().__init__(
+            controls,
+            self.comment_input,
             classes="rubric-edit-row",
         )
         self._apply_required_state()
+
+    @property
+    def comment_value(self) -> str | None:
+        """The row's default-comment text, or ``None`` when blank."""
+        return self.comment_input.value.strip() or None
 
     def _apply_required_state(self) -> None:
         """Disable editing controls for schema-owned rubric rows."""
@@ -139,6 +176,7 @@ class _RubricEditRow(Horizontal):
             points_delta=float(self.delta_input.value.strip()),
             kind=kind,
             selection_mode=selection_mode,
+            default_comment=self.comment_value,
         )
 
 
@@ -233,31 +271,114 @@ class GradeScreen(Vertical):
         layout: vertical;
     }
 
+    /* ── Sidebar cards ───────────────────────────────────────── */
+    /* Same card language as the QA picker panes: round muted border
+       with a left border title, accent when focus is inside. */
+    .sidebar-quadrant {
+        width: 100%;
+        height: auto;
+        background: transparent;
+        border: round $surface-lighten-2;
+        border-title-align: left;
+        border-title-color: $text-muted;
+        border-title-style: bold;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+
+    .sidebar-quadrant:focus-within {
+        border: round $accent;
+        border-title-color: $accent;
+    }
+
+    /* Top-bottom split: the cards form a 2x2 grid above the response. */
     #grade-workspace.-layout-top-bottom > #grade-sidebar {
         layout: grid;
         grid-size: 2 2;
+        grid-gutter: 0 1;
         width: 100%;
         min-width: 100%;
         max-width: 100%;
         margin: 0;
         height: 1fr;
-        border-bottom: tall $accent;
-        border-left: none;
-        padding: 0;
+        border-bottom: tall $surface-lighten-2;
+        padding: 1 1 0 1;
         overflow-y: hidden;
     }
 
-    #grade-sidebar {
-        border-left: tall $accent;
-        padding: 0 1;
+    #grade-workspace.-layout-top-bottom .sidebar-quadrant {
+        height: 1fr;
+        margin-bottom: 0;
     }
 
-    #grade-workspace.-layout-top-bottom .sidebar-quadrant {
-        border: round $accent;
-        background: $boost;
+    #grade-workspace.-layout-top-bottom > #response-viewer {
+        width: 1fr;
         height: 1fr;
-        width: 100%;
-        padding: 0;
+    }
+
+    #grade-workspace.-layout-top-bottom > #grade-sidebar-resize-handle {
+        display: none;
+    }
+
+    /* The question label lives in the question card's border title; this
+       mirror stays mounted for programmatic queries. */
+    #question-section-title {
+        display: none;
+    }
+
+    #grade-answer-group {
+        color: $accent;
+        text-style: bold;
+    }
+
+    #question-confidence {
+        margin-top: 1;
+    }
+
+    #question-math-toggle {
+        margin-top: 1;
+        display: none;
+    }
+
+    /* Whole-page view. The toggle hides itself when the submission has no
+       source PDF (stub data), and the caption only appears while a page is
+       actually on screen. */
+    #question-page-toggle {
+        margin-top: 1;
+        display: none;
+    }
+
+    #question-page-indicator {
+        margin-top: 1;
+        display: none;
+    }
+
+    #question-open-external {
+        margin-top: 1;
+    }
+
+    #transcription-toggle {
+        margin-top: 1;
+    }
+
+    #transcription-editor {
+        height: auto;
+        display: none;
+        margin-top: 1;
+    }
+
+    #transcription-editor.editing {
+        display: block;
+    }
+
+    #transcription-text {
+        height: 6;
+        border: round $surface-lighten-2;
+    }
+
+    #transcription-actions {
+        height: auto;
+        margin-top: 1;
     }
 
     #db-status {
@@ -272,23 +393,6 @@ class GradeScreen(Vertical):
 
     #rubric-editor-panel > Vertical {
         height: auto;
-    }
-
-    /* Standard vertical sidebar layout */
-    .sidebar-quadrant {
-        height: auto;
-        border: none;
-        background: transparent;
-        padding: 0;
-    }
-
-    #grade-workspace.-layout-top-bottom > #response-viewer {
-        width: 1fr;
-        height: 1fr;
-    }
-
-    #grade-workspace.-layout-top-bottom > #grade-sidebar-resize-handle {
-        display: none;
     }
     """
 
@@ -337,6 +441,25 @@ class GradeScreen(Vertical):
             self.comment = comment
             super().__init__()
 
+    class CommentCommitted(Message):
+        """The grader has finished editing the comment.
+
+        Posted when they press enter or when focus leaves the box — the two
+        moments a comment is unambiguously done. The controller uses it to run
+        the once-per-edit half of a save (PDF annotation + audit entry) instead
+        of paying for it on every keystroke. It is only a *hint*: the
+        controller also finishes any pending edit when the active answer
+        changes, so a missed signal costs nothing that the next save
+        does not repair.
+        """
+
+    class TranscriptionUpdated(Message):
+        """A grader saved a corrected transcription for the current question."""
+
+        def __init__(self, response_text: str) -> None:
+            self.response_text = response_text
+            super().__init__()
+
     class RubricEditRequested(Message):
         pass
 
@@ -366,6 +489,31 @@ class GradeScreen(Vertical):
         self._rubric_edit_points = 0.0
         self._zoom_fraction = 0.7
         self._zoom_at_limit = False
+        # Clockwise display rotation of the response pane, for answers written
+        # sideways in the box. Cleared when the *student* changes, not when the
+        # question does: a sideways sheet is a property of one student's scan,
+        # so a grader should not have to re-turn it for every question on it.
+        self._rotation = 0
+        # Math-view toggle: show the rendered LaTeX in the viewer instead of the
+        # handwriting crop. Reset per question. PNGs are cached in a per-session
+        # temp dir, rendered lazily on first toggle.
+        self._math_view = False
+        self._latex_cache_dir: Path | None = None
+        # Whole-page view: index into the current question's page context, or
+        # None while the answer crop is showing (the default for every
+        # question). Rendered pages are cached as PNGs in a per-session temp
+        # dir, rasterized lazily the first time a page is opened.
+        self._page_view_index: int | None = None
+        self._page_cache_dir: Path | None = None
+        # Anonymous grading: paint the scan's Name/Student-ID header out of
+        # every rendered page. Mirrored from the run on each bind so toggling
+        # teacher mode takes effect on the next render.
+        self._redact_identity = False
+        # Whether the cached PNG at a path actually had anything redacted, so
+        # the caption can say so without re-rendering the page.
+        self._page_redactions: dict[Path, bool] = {}
+        # The question currently bound to the screen, for handlers (math toggle).
+        self._current_grade: QuestionGrade | None = None
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
@@ -375,28 +523,71 @@ class GradeScreen(Vertical):
             # Invisible drag target for resizing the grading sidebar.
             yield _SidebarResizeHandle()
             with VerticalScroll(id="grade-sidebar"):
-                with Vertical(id="sidebar-quadrant-info", classes="sidebar-quadrant"):
+                with Vertical(
+                    id="sidebar-quadrant-info", classes="sidebar-quadrant"
+                ) as info_card:
+                    info_card.border_title = "Submission"
                     yield Label("", id="grade-student-name")
                     yield Label("", id="grade-source-pdf")
+                    # Which slice of a divided assignment this grader holds
+                    # (`core/claims.py`); hidden entirely when nobody divided
+                    # the work, which is the common single-grader case.
+                    yield Label("", id="grade-claim-slice")
                     yield Label("Score: 100.0", id="total-grade-label")
                     yield Label("Progress: 0/0", id="grade-progress")
+                    yield Label("", id="grade-answer-group")
                     yield Label("Zoom: 100%", id="grade-zoom-level")
-                
-                yield Rule(id="sidebar-sep-1", classes="sidebar-separator")
-                
-                with VerticalScroll(id="sidebar-quadrant-question", classes="sidebar-quadrant"):
+
+                with VerticalScroll(
+                    id="sidebar-quadrant-question", classes="sidebar-quadrant"
+                ) as question_card:
+                    question_card.border_title = "Question"
                     yield Label(
                         "Question",
                         id="question-section-title",
                         classes="sidebar-section-title",
                     )
                     yield Static("", id="question-context")
-                    yield ShortcutInput(placeholder="Comment...", id="question-comment")
+                    yield Label("", id="question-confidence")
+                    yield Button(
+                        "View rendered math ▸",
+                        id="question-math-toggle",
+                        compact=True,
+                    )
+                    yield Button(
+                        "⛶ View whole page ▸",
+                        id="question-page-toggle",
+                        compact=True,
+                    )
+                    yield Label("", id="question-page-indicator")
+                    # Always offered, not just in a graphics-less terminal: a
+                    # dense crop is sometimes worth a full-screen viewer even
+                    # where the in-terminal image is pixel-perfect.
+                    yield Button(
+                        "⧉ Open image in viewer",
+                        id="question-open-external",
+                        compact=True,
+                    )
+                    yield ShortcutInput(placeholder="Comment…", id="question-comment")
+                    yield Button(
+                        "✎ Fix transcription",
+                        id="transcription-toggle",
+                        compact=True,
+                    )
+                    with Vertical(id="transcription-editor"):
+                        yield TextArea(id="transcription-text")
+                        with Horizontal(id="transcription-actions"):
+                            yield Button(
+                                "Save", id="transcription-save", compact=True
+                            )
+                            yield Button(
+                                "Cancel", id="transcription-cancel", compact=True
+                            )
 
-                yield Rule(id="sidebar-sep-2", classes="sidebar-separator")
-
-                with VerticalScroll(id="sidebar-quadrant-rubric", classes="sidebar-quadrant"):
-                    yield Label("Rubric", classes="sidebar-section-title")
+                with VerticalScroll(
+                    id="sidebar-quadrant-rubric", classes="sidebar-quadrant"
+                ) as rubric_card:
+                    rubric_card.border_title = "Rubric"
                     yield ListView(id="rubric-list")
                     with Vertical(id="rubric-editor-panel"):
                         yield Static("", id="rubric-editor-status")
@@ -414,10 +605,10 @@ class GradeScreen(Vertical):
                             yield Button("Save", id="rubric-edit-save", compact=True)
                             yield Button("Cancel", id="rubric-edit-cancel", compact=True)
 
-                yield Rule(id="sidebar-sep-3", classes="sidebar-separator")
-
-                with VerticalScroll(id="sidebar-quadrant-help", classes="sidebar-quadrant"):
-                    yield Label("Hotkeys", classes="sidebar-section-title")
+                with VerticalScroll(
+                    id="sidebar-quadrant-help", classes="sidebar-quadrant"
+                ) as help_card:
+                    help_card.border_title = "Hotkeys"
                     yield Static("", id="grade-keybinding-ref")
                     yield Static("", id="db-status")
 
@@ -429,6 +620,7 @@ class GradeScreen(Vertical):
         self._update_zoom_label()
 
     def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
+        self._redact_identity = bool(getattr(run, "redact_identity", False))
         self.query_one("#grade-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
         self.query_one("#grade-student-name", Label).update(
             # student_name holds the anonymity-aware label: the student ID by
@@ -439,6 +631,9 @@ class GradeScreen(Vertical):
         source_pdf_label.update(f"PDF: {run.source_pdf_name}")
         # Stub/demo submissions have no source PDF; drop the empty line.
         source_pdf_label.display = bool(run.source_pdf_name)
+        slice_label = self.query_one("#grade-claim-slice", Label)
+        slice_label.update(f"Your slice: {run.claim_slice}" if run.claim_slice else "")
+        slice_label.display = bool(run.claim_slice)
         self.query_one("#total-grade-label", Label).update(
             f"Score: {run.total_score:.1f} / {run.max_points:.1f}"
         )
@@ -448,12 +643,27 @@ class GradeScreen(Vertical):
         self.set_progress(f"Progress: {run.graded_count} / {run.total_questions}")
 
         current = run.current_question
+        self._current_grade = current
+        # A rotation belongs to the *sheet*, not the answer on it: a scan fed in
+        # sideways is sideways for every question on that student's paper, so
+        # only a change of student clears it. Everything else below resets per
+        # question.
+        if run.student_id != self._last_identity[0]:
+            self.query_one("#response-viewer", ResponseViewer).reset_rotation()
+            self._rotation = 0
         # Detect if the actual question or student has changed to reset the view
         identity = (run.student_id, current.question_id if current else None)
         if identity != self._last_identity:
             self._last_identity = identity
             self._zoom_fraction = 0.7
             self._zoom_at_limit = False
+            # A fresh question always starts on the handwriting crop — neither
+            # stale rendered math nor a page left open on the previous answer.
+            self._math_view = False
+            self._page_view_index = None
+            # Never carry an open transcription editor (or its stale text) from
+            # one question to the next.
+            self.query_one("#transcription-editor").remove_class("editing")
             self._update_zoom_label()
             self.query_one("#response-viewer", ResponseViewer).reset_zoom()
 
@@ -462,38 +672,305 @@ class GradeScreen(Vertical):
             for child in list(rubric_list.children):
                 child.remove()
             self._rubric_count = 0
-            self.query_one("#question-section-title", Label).update("Question")
+            self._set_question_title("Question")
             self.query_one("#question-context", Static).update("")
+            confidence_label = self.query_one("#question-confidence", Label)
+            confidence_label.update("")
+            confidence_label.display = False
+            self.query_one("#question-math-toggle", Button).display = False
+            self.query_one("#question-page-toggle", Button).display = False
+            self.query_one("#question-page-indicator", Label).display = False
+            self._page_view_index = None
             comment_input = self.query_one("#question-comment", Input)
             if comment_input.value:
                 comment_input.value = ""
             self.exit_rubric_edit_mode()
             return
 
-        viewer = self.query_one("#response-viewer", ResponseViewer)
-        viewer.set_image_path(current.image_path)
-        # The section title carries the question label so the context text
+        # The card title carries the question label so the context text
         # below it doesn't repeat the word "Question".
-        self.query_one("#question-section-title", Label).update(
-            format_question_label(current.question_id)
-        )
+        self._set_question_title(format_question_label(current.question_id))
         self.query_one("#question-context", Static).update(
             self._question_context_text(current)
         )
+        self._update_confidence_chip(current)
+        self._apply_response_view(current)
 
         self._rubric_count = len(current.rubric_options)
         if self._rubric_edit_mode:
             self._update_rubric_list_visibility()
         else:
             self._sync_rubric_options(current)
-            self._focus_rubric_list()
+            self._restore_rubric_focus()
 
         comment_input = self.query_one("#question-comment", Input)
-        if comment_input.value != current.comment:
+        # Never overwrite what the grader is actively typing: this refresh may
+        # have been triggered by their own keystroke, and the state it is
+        # writing back can be a beat behind the input.
+        if comment_input.value != current.comment and self.app.focused is not comment_input:
             comment_input.value = current.comment
+
+    def _update_confidence_chip(self, current) -> None:
+        """Show the transcription-confidence chip for the current response."""
+        label = self.query_one("#question-confidence", Label)
+        chip = format_confidence_chip(
+            getattr(current, "response_confidence", None),
+            has_response=bool(current.response_text),
+        )
+        if chip is None:
+            label.update("")
+            label.display = False
+        else:
+            label.update(chip)
+            label.display = True
+
+    def _latex_png_path(self, question_id: str) -> Path:
+        """Per-session cache path for a question's rendered-LaTeX PNG."""
+        if self._latex_cache_dir is None:
+            self._latex_cache_dir = Path(tempfile.mkdtemp(prefix="opengrader-latex-"))
+        return self._latex_cache_dir / f"{question_id}.png"
+
+    def _page_png_path(self, current, entry) -> Path:
+        """Per-session cache path for one rendered source page.
+
+        Keyed by the student's scan (its file stem is unique per submission),
+        the question, and the page: the same page carries different highlights
+        for different questions, and two students share question ids, so all
+        three are needed to keep one grader's page out of another's view. The
+        anonymity suffix is part of the key too, so toggling teacher mode can
+        never serve a cached page that was redacted under the other setting.
+        """
+        if self._page_cache_dir is None:
+            self._page_cache_dir = Path(tempfile.mkdtemp(prefix="opengrader-page-"))
+        stem = Path(current.source_pdf_path).stem or "submission"
+        suffix = "-anon" if self._redact_identity else ""
+        return (
+            self._page_cache_dir
+            / f"{stem}-{current.question_id}-p{entry.page_number}{suffix}.png"
+        )
+
+    @staticmethod
+    def _page_context_of(current) -> tuple:
+        """The current question's page sequence, or () when none is renderable."""
+        if current is None or not getattr(current, "source_pdf_path", ""):
+            return ()
+        return tuple(getattr(current, "page_context", ()) or ())
+
+    def _apply_response_view(self, current) -> None:
+        """Point the response viewer at the crop, the rendered math, or a page.
+
+        Three mutually exclusive views of the same answer, in priority order:
+
+        * **whole page** (``_page_view_index`` set) — a page of the student's
+          scan with this question's crop region outlined, so "continued on
+          back" and margin work are visible. During anonymous grading the
+          sheet's Name/Student-ID header is redacted out of the render first.
+          Rendering is cached per page; if it fails (missing scan, unreadable
+          page, an identity header we could not locate) we drop back to the
+          crop with a status line rather than showing a broken — or
+          de-anonymizing — view.
+        * **rendered math** — offered only when the response carries LaTeX, and
+          only while a page is *not* showing (they compete for the same pane).
+        * **the answer crop** — the default for every question.
+        """
+        viewer = self.query_one("#response-viewer", ResponseViewer)
+        math_toggle = self.query_one("#question-math-toggle", Button)
+        page_toggle = self.query_one("#question-page-toggle", Button)
+        indicator = self.query_one("#question-page-indicator", Label)
+
+        entries = self._page_context_of(current)
+        page_toggle.display = bool(entries)
+        if not entries:
+            self._page_view_index = None
+
+        if self._page_view_index is not None:
+            # Clamp rather than trust: the question may have changed under a
+            # stale index (e.g. a shorter page list).
+            index = max(0, min(self._page_view_index, len(entries) - 1))
+            self._page_view_index = index
+            entry = entries[index]
+            png_path = self._page_png_path(current, entry)
+            cached = self._page_redactions.get(png_path)
+            if cached is not None and png_path.exists():
+                outcome = PageRenderOutcome(True, redacted=cached)
+            else:
+                outcome = render_page_context_png(
+                    current.source_pdf_path,
+                    entry,
+                    png_path,
+                    redact_identity=self._redact_identity,
+                )
+                if outcome.ok:
+                    self._page_redactions[png_path] = outcome.redacted
+            if outcome.ok:
+                viewer.set_image_path(str(png_path))
+                page_toggle.label = "◂ View answer crop"
+                indicator.update(
+                    format_page_context_label(
+                        entry, index, len(entries), redacted=outcome.redacted
+                    )
+                )
+                indicator.display = True
+                # The math toggle would swap the pane out from under the page.
+                math_toggle.display = False
+                return
+            self._page_view_index = None
+            self.set_status(outcome.reason)
+
+        indicator.display = False
+        page_toggle.label = "⛶ View whole page ▸"
+
+        has_latex = response_has_latex(current.response_text)
+        math_toggle.display = has_latex
+        if not has_latex:
+            self._math_view = False
+
+        if self._math_view and has_latex:
+            png_path = self._latex_png_path(current.question_id)
+            if render_response_latex_png(current.response_text, png_path):
+                viewer.set_image_path(str(png_path))
+                math_toggle.label = "◂ View handwriting"
+                return
+            # Unparseable LaTeX: drop back to the crop.
+            self._math_view = False
+
+        viewer.set_image_path(current.image_path)
+        math_toggle.label = "View rendered math ▸"
+
+    def cycle_page_view(self, step: int = 1) -> None:
+        """Step through crop → source page(s) → extra work pages → crop.
+
+        One key for the whole sequence (``w`` forward, ``W`` back), because the
+        useful gesture mid-grading is "show me more" repeated, not a choice
+        between two named modes. Position 0 is the crop, positions 1..N are the
+        page-context entries, and the walk wraps so a grader can always get back
+        to the crop by carrying on in the same direction.
+        """
+        current = self._current_grade
+        entries = self._page_context_of(current)
+        if not entries:
+            self.set_status("No source page is available for this response.")
+            return
+
+        position = 0 if self._page_view_index is None else self._page_view_index + 1
+        position = (position + step) % (len(entries) + 1)
+        self._page_view_index = None if position == 0 else position - 1
+        if self._page_view_index is not None:
+            # The page and the rendered math share the viewer; opening a page
+            # implicitly leaves math view.
+            self._math_view = False
+        self._apply_response_view(current)
+
+    def toggle_page_view(self) -> None:
+        """Jump between the answer crop and the first page of its context."""
+        current = self._current_grade
+        entries = self._page_context_of(current)
+        if not entries:
+            self.set_status("No source page is available for this response.")
+            return
+        if self._page_view_index is None:
+            self._page_view_index = 0
+            self._math_view = False
+        else:
+            self._page_view_index = None
+        self._apply_response_view(current)
+
+    @on(Button.Pressed, "#question-page-toggle")
+    def _on_page_toggle_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.toggle_page_view()
+
+    @on(Button.Pressed, "#question-math-toggle")
+    def _on_math_toggle_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        current = self._current_grade
+        if current is None:
+            return
+        self._math_view = not self._math_view
+        if self._math_view:
+            # Leaving page view: the two views share the response pane.
+            self._page_view_index = None
+        self._apply_response_view(current)
+
+    def open_response_externally(self) -> None:
+        """Hand the displayed crop to the OS image viewer.
+
+        The escape hatch for terminals that cannot draw pixels (and for any
+        crop too dense to read at cell resolution). Failures are reported in
+        the status line with the reason, never raised at the grader.
+        """
+        viewer = self.query_one("#response-viewer", ResponseViewer)
+        try:
+            opened = viewer.open_externally()
+        except ExternalViewerError as exc:
+            self.set_status(f"Could not open image: {exc}")
+            return
+        self.set_status(f"Opened {opened} in your image viewer.")
+
+    @on(Button.Pressed, "#question-open-external")
+    def _on_open_external_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.open_response_externally()
+
+    def transcription_editor_active(self) -> bool:
+        return self.query_one("#transcription-editor").has_class("editing")
+
+    def toggle_transcription_editor(self) -> None:
+        """Open the inline transcription editor, or close it if already open."""
+        if self.transcription_editor_active():
+            self._close_transcription_editor()
+        else:
+            self._open_transcription_editor()
+
+    def _open_transcription_editor(self) -> None:
+        current = self._current_grade
+        if current is None:
+            return
+        editor = self.query_one("#transcription-editor")
+        text_area = self.query_one("#transcription-text", TextArea)
+        text_area.text = current.response_text
+        editor.add_class("editing")
+
+        def focus_text() -> None:
+            text_area.focus()
+
+        self.call_next(focus_text)
+
+    def _close_transcription_editor(self) -> None:
+        self.query_one("#transcription-editor").remove_class("editing")
+        # Return focus to the sidebar's usual home so navigation keys work again.
+        self._focus_rubric_list()
+
+    @on(Button.Pressed, "#transcription-toggle")
+    def _on_transcription_toggle_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.toggle_transcription_editor()
+
+    @on(Button.Pressed, "#transcription-save")
+    def _on_transcription_save_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        text_area = self.query_one("#transcription-text", TextArea)
+        self._close_transcription_editor()
+        self.post_message(self.TranscriptionUpdated(text_area.text.strip()))
+
+    @on(Button.Pressed, "#transcription-cancel")
+    def _on_transcription_cancel_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self._close_transcription_editor()
 
     def set_progress(self, text: str) -> None:
         self.query_one("#grade-progress", Label).update(text)
+
+    def set_answer_group(self, text: str) -> None:
+        """Show (or hide) the answer-group indicator in the Submission card."""
+        label = self.query_one("#grade-answer-group", Label)
+        label.update(text)
+        label.display = bool(text)
+
+    def _set_question_title(self, title: str) -> None:
+        """Show the question label on the question card and its query mirror."""
+        self.query_one("#sidebar-quadrant-question").border_title = title
+        self.query_one("#question-section-title", Label).update(title)
 
     def rubric_edit_active(self) -> bool:
         return self._rubric_edit_mode
@@ -511,6 +988,23 @@ class GradeScreen(Vertical):
     def reset_zoom(self) -> None:
         self.query_one("#response-viewer", ResponseViewer).reset_zoom()
 
+    def rotate_response(self, degrees: int) -> None:
+        """Turn the displayed scan by a quarter turn (``,`` left, ``.`` right).
+
+        Display only — nothing on disk, and no grade, changes. It is for the
+        answer a student wrote sideways up the margin, or a page the scan
+        pre-flight could not orient (a sheet too sparse for Tesseract's OSD to
+        call, which it deliberately leaves alone rather than guess at).
+
+        The state is deliberately *shown* in the zoom line rather than left as
+        an invisible mode: a grader who forgets a rotation is on would misread
+        the next answer, so it announces itself and clears with the student.
+        """
+        viewer = self.query_one("#response-viewer", ResponseViewer)
+        viewer.rotate(degrees)
+        self._rotation = viewer.rotation
+        self._update_zoom_label()
+
     def toggle_layout(self) -> None:
         """Toggle the screen between vertical split and horizontal split."""
         workspace = self.query_one("#grade-workspace", Container)
@@ -522,7 +1016,6 @@ class GradeScreen(Vertical):
         question = self.query_one("#sidebar-quadrant-question")
         rubric = self.query_one("#sidebar-quadrant-rubric")
         help = self.query_one("#sidebar-quadrant-help")
-        rules = self.query("Rule.sidebar-separator")
 
         if workspace.has_class("-layout-top-bottom"):
             workspace.remove_class("-layout-top-bottom")
@@ -530,17 +1023,13 @@ class GradeScreen(Vertical):
             workspace.move_child(viewer, before=0)
             workspace.move_child(handle, after=viewer)
             workspace.move_child(sidebar, after=handle)
-            
-            # Restore Original Vertical flow: Info, Question, Rubric, Help
+
+            # Restore original vertical flow: Info, Question, Rubric, Help
             sidebar.move_child(info, before=0)
-            sidebar.move_child(self.query_one("#sidebar-sep-1"), after=info)
-            sidebar.move_child(question, after=self.query_one("#sidebar-sep-1"))
-            sidebar.move_child(self.query_one("#sidebar-sep-2"), after=question)
-            sidebar.move_child(rubric, after=self.query_one("#sidebar-sep-2"))
-            sidebar.move_child(self.query_one("#sidebar-sep-3"), after=rubric)
-            sidebar.move_child(help, after=self.query_one("#sidebar-sep-3"))
-            
-            for r in rules: r.display = True
+            sidebar.move_child(question, after=info)
+            sidebar.move_child(rubric, after=question)
+            sidebar.move_child(help, after=rubric)
+
             # Reset styles to let CSS and sidebar tracking take over
             sidebar.styles.height = "1fr"
             sidebar.styles.width = self._sidebar_width if self._sidebar_width else 40
@@ -551,14 +1040,12 @@ class GradeScreen(Vertical):
             workspace.move_child(sidebar, before=0)
             workspace.move_child(handle, after=sidebar)
             workspace.move_child(viewer, after=handle)
-            
+
             # Reorder for Grid (Row 1: Info, Help | Row 2: Question, Rubric)
             sidebar.move_child(info, before=0)
             sidebar.move_child(help, after=info)
             sidebar.move_child(question, after=help)
             sidebar.move_child(rubric, after=question)
-
-            for r in rules: r.display = False
 
             # Force edge-to-edge width for the top panel
             sidebar.styles.width = "100%"
@@ -580,6 +1067,25 @@ class GradeScreen(Vertical):
             comment_input.cursor_position = len(comment_input.value)
 
         self.call_next(focus_comment)
+
+    def current_comment_text(self) -> str:
+        """Return the text currently in the comment box (for snippet capture)."""
+        return self.query_one("#question-comment", Input).value
+
+    def insert_comment_snippet(self, text: str) -> None:
+        """Drop a saved snippet into the comment box, appending to any text.
+
+        Setting the input's value posts an ``Input.Changed``, which the screen
+        already routes to ``CommentUpdated`` — so the merged comment persists to
+        the submission through the normal path, no separate save needed.
+        """
+        snippet = " ".join(text.split())
+        if not snippet:
+            return
+        comment_input = self.query_one("#question-comment", Input)
+        existing = comment_input.value.strip()
+        comment_input.value = f"{existing} {snippet}".strip() if existing else snippet
+        comment_input.cursor_position = len(comment_input.value)
 
     def present_rubric_editor(
         self,
@@ -608,6 +1114,7 @@ class GradeScreen(Vertical):
                 points_delta=option.points_delta,
                 kind=option.kind,
                 selection_mode=option.selection_mode,
+                default_comment=option.default_comment,
             )
             if option.label == "Correct":
                 correct_option = (option_index, seed)
@@ -855,11 +1362,33 @@ class GradeScreen(Vertical):
             rubric_list.index = selected[0] if selected else 0
 
     def _focus_rubric_list(self) -> None:
-        """Return keyboard focus to the rubric list when grading."""
+        """Return keyboard focus to the rubric list when grading.
+
+        Call this only where the move is the *point* of the action (an editor
+        just closed, the layout was rebuilt on purpose). To put focus back after
+        an incidental refresh, use :meth:`_restore_rubric_focus`, which leaves a
+        grader who is mid-word alone.
+        """
         if self._rubric_edit_mode or self._rubric_count == 0:
             return
         rubric_list = self.query_one("#rubric-list", ListView)
         self.call_next(rubric_list.focus)
+
+    def _restore_rubric_focus(self) -> None:
+        """Put focus back on the rubric list unless the grader is typing.
+
+        ``bind_run`` runs on every refresh — including the one a comment
+        keystroke itself triggers — and it used to reclaim focus every time. The
+        effect was that typing a single character into the comment box threw
+        focus to the rubric list, so the *second* character was interpreted as a
+        hotkey: "a nice, apt job" jumped to the first student, skipped ahead a
+        question and rotated the scan. Refreshing the screen is not a reason to
+        take the keyboard away from someone in the middle of a sentence.
+        """
+        focused = self.app.focused
+        if isinstance(focused, (Input, TextArea)) and focused in self.query("*"):
+            return
+        self._focus_rubric_list()
 
     def _update_rubric_list_visibility(self) -> None:
         """Toggle between rubric selection and rubric editing views."""
@@ -981,6 +1510,7 @@ class GradeScreen(Vertical):
                     points_delta,
                     "partial",
                     "exclusive",
+                    default_comment=rows[0].comment_value,
                 )
             ]
 
@@ -997,6 +1527,7 @@ class GradeScreen(Vertical):
                     points_delta,
                     "partial",
                     "checklist",
+                    default_comment=row.comment_value,
                 )
             )
         return options
@@ -1110,7 +1641,12 @@ class GradeScreen(Vertical):
             current.prompt or "No prompt available.",
         ]
         if current.expected_answers:
-            parts.extend(["", "Expected:", "\n".join(current.expected_answers)])
+            label = "Expected"
+            answers = list(current.expected_answers)
+            if getattr(current, "question_type", None) == NUMERIC:
+                label = "Expected (numeric)"
+                answers = [_format_numeric_expected(answer) for answer in answers]
+            parts.extend(["", f"{label}:", "\n".join(answers)])
         if current.response_text:
             parts.extend(["", "Response text:", current.response_text])
         return "\n".join(parts)
@@ -1140,7 +1676,7 @@ class GradeScreen(Vertical):
         )
         rows.mount(row)
         self._renumber_rubric_edit_rows()
-        self.call_next(row.label_input.focus)
+        self.call_after_refresh(row.label_input.focus)
 
     @on(Button.Pressed, "#rubric-edit-add-bonus")
     def _on_rubric_add_bonus_pressed(self, event: Button.Pressed) -> None:
@@ -1159,7 +1695,7 @@ class GradeScreen(Vertical):
         )
         rows.mount(row)
         self._renumber_rubric_edit_rows()
-        self.call_next(row.label_input.focus)
+        self.call_after_refresh(row.label_input.focus)
 
     def _current_editor_mode(self) -> str:
         """Return the current rubric editor scoring mode."""
@@ -1191,8 +1727,11 @@ class GradeScreen(Vertical):
     def _on_rubric_delete_pressed(self, event: Button.Pressed) -> None:
         """Remove a partial-credit subitem row."""
         event.stop()
-        row = event.button.parent
-        if isinstance(row, _RubricEditRow):
+        row = next(
+            (a for a in event.button.ancestors if isinstance(a, _RubricEditRow)),
+            None,
+        )
+        if row is not None:
             row.remove()
             self._renumber_rubric_edit_rows()
 
@@ -1261,6 +1800,7 @@ class GradeScreen(Vertical):
         if isinstance(focused, Input) and focused.id == "question-comment":
             if event.key in ("enter", "escape"):
                 self.post_message(self.CommentUpdated(focused.value))
+                self.post_message(self.CommentCommitted())
                 self._focus_rubric_list()
                 event.prevent_default()
                 event.stop()
@@ -1327,10 +1867,21 @@ class GradeScreen(Vertical):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "question-comment":
             self.post_message(self.CommentUpdated(event.value))
+            self.post_message(self.CommentCommitted())
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "question-comment":
             self.post_message(self.CommentUpdated(event.value))
+
+    def on_descendant_blur(self, event: events.DescendantBlur) -> None:
+        """Focus leaving the comment box ends the edit.
+
+        `DescendantBlur` rather than the Input's own `Blur`, because focus
+        events do not bubble out of the widget that receives them.
+        """
+        widget = getattr(event, "widget", None)
+        if getattr(widget, "id", None) == "question-comment":
+            self.post_message(self.CommentCommitted())
 
     @on(ResponseViewer.ZoomChanged)
     def _on_zoom_changed(self, event: ResponseViewer.ZoomChanged) -> None:
@@ -1347,27 +1898,64 @@ class GradeScreen(Vertical):
         text = f"Zoom: {round(self._zoom_fraction * 100)}%"
         if self._zoom_at_limit:
             text += " (Max reached)"
+        # Announce a rotation rather than leaving it as an invisible mode — the
+        # grader has to be able to tell "written sideways" from "I turned it".
+        if self._rotation:
+            text += f"  ·  Rotated {self._rotation}°"
         label.update(text)
 
     def _update_hotkey_ref(self) -> None:
         """Update the hotkey reference text with the current layout state."""
         workspace = self.query_one("#grade-workspace", Container)
-        layout_mode = "Top-bottom" if workspace.has_class("-layout-top-bottom") else "Side-by-side"
-        resize_label = "Height" if workspace.has_class("-layout-top-bottom") else "Width"
+        top_bottom = workspace.has_class("-layout-top-bottom")
+        layout_mode = "Top-bottom" if top_bottom else "Side-by-side"
+        resize_label = "height" if top_bottom else "width"
 
         self.query_one("#grade-keybinding-ref", Static).update(
-            "j/k      Prev/Next Question\n"
-            "ctrl+j/k Prev/Next Student\n"
-            "n/m      Prev/Next Ungraded\n"
-            "ctrl+1-9 Rubric+Finalize\n"
-            "         (or alt/shift+1-9)\n"
-            "ctrl+g   Finalize\n"
-            "+/-      Zoom\n"
-            "a        First Student\n"
-            f"\\[/\\]      {resize_label}\n"
-            "e        Edit Rubric\n"
-            "c        Focus Comment\n"
-            f"[b]ctrl+v   Layout: {layout_mode}[/b]"
+            format_hotkey_reference(
+                [
+                    # Grouped the way the keys are: move, then grade, then
+                    # look at the image, then Shift+letter for the reports.
+                    ("j/k", "Next/prev question"),
+                    ("ctrl+j/k", "Next/prev student"),
+                    ("n/p", "Next/prev ungraded"),
+                    ("a", "First student"),
+                    ("shift+1-9", "Rubric + finalize"),
+                    ("", "(or ctrl/alt+1-9)"),
+                    ("b", "Grade by answer (mode)"),
+                    ("g", "Grade answer group"),
+                    ("v", "Confirm AI grades (mode)"),
+                    ("y", "Confirm this AI grade"),
+                    ("shift+U", "Unify similar answers"),
+                    ("ctrl+g", "Finalize student"),
+                    ("e", "Edit rubric"),
+                    ("c", "Focus comment"),
+                    ("x", "Fix transcription"),
+                    ("l", "Comment library"),
+                    ("z", "Undo last grade"),
+                    ("+/-", "Zoom"),
+                    (",/.", "Rotate view"),
+                    ("w/shift+W", "Whole page / extra work"),
+                    ("o", "Open image in viewer"),
+                    ("[ ]", f"Sidebar {resize_label}"),
+                    ("ctrl+v", f"Layout: {layout_mode}"),
+                    ("", ""),
+                    ("SHIFT+", "…opens a report:"),
+                    ("R", "Needs-review queue"),
+                    ("G", "Regrade requests"),
+                    ("S", "Item analysis"),
+                    ("C", "Consistency audit"),
+                    ("P", "Similarity audit"),
+                    ("I", "Grader agreement"),
+                    ("H", "Grade history · teacher"),
+                    ("V", "Grading sessions · teacher"),
+                    ("F", "File a regrade · teacher"),
+                    ("", ""),
+                    ("esc", "Back to questions"),
+                    ("?", "Help"),
+                ],
+                key_width=11,
+            )
         )
 
 

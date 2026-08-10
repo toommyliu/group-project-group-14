@@ -1,24 +1,38 @@
 from __future__ import annotations
 
 import base64
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-from urllib import error, request
+
+from opengrader.core.llm import ollama_transport
+from opengrader.core.llm.ollama_transport import parse_json_object as _parse_json_from_response
 
 from .constants import SUBSCRIPT_TRANSLATION
 
 # https://docs.ollama.com/api/introduction
 # TODO: https://pydantic.dev/docs/ai/overview/ if we ever support multiple providers
+#
+# The HTTP transport (request building, JSON-object salvage) is shared with
+# core/llm/ollama_client.py via core/llm/ollama_transport.py. This module
+# keeps its own config, error type, and model-availability caching — vision
+# extraction and text grading have different failure modes and must not be
+# coupled.
 
 
 @dataclass(frozen=True)
 class OllamaVisionConfig:
     model: str = "qwen2.5vl:7b"
-    host: str = "http://127.0.0.1:11434"
-    timeout_seconds: float = 120.0
+    host: str = ollama_transport.DEFAULT_HOST
+    timeout_seconds: float = ollama_transport.DEFAULT_TIMEOUT_SECONDS
+    # Keeps the model resident between crops. On a cold-ish machine, reloading
+    # the vision model between every field/question crop can dominate total
+    # extraction time far more than generation itself does.
+    keep_alive: str = ollama_transport.DEFAULT_KEEP_ALIVE
+    # General-purpose cap for the short, single-field JSON replies below.
+    # extract_question_prompt_and_answer overrides this — see its call site.
+    num_predict: int = 256
 
 
 class OllamaVisionError(RuntimeError):
@@ -39,35 +53,6 @@ class TitleMetadataResult:
 def _image_to_base64(image_path: str | Path) -> str:
     data = Path(image_path).read_bytes()
     return base64.b64encode(data).decode("ascii")
-
-
-def _parse_json_from_response(raw: str) -> dict | None:
-    text = raw.strip()
-    if not text:
-        return None
-
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text).strip()
-
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    first = text.find("{")
-    last = text.rfind("}")
-    if first == -1 or last == -1 or last <= first:
-        return None
-
-    candidate = text[first : last + 1]
-    try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _normalize_name(value: str) -> str:
@@ -98,35 +83,11 @@ def _normalize_version(value: str | None) -> str | None:
 
 
 def list_available_models(config: OllamaVisionConfig) -> list[str]:
-    host = config.host.rstrip("/")
-    endpoint = f"{host}/api/tags"
-    req = request.Request(endpoint, method="GET")
-
-    try:
-        with request.urlopen(req, timeout=config.timeout_seconds) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-    except error.URLError as exc:
-        raise OllamaVisionError(f"failed to reach Ollama at {endpoint}: {exc}") from exc
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise OllamaVisionError(f"invalid JSON response from Ollama: {exc}") from exc
-
-    models = parsed.get("models", [])
-    if not isinstance(models, list):
-        raise OllamaVisionError(
-            "invalid Ollama model list response: models is not a list"
-        )
-
-    names: list[str] = []
-    for model in models:
-        if not isinstance(model, dict):
-            continue
-        name = str(model.get("name") or model.get("model") or "").strip()
-        if name:
-            names.append(name)
-    return sorted(set(names))
+    return ollama_transport.fetch_model_names(
+        host=config.host,
+        timeout_seconds=config.timeout_seconds,
+        error_factory=OllamaVisionError,
+    )
 
 
 def ensure_model_available(config: OllamaVisionConfig) -> None:
@@ -152,39 +113,33 @@ def _generate_with_image(
     image_path: str | Path,
     prompt: str,
     config: OllamaVisionConfig,
+    response_format: dict | None = None,
+    num_predict: int | None = None,
 ) -> str:
     ensure_model_available(config)
     encoded_image = _image_to_base64(image_path)
-    payload = {
-        "model": config.model,
-        "prompt": prompt,
-        "images": [encoded_image],
-        "stream": False,
-        "options": {"temperature": 0},
-    }
-
-    host = config.host.rstrip("/")
-    endpoint = f"{host}/api/generate"
-    body = json.dumps(payload).encode("utf-8")
-    req = request.Request(
-        endpoint,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    return ollama_transport.generate_raw(
+        host=config.host,
+        model=config.model,
+        prompt=prompt,
+        images=[encoded_image],
+        response_format=response_format,
+        keep_alive=config.keep_alive,
+        num_predict=num_predict if num_predict is not None else config.num_predict,
+        timeout_seconds=config.timeout_seconds,
+        error_factory=OllamaVisionError,
     )
 
-    try:
-        with request.urlopen(req, timeout=config.timeout_seconds) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-    except error.URLError as exc:
-        raise OllamaVisionError(f"failed to call Ollama at {endpoint}: {exc}") from exc
 
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise OllamaVisionError(f"invalid JSON response from Ollama: {exc}") from exc
-
-    return str(parsed.get("response", "")).strip()
+# Shared by extract_field_text and extract_page_number: both ask for a single
+# string value. Ollama's `format` constrains the reply to structurally valid
+# JSON; parse_json_object (via _parse_json_from_response) is still called
+# afterward as the fallback for whatever slips through the schema anyway.
+_VALUE_TEXT_SCHEMA = {
+    "type": "object",
+    "properties": {"value": {"type": "string"}},
+    "required": ["value"],
+}
 
 
 def extract_field_text(
@@ -195,7 +150,7 @@ def extract_field_text(
 ) -> str:
     if field_kind == "name":
         prompt = (
-            "You are a strict OCR transcription engine for scanned exams. "
+            "You are a strict OCR transcription engine for scanned assignments. "
             "Read only visible text in the image. Extract only the student's name value. "
             "The image may include the printed label 'Name'. Do not include the label. "
             "Do not infer, complete, correct, or invent a name. "
@@ -204,7 +159,7 @@ def extract_field_text(
         )
     else:
         prompt = (
-            "You are a strict OCR transcription engine for scanned exams. "
+            "You are a strict OCR transcription engine for scanned assignments. "
             "Read only visible text in the image. Extract only the student ID value. "
             "The image may include label text like 'Student ID'. Do not include the label. "
             "Return only digits that are visibly present. "
@@ -213,7 +168,14 @@ def extract_field_text(
             'Return strict JSON only with this shape: {"value": "..."}.'
         )
 
-    raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
+    raw = _generate_with_image(
+        image_path=image_path,
+        prompt=prompt,
+        config=config,
+        response_format=_VALUE_TEXT_SCHEMA,
+        # A name or ID is a few words/digits at most.
+        num_predict=128,
+    )
     parsed = _parse_json_from_response(raw)
     value = str(parsed.get("value", "")).strip() if parsed is not None else raw.strip()
 
@@ -235,6 +197,23 @@ def extract_student_field(
     )
 
 
+_TITLE_METADATA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "course_code": {"type": "string"},
+        "assignment_title": {"type": "string"},
+        "assignment_version": {"type": "string"},
+        "raw_title": {"type": "string"},
+    },
+    "required": [
+        "course_code",
+        "assignment_title",
+        "assignment_version",
+        "raw_title",
+    ],
+}
+
+
 def extract_title_metadata(
     *,
     image_path: str | Path,
@@ -252,7 +231,14 @@ def extract_title_metadata(
         "[B], Version C, suffix letters, or subscript-like letters/digits."
     )
 
-    raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
+    raw = _generate_with_image(
+        image_path=image_path,
+        prompt=prompt,
+        config=config,
+        response_format=_TITLE_METADATA_SCHEMA,
+        # Four short fields (course code, title, version, raw title).
+        num_predict=256,
+    )
     parsed = _parse_json_from_response(raw)
     if parsed is None:
         cleaned = re.sub(r"\s+", " ", raw).strip()
@@ -282,27 +268,70 @@ def extract_title_metadata(
     )
 
 
+# ``answer`` is declared first on purpose. The schema makes both fields
+# mandatory, so the printed question text now competes for the same num_predict
+# budget as the handwriting — and of the two, only the answer is load-bearing
+# (the extractor discards the prompt; `create-answer-key` is the only caller
+# that reads it). Constrained decoding emits properties in schema order, so if a
+# reply ever does run into the cap, what gets cut is the field nobody grades on.
+_QUESTION_PROMPT_AND_ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string"},
+        "prompt": {"type": "string"},
+    },
+    "required": ["answer", "prompt"],
+}
+
+
 def extract_question_prompt_and_answer(
     *,
     image_path: str | Path,
     config: OllamaVisionConfig,
+    math_latex: bool = False,
 ) -> tuple[str, str]:
     prompt = (
-        "You are a strict OCR transcription engine for scanned exams. "
-        "Your job is to read visible text in the image, not to answer the exam question. "
+        "You are a strict OCR transcription engine for scanned assignments. "
+        "Your job is to read visible text in the image, not to answer the assignment question. "
         "The image may contain printed question text and a student's handwritten response. "
         "Transcribe only what is visibly written on the page. Do not infer, solve, "
         "complete, correct, or generate an answer from the printed question. "
         "If handwriting is messy, preserve your best reading of the handwriting. "
         "If a word or symbol is uncertain, write [unclear]. "
         "If no handwritten answer is visible, return an empty answer string. "
+    )
+    if math_latex:
+        # Opt-in: transcribe handwritten mathematics as LaTeX so fractions,
+        # exponents, roots, integrals, matrices, etc. survive as structured math
+        # instead of being flattened into ambiguous plain text.
+        prompt += (
+            "If the handwritten answer contains mathematical notation (fractions, "
+            "exponents, subscripts, roots, integrals, summations, matrices, Greek "
+            "letters, or similar), transcribe that math as LaTeX enclosed in "
+            "$...$ for inline math or $$...$$ for a displayed equation. Transcribe "
+            "ordinary prose as plain text; only wrap the mathematical parts in "
+            "LaTeX, and never add LaTeX to non-mathematical writing. "
+        )
+    prompt += (
         "Return strict JSON only with this shape: "
         '{"prompt": "...", "answer": "..."}. '
         "The prompt field should contain printed question text only. "
         "The answer field should contain the student's handwritten answer only."
     )
 
-    raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
+    raw = _generate_with_image(
+        image_path=image_path,
+        prompt=prompt,
+        config=config,
+        response_format=_QUESTION_PROMPT_AND_ANSWER_SCHEMA,
+        # The only call that produces long output, and it now produces two long
+        # fields: the schema requires the printed question text alongside the
+        # handwriting. Capped generously — truncating a real transcription
+        # corrupts a student's answer before anyone grades it, which is far
+        # worse than a slow call, so this exists to stop a genuine runaway
+        # (a model looping on messy handwriting), not to bound ordinary answers.
+        num_predict=2048,
+    )
     parsed = _parse_json_from_response(raw)
     if parsed is None:
         return "", raw.strip()
@@ -319,12 +348,20 @@ def extract_page_number(
     config: OllamaVisionConfig,
 ) -> int | None:
     prompt = (
-        "You are a strict OCR transcription engine for scanned exams. "
+        "You are a strict OCR transcription engine for scanned assignments. "
         "Read only the page number visible at the bottom of the image. "
         "Return strict JSON only with this shape: {\"value\": \"...\"} "
-        "where value is the integer page number. If not found, return null."
+        "where value is the integer page number as a string. "
+        "If not found, return an empty string."
     )
-    raw = _generate_with_image(image_path=image_path, prompt=prompt, config=config)
+    raw = _generate_with_image(
+        image_path=image_path,
+        prompt=prompt,
+        config=config,
+        response_format=_VALUE_TEXT_SCHEMA,
+        # A page number is a handful of digits.
+        num_predict=128,
+    )
     parsed = _parse_json_from_response(raw)
     if parsed is not None:
         val = parsed.get("value")
@@ -334,3 +371,47 @@ def extract_page_number(
             except (ValueError, TypeError):
                 pass
     return None
+
+
+_FIRST_PAGE_SCHEMA = {
+    "type": "object",
+    "properties": {"first_page": {"type": "boolean"}},
+    "required": ["first_page"],
+}
+
+
+def page_has_identity_field(
+    *,
+    image_path: str | Path,
+    config: OllamaVisionConfig,
+) -> bool:
+    """Ask the vision model whether a page is a submission's first/cover page.
+
+    A first page carries a student **Name** and/or **Student ID** field or
+    label. Used as the fallback signal for boundary detection when a scan is too
+    poor for Tesseract to read the header. Returns False on any parsing failure
+    (the caller then treats the page as a continuation, the safe default).
+    """
+    prompt = (
+        "You are inspecting one scanned assignment page. Does this page contain "
+        "a student Name field/label or a Student ID (student number) field/label "
+        "near the top — i.e. is it the first or cover page of a submission? "
+        "Return strict JSON only with this shape: {\"first_page\": true} or "
+        "{\"first_page\": false}."
+    )
+    raw = _generate_with_image(
+        image_path=image_path,
+        prompt=prompt,
+        config=config,
+        response_format=_FIRST_PAGE_SCHEMA,
+        # A single boolean.
+        num_predict=128,
+    )
+    parsed = _parse_json_from_response(raw)
+    if parsed is not None:
+        value = parsed.get("first_page")
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "yes", "1"}
+    return False

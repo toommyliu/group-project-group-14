@@ -8,14 +8,13 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from difflib import SequenceMatcher
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal, Mapping
 
-import fitz
-import pytesseract # Added for Tesseract fallback
 import numpy as np
 from PIL import Image
 
 from opengrader.core.source_location import QuestionSourceSegment
+from opengrader.core.roster import load_roster_students
 from opengrader.core.pdf_utils import (
     POINTS_SPEC,
     QUESTION_PREFIX_RE,
@@ -28,12 +27,41 @@ from opengrader.core.pdf_utils import (
     norm_bbox,
 )
 from .student_file import (
+    IdentityCandidate,
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
     render_student_submission_markdown,
 )
-from opengrader.core.ocr.extractor import process_submission_pdf, SubmissionResult, OcrResult
-from opengrader.core.ocr import OcrConfig
+# The structural shape this module consumes lives in its own module because it
+# has more than one producer: the text-layer reader below, and the hand-drawn
+# region maps in `core/region_map.py`. See `template.py` for why that split is
+# load-bearing rather than cosmetic.
+from .template import AssignmentTemplate, FieldLocation
+from .extra_pages import read_extra_pages_for
+from .page_context import infer_extra_pages
+from .transcription import (
+    SOURCE_MATH_MODEL,
+    SOURCE_TESSERACT,
+    SOURCE_TEXT_LAYER,
+    SOURCE_VISION_MODEL,
+    should_escalate,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from opengrader.core.bubble_sheet import BubbleSheetLayout
+    # process_submission_pdf is imported locally at its one call site (in
+    # _build_document_from_ocr_result) instead — opengrader.core.ocr.extractor
+    # imports cv2 and fitz at module scope (~230ms combined cold), and this
+    # whole module is loaded eagerly by core/submissions/__init__.py, so an
+    # eager import here would tax the TUI's startup path for a name only the
+    # OCR extraction strategy calls.
+    from opengrader.core.ocr.extractor import process_submission_pdf
+    from opengrader.core.ocr import OcrConfig
+from opengrader.core.ocr.math_ocr import (
+    DEFAULT_MATH_BACKEND,
+    MathTranscriber,
+    resolve_math_transcriber,
+)
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
     # ensure_model_available, # This is not used in the processor, but in the CLI
@@ -41,11 +69,41 @@ from opengrader.core.ocr.ollama_vlm import (
     extract_question_prompt_and_answer,
 )
 
+
+# ==============================================================================
+# PROGRESS REPORTING
+# ==============================================================================
+
+
+@dataclass
+class ExtractionProgress:
+    """UI-agnostic progress reporter for the extraction pipeline.
+
+    The per-PDF loop lives in the caller (the CLI or the setup-screen worker),
+    so aggregate totals/ETA are the caller's job. Each build call reports how
+    many responses it is about to transcribe for its PDF (``file_start``) and
+    then ticks once per completed response (``response``). Callbacks are
+    optional; a bare ``ExtractionProgress()`` is a no-op, so core code can call
+    the methods unconditionally.
+    """
+
+    on_file_start: Callable[[str, int], None] | None = None
+    on_response: Callable[[str, str], None] | None = None
+
+    def file_start(self, pdf_name: str, response_count: int) -> None:
+        if self.on_file_start is not None:
+            self.on_file_start(pdf_name, response_count)
+
+    def response(self, pdf_name: str, question_id: str) -> None:
+        if self.on_response is not None:
+            self.on_response(pdf_name, question_id)
+
+
 # ==============================================================================
 # CONFIGURATION & REGEX PATTERNS
 # ==============================================================================
 
-# Patterns applied to fitz-extracted text from a PDF text layer (blank exam
+# Patterns applied to fitz-extracted text from a PDF text layer (blank assignment
 # or text-layer student PDF).
 _QUESTION_INLINE_RE = re.compile(
     r"(\d+)\.\s*" + POINTS_SPEC + r"\s*(.+?)(?=\n\s*\d+\.\s*\(|\Z)",
@@ -90,12 +148,6 @@ class _TextLine:
 
 
 @dataclass(frozen=True)
-class _FieldLocation:
-    page: int
-    bbox: tuple[float, float, float, float]  # normalized [x, y, w, h]
-
-
-@dataclass(frozen=True)
 class _ScanLabelBox:
     page: int
     x0: float  # pixel coords in the rendered scan
@@ -119,15 +171,6 @@ class _ScanLayout:
 
 
 @dataclass(frozen=True)
-class _BlankAssignmentTemplate:
-    assignment_title: str
-    name_field: _FieldLocation | None
-    student_id_field: _FieldLocation | None
-    questions: tuple[StudentSubmissionQuestion, ...]
-    total_pages: int
-
-
-@dataclass(frozen=True)
 class _RosterEntry:
     student_id: str
     name: str
@@ -138,15 +181,15 @@ class _RosterEntry:
 # ==============================================================================
 
 def _load_roster(path: Path) -> list[_RosterEntry]:
-    """Load a roster from a tab-separated file."""
-    entries: list[_RosterEntry] = []
-    for line in path.read_text().splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        if len(parts) >= 2:
-            entries.append(_RosterEntry(student_id=parts[0].strip(), name=parts[1].strip()))
-    return entries
+    """Load a roster from a tab-separated file.
+
+    Delegates parsing to the shared ``core.roster`` loader so the extractor and
+    the needs-review engine never drift on what a roster file looks like.
+    """
+    return [
+        _RosterEntry(student_id=student.student_id, name=student.name)
+        for student in load_roster_students(path)
+    ]
 
 
 def _match_roster(student_id: str, name: str, roster: list[_RosterEntry]) -> tuple[_RosterEntry, float] | None:
@@ -165,6 +208,505 @@ def _match_roster(student_id: str, name: str, roster: list[_RosterEntry]) -> tup
     return (best_entry, best_score) if best_entry else None
 
 
+# A student id is "usable" only if the extractor actually read digits; a blank
+# or too-short value means we should fall back to matching on the name alone.
+def _has_usable_id(student_id: str) -> bool:
+    return len(re.sub(r"\D", "", student_id or "")) >= 4
+
+
+# Resolutions to try when reading a sheet's QR, cheapest first. 150 DPI decodes
+# a short payload fine and is what this always used, but a *scrambled* sheet's
+# code also carries a form key, and the denser symbol that produces does not
+# reliably survive 150 DPI — one sheet in five failed to decode in testing while
+# reading perfectly at 200. Escalating only on failure keeps the common case as
+# cheap as it was, and mirrors the cheapest-first cascade in `reorder.py`.
+_QR_READ_DPIS = (150, 300)
+
+
+def _read_qr_code(pdf_path: Path):  # noqa: ANN202 - OpengraderCode | None
+    """Decode the Opengrader QR on a scan's first page, or ``None``.
+
+    Best-effort: any failure, or a sheet with no Opengrader QR, yields ``None``
+    so extraction falls back to the OCR identity paths.
+    """
+    from opengrader.core.ocr.qr_reader import read_code_from_image
+
+    # Import lazily: this whole module is extraction-time only, and fitz
+    # (PyMuPDF, ~110ms cold) has no reason to load just because the TUI
+    # imports opengrader.core.submissions on startup.
+    import fitz
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        try:
+            if len(doc) == 0:
+                return None
+            for dpi in _QR_READ_DPIS:
+                image, _, _ = render_page_to_image(doc, 0, dpi=dpi)
+                code = read_code_from_image(image)
+                if code is not None:
+                    return code
+        finally:
+            doc.close()
+    except Exception:
+        return None
+    return None
+
+
+def _read_qr_student_id(pdf_path: Path) -> str | None:
+    """Read a personalized-template student id from the scan's first page QR."""
+    code = _read_qr_code(pdf_path)
+    if code is not None and code.student_id:
+        return code.student_id
+    return None
+
+
+def _read_qr_metadata(pdf_path: Path) -> tuple[str | None, str | None, str | None]:
+    """Read ``(student_id, version, form_key)`` off the sheet's first-page QR.
+
+    The bubble-sheet path has no printed title or version text to OCR — the
+    sheet is deliberately almost all circles — so the QR is where the
+    assignment version comes from, and on a scrambled batch it is also the only
+    machine-readable record of which question order this sheet was printed in.
+    Best-effort like its sibling: a QR-less sheet just yields all ``None``.
+    """
+    code = _read_qr_code(pdf_path)
+    if code is None:
+        return None, None, None
+    return (code.student_id or None), (code.version or None), (code.form or None)
+
+
+def _layout_for_form(
+    layout: "BubbleSheetLayout", form_key: str | None
+) -> "BubbleSheetLayout":
+    """Rebuild the layout in the question order *this* sheet was printed in.
+
+    A scrambled batch prints every sheet differently, so the shared layout the
+    caller supplied describes none of them. The permutation is re-derived from
+    the sheet's own form key rather than looked up in a sidecar map — the sheet
+    carries the means to read itself, so nothing can be lost or fall out of
+    sync with a re-generated PDF.
+
+    Companion questions and answer-key order ride along unchanged: scrambling
+    changes only where a row is printed, never what the submission ends up
+    saying.
+    """
+    if not form_key:
+        return layout
+
+    from opengrader.core.bubble_sheet import (
+        BubbleQuestion,
+        build_bubble_sheet_layout,
+        shuffle_questions,
+    )
+
+    questions = [
+        BubbleQuestion(
+            question_id=row.question_id,
+            choice_labels=row.choice_labels(),
+            points=row.points,
+        )
+        for row in layout.rows
+    ]
+    return build_bubble_sheet_layout(
+        shuffle_questions(questions, form_key),
+        config=layout.config,
+        assignment_title=layout.assignment_title,
+        companions=layout.companions,
+        question_order=layout.question_order,
+    )
+
+
+def _build_document_from_bubble_sheet(
+    *,
+    pdf_path: Path,
+    submission_dir: Path,
+    layout: "BubbleSheetLayout",
+    progress_callback: Callable[[str], None],
+    qr_student_id: str | None,
+    shuffled_batch: bool = False,
+    form_key_override: str | None = None,
+) -> StudentSubmissionDocument:
+    """OMR extraction path: read a generated answer sheet's filled bubbles.
+
+    A thin adapter over `submissions/bubble_extraction.py`, which does the
+    work; this exists so the mode sits beside the other three at the one place
+    that chooses between them. Warnings (an unregistered page) are surfaced
+    through the progress callback rather than raised: the questions on a page
+    that could not be read come back blank and unverified, which puts them in
+    the needs-review queue instead of discarding the rest of the submission.
+    """
+    from opengrader.core.submissions.bubble_extraction import build_bubble_sheet_document
+
+    _qr_id, qr_version, form_key = _read_qr_metadata(pdf_path)
+    if form_key_override:
+        # A human read the form code off the paper because the QR would not
+        # scan. Their reading wins: it is the only source left, and refusing it
+        # would leave the sheet ungradable.
+        form_key = form_key_override
+    if form_key:
+        progress_callback(f"Scrambled sheet: form {form_key}")
+    elif shuffled_batch:
+        # The caller said these sheets are scrambled, and this one will not say
+        # which form it is. Reading it against the unscrambled layout would map
+        # every answer to the wrong question and report a confident, completely
+        # wrong set of grades — the one failure this whole design exists to
+        # prevent. Refuse the sheet instead: the questions come back unread and
+        # land in the needs-review queue, where a human can read the printed
+        # form key off the paper.
+        progress_callback(
+            f"Warning: {pdf_path.name} is from a scrambled batch but its form "
+            "key could not be read, so its question order is unknown. Left "
+            "unread — check the scan, or read the printed 'Form' code off the "
+            "sheet and re-extract it on its own with --bubble-form."
+        )
+        return build_bubble_sheet_document(
+            pdf_path,
+            submission_dir,
+            layout,
+            assignment_title=layout.assignment_title,
+            assignment_version=qr_version,
+            student_id=qr_student_id or "",
+            read_marks=False,
+            progress_callback=progress_callback,
+        ).document
+
+    sheet_layout = _layout_for_form(layout, form_key)
+    result = build_bubble_sheet_document(
+        pdf_path,
+        submission_dir,
+        sheet_layout,
+        assignment_title=layout.assignment_title,
+        assignment_version=qr_version,
+        student_id=qr_student_id or "",
+        progress_callback=progress_callback,
+    )
+    for warning in result.warnings:
+        progress_callback(f"Warning: {warning}")
+    if result.ambiguous_count:
+        progress_callback(
+            f"{result.ambiguous_count} question(s) had more than one bubble filled "
+            "and were left blank for review."
+        )
+    return result.document
+
+
+@dataclass(frozen=True)
+class RosterMatch:
+    """Outcome of resolving one submission's identity against the roster.
+
+    ``status`` is one of:
+      * ``"matched"`` — ``entry`` is the confident single match.
+      * ``"ambiguous"`` — the name matched several roster people (duplicate
+        names); ``candidates`` holds them and ``entry`` is ``None`` so the
+        caller never guesses.
+      * ``"unmatched"`` — no confident match; keep whatever was extracted.
+
+    ``score`` is the 0-1 similarity that produced a ``"matched"`` result. It is
+    returned rather than discarded because it is the *only* measured statement
+    of how sure this identity is: once a roster match lands, the stored name and
+    id are the roster's own, so an OCR confidence in the handwriting no longer
+    describes the value on disk. A match that barely cleared the threshold is
+    exactly the one a human should look at.
+    """
+
+    status: Literal["matched", "ambiguous", "unmatched"]
+    entry: _RosterEntry | None = None
+    candidates: tuple[_RosterEntry, ...] = ()
+    score: float | None = None
+
+
+def resolve_student_identity(
+    student_id: str,
+    name: str,
+    roster: list[_RosterEntry],
+    *,
+    combined_threshold: float = 0.6,
+    name_threshold: float = 0.85,
+) -> RosterMatch:
+    """Resolve a student's roster identity, preferring the id when present.
+
+    When the extractor read a usable id we keep the existing combined fuzzy
+    match. When only a name is available (the common OCR case where the id box
+    is blank or unreadable) we match on the name alone and, crucially, refuse to
+    pick when several roster people share that name — that ambiguity is returned
+    for the caller to resolve rather than silently mis-assigning a grade.
+    """
+    student_id = (student_id or "").strip()
+    name = (name or "").strip()
+
+    if _has_usable_id(student_id):
+        combined = _match_roster(student_id, name, roster)
+        if combined is not None and combined[1] >= combined_threshold:
+            return RosterMatch(
+                status="matched", entry=combined[0], score=combined[1]
+            )
+
+    if name:
+        scored = sorted(
+            (
+                (
+                    entry,
+                    SequenceMatcher(None, name.lower(), entry.name.lower()).ratio(),
+                )
+                for entry in roster
+            ),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        # De-dupe by id so a roster that lists the same person twice is not
+        # mistaken for a genuine duplicate-name collision. The best score per id
+        # is kept alongside, since that is what a matched result reports as its
+        # confidence.
+        distinct: dict[str, _RosterEntry] = {}
+        best_by_id: dict[str, float] = {}
+        for entry, score in scored:
+            if score < name_threshold:
+                continue
+            distinct.setdefault(entry.student_id, entry)
+            best_by_id.setdefault(entry.student_id, score)
+        if len(distinct) == 1:
+            entry = next(iter(distinct.values()))
+            return RosterMatch(
+                status="matched", entry=entry, score=best_by_id[entry.student_id]
+            )
+        if len(distinct) > 1:
+            return RosterMatch(
+                status="ambiguous", candidates=tuple(distinct.values())
+            )
+
+    return RosterMatch(status="unmatched")
+
+
+# Given the ambiguous submission and the roster people who share its name,
+# return the chosen entry (or None to leave it unresolved). Injected by callers
+# — the extractor CLI uses it to prompt interactively — so core stays pure and
+# non-interactive by default.
+AmbiguityResolver = Callable[
+    [StudentSubmissionDocument, "tuple[_RosterEntry, ...]"],
+    "_RosterEntry | None",
+]
+
+
+def _apply_roster_identity(
+    document: StudentSubmissionDocument,
+    roster: list[_RosterEntry] | None,
+    progress_callback: Callable[[str], None],
+    resolve_ambiguous: "AmbiguityResolver | None" = None,
+    qr_student_id: str | None = None,
+) -> StudentSubmissionDocument:
+    """Fill a submission's student id/name from the roster where confident.
+
+    When ``qr_student_id`` is present (read from the sheet's QR code) it is
+    **authoritative**: the id is written directly, and — if a roster is supplied
+    — the matching roster entry supplies the canonical name. This bypasses fuzzy
+    name matching and duplicate-name ambiguity entirely, which is the whole point
+    of the personalized-QR workflow. An id printed on the sheet but absent from
+    the roster is still trusted (the roster may be stale).
+
+    Otherwise: unique matches are written in. Duplicate-name collisions are
+    offered to ``resolve_ambiguous`` (if provided) so an interactive caller can
+    pick the right student; otherwise they are reported and left blank so the
+    missing id surfaces for manual assignment (e.g. in the TUI needs-review
+    queue) instead of being guessed.
+
+    **Identity confidence.** Whatever this writes, it also records how sure that
+    value is (``name_confidence``/``id_confidence``, 0-100), because once an
+    identity has been *resolved* the OCR confidence in the handwriting no longer
+    describes what is stored. A QR id is exact (the symbol is error-corrected,
+    so it either decodes or it doesn't) and a roster name pulled alongside it is
+    the roster's own, so both are 100. A fuzzy roster match records the match's
+    own similarity, which is the one number that says a 62% match and a 98% one
+    are not the same claim.
+    """
+    if qr_student_id:
+        entry = None
+        for candidate in roster or []:
+            if candidate.student_id == qr_student_id:
+                entry = candidate
+                break
+        if entry is not None:
+            progress_callback(f"  QR: identified student id {qr_student_id}.")
+            return replace(
+                document,
+                student_name=entry.name,
+                student_id=entry.student_id,
+                name_confidence=100.0,
+                id_confidence=100.0,
+            )
+        progress_callback(
+            f"  QR: student id {qr_student_id} (not on roster; trusting the code)."
+        )
+        # Only the id is verified here — the name is still whatever was read off
+        # the sheet, so its confidence is left exactly as the reader set it.
+        return replace(document, student_id=qr_student_id, id_confidence=100.0)
+
+    if not roster:
+        return document
+
+    resolution = resolve_student_identity(
+        document.student_id, document.student_name, roster
+    )
+    if resolution.status == "matched" and resolution.entry is not None:
+        entry = resolution.entry
+        if document.student_id != entry.student_id:
+            progress_callback(
+                f"  Roster: matched '{document.student_name or entry.name}' "
+                f"-> id {entry.student_id}."
+            )
+        match_confidence = (
+            round(resolution.score * 100, 1) if resolution.score is not None else None
+        )
+        return replace(
+            document,
+            student_name=entry.name,
+            student_id=entry.student_id,
+            name_confidence=match_confidence,
+            id_confidence=match_confidence,
+        )
+    if resolution.status == "ambiguous":
+        if resolve_ambiguous is not None:
+            chosen = resolve_ambiguous(document, resolution.candidates)
+            if chosen is not None:
+                progress_callback(
+                    f"  Roster: assigned id {chosen.student_id} for "
+                    f"'{document.student_name}'."
+                )
+                # A human picked from the exact candidate set, which is the
+                # strongest resolution there is — stronger than any similarity
+                # score, since the tie is precisely what a score cannot settle.
+                return replace(
+                    document,
+                    student_name=chosen.name,
+                    student_id=chosen.student_id,
+                    name_confidence=100.0,
+                    id_confidence=100.0,
+                )
+        ids = ", ".join(entry.student_id for entry in resolution.candidates)
+        progress_callback(
+            f"  Roster: '{document.student_name}' matches multiple students "
+            f"({ids}); left blank for manual assignment."
+        )
+        # Record the tied roster people so the review queue can offer them as a
+        # pick list — the human resolves from the exact candidate set the
+        # matcher considered rather than re-typing an id.
+        return replace(
+            document,
+            id_candidates=tuple(
+                IdentityCandidate(student_id=entry.student_id, name=entry.name)
+                for entry in resolution.candidates
+            ),
+        )
+    return document
+
+
+# Section stamped on a mixed-stack submission whose (resolved) student id was in
+# no supplied roster — surfaces in the review queue as a routing miss instead of
+# being silently dropped.
+UNASSIGNED_SECTION = "unassigned"
+
+
+def _apply_section(
+    document: StudentSubmissionDocument,
+    default_section: str | None,
+    section_by_id: Mapping[str, str] | None,
+    progress_callback: Callable[[str], None],
+) -> StudentSubmissionDocument:
+    """Stamp the class section on a submission, if section routing is in effect.
+
+    Two mutually exclusive modes, mirroring the extractor's two workflows:
+
+    * ``default_section`` (one-stack-per-section): the whole run is known to be
+      one section, so every submission is tagged with it — even one whose id
+      couldn't be read, since the physical stack settles the section.
+    * ``section_by_id`` (one mixed stack, routed by roster membership): the
+      section is looked up by the id `_apply_roster_identity` just resolved; an
+      id in no roster is tagged ``UNASSIGNED_SECTION`` and reported.
+
+    A no-op (returns the document unchanged) when neither is supplied.
+    """
+    if default_section is not None:
+        return replace(document, section=default_section)
+    if section_by_id is not None:
+        student_id = (document.student_id or "").strip()
+        section = section_by_id.get(student_id) if student_id else None
+        if section is None:
+            progress_callback(
+                f"  Section: '{document.student_name or student_id or 'unknown'}' "
+                f"not found in any roster; tagged '{UNASSIGNED_SECTION}'."
+            )
+            return replace(document, section=UNASSIGNED_SECTION)
+        return replace(document, section=section)
+    return document
+
+
+def _pdf_page_count(pdf_path: Path) -> int:
+    """Page count of a PDF, or 0 when it can't be opened.
+
+    Only used to decide which pages a crop never covered, so an unreadable file
+    means "don't guess" rather than an error — extraction has already produced
+    the grades-bearing output by the time this runs.
+    """
+    import fitz  # see _read_qr_code for why this is deferred
+
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            return len(doc)
+    except Exception:
+        return 0
+
+
+def _apply_extra_pages(
+    document: StudentSubmissionDocument,
+    pdf_path: Path,
+    extra_pages: tuple[int, ...] | None,
+) -> StudentSubmissionDocument:
+    """Record the source pages that no question crop covers.
+
+    Three sources, most authoritative first:
+
+    1. an explicit ``extra_pages`` from the caller;
+    2. the splitter's sidecar for this PDF (``--extra-work-pages``), where an
+       empty list is a real answer ("checked, none") and is honoured as such;
+    3. otherwise, inference from page coverage — any page the extractor cut no
+       crop from. This is what makes a "continued on back" page reachable on
+       exams that were never split with ``--extra-work-pages``.
+
+    A submission with nothing extra is left untouched, so its markdown keeps the
+    exact shape it had before this feature existed.
+    """
+    if extra_pages is None:
+        extra_pages = read_extra_pages_for(pdf_path)
+    if extra_pages is None:
+        segments = tuple(
+            segment
+            for question in document.questions
+            for segment in question.source_segments
+        )
+        extra_pages = infer_extra_pages(_pdf_page_count(pdf_path), segments)
+    if not extra_pages:
+        return document
+    return replace(document, extra_pages=tuple(sorted({int(p) for p in extra_pages})))
+
+
+def _finalize_submission_document(
+    document: StudentSubmissionDocument,
+    pdf_path: Path,
+    markdown_path: Path,
+    extra_pages: tuple[int, ...] | None,
+) -> tuple[StudentSubmissionDocument, Path]:
+    """Stamp extra work pages onto a built document and (re)write its markdown.
+
+    The single tail every extraction path funnels through, so the three build
+    strategies can't drift on this. Rendering is round-trip safe, so rewriting a
+    file a path already wrote produces the same bytes plus the new frontmatter
+    key (and nothing at all when there are no extra pages).
+    """
+    document = _apply_extra_pages(document, pdf_path, extra_pages)
+    markdown_path.write_text(render_student_submission_markdown(document))
+    return document, markdown_path
+
+
 def _question_number(question: StudentSubmissionQuestion) -> int | None:
     match = re.fullmatch(r"q(\d+)", question.question_id)
     return int(match.group(1)) if match is not None else None
@@ -176,6 +718,8 @@ def _render_scan_all_pages(
     dpi: int = 300,
 ) -> dict[int, Image.Image]:
     """Render every page of a scan PDF as PIL images, keyed by 1-indexed page."""
+    import fitz  # see _read_qr_code for why this is deferred
+
     rendered: dict[int, Image.Image] = {}
     doc = fitz.open(str(scan_pdf))
     try:
@@ -381,8 +925,8 @@ def _field_location_from_scan_label(
     line_boxes: list[tuple[float, float, float]],
     page_image: Image.Image | None = None,
     tight_top: bool = False,
-) -> _FieldLocation:
-    """Convert a scan-detected label box into a normalized _FieldLocation.
+) -> FieldLocation:
+    """Convert a scan-detected label box into a normalized FieldLocation.
 
     The field starts just after the label horizontally and extends to
     either another label on the same horizontal band (the typical
@@ -447,7 +991,7 @@ def _field_location_from_scan_label(
     # handwriting descenders (g, p, q, y, j). Clamped to the page bottom.
     y1_px = min(float(label.page_h), max(y1_px, label.y1 + vertical_pad))
 
-    return _FieldLocation(
+    return FieldLocation(
         page=label.page,
         bbox=(
             round(x0_px / label.page_w, 4),
@@ -467,7 +1011,7 @@ def _response_bbox_from_positions(
 
     The next question's top — used as this question's bbox bottom — is found
     in the supplied positions dict, which can hold scan-detected positions
-    for the questions whose prefixes were OCR'd on the scan and blank-exam
+    for the questions whose prefixes were OCR'd on the scan and blank-assignment
     positions (already shifted by the page's scan offset) for the rest.
     """
     position = positions.get(qnum)
@@ -504,6 +1048,8 @@ def _response_bbox_from_positions(
 
 def _read_pdf_lines(pdf_path: Path) -> list[_TextLine]:
     """Return every non-empty text line in the PDF with its page bbox."""
+    import fitz  # see _read_qr_code for why this is deferred
+
     doc = fitz.open(str(pdf_path))
     try:
         lines: list[_TextLine] = []
@@ -539,7 +1085,7 @@ def _ensure_text_layer(lines: list[_TextLine], pdf_path: Path) -> None:
     if not any(line.text.strip() for line in lines):
         raise ValueError(
             f"no text layer found in PDF: {pdf_path}. "
-            "Pass --blank-exam PATH.pdf to apply a blank-exam template instead, "
+            "Pass --blank-template PATH.pdf to apply a blank assignment template instead, "
             "or run an OCR step first."
         )
 
@@ -566,27 +1112,65 @@ def _norm_bbox(
     )
 
 
+# Markers a born-digital submission commonly uses to introduce the typed
+# answer ("Answer:", "Ans.", "Response -", "Solution:"), anchored to a line
+# start so a mention inside the prompt doesn't trip it.
+_ANSWER_MARKER_RE = re.compile(
+    r"(?im)^\s*(?:answer|ans|response|solution)\b\s*[:.\-]?\s*"
+)
+
+
+def _split_prompt_and_response(block: str) -> tuple[str, str]:
+    """Split a question text block into (prompt, typed response).
+
+    Born-digital submissions (e.g. a PDF exported from Word) carry the
+    student's typed answer in the text layer right after each question. We
+    separate it from the prompt on a best-effort, conservative basis:
+
+    1. an explicit answer marker line ("Answer:", "Response -", …), else
+    2. the first blank line (prompt paragraph vs. the typed answer below it).
+
+    When neither is present we keep the whole block as the prompt and leave the
+    response empty rather than guess — an empty response surfaces in the
+    needs-review queue, which is safer than polluting the prompt with the
+    answer (or vice versa).
+    """
+    marker = _ANSWER_MARKER_RE.search(block)
+    if marker is not None:
+        return block[: marker.start()], block[marker.end() :]
+    paragraphs = re.split(r"\n\s*\n", block, maxsplit=1)
+    if len(paragraphs) == 2:
+        return paragraphs[0], paragraphs[1]
+    return block, ""
+
+
 def _extract_questions_from_text(lines: list[_TextLine]) -> list[StudentSubmissionQuestion]:
-    """Extract prompts, points, and normalized bboxes from PDF text lines."""
+    """Extract prompts, typed responses, points, and bboxes from PDF text lines."""
     all_text = "\n".join(l.text for l in lines)
     questions: list[StudentSubmissionQuestion] = []
-    
+
     for match in _QUESTION_INLINE_RE.finditer(all_text):
         qnum_str, pts_str, qtext = match.groups()
         qnum = int(qnum_str)
-        
+
+        prompt_text, response_text = _split_prompt_and_response(qtext)
+
         # Find the physical line matching the start of this question to get bbox
         start_line = next((l for l in lines if re.search(rf"^{qnum_str}\s*\.", l.text.strip())), lines[0])
         bbox = _norm_bbox(start_line)
 
+        cleaned_response = re.sub(r"\s+", " ", response_text).strip()
         questions.append(
             StudentSubmissionQuestion(
                 question_id=f"q{qnum}",
-                prompt=re.sub(r"\s+", " ", qtext).strip(),
+                prompt=re.sub(r"\s+", " ", prompt_text).strip(),
                 possible_points=float(pts_str),
                 response_image_path=None,
-                response_text="",
+                response_text=cleaned_response,
                 source_segments=(QuestionSourceSegment(page_number=start_line.page, bbox_norm=bbox),),
+                # Read verbatim from the PDF text layer — exact, so full confidence.
+                response_confidence=100.0 if cleaned_response else None,
+                response_source=SOURCE_TEXT_LAYER if cleaned_response else None,
             )
         )
     return questions
@@ -594,6 +1178,11 @@ def _extract_questions_from_text(lines: list[_TextLine]) -> list[StudentSubmissi
 
 def _ocr_image(image_path: Path, *, psm: int = 6) -> str:
     """Perform Tesseract OCR on an image path."""
+    # Import lazily: pytesseract (~110ms cold) is extraction-time only, like
+    # fitz above (see _read_qr_code) — this whole module is the extraction
+    # pipeline, never touched by the TUI's parse/render/grade path.
+    import pytesseract
+
     try:
         with Image.open(image_path) as img:
             return pytesseract.image_to_string(img, config=f"--psm {psm}").strip()
@@ -601,8 +1190,122 @@ def _ocr_image(image_path: Path, *, psm: int = 6) -> str:
         return ""
 
 
+def _ocr_image_with_confidence(
+    image_path: Path, *, psm: int = 6
+) -> tuple[str, float | None]:
+    """OCR an image, returning the text and a mean word confidence (0-100).
+
+    Aggregates Tesseract's per-word confidence into one number for the crop —
+    the signal behind the grade screen's confidence chip and the low-confidence
+    review flag. Words Tesseract reports with no confidence (``conf == -1``) or
+    empty text are ignored; when nothing readable remains the confidence is
+    ``None`` (an empty response, handled elsewhere), never a misleading zero.
+    """
+    import pytesseract  # see _ocr_image for why this is deferred
+
+    try:
+        with Image.open(image_path) as img:
+            data = pytesseract.image_to_data(
+                img, config=f"--psm {psm}", output_type=pytesseract.Output.DICT
+            )
+    except Exception:
+        return "", None
+
+    words: list[str] = []
+    confidences: list[float] = []
+    for text, conf in zip(data.get("text", []), data.get("conf", [])):
+        token = str(text).strip()
+        if not token:
+            continue
+        try:
+            conf_value = float(conf)
+        except (TypeError, ValueError):
+            continue
+        words.append(token)
+        if conf_value >= 0:
+            confidences.append(conf_value)
+
+    if not words:
+        return "", None
+    mean_confidence = sum(confidences) / len(confidences) if confidences else None
+    return " ".join(words), mean_confidence
+
+
+def _ocr_field_with_confidence(
+    image_path: Path, *, digits: bool
+) -> tuple[str, float | None]:
+    """Read a name/id field crop, returning the text and its OCR confidence.
+
+    The field counterpart of :func:`_ocr_image_with_confidence`, and the source
+    of the ``student_name_confidence``/``student_id_confidence`` frontmatter.
+    The id variant keeps the existing multi-PSM digit sweep (a handwritten id is
+    read far better with a digit whitelist) and measures the pass that produced
+    the text, so the recorded number describes the reading that was actually
+    kept rather than a second, differently-configured one.
+
+    ``None`` confidence means *unmeasured*, never *bad* — the same convention
+    the per-response confidence uses for a VLM transcription.
+    """
+    if not digits:
+        return _ocr_image_with_confidence(image_path, psm=7)
+
+    digit_only = "tessedit_char_whitelist=0123456789"
+    best_text = ""
+    best_confidence: float | None = None
+    for config_str in (
+        f"--psm 11 -c {digit_only}",
+        f"--psm 7 -c {digit_only}",
+        f"--psm 6 -c {digit_only}",
+    ):
+        text, confidence = _ocr_data_with_confidence(image_path, config_str)
+        digits_only = re.sub(r"\D", "", text)
+        # Longest run of digits wins, matching `_ocr_image_digits`'s existing
+        # preference — a partial read of an id is worse than a fuller one.
+        if len(digits_only) > len(best_text):
+            best_text = digits_only
+            best_confidence = confidence
+    return best_text, best_confidence
+
+
+def _ocr_data_with_confidence(
+    image_path: Path, config: str
+) -> tuple[str, float | None]:
+    """Run one Tesseract pass, returning its text and mean word confidence."""
+    import pytesseract  # see _ocr_image for why this is deferred
+
+    try:
+        with Image.open(image_path) as img:
+            data = pytesseract.image_to_data(
+                img, config=config, output_type=pytesseract.Output.DICT
+            )
+    except Exception:
+        return "", None
+
+    words: list[str] = []
+    confidences: list[float] = []
+    for text, conf in zip(data.get("text", []), data.get("conf", [])):
+        token = str(text).strip()
+        if not token:
+            continue
+        try:
+            conf_value = float(conf)
+        except (TypeError, ValueError):
+            continue
+        words.append(token)
+        if conf_value >= 0:
+            confidences.append(conf_value)
+    if not words:
+        return "", None
+    return (
+        " ".join(words),
+        sum(confidences) / len(confidences) if confidences else None,
+    )
+
+
 def _ocr_image_digits(image_path: Path) -> str:
     """Perform Tesseract OCR on an image path, optimized for digits."""
+    import pytesseract  # see _ocr_image for why this is deferred
+
     digit_only = "tessedit_char_whitelist=0123456789"
     best = ""
     # Try different PSM modes for robustness
@@ -624,10 +1327,12 @@ def _ocr_image_digits(image_path: Path) -> str:
 # STRATEGY HELPERS
 # ==============================================================================
 
-def _load_blank_assignment_template(pdf_path: Path) -> _BlankAssignmentTemplate:
+def _load_blank_assignment_template(pdf_path: Path) -> AssignmentTemplate:
     """Extract the structural template from a blank assignment PDF."""
     lines = _read_pdf_lines(pdf_path)
     _ensure_text_layer(lines, pdf_path)
+
+    import fitz  # see _read_qr_code for why this is deferred
 
     with fitz.open(str(pdf_path)) as doc:
         total_pages = len(doc)
@@ -636,11 +1341,11 @@ def _load_blank_assignment_template(pdf_path: Path) -> _BlankAssignmentTemplate:
     id_field = None
     for line in lines:
         if _NAME_LABEL_RE.match(line.text):
-            name_field = _FieldLocation(line.page, _norm_bbox(line))
+            name_field = FieldLocation(line.page, _norm_bbox(line))
         elif _ID_LABEL_RE.match(line.text):
-            id_field = _FieldLocation(line.page, _norm_bbox(line))
+            id_field = FieldLocation(line.page, _norm_bbox(line))
 
-    return _BlankAssignmentTemplate(
+    return AssignmentTemplate(
         assignment_title=_assignment_title_from_lines(lines),
         name_field=name_field,
         student_id_field=id_field,
@@ -651,11 +1356,11 @@ def _load_blank_assignment_template(pdf_path: Path) -> _BlankAssignmentTemplate:
 def _select_field(
     label: _ScanLabelBox | None,
     right_boundary: _ScanLabelBox | None,
-    template_field: _FieldLocation | None,
+    template_field: FieldLocation | None,
     line_boxes_by_page: dict[int, list[tuple[float, float, float]]],
     rendered_pages: dict[int, Image.Image],
     tight_top: bool = False,
-) -> _FieldLocation | None:
+) -> FieldLocation | None:
     if label is not None:
         return _field_location_from_scan_label(
             label,
@@ -668,7 +1373,7 @@ def _select_field(
 
 def _save_field_crop(
     image: Image.Image,
-    field_loc: _FieldLocation,
+    field_loc: FieldLocation,
     output_dir: Path,
     prefix: str,
 ) -> str:
@@ -679,7 +1384,7 @@ def _save_field_crop(
     return str(Path(output_dir.name) / filename)
 
 def _scan_offset_by_page(
-    template: _BlankAssignmentTemplate,
+    template: AssignmentTemplate,
     scan_layout: _ScanLayout,
 ) -> dict[int, float]:
     """Calculate median vertical shift per page between template and scan."""
@@ -695,7 +1400,7 @@ def _scan_offset_by_page(
     return calculate_page_offsets(deltas)
 
 def _combined_question_positions(
-    template: _BlankAssignmentTemplate,
+    template: AssignmentTemplate,
     scan_layout: _ScanLayout,
     page_offsets: dict[int, float],
 ) -> dict[int, tuple[int, float]]:
@@ -742,6 +1447,72 @@ def _question_with_scan_crop(
         source_segments=(QuestionSourceSegment(page_number=page_num, bbox_norm=bbox),),
     )
 
+
+def _question_with_mapped_crop(
+    question: StudentSubmissionQuestion,
+    rendered_pages: dict[int, Image.Image],
+    responses_dir: Path,
+) -> StudentSubmissionQuestion:
+    """Crop a question whose region an instructor drew (``exact_regions``).
+
+    The counterpart of :func:`_question_with_scan_crop`, and the whole reason
+    ``AssignmentTemplate.exact_regions`` exists. Nothing is inferred here: the
+    recorded rectangles *are* the answer regions, so they are cut out verbatim.
+    No expansion, no whitespace trimming, no next-question bottom edge — the box
+    the instructor drew is what they will see in the grading TUI, which is the
+    only way "draw it once and check the preview" can be a trustworthy promise.
+
+    A question mapped across a page break carries continuation segments; those
+    are cropped separately and stacked vertically into the single response image
+    the rest of the pipeline expects, exactly as the OCR path does for a
+    detected continuation. ``source_segments`` keeps every segment, so the grade
+    screen's whole-page view still highlights both halves on their own pages.
+
+    A segment whose page is missing from the scan (a short scan, or a map for a
+    longer exam) is skipped rather than fatal — one lost answer belongs in the
+    review queue, not in a crash that loses the other 39.
+    """
+    segments = [
+        segment
+        for segment in question.source_segments
+        if segment.page_number in rendered_pages
+    ]
+    crops: list[Image.Image] = []
+    kept: list[QuestionSourceSegment] = []
+    for segment in segments:
+        crop = crop_norm(rendered_pages[segment.page_number], segment.bbox_norm)
+        if crop is None or crop.width <= 0 or crop.height <= 0:
+            continue
+        crops.append(crop.convert("RGB"))
+        kept.append(segment)
+
+    if not crops:
+        return question
+
+    if len(crops) == 1:
+        stitched = crops[0]
+    else:
+        width = max(crop.width for crop in crops)
+        height = sum(crop.height for crop in crops)
+        # White, not black: the page under these crops is paper, and a black
+        # gutter beside a narrower continuation strip reads as ink to both
+        # Tesseract and the vision model.
+        stitched = Image.new("RGB", (width, height), color=(255, 255, 255))
+        y = 0
+        for crop in crops:
+            stitched.paste(crop, (0, y))
+            y += crop.height
+
+    responses_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{question.question_id}.png"
+    stitched.save(responses_dir / filename)
+    return replace(
+        question,
+        response_image_path=str(Path(responses_dir.name) / filename),
+        source_segments=tuple(kept),
+    )
+
+
 def _source_pdf_relpath(pdf_path: Path, submission_dir: Path) -> str:
     try:
         return os.path.relpath(pdf_path, submission_dir)
@@ -760,47 +1531,240 @@ def _render_submission_markdown(
 # STRATEGY: EXTRACT FROM RAW TEMPLATE OR TEXT LAYERS
 # ==============================================================================
 
+
+def _fill_responses_with_vlm(
+    questions: list[StudentSubmissionQuestion],
+    submission_dir: Path,
+    ollama_config: OllamaVisionConfig,
+    *,
+    pdf_name: str,
+    progress: ExtractionProgress,
+    progress_callback: Callable[[str], None],
+    math_latex: bool = False,
+    math_transcriber: "MathTranscriber | None" = None,
+    escalate_floor: float | None = None,
+) -> list[StudentSubmissionQuestion]:
+    """Transcribe each question's response crop into ``response_text``.
+
+    Two orders, one function, because the *reading* rules (what counts as a
+    result, what each reader's confidence means, what happens when one returns
+    nothing) are identical and only the sequence differs:
+
+    * **model-first** (the default, ``escalate_floor=None``): the maths backend
+      if one was chosen, then the Ollama vision model, then Tesseract as the
+      fallback. Every crop costs a model call.
+    * **escalated** (``escalate_floor`` set, ``--llm-escalate``): Tesseract
+      reads every crop first — fast, local, and *measured* — and a model is
+      asked only about the answers it read badly (see
+      :func:`~core.submissions.transcription.should_escalate`). On a typical
+      exam most answers are short and legible, so this is the difference
+      between one model call per answer and one per *problem* answer.
+
+    The escalated order is safe for exactly one reason, and it is the same rule
+    the maths backend already follows: **a reader that returns nothing never
+    costs an answer.** An escalation whose model reads nothing keeps the OCR
+    text and the OCR confidence, so the worst case of escalating is the time it
+    took. The best case is a handwritten answer Tesseract mangled being
+    replaced by a model that can read it — which is exactly the population the
+    review queue was going to hand to a human.
+
+    Questions that already carry response text, or that have no crop image, are
+    left untouched. Ticks the progress reporter once per transcribed question.
+    Every reading records **which reader produced it** (`response_source`), so
+    the choice made here is auditable on disk and measurable afterwards by
+    `transcribe-eval`.
+    """
+    filled: list[StudentSubmissionQuestion] = []
+    for question in questions:
+        response_text = question.response_text
+        response_confidence = question.response_confidence
+        response_source = question.response_source
+        if not response_text and question.response_image_path:
+            crop_path = submission_dir / question.response_image_path
+            reading = _transcribe_crop(
+                crop_path,
+                question_id=question.question_id,
+                ollama_config=ollama_config,
+                progress_callback=progress_callback,
+                math_latex=math_latex,
+                math_transcriber=math_transcriber,
+                escalate_floor=escalate_floor,
+            )
+            response_text, response_confidence, response_source = reading
+            progress.response(pdf_name, question.question_id)
+        filled.append(
+            replace(
+                question,
+                response_text=response_text,
+                response_confidence=response_confidence,
+                response_source=response_source,
+            )
+        )
+    return filled
+
+
+def _transcribe_crop(
+    crop_path: Path,
+    *,
+    question_id: str,
+    ollama_config: OllamaVisionConfig | None,
+    progress_callback: Callable[[str], None],
+    math_latex: bool = False,
+    math_transcriber: "MathTranscriber | None" = None,
+    escalate_floor: float | None = None,
+) -> tuple[str, float | None, str | None]:
+    """Read one answer crop, returning ``(text, confidence, reader)``.
+
+    The single place the pipeline decides *how* an answer gets read, shared by
+    the template path and the dark-scan path so the two can never disagree
+    about what a reading is worth. Returns the reader that actually produced
+    the text, which is what the ``Read by:`` line records.
+    """
+
+    def _read_with_ocr() -> tuple[str, float | None, str | None]:
+        text, confidence = _ocr_image_with_confidence(crop_path, psm=6)
+        # No text means nothing was read, not "Tesseract read an empty answer":
+        # attributing a blank to a reader would make the run's tally claim
+        # coverage it does not have.
+        return (text, confidence, SOURCE_TESSERACT if text.strip() else None)
+
+    def _read_with_math() -> tuple[str, float | None, str | None] | None:
+        if math_transcriber is None:
+            return None
+        progress_callback(f"Transcribing {question_id} as LaTeX...")
+        text = math_transcriber(crop_path) or ""
+        if not text:
+            return None
+        # A model transcription, like the VLM's: no calibrated confidence, so
+        # it is recorded as unverified rather than given a number nobody
+        # measured.
+        return (text, None, SOURCE_MATH_MODEL)
+
+    def _read_with_vlm() -> tuple[str, float | None, str | None] | None:
+        if ollama_config is None:
+            return None
+        progress_callback(f"Transcribing {question_id} with Ollama VLM...")
+        try:
+            _prompt, answer = extract_question_prompt_and_answer(
+                image_path=crop_path,
+                config=ollama_config,
+                math_latex=math_latex,
+            )
+        except Exception as exc:
+            progress_callback(f"  Warning: Ollama VLM failed for {question_id}: {exc}")
+            return None
+        text = answer or ""
+        return (text, None, SOURCE_VISION_MODEL) if text else None
+
+    if escalate_floor is not None:
+        ocr_reading = _read_with_ocr()
+        text, confidence, _source = ocr_reading
+        if not should_escalate(text, confidence, floor=escalate_floor):
+            return ocr_reading
+        progress_callback(
+            f"  {question_id}: {_escalation_reason(text, confidence)}, "
+            "re-reading with a model..."
+        )
+        # The maths backend first for the same reason as below — it is the
+        # specialist — then the vision model. A model that reads nothing leaves
+        # the OCR reading standing rather than blanking the answer.
+        return _read_with_math() or _read_with_vlm() or ocr_reading
+
+    # Model-first: the specialist maths backend, the vision model, then OCR as
+    # the reader that always answers.
+    return _read_with_math() or _read_with_vlm() or _read_with_ocr()
+
+
+def _escalation_reason(text: str, confidence: float | None) -> str:
+    """Why this reading is being escalated, for the run's progress output."""
+    if not text.strip():
+        return "OCR read nothing"
+    return f"OCR confidence {confidence:.0f}%" if confidence is not None else "OCR unsure"
+
+
 def _build_document_from_assignment_template(
     pdf_path: Path,
     submission_dir: Path,
-    template: _BlankAssignmentTemplate,
+    template: AssignmentTemplate,
+    *,
+    ollama_config: OllamaVisionConfig | None = None,
+    llm_responses: bool = False,
+    llm_math: bool = False,
+    # Resolved once by the caller and passed down (it cannot cross a process
+    # boundary as a callable, so `build_student_submission_document_unified`
+    # builds it inside the worker). Absent from this signature until now, which
+    # made every call from the unified entry point — i.e. every real use of
+    # --blank-template — die with a TypeError before a single page was read.
+    math_transcriber: "MathTranscriber | None" = None,
+    escalate_floor: float | None = None,
+    dpi: int = 300,
+    progress: ExtractionProgress | None = None,
+    progress_callback: Callable[[str], None] = lambda _message: None,
 ) -> tuple[
     StudentSubmissionDocument,
-    _FieldLocation | None,
-    _FieldLocation | None,
+    FieldLocation | None,
+    FieldLocation | None,
     str | None,
     str | None,
 ]:
-    """Build a student .submission.md skeleton using the blank-exam layout.
+    """Build a student .submission.md using the blank-assignment layout.
 
     Renders every page of the scan, detects on-paper question and Name/ID
     label positions via pytesseract (alignment only — no value-extraction
     OCR), saves Name/ID field crops to ``field_crops/`` and per-question
-    response crops to ``responses/``, and assembles a submission document
-    with empty ``name`` / ``student_id`` / per-question Response text. A
-    downstream OCR pass is expected to populate those fields.
+    response crops to ``responses/``, and assembles a submission document.
+
+    When ``llm_responses`` is set and an ``ollama_config`` is supplied, each
+    question's response crop is additionally transcribed into ``response_text``
+    via the vision model (with a Tesseract fallback). Otherwise per-question
+    response text is left empty for a downstream OCR pass to populate.
+
+    A template with ``exact_regions`` set (one built from a hand-drawn region
+    map) takes a shorter route: its rectangles are cropped verbatim and the
+    alignment OCR is skipped entirely. Everything after the crops — the vision
+    model, the roster match, the markdown — is identical either way.
     """
-    rendered_pages = _render_scan_all_pages(pdf_path)
-    scan_layout = _detect_scan_layout(rendered_pages, max_page=template.total_pages)
+    progress = progress or ExtractionProgress()
+    # The caller's render DPI reaches this path too. It used to be fixed at the
+    # helper's own 300 default — identical to the CLI's, so nothing changes for
+    # a default run — which meant `--dpi 450` silently did nothing here and, more
+    # to the point, `submission-extractor --refine --refine-dpi` could not buy a
+    # sharper crop for a template-aligned scan, which is the commonest kind.
+    rendered_pages = _render_scan_all_pages(pdf_path, dpi=dpi)
 
     field_crops_dir = submission_dir / "identifiers"
     responses_dir = submission_dir / "responses"
 
-    name_field = _select_field(
-        label=scan_layout.name_label,
-        right_boundary=scan_layout.id_label,
-        template_field=template.name_field,
-        line_boxes_by_page=scan_layout.line_boxes_by_page,
-        rendered_pages=rendered_pages,
-    )
-    id_field = _select_field(
-        label=scan_layout.id_label,
-        right_boundary=None,
-        template_field=template.student_id_field,
-        line_boxes_by_page=scan_layout.line_boxes_by_page,
-        rendered_pages=rendered_pages,
-        tight_top=True,
-    )
+    # A hand-drawn template needs none of the alignment machinery below, and
+    # running it anyway would be both wasteful and wrong. Wasteful because
+    # `_detect_scan_layout` OCRs every page of every scan and nothing here would
+    # read the result. Wrong because that OCR looks for Opengrader's own
+    # `N. (M points)` prefixes and `Name:` / `ID:` labels — an exam written in
+    # Word may print none of them, and a stray match would shift every crop by a
+    # meaningless amount. See `AssignmentTemplate.exact_regions`.
+    if template.exact_regions:
+        scan_layout = None
+        name_field = template.name_field
+        id_field = template.student_id_field
+    else:
+        scan_layout = _detect_scan_layout(
+            rendered_pages, max_page=template.total_pages
+        )
+        name_field = _select_field(
+            label=scan_layout.name_label,
+            right_boundary=scan_layout.id_label,
+            template_field=template.name_field,
+            line_boxes_by_page=scan_layout.line_boxes_by_page,
+            rendered_pages=rendered_pages,
+        )
+        id_field = _select_field(
+            label=scan_layout.id_label,
+            right_boundary=None,
+            template_field=template.student_id_field,
+            line_boxes_by_page=scan_layout.line_boxes_by_page,
+            rendered_pages=rendered_pages,
+            tight_top=True,
+        )
 
     name_image: str | None = None
     if name_field is not None:
@@ -814,18 +1778,39 @@ def _build_document_from_assignment_template(
         if page_image is not None:
             id_image = _save_field_crop(page_image, id_field, field_crops_dir, "id")
 
-    page_offsets = _scan_offset_by_page(template, scan_layout)
-    positions = _combined_question_positions(template, scan_layout, page_offsets)
-    questions = [
-        _question_with_scan_crop(
-            question,
-            positions,
-            scan_layout.total_points_positions,
-            rendered_pages,
-            responses_dir,
+    if scan_layout is None:
+        questions = [
+            _question_with_mapped_crop(question, rendered_pages, responses_dir)
+            for question in template.questions
+        ]
+    else:
+        page_offsets = _scan_offset_by_page(template, scan_layout)
+        positions = _combined_question_positions(template, scan_layout, page_offsets)
+        questions = [
+            _question_with_scan_crop(
+                question,
+                positions,
+                scan_layout.total_points_positions,
+                rendered_pages,
+                responses_dir,
+            )
+            for question in template.questions
+        ]
+
+    if llm_responses and ollama_config is not None:
+        crop_count = sum(1 for q in questions if q.response_image_path)
+        progress.file_start(pdf_path.name, crop_count)
+        questions = _fill_responses_with_vlm(
+            questions,
+            submission_dir,
+            ollama_config,
+            pdf_name=pdf_path.name,
+            progress=progress,
+            progress_callback=progress_callback,
+            math_latex=llm_math,
+            math_transcriber=math_transcriber,
+            escalate_floor=escalate_floor,
         )
-        for question in template.questions
-    ]
 
     document = StudentSubmissionDocument(
         student_name="",
@@ -847,6 +1832,10 @@ def _build_document_from_text_layer_only(
     submission_dir: Path,
     progress_callback: Callable[[str], None],
     roster: list[_RosterEntry] | None = None,
+    resolve_ambiguous: "AmbiguityResolver | None" = None,
+    default_section: str | None = None,
+    section_by_id: Mapping[str, str] | None = None,
+    qr_student_id: str | None = None,
 ) -> tuple[StudentSubmissionDocument, Path]:
     """Build a document directly from a text-layer student PDF (no scan crops)."""
     progress_callback("Extracting from text layer...")
@@ -859,19 +1848,27 @@ def _build_document_from_text_layer_only(
     raw_id = id_match.group(1) if (id_match := _ID_VALUE_RE.search(all_text)) else ""
     raw_name = name_match.group(1).strip() if (name_match := _NAME_VALUE_RE.search(all_text)) else ""
 
-    final_name, final_id = raw_name, raw_id
-    if roster and (match := _match_roster(raw_id, raw_name, roster)) and match[1] > 0.6:
-        final_name, final_id = match[0].name, match[0].student_id
-
     document = StudentSubmissionDocument(
-        student_name=final_name,
-        student_id=final_id,
+        student_name=raw_name,
+        student_id=raw_id,
         course_code=None,
         assignment_title=_assignment_title_from_lines(lines),
         assignment_version=None,
         source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
+        # A born-digital PDF's text layer is the exact characters the file
+        # carries, not a reading of them — the same 100 the per-response
+        # confidence records for a text-layer answer. Only claimed for a field
+        # that actually matched; a blank one is unmeasured, not perfect.
+        name_confidence=100.0 if raw_name else None,
+        id_confidence=100.0 if raw_id else None,
         questions=_extract_questions_from_text(lines),
+    )
+    document = _apply_roster_identity(
+        document, roster, progress_callback, resolve_ambiguous, qr_student_id
+    )
+    document = _apply_section(
+        document, default_section, section_by_id, progress_callback
     )
     markdown_path = submission_dir / f"{pdf_path.stem}.submission.md"
     markdown_path.write_text(render_student_submission_markdown(document))
@@ -889,10 +1886,19 @@ def _build_document_from_ocr_result(
     save_layout_debug: bool,
     progress_callback: Callable[[str], None],
     roster: list[_RosterEntry] | None = None,
+    resolve_ambiguous: "AmbiguityResolver | None" = None,
+    progress: ExtractionProgress | None = None,
+    default_section: str | None = None,
+    section_by_id: Mapping[str, str] | None = None,
+    llm_math: bool = False,
+    math_transcriber: "MathTranscriber | None" = None,
+    escalate_floor: float | None = None,
+    qr_student_id: str | None = None,
 ) -> tuple[StudentSubmissionDocument, Path]:
     """Processes a single student PDF using OCR and VLM to extract submission data."""
+    progress = progress or ExtractionProgress()
     progress_callback("Scanning layout...")
-    
+
     submission_result = process_submission_pdf(
         pdf_path=pdf_path,
         config=ocr_config,
@@ -906,23 +1912,32 @@ def _build_document_from_ocr_result(
     student_id = ""
     name_image_path = None
     id_image_path = None
+    # How sure we are of each field, on the same 0-100 scale as a response's
+    # transcription confidence. ``None`` = unmeasured (a VLM read gives no
+    # calibrated score), never "bad" — see `_ocr_field_with_confidence`.
+    name_confidence: float | None = None
+    id_confidence: float | None = None
 
     # Extract fields (name, ID)
     for field_res in submission_result.fields:
         if not field_res.crop_path:
             continue
         field_crop = Path(field_res.crop_path)
-        
+
         if field_res.field_id == "student_name":
             name_image_path = field_crop.relative_to(submission_dir).as_posix()
             if ollama_config:
                 progress_callback("Extracting name with Ollama VLM...")
                 try:
                     student_name = extract_field_text(image_path=field_crop, field_kind="name", config=ollama_config)
+                    # Left unverified on purpose: the model returns no score, so
+                    # inventing one here would be worse than saying nothing.
                 except Exception as e:
                     progress_callback(f"  Warning: Ollama VLM failed for name: {e}")
             if not student_name:
-                student_name = _ocr_image(field_crop, psm=7)  # Fallback
+                student_name, name_confidence = _ocr_field_with_confidence(
+                    field_crop, digits=False
+                )  # Fallback
         elif field_res.field_id == "student_id":
             id_image_path = field_crop.relative_to(submission_dir).as_posix()
             if ollama_config:
@@ -932,54 +1947,68 @@ def _build_document_from_ocr_result(
                 except Exception as e:
                     progress_callback(f"  Warning: Ollama VLM failed for student ID: {e}")
             if not student_id:
-                student_id = _ocr_image_digits(field_crop)  # Fallback
-
-    if roster and (match := _match_roster(student_id, student_name, roster)) and match[1] > 0.5:
-        student_name, student_id = match[0].name, match[0].student_id
+                student_id, id_confidence = _ocr_field_with_confidence(
+                    field_crop, digits=True
+                )  # Fallback
 
     # Extract question responses
+    vlm_active = bool(not skip_ollama_qa and ollama_config)
+    if vlm_active:
+        vlm_count = sum(1 for q_res in submission_result.questions if q_res.output_path)
+        progress.file_start(pdf_path.name, vlm_count)
     questions: list[StudentSubmissionQuestion] = []
     for q_res in submission_result.questions:
         response_text = ""
+        response_confidence: float | None = None
+        response_source: str | None = None
         if q_res.output_path:
             crop_path = Path(q_res.output_path)
-            if not skip_ollama_qa and ollama_config:
-                progress_callback(f"Extracting response for {q_res.question_id} with Ollama VLM...")
-                try:
-                    _prompt, answer = extract_question_prompt_and_answer(
-                        image_path=crop_path,
-                        config=ollama_config,
-                    )
-                    response_text = answer or ""
-                except Exception as e:
-                    progress_callback(f"  Warning: Ollama VLM failed for {q_res.question_id}: {e}")
-        
-            if not response_text:
-                response_text = _ocr_image(crop_path, psm=6)
+            response_text, response_confidence, response_source = _transcribe_crop(
+                crop_path,
+                question_id=q_res.question_id,
+                # `--no-ollama-qa` is expressed here rather than inside the
+                # reader: with no vision model available the cascade is simply
+                # the maths backend (if any) and then Tesseract.
+                ollama_config=None if skip_ollama_qa else ollama_config,
+                progress_callback=progress_callback,
+                math_latex=llm_math,
+                math_transcriber=math_transcriber,
+                escalate_floor=escalate_floor,
+            )
+            if vlm_active:
+                progress.response(pdf_path.name, q_res.question_id)
 
         questions.append(
             StudentSubmissionQuestion(
                 question_id=q_res.question_id,
-                prompt="", 
-                possible_points=None, 
+                prompt="",
+                possible_points=None,
                 response_image_path=Path(q_res.output_path).relative_to(submission_dir).as_posix() if q_res.output_path else None,
                 response_text=response_text,
                 source_segments=q_res.source_segments,
+                response_confidence=response_confidence,
+                response_source=response_source,
             )
         )
 
     doc = StudentSubmissionDocument(
         student_name=student_name,
         student_id=student_id,
-        course_code=None, 
-        assignment_title="", 
+        course_code=None,
+        assignment_title="",
         assignment_version=submission_result.version_id,
         source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
         name_image_path=name_image_path,
         id_image_path=id_image_path,
+        name_confidence=name_confidence,
+        id_confidence=id_confidence,
         questions=questions,
     )
+    doc = _apply_roster_identity(
+        doc, roster, progress_callback, resolve_ambiguous, qr_student_id
+    )
+    doc = _apply_section(doc, default_section, section_by_id, progress_callback)
 
     markdown_content = render_student_submission_markdown(doc)
     markdown_path = submission_dir / f"{pdf_path.stem}.submission.md"
@@ -1001,30 +2030,127 @@ def build_student_submission_document_unified(
     ollama_config: OllamaVisionConfig | None,
     skip_ollama_qa: bool,
     save_layout_debug: bool,
-    blank_assignment_template: _BlankAssignmentTemplate | None,
+    blank_assignment_template: AssignmentTemplate | None,
     progress_callback: Callable[[str], None],
     roster: list[_RosterEntry] | None = None,
     update: bool = False,
     refresh_layout: bool = False,
+    resolve_ambiguous: "AmbiguityResolver | None" = None,
+    llm_responses: bool = False,
+    llm_math: bool = False,
+    math_backend: str = DEFAULT_MATH_BACKEND,
+    escalate_floor: float | None = None,
+    progress: ExtractionProgress | None = None,
+    default_section: str | None = None,
+    section_by_id: Mapping[str, str] | None = None,
+    extra_pages: tuple[int, ...] | None = None,
+    bubble_sheet_layout: "BubbleSheetLayout | None" = None,
+    bubble_shuffled: bool = False,
+    bubble_form_key: str | None = None,
 ) -> tuple[StudentSubmissionDocument, Path]:
     """Unified function to build a student submission document from a PDF.
 
-    Chooses between text-layer extraction (with blank exam template),
+    Chooses between bubble-sheet (OMR), blank-assignment-template extraction,
     text-layer only, or OCR-layout extraction.
+
+    ``bubble_sheet_layout`` selects the OMR path and wins over every other
+    mode: it is an explicit statement from the caller that these scans *are*
+    generated answer sheets, and guessing otherwise (a bubble sheet has a text
+    layer when born-digital, and plenty of rectangles for layout detection to
+    find) would quietly produce a garbage extraction instead of an error.
+
+    ``llm_responses`` requests vision-model transcription of each response into
+    ``response_text`` for the blank-template path (the OCR path already does
+    this unless ``skip_ollama_qa``); the text-layer path reads the typed answer
+    straight from the text layer and needs no model. ``progress`` receives the
+    per-response ticks the caller aggregates into a bar/ETA.
+
+    ``llm_math`` asks the vision model to transcribe handwritten mathematics as
+    LaTeX (``$...$``) rather than flattened plain text; it applies only to the
+    vision-model paths (template + OCR), never the plain text layer.
+
+    ``escalate_floor`` flips the transcription order from *model-first* to
+    *escalate-on-doubt*: Tesseract reads every crop and a model is asked only
+    about the readings below that confidence (or empty). It costs a fraction of
+    the model calls on an exam whose answers are mostly short and legible, and
+    it cannot lose an answer — see :func:`_transcribe_crop`. Applies to the
+    template and OCR paths; the text layer is exact and never escalates.
+
+    ``extra_pages`` overrides which source pages are recorded as extra student
+    work; leave it ``None`` to take the splitter's sidecar or, failing that,
+    infer them from page coverage (see ``_apply_extra_pages``).
     """
+    progress = progress or ExtractionProgress()
     submission_dir = output_dir / pdf_path.stem
     submission_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolved here rather than passed in, because extraction runs in a process
+    # pool and a job's fields must stay picklable (`submissions/batch.py`) — a
+    # backend crosses that boundary as a name and becomes a callable on the far
+    # side, which also gives each worker its own cached model. Non-strict: a
+    # missing backend degrades to the built-in path instead of killing a batch
+    # halfway through, since the CLI already refused it at startup.
+    math_transcriber = (
+        resolve_math_transcriber(math_backend, strict=False) if llm_math else None
+    )
+
+    # Personalized-QR fast path: if the sheet carries an Opengrader QR id, it is
+    # authoritative and skips all name-based roster matching. Read once here and
+    # thread into every build path's identity resolution.
+    qr_student_id = _read_qr_student_id(pdf_path)
+
+    if bubble_sheet_layout is not None:
+        document = _build_document_from_bubble_sheet(
+            pdf_path=pdf_path,
+            submission_dir=submission_dir,
+            layout=bubble_sheet_layout,
+            progress_callback=progress_callback,
+            qr_student_id=qr_student_id,
+            shuffled_batch=bubble_shuffled,
+            form_key_override=bubble_form_key,
+        )
+        document = _apply_roster_identity(
+            document, roster, progress_callback, resolve_ambiguous, qr_student_id
+        )
+        document = _apply_section(
+            document, default_section, section_by_id, progress_callback
+        )
+        markdown_path = submission_dir / f"{pdf_path.stem}.submission.md"
+        return _finalize_submission_document(
+            document, pdf_path, markdown_path, extra_pages
+        )
 
     if blank_assignment_template:
         progress_callback("Using blank assignment template for extraction...")
         document, name_field, id_field, name_image, id_image = (
-            _build_document_from_assignment_template(pdf_path, submission_dir, blank_assignment_template)
+            _build_document_from_assignment_template(
+                pdf_path,
+                submission_dir,
+                blank_assignment_template,
+                ollama_config=ollama_config,
+                llm_responses=llm_responses,
+                llm_math=llm_math,
+                math_transcriber=math_transcriber,
+                escalate_floor=escalate_floor,
+                dpi=dpi,
+                progress=progress,
+                progress_callback=progress_callback,
+            )
+        )
+        document = _apply_roster_identity(
+            document, roster, progress_callback, resolve_ambiguous, qr_student_id
+        )
+        document = _apply_section(
+            document, default_section, section_by_id, progress_callback
         )
         markdown_path = submission_dir / f"{pdf_path.stem}.submission.md"
-        markdown_path.write_text(render_student_submission_markdown(document))
-        return document, markdown_path
-    
+        return _finalize_submission_document(
+            document, pdf_path, markdown_path, extra_pages
+        )
+
     # Check if PDF has a text layer for the text-layer-only strategy
+    import fitz  # see _read_qr_code for why this is deferred
+
     doc = fitz.open(str(pdf_path))
     has_text_layer = False
     try:
@@ -1036,17 +2162,21 @@ def build_student_submission_document_unified(
         doc.close()
 
     if has_text_layer:
-        return _build_document_from_text_layer_only(
+        document, markdown_path = _build_document_from_text_layer_only(
             pdf_path=pdf_path,
             submission_dir=submission_dir,
             progress_callback=progress_callback,
             roster=roster,
+            resolve_ambiguous=resolve_ambiguous,
+            default_section=default_section,
+            section_by_id=section_by_id,
+            qr_student_id=qr_student_id,
         )
     else:
         if ocr_config is None:
             raise ValueError("OCR configuration is required for scanned PDFs without a text layer.")
         progress_callback("Using OCR layout detection for extraction (no text layer detected)...")
-        return _build_document_from_ocr_result(
+        document, markdown_path = _build_document_from_ocr_result(
             pdf_path=pdf_path,
             submission_dir=submission_dir,
             ocr_config=ocr_config,
@@ -1057,4 +2187,15 @@ def build_student_submission_document_unified(
             save_layout_debug=save_layout_debug,
             progress_callback=progress_callback,
             roster=roster,
+            resolve_ambiguous=resolve_ambiguous,
+            progress=progress,
+            default_section=default_section,
+            section_by_id=section_by_id,
+            llm_math=llm_math,
+            math_transcriber=math_transcriber,
+            escalate_floor=escalate_floor,
+            qr_student_id=qr_student_id,
         )
+    return _finalize_submission_document(
+        document, pdf_path, markdown_path, extra_pages
+    )

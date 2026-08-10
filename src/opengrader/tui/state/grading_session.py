@@ -7,6 +7,8 @@ from opengrader.core.qa_file.scoring import (
     ungraded_score_adjustment,
 )
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
+from opengrader.core.submissions.page_context import PageContextEntry
+from opengrader.core.submissions.transcription import SOURCE_HUMAN
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,9 @@ class RubricOption:
     points_delta: float
     kind: RubricOptionKind
     selection_mode: RubricSelectionMode
+    # Feedback auto-inserted into the comment box when this option is selected,
+    # sourced from the QA file's ``**Comment**`` bullet. ``None`` when unset.
+    default_comment: str | None = None
 
 
 @dataclass
@@ -34,6 +39,16 @@ class QuestionGrade:
     selected_option_indices: set[int] = field(default_factory=set)
     comment: str = ""
     question_type: QuestionType = FREE_RESPONSE
+    # Transcription confidence (0-100) for response_text, or None when
+    # unverified (VLM-transcribed / pre-confidence extraction).
+    response_confidence: float | None = None
+    # Which reader produced response_text; None when never recorded.
+    response_source: str | None = None
+    # Whole-page context: the student's scanned PDF and the pages this question
+    # can page through (its own source page(s) first, then the submission's
+    # extra work pages). Empty when there is no PDF to render from.
+    source_pdf_path: str = ""
+    page_context: tuple[PageContextEntry, ...] = ()
 
     @property
     def points_delta(self) -> float:
@@ -93,6 +108,16 @@ class StudentGradingRun:
     current_question_index: int = 0
     max_points: float = 100.0
     source_pdf_name: str = ""
+    # Human summary of the work slice this grader claimed ("q1-q4"), or ""
+    # when the assignment was never divided. Display only.
+    claim_slice: str = ""
+    # Anonymity carried into the whole-page view: while this is set the scan's
+    # Name/Student-ID header is painted out of every rendered page, so paging to
+    # a student's sheet cannot reveal what `student_name` is already hiding. Set
+    # from teacher mode by `GradeController.refresh_grade_screen`; unlike the
+    # other fields here it survives `reset()`, because it belongs to the session
+    # rather than to whichever student is open.
+    redact_identity: bool = False
 
     def reset(
         self, *, student_id: int | None, student_name: str, assignment_name: str
@@ -194,3 +219,28 @@ class StudentGradingRun:
         if question is None:
             return
         question.comment = comment
+
+    def update_response_text(
+        self,
+        response_text: str,
+        *,
+        confidence: float | None = 100.0,
+        source: str | None = SOURCE_HUMAN,
+    ) -> None:
+        """Apply a grader's corrected transcription to the active question.
+
+        A human-verified reading is recorded at full confidence by default so
+        the confidence chip turns green and the low-confidence review flag
+        clears; the in-memory update keeps the grade screen in step before the
+        submission file is reloaded.
+        """
+        question = self.current_question
+        if question is None:
+            return
+        question.response_text = response_text
+        if confidence is not None:
+            question.response_confidence = confidence
+        # The grader is now the reader, and the screen has to say so before the
+        # file is reloaded — otherwise a second edit in the same session would
+        # snapshot the *machine* as the previous reader and undo to a lie.
+        question.response_source = source
