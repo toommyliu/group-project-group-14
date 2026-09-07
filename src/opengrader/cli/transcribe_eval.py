@@ -70,7 +70,11 @@ what it measures:
 
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        prog="transcribe-eval",
+        # Deliberately no `prog=`: argparse then names whatever was
+        # actually invoked — the standalone `transcribe-eval` script, or
+        # `opengrader transcribe-eval` when the front-door command dispatched
+        # here (cli/main.py patches sys.argv[0] for exactly this). A
+        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Measure OCR/vision-model transcription accuracy from the "
             "corrections graders have already made."

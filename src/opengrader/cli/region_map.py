@@ -335,7 +335,11 @@ def _run_from_qa(args: Namespace) -> None:
 
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        prog="region-map",
+        # Deliberately no `prog=`: argparse then names whatever was
+        # actually invoked — the standalone `region-map` script, or
+        # `opengrader region-map` when the front-door command dispatched
+        # here (cli/main.py patches sys.argv[0] for exactly this). A
+        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Draw the answer regions on an assignment Opengrader did not generate, "
             "once, and reuse them for every scan of it."

@@ -46,7 +46,11 @@ def _build_parser() -> ArgumentParser:
     # (and a plain --help never touches the settings file needlessly).
     ai = ai_config.resolve()
     parser = ArgumentParser(
-        prog="create-answer-key",
+        # Deliberately no `prog=`: argparse then names whatever was
+        # actually invoked — the standalone `create-answer-key` script, or
+        # `opengrader create-answer-key` when the front-door command dispatched
+        # here (cli/main.py patches sys.argv[0] for exactly this). A
+        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Build a QA-format answer key from a question file — a text2qti "
             "markdown (.md/.txt), a Word document (.docx), or a solved answer-key "

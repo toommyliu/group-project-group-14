@@ -1212,7 +1212,11 @@ class HelpScreen(ModalScreen[None]):
                     "Prepare an assignment: the whole thing in one command, or "
                     "one stage at a time. Both are on the start-up screen — "
                     "RUN THE WHOLE PIPELINE and PREPARE AN ASSIGNMENT — and "
-                    "each also runs with uv run <cli-name>.",
+                    "each also runs in a terminal: uv run opengrader --help "
+                    "lists every command, grouped in this same order, and "
+                    "uv run opengrader <command> --help explains one. The "
+                    "standalone names (uv run submission-splitter, …) still "
+                    "work too.",
                     _PIPELINE_ROWS,
                     key_class="help-tool",
                 )

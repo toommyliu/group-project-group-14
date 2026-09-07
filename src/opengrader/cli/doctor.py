@@ -105,7 +105,11 @@ def build_parser() -> ArgumentParser:
     # hardcoded literal that could silently disagree with the real settings.
     ai = ai_config.resolve()
     parser = ArgumentParser(
-        prog="doctor",
+        # Deliberately no `prog=`: argparse then names whatever was
+        # actually invoked — the standalone `doctor` script, or
+        # `opengrader doctor` when the front-door command dispatched
+        # here (cli/main.py patches sys.argv[0] for exactly this). A
+        # hardcoded name would tell a user to fix a command they never ran.
         description="Check that this machine has everything Opengrader needs.",
         epilog=EPILOG,
         formatter_class=RawDescriptionHelpFormatter,

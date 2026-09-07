@@ -154,7 +154,11 @@ def _build_parser() -> ArgumentParser:
     # other CLI in this package already follows.
     ai = ai_config.resolve()
     parser = ArgumentParser(
-        prog="opengrader-run",
+        # Deliberately no `prog=`: argparse then names whatever was
+        # actually invoked — the standalone `opengrader-run` script, or
+        # `opengrader run` when the front-door command dispatched
+        # here (cli/main.py patches sys.argv[0] for exactly this). A
+        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Run the whole pre-grading pipeline — scan check, split, extract, "
             "auto-grade — with one command. Re-runs resume instead of repeating."

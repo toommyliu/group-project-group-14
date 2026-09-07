@@ -36,6 +36,13 @@ dependencies = [
   # install almost nothing. Key derivation stays on stdlib hashlib; only the
   # cipher comes from here, keeping the third-party surface as small as possible.
   "cryptography>=42.0,<47.0",
+  # The `opengrader` front-door command's subcommand dispatcher
+  # (src/opengrader/cli/main.py). Deliberately used *only* there: the thirty
+  # stage CLIs keep their own argparse parsers, which the dispatcher forwards
+  # to untouched, so this is one small dependency at the door rather than a
+  # rewrite of every tool behind it. Already present transitively (canvas-sak
+  # depends on it), so it adds nothing to an offline install.
+  "click>=8.1,<9.0",
 ]
 
 # Deliberately optional. pix2tex pulls in torch — a gigabyte-scale download an
@@ -61,6 +68,11 @@ photos = [
 ]
 
 [project.scripts]
+# The front door: `opengrader <command> [args...]` reaches every tool below.
+# Each name below stays exactly as it was — the dispatcher calls these same
+# functions, so `submission-splitter …` and `opengrader submission-splitter …`
+# are the same run. See src/opengrader/cli/main.py.
+opengrader = "opengrader.cli.main:main"
 tui = "opengrader.tui.main:run_app"
 # The one command that chains the rest: scan-check → split → extract →
 # auto-grade, resumable per stage. See src/opengrader/cli/run.py.

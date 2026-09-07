@@ -103,15 +103,39 @@ The icon opens a terminal window and launches the TUI, quietly installing/repair
 
 ## Usage Guide
 
-Run CLI tools:
+Every tool lives behind one front door:
 ```bash
-uv run <script_name> [arguments]
+uv run opengrader <command> [arguments]
 ```
+`opengrader --help` lists every command grouped by what you're doing (Start
+here, Prepare an assignment, Take in scans, Grade, ...) instead of
+alphabetically. The standalone script names underneath it still work exactly
+as before — `uv run submission-splitter ...` and
+`uv run opengrader submission-splitter ...` call the same function with the
+same flags — so every command in this guide keeps working; `opengrader` is
+just the one name to remember instead of thirty.
 
 Run the TUI:
 ```bash
-uv run tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
+uv run opengrader tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
 ```
+(`uv run tui ...` and `uv run opengrader grade ...` are the same command.)
+
+### Finding a command
+
+```bash
+uv run opengrader --help              # every command, grouped by workflow step
+uv run opengrader help submission-extractor   # that tool's own --help
+uv run opengrader commands            # every command, one per line (--json for scripts)
+uv run opengrader completion zsh      # shell completion for subcommand names
+```
+
+Short aliases exist for the tools you'll reach for most: `split`
+(submission-splitter), `extract` (submission-extractor), `auto-grade`
+(automated-grading), `answer-key` (create-answer-key), `grade` (tui), and
+`pipeline` / `opengrader-run` (run — the whole pipeline in one command, below).
+Get a subcommand's name slightly wrong and `opengrader` suggests the closest
+match instead of just rejecting it.
 
 ### The short version: one command
 
@@ -135,7 +159,11 @@ same three paths.
 <details>
 <summary>Available Scripts</summary>
 
-- `opengrader-run`: The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
+Every script below runs standalone (`uv run <name> ...`) or through the front
+door (`uv run opengrader <name> ...`) — same code, same flags, either
+spelling.
+
+- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
 - `tui`: Launch the TUI. Optionally pass `--qa-file` and `--submissions` together to load real files.
 - `tui-dev`: Launch the TUI with Textual devtools enabled.
 - `qa-file`: Work with QA markdown files.
@@ -146,8 +174,7 @@ same three paths.
 - `photo-import`: Turn a folder of phone photos (JPEG/HEIC/PNG) into per-student PDFs. Each photo is deskewed and perspective-corrected — by the sheet's corner registration marks when it has them, by the page's own edges otherwise — then the photos belonging to one student are bound into a single PDF for `submission-extractor`. Your photos are only ever read. For a class that submits photos instead of a scanned bundle; it lands where `submission-splitter` lands, so the rest of the pipeline is unchanged.
 - `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
 - `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR. Runs submissions in parallel across CPU cores (`--jobs`) and can pick up where an interrupted run stopped (`--resume`).
-- `pdf-to-qa-solutions`: Convert an answer-key PDF into a QA markdown draft using OCR.
-- `text2qti-to-qa`: Convert a [text2qti](https://github.com/gpoore/text2qti) exam file into QA markdown.
+- `create-answer-key` (`answer-key`): Build a QA markdown draft from an existing answer key — a [text2qti](https://github.com/gpoore/text2qti) file, a Word document, or a solved answer-key PDF (OCR + vision model for a scanned one). The input format is detected from the file extension; replaces the old `pdf-to-qa-solutions` and `text2qti-to-qa` scripts, both retired.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
 - `claim`: Divide grading between several TAs. `claim divide --graders alice,bob,carol` splits the cohort into contiguous slices; `claim status` shows coverage, gaps and any double-booked work. Claiming work someone else holds is refused.
 - `canvas-export`: Push scores and per-question comments from `.submission.md` files to Canvas LMS (requires `canvas-sak` setup; supports `--dry-run`).
@@ -227,7 +254,7 @@ Useful `submission-extractor` options:
 
 Convert an answer key PDF into a QA markdown draft:
 ```bash
-uv run pdf-to-qa-solutions \
+uv run create-answer-key \
   --input samples/exam2b-2-answers.pdf \
   --output out/qa.md \
   --title "Midterm 1 Solutions"
@@ -253,7 +280,7 @@ uv run canvas-export \
 
 0. (Optional) Convert an existing answer key PDF to a QA file:
 ```bash
-uv run pdf-to-qa-solutions --input /path/to/answer-key.pdf --output /path/to/qa.md
+uv run create-answer-key --input /path/to/answer-key.pdf --output /path/to/qa.md
 ```
 
 1. Generate a template from a QA file:
@@ -317,24 +344,60 @@ uv run tui \
 uv run canvas-export --submissions /path/to/student-submissions --course "CS146" --assignment "Quiz 1" --dry-run
 ```
 
-#### Global Installation (Optional)
+#### Run it from anywhere (Optional)
 
-To use the TUI or CLI tools from anywhere on your system:
+By default every command runs through `uv run` from inside the checkout. To
+type `opengrader doctor` instead of `uv run opengrader doctor`, from any
+directory:
 
 ```bash
-uv tool install .
+sh packaging/install-command.sh                                              # macOS / Linux
+powershell -ExecutionPolicy Bypass -File packaging\install-command.ps1       # Windows
 ```
 
-List available executables:
+(On Windows, add `-AddToPath` to have it put the install directory on your user
+PATH for you.)
+
+That installs **one** command, `opengrader`, into `~/.local/bin` (or
+`%USERPROFILE%\.local\bin` on Windows — add that directory to your `PATH` if it
+isn't already; the installer tells you the exact line). Everything is still reached through it: `opengrader tui`,
+`opengrader run`, `opengrader split ...`.
+
+The installed launcher **contains no path to your checkout**. It finds the
+project on every run, so nothing breaks when the project moves, gets cloned
+somewhere else, or — the common one on macOS — lives on an external drive that
+remounts under a new name (`Samsung_T5` one day, `Samsung_T5 1` the next,
+depending on what order your drives were plugged in). It looks, in order, at
+`$OPENGRADER_HOME`, the checkout you're standing in, the one it used last
+time, then any mounted volume and your home directory. Run it inside a
+different clone and that clone is what runs — useful when you have a branch
+checked out separately.
+
 ```bash
-uv tool list
+opengrader doctor                       # from anywhere
+OPENGRADER_HOME=/path/to/checkout opengrader doctor   # pin a specific clone
+OPENGRADER_PYTHON=/path/to/python opengrader doctor   # run with a specific interpreter
+OPENGRADER_WRAPPER_DEBUG=1 opengrader doctor          # say which checkout it picked, and why
 ```
 
-Then you can execute any of the commands from anywhere on your system:
-```bash
-tui
-qa-file --help
-```
+**It does not require uv.** uv is what this project is developed with and is
+preferred when installed — it is the only option that installs missing
+dependencies rather than failing on them — but the launcher will equally use a
+Poetry environment, a plain `python -m venv`, an activated Conda environment,
+or any interpreter you point `$OPENGRADER_PYTHON` at. A venv that some other
+tool built is used directly and never handed to uv, so `uv run` cannot sync a
+Poetry-managed environment against `uv.lock` behind your back. What it can't
+do is create an environment from nothing: with none present it tells you the
+`uv sync` / `poetry install` / `python -m venv` command to run.
+
+To remove it: `rm ~/.local/bin/opengrader`.
+
+> [!NOTE]
+> `uv tool install .` also works and is the more standard incantation, but it
+> installs *all* thirty-odd console scripts — `doctor`, `curve`, `claim`,
+> `tui`, `calibrate`, `regrade` — onto your `PATH` as global commands, and uv
+> has no way to install only one of them. That's why this project ships its
+> own one-command installer.
 
 ## Demo
 

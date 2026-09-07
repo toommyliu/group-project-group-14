@@ -1896,6 +1896,17 @@ def _build_document_from_ocr_result(
     qr_student_id: str | None = None,
 ) -> tuple[StudentSubmissionDocument, Path]:
     """Processes a single student PDF using OCR and VLM to extract submission data."""
+    # The local import the `if TYPE_CHECKING` block at the top of this module
+    # promises. It has to be *here* rather than up there: a name imported under
+    # TYPE_CHECKING exists only for the type checker, so without this line the
+    # call below raises `NameError: name 'process_submission_pdf' is not
+    # defined` at run time — invisible to the type checker and to any test that
+    # stubs the extractor, and fatal to every OCR extraction. Keeping it inside
+    # the function is deliberate and is what the note upstairs explains:
+    # `ocr/extractor` pulls in cv2 and fitz (~230 ms cold) and this module is
+    # loaded eagerly on the TUI's startup path.
+    from opengrader.core.ocr.extractor import process_submission_pdf
+
     progress = progress or ExtractionProgress()
     progress_callback("Scanning layout...")
 

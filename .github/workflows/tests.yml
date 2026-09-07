@@ -9,6 +9,9 @@ on:
       - '.python-version'
       - 'pyproject.toml'
       - 'uv.lock'
+      # The `opengrader` launchers are covered by tests/unit/packaging/, so a
+      # change to one of them has to be able to trigger this workflow.
+      - 'packaging/opengrader*'
   push:
     branches:
       - main
@@ -17,6 +20,7 @@ on:
       - '.python-version'
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'packaging/opengrader*'
   workflow_dispatch:
 
 concurrency:
