@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from difflib import SequenceMatcher
-import re
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -9,6 +8,12 @@ from pathlib import Path
 from typing import Callable, TypeVar
 
 from opengrader.core.grading.files import FileGradingSession
+from opengrader.core.grading.questions import (
+    QuestionContext as _QuestionContext,
+    flatten_question_contexts,
+    questions_for_submission,
+    rubric_options,
+)
 from opengrader.core.export import default_bundle_name
 from opengrader.core.comments import CommentLibrary, read_comments, write_comments
 from opengrader.core.claims import (
@@ -32,28 +37,22 @@ from opengrader.core.history import (
 from opengrader.core.pdf.pdf_preview import get_pdf_page_count
 from opengrader.core.qa_file import (
     QARubricFlatOption,
-    QAQuestion,
     QARubricItem,
-    QASubquestion,
     flatten_rubric_options,
     load_qa_markdown,
     outcomes_by_question,
     possible_points_by_question,
-    qa_question_type,
     replace_qa_rubric_options,
     save_qa_markdown,
 )
 from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
 from opengrader.core.question_types import (
-    FREE_RESPONSE,
     MULTIPLE_ANSWER,
     MULTIPLE_CHOICE,
-    QuestionType,
     humanize_question_label,
 )
 from opengrader.core.submissions import (
     SOURCE_HUMAN,
-    StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
     StudentSubmissionQuestion,
     set_student_identity_file,
@@ -128,19 +127,7 @@ from opengrader.tui.data.models import (
 )
 
 
-_VERSION_MARKER_RE = re.compile(r"\[([A-Za-z0-9]+)\]|\(([A-Za-z0-9]+)\)")
-
 _T = TypeVar("_T")
-
-
-@dataclass(frozen=True)
-class _QuestionContext:
-    question_id: str
-    prompt: str
-    points: float
-    expected_answers: list[str]
-    rubric: list[QARubricItem]
-    question_type: QuestionType = FREE_RESPONSE
 
 
 @dataclass(frozen=True)
@@ -1130,14 +1117,14 @@ class SubmissionFilesProvider:
             submissions_path=self._submissions_path,
             journal=self._journal,
         )
-        qa_version, qa_questions = self._questions_for_submission(
+        qa_version, qa_questions = questions_for_submission(
+            self._qa_doc,
             grading.document,
-            submission_path,
         )
         return _LoadedSubmission(
             grading=grading,
             qa_version=qa_version,
-            question_contexts=self._flatten_question_contexts(qa_questions),
+            question_contexts=flatten_question_contexts(qa_questions),
         )
 
     def reload_all(self) -> None:
@@ -1160,112 +1147,6 @@ class SubmissionFilesProvider:
             if context.question_id == question_id:
                 return context
         raise ValueError(f"question not found in submission QA context: {question_id}")
-
-    def _questions_for_submission(
-        self,
-        document: StudentSubmissionDocument,
-        submission_path: Path,
-    ) -> tuple[str | None, list[QAQuestion]]:
-        if not self._qa_doc.version_questions:
-            return None, self._qa_doc.questions
-
-        explicit_version = (document.assignment_version or "").strip()
-        inferred_version = self._infer_version_from_submission(document)
-        version = explicit_version or inferred_version
-
-        version_by_normalized = {
-            candidate.strip().lower(): candidate
-            for candidate in self._qa_doc.version_questions
-        }
-        selected = version_by_normalized.get(version.lower()) if version else None
-        if selected is None and explicit_version and inferred_version:
-            selected = version_by_normalized.get(inferred_version.lower())
-        if selected is None:
-            selected = next(iter(self._qa_doc.version_questions))
-
-        return selected, self._qa_doc.version_questions[selected]
-
-    def _infer_version_from_submission(
-        self,
-        document: StudentSubmissionDocument,
-    ) -> str:
-        available_by_normalized = {
-            version.strip().lower(): version for version in self._qa_doc.version_questions
-        }
-        candidates: set[str] = set()
-        search_texts = [document.assignment_title]
-        search_texts.extend(question.prompt for question in document.questions)
-
-        for text in search_texts:
-            for match in _VERSION_MARKER_RE.finditer(text or ""):
-                raw = match.group(1) or match.group(2)
-                if raw is None:
-                    continue
-                version = available_by_normalized.get(raw.strip().lower())
-                if version is not None:
-                    candidates.add(version)
-
-        if len(candidates) == 1:
-            return next(iter(candidates))
-        return ""
-
-    @classmethod
-    def _flatten_question_contexts(
-        cls,
-        questions: list[QAQuestion],
-    ) -> list[_QuestionContext]:
-        contexts: list[_QuestionContext] = []
-        for question in questions:
-            if question.subquestions:
-                contexts.extend(
-                    cls._context_from_subquestion(subquestion)
-                    for subquestion in question.subquestions
-                )
-                continue
-            contexts.append(cls._context_from_question(question))
-        return contexts
-
-    @staticmethod
-    def _context_from_question(question: QAQuestion) -> _QuestionContext:
-        return _QuestionContext(
-            question_id=question.id,
-            prompt=question.prompt,
-            points=float(question.points),
-            expected_answers=SubmissionFilesProvider._expected_answers(
-                question.answers,
-                question.correct_choice_label,
-                question.correct_choice_labels,
-            ),
-            rubric=question.rubric,
-            question_type=qa_question_type(question),
-        )
-
-    @staticmethod
-    def _context_from_subquestion(subquestion: QASubquestion) -> _QuestionContext:
-        return _QuestionContext(
-            question_id=subquestion.id,
-            prompt=subquestion.prompt,
-            points=float(subquestion.points),
-            expected_answers=SubmissionFilesProvider._expected_answers(
-                subquestion.answers,
-                subquestion.correct_choice_label,
-                subquestion.correct_choice_labels,
-            ),
-            rubric=subquestion.rubric,
-            question_type=qa_question_type(subquestion),
-        )
-
-    @staticmethod
-    def _expected_answers(
-        answers: list[str],
-        correct_choice_label: str | None,
-        correct_choice_labels: tuple[str, ...] = (),
-    ) -> list[str]:
-        if correct_choice_labels:
-            return list(correct_choice_labels)
-        if correct_choice_label:
-            return [correct_choice_label]
-        return list(answers)
 
     def _validate_question_sets(self) -> None:
         expected = [ctx.question_id for ctx in self._submissions[0].question_contexts]
@@ -1304,7 +1185,7 @@ class SubmissionFilesProvider:
         return self._default_image_path
 
     def _rubric_options(self, context: _QuestionContext) -> list[RubricOptionSeed]:
-        options = [
+        return [
             RubricOptionSeed(
                 label=option.label,
                 points_delta=option.points_delta,
@@ -1312,23 +1193,7 @@ class SubmissionFilesProvider:
                 selection_mode=option.selection_mode,
                 default_comment=option.default_comment,
             )
-            for option in flatten_rubric_options(context.rubric)
-        ]
-        if options:
-            return options
-        return [
-            RubricOptionSeed(
-                label="Correct",
-                points_delta=0.0,
-                kind="correct",
-                selection_mode="exclusive",
-            ),
-            RubricOptionSeed(
-                label="Incorrect",
-                points_delta=-context.points,
-                kind="incorrect",
-                selection_mode="exclusive",
-            ),
+            for option in rubric_options(context)
         ]
 
     @staticmethod
