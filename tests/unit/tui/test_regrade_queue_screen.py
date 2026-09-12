@@ -1,5 +1,3 @@
-"""The regrade-queue modal (Shift+R): open / resolve / deny a dispute."""
-
 import asyncio
 
 from textual.app import App
@@ -89,11 +87,9 @@ def test_unmatched_dispute_cannot_open_but_can_resolve() -> None:
         app = _Harness([_item(student_item_id="", student_name="")])
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            # Enter on a non-navigable row does nothing (no target to route to).
             await pilot.press("enter")
             await pilot.pause()
             assert app.result == "unset"
-            # But it can still be resolved.
             await pilot.press("r")
             await pilot.pause()
         assert isinstance(app.result, RegradeChoice)

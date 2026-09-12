@@ -18,17 +18,8 @@ from .draw import (
 from .fonts import register_page_fonts, resolve_template_fonts
 from .master_key import draw_master_key_page
 
-# Re-exported so ``opengrader.core.pdf.templates.generate.QuestionInput`` keeps
-# working for existing callers — the definition itself lives in ``.utils``
-# (see there for why) so importing it doesn't require this fitz-heavy module.
 from .utils import QuestionInput, default_subquestion_label
 
-# fitz is only needed for type annotations here and for the two functions
-# below that actually build a document (``_build_template_doc`` and
-# ``generate_personalized_batch``), which import it locally right before
-# constructing a ``fitz.Document()``. Keeping it out of module scope matters
-# because this module sits on the TUI startup chain (reached while building
-# the qa-file setup screen) even for sessions that never generate a template.
 if TYPE_CHECKING:
     import fitz
 
@@ -212,14 +203,6 @@ def _build_template_doc(
     fonts,
     start_questions_on_first_page: bool,
 ) -> fitz.Document:
-    """Build (but do not save) one template/submission PDF.
-
-    Shared spine of :func:`generate_template_pdf`, :func:`generate_submission_pdf`,
-    and the personalized batch. ``title`` is the *final* composed title (any
-    ``(version)`` suffix is added by the caller); a blank ``name``/``student_id``
-    prints an empty field for handwritten entry.
-    """
-    # Import lazily: see the module-level note above — same reason.
     import fitz
 
     normalized_questions = _normalize_questions(questions)
@@ -290,11 +273,6 @@ def _stamp_qr_codes(
     student_id: str | None,
     page_w: float,
 ) -> None:
-    """Stamp an Opengrader QR on every page: identity + version + page + count.
-
-    Called once the doc is fully built so the total page count is known.
-    ``student_id=None`` produces *generic* codes (version/page/count only).
-    """
     total = len(doc)
     for index in range(total):
         code = OpengraderCode(
@@ -320,12 +298,6 @@ def generate_template_pdf(
     start_questions_on_first_page: bool = True,
     qr: bool = False,
 ) -> None:
-    """Generate one blank template PDF.
-
-    ``qr=True`` stamps a *generic* QR (version + page + count, no student id) on
-    every page — a stack of identical sheets that still splits and reorders
-    deterministically. For per-student identity use :func:`generate_personalized_batch`.
-    """
     fonts = resolve_template_fonts(
         regular_file=font_regular_file, bold_file=font_bold_file
     )
@@ -403,20 +375,9 @@ def generate_personalized_batch(
     start_questions_on_first_page: bool = True,
     include_master_key: bool = True,
 ) -> list[RosterStudent]:
-    """Generate one combined PDF: master key (page 1) + one QR sheet per student.
-
-    Every roster student gets a personalized, **anonymous** template — the sheet
-    prints their student **id** (never their name) plus a QR encoding
-    ``id + version + page + count``. Rows missing an id are given a stable 6-digit
-    id (:func:`assign_student_ids`). The master key (id → name) is prepended as
-    page 1 for the teacher to keep and detach before distribution.
-
-    Returns the roster with ids assigned (the teacher's authoritative mapping).
-    """
     if not students:
         raise ValueError("a personalized batch needs at least one roster student")
 
-    # Import lazily: see the module-level note above — same reason.
     import fitz
 
     fonts = resolve_template_fonts(

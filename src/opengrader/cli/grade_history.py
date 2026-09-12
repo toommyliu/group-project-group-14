@@ -1,10 +1,4 @@
-"""Show the durable grade-change history for a set of submissions.
-
-Reads the append-only accountability journal written under
-``<submissions>/.opengrader/history/`` — who changed which grade, from what to
-what, and when — merged across every grading session (so multiple graders are
-all visible). See :mod:`opengrader.core.history.journal`.
-"""
+"""Show changes to grades, comments, and transcriptions."""
 
 from __future__ import annotations
 
@@ -31,7 +25,6 @@ _KIND_GLYPH = {"grade": "✓", "comment": "✎", "rubric": "±"}
 
 
 def _short_time(timestamp: str) -> str:
-    # ISO 8601 -> "YYYY-MM-DD HH:MM"; fall back to the raw value if unparseable.
     if "T" in timestamp and len(timestamp) >= 16:
         return timestamp[:16].replace("T", " ")
     return timestamp

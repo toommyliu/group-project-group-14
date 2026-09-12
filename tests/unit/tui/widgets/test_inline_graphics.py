@@ -23,8 +23,6 @@ def test_iterm2_sequence_is_well_formed() -> None:
 
     arguments = _arguments(sequence)
     assert arguments["inline"] == "1"
-    # Size is declared in *cells* so the terminal scales the payload into
-    # exactly the box Textual reserved, whatever resolution we sent.
     assert arguments["width"] == "6"
     assert arguments["height"] == "3"
     assert arguments["preserveAspectRatio"] == "0"
@@ -39,9 +37,7 @@ def test_iterm2_payload_is_the_declared_number_of_png_bytes() -> None:
     match = _HEADER.match(sequence)
     assert match
     payload = base64.b64decode(match.group("payload"))
-    # `size` must match, or iTerm2 truncates or waits for more data.
     assert len(payload) == int(_arguments(sequence)["size"])
-    # PNG magic: lossless, so thin pen strokes survive.
     assert payload[:8] == b"\x89PNG\r\n\x1a\n"
 
 
@@ -62,5 +58,5 @@ def test_sixel_output_uses_the_sixel_introducer() -> None:
 
     data = encode_sixel(image)
 
-    assert data.startswith("\x1bP")  # DCS
-    assert data.endswith("\x1b\\")  # ST
+    assert data.startswith("\x1bP")
+    assert data.endswith("\x1b\\")

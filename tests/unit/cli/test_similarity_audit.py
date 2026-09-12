@@ -102,8 +102,6 @@ def test_invalid_threshold_rejected(tmp_path) -> None:
     assert exc.value.code == 1
 
 
-# --- Objective answer patterns (--solutions) -------------------------------
-
 _OPTIONS = ("A", "B", "C", "D")
 
 
@@ -193,12 +191,10 @@ def test_flags_a_copied_objective_paper(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     assert "Student 000 ↔ Student 001" in out
     assert "identical wrong answers" in out
-    # The reader is told how many comparisons produced it.
     assert "student pair(s) compared" in out
 
 
 def test_reports_what_could_not_be_analyzed_before_any_verdict(tmp_path, capsys) -> None:
-    """A clean result over two of fifty questions is not a clean result."""
     subs = tmp_path / "subs"
     subs.mkdir()
     qa = tmp_path / "qa.md"

@@ -1,24 +1,4 @@
-"""One command from a stack of scans to a gradeable cohort.
-
-    uv run opengrader-run --scan bundle.pdf --qa qa.md --out cohort/
-
-Runs ``scan-check → split → extract → auto-grade`` in order and then opens the
-TUI on what it built. Re-run the identical command after an interruption, a
-re-scan or a change of mind and each stage consults the run ledger: the work
-that still stands is **reused**, not repeated.
-
-This is a thin front end. Every decision — what each stage does, what it may
-skip, what stops the run — lives in ``core/pipeline.py``; everything here is
-argument parsing and how the run is narrated to somebody watching a terminal.
-That split is deliberate: the TUI drives the same engine and must not have to
-re-derive any of it from printed text.
-
-exit codes:
-  0  everything that could run, ran
-  1  a stage failed
-  2  the scan pre-flight blocked the run — a decision is needed (the same
-     meaning `grade-check --fail-on-blocking` gives 2)
-"""
+"""Run the scan-check, split, extract, and grading stages."""
 
 from __future__ import annotations
 
@@ -60,9 +40,6 @@ what it builds under --out:
   .opengrader/run-ledger.jsonl the stage ledger that makes a re-run resumable
 """
 
-# How each status reads in the summary. The words are the point of the whole
-# feature — "reused" is what teaches a user that re-running is cheap — so they
-# are spelled out rather than borrowed from the enum's identifiers.
 _STATUS_LABEL = {
     StageStatus.RAN: "ran",
     StageStatus.REUSED: "reused",
@@ -81,16 +58,6 @@ _STATUS_GLYPH = {
 
 
 class _Narrator:
-    """Prints the run as it happens, for somebody watching rather than logging.
-
-    The per-answer ticks are the awkward part: on a class of two hundred they
-    are tens of thousands of events, and printing a line each would bury every
-    status message the stages emit. So they are collapsed into a single
-    carriage-returned counter, and only when stdout is a terminal — redirected
-    to a file, ``\\r`` produces one unreadable mega-line instead of a progress
-    bar, so a non-TTY simply gets the status lines and nothing else.
-    """
-
     def __init__(self, *, stream=None) -> None:
         self._stream = stream if stream is not None else sys.stdout
         self._interactive = bool(getattr(self._stream, "isatty", lambda: False)())
@@ -147,18 +114,8 @@ class _Narrator:
 
 
 def _build_parser() -> ArgumentParser:
-    # Resolved once, here, not at import time: a teacher can change the saved
-    # AI Setup switches at any time, and reading them only when the parser is
-    # actually built means every invocation picks up whatever is current,
-    # while an explicit CLI flag below still wins — the same reasoning every
-    # other CLI in this package already follows.
     ai = ai_config.resolve()
     parser = ArgumentParser(
-        # Deliberately no `prog=`: argparse then names whatever was
-        # actually invoked — the standalone `opengrader-run` script, or
-        # `opengrader run` when the front-door command dispatched
-        # here (cli/main.py patches sys.argv[0] for exactly this). A
-        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Run the whole pre-grading pipeline — scan check, split, extract, "
             "auto-grade — with one command. Re-runs resume instead of repeating."
@@ -325,12 +282,6 @@ def _build_parser() -> ArgumentParser:
 def _build_request(
     args, ai: "ai_config.ResolvedAI | None" = None
 ) -> PipelineRequest:
-    # Resolved here (unless a caller — a test — hands one in) rather than at
-    # import time, for the same reason `_build_parser` resolves its own copy:
-    # AI Setup can change between runs. Two separate resolves (one for
-    # argparse defaults, one here) rather than threading one value through is
-    # deliberately simple — `ai_config.resolve()` is cheap file I/O, not a
-    # network call.
     resolved_ai = ai if ai is not None else ai_config.resolve()
     return PipelineRequest(
         scan=Path(args.scan),
@@ -339,13 +290,6 @@ def _build_request(
         roster=Path(args.roster) if args.roster else None,
         blank_template=Path(args.blank_template) if args.blank_template else None,
         pages_per_submission=args.pages_per_submission,
-        # --llm is deliberately tri-state (default=None): absent, the two
-        # halves follow the two separate AI Setup switches (reading
-        # handwriting and suggesting grades are genuinely different
-        # decisions); given, --llm/--no-llm is a blunt override for both,
-        # which is what a script or a CI run wants. `LlmOptions.enabled` is
-        # still `read_handwriting or grade_written`, so nothing downstream
-        # broke.
         llm=LlmOptions(
             read_handwriting=(
                 args.llm if args.llm is not None else resolved_ai.read_handwriting
@@ -385,9 +329,6 @@ def _print_summary(report: PipelineReport) -> None:
         label = _STATUS_LABEL.get(outcome.status, outcome.status.value)
         print(f"  {glyph} {outcome.stage:<12} {label:<8} {outcome.message}")
 
-    # A stage with no outcome at all is one the run never reached. Named
-    # explicitly rather than left off the list, because a summary that simply
-    # stops reads as "that was everything".
     not_reached = [stage for stage in PIPELINE_STAGES if report.stage(stage) is None]
     if not_reached:
         print(f"  · {'not reached':<12} {'':<8} {', '.join(not_reached)}")
@@ -443,24 +384,12 @@ def _report_to_dict(report: PipelineReport) -> dict[str, object]:
 
 
 def exit_code(report: PipelineReport) -> int:
-    """0 clean, 2 blocked, 1 failed.
-
-    Blocked outranks failed because it is the more actionable of the two and,
-    by construction, the run stops at whichever came first — so at most one of
-    them is ever present.
-    """
     if any(outcome.status is StageStatus.BLOCKED for outcome in report.stages):
         return 2
     return 0 if report.ok else 1
 
 
 def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
-    """Run the pipeline and narrate it. ``None`` for a dry run.
-
-    Returns the report so a caller with something better to do than parse
-    stdout — the TUI, a test, a future web layer — can have it. The console
-    entry point is :func:`main`, which throws it away; see there for why.
-    """
     args = _build_parser().parse_args(argv)
     request = _build_request(args)
 
@@ -468,17 +397,6 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
         _print_plan(request)
         return None
 
-    # Under --json the narration moves to stderr rather than going away: a long
-    # run still shows a human what it is doing, while stdout stays a single
-    # parseable document. Interleaving the two on stdout would make --json
-    # useless the moment a stage said anything.
-    #
-    # Redirecting stdout for the run itself is not belt-and-braces: the inner
-    # CLIs print some lines directly rather than only through their status
-    # callbacks (``automated_grading``'s ``emit`` always prints, and the
-    # extractor announces its model and PDF count), so without this a --json run
-    # emits "Found 2 submission PDF(s)" ahead of the opening brace and every
-    # scripted caller fails to parse it.
     narrator = _Narrator(stream=sys.stderr if args.as_json else sys.stdout)
     if args.as_json:
         with redirect_stdout(sys.stderr):
@@ -491,9 +409,6 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
     else:
         _print_summary(report)
 
-    # --json is a machine-readable answer; handing that caller an interactive
-    # full-screen app instead of returning would be a surprise it cannot recover
-    # from, so it always wins over --tui however --tui was set.
     open_tui = args.tui if args.tui is not None else sys.stdout.isatty()
     if open_tui and not args.as_json and report.ok and report.ready_to_grade:
         _open_tui(report)
@@ -502,17 +417,6 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
 
 
 def _open_tui(report: PipelineReport) -> None:
-    """Hand the finished cohort to the TUI, through its own entry point.
-
-    ``tui/main.run_app`` is called rather than ``TuiApp`` directly so this path
-    goes through the same graphics-protocol negotiation every other launch does
-    — that has to happen before Textual owns stdin, and duplicating it here
-    would be a second place for terminal detection to be got wrong.
-
-    Skipped without a QA file: ``run_app`` requires ``--qa-file`` and
-    ``--submissions`` together, and opening the app on nothing would lose the
-    folder this run just built.
-    """
     if report.qa_file is None:
         return
     from opengrader.tui.main import run_app
@@ -528,17 +432,9 @@ def _open_tui(report: PipelineReport) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Console entry point.
-
-    ``console_scripts`` does ``sys.exit(main())``, so an entry point aimed
-    straight at :func:`run_cli` would print the report's ``repr`` and exit 1 on
-    a *successful* run — the same latent defect already fixed in ``llm-eval``,
-    ``grade-check`` and ``doctor``. The report is for programmatic callers; the
-    console gets an exit code.
-    """
     report = run_cli(argv)
     return 0 if report is None else exit_code(report)
 
 
-if __name__ == "__main__":  # pragma: no cover - manual invocation
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

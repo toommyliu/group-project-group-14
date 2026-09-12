@@ -7,14 +7,12 @@ from opengrader.core.submissions.answer_groups import (
 
 
 def test_numeric_normalization_groups_equal_values() -> None:
-    # Equal numeric values collapse regardless of formatting or trailing units.
     assert (
         normalize_answer_key("42", NUMERIC)
         == normalize_answer_key("42.0", NUMERIC)
         == normalize_answer_key("42 mL", NUMERIC)
         == "42"
     )
-    # Different values stay distinct; unreadable numbers land in the blank bucket.
     assert normalize_answer_key("43", NUMERIC) == "43"
     assert normalize_answer_key("n/a", NUMERIC) == ""
 
@@ -35,7 +33,6 @@ def test_free_response_normalization_collapses_cosmetic_differences() -> None:
 
 
 def test_free_response_preserves_inner_punctuation() -> None:
-    # Different expressions must stay distinct.
     assert normalize_answer_key("f(x)=x^2", FREE_RESPONSE) != normalize_answer_key(
         "f(x)=x", FREE_RESPONSE
     )
@@ -82,7 +79,6 @@ def test_group_responses_orders_largest_first_then_blank_last() -> None:
             _fr("s4", "b"),
         ]
     )
-    # "a" (size 2) first, "b" (size 1) next, blank last despite insertion order.
     assert [g.key for g in groups] == ["a", "b", ""]
     assert groups[-1].is_blank
     assert groups[-1].member_ids == ("s1",)
@@ -117,7 +113,6 @@ def test_group_sample_response_text_prefers_nonblank() -> None:
             _fr("s2", "  "),
         ]
     )
-    # All blank: single blank group with an empty sample.
     assert len(groups) == 1
     assert groups[0].is_blank
     assert groups[0].sample_response_text == ""

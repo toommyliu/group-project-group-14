@@ -1,35 +1,4 @@
-"""Measure an LLM grader against submissions a human already graded.
-
-``automated-grading --llm`` hands a model authority over part of an exam, gated
-by one number: ``--llm-min-confidence``. Its default of 0.7 was a guess, and so
-is every value an instructor has picked since — there has been no way to find
-out whether a given model, on a given assignment, is right 95% of the time above
-0.8 or 60% of the time everywhere.
-
-This tool answers that. It replays the *exact* grading path
-``automated-grading --llm --dry-run`` takes — same answer-key lookup, same
-candidate selection, same prompt, same rubric-constrained scoring — over answers
-a human has already marked, and reports how often the model agreed, broken down
-per model, per question type, and per confidence bucket. It then reads a
-threshold off that evidence.
-
-It is **strictly read-only**: no grade, comment, annotation or journal entry is
-written. The only side effect is load on the Ollama server.
-
-    uv run llm-eval --solutions solutions.md --input out/student-submissions/
-    uv run llm-eval --solutions solutions.md --input out/student-submissions/ \\
-        --llm-model llama3.1 --llm-model qwen2.5:7b
-
-``--input`` repeats to **pool classes that share this answer key** — the same
-exam given in past terms. That is the one kind of pooling worth doing: same
-rubric, same point scale, same questions, just more students, so the agreement
-rate describes exactly what it claims to. (Pooling *different* assignments would
-average a 4-point short answer with a 20-point essay into a number that
-describes neither, which is why the answer key stays singular.)
-
-Engine: ``core/grading/evaluation.py`` (pure); candidate selection is shared with
-production grading via ``core/grading/solutions.needs_llm_grade``.
-"""
+"""Measure an LLM grader against submissions a human already graded."""
 
 from __future__ import annotations
 
@@ -91,15 +60,7 @@ a human already marked, and compares.
 """
 
 
-# ── collecting the evidence ──────────────────────────────────────────────────
-
-
 def discover_submission_paths(input_path: Path) -> list[Path]:
-    """Find submission files, flat or one directory down.
-
-    Matches `SubmissionFilesProvider` and every other CLI, so "the folder I
-    graded" means the same thing here as everywhere else.
-    """
     if input_path.is_file():
         return [input_path]
     direct = sorted(input_path.glob("*.submission.md"))
@@ -108,13 +69,6 @@ def discover_submission_paths(input_path: Path) -> list[Path]:
 
 
 def resolve_classes(inputs: Sequence[str]) -> list[Path]:
-    """Turn the ``--input`` values into distinct class roots, order preserved.
-
-    De-duplicated by resolved path: naming the same folder twice would double
-    every one of its answers in the sample, quietly halving the weight of every
-    other class. Silently dropping the repeat is right — the user's intent is
-    unambiguous and there is nothing for them to decide.
-    """
     seen: set[Path] = set()
     roots: list[Path] = []
     for raw in inputs:
@@ -131,18 +85,6 @@ def resolve_classes(inputs: Sequence[str]) -> list[Path]:
 
 
 def class_labels(roots: Sequence[Path]) -> list[str]:
-    """Name each class by the shortest tail of its path that is still unique.
-
-    The expected on-disk layout is one folder per term, each containing an
-    identically-named `student-submissions/` — so a bare basename would label
-    every class "student-submissions" and tell the reader nothing. This walks
-    up a component at a time until the labels differ: `2026-spring` and
-    `2025-fall` when those are the folder names, `2026-spring/student-
-    submissions` when the distinguishing part is one level up.
-
-    Callers pass de-duplicated roots (`resolve_classes`), so the loop always
-    terminates on a difference rather than exhausting the paths.
-    """
     tails = [list(reversed(Path(root).parts)) for root in roots]
     longest = max((len(tail) for tail in tails), default=0)
     for depth in range(1, longest + 1):
@@ -154,27 +96,12 @@ def class_labels(roots: Sequence[Path]) -> list[str]:
 
 def collect_targets(
     roots: Sequence[Path],
-    qa_doc,  # noqa: ANN001 — QADocument
+    qa_doc,  # noqa: ANN001
     *,
     warn: Callable[[str], None] | None = None,
     label_classes: bool = False,
     min_transcription_confidence: float = MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
 ) -> tuple[list[EvalTarget], SkipTally]:
-    """Gather every human-graded answer a model would be asked to grade.
-
-    Done once for all models, so each model is measured on an identical set of
-    answers — otherwise a comparison between two models would partly be a
-    comparison between two samples. A submission that fails to parse is reported
-    and skipped rather than aborting the run: one bad file should not cost an
-    instructor the whole calibration.
-
-    Several ``roots`` pool classes that share the answer key — the same exam
-    given in past terms. Nothing about the aggregation changes, because pooling
-    answers is what this already does across students; these just come from more
-    folders. ``label_classes`` stamps each target with its folder name, worth
-    doing only when there is more than one (otherwise every row would carry the
-    same redundant label).
-    """
     targets: list[EvalTarget] = []
     tally = SkipTally()
     labels = class_labels(roots) if label_classes else [""] * len(roots)
@@ -206,13 +133,6 @@ def run_models_over_targets(
     progress: Callable[[str, int, int, EvalTarget], None] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> list[EvalCase]:
-    """Ask every model about every target.
-
-    A transport failure (server died mid-run) is reported and the answer is
-    recorded as "no suggestion" rather than aborting: a partial measurement of a
-    slow, expensive pass is worth far more than none, and "no suggestion" is
-    exactly what production would do with that answer anyway.
-    """
     cases: list[EvalCase] = []
     for model in models:
         generate_fn = generate_for(model)
@@ -238,9 +158,6 @@ def run_models_over_targets(
                     )
                 )
     return cases
-
-
-# ── rendering ────────────────────────────────────────────────────────────────
 
 
 def _pct(value: float | None) -> str:
@@ -271,15 +188,12 @@ def _print_skips(tally: SkipTally, target_count: int, classes: Sequence[str] = (
         f"{tally.low_confidence} transcription too weak to grade"
     )
     if tally.low_confidence:
-        # Not a grading problem and not fixable by tuning a threshold — say so,
-        # or it reads as answers the model declined.
         print(
             f"  ({tally.low_confidence} answer(s) were not sent to any model "
             "because the OCR does not trust the transcription; production "
             "skips these too. A large number here is a scan-quality problem.)"
         )
     if tally.ungraded:
-        # The one row an instructor can act on to make the answer sharper.
         print(
             f"  ({tally.ungraded} answer(s) have no human grade to compare "
             "against — grading more of them by hand sharpens this report.)"
@@ -341,15 +255,9 @@ def _print_model(evaluation: ModelEvaluation, report: LlmEvalReport) -> None:
         f"    {'min-conf':<9}{'graded':>7}{'coverage':>10}{'agreed':>8}"
         f"{'±pts':>7}{'left to you':>13}"
     )
-    # Consecutive thresholds that catch the same answers produce identical rows.
-    # Only the first (loosest) of each run is printed: it is the one that would
-    # be recommended, and a dozen repeats of it would bury the shape of the
-    # curve — which is the only thing this table exists to show.
     previous_applied: int | None = None
     for row in evaluation.thresholds:
         if not row.has_sample and row.threshold > 0:
-            # Every stricter threshold is empty too; stop rather than print a
-            # tail of dashes.
             break
         if row.applied == previous_applied:
             continue
@@ -364,7 +272,7 @@ def _print_model(evaluation: ModelEvaluation, report: LlmEvalReport) -> None:
     print()
     if recommendation.threshold is not None:
         row = recommendation.row
-        assert row is not None  # set together with `threshold`
+        assert row is not None
         print(
             f"  → --llm-min-confidence {recommendation.threshold:.2f}"
             f"   grades {row.applied}/{report.cases_per_model} "
@@ -375,14 +283,10 @@ def _print_model(evaluation: ModelEvaluation, report: LlmEvalReport) -> None:
     else:
         print(f"  → no recommended threshold: {recommendation.reason}")
 
-    # Printed in both cases, and deliberately so: when no threshold is
-    # recommendable, these are the answers that say why.
     if evaluation.worst_disagreements:
         print("\n  Biggest disagreements (read these yourself)")
         for case in evaluation.worst_disagreements:
             who = case.target.student_name or case.target.student_id or "?"
-            # Two pooled classes can both number their students from s1, so a
-            # bare id would point at two different people.
             if case.target.class_label:
                 who = f"{who} [{case.target.class_label}]"
             error = case.points_error or 0.0
@@ -423,9 +327,6 @@ def print_report(report: LlmEvalReport) -> None:
                 f"grades {_pct(row.coverage)} of the free responses at "
                 f"{_pct(row.agreement_rate)} agreement."
             )
-
-
-# ── JSON ─────────────────────────────────────────────────────────────────────
 
 
 def _stats_to_dict(stats: AgreementStats) -> dict[str, object]:
@@ -525,14 +426,7 @@ def report_to_dict(report: LlmEvalReport) -> dict[str, object]:
     }
 
 
-# ── CLI ──────────────────────────────────────────────────────────────────────
-
-
 def _build_parser() -> ArgumentParser:
-    # Resolved once, here, rather than as a module-level constant: a teacher's
-    # AI Setup choice can change between runs, and reading it only when the
-    # parser is actually built keeps a `--help` of some other tool from ever
-    # touching the settings file.
     ai = ai_config.resolve()
     parser = ArgumentParser(
         description=(
@@ -685,11 +579,6 @@ def _build_parser() -> ArgumentParser:
 def _start_ollama_server_if_needed(
     config: OllamaConfig, emit: Callable[[str], None]
 ) -> None:
-    """Start ``ollama serve`` if nothing is listening on the configured host.
-
-    A copy of the helper in the split/extract/answer-key/grading CLIs, per the
-    repo's self-contained-CLI convention.
-    """
     parsed = urlparse(config.host)
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or 11434
@@ -719,12 +608,6 @@ def _start_ollama_server_if_needed(
 def _default_generate_factory(
     host: str, timeout_seconds: float, *, auto_ollama: bool
 ) -> Callable[[str], GenerateFn]:
-    """Build the per-model transport, checking each model is actually there.
-
-    The check is up front for the same reason ``automated-grading`` does it: a
-    missing model should cost one clear error, not one warning per answer over a
-    pass that then reports a meaningless 0% agreement.
-    """
     started = False
 
     def factory(model: str) -> GenerateFn:
@@ -758,17 +641,6 @@ def run_cli(
     *,
     generate_factory: Callable[[str], GenerateFn] | None = None,
 ) -> LlmEvalReport | None:
-    """Run the evaluation harness.
-
-    ``generate_factory`` injects the transport (model name -> generate function)
-    so the whole CLI is testable without an Ollama server.
-
-    Returns the finished report. The console entry point ignores it, but the
-    TUI's calibration modal reads the recommended threshold off it **as a
-    number** rather than scraping it back out of the printed text — the number
-    is the entire point of the tool, and it should not survive or fail on a
-    change to a `print` format string.
-    """
     args = _build_parser().parse_args(argv)
 
     solutions_path = Path(args.solutions)
@@ -799,19 +671,11 @@ def run_cli(
         min_transcription_confidence=args.llm_min_transcription_confidence,
     )
     if args.limit is not None:
-        # Spread rather than truncate: see `spread_targets`. Applied to the
-        # pooled set, so --limit is a total budget across every class.
         targets = spread_targets(targets, args.limit)
 
-    # `--llm-model` is repeatable (to compare several), so it can't carry a
-    # fixed argparse default the way a single-value flag can; falling back to
-    # the resolved AI Setup model here (rather than OllamaConfig's literal)
-    # keeps this in step with every other tool's default.
     models = args.llm_models or [ai_config.resolve().text_model]
 
     if not targets:
-        # Report the tally anyway: it says *why* there is nothing to measure,
-        # which is the actionable part.
         report = build_llm_eval_report(
             [],
             skipped=tally,
@@ -879,14 +743,6 @@ def run_cli(
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Console entry point.
-
-    A ``console_scripts`` wrapper calls ``sys.exit(main())``, so pointing the
-    entry point straight at :func:`run_cli` made a *successful* run print the
-    report's ``repr`` and exit 1. The return value exists for the TUI's
-    calibration modal, which reads the recommended threshold off it as a number
-    rather than scraping stdout; the console never wants it.
-    """
     run_cli(argv)
 
 

@@ -107,9 +107,6 @@ def test_low_confidence_ai_grade_flagged_high() -> None:
 
 
 def test_confirmed_ai_grade_not_flagged() -> None:
-    # A human has been here and kept the grade. Leaving it flagged would mean
-    # the queue never empties and the release pre-flight never clears, which is
-    # how a warning becomes something people click past.
     q = _question(
         "q1",
         points_awarded=5,
@@ -121,9 +118,6 @@ def test_confirmed_ai_grade_not_flagged() -> None:
 
 
 def test_overridden_ai_grade_not_flagged() -> None:
-    # The common way an AI grade gets reviewed: a grader disagreed and picked a
-    # different rubric option. Nobody has to look at it again, so leaving it
-    # flagged would mean the queue could never empty.
     q = _question(
         "q1",
         points_awarded=10,
@@ -135,7 +129,6 @@ def test_overridden_ai_grade_not_flagged() -> None:
 
 
 def test_unconfirmed_ai_grade_with_a_model_is_still_flagged() -> None:
-    # Recording the model must not be mistaken for a human having checked it.
     q = _question(
         "q1",
         points_awarded=5,
@@ -171,7 +164,7 @@ def test_zero_score_sweep_not_flagged_for_single_zero() -> None:
 
 
 def test_ungraded_only_flagged_when_requested() -> None:
-    q = _question("q1")  # no points, no labels
+    q = _question("q1")
     assert ReviewReason.UNGRADED not in _reasons(flag_submission(_doc(questions=[q])))
     with_ungraded = flag_submission(_doc(questions=[q]), include_ungraded=True)
     assert ReviewReason.UNGRADED in _reasons(with_ungraded)
@@ -182,12 +175,9 @@ def test_build_review_flags_sorts_high_severity_first() -> None:
     missing_id = _doc(student_id="", student_name="Amy")
     flags = build_review_flags([clean, missing_id])
     assert flags[0].reason is ReviewReason.MISSING_STUDENT_ID
-    # Severity ranks are non-decreasing through the list.
     ranks = [f.severity_rank for f in flags]
     assert ranks == sorted(ranks)
 
-
-# ── Missing-submission (cohort-level) checks ──────────────────────────────────
 
 _ROSTER = [
     RosterStudent(student_id="111111111", name="Tommy Liu"),
@@ -207,14 +197,12 @@ def test_missing_submission_flagged_for_roster_student_with_no_file() -> None:
 
 
 def test_present_student_matched_by_id_is_not_flagged() -> None:
-    # Id matches even though the name was mis-transcribed on the submission.
     submitted = [_doc(student_id="222222222", student_name="A. Cortez")]
     flags = flag_missing_submissions(_ROSTER, submitted)
     assert "222222222" not in {f.student_id for f in flags}
 
 
 def test_present_student_matched_by_unique_name_when_id_missing() -> None:
-    # Id box was blank/unreadable, but the unique roster name still matches.
     submitted = [_doc(student_id="", student_name="  andy   cortes ")]
     flags = flag_missing_submissions(_ROSTER, submitted)
     assert "222222222" not in {f.student_id for f in flags}
@@ -225,7 +213,6 @@ def test_shared_roster_name_does_not_mask_a_missing_twin() -> None:
         RosterStudent(student_id="444444444", name="John Smith"),
         RosterStudent(student_id="555555555", name="John Smith"),
     ]
-    # One "John Smith" submitted by name only; the twin must still be flagged.
     submitted = [_doc(student_id="", student_name="John Smith")]
     flags = flag_missing_submissions(roster, submitted)
     assert {f.student_id for f in flags} == {"444444444", "555555555"}
@@ -244,7 +231,6 @@ def test_build_review_flags_includes_missing_submissions_when_roster_given() -> 
     with_roster = build_review_flags(submitted, roster=_ROSTER)
     missing = [f for f in with_roster if f.reason is ReviewReason.MISSING_SUBMISSION]
     assert {f.student_id for f in missing} == {"222222222", "333333333"}
-    # Still globally sorted by severity.
     ranks = [f.severity_rank for f in with_roster]
     assert ranks == sorted(ranks)
 
@@ -267,7 +253,6 @@ def test_high_confidence_transcription_not_flagged() -> None:
 
 
 def test_vlm_none_confidence_is_not_flagged() -> None:
-    # A VLM transcription (no confidence) is deliberately left unflagged.
     flags = flag_submission(
         _doc(questions=[_question(response_text="mitochondria", response_confidence=None)])
     )
@@ -275,12 +260,6 @@ def test_vlm_none_confidence_is_not_flagged() -> None:
 
 
 def test_measured_empty_response_is_unreadable_not_merely_empty() -> None:
-    # An empty response the reader *measured* and distrusts is a stronger
-    # signal than a plain blank: OCR that read nothing at 10% confidence, or a
-    # bubble sheet with two circles filled, is an extraction failure rather
-    # than a student who skipped the question. It gets its own high-severity
-    # reason, and never the low-confidence-*transcription* one (there is no
-    # transcription to distrust).
     flags = flag_submission(
         _doc(questions=[_question(response_text="", response_confidence=10.0)])
     )
@@ -293,8 +272,6 @@ def test_measured_empty_response_is_unreadable_not_merely_empty() -> None:
 
 
 def test_plain_blank_response_is_still_only_empty() -> None:
-    # No measurement (None) or a confident one: the student simply left it
-    # blank, which stays the quiet low-severity flag it always was.
     for confidence in (None, 100.0):
         flags = flag_submission(
             _doc(questions=[_question(response_text="", response_confidence=confidence)])
@@ -305,8 +282,6 @@ def test_plain_blank_response_is_still_only_empty() -> None:
 
 
 def test_unreadable_mark_flagged_on_a_multiple_choice_question() -> None:
-    # The bubble-sheet case: multiple choice never raises EMPTY_RESPONSE, so
-    # before this reason existed a double-marked bubble surfaced nowhere.
     flags = flag_submission(
         _doc(
             questions=[
@@ -326,6 +301,6 @@ def test_unreadable_mark_flagged_on_a_multiple_choice_question() -> None:
 
 def test_ocr_confidence_floor_is_configurable() -> None:
     q = [_question(response_text="mitochondria", response_confidence=70.0)]
-    assert flag_submission(_doc(questions=q)) == []  # 70 >= default 60
+    assert flag_submission(_doc(questions=q)) == []
     flags = flag_submission(_doc(questions=q), ocr_confidence_floor=80)
     assert flags[0].reason is ReviewReason.LOW_CONFIDENCE_TRANSCRIPTION

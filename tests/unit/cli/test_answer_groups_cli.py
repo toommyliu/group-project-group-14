@@ -8,7 +8,6 @@ _ANSWER = (
     "A binary search repeatedly halves the interval, comparing the target to "
     "the middle element and discarding the half that cannot contain it."
 )
-# Same answer, cosmetically different — the exact tier keeps these apart.
 _ANSWER_REWORDED = _ANSWER.replace("cannot contain it.", "can not contain it.")
 _OTHER = (
     "Depth-first search explores as far as possible along each branch before "
@@ -59,8 +58,6 @@ def test_reports_the_grading_effort_a_cohort_actually_costs(cohort, capsys):
     run_cli(["--input", str(cohort)])
 
     out = capsys.readouterr().out
-    # 5 responses, 4 distinct answers (two share one exactly), 3 after the
-    # reworded one is proposed for merging.
     assert "5 responses → 4 distinct answers → 3 after suggested merges" in out
     assert "Question 1" in out
 
@@ -71,7 +68,6 @@ def test_suggestions_list_the_answers_a_merge_would_join(cohort, capsys):
     out = capsys.readouterr().out
     assert "1 proposed merge(s)" in out
     assert "grade this" in out
-    # The proposal is a proposal — the tool never applies one.
     assert "Nothing here is applied" in out
 
 

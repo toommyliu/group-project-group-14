@@ -1,5 +1,3 @@
-"""The item-analysis modal's per-section cycler (f)."""
-
 import asyncio
 
 from opengrader.core.analytics import ItemAnalysisReport
@@ -8,8 +6,6 @@ from opengrader.tui.ui.screens import ItemAnalysisScreen
 
 from .fakes import DEFAULT_IMAGE_PATH
 
-# Empty reports keep the test off matplotlib (no chart when there are no items);
-# the cohort size stands in for "which scope am I looking at".
 _REPORTS = {
     None: ItemAnalysisReport(items=(), class_size=3),
     "MW": ItemAnalysisReport(items=(), class_size=2),
@@ -45,7 +41,6 @@ def test_cycle_section_advances_scope_and_rebuilds() -> None:
             await pilot.pause()
             assert screen._current_scope == "TTh"
 
-            # Wraps back to all-sections.
             await pilot.press("f")
             await pilot.pause()
             assert screen._current_scope is None
@@ -63,7 +58,6 @@ def test_no_cycler_without_sections() -> None:
             await app.push_screen(screen)
             await pilot.pause()
 
-            # A single scope: pressing f is a no-op, not a crash.
             await pilot.press("f")
             await pilot.pause()
             assert screen._current_scope is None

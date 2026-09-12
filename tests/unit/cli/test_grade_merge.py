@@ -1,10 +1,3 @@
-"""The grade-merge CLI end to end: pack, grade both copies, preview, apply.
-
-These are the tests with real folders on both sides, so they cover the parts the
-pure engine tests deliberately leave out: alias translation, finding the handoff
-key, reading two cohorts off disk, and writing the merged answers back.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -72,7 +65,6 @@ def cohort(tmp_path: Path) -> Path:
 
 
 def _grade(folder: Path, actor: str, question_id: str, points: float, *, index: int = 0):
-    """Grade one answer the way the TUI does: write the file, then journal it."""
     paths = sorted(folder.glob("*/*.submission.md"))
     path = paths[index]
     document = load_student_submission_markdown(path)
@@ -110,9 +102,6 @@ def _pack(cohort: Path, out: Path, name: str = "p1") -> Path:
     return out / name
 
 
-# ── pack ──────────────────────────────────────────────────────────────────
-
-
 def test_pack_reports_the_folder_and_the_key_separately(
     cohort: Path, tmp_path: Path, capsys
 ) -> None:
@@ -146,9 +135,6 @@ def test_list_shows_the_packets_handed_out(cohort: Path, tmp_path: Path, capsys)
     assert "for-alice" in output and "students: 2" in output
 
 
-# ── preview / apply ───────────────────────────────────────────────────────
-
-
 def test_preview_writes_nothing(cohort: Path, tmp_path: Path, capsys) -> None:
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 5.0)
@@ -159,7 +145,7 @@ def test_preview_writes_nothing(cohort: Path, tmp_path: Path, capsys) -> None:
     output = capsys.readouterr().out
 
     assert "1 change(s) to take" in output
-    assert "Ada Lovelace" in output  # de-aliased through the handoff key
+    assert "Ada Lovelace" in output
     assert sorted(p.read_bytes() for p in cohort.glob("*/*.submission.md")) == before
 
 
@@ -170,8 +156,8 @@ def test_apply_takes_their_work_and_keeps_ours(cohort: Path, tmp_path: Path) -> 
 
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
 
-    assert _points(cohort, "q1") == 5.0  # theirs
-    assert _points(cohort, "q2") == 4.0  # ours, untouched
+    assert _points(cohort, "q1") == 5.0
+    assert _points(cohort, "q2") == 4.0
 
 
 def test_apply_without_yes_is_a_preview(cohort: Path, tmp_path: Path, capsys) -> None:
@@ -217,7 +203,6 @@ def test_conflicts_theirs_takes_the_incoming_answer(cohort: Path, tmp_path: Path
 def test_the_merge_is_journalled_under_an_actor_naming_the_packet(
     cohort: Path, tmp_path: Path
 ) -> None:
-    """This is what makes the merge undoable with one grade-restore command."""
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 5.0)
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
@@ -229,7 +214,6 @@ def test_the_merge_is_journalled_under_an_actor_naming_the_packet(
 def test_a_merge_can_be_undone_with_one_grade_restore_command(
     cohort: Path, tmp_path: Path
 ) -> None:
-    """The property that makes trying a merge safe — so it is tested for real."""
     from opengrader.cli.grade_restore import run_cli as run_restore_cli
 
     packet = _pack(cohort, tmp_path / "out")
@@ -251,7 +235,6 @@ def test_a_merge_can_be_undone_with_one_grade_restore_command(
 
 
 def test_history_import_is_off_by_default(cohort: Path, tmp_path: Path) -> None:
-    """It costs the one-command undo, so it must never happen unasked."""
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 5.0)
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
@@ -279,8 +262,6 @@ def test_history_import_de_aliases_and_names_the_extra_undo_actor(
 
     imported = [e for e in read_journal(resolve_history_dir(cohort)) if e.actor == "alice"]
     assert imported, "the other grader's session should be readable here"
-    # The alias is rewritten back to the real student, or the imported history
-    # would be a wall of codes nobody can read.
     assert imported[0].student_id == "1001"
     assert imported[0].student_name == "Ada Lovelace"
     assert "--without-actor alice" in output
@@ -305,13 +286,9 @@ def test_importing_twice_does_not_double_the_entries(cohort: Path, tmp_path: Pat
     assert first == second
 
 
-# ── the failure that must not be silent ───────────────────────────────────
-
-
 def test_a_redacted_packet_without_its_key_is_refused(
     cohort: Path, tmp_path: Path, capsys
 ) -> None:
-    """Merging without the map would match nothing and report "no changes"."""
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 5.0)
     (resolve_handoff_dir(cohort) / "p1.json").unlink()
@@ -348,7 +325,6 @@ def test_a_moved_key_can_be_named_explicitly(cohort: Path, tmp_path: Path, capsy
 def test_a_plain_unredacted_copy_merges_with_no_key_at_all(
     cohort: Path, tmp_path: Path, capsys
 ) -> None:
-    """A hand-made `cp -r` copy is a supported thing to hand back."""
     copy = tmp_path / "copy"
     copy.mkdir()
     for source in sorted(cohort.glob("*/")):
@@ -398,21 +374,11 @@ def test_preview_json_is_machine_readable(cohort: Path, tmp_path: Path, capsys) 
 def test_pack_without_output_uses_the_default_beside_the_cohort(
     cohort: Path, capsys
 ) -> None:
-    """--output is optional so the flag and the TUI field mean the same thing."""
     run_cli(["pack", "--submissions", str(cohort), "--name", "p1"])
     expected = default_packet_output_dir(cohort) / "p1"
     assert expected.is_dir()
     assert str(expected) in capsys.readouterr().out
-    # Never inside the cohort, or it would be swept into its own snapshots,
-    # backups and later packets.
     assert cohort not in expected.parents
-
-
-# ── sealed packets ────────────────────────────────────────────────────────
-#
-# The whole round trip has to work when the packet travelled as one encrypted
-# file: pack it sealed, the grader unseals and grades, and the merge takes it
-# back without the CLI ever being told the packet was encrypted.
 
 
 def test_pack_encrypt_writes_a_sealed_file_instead_of_a_folder(
@@ -436,8 +402,6 @@ def test_pack_encrypt_writes_a_sealed_file_instead_of_a_folder(
     assert sealed.is_file()
     assert not (tmp_path / "out" / "p1").exists()
     assert str(sealed) in out
-    # The grader needs the passphrase, and emailing it with the packet would
-    # protect nothing — so the command says so.
     assert "some other way" in out
 
 
@@ -459,7 +423,6 @@ def test_a_sealed_packet_merges_back(
     )
     sealed = tmp_path / "out" / "p1.zip.enc"
 
-    # The grader opens it, grades, and seals it again to send back.
     opened = unseal_packet(sealed, tmp_path / "alice", "correct horse")
     _grade(opened / "submissions", "alice", "q1", 5.0)
     returned = seal_packet(opened, "correct horse", destination=tmp_path / "back.zip.enc")
@@ -490,8 +453,6 @@ def test_previewing_a_sealed_packet_leaves_nothing_decrypted(
 
     capsys.readouterr()
     run_cli(["preview", "--submissions", str(cohort), "--incoming", str(sealed)])
-    # Only the sealed file is left in the output directory — the unpacking
-    # happened in a temporary directory that has since been removed.
     assert [p.name for p in (tmp_path / "out").iterdir()] == ["p1.zip.enc"]
 
 
@@ -524,4 +485,4 @@ def test_a_wrong_passphrase_refuses_the_merge(
             ]
         )
     assert exit_info.value.code == 2
-    assert _points(cohort, "q1") is None  # nothing was written
+    assert _points(cohort, "q1") is None

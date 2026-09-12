@@ -75,18 +75,7 @@ def _document(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Leniency
-# --------------------------------------------------------------------------- #
-
-
 def test_leniency_is_measured_against_each_question_not_raw_means():
-    """A grader given the hard question must not look harsh for it.
-
-    `alice` marks only q1 (which everyone marks low) and `bob` only q2 (which
-    everyone marks high). Their raw means differ by 40 points, but neither is
-    lenient — they were handed different questions, and the residual says so.
-    """
     answers = [
         _answer("alice", "s1", "q1", 4.0),
         _answer("alice", "s2", "q1", 4.0),
@@ -101,7 +90,6 @@ def test_leniency_is_measured_against_each_question_not_raw_means():
 
     assert by_actor["alice"].mean_percent == 40.0
     assert by_actor["bob"].mean_percent == 80.0
-    # Neither deviates from how their question was marked overall.
     assert by_actor["alice"].mean_residual == 0.0
     assert by_actor["bob"].mean_residual == 0.0
 
@@ -143,13 +131,7 @@ def test_report_is_safe_on_no_input():
     assert report.has_overlap is False
 
 
-# --------------------------------------------------------------------------- #
-# Pairwise agreement
-# --------------------------------------------------------------------------- #
-
-
 def test_same_work_pairs_compare_graders_on_identical_submissions():
-    """The calibration shape: every grader marks the same students."""
     answers = []
     for index in range(4):
         student = f"s{index}"
@@ -166,7 +148,6 @@ def test_same_work_pairs_compare_graders_on_identical_submissions():
     assert pair.sufficient is True
     assert pair.exact_agreement == 0.0
     assert pair.mean_absolute_gap == 20.0
-    # alice awarded 8/10 where bob awarded 6/10, so alice is the generous one.
     assert pair.mean_signed_gap == 20.0
     assert pair.more_generous == "alice"
 
@@ -185,7 +166,6 @@ def test_identical_grading_reports_full_agreement_and_no_generosity():
 
 
 def test_undersized_pairs_are_reported_but_marked_provisional():
-    """Two answers in common is not a finding about a colleague."""
     answers = [
         _answer("alice", "s1", "q1", 10.0),
         _answer("bob", "s1", "q1", 0.0),
@@ -199,11 +179,9 @@ def test_undersized_pairs_are_reported_but_marked_provisional():
 
 def test_sufficient_pairs_outrank_a_noisier_wider_gap():
     answers = [
-        # A big gap on a single shared answer.
         _answer("alice", "s1", "q1", 10.0),
         _answer("bob", "s1", "q1", 0.0),
     ]
-    # A smaller but well-evidenced gap between two other graders.
     for index in range(6):
         answers.append(_answer("carol", f"s{index + 2}", "q1", 6.0))
         answers.append(_answer("dave", f"s{index + 2}", "q1", 5.0))
@@ -215,7 +193,6 @@ def test_sufficient_pairs_outrank_a_noisier_wider_gap():
 
 
 def test_same_answer_overlap_works_on_a_divided_cohort():
-    """Two graders never share a student, but do share an answer."""
     answers = [
         _answer("alice", "s1", "q1", 8.0, answer_key="binary search halves it"),
         _answer("alice", "s2", "q1", 8.0, answer_key="binary search halves it"),
@@ -225,9 +202,7 @@ def test_same_answer_overlap_works_on_a_divided_cohort():
 
     report = build_grader_agreement_report(answers, min_pair_samples=2)
 
-    # No student was marked twice, so the strong basis finds nothing...
     assert report.same_work_pairs == ()
-    # ...but the same answer was, and that is comparable.
     assert len(report.same_answer_pairs) == 1
     pair = report.same_answer_pairs[0]
     assert pair.basis == "same_answer"
@@ -236,7 +211,6 @@ def test_same_answer_overlap_works_on_a_divided_cohort():
 
 
 def test_blank_answers_never_manufacture_same_answer_overlap():
-    """Everyone who wrote nothing wrote the same nothing — that is not overlap."""
     answers = [
         _answer("alice", "s1", "q1", 0.0, answer_key=""),
         _answer("bob", "s2", "q1", 5.0, answer_key=""),
@@ -246,10 +220,9 @@ def test_blank_answers_never_manufacture_same_answer_overlap():
 
 
 def test_a_regrade_compares_the_grade_that_stands():
-    """Two entries for one answer must not be read as two separate decisions."""
     answers = [
         _answer("alice", "s1", "q1", 2.0, minute=0),
-        _answer("alice", "s1", "q1", 8.0, minute=5),  # alice corrected herself
+        _answer("alice", "s1", "q1", 8.0, minute=5),
         _answer("bob", "s1", "q1", 8.0, minute=1),
     ]
 
@@ -259,18 +232,11 @@ def test_a_regrade_compares_the_grade_that_stands():
     assert pair.exact_agreement == 1.0
 
 
-# --------------------------------------------------------------------------- #
-# Drift
-# --------------------------------------------------------------------------- #
-
-
 def test_drift_detects_a_grader_loosening_over_the_session():
     answers = []
-    # A second grader keeps every question's norm honest.
     for index in range(12):
         answers.append(_answer("bob", f"b{index}", "q1", 5.0))
     for index in range(12):
-        # alice starts harsh and ends generous.
         points = 3.0 if index < 6 else 9.0
         answers.append(_answer("alice", f"s{index}", "q1", points, minute=index))
 
@@ -284,12 +250,6 @@ def test_drift_detects_a_grader_loosening_over_the_session():
 
 
 def test_drift_controls_for_which_question_was_graded_when():
-    """Grading an easy question late must not read as loosening.
-
-    Graders work question by question, so the late half is nearly always a
-    different question from the early half. Residuals are what stop that from
-    being reported as drift.
-    """
     answers = []
     for index in range(10):
         answers.append(_answer("bob", f"b{index}", "q1", 3.0))
@@ -307,7 +267,6 @@ def test_drift_controls_for_which_question_was_graded_when():
 
 
 def test_drift_is_none_rather_than_zero_when_it_cannot_be_measured():
-    """An unmeasurable drift must stay visibly unknown, not read as 'steady'."""
     untimed = [_answer("alice", f"s{i}", "q1", 5.0) for i in range(40)]
     too_few = [_answer("bob", f"s{i}", "q1", 5.0, minute=i) for i in range(3)]
 
@@ -316,11 +275,6 @@ def test_drift_is_none_rather_than_zero_when_it_cannot_be_measured():
 
     assert by_actor["alice"].drift is None
     assert by_actor["bob"].drift is None
-
-
-# --------------------------------------------------------------------------- #
-# Adapters
-# --------------------------------------------------------------------------- #
 
 
 def _entry(
@@ -353,7 +307,6 @@ def test_journal_adapter_reads_grade_events_with_the_questions_weight():
     entries = [
         _entry("alice", "001", "q1", 15.0),
         _entry("bob", "002", "q1", 10.0, minute=1),
-        # Not a mark: no severity to read from either of these.
         _entry("alice", "001", "q1", None, kind="comment"),
         _entry("alice", "001", "q1", None),
     ]
@@ -388,18 +341,14 @@ def test_graded_copies_adapter_turns_one_copy_per_grader_into_decisions():
         ]
     )
 
-    # Only the graded question is a decision; the untouched one is simply absent.
     assert len(answers) == 2
     assert {answer.actor for answer in answers} == {"alice", "bob"}
     assert all(answer.question_id == "q1" for answer in answers)
     assert all(answer.student_key == "001" for answer in answers)
-    # A returned copy records the grade, not when it was made.
     assert all(answer.at is None for answer in answers)
 
 
 def test_calibration_shape_end_to_end():
-    """Two graders, same sample, one clearly harsher — the norming result."""
-
     def copy_for(points: float):
         return {
             f"00{index}": _document(
@@ -420,5 +369,4 @@ def test_calibration_shape_end_to_end():
     assert pair.sufficient is True
     assert pair.more_generous == "alice"
     assert pair.mean_absolute_gap == 30.0
-    # No timestamps in a returned copy, so drift stays unknown.
     assert all(grader.drift is None for grader in report.graders)

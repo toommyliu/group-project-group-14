@@ -13,22 +13,16 @@ from .utils import apply_grayscale
 
 @dataclass
 class DetectedRegion:
-    """A rectangular region detected in a template scan."""
-
-    bbox: list[float]  # [x, y, w, h] normalized 0-1
+    bbox: list[float]  # Normalized [x, y, w, h], 0-1.
     region_type: Literal["header_field", "question", "unknown"]
-    confidence: float  # 0-100
+    confidence: float  # 0-100.
     label: str | None = None
     question_type: QuestionType | None = None
 
 
-# Ignore tiny contours so text specks and dust do not become template regions.
 MIN_REGION_AREA_RATIO = 0.002
-# Skip huge rectangles because page borders are not student-fillable regions.
 MAX_REGION_AREA_RATIO = 0.5
-# Very narrow regions are usually strokes or separators, not answer boxes.
 MIN_ASPECT_RATIO = 0.3
-# The template scanner uses vertical position as a cheap header-field signal.
 HEADER_ZONE_RATIO = 0.15
 
 
@@ -37,19 +31,6 @@ def _find_rectangles(
     min_area: int,
     max_area: int,
 ) -> list[tuple[int, int, int, int]]:
-    """
-    Find rectangular contours in a grayscale image.
-
-    Args:
-        gray: Grayscale image as numpy array.
-        min_area: Minimum area in pixels to consider a valid region.
-        max_area: Maximum area in pixels to consider a valid region.
-
-    Returns:
-        List of (x, y, w, h) tuples for detected rectangles in pixel coordinates.
-    """
-    # Adaptive thresholding and dilation help faint printed boxes survive long
-    # enough to be found as contours.
     binary = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 10
     )
@@ -69,8 +50,6 @@ def _find_rectangles(
         if w == 0 or h == 0:
             continue
         aspect = w / h
-        # Aspect and rectangularity filters reject text blobs and page noise
-        # while keeping hand-drawn or slightly broken boxes.
         if aspect < MIN_ASPECT_RATIO:
             continue
         rect_area = w * h
@@ -85,7 +64,6 @@ def _merge_overlapping(
     rects: list[tuple[int, int, int, int]],
     overlap_threshold: float = 0.5,
 ) -> list[tuple[int, int, int, int]]:
-    """Merge rectangles that significantly overlap."""
     if not rects:
         return []
     merged: list[tuple[int, int, int, int]] = []
@@ -102,8 +80,6 @@ def _merge_overlapping(
             x2, y2, w2, h2 = rects[j]
             bx0, by0, bx1, by1 = x2, y2, x2 + w2, y2 + h2
 
-            # OpenCV can report nested contours for the same drawn box, so
-            # collapse heavy overlaps into one candidate region.
             ix0 = max(ax0, bx0)
             iy0 = max(ay0, by0)
             ix1 = min(ax1, bx1)
@@ -125,7 +101,6 @@ def _merge_overlapping(
 def _classify_region(
     x: float, y: float, w: float, h: float, page_h: float
 ) -> Literal["header_field", "question", "unknown"]:
-    """Classify a region based on its position and size."""
     y_center = (y + h / 2) / page_h
     if y_center < HEADER_ZONE_RATIO:
         return "header_field"
@@ -139,20 +114,6 @@ def scan_template(
     min_area_ratio: float = MIN_REGION_AREA_RATIO,
     max_area_ratio: float = MAX_REGION_AREA_RATIO,
 ) -> list[DetectedRegion]:
-    """
-    Auto-detect rectangular regions in a template image.
-
-    Scans for drawn boxes/rectangles and classifies them as
-    header fields (name, ID) or question response areas.
-
-    Args:
-        image: PIL Image of the template page.
-        min_area_ratio: Minimum region area as fraction of page area.
-        max_area_ratio: Maximum region area as fraction of page area.
-
-    Returns:
-        List of DetectedRegion objects sorted top-to-bottom.
-    """
     arr = np.array(image)
     gray = apply_grayscale(arr)
 
@@ -164,12 +125,10 @@ def scan_template(
     rects = _find_rectangles(gray, min_area, max_area)
     rects = _merge_overlapping(rects)
 
-    # Sort by y position (top to bottom)
     rects.sort(key=lambda r: r[1])
 
     regions: list[DetectedRegion] = []
     for x, y, w, h in rects:
-        # Normalize to 0-1
         x_norm = round(x / page_w, 3)
         y_norm = round(y / page_h, 3)
         w_norm = round(w / page_w, 3)
@@ -178,8 +137,6 @@ def scan_template(
         region_type = _classify_region(x, y, w, h, page_h)
         question_type: QuestionType | None = None
         if region_type == "question":
-            # Header fields are not classified as question types because their
-            # short labels can look like answer content to the classifier.
             question_type = classify_question_image(image.crop((x, y, x + w, y + h)))
 
         confidence = min(95.0, 60.0 + (w * h) / page_area * 200)

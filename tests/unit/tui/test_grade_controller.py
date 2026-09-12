@@ -25,15 +25,6 @@ def _seed(
 
 
 class PersistentFakeDataProvider(FakeDataProvider):
-    """Mirrors the real provider's two-halves analysis API.
-
-    ``stage_question_analysis`` is the cheap per-keystroke text write and
-    ``commit_question_analysis`` the once-per-edit half that syncs the PDF and
-    journals — so ``saved_analyses`` counts text writes and
-    ``saved_annotations`` counts PDF syncs, which is what the tests are really
-    asking about.
-    """
-
     def __init__(self) -> None:
         self.saved_grades: list[dict[str, object]] = []
         self.saved_analyses: list[dict[str, object]] = []
@@ -154,13 +145,6 @@ class RubricPersistentFakeDataProvider(FakeDataProvider):
 
 
 class StatefulFakeDataProvider(FakeDataProvider):
-    """Persists grades/comments in memory and reflects them back in seeds.
-
-    This lets the undo path be exercised end to end: after a revert, the next
-    ``build_question_seeds`` returns the restored values just like the real
-    file-backed provider.
-    """
-
     def __init__(self) -> None:
         self.grades: dict[tuple[str, str], dict[str, object]] = {}
         self.analyses: dict[tuple[str, str], str] = {}
@@ -241,14 +225,13 @@ def _build_stateful_controller() -> (
 def test_undo_restores_grade_to_previous_persisted_state() -> None:
     app, state, provider, controller = _build_stateful_controller()
 
-    controller.on_rubric_selected(1)  # select "Incorrect"
+    controller.on_rubric_selected(1)
     assert provider.grades[("s1", "Q1")]["rubric_labels"] == ("Incorrect",)
     assert len(state.grading_log) == 1
     assert state.qa_student_status.get(("1", "1", "Q1", "s1")) == "graded"
 
     controller.undo_last_grade_change()
 
-    # The most recent save re-persisted the pre-change (ungraded) state.
     assert provider.save_grade_calls[-1]["points_awarded"] is None
     assert provider.save_grade_calls[-1]["rubric_labels"] == ()
     assert provider.grades[("s1", "Q1")]["points_awarded"] is None
@@ -262,8 +245,6 @@ def test_undo_restores_comment_to_previous_value() -> None:
 
     controller.on_comment_updated("Great work")
     assert provider.analyses[("s1", "Q1")] == "Great work"
-    # The log entry lands when the edit finishes, so undo restores the whole
-    # comment rather than the last keystroke of it.
     controller.commit_pending_comment()
     assert len(state.grading_log) == 1
 
@@ -284,9 +265,7 @@ def test_transcription_edit_persists_marks_verified_and_logs() -> None:
     assert provider.transcriptions[("s1", "Q1")]["response_text"] == (
         "the cat sat on the mat"
     )
-    # The in-memory question is marked human-verified (confidence 100).
     assert state.grading_run.current_question.response_confidence == 100.0
-    # Logged as its own undoable entry.
     assert len(state.grading_log) == 1
     entry = state.grading_log.peek_last_undoable()
     assert entry is not None and entry.kind == "transcription"
@@ -295,7 +274,6 @@ def test_transcription_edit_persists_marks_verified_and_logs() -> None:
 def test_transcription_edit_is_noop_when_unchanged() -> None:
     _, state, provider, controller = _build_stateful_controller()
 
-    # The seed's response text is empty; "saving" the same value writes nothing.
     controller.on_transcription_updated("")
 
     assert provider.save_transcription_calls == []
@@ -313,7 +291,6 @@ def test_undo_restores_transcription_to_previous_reading() -> None:
 
     controller.undo_last_grade_change()
 
-    # Undo re-persists the pre-correction (empty) reading.
     assert provider.save_transcription_calls[-1]["response_text"] == ""
     assert provider.transcriptions[("s1", "Q1")]["response_text"] == ""
     assert len(state.grading_log) == 0
@@ -330,12 +307,11 @@ def test_undo_reports_nothing_to_undo_when_log_empty() -> None:
 def test_undo_is_multi_level_and_newest_first() -> None:
     _, state, provider, controller = _build_stateful_controller()
 
-    controller.on_rubric_selected(1)  # grade
-    controller.on_comment_updated("See rubric")  # comment (separate entry)
+    controller.on_rubric_selected(1)
+    controller.on_comment_updated("See rubric")
     controller.commit_pending_comment()
     assert len(state.grading_log) == 2
 
-    # Newest first: the comment reverts before the grade.
     controller.undo_last_grade_change()
     assert provider.analyses[("s1", "Q1")] == ""
     assert provider.grades[("s1", "Q1")]["rubric_labels"] == ("Incorrect",)
@@ -349,14 +325,13 @@ def test_undo_is_multi_level_and_newest_first() -> None:
 def test_undo_of_coalesced_grades_restores_pre_streak_state() -> None:
     _, state, provider, controller = _build_stateful_controller()
 
-    controller.on_rubric_selected(1)  # Incorrect
-    controller.on_rubric_selected(0)  # Correct — coalesces into one entry
+    controller.on_rubric_selected(1)
+    controller.on_rubric_selected(0)
     assert len(state.grading_log) == 1
     assert provider.grades[("s1", "Q1")]["rubric_labels"] == ("Correct",)
 
     controller.undo_last_grade_change()
 
-    # Restored to before the first selection, not the intermediate "Incorrect".
     assert provider.grades[("s1", "Q1")]["points_awarded"] is None
     assert provider.grades[("s1", "Q1")]["rubric_labels"] == ()
     assert len(state.grading_log) == 0
@@ -367,8 +342,7 @@ def test_undo_skips_rubric_edits_without_revert() -> None:
 
     _, state, provider, controller = _build_stateful_controller()
 
-    controller.on_rubric_selected(1)  # undoable grade entry
-    # Simulate a later rubric edit, which is logged without a revert.
+    controller.on_rubric_selected(1)
     state.grading_log.record(
         GradingLogEntry(kind="rubric", question_id="Q1", summary="Rubric edited")
     )
@@ -376,15 +350,12 @@ def test_undo_skips_rubric_edits_without_revert() -> None:
 
     controller.undo_last_grade_change()
 
-    # The grade (not the rubric edit) is reverted; the rubric row stays.
     assert provider.grades[("s1", "Q1")]["points_awarded"] is None
     remaining = state.grading_log.entries_latest_first()
     assert [entry.kind for entry in remaining] == ["rubric"]
 
 
 class GroupingFakeDataProvider(PersistentFakeDataProvider):
-    """Three students; s1 and s2 give the same Q1 answer, s3 differs."""
-
     _RESPONSES = {"s1": "42", "s2": "42 ", "s3": "seven"}
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]:
@@ -550,7 +521,6 @@ def test_open_review_target_opens_that_student_and_question() -> None:
 def test_open_review_target_without_question_opens_first_question() -> None:
     app, state, controller = build_controller()
 
-    # Submission-level flag (missing id/name): no question id.
     controller.open_review_target("s2", "")
 
     assert app.page == PAGE_GRADE
@@ -735,8 +705,6 @@ def test_next_previous_ungraded_student_skip_graded_for_selected_qa() -> None:
 def test_finalize_last_student_returns_to_qa_picker() -> None:
     app, state, controller = build_controller()
 
-    # Finalizing wraps around to earlier ungraded students, so the picker is
-    # only shown once every other student is already graded for this QA.
     state.qa_student_status[("1", "1", "Q1", "s1")] = "graded"
     controller.open_student_by_index(1)
     state.current_page = PAGE_GRADE
@@ -891,7 +859,6 @@ def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
 
     controller.on_comment_updated("Needs clearer work.")
 
-    # The text is written immediately — that is the durability guarantee.
     assert provider.saved_analyses == [
         {
             "student_item_id": "s1",
@@ -899,8 +866,6 @@ def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
             "analysis": "Needs clearer work.",
         }
     ]
-    # The PDF sync is the derived half and waits for the edit to finish, which
-    # is what stops a 33-character comment costing 33 PDF round trips.
     assert provider.saved_annotations == []
 
     controller.commit_pending_comment()
@@ -929,7 +894,7 @@ def test_comment_update_reports_annotation_errors() -> None:
     state.current_page = PAGE_GRADE
 
     controller.on_comment_updated("Needs clearer work.")
-    assert provider.saved_analyses  # the note itself still saved
+    assert provider.saved_analyses
     controller.commit_pending_comment()
 
     assert provider.saved_annotations == []
@@ -939,8 +904,6 @@ def test_comment_update_reports_annotation_errors() -> None:
 
 
 class CommentSeedFakeDataProvider(PersistentFakeDataProvider):
-    """A provider whose ``Incorrect`` option carries an authored default comment."""
-
     def build_question_seeds(self, **kwargs):  # noqa: ANN001, ANN201
         seeds = super().build_question_seeds(**kwargs)
         annotated = []
@@ -973,10 +936,9 @@ def _comment_controller() -> tuple[FakeApp, CommentSeedFakeDataProvider, GradeCo
 def test_rubric_selection_auto_inserts_default_comment() -> None:
     _, provider, controller = _comment_controller()
 
-    controller.on_rubric_selected(1)  # Incorrect — carries a default comment
+    controller.on_rubric_selected(1)
 
     assert provider.saved_grades[-1]["rubric_labels"] == ("Incorrect",)
-    # The authored comment is persisted through the normal analysis + PDF path.
     assert provider.saved_analyses == [
         {
             "student_item_id": "s1",
@@ -994,12 +956,10 @@ def test_rubric_selection_auto_inserts_default_comment() -> None:
 def test_rubric_default_comment_is_not_duplicated_on_reselect() -> None:
     _, provider, controller = _comment_controller()
 
-    controller.on_rubric_selected(1)  # inserts the comment
-    controller.on_rubric_selected(1)  # re-pick: comment already present
-    controller.on_rubric_selected(0)  # switch to Correct: never removes text
+    controller.on_rubric_selected(1)
+    controller.on_rubric_selected(1)
+    controller.on_rubric_selected(0)
 
-    # Exactly one comment write — dedup blocks the duplicate, and Correct (no
-    # default comment) adds nothing.
     assert len(provider.saved_analyses) == 1
     assert provider.saved_analyses[0]["analysis"] == "See me about recursion."
 
@@ -1008,7 +968,7 @@ def test_rubric_default_comment_appends_to_existing_comment() -> None:
     _, provider, controller = _comment_controller()
 
     controller.on_comment_updated("Nice attempt.")
-    controller.on_rubric_selected(1)  # Incorrect appends its default comment
+    controller.on_rubric_selected(1)
 
     assert provider.saved_analyses[-1]["analysis"] == (
         "Nice attempt. See me about recursion."
@@ -1022,7 +982,7 @@ def test_rubric_selection_without_default_comment_writes_no_analysis() -> None:
     state.selection.assignment_id = 1
     state.selection_labels["course"] = "CMPE 195"
     state.selection_labels["assignment"] = "HW 1"
-    provider = PersistentFakeDataProvider()  # no default comments on any option
+    provider = PersistentFakeDataProvider()
     controller = GradeController(app, state, provider)
     controller.open_question_picker_for_assignment()
     controller.open_question_by_index(0)
@@ -1030,8 +990,8 @@ def test_rubric_selection_without_default_comment_writes_no_analysis() -> None:
 
     controller.on_rubric_selected(1)
 
-    assert provider.saved_grades  # grade still persisted
-    assert provider.saved_analyses == []  # no comment side effect
+    assert provider.saved_grades
+    assert provider.saved_analyses == []
 
 
 def test_open_rubric_editor_presents_modal_when_provider_supports_it() -> None:
@@ -1128,7 +1088,6 @@ def _build_grouping_controller() -> tuple[FakeApp, TuiWorkflowState, GroupingFak
 def test_answer_group_indicator_shows_shared_answer_count() -> None:
     app, _state, _provider, controller = _build_grouping_controller()
 
-    # s1 is the first student; s1 and s2 share the answer "42".
     controller.refresh_grade_screen(status="")
 
     assert app.grade_screen.answer_group == (
@@ -1139,7 +1098,6 @@ def test_answer_group_indicator_shows_shared_answer_count() -> None:
 def test_apply_grade_to_answer_group_applies_to_matching_students_only() -> None:
     app, state, provider, controller = _build_grouping_controller()
 
-    # Grade the current student (s1) Correct, then stamp the whole group.
     controller.on_rubric_selected(0)
     controller.apply_grade_to_answer_group()
 
@@ -1147,8 +1105,6 @@ def test_apply_grade_to_answer_group_applies_to_matching_students_only() -> None
         (grade["student_item_id"], grade["question_id"])
         for grade in provider.saved_grades
     }
-    # s1 persisted by the rubric selection; s2 shares the answer and is
-    # batch-graded; s3 gave a different answer and is untouched.
     assert ("s1", "Q1") in graded_students
     assert ("s2", "Q1") in graded_students
     assert ("s3", "Q1") not in graded_students
@@ -1193,8 +1149,6 @@ def test_apply_grade_to_answer_group_requires_a_selection() -> None:
 
 
 class MixedRubricGroupingFakeDataProvider(GroupingFakeDataProvider):
-    """s1 and s2 share the Q1 answer but s2's version has a different rubric."""
-
     _RESPONSES = {"s1": "42", "s2": "42", "s3": "seven"}
 
     def build_question_seeds(self, **kwargs):  # noqa: ANN003, ANN201
@@ -1202,7 +1156,6 @@ class MixedRubricGroupingFakeDataProvider(GroupingFakeDataProvider):
         seeds = super().build_question_seeds(**kwargs)
         if student_item_id != "s2":
             return seeds
-        # s2's rubric uses labels that cannot express s1's "Correct" selection.
         other_rubric = [
             _seed("Full", 0.0),
             _seed("None", -10.0),
@@ -1229,11 +1182,9 @@ def test_apply_grade_to_answer_group_skips_incompatible_rubric() -> None:
     controller.open_question_by_index(0)
     state.current_page = PAGE_GRADE
 
-    controller.on_rubric_selected(0)  # grade s1 "Correct"
+    controller.on_rubric_selected(0)
     controller.apply_grade_to_answer_group()
 
-    # s2 shares the answer but cannot take the "Correct" label, so it is
-    # skipped rather than persisted with a mismatched grade.
     assert not any(
         grade["student_item_id"] == "s2" for grade in provider.saved_grades
     )
@@ -1244,14 +1195,13 @@ def test_apply_grade_to_answer_group_skips_incompatible_rubric() -> None:
 def test_apply_grade_to_answer_group_reports_unique_answer() -> None:
     app, _state, provider, controller = _build_grouping_controller()
 
-    # Move to s3, whose answer "seven" is unique.
     controller.open_student_by_index(2)
     controller.on_rubric_selected(0)
     saved_before = len(provider.saved_grades)
 
     controller.apply_grade_to_answer_group()
 
-    assert len(provider.saved_grades) == saved_before  # no batch writes
+    assert len(provider.saved_grades) == saved_before
     assert app.grade_screen.status == "No other students share this answer."
 
 
@@ -1300,13 +1250,6 @@ def test_rubric_editor_save_reports_provider_errors() -> None:
     )
 
 
-# --- group-first grading ("grade the answer, not the student") --------------
-#
-# The fixture cohort is three students on Q1: s1 and s2 both wrote "42", s3
-# wrote "seven" — so two distinct answers, and the whole point of the mode is
-# that walking the question is two stops rather than three.
-
-
 def test_group_mode_reports_how_many_distinct_answers_there_are() -> None:
     app, state, _provider, controller = _build_grouping_controller()
 
@@ -1318,15 +1261,13 @@ def test_group_mode_reports_how_many_distinct_answers_there_are() -> None:
 
 
 def test_group_mode_indicator_is_always_shown_even_for_a_unique_answer() -> None:
-    # A grader has to be able to tell at a glance how many people the next `g`
-    # will grade; an indicator that comes and goes is one they stop trusting.
     app, _state, _provider, controller = _build_grouping_controller()
     controller.toggle_group_mode()
 
     assert app.grade_screen.answer_group.startswith("By answer · answer 1 of 2")
     assert "2 students share this answer" in app.grade_screen.answer_group
 
-    controller.next_student()  # on to s3's unique answer
+    controller.next_student()
     assert "only this student gave it" in app.grade_screen.answer_group
 
 
@@ -1334,7 +1275,6 @@ def test_moving_forward_skips_the_rest_of_the_current_answer_group() -> None:
     _app, state, _provider, controller = _build_grouping_controller()
     controller.toggle_group_mode()
 
-    # s1 and s2 share an answer, so the next stop is s3 — not s2.
     controller.next_student()
 
     assert state.selection.student_item_id == "s3"
@@ -1363,11 +1303,9 @@ def test_next_ungraded_skips_answers_that_are_fully_graded() -> None:
     _app, state, _provider, controller = _build_grouping_controller()
     controller.toggle_group_mode()
 
-    # Grade the first answer for everyone who gave it.
     controller.on_rubric_selected(0)
     controller.apply_grade_to_answer_group()
 
-    # The batch grade already advanced to the only answer still needing one.
     assert state.selection.student_item_id == "s3"
 
 
@@ -1388,13 +1326,11 @@ def test_the_last_group_says_the_question_is_finished() -> None:
     controller.toggle_group_mode()
 
     controller.on_rubric_selected(0)
-    controller.apply_grade_to_answer_group()  # s1 + s2
+    controller.apply_grade_to_answer_group()
     controller.on_rubric_selected(0)
-    controller.apply_grade_to_answer_group()  # s3, alone
+    controller.apply_grade_to_answer_group()
 
     assert "Every distinct answer on this question is graded." in app.grade_screen.status
-    # Nowhere left to go, so the grader stays where they are rather than being
-    # bounced somewhere arbitrary.
     assert state.selection.student_item_id == "s3"
 
 
@@ -1419,8 +1355,6 @@ def test_turning_group_mode_off_restores_student_navigation() -> None:
 
 
 def test_the_groups_are_disjoint_so_the_count_can_reach_zero() -> None:
-    # A student appearing in two groups would be offered twice and the "N left"
-    # count would never finish.
     _app, _state, _provider, controller = _build_grouping_controller()
 
     groups = controller._grading_groups("Q1")
@@ -1433,7 +1367,7 @@ def test_the_groups_are_disjoint_so_the_count_can_reach_zero() -> None:
 def test_moving_past_the_last_answer_says_so_and_stays_put() -> None:
     app, state, _provider, controller = _build_grouping_controller()
     controller.toggle_group_mode()
-    controller.next_student()  # s3, the last answer
+    controller.next_student()
 
     controller.next_student()
 
@@ -1442,30 +1376,25 @@ def test_moving_past_the_last_answer_says_so_and_stays_put() -> None:
 
 
 def test_changing_question_lands_on_an_answer_that_still_needs_grading() -> None:
-    # Keeping whichever student you were on would put you at an arbitrary point
-    # in the new question's answers, and the "answer 4 of 9" indicator would be
-    # telling the truth about a position nobody chose.
     _app, state, _provider, controller = _build_grouping_controller()
     controller.toggle_group_mode()
-    controller.next_student()  # s3, whose Q1 answer only they gave
+    controller.next_student()
     controller.on_rubric_selected(0)
     controller.apply_grade_to_answer_group()
 
-    controller.next_question()  # Q2, where all three share one answer
-    controller.previous_question()  # back to Q1, where s3 is now done
+    controller.next_question()
+    controller.previous_question()
 
     assert state.grading_run.current_question.question_id == "Q1"
     assert state.selection.student_item_id == "s1"
 
 
 def test_changing_question_stays_put_when_the_current_answer_is_ungraded() -> None:
-    # Moving for its own sake would throw away a position the grader may have
-    # navigated to deliberately.
     _app, state, _provider, controller = _build_grouping_controller()
     controller.toggle_group_mode()
-    controller.next_student()  # s3
+    controller.next_student()
 
-    controller.next_question()  # Q2: everyone shares one ungraded answer
+    controller.next_question()
 
     assert state.grading_run.current_question.question_id == "Q2"
     assert state.selection.student_item_id == "s3"
@@ -1482,11 +1411,6 @@ def test_changing_question_without_group_mode_keeps_the_student() -> None:
 
 
 def test_answers_claimed_by_another_grader_do_not_hold_up_the_count() -> None:
-    """A claim means "not yours", so it must not count as work still to do.
-
-    Otherwise "1 answer left" would never reach zero on a divided cohort, and
-    the mode's whole progress signal becomes noise.
-    """
     from opengrader.core.claims import WorkClaim, WorkSlice
 
     _app, state, _provider, controller = _build_grouping_controller()
@@ -1504,8 +1428,6 @@ def test_answers_claimed_by_another_grader_do_not_hold_up_the_count() -> None:
     controller.on_rubric_selected(0)
     controller.apply_grade_to_answer_group()
 
-    # s3's answer belongs to Alice, so grading the only answer that is ours
-    # finishes the question rather than leaving one "outstanding".
     assert "Every distinct answer on this question is graded." in _app_status(controller)
 
 
@@ -1514,15 +1436,7 @@ def _app_status(controller: GradeController) -> str:
 
 
 def test_entering_group_mode_moves_to_the_most_given_answer() -> None:
-    """Answer groups come back largest-first, so entering the mode has to move.
-
-    Otherwise the grader is told they are on "answer 2 of 2" purely because of
-    which student they happened to be looking at, and moving forward from there
-    goes nowhere — which is exactly what the first real run of this showed.
-    """
     _app, state, _provider, controller = _build_grouping_controller()
-    # s1 and s2 share "42" (two students), s3 wrote "seven" (one), so the
-    # shared answer is the first group either way.
     assert state.selection.student_item_id == "s1"
 
     controller.toggle_group_mode()
@@ -1531,22 +1445,7 @@ def test_entering_group_mode_moves_to_the_most_given_answer() -> None:
     assert controller._current_group_index(groups) == 0
 
 
-# --- confirming AI grades ---------------------------------------------------
-#
-# `automated-grading --llm` writes real grades tagged `[AI · NN% · model]`.
-# They are *graded*, so `n` (next ungraded) steps straight over them, and the
-# release pre-flight blocks on them with nothing to clear the list quickly.
-# The fixture cohort: s1 and s3 carry unconfirmed AI grades on Q1, s2 was
-# graded by a human.
-
-
 class AiGradedFakeDataProvider(PersistentFakeDataProvider):
-    """Three students on Q1; s1 and s3 hold unconfirmed AI grades.
-
-    Analyses actually persist, so confirming one really does shrink the
-    remaining count — the property a stubbed provider would hide.
-    """
-
     def __init__(self) -> None:
         super().__init__()
         self.analyses = {
@@ -1576,8 +1475,6 @@ class AiGradedFakeDataProvider(PersistentFakeDataProvider):
         ]
 
     def stage_question_analysis(self, **kwargs: object) -> None:
-        # The *write* half, so the stored note follows a keystroke as it does
-        # in the real provider (the commit half only syncs and journals).
         super().stage_question_analysis(**kwargs)
         if kwargs.get("question_id") == "Q1":
             student = kwargs.get("student_item_id")
@@ -1613,8 +1510,6 @@ def test_ai_review_mode_reports_how_many_need_confirming() -> None:
 
 
 def test_ai_review_mode_refuses_when_there_is_nothing_to_confirm() -> None:
-    # "Nothing to confirm here" is the useful answer; a mode whose keys do
-    # nothing is worse than not entering it.
     app, state, provider, controller = _build_ai_controller()
     provider.analyses = {"s1": "human", "s2": "human", "s3": "human"}
 
@@ -1628,15 +1523,12 @@ def test_ai_review_mode_moves_between_ai_grades_only() -> None:
     _app, state, _provider, controller = _build_ai_controller()
     controller.toggle_ai_review_mode()
 
-    # s1 holds an AI grade, s2 is a human's, s3 is the next AI one.
     assert state.active_student_index == 0
     controller.next_student()
     assert state.active_student_index == 2
 
 
 def test_ai_review_indicator_names_the_model_and_confidence() -> None:
-    # "Which model graded this?" is the question a grader deciding whether to
-    # trust a suggestion actually has.
     app, _state, _provider, controller = _build_ai_controller()
     controller.toggle_ai_review_mode()
 
@@ -1653,7 +1545,6 @@ def test_confirming_keeps_the_grade_and_marks_the_note() -> None:
     assert saved["student_item_id"] == "s1"
     assert "confirmed" in saved["analysis"]
     assert "62%" in saved["analysis"]
-    # Confirming means "this grade is right", not "regrade it".
     assert provider.saved_grades == []
 
 
@@ -1663,7 +1554,7 @@ def test_confirming_advances_to_the_next_one_in_the_mode() -> None:
 
     controller.confirm_ai_grade()
 
-    assert state.active_student_index == 2  # skipped the human-graded s2
+    assert state.active_student_index == 2
     assert "1 left" in app.grade_screen.status
 
 
@@ -1679,7 +1570,7 @@ def test_confirming_the_last_one_clears_the_queue() -> None:
 
 def test_confirming_a_human_grade_says_so() -> None:
     app, _state, _provider, controller = _build_ai_controller()
-    controller.open_student_by_index(1)  # s2, graded by a person
+    controller.open_student_by_index(1)
 
     controller.confirm_ai_grade()
 
@@ -1698,8 +1589,6 @@ def test_confirming_twice_is_reported_not_repeated() -> None:
 
 
 def test_confirming_works_outside_the_mode() -> None:
-    # A grader who lands on an AI grade while marking normally should not have
-    # to switch modes to accept it.
     _app, state, provider, controller = _build_ai_controller()
 
     controller.confirm_ai_grade()
@@ -1709,8 +1598,6 @@ def test_confirming_works_outside_the_mode() -> None:
 
 
 def test_ai_review_and_group_mode_are_mutually_exclusive() -> None:
-    # Both redefine the movement keys; leaving both on would make "next" mean
-    # whichever branch is tested first.
     _app, state, _provider, controller = _build_ai_controller()
 
     controller.toggle_ai_review_mode()
@@ -1724,9 +1611,6 @@ def test_ai_review_and_group_mode_are_mutually_exclusive() -> None:
 
 
 def test_confirming_invalidates_the_cached_count() -> None:
-    # The count is cached (it recomputes on every screen refresh and the sweep
-    # costs ~0.5 ms/student), so the one thing that shrinks it has to say so.
-    # A stale count would tell a grader work remained after they had finished.
     app, _state, _provider, controller = _build_ai_controller()
     controller.toggle_ai_review_mode()
     assert "2 left" in app.grade_screen.answer_group
@@ -1737,10 +1621,6 @@ def test_confirming_invalidates_the_cached_count() -> None:
 
 
 def test_changing_the_claim_filter_recomputes_the_count() -> None:
-    # The set is filtered to your own slice, so moving the filter moves it —
-    # and the cache must not hold the pre-filter answer. Changing the data
-    # behind the controller stands in for the filter changing which answers
-    # count as yours; either way the next read must not be the cached one.
     _app, _state, provider, controller = _build_ai_controller()
     controller.toggle_ai_review_mode()
     assert controller._unconfirmed_ai_indices("Q1") == [0, 2]
@@ -1751,24 +1631,14 @@ def test_changing_the_claim_filter_recomputes_the_count() -> None:
     assert controller._unconfirmed_ai_indices("Q1") == [0]
 
 
-# --- a human grading over an AI suggestion retires the tag -------------------
-#
-# `y` is the explicit way to review an AI grade; picking a rubric option is the
-# *common* one. Before this, the tag stayed attached to what had become a
-# human's grade, so the queue never emptied for answers a grader disagreed with.
-
-
 def test_regrading_an_ai_answer_marks_it_overridden() -> None:
     _app, _state, provider, controller = _build_ai_controller()
 
-    # s1 holds an AI grade of 6.0; pick a rubric option that scores differently.
     controller.on_rubric_selected(0)
 
     note = provider.analyses["s1"]
     assert "overridden" in note
     assert "confirmed" not in note
-    # Provenance survives; the model's rationale, which argued for a score the
-    # answer no longer has, does not.
     assert "62%" in note and "llama3.1" in note
     assert "Names one of two properties" not in note
 
@@ -1783,10 +1653,6 @@ def test_an_overridden_answer_leaves_the_confirm_queue() -> None:
 
 
 def test_grading_to_the_same_grade_counts_as_confirming() -> None:
-    # A grader who looks and lands on the model's own answer has confirmed it
-    # just as surely as one who pressed y; recording that as an override would
-    # claim a disagreement that did not happen. Exercised directly because this
-    # fixture's rubric cannot reproduce the AI's stored score by selection.
     _app, _state, provider, controller = _build_ai_controller()
 
     controller._record_human_review_of_ai(changed=False)
@@ -1805,7 +1671,7 @@ def test_grading_to_a_different_grade_counts_as_overriding() -> None:
 
 def test_regrading_a_human_graded_answer_writes_no_tag() -> None:
     _app, _state, provider, controller = _build_ai_controller()
-    controller.open_student_by_index(1)  # s2 was graded by a person
+    controller.open_student_by_index(1)
 
     controller.on_rubric_selected(0)
 
@@ -1814,7 +1680,7 @@ def test_regrading_a_human_graded_answer_writes_no_tag() -> None:
 
 def test_confirm_key_refuses_an_answer_the_grader_replaced() -> None:
     app, _state, _provider, controller = _build_ai_controller()
-    controller.on_rubric_selected(0)  # override
+    controller.on_rubric_selected(0)
 
     controller.confirm_ai_grade()
 
@@ -1822,8 +1688,6 @@ def test_confirm_key_refuses_an_answer_the_grader_replaced() -> None:
 
 
 class AiGroupFakeDataProvider(AiGradedFakeDataProvider):
-    """s1 and s2 gave the same Q1 answer; both carry unconfirmed AI grades."""
-
     _RESPONSES = {"s1": "42", "s2": "42 ", "s3": "seven"}
 
     def build_question_seeds(self, **kwargs):  # noqa: ANN003, ANN201
@@ -1854,16 +1718,13 @@ def _build_ai_group_controller():  # noqa: ANN202
 
 
 def test_batch_grading_retires_the_ai_tag_on_every_member() -> None:
-    # Without this, grading a group would clear the queue for the student on
-    # screen and leave everyone who gave the same answer flagged forever.
     _app, _state, provider, controller = _build_ai_group_controller()
 
-    controller.on_rubric_selected(0)  # grades s1, retiring its tag
-    controller.apply_grade_to_answer_group()  # stamps s2, which shares "42"
+    controller.on_rubric_selected(0)
+    controller.apply_grade_to_answer_group()
 
     assert "overridden" in provider.analyses["s1"]
     assert "overridden" in provider.analyses["s2"]
-    # s3 gave a different answer and is untouched.
     assert provider.analyses["s3"] == "[AI · 55% · llama3.1] Close enough."
 
 
@@ -1875,13 +1736,6 @@ def test_batch_grading_leaves_the_confirm_queue_empty_for_the_group() -> None:
     controller.apply_grade_to_answer_group()
 
     assert controller._unconfirmed_ai_indices("Q1") == [2]
-
-
-# --- a comment that did not change is not a write ---------------------------
-#
-# The comment box posts an `Input.Changed` whenever its value is *set*, and
-# moving to another student or question sets it to that answer's own saved
-# note — which arrives back at the controller looking like an edit.
 
 
 def _noop_comment_controller():  # noqa: ANN202
@@ -1907,7 +1761,6 @@ def test_reemitting_an_unchanged_comment_writes_nothing() -> None:
     provider.saved_annotations.clear()
     log_length = len(state.grading_log)
 
-    # Exactly what a rebind delivers: the answer's own stored note.
     controller.on_comment_updated("Nice work")
 
     assert provider.saved_analyses == []
@@ -1929,8 +1782,6 @@ def test_a_real_comment_edit_still_writes_logs_and_annotates() -> None:
 
 
 def test_clearing_a_comment_is_a_real_edit() -> None:
-    # Emptying the box is something a grader means; it must not be mistaken for
-    # the "nothing changed" case just because the new value is falsy.
     _app, _state, provider, controller = _noop_comment_controller()
     controller.on_comment_updated("typo")
     provider.saved_analyses.clear()
@@ -1940,23 +1791,14 @@ def test_clearing_a_comment_is_a_real_edit() -> None:
     assert [call["analysis"] for call in provider.saved_analyses] == [""]
 
 
-# --- typing costs one write, not one save ----------------------------------
-#
-# The comment box persists on every keystroke so a comment can never be lost.
-# The expensive half of a save — re-annotating the student's PDF and appending
-# an audit entry — is meaningless about a half-typed sentence, so it waits.
-
-
 def test_typing_stages_text_but_defers_the_derived_work() -> None:
     _app, state, provider, controller = _noop_comment_controller()
 
     for i in range(1, len("Good work") + 1):
         controller.on_comment_updated("Good work"[:i])
 
-    # Every keystroke reached disk...
     assert len(provider.saved_analyses) == len("Good work")
     assert provider.saved_analyses[-1]["analysis"] == "Good work"
-    # ...but the PDF and the audit trail were left alone.
     assert provider.committed_analyses == []
     assert len(state.grading_log) == 0
 
@@ -1974,8 +1816,6 @@ def test_committing_runs_the_derived_work_exactly_once() -> None:
 
 
 def test_the_audit_entry_records_the_edit_not_the_last_keystroke() -> None:
-    # `old` must be the note before the edit began, or `grade-history` reads as
-    # "changed 'Good wor' to 'Good work'" and undo restores one letter.
     _app, _state, provider, controller = _noop_comment_controller()
     controller.on_comment_updated("First note")
     controller.commit_pending_comment()
@@ -1991,8 +1831,6 @@ def test_the_audit_entry_records_the_edit_not_the_last_keystroke() -> None:
 
 
 def test_undo_after_an_edit_restores_the_whole_comment() -> None:
-    # Typed one character at a time, undo must remove the comment rather than
-    # peel off the last letter — the log entry is the *edit*, not a keystroke.
     _app, state, provider, controller = _build_stateful_controller()
     typed = "Nearly there"
     for i in range(1, len(typed) + 1):
@@ -2007,9 +1845,6 @@ def test_undo_after_an_edit_restores_the_whole_comment() -> None:
 
 
 def test_moving_to_another_student_finishes_the_edit_first() -> None:
-    # The safety net: a grader who types and then navigates away without
-    # pressing enter must still get their PDF annotation and history row, filed
-    # against the student who actually received the comment.
     _app, _state, provider, controller = _noop_comment_controller()
     controller.on_comment_updated("For the first student")
 
@@ -2040,8 +1875,6 @@ def test_returning_to_the_picker_finishes_the_edit_first() -> None:
 
 
 def test_editing_a_second_answer_finishes_the_first_edit() -> None:
-    # Two pending edits must never exist at once, or one of them would be
-    # committed against the wrong answer.
     _app, _state, provider, controller = _noop_comment_controller()
     controller.on_comment_updated("First")
     controller.open_student_by_index(1)
@@ -2073,21 +1906,7 @@ def test_committing_with_no_pending_edit_is_a_no_op() -> None:
     assert len(state.grading_log) == 0
 
 
-# Traversal shuffle tests
-
-
 class ShuffleAwareFakeDataProvider(FakeDataProvider):
-    """A fake provider carrying the two things the shuffle reads.
-
-    Mirrors ``SubmissionFilesProvider``'s public surface: a ``submissions_path``
-    property (which is both where the policy file is found and what scopes the
-    seed) and ``grader_actor``. The plain ``FakeDataProvider`` has neither, so
-    it stands in for the stub-provider case that must stay unshuffled.
-    """
-
-    # Two students is a coin flip, which cannot distinguish a shuffle from a
-    # no-op. A cohort this size makes an accidental identity ordering
-    # vanishingly unlikely, so an order assertion means something.
     _COHORT_SIZE = 24
 
     def __init__(self, submissions_path: str, *, actor: str = "test_grader") -> None:
@@ -2111,7 +1930,6 @@ class ShuffleAwareFakeDataProvider(FakeDataProvider):
 
 
 def _student_order(provider: ShuffleAwareFakeDataProvider) -> list[str]:
-    """Drive the controller and read back the traversal order it built."""
     app = FakeApp()
     state = TuiWorkflowState()
     state.selection.course_id = 1
@@ -2125,7 +1943,6 @@ def _student_order(provider: ShuffleAwareFakeDataProvider) -> list[str]:
 
 
 def test_student_order_is_unshuffled_with_no_policy(tmp_path) -> None:  # type: ignore
-    """No policy file is the permissive default: the on-disk order stands."""
     provider = ShuffleAwareFakeDataProvider(str(tmp_path))
     order = _student_order(provider)
 
@@ -2134,7 +1951,6 @@ def test_student_order_is_unshuffled_with_no_policy(tmp_path) -> None:  # type: 
 
 
 def test_student_order_is_shuffled_with_shuffle_policy(tmp_path) -> None:  # type: ignore
-    """The policy reorders the cohort without adding or losing anyone."""
     from opengrader.core.policy import GradingPolicy, write_policy
 
     write_policy(tmp_path, GradingPolicy(traversal_shuffle=True))
@@ -2143,17 +1959,10 @@ def test_student_order_is_shuffled_with_shuffle_policy(tmp_path) -> None:  # typ
 
     on_disk = [f"s{index}" for index in range(1, provider._COHORT_SIZE + 1)]
     assert order != on_disk
-    # The shuffle is a permutation, never a filter — every student must still be
-    # reachable exactly once, or a grader would silently never see someone.
     assert sorted(order) == sorted(on_disk)
 
 
 def test_shuffled_order_is_stable_across_sessions(tmp_path) -> None:  # type: ignore
-    """The same grader reopening the assignment resumes the same pile.
-
-    This is the invariant that makes the feature usable rather than merely fair
-    — see ``core/traversal.py``.
-    """
     from opengrader.core.policy import GradingPolicy, write_policy
 
     write_policy(tmp_path, GradingPolicy(traversal_shuffle=True))
@@ -2164,11 +1973,6 @@ def test_shuffled_order_is_stable_across_sessions(tmp_path) -> None:  # type: ig
 
 
 def test_two_graders_get_different_orders(tmp_path) -> None:  # type: ignore
-    """Different graders walk the cohort differently — the point of the feature.
-
-    A shared order would leave fatigue drift correlated with student identity
-    exactly as before, just in a scrambled sequence.
-    """
     from opengrader.core.policy import GradingPolicy, write_policy
 
     write_policy(tmp_path, GradingPolicy(traversal_shuffle=True))
@@ -2182,7 +1986,6 @@ def test_two_graders_get_different_orders(tmp_path) -> None:  # type: ignore
 
 
 def test_shuffle_is_announced_in_the_picker_status(tmp_path) -> None:  # type: ignore
-    """A silent reordering is one a grader reports as a bug."""
     from opengrader.core.policy import GradingPolicy, write_policy
 
     app = FakeApp()
@@ -2201,16 +2004,7 @@ def test_shuffle_is_announced_in_the_picker_status(tmp_path) -> None:  # type: i
     assert "randomized order" in app.qa_screen.status
 
 
-# --------------------------------------------------------------------------- #
-# Background extraction fold-in
-# --------------------------------------------------------------------------- #
-
-
 class GrowableShuffleFakeDataProvider(ShuffleAwareFakeDataProvider):
-    """Like `ShuffleAwareFakeDataProvider`, but the cohort can grow mid-session
-    — for proving a fold-in survives the reshuffle a longer list triggers.
-    """
-
     def __init__(self, submissions_path: str, *, actor: str = "test_grader") -> None:
         super().__init__(submissions_path, actor=actor)
         self._extra = 0
@@ -2232,13 +2026,6 @@ class GrowableShuffleFakeDataProvider(ShuffleAwareFakeDataProvider):
 def test_fold_in_restores_question_and_student_by_id_across_a_reshuffle(
     tmp_path,
 ) -> None:
-    """The per-grader traversal shuffle reorders *every* student's position
-    whenever the cohort's length changes (`core/traversal.py`'s
-    ``shuffled_order`` reruns Fisher-Yates over the whole list) — so a fold-in
-    that restored by index would land the grader on a different, wrong
-    student. Restoring by item id (what `_fold_in_pending_submissions` does)
-    must survive that.
-    """
     from opengrader.core.policy import GradingPolicy, write_policy
 
     write_policy(tmp_path, GradingPolicy(traversal_shuffle=True))
@@ -2253,7 +2040,7 @@ def test_fold_in_restores_question_and_student_by_id_across_a_reshuffle(
     controller = GradeController(app, state, provider)
     controller.attach_student_refresh(lambda: None)
     controller.open_question_picker_for_assignment()
-    controller.open_question_by_index(1)  # land on Q2
+    controller.open_question_by_index(1)
     state.current_page = PAGE_GRADE
 
     current_question_id = state.selection.question_id
@@ -2261,8 +2048,6 @@ def test_fold_in_restores_question_and_student_by_id_across_a_reshuffle(
     assert current_question_id == "Q2"
     assert current_student_item_id
 
-    # Grow the cohort enough that the reshuffle is effectively guaranteed to
-    # move the current student's position in the traversal order.
     for _ in range(8):
         provider.add_student()
     controller.note_extraction_progress(added=8, appears_active=True)
@@ -2271,13 +2056,10 @@ def test_fold_in_restores_question_and_student_by_id_across_a_reshuffle(
 
     assert state.selection.question_id == current_question_id
     assert state.selection.student_item_id == current_student_item_id
-    # The new students are genuinely part of the run now.
     assert len(state.student_items) == provider._COHORT_SIZE + 8
 
 
 class GrowableFakeDataProvider(FakeDataProvider):
-    """A `FakeDataProvider` whose roster can grow mid-session."""
-
     def __init__(self) -> None:
         self._students = [
             StudentSummary(1, "Tommy Liu"),
@@ -2312,13 +2094,10 @@ def test_return_to_qa_picker_surfaces_newly_folded_in_students() -> None:
     growable.add_student(3, "Casey Kim")
     controller.note_extraction_progress(added=1, appears_active=True)
 
-    # Not visible yet — a background arrival must not move a grader mid-answer.
     assert len(state.student_items) == 2
 
     controller.return_to_qa_picker()
 
-    # Crossing the boundary the grader chose (leaving the grade screen)
-    # surfaces it.
     assert len(state.student_items) == 3
     assert any(item.label == "Casey Kim" for item in state.student_items)
 
@@ -2331,7 +2110,6 @@ def test_progress_label_is_qualified_while_extraction_is_active() -> None:
     controller.note_extraction_progress(added=0, appears_active=True)
     assert "extraction still running" in controller._qa_student_progress_label()
 
-    # And it reverts to the plain wording once extraction is no longer active.
     controller.note_extraction_progress(added=0, appears_active=False)
     assert controller._qa_student_progress_label() == plain
 
@@ -2350,7 +2128,6 @@ def test_all_questions_graded_message_is_qualified_while_extraction_is_active() 
     assert "All questions are fully graded for all students!" in app.qa_screen.status
     assert "extraction still running" in app.qa_screen.status
 
-    # Once extraction is no longer active, the plain sentence returns.
     controller.note_extraction_progress(added=0, appears_active=False)
     controller.qa_jump_ungraded_question()
     assert app.qa_screen.status == "All questions are fully graded for all students!"

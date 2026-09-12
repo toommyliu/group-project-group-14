@@ -221,7 +221,6 @@ def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
             assert "/ Filter" in status_text
             assert "? Help" in status_text
             assert "^\\ palette" not in status_text
-            # The QA picker is the root screen: no Back offered there.
             assert "esc Back" not in status_text
 
             await pilot.press("enter")
@@ -230,8 +229,6 @@ def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
             grade_status_text = _status_bar_text(app)
             assert "ctrl+j/right Next Student" in grade_status_text
             assert "esc Back" in grade_status_text
-            # Commands documented on the grade screen's Hotkeys card stay
-            # out of the status bar to keep it readable.
             assert "c Comment" not in grade_status_text
             assert "Zoom" not in grade_status_text
 
@@ -333,7 +330,6 @@ def test_student_pane_id_tab_displays_submitted_ids() -> None:
             assert id_labels[1].startswith("987654321 [")
             assert id_labels[1].endswith("/11 graded]")
 
-            # The Name tab is hidden while grading anonymously.
             pane.action_pane_activate_tab(1)
             await pilot.pause()
             assert pane.active_tab_index == 0
@@ -385,7 +381,6 @@ def test_student_pane_name_id_hotkey_toggles_display_mode() -> None:
             status = app.get_qa_picker_screen().query_one("#qa-status", Static)
             assert pane.active_tab_index == 0
 
-            # Anonymous grading: names are unavailable, d only hints at t.
             await pilot.press("d")
             await pilot.pause()
 
@@ -413,7 +408,6 @@ def test_student_pane_name_id_hotkey_toggles_display_mode() -> None:
                 "s2 [0/2 graded]",
             ]
 
-            # Turning teacher mode off while on the Name tab snaps back to IDs.
             await pilot.press("d")
             await pilot.pause()
             assert pane.active_tab_index == 1
@@ -555,13 +549,9 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
             assert app.workflow_state.grading_run.max_points == 85
             assert current.question_id == "q1"
             assert current.prompt.startswith("Convert decimal ")
-            # The regenerated samples carry no OCR transcription, so the
-            # student-specific context is asserted via the image crops.
             assert "/student-submissions/submission-" in current.image_path
             assert current.image_path.endswith("/responses/q1.png")
 
-            # The section title names the question; the context below starts
-            # with the score so "Question" never appears twice.
             title = app.get_grade_screen().query_one(
                 "#question-section-title", Label
             )
@@ -586,7 +576,6 @@ def test_comment_library_inserts_snippet_into_comment_box(tmp_path) -> None:
 
     submissions = tmp_path / "student-submissions"
     shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
-    # Pre-seed a saved snippet so the insert path has something to pick.
     write_comments(submissions, CommentLibrary().with_snippet("See Lecture 5"))
 
     async def run() -> None:
@@ -598,21 +587,19 @@ def test_comment_library_inserts_snippet_into_comment_box(tmp_path) -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("enter")  # into the grade screen
+            await pilot.press("enter")
             await pilot.pause()
 
-            await pilot.press("l")  # open the comment library
+            await pilot.press("l")
             await pilot.pause()
             assert isinstance(app.screen, CommentLibraryScreen)
 
-            await pilot.press("1")  # insert the first snippet, closing the modal
+            await pilot.press("1")
             await pilot.pause()
 
             comment = app.get_grade_screen().query_one("#question-comment", Input)
             assert "See Lecture 5" in comment.value
 
-            # Inserting bumped the global use count and recorded it against the
-            # current question (q1), and persisted both to the folder.
             reloaded = read_comments(submissions)
             assert reloaded.snippets[0].text == "See Lecture 5"
             assert reloaded.snippets[0].uses == 1
@@ -638,20 +625,17 @@ def test_transcription_editor_opens_with_x_and_saves_correction(tmp_path) -> Non
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("enter")  # into the grade screen
+            await pilot.press("enter")
             await pilot.pause()
 
             grade_screen = app.get_grade_screen()
             editor = grade_screen.query_one("#transcription-editor")
             assert not editor.has_class("editing")
 
-            # The `x` hotkey opens the inline editor (check_action lets it
-            # through since no Input/TextArea holds focus yet).
             await pilot.press("x")
             await pilot.pause()
             assert editor.has_class("editing")
 
-            # Replace the text and save through the button.
             text_area = grade_screen.query_one("#transcription-text", TextArea)
             text_area.text = "corrected reading via TUI"
             await pilot.click("#transcription-save")
@@ -682,7 +666,6 @@ def test_comment_library_scope_toggle_reorders_by_question(tmp_path) -> None:
 
     submissions = tmp_path / "student-submissions"
     shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
-    # "global favorite" leads globally; "loop note" leads only on q1.
     library = (
         CommentLibrary()
         .with_snippet("global favorite")
@@ -702,7 +685,7 @@ def test_comment_library_scope_toggle_reorders_by_question(tmp_path) -> None:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("enter")  # grade screen, on q1
+            await pilot.press("enter")
             await pilot.pause()
             await pilot.press("l")
             await pilot.pause()
@@ -713,17 +696,14 @@ def test_comment_library_scope_toggle_reorders_by_question(tmp_path) -> None:
                 items = list(screen.query(_SnippetItem))
                 return items[0].snippet.text
 
-            # Default is the stable global order.
             assert screen._scope == SCOPE_GLOBAL
             assert top_row_text() == "global favorite"
 
-            # Toggling to per-question surfaces the q1-specific phrase first.
             await pilot.press("g")
             await pilot.pause()
             assert screen._scope == SCOPE_QUESTION
             assert top_row_text() == "loop note"
 
-            # The choice is remembered on the app for the session.
             assert app._comment_library_scope == SCOPE_QUESTION
 
     asyncio.run(run())
@@ -757,10 +737,10 @@ def test_comment_library_saves_a_new_snippet_from_the_modal(tmp_path) -> None:
             new_input.focus()
             new_input.value = "Off-by-one in loop bound"
             await pilot.pause()
-            await pilot.press("enter")  # save the new snippet, modal stays open
+            await pilot.press("enter")
             await pilot.pause()
 
-            assert isinstance(app.screen, CommentLibraryScreen)  # still open
+            assert isinstance(app.screen, CommentLibraryScreen)
             assert [s.text for s in read_comments(submissions).snippets] == [
                 "Off-by-one in loop bound"
             ]
@@ -1166,8 +1146,6 @@ def test_grade_rubric_editor_rejects_mixed_positive_and_negative_scoring() -> No
             await pilot.pause()
 
             status = grade_screen.query_one("#rubric-editor-status", Static)
-            # A negative delta flips the rubric to deduction mode, so the
-            # positive Correct row is rejected with a mode-specific message.
             assert "Correct must use +0 points for deduction rubrics." in str(
                 status.content
             )
@@ -1226,7 +1204,6 @@ def test_rubric_editor_authors_default_comment() -> None:
             await pilot.pause()
 
             grade_screen = app.get_grade_screen()
-            # Type a default comment into the Correct row's comment field.
             correct_container = grade_screen.query_one("#rubric-editor-correct")
             comment_input = next(
                 widget
@@ -1245,7 +1222,6 @@ def test_rubric_editor_authors_default_comment() -> None:
                 if option.label == "Correct"
             )
             assert correct.default_comment == "Well reasoned throughout."
-            # Untouched rows carry no comment.
             incorrect = next(
                 option
                 for option in provider.saved_options
@@ -1595,7 +1571,6 @@ def test_returning_from_question_pane_restores_question_focus() -> None:
             assert qa_list.has_class("-pane-active") is True
             assert student_pane.has_class("-pane-active") is False
             assert app.focused is qa_list
-            # The preview shows the highlighted question's prompt (q3).
             assert "most significant bit" in str(preview.content)
 
     asyncio.run(run())
@@ -1710,8 +1685,6 @@ def test_highlighting_student_updates_details() -> None:
             qa_screen.show_student_details(student)
             await pilot.pause()
 
-            # Anonymous grading by default: the details pane shows the
-            # student ID, never the name.
             preview = qa_screen.query_one("#qa-preview", Static)
             assert "s1" in str(preview.content)
             assert "Tommy Liu" not in str(preview.content)
@@ -1731,7 +1704,7 @@ def test_teacher_mode_toggle_reveals_names_in_details_pane() -> None:
             await pilot.pause()
 
             qa_screen = app.get_qa_picker_screen()
-            await pilot.press("tab")  # focus the students pane
+            await pilot.press("tab")
             await pilot.pause()
 
             preview = qa_screen.query_one("#qa-preview", Static)
@@ -1779,7 +1752,6 @@ def test_teacher_mode_toggle_reveals_name_on_grade_screen() -> None:
             assert app.workflow_state.selection_labels["student"] == "Tommy Liu"
             assert "Tommy Liu" in str(name_label.content)
 
-            # The revealed name follows student navigation until toggled off.
             await pilot.press("right")
             await pilot.pause()
             assert app.workflow_state.selection_labels["student"] == "Andy Cortes"
@@ -2137,8 +2109,6 @@ def test_qa_picker_student_search_is_independent_and_handles_no_matches() -> Non
 
 
 def test_escape_on_qa_picker_is_not_a_back_action() -> None:
-    """The QA picker is the root screen: esc offers no Back there."""
-
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -2180,9 +2150,6 @@ def test_question_mark_opens_and_closes_help() -> None:
 
 
 def test_setup_page_scopes_out_qa_picker_hotkeys() -> None:
-    """The start-up page offers only global commands plus its own Templates
-    hotkey — never the QA picker / grading ones."""
-
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
 
@@ -2311,7 +2278,6 @@ def test_shifted_digit_selects_and_finalizes_rubric() -> None:
             await pilot.press("enter")
             await pilot.pause()
 
-            # shift+1 on a US layout: the protocol-independent ctrl+1 fallback.
             await pilot.press("exclamation_mark")
             await pilot.pause()
 
@@ -2332,7 +2298,6 @@ def test_shifted_digit_beyond_rubric_count_does_nothing() -> None:
             await pilot.press("enter")
             await pilot.pause()
 
-            # shift+4 targets rubric slot 4, but only 2 options exist.
             await pilot.press("dollar_sign")
             await pilot.pause()
 
@@ -2391,12 +2356,10 @@ def test_review_hotkey_opens_modal_and_row_jumps_to_grade(tmp_path) -> None:
         )
         async with app.run_test() as pilot:
             await pilot.pause()
-            # Shift+R on the QA picker opens the needs-review modal.
             await pilot.press("R")
             await pilot.pause()
             assert isinstance(app.screen, ReviewQueueScreen)
 
-            # Selecting the top row dismisses the modal and jumps to that grade.
             await pilot.press("enter")
             await pilot.pause()
             assert not isinstance(app.screen, ReviewQueueScreen)
@@ -2419,16 +2382,15 @@ def test_history_hotkey_opens_modal_after_a_graded_change(tmp_path) -> None:
         )
         async with app.run_test() as pilot:
             await pilot.pause()
-            await pilot.press("enter")  # grade screen
-            await pilot.press("1")      # persist a grade -> journal entry
+            await pilot.press("enter")
+            await pilot.press("1")
             await pilot.pause()
 
-            # History is teacher-mode only: it must not open while anonymous.
             await pilot.press("H")
             await pilot.pause()
             assert not isinstance(app.screen, GradeHistoryScreen)
 
-            await pilot.press("t")  # enter teacher mode
+            await pilot.press("t")
             await pilot.press("H")
             await pilot.pause()
             assert isinstance(app.screen, GradeHistoryScreen)
@@ -2443,8 +2405,6 @@ def test_history_hotkey_opens_modal_after_a_graded_change(tmp_path) -> None:
 
 
 def test_pressing_o_opens_the_current_crop_in_an_external_viewer() -> None:
-    """The escape hatch out of the terminal: works on any terminal, and
-    reports back in the grade screen's status line."""
     import opengrader.tui.ui.widgets.response_viewer as viewer_module
 
     async def run() -> None:
@@ -2478,7 +2438,6 @@ def test_pressing_o_opens_the_current_crop_in_an_external_viewer() -> None:
 
 
 def test_external_viewer_failure_is_reported_not_raised() -> None:
-    """A missing viewer must not take the grading session down with it."""
     import opengrader.tui.ui.widgets.response_viewer as viewer_module
     from opengrader.tui.external_viewer import ExternalViewerError
 
@@ -2510,8 +2469,6 @@ def test_external_viewer_failure_is_reported_not_raised() -> None:
 
 
 def test_open_in_viewer_is_not_dispatched_while_typing_a_comment() -> None:
-    """'o' is a printable character; it must reach the comment box, not the
-    external viewer, whenever an Input holds focus."""
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
@@ -2531,28 +2488,11 @@ def test_open_in_viewer_is_not_dispatched_while_typing_a_comment() -> None:
     asyncio.run(run())
 
 
-# --------------------------------------------------------------------------- #
-# Grade while extracting — the app-level wiring of the fold-in loop
-# --------------------------------------------------------------------------- #
-
-
 def _student_count(app) -> int:  # noqa: ANN001
-    """How many students the open session can actually reach.
-
-    Asked through the provider's own listing rather than a private attribute,
-    so it counts what a grader would see in the student pane. A file-backed
-    folder is one assignment, which the provider presents as course 1.
-    """
     return len(app.data_provider.list_students(course_id=1))
 
 
 def _partially_extracted_folder(tmp_path):  # noqa: ANN001
-    """A submissions folder with one student finished and one still to come.
-
-    Returns ``(folder, arrive)`` where calling ``arrive()`` completes the second
-    submission the way the extractor does: files first, manifest record last —
-    the ordering the whole fold-in design rests on.
-    """
     import shutil
     from pathlib import Path
 
@@ -2590,8 +2530,6 @@ def _partially_extracted_folder(tmp_path):  # noqa: ANN001
 
 
 def test_a_submission_that_finishes_later_folds_into_an_open_session(tmp_path) -> None:  # noqa: ANN001
-    """The feature end to end: open on a half-extracted folder, and the student
-    who finishes while you are grading appears without a restart."""
 
     async def run() -> tuple[int, int]:
         folder, arrive = _partially_extracted_folder(tmp_path)
@@ -2616,9 +2554,6 @@ def test_a_submission_that_finishes_later_folds_into_an_open_session(tmp_path) -
 
 
 def test_the_fold_in_watch_starts_on_a_folder_opened_directly(tmp_path) -> None:  # noqa: ANN001
-    """A CLI launch (or a restarted app reopening where it left off) may land on
-    a folder someone else is still extracting into, so the watch is not
-    something only the setup screen's button can turn on."""
 
     async def run() -> bool:
         folder, _arrive = _partially_extracted_folder(tmp_path)
@@ -2635,9 +2570,6 @@ def test_the_fold_in_watch_starts_on_a_folder_opened_directly(tmp_path) -> None:
 
 
 def test_grade_while_extracting_opens_the_workspace_with_certainty(tmp_path) -> None:  # noqa: ANN001
-    """The setup screen's own run is the one case with a definite answer to "is
-    extraction still going?", and it must be threaded through rather than
-    re-guessed from the manifest's mtime."""
     from opengrader.tui.ui.screens.setup_screen import SetupScreen
 
     async def run() -> tuple[bool, bool, int]:
@@ -2654,8 +2586,6 @@ def test_grade_while_extracting_opens_the_workspace_with_certainty(tmp_path) -> 
             await pilot.pause()
 
             watching = app._extraction_watcher is not None
-            # The probe is a callable read fresh on every poll, not a bool
-            # captured at launch — the worker can finish at any moment.
             probe = app._extraction_known_active
             return watching, callable(probe), _student_count(app)
 
@@ -2666,9 +2596,6 @@ def test_grade_while_extracting_opens_the_workspace_with_certainty(tmp_path) -> 
 
 
 def test_the_watch_stops_once_the_extractor_worker_reports_done(tmp_path) -> None:  # noqa: ANN001
-    """Certainty is the one signal allowed to end the loop promptly — and the
-    poll that sees it still folds in whatever landed first, so the last
-    submission of a run is never lost to the stop."""
 
     async def run() -> tuple[int, bool]:
         folder, arrive = _partially_extracted_folder(tmp_path)

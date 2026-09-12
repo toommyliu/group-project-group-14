@@ -11,8 +11,6 @@ from .tabbed_list_pane import IndexedListView, TabbedListPane
 
 
 class _GradingLogEntryItem(ListItem):
-    """One log row; clicking it reopens that grade on the grade screen."""
-
     def __init__(self, entry: GradingLogEntry, *, teacher_mode: bool) -> None:
         self.entry = entry
         super().__init__(
@@ -26,19 +24,7 @@ class _GradingLogEntryItem(ListItem):
 
 
 class GradingLogPane(TabbedListPane):
-    """Session-activity feed styled like the Students pane.
-
-    Three tabs slice the same log: Latest (everything, newest first) and the
-    teacher-mode-only Student/Question tabs, which follow whatever the picker
-    currently highlights. The lists never take keyboard focus — tabs are
-    switched by clicking their labels in the border title. Rows themselves
-    are clickable: each posts :class:`EntrySelected` so the app can jump to
-    that entry's question/student on the grade screen.
-    """
-
     class EntrySelected(Message):
-        """Posted when the user clicks a log row to revisit that grade."""
-
         def __init__(self, entry: GradingLogEntry) -> None:
             self.entry = entry
             super().__init__()
@@ -47,7 +33,6 @@ class GradingLogPane(TabbedListPane):
     TAB_STUDENT = 1
     TAB_QUESTION = 2
 
-    # Bound the widget cost per refresh; the log itself keeps more history.
     _MAX_ROWS = 50
 
     def __init__(self, *, id: str | None = None) -> None:
@@ -73,7 +58,6 @@ class GradingLogPane(TabbedListPane):
         )
 
     def set_teacher_tabs_visible(self, visible: bool) -> None:
-        """Anonymous grading only exposes the Latest tab."""
         self.set_tab_hidden(self.TAB_STUDENT, not visible)
         self.set_tab_hidden(self.TAB_QUESTION, not visible)
 
@@ -113,7 +97,6 @@ class GradingLogPane(TabbedListPane):
         self.refresh_index_subtitle()
 
     def refresh_index_subtitle(self) -> None:
-        """Show the active tab's entry count instead of a cursor position."""
         count = self._tab_counts.get(self.active_tab_index, 0)
         self.set_subtitle(f"{count} entr{'y' if count == 1 else 'ies'}")
 

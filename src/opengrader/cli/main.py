@@ -1,41 +1,4 @@
-"""`opengrader` — one command, one place to find every tool.
-
-Opengrader grew as a set of composable scripts, and `[project.scripts]` grew
-with it: thirty-odd console commands with names like `submission-splitter` and
-`grade-restore`, each installed into the environment as its own binary. That is
-the right shape for the *pipeline* — a stage you can run on its own is a stage
-you can debug on its own — and the wrong shape for the person in front of it.
-A name you cannot guess is a name you cannot find, `--help` only helps once you
-already know which of the thirty to ask, and a tool called `curve` or `claim`
-sitting loose on an instructor's `PATH` says nothing about what project it
-belongs to.
-
-This module is the single front door: **`opengrader <command> [args...]`**.
-It is deliberately a *dispatcher and nothing else* — every subcommand hands its
-arguments, untouched, to the exact function the legacy console script already
-calls, so there is one implementation of every flag and no second place for
-behaviour to drift. Three properties are load-bearing:
-
-* **No flags are re-declared here.** Each subcommand takes `nargs=-1,
-  type=click.UNPROCESSED` and forwards the raw argv to the module's own
-  `argparse` parser. `opengrader submission-extractor --help` is therefore the
-  extractor's real help, always current, with no risk of this file describing a
-  flag that was renamed a release ago.
-* **Nothing is imported until it is invoked.** `COMMANDS` stores the target as
-  the string `"module:function"`, and the module is imported inside
-  `dispatch()`. Importing this file must stay cheap enough to run on every tab
-  completion, and the alternative — importing thirty CLI modules to build the
-  group — would drag in `cv2`, `fitz`, `numpy` and Textual just to print a list
-  of names (see §6 *Keep a heavy dependency out of TUI startup*).
-* **The legacy commands still work.** `uv run submission-splitter …` and
-  `uv run opengrader submission-splitter …` run the same function with the same
-  arguments; this is an addition, not a migration. Subcommand names are the
-  legacy names for exactly that reason — every command in the README, in the
-  `About/` map and in muscle memory transfers by typing `opengrader` in front
-  of it. The one exception is `opengrader-run`, which becomes `opengrader run`
-  because `opengrader opengrader-run` is not a thing anyone should type; the
-  old name is kept as an alias so scripts that use it keep working.
-"""
+"""Dispatch Opengrader subcommands."""
 
 from __future__ import annotations
 
@@ -46,31 +9,12 @@ from dataclasses import dataclass
 
 import click
 
-# The name the user typed. Used as the `prog` half of the usage lines the inner
-# argparse parsers print, so an error from a subcommand reads
-# "usage: opengrader submission-splitter [-h] …" rather than naming a binary
-# the user did not invoke.
 PROGRAM_NAME = "opengrader"
 
-# The exit code a shell expects when a program is killed by SIGINT (128 + 2).
-# Every subcommand gets this for free, which the standalone scripts never had:
-# an interrupted extraction used to exit 1 and look like a failure.
 EXIT_INTERRUPTED = 130
 
-# Aliases that keep working but are not advertised in the command list. These
-# are kept for compatibility, not for reading: printing
-# "run (opengrader-run, pipeline)" would recommend the very spelling this
-# command exists to replace.
 UNADVERTISED_ALIASES = frozenset({"opengrader-run"})
 
-
-# --- The command registry ---------------------------------------------------
-#
-# Sections are printed in the order listed here, and the order is the workflow:
-# a reader scanning `opengrader --help` top to bottom walks the same path their
-# exam does, from a stack of paper to grades in Canvas. Alphabetical would be
-# easier to maintain and useless to read — thirty tools sorted by name is the
-# problem this command exists to solve, not the solution.
 
 SECTION_START = "Start here"
 SECTION_PREPARE = "Prepare an assignment"
@@ -97,15 +41,6 @@ SECTION_ORDER: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class Subcommand:
-    """One row of the registry: a name, where its code lives, how to call it.
-
-    `target` is a string rather than a function so that building the group
-    imports nothing (see the module docstring). `takes_argv` records whether
-    the entry function accepts an explicit argument list — most do, but the
-    console-script entry points of `doctor` and `tui-dev` take none and read
-    `sys.argv` themselves, which `dispatch()` handles by patching it.
-    """
-
     name: str
     target: str
     summary: str
@@ -116,17 +51,14 @@ class Subcommand:
 
     @property
     def module(self) -> str:
-        """The dotted module path half of `target`."""
         return self.target.split(":", 1)[0]
 
     @property
     def attribute(self) -> str:
-        """The entry-function name half of `target`."""
         return self.target.split(":", 1)[1]
 
 
 COMMANDS: tuple[Subcommand, ...] = (
-    # --- Start here ---
     Subcommand(
         name="run",
         target="opengrader.cli.run:main",
@@ -148,7 +80,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         section=SECTION_START,
         takes_argv=False,
     ),
-    # --- Prepare an assignment ---
     Subcommand(
         name="create-answer-key",
         target="opengrader.cli.answer_key:run_cli",
@@ -168,7 +99,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="draw answer regions on an assignment Opengrader didn't make",
         section=SECTION_PREPARE,
     ),
-    # --- Take in scans ---
     Subcommand(
         name="scan-check",
         target="opengrader.cli.scan_check:run_cli",
@@ -195,7 +125,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         section=SECTION_INTAKE,
         aliases=("extract",),
     ),
-    # --- Grade ---
     Subcommand(
         name="automated-grading",
         target="opengrader.cli.automated_grading:run_cli",
@@ -221,7 +150,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="track a grade dispute from request to resolution",
         section=SECTION_GRADE,
     ),
-    # --- Check the grading ---
     Subcommand(
         name="review-queue",
         target="opengrader.cli.review_queue:run_cli",
@@ -270,7 +198,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="is the OCR trustworthy here, measured against human fixes",
         section=SECTION_CHECK,
     ),
-    # --- Hand back ---
     Subcommand(
         name="grade-check",
         target="opengrader.cli.grade_check:main",
@@ -307,7 +234,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="whole-semester grades, the at-risk list, outcome mastery",
         section=SECTION_RETURN,
     ),
-    # --- Work with other graders ---
     Subcommand(
         name="claim",
         target="opengrader.cli.claim:run_cli",
@@ -326,7 +252,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="hand a redacted packet to a TA, then merge their grades back",
         section=SECTION_GRADERS,
     ),
-    # --- History and safety ---
     Subcommand(
         name="grade-history",
         target="opengrader.cli.grade_history:run_cli",
@@ -345,7 +270,6 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="snapshot, verify and restore a class's graded work",
         section=SECTION_HISTORY,
     ),
-    # --- Not listed: development only ---
     Subcommand(
         name="tui-dev",
         target="opengrader.tui.main:run_app_dev",
@@ -358,13 +282,6 @@ COMMANDS: tuple[Subcommand, ...] = (
 
 
 def _version() -> str:
-    """The installed package version, or a placeholder when there is none.
-
-    `importlib.metadata` raises when the package is not installed — which is
-    exactly the case when someone runs this straight out of a source tree with
-    `PYTHONPATH=src`. `--version` failing there would be a silly way to break a
-    checkout, so the lookup degrades to a word instead of an exception.
-    """
     from importlib.metadata import PackageNotFoundError, version
 
     try:
@@ -374,12 +291,6 @@ def _version() -> str:
 
 
 def _index() -> dict[str, Subcommand]:
-    """Every name a user may type — canonical and alias — mapped to its row.
-
-    Built on demand rather than at import so the registry stays the single
-    source of truth; it is thirty-odd dict inserts, which is nothing next to
-    the import it is protecting.
-    """
     table: dict[str, Subcommand] = {}
     for spec in COMMANDS:
         table[spec.name] = spec
@@ -389,19 +300,10 @@ def _index() -> dict[str, Subcommand]:
 
 
 def find(name: str) -> Subcommand | None:
-    """Resolve a typed name (canonical or alias) to its registry row."""
     return _index().get(name)
 
 
 def unknown_command_message(name: str) -> str:
-    """A rejection that names the near-miss, because these names are long.
-
-    `submission-extracter` and `grade-releases` are the typos this tool
-    actually gets, and a bare "no such command" sends the reader back to a
-    list of thirty to hunt for the one character they got wrong. The 0.55
-    cutoff is deliberately loose: a wrong suggestion costs a glance, a missing
-    one costs another round trip through `--help`.
-    """
     close = difflib.get_close_matches(name, sorted(_index()), n=3, cutoff=0.55)
     message = f"No such command {name!r}."
     if close:
@@ -409,29 +311,9 @@ def unknown_command_message(name: str) -> str:
     return message + f"\nRun `{PROGRAM_NAME} --help` for the full list."
 
 
-# --- Dispatch ---------------------------------------------------------------
-
-
 def dispatch(spec: Subcommand, argv: list[str]) -> int:
-    """Import the target module, run its entry function, return an exit code.
-
-    `sys.argv` is patched for the duration of the call for two reasons. The
-    obvious one is cosmetic: `argparse` takes its `prog` from `sys.argv[0]`,
-    so without this a bad flag would be reported as `opengrader: error: …` and
-    send the reader to `opengrader --help`, which lists commands rather than
-    the flag they actually got wrong. (This is also why the five parsers that
-    used to hardcode `prog=` no longer do — see the comment at each of them.)
-    The load-bearing reason is that a couple of entry points (`doctor`, `tui-dev`)
-    take no arguments and read `sys.argv` themselves — patching it is what lets
-    them be dispatched at all, and is why they are marked `takes_argv=False`
-    rather than being called with an argument they would reject.
-
-    The exit code follows whatever the entry function already does, because
-    these are the same functions the legacy console scripts call: a returned
-    `int` is the code (`doctor`, `run`, `transcribe-eval`), a `SystemExit` from
-    `argparse` — `--help`, or a bad flag — propagates untouched, and anything
-    else means success. `bool` is excluded from the int case deliberately:
-    `True` is an `int` in Python and would silently become exit code 1.
+    """Temporarily replaces sys.argv for argparse and no-argument entry points.
+    Integer results become exit codes; bool does not. SystemExit propagates.
     """
     module = importlib.import_module(spec.module)
     entry = getattr(module, spec.attribute)
@@ -441,9 +323,6 @@ def dispatch(spec: Subcommand, argv: list[str]) -> int:
     try:
         result = entry(argv) if spec.takes_argv else entry()
     except KeyboardInterrupt:
-        # A grader pressing ctrl-c mid-extraction is ending the run, not
-        # hitting a bug: say so on stderr and use the shell's own code for it,
-        # rather than letting Python print a traceback over the progress bar.
         click.echo(f"\n{spec.name}: interrupted.", err=True)
         return EXIT_INTERRUPTED
     finally:
@@ -455,14 +334,6 @@ def dispatch(spec: Subcommand, argv: list[str]) -> int:
 
 
 def _passthrough(spec: Subcommand) -> click.Command:
-    """Build the click command that forwards everything to `spec`'s parser.
-
-    `add_help_option=False` and the empty `help_option_names` are the whole
-    trick: they stop click from claiming `-h`/`--help`, so the flag reaches the
-    subcommand's own `argparse` and the user reads the real, current help for
-    that tool instead of a summary this file would have to keep in sync.
-    """
-
     @click.pass_context
     def callback(ctx: click.Context, args: tuple[str, ...]) -> None:
         ctx.exit(dispatch(spec, list(args)))
@@ -487,16 +358,10 @@ def _passthrough(spec: Subcommand) -> click.Command:
 
 
 class OpengraderCLI(click.Group):
-    """The group: lazy lookup, sectioned help, and a guess when you typo."""
-
     def list_commands(self, ctx: click.Context) -> list[str]:
-        """Registry order, not alphabetical — see the note above `SECTION_*`."""
         return [spec.name for spec in COMMANDS if not spec.hidden] + sorted(self.commands)
 
     def get_command(self, ctx: click.Context, name: str) -> click.Command | None:
-        # The handful of commands defined in this file (`help`, `commands`,
-        # `completion`) are registered on the group the normal way; everything
-        # else is built here, on demand, from the registry.
         builtin = self.commands.get(name)
         if builtin is not None:
             return builtin
@@ -512,14 +377,10 @@ class OpengraderCLI(click.Group):
         return super().resolve_command(ctx, args)
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
-        """Print the commands grouped by section instead of as one long list."""
         rows: dict[str, list[tuple[str, str]]] = {}
         for spec in COMMANDS:
             if spec.hidden:
                 continue
-            # Aliases ride along in the name column: someone reading the list
-            # to find "how do I split a scan" should see `split` here rather
-            # than discover it in a changelog.
             label = spec.name
             visible_aliases = [a for a in spec.aliases if a not in UNADVERTISED_ALIASES]
             if visible_aliases:
@@ -583,15 +444,11 @@ def help_command(ctx: click.Context, command: str | None) -> None:
     if spec is None:
         builtin = cli.commands.get(command)
         if builtin is not None:
-            # `info_name` is the *last* word of the usage line; click prepends
-            # the parent's own name, so passing "opengrader commands" here
-            # would print "opengrader opengrader commands".
+            # Click prepends the parent name to info_name.
             with click.Context(builtin, info_name=command, parent=ctx.parent) as sub_ctx:
                 click.echo(sub_ctx.get_help())
             return
         raise click.UsageError(unknown_command_message(command), ctx)
-    # Asking the tool itself rather than reprinting a summary: `help X` and
-    # `X --help` must never be able to disagree.
     ctx.exit(dispatch(spec, ["--help"]))
 
 
@@ -636,16 +493,15 @@ def completion_command(shell: str) -> None:
     from click.shell_completion import get_completion_class
 
     completion_class = get_completion_class(shell)
-    if completion_class is None:  # pragma: no cover - click ships all three
+    if completion_class is None:  # pragma: no cover
         raise click.UsageError(f"No completion support for {shell!r}.")
     source = completion_class(cli, {}, PROGRAM_NAME, "_OPENGRADER_COMPLETE").source()
     click.echo(source)
 
 
 def main() -> None:
-    """Console-script entry point for `opengrader`."""
     cli(prog_name=PROGRAM_NAME)
 
 
-if __name__ == "__main__":  # pragma: no cover - exercised via `python -m`
+if __name__ == "__main__":  # pragma: no cover
     main()

@@ -48,7 +48,6 @@ def test_read_policy_survives_malformed_json(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{ this is not json", encoding="utf-8")
 
-    # A corrupt policy must never block grading: fall back to the default.
     assert read_policy(tmp_path) == GradingPolicy()
 
 
@@ -58,7 +57,7 @@ def test_read_policy_ignores_unknown_mode(tmp_path: Path) -> None:
     path.write_text('{"mode": "bogus", "anonymity_locked": true}', encoding="utf-8")
 
     loaded = read_policy(tmp_path)
-    assert loaded.mode == "solo"  # unknown mode normalizes to the safe default
+    assert loaded.mode == "solo"
     assert loaded.anonymity_locked is True
 
 
@@ -70,7 +69,6 @@ def test_unlocking_overwrites_a_previously_locked_folder(tmp_path: Path) -> None
 
 
 def test_traversal_shuffle_round_trips(tmp_path: Path) -> None:
-    """The traversal_shuffle field must survive write and read."""
     written = write_policy(
         tmp_path, GradingPolicy(mode="solo", traversal_shuffle=True)
     )
@@ -80,14 +78,8 @@ def test_traversal_shuffle_round_trips(tmp_path: Path) -> None:
 
 
 def test_traversal_shuffle_defaults_to_false_when_absent(tmp_path: Path) -> None:
-    """An old policy file without traversal_shuffle must load as False.
-
-    This ensures backwards compatibility: an existing folder with no
-    traversal_shuffle key behaves exactly as it does today (unshuffled).
-    """
     path = resolve_policy_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Write a legacy policy without the traversal_shuffle key.
     path.write_text('{"mode": "solo", "anonymity_locked": false}', encoding="utf-8")
 
     loaded = read_policy(tmp_path)
@@ -95,7 +87,6 @@ def test_traversal_shuffle_defaults_to_false_when_absent(tmp_path: Path) -> None
 
 
 def test_policy_with_all_fields_round_trips(tmp_path: Path) -> None:
-    """A complete policy with all fields must survive serialization."""
     policy = GradingPolicy(mode="multi", anonymity_locked=True, traversal_shuffle=True)
     write_policy(tmp_path, policy)
 

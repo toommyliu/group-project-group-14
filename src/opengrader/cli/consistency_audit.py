@@ -1,11 +1,4 @@
-"""Audit a graded set for consistency: same answer, same grade?
-
-Clusters every graded response by its answer (the same "same answer" rule the
-TUI's answer-grouping uses) and reports each cluster whose members did not all
-receive the same grade — the fairness check to run before scores reach Canvas.
-Reads only the persisted ``.submission.md`` files; it never re-runs OCR or
-changes any grade.
-"""
+"""Report identical answers with inconsistent grades."""
 
 from __future__ import annotations
 
@@ -38,7 +31,6 @@ _KIND_HEADLINE = {
 
 
 def _submission_paths(input_path: Path) -> list[Path]:
-    """Discover submission files, matching SubmissionFilesProvider's rules."""
     if input_path.is_file():
         return [input_path]
     direct = sorted(input_path.glob("*.submission.md"))
@@ -47,7 +39,6 @@ def _submission_paths(input_path: Path) -> list[Path]:
 
 
 def _format_points(points: float) -> str:
-    """Render a score without a trailing ``.0`` on whole numbers."""
     return f"{points:g}"
 
 

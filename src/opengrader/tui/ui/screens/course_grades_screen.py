@@ -1,18 +1,3 @@
-"""Modal course gradebook — a whole semester, from the start-up screen.
-
-Every other screen in the app is scoped to one assignment, because that is the
-unit you grade. A course is not: it spans folders this session was never opened
-with. That is exactly why this lives in the start-up screen's Helper Tools and
-**not** behind a workspace hotkey — a course report is not a report about the
-assignment in front of you, and putting it next to the ones that are would
-promise a connection that isn't there.
-
-It is a thin front end over the `course-grades` CLI, run in a thread worker with
-its output in a log pane, matching the Canvas / return-bundle / calibration
-modals. Strictly read-only with respect to grades: it never writes into an
-assignment folder, and writes at all only when a CSV path is given.
-"""
-
 from __future__ import annotations
 
 import io
@@ -31,9 +16,6 @@ from opengrader.core.course import COURSE_FILENAME
 from opengrader.tui.ui.screens.course_builder_screen import CourseBuilderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
-# What the report should lead with. These map onto the CLI's flags rather than
-# inventing a second vocabulary, so what the screen shows and what a scripted
-# run shows can never drift.
 VIEW_EVERYTHING = "everything"
 VIEW_SUMMARY = "summary"
 VIEW_AT_RISK = "at-risk"
@@ -48,8 +30,6 @@ _VIEW_OPTIONS: list[tuple[str, str]] = [
 
 
 class CourseGradesScreen(ModalScreen[None]):
-    """Weighted course grades, at-risk students, and outcome mastery."""
-
     DEFAULT_CSS = """
     CourseGradesScreen {
         align: center middle;
@@ -194,23 +174,14 @@ class CourseGradesScreen(ModalScreen[None]):
         )
         self.query_one("#course-grades-path", Input).focus()
 
-    # ── browsing ─────────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#course-grades-browse")
     def _on_browse_course(self, event: Button.Pressed) -> None:
         event.stop()
-        # "any" rather than "file": a course folder is a perfectly good answer,
-        # and the CLI resolves a directory to the course.toml inside it.
         self._browse_into("#course-grades-path", f"Choose a {COURSE_FILENAME}", "any")
 
     @on(Button.Pressed, "#course-grades-new")
     def _on_new_course_file(self, event: Button.Pressed) -> None:
-        """Build a course file from form fields instead of hand-writing TOML.
-
-        The written path is dropped straight into the course field, so the
-        instructor lands back here one click from their first report rather
-        than having to find the file they just made.
-        """
         event.stop()
 
         def _apply(written: Path | None) -> None:
@@ -225,7 +196,6 @@ class CourseGradesScreen(ModalScreen[None]):
         )
 
     def _start_dir_for_builder(self) -> str:
-        """Where the builder should start looking — the course field's folder."""
         raw = self.query_one("#course-grades-path", Input).value.strip().strip("'\"")
         if not raw:
             return ""
@@ -258,7 +228,6 @@ class CourseGradesScreen(ModalScreen[None]):
             PathPickerScreen(title=title, mode=mode, start_path=start_path), _apply
         )
 
-    # ── running ──────────────────────────────────────────────────────────────
 
     def _build_argv(self) -> list[str] | None:
         course = self.query_one("#course-grades-path", Input).value.strip().strip("'\"")
@@ -271,9 +240,6 @@ class CourseGradesScreen(ModalScreen[None]):
         argv = ["--course", course]
 
         view = self.query_one("#course-grades-view", Select).value
-        # The at-risk list and outcomes print unasked when non-empty, so the
-        # narrower views only ever *add* a flag — never suppress something the
-        # instructor would have seen anyway.
         if view == VIEW_SUMMARY:
             argv.append("--summary")
         elif view == VIEW_AT_RISK:
@@ -299,12 +265,6 @@ class CourseGradesScreen(ModalScreen[None]):
         self.run_worker(lambda: self._run_report(argv), thread=True, exclusive=True)
 
     def _run_report(self, argv: list[str]) -> None:
-        """Worker thread: run the CLI with its output captured.
-
-        stderr is captured into the same buffer as stdout on purpose — the CLI
-        sends per-assignment load failures there, and those are exactly the
-        caveats a reader of the numbers must not miss.
-        """
         buffer = io.StringIO()
         succeeded = True
         try:
@@ -312,7 +272,7 @@ class CourseGradesScreen(ModalScreen[None]):
                 run_course_grades_cli(argv)
         except SystemExit as exc:
             succeeded = exc.code in (0, None)
-        except Exception as exc:  # surface unexpected failures in the log
+        except Exception as exc:
             succeeded = False
             buffer.write(f"\nerror: {exc}")
         self.app.call_from_thread(self._show_result, buffer.getvalue(), succeeded)
@@ -331,7 +291,6 @@ class CourseGradesScreen(ModalScreen[None]):
                 "Could not build the course report — see the log.", severity="error"
             )
 
-    # ── leaving ──────────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#course-grades-close")
     def _on_close_pressed(self, event: Button.Pressed) -> None:

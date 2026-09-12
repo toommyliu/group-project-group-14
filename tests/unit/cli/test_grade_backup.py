@@ -1,10 +1,3 @@
-"""The grade-backup CLI: snapshot, verify, archive, check, restore.
-
-The engine's decision table is tested in ``tests/unit/core/test_integrity.py``;
-what these cover is the part a user actually meets — the wording of the report,
-the exit codes a script depends on, and the refusals.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -46,9 +39,6 @@ student_score: ""
     return root
 
 
-# ── snapshot ──────────────────────────────────────────────────────────────
-
-
 def test_snapshot_records_the_folder(folder: Path, capsys) -> None:
     run_cli(["snapshot", "--submissions", str(folder)])
     assert resolve_snapshot_path(folder).is_file()
@@ -56,14 +46,10 @@ def test_snapshot_records_the_folder(folder: Path, capsys) -> None:
 
 
 def test_re_snapshotting_says_it_replaced_the_old_one(folder: Path, capsys) -> None:
-    """Otherwise a failing verify could be "fixed" by silently re-recording it."""
     run_cli(["snapshot", "--submissions", str(folder)])
     capsys.readouterr()
     run_cli(["snapshot", "--submissions", str(folder)])
     assert "Replaced the snapshot" in capsys.readouterr().out
-
-
-# ── verify ────────────────────────────────────────────────────────────────
 
 
 def test_verify_without_a_snapshot_exits_with_advice(folder: Path, capsys) -> None:
@@ -91,7 +77,6 @@ def test_verify_names_a_corrupted_file(folder: Path, capsys) -> None:
 
 
 def _journal_a_grade(folder: Path) -> None:
-    """Record one grading action, the way a real save does."""
     GradeJournal(resolve_history_dir(folder), actor="prof").append(
         kind="grade",
         student_id="1001",
@@ -106,11 +91,6 @@ def _journal_a_grade(folder: Path) -> None:
 def test_verify_flags_a_grade_change_with_nothing_in_the_journal(
     folder: Path, capsys
 ) -> None:
-    """The signal the cross-reference exists for, printed as the conclusion.
-
-    The folder has a journal — grading happened here — which is what makes "and
-    yet nothing recorded *this* change" meaningful rather than merely true.
-    """
     _journal_a_grade(folder)
     run_cli(["snapshot", "--submissions", str(folder)])
     path = folder / "sub-0001" / "sub-0001.submission.md"
@@ -128,7 +108,7 @@ def test_verify_explains_a_change_that_grading_accounts_for(
     run_cli(["snapshot", "--submissions", str(folder)])
     path = folder / "sub-0001" / "sub-0001.submission.md"
     path.write_text(path.read_text().replace("Points: 3", "Points: 5"))
-    _journal_a_grade(folder)  # recorded *after* the snapshot, so it explains it
+    _journal_a_grade(folder)
     capsys.readouterr()
     run_cli(["verify", "--submissions", str(folder)])
     output = capsys.readouterr().out
@@ -149,9 +129,6 @@ def test_verify_all_lists_the_untouched_files_too(folder: Path, capsys) -> None:
     capsys.readouterr()
     run_cli(["verify", "--submissions", str(folder), "--all"])
     assert "unchanged: sub-0001/responses/q1.png" in capsys.readouterr().out
-
-
-# ── backup / check / restore ──────────────────────────────────────────────
 
 
 def test_backup_writes_and_verifies_an_archive(folder: Path, tmp_path: Path, capsys) -> None:
@@ -213,12 +190,10 @@ def test_restore_refuses_an_existing_destination(folder: Path, tmp_path: Path, c
 
 
 def test_backup_without_output_writes_beside_the_folder(folder: Path, capsys) -> None:
-    """--output is optional so the flag and the TUI field mean the same thing."""
     run_cli(["backup", "--submissions", str(folder)])
     written = list(folder.parent.glob("*.zip"))
     assert len(written) == 1
     assert written[0].name.startswith(f"{folder.name}-backup-")
-    # A backup inside the folder is lost with it, so the default never is.
     assert not list(folder.rglob("*.zip"))
     assert str(written[0]) in capsys.readouterr().out
 
@@ -230,9 +205,6 @@ def test_backup_into_the_folder_is_refused_with_the_reason(folder: Path, capsys)
         )
     assert exit_info.value.code == 1
     assert "inside the folder being backed up" in capsys.readouterr().err
-
-
-# ── encrypted archives ────────────────────────────────────────────────────
 
 
 def test_backup_encrypt_writes_an_enc_archive(
@@ -253,8 +225,6 @@ def test_backup_encrypt_writes_an_enc_archive(
     out = capsys.readouterr().out
     assert archive.is_file()
     assert "Encrypted" in out
-    # Losing the passphrase loses the archive, so the command says so rather
-    # than leaving the user to find out later.
     assert "store it somewhere" in out
 
 
@@ -276,8 +246,6 @@ def test_check_and_restore_ask_for_the_passphrase_themselves(
 def test_an_unencrypted_backup_still_needs_no_passphrase(
     folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    # The environment variable is set, but a plain archive must not start using
-    # it — check reads the file to decide, not the environment.
     monkeypatch.setenv("OPENGRADER_PASSPHRASE", "p")
     archive = tmp_path / "plain.zip"
     run_cli(["backup", "--submissions", str(folder), "--output", str(archive)])

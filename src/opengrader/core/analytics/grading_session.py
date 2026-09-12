@@ -1,27 +1,3 @@
-"""Grading-session analytics over the durable audit journal (pure, no I/O).
-
-The journal (`core/history/journal.py`) already records *who* changed *what*,
-*when*. This engine reads those timestamps back as a productivity view: how much
-grading happened, how fast, spread across how many sittings, per grader. It's
-the analytics counterpart to the raw `grade-history` list — same data, summarized
-instead of enumerated.
-
-Design notes:
-
-* **Active time, not wall-clock.** Two consecutive actions close together are
-  "active grading"; a gap longer than ``idle_gap_seconds`` (default 5 min) is a
-  break, excluded from active time and treated as a session boundary. So a
-  grader who did an hour of work across a morning and an afternoon shows ~1h of
-  *active* time over 2 sessions, not the 6h of wall-clock between them.
-* **Per-actor, then pooled.** Timing is computed within each actor's own
-  timeline (you can't infer cadence across two people grading at once), then the
-  overall figures pool those — active seconds and session counts add up, and the
-  median cadence pools every within-session gap. This keeps concurrent graders
-  from inventing phantom idle time.
-* **Deterministic.** Actors are ordered by grading effort (events desc, then
-  name) so the report is stable.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,15 +6,11 @@ from statistics import median
 
 from opengrader.core.history.journal import GradeJournalEntry
 
-# Gaps longer than this (seconds) between one grader's actions are treated as a
-# break: they don't count toward active grading time and they split sessions.
 DEFAULT_IDLE_GAP_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
 class ActorGradingStats:
-    """One grader's slice of the grading-session report."""
-
     actor: str
     total_events: int
     grades: int
@@ -58,8 +30,6 @@ class ActorGradingStats:
 
 @dataclass(frozen=True)
 class GradingSessionReport:
-    """Cohort-wide grading throughput, plus a per-grader breakdown."""
-
     total_events: int
     grades: int
     comments: int
@@ -94,12 +64,6 @@ def _rate_per_hour(count: float, active_seconds: float) -> float | None:
 def _timeline_stats(
     times: list[datetime], idle_gap_seconds: float
 ) -> tuple[int, float, list[float]]:
-    """Return (sessions, active_seconds, within_session_gaps) for one grader.
-
-    ``times`` must be sorted ascending. A gap <= ``idle_gap_seconds`` is active
-    grading time and stays within the current session; a longer gap is a break
-    that starts a new session and is excluded from active time.
-    """
     if not times:
         return 0, 0.0, []
     sessions = 1
@@ -153,11 +117,6 @@ def build_grading_session_report(
     *,
     idle_gap_seconds: float = DEFAULT_IDLE_GAP_SECONDS,
 ) -> GradingSessionReport:
-    """Summarize grading throughput from journal entries.
-
-    Read-only: computes statistics from the entries and returns them; nothing is
-    written and no grade is changed. Safe on an empty journal (returns zeros).
-    """
     by_actor: dict[str, list[GradeJournalEntry]] = {}
     for entry in entries:
         by_actor.setdefault(entry.actor, []).append(entry)
@@ -173,7 +132,6 @@ def build_grading_session_report(
         total_active += stats.active_seconds
         total_sessions += stats.sessions
 
-    # Most grading effort first; ties broken by name for determinism.
     actor_stats.sort(key=lambda s: (-s.total_events, s.actor))
 
     all_times = sorted(

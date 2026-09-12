@@ -88,7 +88,7 @@ class TestGrade:
 
     def test_percent_tolerance_grade(self) -> None:
         specs = [parse_numeric_answer("200 ±5%")]  # type: ignore[list-item]
-        assert grade_numeric_response("190", specs) is True   # within ±10
+        assert grade_numeric_response("190", specs) is True
         assert grade_numeric_response("211", specs) is False
 
     def test_range_grade(self) -> None:

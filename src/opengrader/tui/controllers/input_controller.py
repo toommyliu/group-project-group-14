@@ -92,13 +92,7 @@ class CommandBindingSpec:
     show: bool = True
     priority: bool = True
     key_display: str | None = None
-    # Only available while teacher mode is on. Used for commands that reveal
-    # identity/accountability data (e.g. the grade-history audit view), so they
-    # stay hidden during anonymous grading.
     requires_teacher_mode: bool = False
-    # Unavailable when the assignment's policy locks anonymous grading. Used for
-    # the teacher-mode toggle so a grader can't de-anonymize a multi-grader
-    # folder the teacher marked anonymous-locked (`core/policy.py`).
     requires_unlocked_anonymity: bool = False
 
     def to_binding(self) -> Binding:
@@ -114,7 +108,6 @@ class CommandBindingSpec:
 
 INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
     CommandBindingSpec("q", InputCommand.APP_QUIT, "Quit", (InputContext.GLOBAL,)),
-    # Start-up page only: show the copy-paste assignment-file format templates.
     CommandBindingSpec(
         "t",
         InputCommand.OPEN_FORMAT_GUIDE,
@@ -128,8 +121,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GLOBAL,),
         key_display="?",
     ),
-    # Back only applies where there is somewhere to go back to; the QA
-    # picker is the root screen.
     CommandBindingSpec(
         "escape",
         InputCommand.APP_BACK,
@@ -137,8 +128,7 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
     ),
     CommandBindingSpec("/", InputCommand.QA_FILTER, "Filter", (InputContext.QA,)),
-    # Duplicated bindings for both QA and Students so they
-    # display properly in either pane
+    # Both picker panes need bindings for Textual to display their shortcuts.
     CommandBindingSpec(
         "j,down",
         InputCommand.QA_MOVE_DOWN,
@@ -185,34 +175,14 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         InputCommand.APP_TOGGLE_TEACHER_MODE,
         "Teacher Mode",
         (InputContext.QA, InputContext.GRADE),
-        # Hidden/inert when the assignment policy locks anonymous grading, so a
-        # grader can't reveal names in a multi-grader folder.
         requires_unlocked_anonymity=True,
     ),
-    # Undo the last persisted grade/comment change. Available both on the grade
-    # screen and on the QA picker, where the grading log lists what will revert.
     CommandBindingSpec(
         "z",
         InputCommand.UNDO_LAST_GRADE,
         "Undo Grade",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # ----------------------------------------------------------------------- #
-    # Reports, audits and queues — every one of them on **Shift + a letter**.
-    #
-    # These are the "show me something about the cohort" tools, and grouping
-    # them behind one modifier is what makes them learnable: a grader who knows
-    # Shift opens a report only has to remember the letter, instead of eight
-    # unrelated single keys competing with the grading actions. Shift (rather
-    # than Ctrl) because ctrl+h/i/m *are* backspace/tab/enter in a terminal and
-    # ctrl+s/q are flow control, which would have cost exactly the mnemonics
-    # these tools want; an uppercase letter is layout-independent and encodable
-    # in every terminal.
-    #
-    # The one deliberate exception is W (previous page), which belongs to the
-    # w/W forward-back pair rather than to this group — the same shift-for-the-
-    # reverse-direction convention vim uses for n/N.
-    # ----------------------------------------------------------------------- #
     CommandBindingSpec(
         "R",
         InputCommand.OPEN_REVIEW_QUEUE,
@@ -224,15 +194,8 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         InputCommand.OPEN_GRADE_HISTORY,
         "History",
         (InputContext.QA, InputContext.GRADE),
-        # The audit log names graders and students; keep it to teacher mode so
-        # anonymous grading stays anonymous.
         requires_teacher_mode=True,
     ),
-    # Grading-session analytics: throughput/pace per grader, from the same audit
-    # journal. It names graders, so — like grade history — it's teacher-mode only.
-    # Keeps its historical letter (it was `v`) rather than taking a mnemonic T,
-    # which would have sat one shift away from `t` (teacher mode) meaning
-    # something unrelated.
     CommandBindingSpec(
         "V",
         InputCommand.OPEN_GRADING_SESSION,
@@ -240,13 +203,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.QA, InputContext.GRADE),
         requires_teacher_mode=True,
     ),
-    # Inter-grader agreement: leniency, drift and how any two graders compare
-    # on work they both marked. I for **I**nter-rater, the standard term for
-    # what it measures — and the one mnemonic in this group with no lowercase
-    # partner at all, so it cannot repeat the `t`/`T` trap of sitting one shift
-    # away from an unrelated command. Teacher-mode only: it names graders, the
-    # same gate as grade history (H) and the session analytics (V) it sits
-    # beside.
     CommandBindingSpec(
         "I",
         InputCommand.OPEN_GRADER_AGREEMENT,
@@ -254,39 +210,24 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.QA, InputContext.GRADE),
         requires_teacher_mode=True,
     ),
-    # Grading-consistency audit: same answer, same grade? Anonymity-safe (it
-    # shows student ids, not names, outside teacher mode), so available to every
-    # grader in both contexts.
     CommandBindingSpec(
         "C",
         InputCommand.OPEN_CONSISTENCY_AUDIT,
         "Consistency",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # Answer-similarity audit: did two students hand in the same free response?
-    # Anonymity-safe like the consistency audit (student ids, not names, outside
-    # teacher mode), so available to every grader in both contexts. Deliberately
-    # not teacher-gated: a TA can see that "s3 and s7 match" and act on it
-    # without any name being revealed.
     CommandBindingSpec(
         "P",
         InputCommand.OPEN_SIMILARITY_AUDIT,
         "Similarity",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # Regrade queue: student grade disputes worked as first-class items. Routes
-    # to the disputed question just like the review queue, so — like it — it's
-    # available to every grader in both contexts (the modal is anonymity-aware).
     CommandBindingSpec(
         "G",
         InputCommand.OPEN_REGRADE_QUEUE,
         "Regrades",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # File a new regrade request (grade dispute). Teacher-mode only — filing a
-    # dispute names a student — so it's hidden and inert during anonymous
-    # grading, like the audit views. On the grade screen it pre-fills the current
-    # student/question; on the QA picker the teacher picks them.
     CommandBindingSpec(
         "F",
         InputCommand.FILE_REGRADE,
@@ -294,13 +235,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.QA, InputContext.GRADE),
         requires_teacher_mode=True,
     ),
-    # Item analysis: per-question difficulty, separation, and MC distractors.
-    # Every figure is a cohort aggregate (no student named), so it's available
-    # to every grader in both contexts, no teacher-mode gate.
-    # Who is grading what (`core/claims.py`). D for **D**ivide: W would have
-    # been the obvious mnemonic but it is already the w/W page-view pair on the
-    # grade screen. Anonymity-safe — it names graders, not students — so no
-    # teacher-mode gate; a TA has to be able to see and release their own slice.
     CommandBindingSpec(
         "D",
         InputCommand.OPEN_WORK_CLAIMS,
@@ -313,31 +247,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Stats",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # Calibrate AI grading: measure the LLM grader against answers this grader
-    # already marked, and get the --llm-min-confidence the evidence supports.
-    # A for **A**I. It belongs in this group because it is a cohort-level report
-    # rather than an action on the answer in front of you — but unlike the rest
-    # it is the one that *takes a while*, since every measured answer is a model
-    # call. Reachable from the workspace (not just the setup screen's Helper
-    # Tools) because of a chicken-and-egg: there is nothing to measure until a
-    # human has graded a sample, so the moment you *can* calibrate is while
-    # grading. No teacher-mode gate — every figure is an aggregate about the
-    # model, and the disagreement list identifies students the same way the
-    # consistency and similarity audits already do.
     CommandBindingSpec(
         "A",
         InputCommand.OPEN_LLM_EVAL,
         "AI Check",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # The two halves of the offline handoff round trip, E for **E**xport a copy
-    # and M for **M**erge one back. They are on the workspace and not only in
-    # the setup screen's Helper Tools for a plain reason: launching with
-    # --qa-file/--submissions — which is how anyone actually grades — opens the
-    # QA picker and never shows the setup screen at all, so a tool that lives
-    # only there is invisible to every real session. The same chicken-and-egg
-    # as the AI check above: deciding to hand half the pile to a TA, or getting
-    # it back, happens while grading, not before.
     CommandBindingSpec(
         "E",
         InputCommand.OPEN_GRADER_PACKET,
@@ -350,29 +265,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Merge",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # B for **B**ackup. No teacher-mode gate on any of these three: a packet
-    # names no student, the merge plan is anonymity-aware like the consistency
-    # and similarity audits, and an integrity report is about files.
     CommandBindingSpec(
         "B",
         InputCommand.OPEN_BACKUP,
         "Backup",
         (InputContext.QA, InputContext.GRADE),
     ),
-    # Hand the assignment back, and see what has moved since you last did
-    # (`core/release.py`). On the workspace for the same reason as E/M/B: a
-    # session launched the way anyone grades never shows the setup screen, and
-    # "am I done?" is asked at the end of a grading session, not before one.
-    #
-    # **L** because R for Release is taken by the review queue and every other
-    # letter of the word is too. `l` (comment library) is its lowercase partner,
-    # which is fine here and was not for `t`/`T`: the trap that rule exists for
-    # is a mis-shift silently flipping *state* — anonymity — under the grader,
-    # whereas mis-shifting `l` opens the wrong modal and escape closes it.
-    #
-    # No teacher-mode gate: the readiness report counts and names student *ids*
-    # only, and the change list is anonymity-aware like the consistency and
-    # similarity audits — a TA has to be able to see that they are not finished.
     CommandBindingSpec(
         "L",
         InputCommand.OPEN_RELEASE,
@@ -391,14 +289,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Jump Ungraded",
         (InputContext.QA,),
     ),
-    # Movement, in one direction convention throughout: **j/down = forward,
-    # k/up = back**, matching the QA picker's list navigation and vim. The grade
-    # screen used to invert it (k was *next* question), which meant the same
-    # finger moved opposite ways on the two screens.
-    #
-    # The axis is the modifier: a bare key moves within the student's paper
-    # (question to question), Ctrl moves between students. Arrow aliases follow
-    # the same split — up/down for questions, left/right for students.
     CommandBindingSpec(
         "j,down",
         InputCommand.GRADE_NEXT_QUESTION,
@@ -427,10 +317,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         key_display="ctrl+k/left",
     ),
-    # Skip to the next/previous student who still needs this question graded.
-    # n/p rather than the old m/n: "n = next" is the near-universal convention
-    # (vim search, less, browsers), and p is its natural partner — where m for
-    # "next" was arbitrary and collided with nothing memorable.
     CommandBindingSpec(
         "n",
         InputCommand.GRADE_NEXT_UNGRADED_STUDENT,
@@ -443,9 +329,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Prev Ungraded",
         (InputContext.GRADE,),
     ),
-    # The grade screen's always-visible Hotkeys card documents the
-    # commands below; keeping them out of the status bar leaves room
-    # for the navigation keys that change most often.
     CommandBindingSpec(
         "e",
         InputCommand.GRADE_EDIT_RUBRIC,
@@ -460,9 +343,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         show=False,
     ),
-    # Correct an OCR/VLM transcription in place (opens the inline editor in the
-    # Question card). Documented in the Hotkeys card + help screen; kept out of
-    # the status bar so the bar stays focused on navigation keys.
     CommandBindingSpec(
         "x",
         InputCommand.GRADE_EDIT_TRANSCRIPTION,
@@ -470,9 +350,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         show=False,
     ),
-    # Open the reusable comment-snippet library and insert a saved phrase into
-    # the answer's comment box. Documented in the Hotkeys card + help screen;
-    # kept out of the status bar so the bar stays focused on navigation keys.
     CommandBindingSpec(
         "l",
         InputCommand.OPEN_COMMENT_LIBRARY,
@@ -500,20 +377,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Finalize",
         (InputContext.GRADE,),
     ),
-    # Batch-apply the current grade to everyone with the same answer. Kept
-    # out of the status bar (documented in the Hotkeys card and help screen)
-    # so the bar stays focused on navigation keys.
-    # Review the merges proposed for this question's near-identical answers,
-    # and accept one to widen what `g` covers. U for **U**nify.
-    #
-    # GRADE context only, and that is a design constraint rather than a spare
-    # key: a proposal is scoped to the question in front of you, and accepting
-    # one only means something while you have a rubric selection to apply. It
-    # also keeps `U` clear of the QA picker's `u` (jump to ungraded), so the
-    # two never coexist in one context meaning unrelated things.
-    #
-    # Not in the status bar, like the other grade-screen extras — the Hotkeys
-    # card and help screen document it.
     CommandBindingSpec(
         "U",
         InputCommand.OPEN_UNIFY_ANSWERS,
@@ -528,41 +391,18 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         show=False,
     ),
-    # Grade the answer, not the student: navigation moves between this
-    # question's distinct answers instead of its students.
-    #
-    # `b` for grading **b**y answer. GRADE context only — the same design
-    # constraint as `U` above, since an answer group is scoped to the question
-    # in front of you — which also keeps it clear of the QA picker's `b`
-    # (return bundle), so the two never coexist in one context.
-    #
-    # Shown in the status bar, unlike `g` and `U`: it is a *mode*, and a mode
-    # whose key is undiscoverable is a mode nobody finds. The grade screen's
-    # answer-group indicator says when it is on.
     CommandBindingSpec(
         "b",
         InputCommand.GRADE_TOGGLE_GROUP_MODE,
         "By Answer",
         (InputContext.GRADE,),
     ),
-    # Confirm the AI's grades. `v` for **v**erify — and the pairing with `V`
-    # (grading-session analytics) is coincidental, not a family: these are the
-    # letters left, and the mode is worth a memorable one.
-    #
-    # Shown in the status bar for the same reason as `b`: a mode nobody can
-    # find is a mode nobody uses, and this one exists precisely because the
-    # work it does had no fast path before. GRADE context only, since it is
-    # scoped to the question in front of you.
     CommandBindingSpec(
         "v",
         InputCommand.GRADE_TOGGLE_AI_REVIEW,
         "Confirm AI",
         (InputContext.GRADE,),
     ),
-    # The one key that acts. Hidden from the status bar (like `g`), since it is
-    # an action rather than a mode and the mode's own indicator names it.
-    # Works outside the mode too: a grader who lands on an AI grade while
-    # marking normally can accept it without switching modes first.
     CommandBindingSpec(
         "y",
         InputCommand.GRADE_CONFIRM_AI,
@@ -570,10 +410,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         show=False,
     ),
-    # Escape hatch out of the terminal: open the answer crop in the OS image
-    # viewer. Essential on terminals with no graphics protocol (where the
-    # in-terminal preview is only colour blocks), useful everywhere else for a
-    # full-resolution look. Documented in the Hotkeys card + help screen.
     CommandBindingSpec(
         "o",
         InputCommand.GRADE_OPEN_EXTERNAL,
@@ -581,12 +417,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         show=False,
     ),
-    # Whole-page context: step the response pane through the page(s) this answer
-    # was cropped from and then the submission's extra work pages, so an answer
-    # continued on the back — or on a scratch sheet — is one keypress away
-    # instead of invisible. One key forward (w), shift for back (W); the whole
-    # sequence wraps back to the crop. Documented in the Hotkeys card + help
-    # screen, kept out of the status bar like the other grade-screen extras.
     CommandBindingSpec(
         "w",
         InputCommand.GRADE_NEXT_PAGE_VIEW,
@@ -624,19 +454,6 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         (InputContext.GRADE,),
         show=False,
     ),
-    # Turn the displayed scan a quarter turn — for the answer a student wrote
-    # sideways up the margin, and for the occasional page the scan pre-flight
-    # leaves alone because it was too sparse for OSD to orient. Display only:
-    # nothing on disk changes, and the rotation clears with the student.
-    # ``,``/``.`` are the unshifted keys under ``<``/``>``, the conventional
-    # rotate pair, and both are free in the grade context ([ and ] already
-    # resize the sidebar). Deliberately *not* in the Input-focus bypass list
-    # below, so a comma typed into the comment box stays a comma.
-    #
-    # Spelled as Textual's Unicode key *names* rather than the literal
-    # characters: Textual splits a binding string on commas, so a literal ","
-    # is unbindable (it parses as two empty keys). Same reason ``?`` is bound
-    # as ``question_mark`` above.
     CommandBindingSpec(
         "comma",
         InputCommand.GRADE_ROTATE_LEFT,
@@ -670,21 +487,13 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
 )
 
 
-# Modifier prefixes that make a key impossible to type into a text box. Shift is
-# deliberately absent: shift+letter *is* a typeable uppercase letter, and
-# shift+tab is how you move focus backwards out of a field.
+# Shifted letters are text input; Shift+Tab moves focus.
 _NON_TYPEABLE_MODIFIERS = ("ctrl+", "alt+", "super+", "cmd+", "meta+")
 
 _FUNCTION_KEY_RE = re.compile(r"f\d{1,2}$")
 
 
 def key_is_typeable(key: str) -> bool:
-    """Whether a key press could be meant for a focused text box.
-
-    True for anything a person can type *and* for the keys a text box needs to
-    edit with — arrows, home/end, backspace, delete, tab, escape. Only a
-    modifier chord or a function key is genuinely unavailable to a text field.
-    """
     stripped = key.strip()
     if not stripped:
         return False
@@ -694,23 +503,7 @@ def key_is_typeable(key: str) -> bool:
 
 
 def command_survives_text_focus(command: InputCommand) -> bool:
-    """Whether a command may still fire while a text box holds focus.
-
-    Only when **every** key it is bound to is unavailable to a text field. The
-    rule is derived from the binding table rather than kept as a hand-written
-    allow-list, because the hand-written version is what broke: it had drifted
-    into two divergent copies and had listed printable keys (``a``, ``j``,
-    ``k``, ``n``, ``m``, ``0``, ``[``, ``+``) plus the arrow keys, so typing
-    "a" in a comment jumped to the first student and pressing ← to fix a typo
-    jumped to the previous one. Deriving it means a new binding can never
-    reintroduce that class of bug: add a printable key and it is blocked while
-    typing, automatically.
-
-    A command bound to a chord *and* a typeable alias (next student is
-    ``ctrl+j`` or ``→``) does not survive: we are asked about the command, not
-    the key that triggered it, so the safe answer is the one that keeps the
-    arrow free for the cursor.
-    """
+    """A typeable alias blocks the whole command because the triggering key is unknown here."""
     keys = [
         key
         for binding in INPUT_BINDINGS

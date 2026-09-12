@@ -1,24 +1,3 @@
-"""Modal dialog that calibrates AI grading from inside the TUI.
-
-`automated-grading --llm` writes a model's grade whenever its self-reported
-confidence clears a threshold, and until this existed that threshold was a
-guess. This modal runs the `llm-eval` harness — re-grading free responses a
-human already marked and reporting how often the model agreed — and hands back
-the confidence cutoff the evidence supports.
-
-Two entry points, one screen: the setup screen's HELPER TOOLS (before a grading
-run, prefilled from the Auto-grade step's own paths) and **shift+A** from the
-workspace. The second exists because of a chicken-and-egg the tool cannot avoid:
-you need hand-graded answers before there is anything to measure, so the natural
-moment to calibrate is *while* grading, and unwinding to the setup screen to get
-there would be a poor trade.
-
-Read-only with respect to grades — the harness never writes one. The only thing
-this screen can change is the Auto-grade step's min-confidence field, and only
-when the caller asked for that (``apply_label``) and the grader presses the
-button.
-"""
-
 from __future__ import annotations
 
 import io
@@ -40,10 +19,6 @@ from opengrader.core.grading.evaluation import (
 from opengrader.core.llm import OllamaConfig
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
-# The two things you can measure a model against. "Another graded assignment" is
-# what makes the tool useful early in a term: a past exam you finished marking
-# has far more human-graded answers than the one you have just started, and a
-# threshold is only as good as the sample behind it.
 SOURCE_THIS = "this"
 SOURCE_OTHER = "other"
 
@@ -54,14 +29,6 @@ _SOURCE_OPTIONS: list[tuple[str, str]] = [
 
 
 class LlmEvalScreen(ModalScreen[float | None]):
-    """Measure the LLM grader and return the confidence cutoff to trust it at.
-
-    Dismisses with the recommended ``--llm-min-confidence`` when the grader
-    presses the apply button, and with ``None`` otherwise — including after a
-    successful run they chose not to act on. Closing must never quietly rewrite
-    a setting the grader didn't ask to change.
-    """
-
     DEFAULT_CSS = """
     LlmEvalScreen {
         align: center middle;
@@ -110,11 +77,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         margin-left: 1;
         margin-top: 1;
     }
-
-    /* An explicit auto height: a bare revealed Vertical defaults to 1fr and
-       stretches to the dialog's full height, pushing the log and the buttons
-       off-screen. The same trap the setup screen's #ext-parallel-options
-       comment documents. */
     #llm-eval-other-source {
         height: auto;
     }
@@ -128,8 +90,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         margin-right: 1;
     }
 
-    /* A fixed height so a growing list can't swallow the report pane; the
-       TextArea scrolls internally past that. Mirrors #ext-roster-list. */
     #llm-eval-classes {
         height: 5;
         margin-top: 1;
@@ -176,8 +136,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         super().__init__()
         self._solutions_path = solutions_path
         self._submissions_path = submissions_path
-        # Set by the setup screen ("Use in Auto-grade"); a caller with nowhere
-        # to put the number leaves it None and gets no button.
         self._apply_label = apply_label
         self._recommended: float | None = None
 
@@ -297,7 +255,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
                         id="llm-eval-apply",
                         compact=True,
                     )
-                    # Nothing to apply until a run has produced a threshold.
                     apply_button.disabled = True
                     yield apply_button
                 yield Button(
@@ -316,7 +273,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         )
         self.query_one("#llm-eval-run", Button).focus()
 
-    # ── source selection ─────────────────────────────────────────────────────
 
     @on(Select.Changed, "#llm-eval-source")
     def _on_source_changed(self, event: Select.Changed) -> None:
@@ -339,11 +295,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
 
     @on(Button.Pressed, "#llm-eval-classes-browse")
     def _on_browse_class(self, event: Button.Pressed) -> None:
-        """Pick a folder and *append* it as a new line in the class list.
-
-        Appends rather than replaces, since the whole point is several folders
-        — the same repeatable-path pattern as the extractor's roster list.
-        """
         event.stop()
         text_area = self.query_one("#llm-eval-classes", TextArea)
 
@@ -364,7 +315,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         )
 
     def _class_paths(self) -> list[str]:
-        """The extra submissions folders typed or browsed into the list."""
         return [
             line.strip().strip("'\"")
             for line in self.query_one("#llm-eval-classes", TextArea).text.splitlines()
@@ -392,10 +342,8 @@ class LlmEvalScreen(ModalScreen[float | None]):
             PathPickerScreen(title=title, mode=mode, start_path=start_path), _apply
         )
 
-    # ── running ──────────────────────────────────────────────────────────────
 
     def _resolve_paths(self) -> tuple[str, str] | None:
-        """The (answer key, submissions) pair to measure, or None if incomplete."""
         source = self.query_one("#llm-eval-source", Select).value
         if source == SOURCE_THIS:
             if not (self._solutions_path and self._submissions_path):
@@ -422,8 +370,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
     def _build_argv(self, solutions: str, submissions: str) -> list[str] | None:
         argv = ["--solutions", solutions, "--input", submissions, "--quiet"]
 
-        # Extra classes sharing the same answer key. The CLI de-duplicates, so
-        # re-listing the folder already chosen above is harmless.
         for folder in self._class_paths():
             argv += ["--input", folder]
 
@@ -435,8 +381,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         for model in models:
             argv += ["--llm-model", model]
 
-        # Instructors think in percent ("a 90% agreement"), the CLI takes 0-1 —
-        # the same translation `curve suggest --target-mean` makes.
         target_raw = self.query_one("#llm-eval-target", Input).value.strip()
         if target_raw:
             try:
@@ -470,10 +414,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
                 return None
             argv += ["--limit", str(limit)]
 
-        # The server may not be up and the model may not be pulled; the harness
-        # is a long opt-in operation the grader just asked for, so boot and pull
-        # rather than failing them at the first call — matching how the setup
-        # screen's Split/Extract/Answer-key steps behave.
         argv.append("--auto-ollama")
         return argv
 
@@ -497,7 +437,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         self.run_worker(lambda: self._run_eval(argv), thread=True, exclusive=True)
 
     def _run_eval(self, argv: list[str]) -> None:
-        """Worker thread: run the harness with its output captured."""
         buffer = io.StringIO()
         report: LlmEvalReport | None = None
         succeeded = True
@@ -505,10 +444,8 @@ class LlmEvalScreen(ModalScreen[float | None]):
             with redirect_stdout(buffer), redirect_stderr(buffer):
                 report = run_llm_eval_cli(argv)
         except SystemExit as exc:
-            # The harness exits 1 when there is nothing to measure; its printed
-            # explanation is the useful part and is already in the buffer.
             succeeded = exc.code in (0, None)
-        except Exception as exc:  # surface unexpected failures in the log
+        except Exception as exc:
             succeeded = False
             buffer.write(f"\nerror: {exc}")
         self.app.call_from_thread(
@@ -545,7 +482,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
                 severity="warning",
             )
 
-    # ── leaving ──────────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#llm-eval-apply")
     def _on_apply_pressed(self, event: Button.Pressed) -> None:

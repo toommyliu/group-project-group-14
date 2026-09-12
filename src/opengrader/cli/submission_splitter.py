@@ -1,3 +1,5 @@
+"""Split a scan bundle into individual student PDFs."""
+
 from __future__ import annotations
 
 from argparse import ArgumentParser, BooleanOptionalAction, RawDescriptionHelpFormatter
@@ -27,9 +29,6 @@ from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, ensure_model_avai
 
 from pypdf import PdfReader
 
-"""
-Splits one large PDF into individual student submissions
-"""
 
 EPILOG = """
 examples:
@@ -47,9 +46,6 @@ examples:
 
 
 def _build_parser() -> ArgumentParser:
-    # Resolved once per parser build (not at import time) so the defaults below
-    # always reflect whatever the teacher last saved in AI Setup, and so a test
-    # or a `--help`-only run of another tool never freezes a stale value in.
     ai = ai_config.resolve()
     parser = ArgumentParser(
         description=(
@@ -223,11 +219,6 @@ def _build_parser() -> ArgumentParser:
 
 
 def _start_ollama_server(args, emit: "Callable[[str], None]"):
-    """Start `ollama serve` if nothing is listening. Returns (proc, log_file).
-
-    Both boundary detection and the reorder pass can use the vision model, so
-    this is booted once, up front, when --auto-ollama is set.
-    """
     parsed_url = urlparse(args.ollama_host)
     host = parsed_url.hostname or "127.0.0.1"
     port = parsed_url.port or 11434
@@ -266,11 +257,6 @@ def _start_ollama_server(args, emit: "Callable[[str], None]"):
 
 
 def _verified_ollama_config(args, emit: "Callable[[str], None]") -> "OllamaVisionConfig | None":
-    """Build and verify a vision config, or None (and warn) if unavailable.
-
-    None means callers proceed with Tesseract only — the vision model is always
-    an optional accelerator/fallback, never required.
-    """
     config = OllamaVisionConfig(
         model=args.ollama_model,
         host=args.ollama_host,
@@ -285,13 +271,6 @@ def _verified_ollama_config(args, emit: "Callable[[str], None]") -> "OllamaVisio
 
 
 def _expected_pages_per_submission(args) -> int | None:
-    """How many pages one student's submission should be, if we can know.
-
-    An explicit ``--pages-per-submission`` wins; otherwise a blank template's own
-    page count says it. Returns ``None`` when neither is given — boundary
-    detection is then deciding submission lengths itself, so "the bundle should
-    divide evenly" is not a claim we can make.
-    """
     if args.pages_per_submission:
         return args.pages_per_submission
     if args.blank_template:
@@ -303,15 +282,6 @@ def _expected_pages_per_submission(args) -> int | None:
 
 
 class _PreflightOutcome(NamedTuple):
-    """What the pre-flight leaves the rest of the run to work with.
-
-    ``pdf`` is the file everything downstream should read — the corrected copy
-    when rotation was fixed, otherwise the original. ``auto_reorder`` says the
-    pre-flight found pages out of order *and* judged the evidence good enough to
-    correct without asking; the actual reordering happens after the split, since
-    that is the only point at which "in order" means anything.
-    """
-
     pdf: Path
     auto_reorder: bool = False
 
@@ -319,26 +289,6 @@ class _PreflightOutcome(NamedTuple):
 def _run_scan_preflight(
     args, input_pdf: Path, emit: "Callable[[str], None]"
 ) -> _PreflightOutcome:
-    """Check the scan before splitting; optionally return an upright copy.
-
-    Rotation has to be corrected *here*, before anything downstream reads the
-    pages: boundary detection looks for a Name/ID header, the reorder pass reads
-    a footer, and the extractor crops answer boxes by geometry and OCRs them —
-    an upside-down page defeats all three without any of them raising an error.
-    Fixing it later is impossible, because by grading time the wrong rectangles
-    have already been cropped and transcribed.
-
-    The correction is written to a new file under ``<output>/.opengrader/`` — a
-    dot-dir so the extractor's ``*.pdf`` scan of the split directory can't pick
-    it up as a submission, and a copy so the original scan (often the only
-    record of a student's work) is never modified.
-
-    Page order is the mirror image: **detected here, corrected after the split**.
-    Page numbers restart at 1 for every student, so a bundle has no single order
-    to sort into and there is nothing this stage could usefully rearrange — but
-    this stage is the one already rendering every page, so noticing costs almost
-    nothing here and would cost a whole extra pass anywhere else.
-    """
     emit(
         "Checking the scan (rotation, page order, blanks, resolution, margins, "
         "page count)…"
@@ -351,9 +301,6 @@ def _run_scan_preflight(
         progress_callback=emit,
     )
 
-    # Say what could *not* be checked before anything that reads like a pass —
-    # a silent rotation check that never ran is how the upside-down stack got
-    # through in the first place.
     if not report.orientation_available:
         print(f"Warning: {report.orientation_note}", file=sys.stderr)
     elif report.rotation_plan.unverified_pages:
@@ -368,10 +315,6 @@ def _run_scan_preflight(
         emit(f"  ~ No page number could be read on page(s): {pages}")
 
     if report.issues:
-        # The verdict goes through emit so it reaches the TUI's status line —
-        # stderr does not, and a check whose findings the user never sees is the
-        # silence this feature exists to end. The per-issue detail follows on
-        # stderr for anyone running the CLI directly.
         emit(
             f"  Scan pre-flight: {summarize_issues(report.issues)} "
             f"({len(report.issues)} problem(s) in {input_pdf.name})"
@@ -411,19 +354,6 @@ def _run_scan_preflight(
 
 
 def _resolve_auto_reorder(args, report, emit: "Callable[[str], None]") -> bool:
-    """Decide whether the pre-flight's ordering finding gets corrected by itself.
-
-    The whole tiering rule in one place. Nothing was found ⇒ nothing to do, and
-    ``--fix-order`` costs nothing on a scan that is already in order. Something
-    was found ⇒ the answer depends on how the page numbers were *obtained*, which
-    :func:`page_order_fix_is_safe` owns; decided (rather than re-derived) here so
-    the splitter and the TUI can never disagree.
-
-    The report-only branch is not a fallback, it is the point: on OCR evidence a
-    misread footer would have the reorder pass move a page that was in the right
-    place, turning a check into the very fault it exists to catch. So the finding
-    is printed with the command that acts on it and the user decides.
-    """
     order_plan = report.page_order_plan
     if not order_plan:
         return False
@@ -450,8 +380,6 @@ def _resolve_auto_reorder(args, report, emit: "Callable[[str], None]") -> bool:
         emit(f"  Pages will be put back in order after the split ({basis}).")
         return True
 
-    # --fix-order was asked for and is declining on purpose; say so, or it looks
-    # like the flag was ignored.
     emit(
         "  Not reordering automatically: these page numbers were read by OCR and "
         "one may have been misread. Check the pages, then use --reorder (or "
@@ -465,11 +393,6 @@ def run_cli(
     *,
     status_callback: "Callable[[str], None] | None" = None,
 ) -> None:
-    """Split a scanned bundle into per-student PDFs (optionally reorder them).
-
-    When called programmatically (e.g. from the setup-screen worker), pass a
-    ``status_callback`` to receive progress lines instead of stdout.
-    """
     def emit(message: str) -> None:
         if status_callback is not None:
             status_callback(message)
@@ -489,8 +412,6 @@ def run_cli(
     if total_pages <= 0:
         raise ValueError(f"input PDF has no pages: {input_pdf}")
 
-    # Pre-flight first: everything below reads pages, and every one of those
-    # readers assumes the page is the right way up.
     auto_reorder = False
     if args.scan_check or args.fix_rotation or args.fix_order:
         input_pdf, auto_reorder = _run_scan_preflight(args, input_pdf, emit)
@@ -503,27 +424,12 @@ def run_cli(
             sys.exit(1)
         blank_template_layout = _load_page_number_layout(blank_template_path)
 
-    # Detect boundaries when explicitly asked, or when we have neither a fixed
-    # page count nor a template to infer one from.
     use_boundary = args.detect_boundaries or (
         args.pages_per_submission is None and blank_template_layout is None
     )
-    # `auto_reorder` is the pre-flight saying it found pages out of order on
-    # evidence good enough to act on; the other three are the user asking for the
-    # pass outright. Either way the same reorder runs, so a scan that turned out
-    # to be in order after all costs nothing but the check that said so.
     uses_ordering_pass = (
         args.reorder or args.blank_template or args.extra_work_pages or auto_reorder
     )
-    # Deliberate behaviour change: until now the splitter reached for Ollama
-    # whenever boundary detection or the ordering pass ran, regardless of any
-    # flag — it was the one AI path in the toolchain that was not opt-in, and a
-    # user who has the AI switched off (or never turned it on) should not have
-    # their splitter dialling a model server. Gating on --llm-page-numbers
-    # (default: ai.read_handwriting, from AI Setup) makes it opt-in like every
-    # other model call. The other tiers — text layer, QR, Tesseract — are
-    # unaffected, so a split with this off is the same split it always was
-    # minus the last resort.
     may_use_vlm = args.llm_page_numbers and (use_boundary or uses_ordering_pass)
 
     pages_per_submission = args.pages_per_submission
@@ -531,13 +437,10 @@ def run_cli(
     ollama_server_proc = None
     ollama_log_file = None
     try:
-        # Boot Ollama once, up front, so both boundary detection and reordering
-        # can share it.
         if args.auto_ollama and may_use_vlm:
             ollama_server_proc, ollama_log_file = _start_ollama_server(args, emit)
         active_ollama = _verified_ollama_config(args, emit) if may_use_vlm else None
 
-        # ---- Determine split ranges ----
         boundary_warnings: list[str] = []
         if use_boundary:
             emit("Detecting submission boundaries (student Name/ID header)…")
@@ -580,7 +483,6 @@ def run_cli(
         )
         emit(f"Wrote {len(created)} split PDFs to: {Path(args.output)}")
 
-        # ---- Optional reorder pass ----
         if uses_ordering_pass:
             emit("Checking page order and reordering if necessary...")
 
@@ -594,10 +496,6 @@ def run_cli(
                 print(f"Warning: --pages-per-submission ({pages_per_submission}) does not match "
                       f"the blank template page count ({blank_template_layout.total_pages}).")
 
-            # Which pages ended up as extra student work, per submission. Written
-            # to a sidecar below so the extractor can stamp them into each
-            # `.submission.md` — otherwise this knowledge dies here and the
-            # scratch pages are invisible at grading time.
             extra_pages_by_stem: dict[str, tuple[int, ...]] = {}
 
             for index, pdf_path in enumerate(created, start=1):
@@ -619,9 +517,6 @@ def run_cli(
                         emit(f"  - Extra work page(s) at the end: {pages}")
 
             if args.extra_work_pages:
-                # Recorded even for submissions with no extra pages: an empty
-                # list is the authoritative "checked, none found", which stops
-                # the extractor from guessing (see core/submissions/extra_pages).
                 map_path = write_extra_pages_map(Path(args.output), extra_pages_by_stem)
                 marked = sum(1 for pages in extra_pages_by_stem.values() if pages)
                 emit(

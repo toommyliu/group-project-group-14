@@ -2,15 +2,12 @@ from enum import Enum
 from typing import TypeAlias
 
 PAGE_EDGE_MARGIN = 24
-# Horizontal bounds for instructions, questions, and continuation headers.
 CONTENT_SIDE_MARGIN = PAGE_EDGE_MARGIN + 50
-# Printable-area inset used for footer page numbers and continuation headers.
 PRINT_SAFE_MARGIN = 36
 
 BOX_LINE = 0.75
 
-# 8.5x11 inch page
-LETTER_W, LETTER_H = 612, 792  # points
+LETTER_W, LETTER_H = 612, 792  # Points.
 
 MIN_QUESTION_BOX_HEIGHT = 120
 QUESTION_GAP = 8

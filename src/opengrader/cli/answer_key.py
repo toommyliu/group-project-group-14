@@ -1,16 +1,4 @@
-"""``create-answer-key`` — build a QA-format answer key from a question file.
-
-One command for teachers, three input formats, auto-detected by extension:
-
-* **.md / .txt** — a text2qti-format question file (fast, exact).
-* **.docx** — the same text2qti layout authored in Word (its text is extracted
-  and run through the identical parser).
-* **.pdf** — a solved answer-key PDF, read with OCR/OpenCV and an optional local
-  vision model (imperfect — review the output before grading).
-
-The heavy PDF/OCR stack is imported only when a PDF is given, so the text and
-Word paths stay dependency-light.
-"""
+"""Build a QA answer key from a question file."""
 
 from __future__ import annotations
 
@@ -40,17 +28,8 @@ examples:
 
 
 def _build_parser() -> ArgumentParser:
-    # Resolved once here, not as a module constant: a teacher can change the
-    # saved model/host in AI Setup at any time, and reading it only when the
-    # parser is actually built means every run picks up the current choice
-    # (and a plain --help never touches the settings file needlessly).
     ai = ai_config.resolve()
     parser = ArgumentParser(
-        # Deliberately no `prog=`: argparse then names whatever was
-        # actually invoked — the standalone `create-answer-key` script, or
-        # `opengrader create-answer-key` when the front-door command dispatched
-        # here (cli/main.py patches sys.argv[0] for exactly this). A
-        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Build a QA-format answer key from a question file — a text2qti "
             "markdown (.md/.txt), a Word document (.docx), or a solved answer-key "
@@ -118,10 +97,9 @@ def _build_parser() -> ArgumentParser:
 
 
 def _read_docx_text(path: Path) -> str:
-    """Extract paragraph text from a .docx (lazy import so it's only needed here)."""
     try:
-        import docx  # python-docx
-    except ImportError as exc:  # pragma: no cover - dependency is declared
+        import docx
+    except ImportError as exc:  # pragma: no cover
         raise RuntimeError(
             "reading .docx files needs the 'python-docx' package (uv sync)."
         ) from exc
@@ -142,7 +120,6 @@ def _qa_from_text(text: str, args) -> str:
 
 
 def _start_ollama_server_if_needed(args, emit: Callable[[str], None]):
-    """Start `ollama serve` if nothing is listening. Returns (proc, log_file)."""
     parsed_url = urlparse(args.ollama_host)
     host = parsed_url.hostname or "127.0.0.1"
     port = parsed_url.port or 11434
@@ -173,7 +150,6 @@ def _qa_from_pdf(
     emit: Callable[[str], None],
     progress: "Callable[[int, int], None] | None" = None,
 ) -> str:
-    # Lazy import: pulls in fitz/cv2/tesseract only for the PDF path.
     from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, ensure_model_available
     from opengrader.core.qa_file.pdf_answer_key import extract_qa_markdown_from_pdf
 
@@ -182,10 +158,6 @@ def _qa_from_pdf(
     try:
         ollama_config = None
         if not args.llm_read_scans:
-            # Opted out in AI Setup (or on the command line): read the scan
-            # with OCR alone rather than dialling a model server. Text/
-            # born-digital inputs never reach this function's PDF-image path
-            # at all, so this only changes behaviour for a scanned answer key.
             emit(
                 "The scan will be read with OCR alone (turn on 'Read "
                 "handwriting on scans' in AI setup to also use the vision "
@@ -199,12 +171,6 @@ def _qa_from_pdf(
                     ["ollama", "pull", args.ollama_model],
                     check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-            # Build a config when Ollama is requested or non-default endpoints are
-            # set. Compared against the *resolved* default (whatever AI Setup has
-            # saved), not the hardcoded literal — otherwise a teacher who saved a
-            # different model/host would have this fire on every run even without
-            # --auto-ollama, since their configured default would never match the
-            # old hardcoded string.
             resolved_default = ai_config.resolve()
             if (
                 args.auto_ollama
@@ -279,8 +245,6 @@ def run_cli(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(qa_markdown)
 
-    # A generated file may still need manual fixes (especially from a PDF); warn
-    # rather than fail so the teacher can edit and re-validate.
     try:
         parse_qa_markdown(qa_markdown)
     except ValueError as exc:

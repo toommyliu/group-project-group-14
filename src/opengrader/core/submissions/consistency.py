@@ -1,37 +1,3 @@
-"""Grading-consistency audit: did the same answer get the same grade?
-
-The single fairness guarantee an instructor most wants from a batch of graded
-assignments is that two students who wrote *the same answer* to a question received
-the *same* score. Opengrader already leans on this: the TUI's answer-grouping
-workflow (the ``g`` hotkey, :mod:`answer_groups`) lets a grader apply one rubric
-selection to everyone who gave an answer. But grades drift — a group graded
-before a rubric tweak, two TAs splitting a question, an early hand-grade
-overridden later — and nothing today catches it before the scores reach Canvas.
-
-This module is that catch. It is a **pure** function over the persisted
-``.submission.md`` data (no I/O, no OCR) that clusters every graded response by
-its answer and reports each cluster whose members did *not* all receive the same
-grade.
-
-It reuses :func:`answer_groups.normalize_answer_key` — the one place that
-decides "same answer" — so the two features can never disagree, and so a flag
-always means genuinely-identical answers were graded differently (the
-normalizer only collapses cosmetic differences, never fuzzy/semantic ones).
-
-Why this lives beside :mod:`review` rather than inside it: a review flag is a
-property of a *single* submission (:func:`review.flag_submission` takes one
-document), whereas consistency is inherently *cross-submission* — it can only be
-judged with the whole cohort for a question in hand. Forcing it into the
-per-submission shape would break that module's design, so it gets its own
-cohort-level engine with the same conventions (frozen dataclasses, deterministic
-ordering, severity-ranked output).
-
-Partitioning note: responses are compared only within the same
-``assignment_version``. On a multi-version assignment the answer key differs per
-version, so "42" can be correct on version A and wrong on version B — comparing
-across versions would manufacture false conflicts.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -47,41 +13,27 @@ ConsistencySeverity = Literal["high", "low"]
 
 _SEVERITY_RANK: dict[ConsistencySeverity, int] = {"high": 0, "low": 1}
 
-# Points are bucketed to this many decimals so float noise never splits an
-# otherwise-identical score. Mirrors scoring.EPSILON (1e-6).
 _POINTS_DECIMALS = 6
 
 
 class ConsistencyKind(str, Enum):
-    """Why an answer group is inconsistent."""
-
-    # Members of one answer group received different point totals — the direct
-    # fairness violation (different scores for the same answer).
     POINTS_DIVERGENCE = "points_divergence"
-    # Members received the same points but via different rubric selections — the
-    # score is fair, but the rubric was applied inconsistently (so PDF comments
-    # and any later re-tally would diverge). Worth a look, not a scoring bug.
     RUBRIC_DIVERGENCE = "rubric_divergence"
 
 
 @dataclass(frozen=True)
 class ResponseRef:
-    """Identifies the student behind one response in a variant."""
-
     student_id: str
     student_name: str
     source_pdf: str
 
     @property
     def label(self) -> str:
-        """A human handle for this student, preferring the name."""
         return self.student_name or self.student_id or self.source_pdf or "unknown"
 
 
 @dataclass(frozen=True)
 class GradeVariant:
-    """One distinct grade outcome within an answer group, and who got it."""
-
     points_awarded: float
     rubric_labels: tuple[str, ...]
     members: tuple[ResponseRef, ...]
@@ -93,12 +45,6 @@ class GradeVariant:
 
 @dataclass(frozen=True)
 class ConsistencyFlag:
-    """An answer group whose members were graded differently.
-
-    Anchored to one question on one version, it carries the shared answer and
-    the two-or-more :class:`GradeVariant`s the group split into (largest first).
-    """
-
     question_id: str
     assignment_version: str | None
     question_type: QuestionType
@@ -115,7 +61,6 @@ class ConsistencyFlag:
 
     @property
     def is_blank(self) -> bool:
-        """Whether the shared answer is the "no answer" bucket."""
         return self.answer_key == ""
 
     @property
@@ -124,15 +69,12 @@ class ConsistencyFlag:
 
     @property
     def point_spread(self) -> float:
-        """The largest gap in awarded points across the group (0 for rubric-only)."""
         points = [variant.points_awarded for variant in self.variants]
         return max(points) - min(points)
 
 
 @dataclass(frozen=True)
 class _Response:
-    """Internal: one graded response with everything grouping needs."""
-
     ref: ResponseRef
     question_id: str
     assignment_version: str | None
@@ -143,24 +85,16 @@ class _Response:
     rubric_labels: tuple[str, ...]
 
 
-# Grouping key: same question, same version, same normalized answer.
 _GroupKey = tuple[str, str | None, str]
 
 
 def _points_bucket(points: float) -> float:
-    """Canonicalize a score so values within EPSILON compare equal."""
     return round(points, _POINTS_DECIMALS)
 
 
 def _collect_graded_responses(
     documents: list[StudentSubmissionDocument],
 ) -> list[_Response]:
-    """Flatten every *graded* response across submissions.
-
-    A response participates only when it has an awarded point value — that is
-    the Canvas-facing number the audit compares. A question with rubric labels
-    but no points is malformed and left to the needs-review queue.
-    """
     responses: list[_Response] = []
     for document in documents:
         ref = ResponseRef(
@@ -187,13 +121,6 @@ def _collect_graded_responses(
 
 
 def _build_variants(group: list[_Response]) -> list[GradeVariant]:
-    """Split a group of same-answer responses into distinct grade outcomes.
-
-    Two members share a variant when their awarded points and their *set* of
-    rubric labels match (label order is not significant — a checklist selection
-    is a set). Variants are ordered largest-first, then by points, then labels,
-    for a stable, reviewer-friendly presentation.
-    """
     order: list[tuple[float, frozenset[str]]] = []
     members_by_outcome: dict[tuple[float, frozenset[str]], list[ResponseRef]] = {}
     display_by_outcome: dict[tuple[float, frozenset[str]], tuple[float, tuple[str, ...]]] = {}
@@ -235,27 +162,6 @@ def build_consistency_flags(
     *,
     include_blank: bool = False,
 ) -> list[ConsistencyFlag]:
-    """Return every answer group that was graded inconsistently, worst first.
-
-    Two responses are "the same answer" when
-    :func:`answer_groups.normalize_answer_key` returns the same key for them,
-    within the same question and ``assignment_version``. A group is flagged when
-    its graded members did not all receive the same grade:
-
-    - different awarded points  → :attr:`ConsistencyKind.POINTS_DIVERGENCE`
-      (``severity="high"`` — students got different scores for the same answer);
-    - same points, different rubric selection → :attr:`ConsistencyKind.RUBRIC_DIVERGENCE`
-      (``severity="low"`` — fair score, inconsistent rubric).
-
-    Groups with a single graded member, or fully consistent groups, are not
-    returned. The blank ("no answer") bucket is skipped unless ``include_blank``
-    is set, because a blank transcription most often reflects work the OCR
-    missed, making it the noisiest signal.
-
-    The ordering is total and deterministic: severity, then widest point spread,
-    then largest group, then question id, version, and answer key — so the same
-    inputs always produce the same audit.
-    """
     responses = _collect_graded_responses(documents)
 
     order: list[_GroupKey] = []
@@ -269,7 +175,6 @@ def build_consistency_flags(
             groups[key] = []
             samples[key] = ""
         groups[key].append(response)
-        # Keep the first non-blank sample so the report can echo the answer.
         if not samples[key] and response.response_text.strip():
             samples[key] = response.response_text.strip()
 
@@ -284,7 +189,7 @@ def build_consistency_flags(
 
         variants = _build_variants(group)
         if len(variants) < 2:
-            continue  # every member graded identically
+            continue
 
         distinct_points = {_points_bucket(v.points_awarded) for v in variants}
         if len(distinct_points) > 1:

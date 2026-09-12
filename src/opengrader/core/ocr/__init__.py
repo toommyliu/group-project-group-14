@@ -1,11 +1,3 @@
-# Lazy re-exports (PEP 562): ``.extractor`` imports cv2 and fitz, and
-# ``.ollama_vlm``/``.layout`` pull in their own moderate-cost chains, all at
-# module scope. Python always runs a package's ``__init__`` before any of its
-# submodules, so an eager ``from .extractor import ...`` here would tax every
-# import of a sibling submodule too — including ``opengrader.core.ocr.constants``,
-# which ``core/submissions/student_file.py`` imports for the dependency-free
-# ``SUBSCRIPT_TRANSLATION`` table and has no other reason to load cv2/fitz for.
-# Names are resolved to their real submodule only on first access.
 from typing import Any
 
 __all__ = [

@@ -1,33 +1,11 @@
-"""Parse a text2qti-format source into a QA-format markdown answer key.
-
-text2qti is a plain-text quiz-authoring format; this maps each question to a
-QA-format bullet (prompt + points + correct answer(s) + a standard rubric) and
-the file's title/description to the QA frontmatter. Pure text in, markdown out —
-no PDF, OCR, or network — so the ``.md``/``.txt``/``.docx`` paths of the
-``create-answer-key`` command all funnel through here.
-
-``Quiz title:`` / ``Quiz description:`` are the literal text2qti keywords and are
-matched verbatim; everything else speaks of "assignments".
-
-Supported question types: short answer (``* answer``), numeric (``= value``),
-multiple choice (``*a) correct`` / ``a) wrong``), multiple answer
-(``[*] correct`` / ``[ ] wrong``), and essay/free response (``____``).
-"""
-
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# ``Quiz title:`` / ``Quiz description:`` are text2qti format keywords — matched
-# verbatim, not renamed.
 _TITLE_RE = re.compile(r"^\s*Quiz\s+title\s*:\s*(.*)$", re.IGNORECASE)
-# ``Outcome: CLO3`` tags a question with a learning outcome it measures. Not a
-# text2qti keyword — an Opengrader extension, spelled as a plain ``Key: value``
-# line so it reads like the ``Quiz title:`` / ``Points possible:`` directives
-# already in this format rather than importing QA markdown's ``**Outcome**``
-# bullet syntax into a file that has no bullets.
+# Outcome is an Opengrader extension to text2qti.
 _OUTCOME_RE = re.compile(r"^\s*Outcomes?\s*:\s*(.*)$", re.IGNORECASE)
 _DESCRIPTION_RE = re.compile(r"^\s*Quiz\s+description\s*:\s*(.*)$", re.IGNORECASE)
 _POINTS_RE = re.compile(
@@ -87,19 +65,10 @@ class ParsedAssignment:
 
 
 def parse_text2qti(text: str) -> ParsedAssignment:
-    """Parse text2qti source text into title, description, and questions.
-
-    Tracks fenced code blocks within question bodies so that ``*`` / ``=`` lines
-    inside source-code examples are not mistaken for answer markers.
-    """
     title = ""
     description_lines: list[str] = []
     questions: list[Question] = []
     current_points: float | None = None
-    # Outcomes declared before any question apply to every question after them,
-    # matching how ``Points possible:`` already works — "the next ten questions
-    # all measure CLO2" is the common case, and repeating a line ten times is
-    # how an instructor gets one of them wrong.
     current_outcomes: list[str] = []
     current: Question | None = None
     in_description = False
@@ -224,7 +193,6 @@ def parse_text2qti(text: str) -> ParsedAssignment:
 
 
 def parse_text2qti_file(path: Path) -> ParsedAssignment:
-    """Convenience wrapper: read a file and parse its text2qti content."""
     return parse_text2qti(Path(path).read_text())
 
 
@@ -256,7 +224,6 @@ def render_qa(
     instructions_override: str | None = None,
     questions_start_page: int = 1,
 ) -> str:
-    """Render a parsed assignment as QA-format markdown."""
     title = title_override if title_override is not None else parsed.title
     instructions = (
         instructions_override
@@ -306,10 +273,6 @@ def render_qa(
         lines.append("    - Correct (+0)")
         lines.append(f"    - Partially Correct (-{partial_penalty})")
         lines.append(f"    - Incorrect (-{full_penalty})")
-        # After the rubric, matching where `markdown._render_question` puts them
-        # so a generated file and a hand-edited one look the same. Emitted only
-        # when tagged, so a source file that uses no outcomes produces exactly
-        # the QA markdown it always did.
         for outcome in question.outcomes:
             lines.append(f"  - **Outcome** {outcome}")
         lines.append("")

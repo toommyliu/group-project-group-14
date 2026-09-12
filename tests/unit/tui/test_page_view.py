@@ -1,11 +1,3 @@
-"""Grade-screen whole-page view: the `w`/`W` walk over a question's pages.
-
-Driven against the real app + real `SubmissionFilesProvider` so the wiring from
-`.submission.md` through the provider, controller and screen is covered end to
-end — the bug this feature fixes (grading a fragment) lives in that seam, not in
-any one layer.
-"""
-
 import asyncio
 from pathlib import Path
 
@@ -51,7 +43,6 @@ student_score: ""
 
 @pytest.fixture
 def workspace(tmp_path: Path):
-    """A one-question submission whose 3-page scan has only page 1 cropped."""
     (tmp_path / "qa.md").write_text(QA)
 
     split_dir = tmp_path / "split-submissions"
@@ -66,7 +57,6 @@ def workspace(tmp_path: Path):
     responses = submissions / "responses"
     responses.mkdir(parents=True)
     (submissions / "student.submission.md").write_text(SUBMISSION)
-    # A real crop file so the default view has something to show.
     from PIL import Image
 
     Image.new("RGB", (120, 60), "white").save(responses / "q1.png")
@@ -96,10 +86,6 @@ async def _test_w_walks_crop_then_source_page_then_extra_pages(workspace) -> Non
         crop = _viewer_name(app)
         assert crop == "q1.png"
 
-        # Page 1 (the sheet the crop came from), then pages 2-3 as extra work.
-        # The `-anon` suffix is the anonymous-grading cache key: the app starts
-        # outside teacher mode, so pages render with the identity header
-        # redacted and must not share a cache slot with the teacher-mode render.
         seen = []
         for _ in range(3):
             await pilot.press("w")
@@ -111,7 +97,6 @@ async def _test_w_walks_crop_then_source_page_then_extra_pages(workspace) -> Non
             "student-q1-p3-anon.png",
         ]
 
-        # The walk wraps back to the crop, so one key gets you home.
         await pilot.press("w")
         await pilot.pause()
         assert _viewer_name(app) == crop
@@ -121,7 +106,6 @@ async def _test_shift_w_walks_backwards(workspace) -> None:
     app = _app(workspace)
     async with app.run_test(size=(140, 45)) as pilot:
         await _open_grade_screen(app, pilot)
-        # Backwards from the crop lands on the last page in the sequence.
         await pilot.press("W")
         await pilot.pause()
         assert _viewer_name(app) == "student-q1-p3-anon.png"
@@ -147,7 +131,6 @@ async def _test_indicator_distinguishes_source_and_extra_pages(workspace) -> Non
         await pilot.pause()
         assert "extra work page" in str(indicator.render())
 
-        # Back on the crop the caption goes away entirely.
         await pilot.press("w")
         await pilot.press("w")
         await pilot.pause()
@@ -173,7 +156,6 @@ async def _test_toggle_button_jumps_to_the_first_page_and_back(workspace) -> Non
 
 
 async def _test_external_viewer_opens_the_page_that_is_showing(workspace) -> None:
-    """`o` opens what's displayed — the page, not the crop it replaced."""
     app = _app(workspace)
     async with app.run_test(size=(140, 45)) as pilot:
         await _open_grade_screen(app, pilot)
@@ -195,7 +177,6 @@ async def _test_external_viewer_opens_the_page_that_is_showing(workspace) -> Non
 
 
 async def _test_changing_question_returns_to_the_crop(workspace, tmp_path: Path) -> None:
-    # Add a second question so `k` has somewhere to go.
     qa_file, submissions = workspace
     qa_file.write_text(
         QA
@@ -223,10 +204,9 @@ async def _test_changing_question_returns_to_the_crop(workspace, tmp_path: Path)
         await pilot.pause()
         assert _viewer_name(app) == "student-q1-p1-anon.png"
 
-        await pilot.press("j")  # next question
+        await pilot.press("j")
         await pilot.pause()
         assert app.workflow_state.grading_run.current_question.question_id == "q2"
-        # A fresh question always opens on its own crop, never on a stale page.
         assert app.get_grade_screen()._page_view_index is None
 
 
@@ -244,13 +224,11 @@ async def _test_toggle_hidden_when_there_is_no_source_pdf(tmp_path: Path) -> Non
         screen = app.get_grade_screen()
         assert screen.query_one("#question-page-toggle", Button).display is False
 
-        # Pressing w says so rather than silently doing nothing.
         await pilot.press("w")
         await pilot.pause()
         assert screen._page_view_index is None
 
 
-# Sync wrappers (the suite's convention: no async pytest plugin).
 def test_w_walks_crop_then_source_page_then_extra_pages(workspace) -> None:
     asyncio.run(_test_w_walks_crop_then_source_page_then_extra_pages(workspace))
 

@@ -1,11 +1,3 @@
-"""Tests for parallel extraction (`core/submissions/batch.py`).
-
-Most tests drive the runner with a stubbed builder so they stay fast and never
-touch OCR. The final section spawns real worker processes against real
-text-layer PDFs, because process startup, argument pickling, and cross-process
-progress reporting are exactly the things a stub cannot check.
-"""
-
 from pathlib import Path
 
 import fitz
@@ -47,7 +39,6 @@ def _document(student_id: str = "111", name: str = "Ann Lee") -> StudentSubmissi
 
 
 def _builder(tmp_path: Path, *, fails: set[str] = frozenset()):
-    """A stand-in for the real extractor that records which PDFs it saw."""
     seen: list[str] = []
 
     def build(**kwargs):
@@ -59,11 +50,6 @@ def _builder(tmp_path: Path, *, fails: set[str] = frozenset()):
 
     build.seen = seen  # type: ignore[attr-defined]
     return build
-
-
-# --------------------------------------------------------------------------- #
-# Choosing a worker count
-# --------------------------------------------------------------------------- #
 
 
 def test_single_job_never_starts_a_pool() -> None:
@@ -81,8 +67,6 @@ def test_auto_respects_the_plain_cap(monkeypatch) -> None:
 
 
 def test_auto_uses_the_lower_cap_when_the_vision_model_is_active(monkeypatch) -> None:
-    """Ollama serves only a few generations at once; extra workers would just
-    queue up behind the per-request timeout."""
     monkeypatch.setattr("os.cpu_count", lambda: 64)
     assert resolve_worker_count(None, 100, vlm_active=True) == VLM_AUTO_WORKER_CAP
 
@@ -100,11 +84,6 @@ def test_explicit_request_overrides_the_cap(monkeypatch) -> None:
 def test_unknown_cpu_count_falls_back_to_one(monkeypatch) -> None:
     monkeypatch.setattr("os.cpu_count", lambda: None)
     assert resolve_worker_count(None, 100, vlm_active=False) == 1
-
-
-# --------------------------------------------------------------------------- #
-# The sequential path
-# --------------------------------------------------------------------------- #
 
 
 def test_empty_batch_reports_nothing(tmp_path) -> None:
@@ -156,8 +135,6 @@ def test_fail_fast_stops_after_the_first_failure(tmp_path) -> None:
 
 
 def test_on_outcome_fires_per_submission(tmp_path) -> None:
-    """The caller ledgers each result as it lands, so a killed run keeps what
-    it finished."""
     build = _builder(tmp_path)
     jobs = [_job(tmp_path, f"submission-{n:04d}") for n in range(1, 4)]
     seen: list[str] = []
@@ -166,7 +143,6 @@ def test_on_outcome_fires_per_submission(tmp_path) -> None:
 
 
 def test_a_custom_builder_forces_single_process(tmp_path) -> None:
-    """An arbitrary callable cannot be pickled into a worker."""
     build = _builder(tmp_path)
     jobs = [_job(tmp_path, f"submission-{n:04d}") for n in range(1, 5)]
     report = run_extraction_batch(jobs, workers=4, build=build)
@@ -174,7 +150,6 @@ def test_a_custom_builder_forces_single_process(tmp_path) -> None:
 
 
 def test_the_interactive_resolver_forces_single_process(tmp_path) -> None:
-    """The duplicate-name prompt owns stdin; workers racing for it is unusable."""
     build = _builder(tmp_path)
     jobs = [_job(tmp_path, f"submission-{n:04d}") for n in range(1, 5)]
     report = run_extraction_batch(
@@ -190,7 +165,7 @@ def test_the_resolver_reaches_the_builder(tmp_path) -> None:
         captured.update(kwargs)
         return _document(), Path(kwargs["output_dir"]) / "x.md"
 
-    resolver = lambda *_a: None  # noqa: E731 - identity check only
+    resolver = lambda *_a: None  # noqa: E731
     run_extraction_batch([_job(tmp_path, "s1")], build=build, resolve_ambiguous=resolver)
     assert captured["resolve_ambiguous"] is resolver
 
@@ -215,11 +190,6 @@ def test_progress_and_status_reach_the_caller_in_process(tmp_path) -> None:
     assert statuses == ["Extracting from text layer..."]
 
 
-# --------------------------------------------------------------------------- #
-# What lands in the resume ledger
-# --------------------------------------------------------------------------- #
-
-
 def test_document_outputs_lists_markdown_and_every_crop(tmp_path) -> None:
     document = StudentSubmissionDocument(
         student_name="Ann",
@@ -242,7 +212,7 @@ def test_document_outputs_lists_markdown_and_every_crop(tmp_path) -> None:
                 question_id="q2",
                 prompt="p",
                 possible_points=1.0,
-                response_image_path=None,  # text-layer answers have no crop
+                response_image_path=None,
                 response_text="typed",
             ),
         ],
@@ -256,13 +226,7 @@ def test_document_outputs_lists_markdown_and_every_crop(tmp_path) -> None:
     )
 
 
-# --------------------------------------------------------------------------- #
-# The real multi-process path
-# --------------------------------------------------------------------------- #
-
-
 def _text_layer_pdf(path: Path, student_id: str, name: str) -> None:
-    """A born-digital submission: extractable with no OCR and no Ollama."""
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((72, 72), "CS146 Quiz 1")
@@ -276,7 +240,6 @@ def _text_layer_pdf(path: Path, student_id: str, name: str) -> None:
 
 @pytest.fixture
 def spawned_batch(tmp_path):
-    """Three real submissions, extracted on two real worker processes."""
     scans = tmp_path / "scans"
     out = tmp_path / "out"
     scans.mkdir()
@@ -303,7 +266,6 @@ def test_workers_extract_every_submission_correctly(spawned_batch) -> None:
 
 
 def test_outcomes_come_back_in_input_order(spawned_batch) -> None:
-    """Workers finish in whatever order they finish; the report must not."""
     _people, _out, report = spawned_batch
     assert [o.key for o in report.outcomes] == [
         "submission-0001",
@@ -320,7 +282,6 @@ def test_worker_outputs_are_recorded_relative_to_the_output_dir(spawned_batch) -
 
 
 def test_status_messages_cross_the_process_boundary(tmp_path) -> None:
-    """The drain thread replays worker chatter onto the parent's callback."""
     scans = tmp_path / "scans"
     scans.mkdir()
     for index in range(1, 3):
@@ -336,7 +297,6 @@ def test_status_messages_cross_the_process_boundary(tmp_path) -> None:
 
 
 def test_a_broken_pdf_fails_only_its_own_submission(tmp_path) -> None:
-    """One unreadable scan must not take the pool — or the batch — down."""
     scans = tmp_path / "scans"
     scans.mkdir()
     _text_layer_pdf(scans / "submission-0001.pdf", "111111111", "Ann Lee")

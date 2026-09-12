@@ -1,10 +1,3 @@
-"""Tests for the learning-outcome view inside the item-analysis modal (`o`).
-
-What must be right: the toggle exists only when the answer key tags outcomes,
-it swaps both the body and the summary hint, and the coverage caveat is on
-screen next to the mastery number rather than a page away.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -77,7 +70,6 @@ class _Host(App):
 
 
 def _run(screen_factory, body):  # noqa: ANN001, ANN202
-    """Drive the modal and return whatever ``body(pilot, screen)`` returns."""
     result: list = []
 
     async def go() -> None:
@@ -94,12 +86,7 @@ def _summary(screen) -> str:  # noqa: ANN001
     return str(screen.query_one("#item-analysis-summary", Static).render())
 
 
-# ── the toggle only exists when outcomes do ─────────────────────────────────
-
-
 def test_without_outcomes_the_toggle_is_absent_and_inert() -> None:
-    """An instructor who does not use outcomes should see no trace of them."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         before = _summary(screen)
         await pilot.press("o")
@@ -108,7 +95,7 @@ def test_without_outcomes_the_toggle_is_absent_and_inert() -> None:
 
     before, view, after = _run(lambda: ItemAnalysisScreen(EMPTY_ITEMS), body)
     assert "outcomes" not in before.lower()
-    assert view == ItemAnalysisScreen.VIEW_QUESTIONS  # o did nothing
+    assert view == ItemAnalysisScreen.VIEW_QUESTIONS
     assert after == before
 
 
@@ -137,9 +124,6 @@ def test_the_questions_view_is_still_the_default() -> None:
     )
     assert view == ItemAnalysisScreen.VIEW_QUESTIONS
     assert title == "▸ Item Analysis"
-
-
-# ── toggling ─────────────────────────────────────────────────────────────────
 
 
 def test_o_swaps_to_outcomes_and_back() -> None:
@@ -180,9 +164,6 @@ def test_the_outcome_view_shows_one_card_per_outcome() -> None:
 
 
 def test_coverage_sits_beside_mastery_on_the_card() -> None:
-    """A mastery rate cannot be read without knowing how much of the exam the
-    outcome rests on, so the two must not be separated."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
         await pilot.pause()
@@ -197,9 +178,9 @@ def test_coverage_sits_beside_mastery_on_the_card() -> None:
     )
     assert "2/3 mastered" in headline
     body_text = " ".join(lines)
-    assert "Q1, Q2" in body_text  # what measured it
+    assert "Q1, Q2" in body_text
     assert "20 pts" in body_text
-    assert "80% of the assignment" in body_text  # the coverage caveat
+    assert "80% of the assignment" in body_text
 
 
 def test_the_summary_leads_with_the_untagged_share() -> None:
@@ -220,9 +201,6 @@ def test_the_summary_leads_with_the_untagged_share() -> None:
 
 
 def test_a_tagged_but_ungraded_assignment_still_offers_the_view() -> None:
-    """Empty is a different answer from absent — the grader must be able to see
-    that outcomes exist and simply have nothing graded yet."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
         await pilot.pause()
@@ -238,8 +216,6 @@ def test_a_tagged_but_ungraded_assignment_still_offers_the_view() -> None:
 
 
 def test_a_weak_outcome_is_flagged_like_a_weak_item() -> None:
-    """Red means the same thing in both views."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
         await pilot.pause()
@@ -252,8 +228,8 @@ def test_a_weak_outcome_is_flagged_like_a_weak_item() -> None:
         lambda: ItemAnalysisScreen(
             EMPTY_ITEMS,
             outcome_report=_outcome_report(
-                _outcome("CLO1", mastered=1, measured=4),  # 25% — flagged
-                _outcome("CLO2", mastered=4, measured=4),  # 100% — not
+                _outcome("CLO1", mastered=1, measured=4),
+                _outcome("CLO2", mastered=4, measured=4),
             ),
         ),
         body,
@@ -262,7 +238,6 @@ def test_a_weak_outcome_is_flagged_like_a_weak_item() -> None:
 
 
 def test_switching_section_rebuilds_the_outcome_report() -> None:
-    """The `f` section cycler must scope both views, not just the item one."""
     calls: list[str | None] = []
 
     def outcome_builder(section: str | None) -> OutcomeReport:
@@ -272,7 +247,7 @@ def test_switching_section_rebuilds_the_outcome_report() -> None:
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
         await pilot.pause()
-        await pilot.press("f")  # all sections -> MW
+        await pilot.press("f")
         await pilot.pause()
         return list(calls)
 
@@ -287,9 +262,6 @@ def test_switching_section_rebuilds_the_outcome_report() -> None:
         body,
     )
     assert seen == ["MW"]
-
-
-# ── discovering outcomes from the item view ──────────────────────────────────
 
 
 def _item(question_id: str = "q1"):  # noqa: ANN202
@@ -319,9 +291,6 @@ def _hint(screen) -> tuple[bool, str]:  # noqa: ANN001
 
 
 def test_an_untagged_answer_key_is_offered_outcome_tagging() -> None:
-    """The `o` view is invisible when nothing is tagged, so without this the
-    instructor who wants per-outcome mastery never learns it exists."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         return _hint(screen)
 
@@ -334,8 +303,6 @@ def test_an_untagged_answer_key_is_offered_outcome_tagging() -> None:
 
 
 def test_a_tagged_answer_key_gets_no_hint() -> None:
-    """Nothing to suggest — they already did it."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         return _hint(screen)[0]
 
@@ -349,8 +316,6 @@ def test_a_tagged_answer_key_gets_no_hint() -> None:
 
 
 def test_no_hint_before_anything_is_graded() -> None:
-    """The summary is already saying 'go grade'; a second suggestion is noise."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         return _hint(screen)[0]
 
@@ -363,7 +328,6 @@ def test_the_hint_disappears_once_switched_into_the_outcome_view() -> None:
         await pilot.pause()
         return _hint(screen)[0]
 
-    # Tagged, so the hint was never showing and the view is reachable.
     assert (
         _run(
             lambda: ItemAnalysisScreen(

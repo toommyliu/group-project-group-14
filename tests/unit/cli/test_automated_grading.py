@@ -142,7 +142,6 @@ def _grade(tmp_path: Path) -> dict[str, object]:
 def test_correct_multiple_choice_earns_full_points(tmp_path: Path) -> None:
     graded = _grade(tmp_path)
 
-    # "b." matches choice label "B" despite case/punctuation differences.
     assert graded["q1"].points_awarded == 10.0
     assert graded["q1"].possible_points == 10.0
     assert graded["q1"].analysis == "Correct"
@@ -165,7 +164,6 @@ def test_correct_free_response_earns_full_points(tmp_path: Path) -> None:
 def test_incorrect_free_response_is_left_for_manual_grading(tmp_path: Path) -> None:
     graded = _grade(tmp_path)
 
-    # Pre-existing manual grade and analysis must survive re-grading.
     assert graded["q4"].points_awarded == 3.0
     assert graded["q4"].analysis == "Partially correct per manual review"
     assert graded["q4"].possible_points == 5.0
@@ -178,8 +176,6 @@ def test_empty_response_is_skipped(tmp_path: Path) -> None:
     assert graded["q5"].possible_points is None
     assert graded["q5"].analysis == ""
 
-
-# --- Numeric and True/False auto-grading ------------------------------------
 
 NUMERIC_TF_SOLUTIONS_MD = """\
 ---
@@ -267,22 +263,18 @@ def _grade_numeric_tf(tmp_path: Path) -> dict[str, object]:
 
 def test_numeric_within_tolerance_earns_full_points(tmp_path: Path) -> None:
     graded = _grade_numeric_tf(tmp_path)
-    # 1005 mL is inside 1000 ± 10, and the unit is ignored.
     assert graded["q1"].points_awarded == 5.0
     assert graded["q1"].analysis == "Correct"
 
 
 def test_numeric_outside_tolerance_left_for_manual(tmp_path: Path) -> None:
     graded = _grade_numeric_tf(tmp_path)
-    # 3.2 is outside 3.14 ± 0.01. Numeric is award-only: a miss is left for
-    # manual review (not auto-zeroed), since numeric handwriting is error-prone.
     assert graded["q2"].points_awarded is None
     assert graded["q2"].analysis == ""
 
 
 def test_true_false_word_answer_grades(tmp_path: Path) -> None:
     graded = _grade_numeric_tf(tmp_path)
-    # "false" matches the correct False answer; "T" matches True.
     assert graded["q3"].points_awarded == 2.0
     assert graded["q4"].points_awarded == 2.0
 
@@ -297,16 +289,10 @@ def test_unreadable_numeric_left_for_manual(tmp_path: Path) -> None:
     run_cli(["--solutions", str(solutions_path), "--input", str(submission_path)])
     document = load_student_submission_markdown(submission_path)
     graded = {q.question_id: q for q in document.questions}
-    # A non-numeric response is not marked wrong; it is left ungraded.
     assert graded["q2"].points_awarded is None
 
 
-# --- LLM-assisted free-response grading -------------------------------------
-
-
 class _StubGenerator:
-    """Records prompts and returns a canned JSON payload per call."""
-
     def __init__(self, payload: dict | str) -> None:
         self.text = payload if isinstance(payload, str) else json.dumps(payload)
         self.prompts: list[str] = []
@@ -316,7 +302,6 @@ class _StubGenerator:
         return self.text
 
 
-# A submission with ungraded, incorrect free responses for the LLM path.
 LLM_SUBMISSION_MD = """\
 ---
 student_name: "Test Student"
@@ -383,7 +368,6 @@ def test_llm_grades_incorrect_free_response(tmp_path: Path) -> None:
     grade_student_file(submission_path, qa_doc, llm_generate=stub)
 
     graded = _reload(submission_path)
-    # q4 "green" vs "blue": AI suggested Partially Correct (-2) on a 5-pt item.
     assert graded["q4"].points_awarded == 3.0
     assert graded["q4"].rubric_label == "Partially Correct"
     assert graded["q4"].analysis.startswith("[AI · 90%]")
@@ -399,19 +383,17 @@ def test_llm_low_confidence_is_left_for_manual(tmp_path: Path) -> None:
     )
 
     graded = _reload(submission_path)
-    # Wrong, ungraded free responses stay untouched when confidence is low.
     assert graded["q4"].points_awarded is None
     assert graded["q5"].points_awarded is None
 
 
 def test_llm_never_overwrites_existing_grade(tmp_path: Path) -> None:
-    submission_path, qa_doc = _write_case(tmp_path)  # q4 pre-graded at 3.0
+    submission_path, qa_doc = _write_case(tmp_path)
     stub = _StubGenerator({"rubric_labels": ["Incorrect"], "confidence": 1.0})
 
     grade_student_file(submission_path, qa_doc, llm_generate=stub)
 
     graded = _reload(submission_path)
-    # q4 already had a manual grade (3.0) and analysis; AI must not touch it.
     assert graded["q4"].points_awarded == 3.0
     assert graded["q4"].analysis == "Partially correct per manual review"
 
@@ -422,7 +404,6 @@ def test_llm_does_not_call_model_for_exact_matches(tmp_path: Path) -> None:
 
     grade_student_file(submission_path, qa_doc, llm_generate=stub)
 
-    # q3 ("4") matches exactly, so its prompt must never reach the LLM.
     assert all("2 + 2" not in prompt for prompt in stub.prompts)
     graded = _reload(submission_path)
     assert graded["q3"].analysis == "Correct"
@@ -441,7 +422,6 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_select_all_grades_all_or_nothing_award_only() -> None:
-    """Select-all is graded on an exact set match; misses are left for review."""
     from opengrader.cli.automated_grading import (
         _make_solution_entry,
         _objective_correctness,
@@ -471,11 +451,9 @@ def test_select_all_grades_all_or_nothing_award_only() -> None:
     class _Resp:
         question_type = "multiple_answer"
 
-    # Exact set (any order / separators) -> full credit.
     assert _objective_correctness(entry, "A, C", _Resp) is True
     assert _objective_correctness(entry, "C and A", _Resp) is True
     assert _objective_correctness(entry, "AC", _Resp) is True
-    # Subset, superset, or wrong set -> None (manual review, never auto-zeroed).
     assert _objective_correctness(entry, "A", _Resp) is None
     assert _objective_correctness(entry, "A, C, D", _Resp) is None
     assert _objective_correctness(entry, "A, B", _Resp) is None
@@ -483,7 +461,6 @@ def test_select_all_grades_all_or_nothing_award_only() -> None:
 
 
 def test_run_cli_reports_progress(tmp_path: Path) -> None:
-    """run_cli fires file_start (with 1-based index/total) and question ticks."""
     from opengrader.cli.automated_grading import GradingProgress
 
     solutions_path = tmp_path / "solutions.md"
@@ -500,16 +477,13 @@ def test_run_cli_reports_progress(tmp_path: Path) -> None:
 
     run_cli(["--solutions", str(solutions_path), "--input", str(tmp_path)], progress=progress)
 
-    # Two files, reported with a 1-based index and the cohort total.
     assert files == [("a.submission.md", 1, 2), ("b.submission.md", 2, 2)]
-    # Each file ticks per graded (non-empty) question — q5 is blank, so skipped.
     assert ("a.submission.md", "q1") in questions
     assert ("a.submission.md", "q5") not in questions
     assert {name for name, _ in questions} == {"a.submission.md", "b.submission.md"}
 
 
 def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> None:
-    """--auto-ollama forwards server-start and model-pull status to the callback."""
     import opengrader.cli.automated_grading as ag
 
     monkeypatch.setattr(
@@ -541,8 +515,6 @@ def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> N
 
 
 def test_unknown_version_falls_back_to_first_version(tmp_path: Path) -> None:
-    """A submission version that matches no QA version uses the first version
-    rather than raising, so one bad/misread string never blocks the run."""
     from opengrader.cli.automated_grading import _solution_entries_for_submission
     from opengrader.core.submissions import StudentSubmissionDocument
 
@@ -575,18 +547,14 @@ def test_unknown_version_falls_back_to_first_version(tmp_path: Path) -> None:
         student_id="1",
         course_code="C",
         assignment_title="Quiz",
-        assignment_version="Z",  # matches neither A nor B
+        assignment_version="Z",
         source_pdf="s.pdf",
         questions=[],
     )
 
     entries = _solution_entries_for_submission(qa_doc, document)
-    # Fell back to version A (the first), not raised.
     assert any(entry.prompt == "PromptA" for entry in entries.values())
     assert not any(entry.prompt == "PromptB" for entry in entries.values())
-
-
-# ── audit journalling (what makes a batch run reversible) ─────────────────
 
 
 def _journal_entries(submissions_dir: Path):  # noqa: ANN202
@@ -596,8 +564,6 @@ def _journal_entries(submissions_dir: Path):  # noqa: ANN202
 
 
 def test_a_batch_run_records_every_grade_it_writes(tmp_path: Path) -> None:
-    # Without this the riskiest operation in the app — grading a whole cohort
-    # unattended — is the one thing grade-restore cannot undo.
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)
     (tmp_path / "a.submission.md").write_text(SUBMISSION_MD)
@@ -608,10 +574,7 @@ def test_a_batch_run_records_every_grade_it_writes(tmp_path: Path) -> None:
     assert entries, "a batch run must be journalled"
     graded = [e for e in entries if e.kind == "grade"]
     assert graded
-    # Recorded under the tool's own name, so undoing the batch cannot also undo
-    # the human's hand grading.
     assert {e.actor for e in graded} == {"automated-grading"}
-    # And each carries the before/after a restore needs.
     assert all("points" in e.old and "points" in e.new for e in graded)
 
 
@@ -653,8 +616,6 @@ def test_no_journal_opts_out(tmp_path: Path) -> None:
 def test_re_running_an_unchanged_cohort_records_no_new_grade_events(
     tmp_path: Path,
 ) -> None:
-    # A journal full of non-events would make grade-restore propose restores
-    # that change nothing.
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)
     (tmp_path / "a.submission.md").write_text(SUBMISSION_MD)
@@ -679,9 +640,6 @@ def test_the_run_points_the_user_at_the_undo(tmp_path: Path, capsys) -> None:  #
 
 
 def test_a_batch_run_is_undone_by_grade_restore(tmp_path: Path) -> None:
-    # The end-to-end contract the two features form together: undoing the batch
-    # clears exactly what the batch wrote, and leaves a human's existing grade
-    # (q4, already 3.0 in the fixture) untouched.
     from opengrader.cli import grade_restore
 
     solutions_path = tmp_path / "solutions.md"
@@ -714,11 +672,7 @@ def test_a_batch_run_is_undone_by_grade_restore(tmp_path: Path) -> None:
     assert restored == before
 
 
-# ── grade the answer, not the student ────────────────────────────────────────
-
-
 def _cohort_submission(name: str, student_id: str, q4_answer: str) -> str:
-    """A minimal one-question submission, for cohort-level grouping tests."""
     return f"""\
 ---
 student_name: "{name}"
@@ -755,7 +709,6 @@ def _write_cohort(tmp_path: Path, answers: list[str]) -> Path:
 def test_identical_answers_cost_one_model_call_across_the_cohort(
     tmp_path: Path, monkeypatch
 ) -> None:
-    # Ten students, three distinct answers: three decisions, not ten.
     answers = ["green", "green", "green", "purple", "purple", "green"]
     solutions_path = _write_cohort(tmp_path, answers)
     stub = _StubGenerator(
@@ -780,14 +733,10 @@ def test_identical_answers_cost_one_model_call_across_the_cohort(
         ]
     )
 
-    assert len(stub.prompts) == 2  # "green" and "purple"
+    assert len(stub.prompts) == 2
 
 
 def test_identical_answers_receive_the_same_grade(tmp_path: Path, monkeypatch) -> None:
-    # The fairness property, and the reason this matters more than the speed:
-    # a cohort's identical answers cannot diverge, because there is only one
-    # decision. A model that answered differently the second time would
-    # otherwise trip the project's own consistency audit.
     solutions_path = _write_cohort(tmp_path, ["green", "green"])
     replies = iter(
         [
@@ -887,8 +836,6 @@ def test_model_name_is_recorded_in_the_grade(tmp_path: Path, monkeypatch) -> Non
 def test_llm_generate_lambda_passes_grade_suggestion_schema(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The injected ``generate`` call site wires GRADE_SUGGESTION_SCHEMA through
-    as Ollama's ``format`` so grading replies are structurally valid JSON."""
     from opengrader.core.grading.llm_grader import GRADE_SUGGESTION_SCHEMA
 
     solutions_path = _write_cohort(tmp_path, ["green"])
@@ -919,9 +866,6 @@ def test_llm_generate_lambda_passes_grade_suggestion_schema(
     assert captured_kwargs["response_format"] == GRADE_SUGGESTION_SCHEMA
 
 
-# ── never grade a transcription the OCR doubts ───────────────────────────────
-
-
 LOW_CONFIDENCE_SUBMISSION_MD = """\
 ---
 student_name: "Test Student"
@@ -945,8 +889,6 @@ student_score: ""
 
 
 def test_weak_transcription_is_not_sent_to_the_model(tmp_path: Path) -> None:
-    # The model reads the text and never the image, so below the floor it would
-    # be grading a string nobody vouched for — confidently.
     submission_path, qa_doc = _write_case(tmp_path, LOW_CONFIDENCE_SUBMISSION_MD)
     stub = _StubGenerator({"rubric_labels": ["Incorrect"], "confidence": 1.0})
 
@@ -973,9 +915,6 @@ def test_weak_transcription_can_be_graded_when_the_floor_is_disabled(
 
 
 def test_unmeasured_confidence_is_still_graded(tmp_path: Path) -> None:
-    # `None` means unmeasured, never "bad" — the convention the whole codebase
-    # keeps. The VLM path reads handwriting and reports no number, so treating
-    # None as untrusted would withdraw AI grading from nearly every real exam.
     submission_path, qa_doc = _write_case(tmp_path, LLM_SUBMISSION_MD)
     stub = _StubGenerator(
         {"rubric_labels": ["Partially Correct"], "confidence": 0.9, "rationale": "ok"}
@@ -983,7 +922,7 @@ def test_unmeasured_confidence_is_still_graded(tmp_path: Path) -> None:
 
     grade_student_file(submission_path, qa_doc, llm_generate=stub)
 
-    assert stub.prompts  # q4/q5 have no Confidence line and were still graded
+    assert stub.prompts
     assert _reload(submission_path)["q4"].points_awarded == 3.0
 
 
@@ -999,12 +938,6 @@ def test_strong_transcription_is_graded(tmp_path: Path) -> None:
     grade_student_file(submission_path, qa_doc, llm_generate=stub)
 
     assert len(stub.prompts) == 1
-
-
-# --------------------------------------------------------------------------- #
-# --llm follows AI Setup, and the calibration gate refuses before any grading
-# work when `require_calibration` is on but never measured.
-# --------------------------------------------------------------------------- #
 
 
 def test_llm_defaults_on_from_ai_setup(tmp_path: Path, monkeypatch) -> None:
@@ -1033,7 +966,7 @@ def test_llm_defaults_off_when_ai_setup_leaves_it_off(tmp_path: Path, monkeypatc
 
     ai_config.save_settings(ai_config.AISettings())
 
-    def _boom(*_a, **_k):  # pragma: no cover - must never be reached
+    def _boom(*_a, **_k):  # pragma: no cover
         raise AssertionError("no model call should be attempted with --llm off")
 
     monkeypatch.setattr(ag, "ensure_model_available", _boom)
@@ -1047,12 +980,11 @@ def test_llm_defaults_off_when_ai_setup_leaves_it_off(tmp_path: Path, monkeypatc
 
 
 def test_explicit_no_llm_beats_ai_setup(tmp_path: Path, monkeypatch) -> None:
-    """An explicit CLI flag must still win over a settings file: CLI > env > file."""
     import opengrader.cli.automated_grading as ag
 
     ai_config.save_settings(ai_config.AISettings(grade_written=True))
 
-    def _boom(*_a, **_k):  # pragma: no cover - must never be reached
+    def _boom(*_a, **_k):  # pragma: no cover
         raise AssertionError("--no-llm must turn AI grading off even with it saved on")
 
     monkeypatch.setattr(ag, "ensure_model_available", _boom)
@@ -1086,13 +1018,10 @@ def test_llm_refuses_when_calibration_is_required_but_unmeasured(
     with pytest.raises(SystemExit) as exit_info:
         run_cli(["--solutions", str(solutions_path), "--input", str(submission_path)])
 
-    # 2, not 1: "refused, not crashed" — matching grade-check --fail-on-blocking
-    # and claim --fail-on-overlap.
     assert exit_info.value.code == 2
     err = capsys.readouterr().err
     assert "never measured" in err
     assert "llm-eval" in err
-    # Nothing must have been graded: the file is untouched.
     assert submission_path.read_text() == SUBMISSION_MD
 
 
@@ -1116,6 +1045,4 @@ def test_llm_does_not_refuse_once_calibration_is_measured(
     submission_path = tmp_path / "student.submission.md"
     submission_path.write_text(SUBMISSION_MD)
 
-    # No SystemExit: the gate must not fire once provenance says the
-    # confidence floor was actually measured.
     run_cli(["--solutions", str(solutions_path), "--input", str(submission_path)])

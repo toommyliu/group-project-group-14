@@ -1,5 +1,3 @@
-"""Tests for the return-bundle TUI modal and its b hotkey."""
-
 import asyncio
 from pathlib import Path
 
@@ -21,8 +19,6 @@ def _qa_picker_app() -> TuiApp:
 
 
 class _BundleApp(App):
-    """Minimal host that pushes a ReturnBundleScreen with a known submissions path."""
-
     def __init__(self, submissions_path: str) -> None:
         super().__init__()
         self._submissions_path = submissions_path
@@ -115,7 +111,7 @@ def test_export_without_submissions_notifies_and_skips(monkeypatch) -> None:
     )
 
     async def run() -> None:
-        app = _BundleApp("")  # no submissions path
+        app = _BundleApp("")
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             await pilot.click("#return-bundle-run")

@@ -86,9 +86,6 @@ def _pack(cohort: Path, tmp_path: Path, graders: str = "alice,bob") -> Path:
     return out
 
 
-# ── pack ──────────────────────────────────────────────────────────────────
-
-
 def test_pack_cuts_one_packet_per_grader(cohort, tmp_path, capsys):
     out = _pack(cohort, tmp_path, "alice,bob,carol")
 
@@ -133,9 +130,6 @@ def test_list_is_quiet_when_there_are_no_sessions(cohort, capsys):
     assert "No calibration sets recorded" in capsys.readouterr().out
 
 
-# ── report from a calibration set ─────────────────────────────────────────
-
-
 def test_report_names_the_harsher_grader(cohort, tmp_path, capsys):
     out = _pack(cohort, tmp_path)
     _grade_packet(out / "norming-alice", 9.0)
@@ -155,7 +149,6 @@ def test_report_names_the_harsher_grader(cohort, tmp_path, capsys):
     assert "calibration set 'norming'" in printed
     assert "alice ↔ bob" in printed
     assert "alice marks 40.0 points per 100 more generously" in printed
-    # 90% vs 50% on identical work: the residuals are equal and opposite.
     assert "+20.0" in printed and "-20.0" in printed
     assert "provisional" not in printed
 
@@ -173,7 +166,6 @@ def test_report_refuses_when_only_one_grader_returned_a_packet(
     captured = capsys.readouterr()
     assert exit_info.value.code == 1
     assert "agreement needs at least two" in captured.err
-    # And it says *why* bob is missing rather than silently ignoring him.
     assert "bob's packet is not usable" in captured.err
 
 
@@ -222,11 +214,7 @@ def test_report_json_carries_the_pair_statistics(cohort, tmp_path, capsys):
     assert {grader["actor"] for grader in payload["graders"]} == {"alice", "bob"}
 
 
-# ── report from the journal ───────────────────────────────────────────────
-
-
 def _journal_grading(cohort: Path) -> None:
-    """Two TAs on a divided cohort; alice loosens over her session."""
     history = cohort / ".opengrader" / "history"
     for index, path in enumerate(sorted(cohort.glob("*.submission.md"))):
         document = load_student_submission_markdown(path)
@@ -250,7 +238,6 @@ def _journal_grading(cohort: Path) -> None:
             summary="",
             new={"points": points, "rubric": ["Partial"]},
         )
-        # Backdate so the drift split has a timeline to read.
         lines = journal.path.read_text().splitlines()
         record = json.loads(lines[-1])
         record["timestamp"] = (_START + timedelta(minutes=index * 3)).isoformat()
@@ -272,17 +259,10 @@ def test_report_defaults_to_the_audit_journal(cohort, capsys):
 
     out = capsys.readouterr().out
     assert "the audit journal" in out
-    # alice went from 2/10 to 9/10 over her own session.
     assert "+70.0" in out
 
 
 def test_a_divided_cohort_with_no_shared_answer_is_told_so(cohort, capsys):
-    """The honest answer when no two graders marked comparable work.
-
-    Every student in this fixture wrote something different, so there is no
-    overlap of either kind and the report says the graders cannot be compared
-    rather than quietly presenting residuals as if they could.
-    """
     _journal_grading(cohort)
 
     run_cli(["report", "--submissions", str(cohort), "--min-drift-samples", "3"])
@@ -295,11 +275,6 @@ def test_a_divided_cohort_with_no_shared_answer_is_told_so(cohort, capsys):
 def test_a_divided_cohort_is_still_comparable_through_a_shared_answer(
     tmp_path, capsys
 ):
-    """The fallback that makes production grading measurable at all.
-
-    Two TAs never share a *student* on a divided cohort — but on a large class
-    they constantly share an *answer*, and that is real overlap.
-    """
     root = tmp_path / "same-answers"
     root.mkdir()
     for index in range(1, 9):

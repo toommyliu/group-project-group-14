@@ -1,22 +1,4 @@
-"""Import a folder of phone photos as per-student PDFs for submission-extractor.
-
-The pipeline everywhere else assumes a flat, already-deskewed,
-one-PDF-per-student scan — which a folder of phone photos from a class that
-has no scanner simply is not. This tool is the bridge: it deskews or
-perspective-corrects each photo, works out which photos belong to which
-student, and writes ordinary per-student PDFs that ``submission-extractor``
-can read exactly as if they came off a scanner.
-
-Perspective correction reuses the geometry `core/ocr/omr.py` already trusts
-for bubble sheets (find the four corner registration marks, solve the
-transform they imply) when those marks are present, and falls back to
-general document-edge detection otherwise — see
-``core/submissions/photo_intake.py`` for the full explanation, including why
-a photo that cannot be rectified at all is imported flat rather than dropped.
-
-Never modifies ``--input``. Every photo is opened read-only; every output PDF
-is written under ``--output``.
-"""
+"""Import a folder of phone photos as per-student PDFs for submission-extractor."""
 
 from __future__ import annotations
 

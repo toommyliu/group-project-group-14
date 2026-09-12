@@ -1,11 +1,3 @@
-"""Tests for the `llm-eval` CLI (the LLM grading evaluation harness).
-
-The transport is injected via ``run_cli(generate_factory=…)``, so nothing here
-needs an Ollama server. What the CLI itself must get right is: discovering the
-class, measuring every model over the *same* answers, never writing anything,
-and printing a threshold an instructor can act on.
-"""
-
 from __future__ import annotations
 
 import json
@@ -86,7 +78,6 @@ def _class(
 
 
 def _factory(payloads: dict[str, dict]):  # noqa: ANN202
-    """Build a generate-factory where each model returns one canned verdict."""
 
     def factory(model: str):  # noqa: ANN202
         body = json.dumps(payloads[model])
@@ -107,9 +98,6 @@ def _disagrees(confidence: float = 0.9) -> dict:
     }
 
 
-# ── the happy path ───────────────────────────────────────────────────────────
-
-
 def test_it_reports_agreement_and_recommends_a_threshold(
     tmp_path: Path, capsys
 ) -> None:  # noqa: ANN001
@@ -121,7 +109,6 @@ def test_it_reports_agreement_and_recommends_a_threshold(
     out = capsys.readouterr().out
     assert "Agreed with the human: 8/8" in out
     assert "--llm-min-confidence" in out
-    # Every answer agreed at 0.88, so the loosest cutoff that holds is 0.00.
     assert "→ --llm-min-confidence 0.00" in out
 
 
@@ -141,8 +128,6 @@ def test_a_model_that_always_disagrees_gets_no_recommendation(
 def test_objective_questions_are_reported_as_not_evaluated(
     tmp_path: Path, capsys
 ) -> None:  # noqa: ANN001
-    """The multiple-choice answer in every submission is graded by rule, so the
-    model is never asked about it and it must not count toward agreement."""
     solutions, submissions = _class(tmp_path, count=3)
     llm_eval.run_cli(
         ["--solutions", str(solutions), "--input", str(submissions), "--quiet"],
@@ -154,8 +139,6 @@ def test_objective_questions_are_reported_as_not_evaluated(
 
 
 def test_it_never_writes_to_a_submission(tmp_path: Path) -> None:
-    """A harness that graded while measuring would destroy the ground truth it
-    is measuring against."""
     solutions, submissions = _class(tmp_path, count=3)
     before = {
         path.name: path.read_text() for path in submissions.glob("*.submission.md")
@@ -166,11 +149,7 @@ def test_it_never_writes_to_a_submission(tmp_path: Path) -> None:
     )
     after = {path.name: path.read_text() for path in submissions.glob("*.submission.md")}
     assert after == before
-    # ...and no journal, curve or other dot-dir state appeared either.
     assert not (submissions / ".opengrader").exists()
-
-
-# ── comparing models ─────────────────────────────────────────────────────────
 
 
 def test_several_models_are_measured_over_the_same_answers(
@@ -224,9 +203,6 @@ def test_limit_caps_the_number_of_model_calls(tmp_path: Path, capsys) -> None:  
     assert "Evaluating 3 human-graded answer(s) per model." in capsys.readouterr().out
 
 
-# ── flags ────────────────────────────────────────────────────────────────────
-
-
 def test_json_output_carries_the_recommendation_and_the_whole_curve(
     tmp_path: Path, capsys
 ) -> None:  # noqa: ANN001
@@ -241,14 +217,12 @@ def test_json_output_carries_the_recommendation_and_the_whole_curve(
     model = payload["models"][0]
     assert model["overall"]["agreements"] == 8
     assert model["recommendation"]["llm_min_confidence"] == 0.0
-    assert len(model["thresholds"]) == 21  # 0.00 … 1.00 at the default step
+    assert len(model["thresholds"]) == 21
 
 
 def test_a_stricter_target_agreement_demands_a_stricter_threshold(
     tmp_path: Path, capsys
 ) -> None:  # noqa: ANN001
-    """Half the class is graded 4, half 0, and the model always says 4 — so it
-    agrees exactly half the time and cannot reach a 90% target."""
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS)
     submissions = tmp_path / "subs"
@@ -292,9 +266,6 @@ def test_biggest_disagreements_are_printed_for_the_instructor_to_read(
     assert "leans generous" in out
 
 
-# ── the unhappy paths ────────────────────────────────────────────────────────
-
-
 def test_a_cohort_with_no_human_grades_explains_itself_and_exits_nonzero(
     tmp_path: Path, capsys
 ) -> None:  # noqa: ANN001
@@ -334,8 +305,6 @@ def test_a_directory_with_no_submissions_fails_fast(tmp_path: Path) -> None:
 
 
 def test_submissions_are_discovered_one_directory_down(tmp_path: Path) -> None:
-    """Same discovery rule as the provider and every other CLI, so "the folder
-    I graded" means the same thing everywhere."""
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS)
     submissions = tmp_path / "subs"
@@ -346,11 +315,7 @@ def test_submissions_are_discovered_one_directory_down(tmp_path: Path) -> None:
     assert len(llm_eval.discover_submission_paths(submissions)) == 1
 
 
-# ── pooling several classes that share one answer key ────────────────────────
-
-
 def test_two_cohorts_are_pooled_into_one_sample(tmp_path: Path, capsys) -> None:  # noqa: ANN001
-    """The same exam across terms: same rubric, same scale, just more students."""
     solutions, spring = _class(tmp_path / "2026-spring", count=4)
     _, fall = _class(tmp_path / "2025-fall", count=3)
 
@@ -373,7 +338,6 @@ def test_two_cohorts_are_pooled_into_one_sample(tmp_path: Path, capsys) -> None:
 
 
 def test_a_repeated_folder_is_not_double_counted(tmp_path: Path, capsys) -> None:  # noqa: ANN001
-    """Naming the same folder twice would silently double its weight."""
     solutions, submissions = _class(tmp_path, count=5)
     llm_eval.run_cli(
         [
@@ -391,7 +355,6 @@ def test_a_repeated_folder_is_not_double_counted(tmp_path: Path, capsys) -> None
 
 
 def test_pooled_disagreements_name_their_class(tmp_path: Path, capsys) -> None:  # noqa: ANN001
-    """Two classes can both number students from s0 — a bare id is ambiguous."""
     solutions, spring = _class(tmp_path / "2026-spring", count=3, points="0")
     _, fall = _class(tmp_path / "2025-fall", count=3, points="0")
     llm_eval.run_cli(
@@ -459,9 +422,6 @@ def test_a_missing_cohort_folder_fails_fast(tmp_path: Path) -> None:
     assert excinfo.value.code == 1
 
 
-# ── the limit is a spread, and a pooled total ────────────────────────────────
-
-
 def test_the_limit_is_a_total_across_cohorts_not_per_folder(tmp_path: Path) -> None:
     solutions, spring = _class(tmp_path / "spring", count=6)
     _, fall = _class(tmp_path / "fall", count=6)
@@ -489,13 +449,10 @@ def test_the_limit_is_a_total_across_cohorts_not_per_folder(tmp_path: Path) -> N
         ],
         generate_factory=factory,
     )
-    # 4 total, not 4 per folder.
     assert calls == 4
 
 
 def test_a_limited_run_samples_both_cohorts(tmp_path: Path) -> None:
-    """A prefix limit would take everything from the first folder and nothing
-    from the second — the exact failure pooling exists to avoid."""
     solutions, spring = _class(tmp_path / "spring", count=5)
     _, fall = _class(tmp_path / "fall", count=5)
     prompts: list[str] = []
@@ -521,9 +478,6 @@ def test_a_limited_run_samples_both_cohorts(tmp_path: Path) -> None:
         ],
         generate_factory=factory,
     )
-    # Each submission's response text is unique per student index, and both
-    # classes use the same indices — so seeing every index 0..1 twice proves
-    # both folders were sampled.
     assert len(prompts) == 4
     assert sum("answer number 0" in p for p in prompts) == 2
 
@@ -536,8 +490,6 @@ def test_cohort_labels_shorten_to_the_folder_name_when_that_is_unique() -> None:
 
 
 def test_cohort_labels_walk_up_when_the_folder_names_collide() -> None:
-    """The expected layout: one folder per term, each with an identically named
-    student-submissions/ inside. A bare basename would name them all the same."""
     labels = llm_eval.class_labels(
         [
             Path("/exams/spring-2026/student-submissions"),
@@ -560,8 +512,6 @@ def test_resolve_cohorts_drops_repeats_but_keeps_order(tmp_path: Path) -> None:
 
 
 def test_default_generate_factory_wires_grade_suggestion_schema(monkeypatch) -> None:
-    """The real (non-injected) transport must pass GRADE_SUGGESTION_SCHEMA
-    through to ``generate`` as Ollama's ``format``, same as automated-grading."""
     from opengrader.core.grading.llm_grader import GRADE_SUGGESTION_SCHEMA
 
     captured_kwargs: dict = {}

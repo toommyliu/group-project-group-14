@@ -1,19 +1,3 @@
-"""Modal grading-consistency audit, opened with i.
-
-A pop-up that answers one question: did students who gave the *same* answer
-receive the *same* grade? It lists every answer group whose graded members
-diverged — a scoring conflict (different points, high severity) or a rubric-only
-conflict (same points, different rubric selection) — worst first.
-
-Each conflicting student is an actionable row: selecting one (click, or focus +
-enter) jumps straight to that student's question on the grade screen so the
-grader can regrade and resolve the conflict, mirroring how the needs-review
-queue routes to `GradeController.open_review_target`. Backed by the pure cohort
-engine in ``core/submissions/consistency.py``; it re-reads nothing and changes
-nothing on its own. Anonymity-aware: names show only in teacher mode. esc or i
-closes it.
-"""
-
 from __future__ import annotations
 
 from textual import events, on
@@ -34,12 +18,6 @@ from opengrader.tui.formatting import (
 
 
 class _ConsistencyMemberRow(Static):
-    """A clickable/focusable student row; selecting it opens that student.
-
-    Only built for navigable members (those mapped to a loaded submission), so
-    posting a target is always meaningful.
-    """
-
     can_focus = True
 
     def __init__(self, member: ConsistencyMember, question_id: str, label) -> None:
@@ -57,9 +35,6 @@ class _ConsistencyMemberRow(Static):
         self._select()
 
     def on_key(self, event: events.Key) -> None:
-        # The focused row is first in the bubble path, so intercepting the nav
-        # keys here (and stopping them) keeps the enclosing VerticalScroll from
-        # hijacking up/down to scroll instead of moving between students.
         if event.key in ("enter", "space"):
             event.stop()
             self._select()
@@ -72,12 +47,6 @@ class _ConsistencyMemberRow(Static):
 
 
 class ConsistencyScreen(ModalScreen["tuple[str, str] | None"]):
-    """Worst-first list of inconsistently-graded answer groups.
-
-    Dismisses with ``(student_item_id, question_id)`` when a student row is
-    selected, or ``None`` on close.
-    """
-
     DEFAULT_CSS = """
     ConsistencyScreen {
         align: center middle;
@@ -168,8 +137,6 @@ class ConsistencyScreen(ModalScreen["tuple[str, str] | None"]):
     ]
 
     class MemberSelected(Message):
-        """Posted when a student row is chosen, to open them on the grade screen."""
-
         def __init__(self, student_item_id: str, question_id: str) -> None:
             self.student_item_id = student_item_id
             self.question_id = question_id
@@ -196,10 +163,6 @@ class ConsistencyScreen(ModalScreen["tuple[str, str] | None"]):
                 yield Button("Close", id="consistency-close", compact=True)
 
     def on_mount(self) -> None:
-        # Land on the first actionable student so enter works immediately; fall
-        # back to the close button when there's nothing to act on (an empty
-        # audit — e.g. nothing graded yet — has no member rows, and Textual's
-        # `.first()` raises on an empty query, so iterate instead).
         rows = list(self.query(_ConsistencyMemberRow))
         if rows:
             rows[0].focus()
@@ -207,12 +170,6 @@ class ConsistencyScreen(ModalScreen["tuple[str, str] | None"]):
             self.query_one("#consistency-close", Button).focus()
 
     def focus_relative_member(self, current: _ConsistencyMemberRow, delta: int) -> None:
-        """Move focus to the next/previous student row (arrow / j·k keys).
-
-        Walks the actionable rows in document order — so headers and grade
-        sub-lines are skipped for free — and clamps at the ends (no wrap), the
-        same as the app's other lists. Scrolls the new row into view.
-        """
         rows = list(self.query(_ConsistencyMemberRow))
         if current not in rows:
             return

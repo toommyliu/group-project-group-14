@@ -6,8 +6,6 @@ from opengrader.tui.ui.widgets.shortcut_input import ShortcutInput
 
 
 class ShortcutInputApp(App[None]):
-    """Small harness for exercising ShortcutInput bindings."""
-
     def compose(self) -> ComposeResult:
         yield ShortcutInput(value="alpha beta gamma", id="input")
 

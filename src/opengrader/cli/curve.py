@@ -1,11 +1,4 @@
-"""Get/set/clear an assignment's score curve — a reversible transform on totals.
-
-The curve is stored per-assignment at ``<submissions>/.opengrader/curve.json``
-and applied wherever a final score leaves the tool (Canvas export, gradebook
-CSV, the returnable summary page), always shown alongside the raw total. It
-never edits a rubric selection or a stored grade, so ``curve clear`` restores
-the raw totals exactly. See :mod:`opengrader.core.curve`.
-"""
+"""Manage reversible score curves for assignment totals."""
 
 from __future__ import annotations
 
@@ -52,7 +45,6 @@ def _submission_paths(path: Path) -> list[Path]:
 
 
 def _student_totals(path: Path) -> list[tuple[float, float | None]]:
-    """(raw awarded total, possible total) per student, for the curve preview."""
     totals: list[tuple[float, float | None]] = []
     for submission_path in _submission_paths(path):
         doc = load_student_submission_markdown(submission_path)

@@ -1,86 +1,13 @@
 #!/bin/sh
-# `opengrader` from anywhere — a launcher that finds its own checkout.
-#
-# Installed to ~/.local/bin by packaging/install-command.sh, this is what makes
-# `opengrader doctor` work in any directory instead of
-# `uv run opengrader doctor` inside the repo.
-#
-# The whole point of this file is that **it contains no machine-specific
-# paths**. Baking the checkout location in at install time is the obvious
-# design and the wrong one here: on macOS a volume that is remounted while its
-# old mount point is still busy comes back as "Samsung_T5 1", then
-# "Samsung_T5 2" — the path changes without anyone moving anything — and a
-# checkout also moves when you copy the project to an internal disk, rename a
-# folder, or clone it somewhere else. A launcher that hardcodes a path breaks
-# on all of those and fails in a way that reads like the tool is broken. So
-# this script *resolves* the checkout on every run instead, in this order:
-#
-#   1. $OPENGRADER_HOME, when set — an explicit answer always wins, and is
-#      reported as an error rather than ignored when it points somewhere wrong.
-#   2. The directory above this script, when it is still sitting in a checkout
-#      (so `packaging/opengrader doctor` works straight from a clone).
-#   3. Walking up from the current directory — inside a checkout, that checkout
-#      is what you meant, which is also what makes two clones behave sanely.
-#   4. The path remembered from last time (see CACHE_FILE below).
-#   5. A bounded search of the places a checkout plausibly lives.
-#
-# A directory counts as a checkout when its pyproject.toml declares this
-# project by name. That marker is deliberately not the folder name: this repo's
-# directory is called `group-project-group-14`, a GitHub Classroom artifact
-# that says nothing about what is inside it and that anyone may rename.
-#
-# The second half of the job is *how* to run it. This project is developed with
-# uv, but the launcher deliberately does not require it: a teammate who set the
-# project up with Poetry, with plain `python -m venv`, or inside a Conda
-# environment gets a working `opengrader` too. What it cannot do is conjure an
-# environment out of nothing — the project needs Python 3.12 and its
-# dependencies installed *somehow* — so when it finds none it names the three
-# ways to make one rather than failing with an import error.
-#
-# Runners are tried in this order:
-#
-#   1. $OPENGRADER_PYTHON — an interpreter you name yourself; skips uv entirely.
-#   2. A project virtualenv that some *other* tool built (no `uv = ` line in its
-#      pyvenv.cfg). Used directly and never handed to uv, because `uv run`
-#      would sync a Poetry-managed venv against uv.lock and quietly take it
-#      over.
-#   3. uv, when installed — the project's own setup, and the only runner that
-#      also *installs* what is missing, so it stays first for everyone else.
-#   4. A project virtualenv uv made earlier, on a machine where uv has since
-#      gone away.
-#   5. Poetry's environment for this project (`poetry env info --path`).
-#   6. An activated environment ($VIRTUAL_ENV, or Conda's $CONDA_PREFIX).
-#   7. Any python on PATH that can already import opengrader — covers pipx and
-#      a plain `pip install -e .`.
-#
-# Everything but uv is invoked as `<python> -m opengrader`, never as the
-# venv's `bin/opengrader` console script. Those scripts hardcode an absolute
-# interpreter path at install time and rot when it moves: this very checkout
-# has a `.venv/bin/pytest` still pointing at "/Volumes/Samsung_T5/…", a path
-# that stopped existing when the drive came back as "Samsung_T5 1". `python -m`
-# has no such embedded path, which is why src/opengrader/__main__.py exists.
-#
-# Environment variables:
-#   OPENGRADER_HOME           pin the checkout explicitly (rule 1)
-#   OPENGRADER_PYTHON         run with this interpreter; skips uv
-#   OPENGRADER_SEARCH_ROOTS   colon-separated list of places rule 5 should look
-#   OPENGRADER_WRAPPER_DEBUG  set to 1 to print which rule matched
 
 set -u
 
 MARKER_FILE="pyproject.toml"
 MARKER_LINE='^name = "opengrader"$'
 
-# Where the resolved path is remembered. Deliberately a *cache*: deleting it
-# costs one search, never correctness, so it needs no migration story and no
-# cleanup on uninstall.
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/opengrader"
 CACHE_FILE="$CACHE_DIR/checkout-path"
 
-# How deep to look under each search root. The checkout here sits three levels
-# below its volume ("CMPE 195/Senior Project/group-project-group-14"), and a
-# person's projects are rarely deeper than this under $HOME; every extra level
-# multiplies the cost of the one slow path in this script.
 MAX_DEPTH=5
 
 debug() {
@@ -93,14 +20,12 @@ die() {
     exit 1
 }
 
-# Is this directory an Opengrader checkout?
 is_checkout() {
     [ -n "${1:-}" ] || return 1
     [ -f "$1/$MARKER_FILE" ] || return 1
     grep -q "$MARKER_LINE" "$1/$MARKER_FILE" 2>/dev/null
 }
 
-# Rule 3: the nearest checkout at or above a starting directory.
 walk_up_from() {
     dir=$1
     while :; do
@@ -109,20 +34,12 @@ walk_up_from() {
             return 0
         fi
         parent=$(dirname "$dir")
-        # dirname("/") is "/" — that fixed point is the loop's only exit.
         [ "$parent" = "$dir" ] && return 1
         dir=$parent
     done
 }
 
-# Rule 5, the slow path. Roots are searched one at a time, cheapest and most
-# likely first, and the first root that yields a checkout wins — on the machine
-# this was written for, that means the external drive answers and $HOME is
-# never walked at all.
 search_for_checkout() {
-    # An explicit list of places to look, colon-separated, for a machine whose
-    # projects live somewhere this script would not think to search (and for
-    # this script's own tests, which must not depend on what is plugged in).
     if [ -n "${OPENGRADER_SEARCH_ROOTS:-}" ]; then
         old_ifs=$IFS
         IFS=':'
@@ -139,10 +56,6 @@ search_for_checkout() {
     fi
 
     for volume in /Volumes/*; do
-        # Skip symlinked volumes. macOS ships /Volumes/Macintosh HD as a
-        # symlink to "/", and `find` follows a symlink named on its command
-        # line, so including it means searching the entire root filesystem:
-        # measured at 3.3s here versus 0.3s for the real drives.
         [ -L "$volume" ] && continue
         [ -d "$volume" ] || continue
         if found=$(search_one_root "$volume"); then
@@ -157,16 +70,7 @@ search_for_checkout() {
     return 1
 }
 
-# Look for a checkout under exactly one root.
-#
-# Note this searches for the marker *file* and then validates the directory
-# holding it, rather than trusting any directory name: on this machine the
-# same search also turns up unrelated Python projects, and only the
-# pyproject.toml name check tells them apart.
 search_one_root() {
-    # Pruning matters more than depth: .venv and node_modules hold tens of
-    # thousands of files and can each contain a pyproject.toml of their own,
-    # which would be a wrong answer as well as a slow one.
     matches=$(
         find "$1" -maxdepth "$MAX_DEPTH" \
             \( -name .venv -o -name node_modules -o -name .git \
@@ -175,7 +79,6 @@ search_one_root() {
     )
     [ -n "$matches" ] || return 1
 
-    # Split on newlines only, for the same spaces-in-paths reason as above.
     found=''
     others=''
     old_ifs=$IFS
@@ -196,8 +99,6 @@ search_one_root() {
 
     [ -n "$found" ] || return 1
     if [ -n "$others" ]; then
-        # Report rather than silently pick: running the wrong clone is the kind
-        # of mistake that costs an afternoon before anyone notices.
         printf 'opengrader: found more than one checkout under %s; using %s\n' "$1" "$found" >&2
         printf 'opengrader: also found:%s\n' "$others" >&2
         printf 'opengrader: set OPENGRADER_HOME to choose a different one.\n' >&2
@@ -206,31 +107,23 @@ search_one_root() {
 }
 
 remember() {
-    # Best effort by design: a read-only or full home directory should cost a
-    # search on the next run, never the run in front of us.
     mkdir -p "$CACHE_DIR" 2>/dev/null || return 0
     printf '%s\n' "$1" >"$CACHE_FILE" 2>/dev/null || return 0
 }
 
 resolve_checkout() {
-    # 1. Explicit override.
     if [ -n "${OPENGRADER_HOME:-}" ]; then
         if is_checkout "$OPENGRADER_HOME"; then
             debug "using \$OPENGRADER_HOME"
             printf '%s\n' "$OPENGRADER_HOME"
             return 0
         fi
-        # Return, never exit: this function is called inside a command
-        # substitution, so an `exit` here would end only that subshell and the
-        # caller would then print its own "could not find" message on top of
-        # this one. Status 2 means "already explained".
         printf 'opengrader: %s\n' "\$OPENGRADER_HOME is set to '$OPENGRADER_HOME', which is not an Opengrader checkout.
   A checkout is the directory holding $MARKER_FILE and src/opengrader/.
   Unset it to let opengrader find the checkout itself." >&2
         return 2
     fi
 
-    # 2. Running in place, from a checkout's packaging/ directory.
     script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P) || script_dir=''
     if [ -n "$script_dir" ]; then
         in_place=$(dirname "$script_dir")
@@ -241,7 +134,6 @@ resolve_checkout() {
         fi
     fi
 
-    # 3. The checkout the caller is standing in.
     here=$(pwd -P 2>/dev/null) || here=''
     if [ -n "$here" ] && found=$(walk_up_from "$here"); then
         debug "using the checkout containing the current directory"
@@ -250,7 +142,6 @@ resolve_checkout() {
         return 0
     fi
 
-    # 4. Last known good.
     if [ -f "$CACHE_FILE" ]; then
         cached=$(cat "$CACHE_FILE" 2>/dev/null) || cached=''
         if is_checkout "$cached"; then
@@ -258,13 +149,10 @@ resolve_checkout() {
             printf '%s\n' "$cached"
             return 0
         fi
-        # Stale — the drive was renamed, or the checkout moved. Drop it so the
-        # search below gets a clean shot and the next run is fast again.
         debug "remembered path is stale, searching"
         rm -f "$CACHE_FILE" 2>/dev/null
     fi
 
-    # 5. Search.
     debug "searching /Volumes/* and \$HOME (depth $MAX_DEPTH)"
     if found=$(search_for_checkout); then
         debug "found $found"
@@ -279,12 +167,8 @@ resolve_checkout() {
 
 project=$(resolve_checkout)
 resolve_status=$?
-# 2 means resolve_checkout already said exactly what was wrong; anything else
-# non-zero means nothing was found and the generic advice below is the help.
 [ "$resolve_status" -eq 2 ] && exit 1
 if [ "$resolve_status" -ne 0 ] || [ -z "$project" ]; then
-    # Say where it actually looked — with a search-root override in play, the
-    # default advice would name places it never touched.
     if [ -n "${OPENGRADER_SEARCH_ROOTS:-}" ]; then
         searched="\$OPENGRADER_SEARCH_ROOTS ($OPENGRADER_SEARCH_ROOTS)"
     else
@@ -296,20 +180,13 @@ if [ "$resolve_status" -ne 0 ] || [ -z "$project" ]; then
   Otherwise point at it directly:  export OPENGRADER_HOME=/path/to/the/checkout"
 fi
 
-# --- Choosing how to run ---------------------------------------------------
 
-# Can this interpreter actually import the package? The check costs one Python
-# start-up (~80ms), so it runs only on the fallback runners — never on the uv
-# path — and it buys a real error message instead of a traceback.
 python_can_import() {
     [ -n "${1:-}" ] || return 1
     [ -x "$1" ] || return 1
     "$1" -c 'import opengrader' >/dev/null 2>&1
 }
 
-# Is the package installed in this virtualenv? A few stats rather than a
-# process: an editable install leaves a .pth file, a regular one a dist-info,
-# and either way bin/opengrader appears.
 venv_has_package() {
     [ -e "$1/bin/opengrader" ] && return 0
     for marker in \
@@ -322,8 +199,6 @@ venv_has_package() {
     return 1
 }
 
-# The project virtualenv, if there is one. `.venv` is what uv and Poetry
-# both use by default; the other two are what `python -m venv` users pick.
 find_project_venv() {
     for name in .venv venv env; do
         candidate="$project/$name"
@@ -335,8 +210,6 @@ find_project_venv() {
     return 1
 }
 
-# Did uv build this virtualenv? uv stamps its version into pyvenv.cfg, which
-# is the only reliable way to tell its venv from Poetry's or virtualenv's.
 venv_is_uv_made() {
     [ -f "$1/pyvenv.cfg" ] || return 1
     grep -q '^uv = ' "$1/pyvenv.cfg" 2>/dev/null
@@ -344,7 +217,6 @@ venv_is_uv_made() {
 
 project_venv=$(find_project_venv) || project_venv=''
 
-# 1. An interpreter named outright.
 if [ -n "${OPENGRADER_PYTHON:-}" ]; then
     if ! python_can_import "$OPENGRADER_PYTHON"; then
         die "\$OPENGRADER_PYTHON is set to '$OPENGRADER_PYTHON', which cannot import opengrader.
@@ -354,29 +226,21 @@ if [ -n "${OPENGRADER_PYTHON:-}" ]; then
     exec "$OPENGRADER_PYTHON" -m opengrader "$@"
 fi
 
-# 2. A virtualenv another tool built — use it, and keep uv away from it.
 if [ -n "$project_venv" ] && ! venv_is_uv_made "$project_venv"; then
     debug "running with $project_venv (not uv-made; uv left alone)"
     exec "$project_venv/bin/python" -m opengrader "$@"
 fi
 
-# 3. uv — the project's own setup, and the only runner that installs what is
-#    missing rather than failing on it.
 if command -v uv >/dev/null 2>&1; then
     debug "running with uv"
-    # exec, not a subshell: this hands over the terminal itself, which the TUI
-    # needs for its keyboard and image output, and lets the real command's exit
-    # code reach the shell unaltered.
     exec uv run --project "$project" opengrader "$@"
 fi
 
-# 4. The virtualenv uv made before uv went away.
 if [ -n "$project_venv" ]; then
     debug "running with $project_venv (uv not installed)"
     exec "$project_venv/bin/python" -m opengrader "$@"
 fi
 
-# 5. Poetry's environment for this project.
 if command -v poetry >/dev/null 2>&1; then
     poetry_env=$(cd "$project" 2>/dev/null && poetry env info --path 2>/dev/null) || poetry_env=''
     if [ -n "$poetry_env" ] && python_can_import "$poetry_env/bin/python"; then
@@ -385,8 +249,6 @@ if command -v poetry >/dev/null 2>&1; then
     fi
 fi
 
-# 6. Whatever the caller has activated. Conda does not set $VIRTUAL_ENV, so
-#    both variables are checked.
 for activated in "${VIRTUAL_ENV:-}" "${CONDA_PREFIX:-}"; do
     if [ -n "$activated" ] && python_can_import "$activated/bin/python"; then
         debug "running with the activated environment ($activated)"
@@ -394,7 +256,6 @@ for activated in "${VIRTUAL_ENV:-}" "${CONDA_PREFIX:-}"; do
     fi
 done
 
-# 7. A python on PATH that already has it — pipx, or `pip install -e .`.
 for name in python3 python; do
     candidate=$(command -v "$name" 2>/dev/null) || continue
     if python_can_import "$candidate"; then

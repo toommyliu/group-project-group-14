@@ -1,5 +1,3 @@
-"""Transcription accuracy, measured from graders' own corrections."""
-
 from __future__ import annotations
 
 from opengrader.core.analytics.transcription_eval import (
@@ -50,9 +48,6 @@ def _correction(
     )
 
 
-# ── Metrics ─────────────────────────────────────────────────────────────────
-
-
 def test_character_error_rate_counts_substitutions():
     sample, _ = collect_transcription_samples([_correction(machine="cat", human="bat")])
     assert sample[0].character_error_rate() == 1 / 3
@@ -73,7 +68,6 @@ def test_a_perfect_reading_scores_zero():
 
 
 def test_whitespace_differences_are_not_errors():
-    """A line break inside an answer box is layout, not a misread."""
     sample, _ = collect_transcription_samples(
         [_correction(machine="a  b\nc", human="a b c")]
     )
@@ -87,7 +81,6 @@ def test_case_matters_unless_asked_otherwise():
 
 
 def test_punctuation_is_kept():
-    """A missing decimal point changes a numeric answer."""
     sample, _ = collect_transcription_samples([_correction(machine="42", human="4.2")])
     assert sample[0].character_error_rate() > 0
 
@@ -110,11 +103,7 @@ def test_normalize_only_collapses_whitespace():
     assert normalize_transcription("A B", ignore_case=True) == "a b"
 
 
-# ── Sample collection ───────────────────────────────────────────────────────
-
-
 def test_a_tools_re_read_is_never_ground_truth():
-    """A refine pass is machine-to-machine; scoring against it measures nothing."""
     samples, tally = collect_transcription_samples(
         [_correction(actor="submission-extractor:refine")]
     )
@@ -132,7 +121,6 @@ def test_is_tool_actor_follows_the_name_colon_role_convention():
 
 
 def test_the_machine_reading_is_the_one_the_human_replaced():
-    """A tool re-read before the human means *that* is what was corrected."""
     samples, _ = collect_transcription_samples(
         [
             _correction(
@@ -210,11 +198,7 @@ def test_non_transcription_entries_are_ignored():
     assert tally.transcription_entries == 0
 
 
-# ── The escalation-floor curve ──────────────────────────────────────────────
-
-
 def _mixed_corrections() -> list[GradeJournalEntry]:
-    """Four wrong readings at 20/40/60/80 and four right ones at the same."""
     entries: list[GradeJournalEntry] = []
     for index, confidence in enumerate((20.0, 40.0, 60.0, 80.0)):
         entries.append(
@@ -240,19 +224,15 @@ def test_the_curve_reports_cost_and_catch_at_each_floor():
     samples, _ = collect_transcription_samples(_mixed_corrections())
     curve = {point.floor: point for point in build_floor_curve(samples)}
 
-    # A floor of 50 escalates the four readings under it (20 and 40, each of
-    # which has a right and a wrong one), catching two of the four errors.
     assert curve[50.0].escalated == 4
     assert curve[50.0].caught == 2
     assert curve[50.0].errors == 4
     assert curve[50.0].precision == 0.5
-    # A floor of 100 escalates everything and therefore catches everything.
     assert curve[100.0].escalated == 8
     assert curve[100.0].catch_rate == 1.0
 
 
 def test_an_unmeasured_reading_is_outside_the_curve():
-    """`should_escalate` never escalates one, so it cannot be judged by a floor."""
     samples, _ = collect_transcription_samples(
         [_correction(confidence=None, source="vision-model", machine="a", human="b")]
     )
@@ -272,7 +252,6 @@ def test_a_blank_reading_is_escalated_at_every_floor():
 
 
 def test_catch_is_monotonic_in_the_floor():
-    """The property `recommend_floor` relies on: raising it can only catch more."""
     samples, _ = collect_transcription_samples(_mixed_corrections())
     caught = [point.caught for point in build_floor_curve(samples)]
 
@@ -283,8 +262,6 @@ def test_the_lowest_floor_meeting_the_target_is_recommended():
     samples, _ = collect_transcription_samples(_mixed_corrections())
     curve = build_floor_curve(samples)
 
-    # 85 is the lowest candidate that escalates all four wrong readings (the
-    # worst sits at 80), so it is the same catch at the fewest model calls.
     assert recommend_floor(curve, target_catch=1.0, min_sample=4) == 85.0
 
 
@@ -294,7 +271,6 @@ def test_too_few_errors_recommends_nothing():
 
 
 def test_an_unreachable_target_recommends_nothing():
-    """An error with no measured confidence cannot be caught by any floor."""
     entries = _mixed_corrections()
     entries.append(
         _correction(
@@ -307,8 +283,6 @@ def test_an_unreachable_target_recommends_nothing():
     )
     samples, _ = collect_transcription_samples(entries)
 
-    # The unmeasured error is outside the judged population entirely, so the
-    # target is still reachable — that exclusion is what keeps the rate honest.
     assert recommend_floor(build_floor_curve(samples), target_catch=1.0, min_sample=4) == 85.0
 
 
@@ -319,9 +293,6 @@ def test_collapse_keeps_one_row_per_distinct_behaviour():
     escalated = [point.escalated for point in collapsed]
     assert escalated == sorted(set(escalated))
     assert len(collapsed) < len(build_floor_curve(samples))
-
-
-# ── Coverage and the whole report ───────────────────────────────────────────
 
 
 def _document(question_count: int = 4) -> StudentSubmissionDocument:

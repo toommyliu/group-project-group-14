@@ -1,10 +1,3 @@
-"""Tests for the photo-import CLI (cli/photo_import.py).
-
-These exercise the argparse plumbing and I/O against tiny synthetic photos —
-the geometry itself is covered in
-tests/unit/core/submissions/test_photo_intake.py.
-"""
-
 from __future__ import annotations
 
 import json
@@ -17,9 +10,6 @@ from opengrader.cli import photo_import
 
 
 def _save_plain_photo(path, *, size=(300, 400)) -> None:  # noqa: ANN001
-    # A flat white image with a black border and no fiducials: no quad will
-    # be confidently found or lost either way, --no-perspective keeps these
-    # tests fast and deterministic without depending on the geometry pass.
     array = np.full((size[1], size[0], 3), 255, dtype=np.uint8)
     array[:6, :] = 0
     array[-6:, :] = 0

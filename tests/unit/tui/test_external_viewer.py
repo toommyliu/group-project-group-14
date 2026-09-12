@@ -39,7 +39,6 @@ def test_configured_viewer_overrides_the_platform_launcher(
 
 
 def test_placeholder_positions_the_path(monkeypatch, image: Path) -> None:
-    """Some viewers need the path before their flags."""
     monkeypatch.setenv(ENV_VIEWER, "myviewer {} --fullscreen")
 
     assert viewer_command(image) == ["myviewer", str(image), "--fullscreen"]
@@ -48,7 +47,6 @@ def test_placeholder_positions_the_path(monkeypatch, image: Path) -> None:
 def test_empty_viewer_setting_is_an_error(monkeypatch, image: Path) -> None:
     monkeypatch.setenv(ENV_VIEWER, "   '' ")
 
-    # A quoted-empty command would otherwise exec the empty string.
     with pytest.raises(ExternalViewerError):
         viewer_command(image)
 
@@ -63,9 +61,6 @@ def test_missing_image_reports_the_path(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_viewer_is_launched_detached_and_silenced(monkeypatch, image: Path) -> None:
-    """The viewer must not inherit the TUI's terminal: stdio goes to
-    /dev/null and (on POSIX) the child gets its own session, so it can
-    neither print over the UI nor steal keystrokes."""
     monkeypatch.setenv(ENV_VIEWER, "myviewer")
     calls: list[tuple[list[str], dict]] = []
 

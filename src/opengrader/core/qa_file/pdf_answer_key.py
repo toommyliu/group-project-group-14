@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 import cv2
-import fitz  # PyMuPDF
+import fitz
 import numpy as np
 import pytesseract
 from PIL import Image
@@ -33,26 +33,7 @@ from opengrader.core.ocr.ollama_vlm import (
 )
 
 
-"""Extract a QA-format answer key from an answer-key PDF (OCR/OpenCV/VLM).
-
-The heavy backend of ``create-answer-key`` for ``.pdf`` inputs. Two layout
-strategies: text-layer analysis (locate ``N. (Points)`` markers via PyMuPDF) or,
-with a blank assignment template, Tesseract-anchored alignment. OpenCV finds the
-answer box in each question region; an optional Ollama vision model cleanly
-separates the printed prompt from the handwritten solution. Output is imperfect
-by nature — the generated markdown is meant to be reviewed/edited before grading.
-
-``extract_qa_markdown_from_pdf`` is the entry point; it takes an already-verified
-``ollama_config`` (server boot/verification is the caller's job) and returns the
-QA markdown string.
-"""
-
-
 def detect_question_positions(doc):
-    """
-    Scans the PDF to find the coordinates of "1.", "2.", etc.
-    Returns: q_starts (dict), max_q (int)
-    """
     all_detections = {}
     max_q = 0
 
@@ -61,10 +42,9 @@ def detect_question_positions(doc):
         img, _, _ = render_page_to_image(doc, pg_idx, dpi=300)
         img_w, img_h = img.size
 
-        # Focus OCR on the left 30% of the page to catch numbers even with wide margins
         left_img = img.crop((0, 0, int(img_w * 0.3), img_h))
 
-        # Use PSM 6 (uniform block of text) for better vertical list recognition
+        # PSM 6 treats the vertical question-number list as one text block.
         config = "--psm 6"
         data = safe_image_to_data(left_img, config=config)
 
@@ -75,12 +55,10 @@ def detect_question_positions(doc):
             if re.match(r"^\d{1,2}\.$", text) or re.match(r"^\d{1,2}$", text):
                 potential_num = int(text.rstrip("."))
 
-                # If it was just a number without a dot, check if the next token is a dot
                 has_dot = "." in text or (
                     i + 1 < len(data["text"]) and data["text"][i + 1].strip() == "."
                 )
 
-                # Peek ahead for "(points)" to confirm format
                 full_context = " ".join(data["text"][max(0, i - 1) : i + 6])
                 if has_dot and re.search(r"\(?\d+\s*points?\)?", full_context):
                     matched_qnum = potential_num
@@ -93,35 +71,26 @@ def detect_question_positions(doc):
                 all_detections[matched_qnum].append((pg_idx + 1, y_frac, x_left))
                 max_q = max(max_q, matched_qnum)
 
-    # Find the vertical column where most numbers sit (the margin)
     single_xs = [dets[0][2] for dets in all_detections.values() if len(dets) == 1]
     median_x = sorted(single_xs)[len(single_xs) // 2] if single_xs else 0
 
     q_starts = {}
     for qnum, dets in all_detections.items():
-        # Pick the detection closest to the standard left margin
         best = min(dets, key=lambda d: abs(d[2] - median_x))
-        q_starts[qnum] = (best[0], best[1])  # (page, y_frac)
+        q_starts[qnum] = (best[0], best[1])  # (page, y_frac).
 
     return q_starts, max_q
 
 
 def compute_bounding_boxes(q_starts, max_q):
-    """
-    Determines the area each question covers by looking at the start of the next question.
-    """
-
     sorted_qs = sorted(q_starts.items())
     boxes = {}
 
-    # Don't go to the very bottom of the page
     default_end = 0.95
 
     for idx, (qnum, (pg, y_start)) in enumerate(sorted_qs):
-        # Start slightly above the number to catch the whole line
         crop_start = max(0, y_start - 0.005)
 
-        # The end of this question is the start of the next, or the end of the page
         if idx + 1 < len(sorted_qs):
             next_qnum, (next_pg, next_y) = sorted_qs[idx + 1]
             if next_pg == pg:
@@ -137,11 +106,7 @@ def compute_bounding_boxes(q_starts, max_q):
 
 
 def find_answer_box(img_pil: Image.Image):
-    """
-    Uses OpenCV to find a rectangular 'answer box' inside a question area.
-    Returns the relative y-fraction where the box starts, or None.
-    """
-    # Convert PIL to OpenCV (BGR)
+    """The returned y-fraction is relative to the question area, not the page."""
     cv_img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -155,22 +120,17 @@ def find_answer_box(img_pil: Image.Image):
         approx = cv2.approxPolyDP(c, 0.02 * peri, True)
         if len(approx) == 4:
             x, y, w, h = cv2.boundingRect(approx)
-            # If it's a reasonably large box (at least 15% of width)
             if w > width * 0.15 and h > 20:
                 return y / height
     return None
 
 
 def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssignmentTemplate:
-    """
-    Parses a blank template PDF to extract question numbers, prompts, points,
-    and their normalized bounding boxes from the text layer.
-    """
     questions: dict[int, QuestionLayoutInfo] = {}
     current_qnum: int | None = None
     current_points: float | None = None
     current_prompt_lines: list[str] = []
-    # (page, y0, x0, page_w, page_h)
+    # (page, y0, x0, page_w, page_h).
     current_start: tuple[int, float, float, float, float] | None = None
 
     for pg_idx in range(len(blank_template_doc)):
@@ -179,7 +139,7 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
         text_blocks = page.get_text("dict")["blocks"]
 
         for block in text_blocks:
-            if block["type"] == 0:  # Text block
+            if block["type"] == 0:
                 for line_dict in block["lines"]:
                     line_text = "".join(span["text"] for span in line_dict["spans"]).strip()
                     x0, y0, x1, y1 = line_dict["bbox"]
@@ -187,9 +147,7 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
                     match = QUESTION_PREFIX_RE.match(line_text)
                     if match:
                         if current_qnum is not None and current_start is not None:
-                            # Finalize previous question
                             prev_pg, prev_y0, prev_x0, prev_pw, prev_ph = current_start
-                            # If next question is on a new page, the current one ends at the page bottom.
                             y_end = y0 if prev_pg == pg_idx + 1 else prev_ph
                             questions[current_qnum] = QuestionLayoutInfo(
                                 qnum=current_qnum,
@@ -209,10 +167,8 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
                     elif current_qnum is not None:
                         current_prompt_lines.append(line_text)
 
-    # Finalize the last question
     if current_qnum is not None and current_start is not None:
         prev_pg, prev_y0, prev_x0, prev_pw, prev_ph = current_start
-        # Assume last question on page goes to the 95% mark as a fallback
         questions[current_qnum] = QuestionLayoutInfo(
             qnum=current_qnum,
             page=prev_pg,
@@ -224,7 +180,6 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
             prompt=" ".join(current_prompt_lines).strip(),
         )
 
-    # Refine y_bottom_norm for all questions based on the next question's start
     sorted_qnums = sorted(questions.keys())
     for i, qnum in enumerate(sorted_qnums):
         if i + 1 < len(sorted_qnums):
@@ -240,9 +195,6 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
 def _detect_scan_question_alignments(
     rendered_pages: dict[int, Image.Image]
 ) -> dict[int, list[ScanQuestionPosition]]:
-    """
-    Detects question prefixes on rendered scan pages using pytesseract for alignment.
-    """
     question_positions: dict[int, list[ScanQuestionPosition]] = {}
 
     for page_number, image in sorted(rendered_pages.items()):
@@ -270,15 +222,10 @@ def _calculate_page_offsets(
     blank_layout: dict[int, QuestionLayoutInfo],
     scan_alignments: dict[int, list[ScanQuestionPosition]]
 ) -> dict[int, float]:
-    """
-    Calculates the median vertical offset per page between blank assignment layout
-    and detected scan question positions.
-    """
     deltas_by_page: dict[int, list[float]] = {}
     for qnum, blank_info in blank_layout.items():
         scan_positions = scan_alignments.get(qnum)
         if scan_positions:
-            # Take the first detected position for this qnum on the page
             scan_pos = scan_positions[0] 
             if blank_info.page == scan_pos.page:
                 deltas_by_page.setdefault(scan_pos.page, []).append(scan_pos.y_top_norm - blank_info.y_top_norm)
@@ -286,25 +233,13 @@ def _calculate_page_offsets(
     return calculate_page_offsets(deltas_by_page)
 
 
-# Below this many characters, a question region's text layer is treated as
-# absent (a stray header/page number, not real content) and we fall back to OCR.
 _TEXT_LAYER_MIN_CHARS = 10
 
-# OCR→VLM cascade thresholds. Tesseract reads clean printed answer keys well, so
-# the (slow) vision model runs only when OCR looks unreliable. Empty/near-empty
-# output is the strongest handwriting signal (Tesseract returns little or nothing
-# on cursive); mean word confidence below the threshold is the secondary one.
-# 60.0 matches the main extractor's DEFAULT_CONFIDENCE_THRESHOLD.
 _OCR_CONFIDENCE_THRESHOLD = 60.0
 _OCR_MIN_CHARS = 3
 
 
 def _ocr_mean_confidence(image: Image.Image) -> float:
-    """Mean Tesseract word confidence over a crop; 0.0 when nothing was read.
-
-    Non-text rows (Tesseract reports ``conf == -1``) and blank tokens are
-    ignored so the average reflects only actual recognized words.
-    """
     data = safe_image_to_data(image)
     confidences: list[float] = []
     for conf, text in zip(data.get("conf", []), data.get("text", [])):
@@ -320,11 +255,6 @@ def _ocr_mean_confidence(image: Image.Image) -> float:
 
 
 def _ocr_looks_unreliable(text: str, mean_confidence: float) -> bool:
-    """Whether Tesseract's read of a region should be escalated to the VLM.
-
-    True when the result is empty/near-empty (handwriting Tesseract couldn't
-    read) or its mean word confidence is below the threshold.
-    """
     if len(text.strip()) < _OCR_MIN_CHARS:
         return True
     return mean_confidence < _OCR_CONFIDENCE_THRESHOLD
@@ -335,11 +265,6 @@ def _text_from_region(
     page_num: int,
     bbox_norm: tuple[float, float, float, float],
 ) -> str:
-    """Read the born-digital text layer inside a question's region.
-
-    Returns the region's exact text for a born-digital PDF, or ``""`` for a
-    scanned/image page (no text layer) so the caller falls back to OCR.
-    """
     try:
         page = doc[page_num - 1]
     except (IndexError, KeyError):
@@ -357,30 +282,17 @@ def _text_from_region(
 def extract_content(
     doc: fitz.Document,
     rendered_pages: dict[int, Image.Image],
-    question_bboxes: dict[int, tuple[int, tuple[float, float, float, float]]], # qnum -> (page, bbox_norm)
+    question_bboxes: dict[int, tuple[int, tuple[float, float, float, float]]],
     max_q: int,
     ollama_config: OllamaVisionConfig | None = None,
     progress: Callable[[int, int], None] | None = None,
 ):
-    """
-    Crops the PDF based on boxes and extracts text to find Points, Question, and Answer.
-    Fills in missing questions between 1 and max_q.
-    Uses rendered_pages and normalized bboxes for extraction.
-
-    Reading cascades cheapest-first: a born-digital region is read straight from
-    its text layer (exact; skips OCR and the vision model). A scanned region is
-    read with Tesseract, and the Ollama vision model runs only when
-    ``ollama_config`` is given *and* the OCR looks unreliable (empty/low
-    confidence — the signals of handwriting), so clean printed keys never pay the
-    VLM cost. ``progress(current_question, total_questions)`` fires once per question.
-    """
     markdown_questions = []
 
     for qnum in range(1, max_q + 1):
         if progress is not None:
             progress(qnum, max_q)
         if qnum not in question_bboxes:
-            # Fill in missing question gap with placeholder sections
             block = (
                 f"- (10 points) [Question {qnum} - Text not detected]\n"
                 "  - **Correct**\n"
@@ -407,45 +319,34 @@ def extract_content(
         inner_box_y_frac = None
         vlm_answer = None
 
-        # 0. Born-digital fast path: read the exact text layer for this region.
-        #    When present, it's exact and needs no OCR/VLM — so even if Ollama is
-        #    enabled, it doesn't run here (it's the fallback for scans only).
         text_layer = _text_from_region(doc, pg_num, bbox_norm)
         if len(text_layer) >= _TEXT_LAYER_MIN_CHARS:
             full_text = text_layer
         else:
-            # 1. Primary OCR Scan (Tesseract) for scanned/image pages.
             inner_box_y_frac = find_answer_box(cropped_image)
             full_text = pytesseract.image_to_string(cropped_image).strip()
 
-            # 2. VLM fallback — only when Ollama is enabled AND OCR looks
-            #    unreliable (empty/low-confidence: the marks of handwriting). A
-            #    clean printed answer key reads fine with Tesseract and skips the
-            #    slow vision model entirely.
             if ollama_config and _ocr_looks_unreliable(
                 full_text, _ocr_mean_confidence(cropped_image)
             ):
                 with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                     cropped_image.save(tmp.name)
                     try:
-                        # VLM is much better at separating prompt from answer and cleaning noise
                         vlm_prompt, vlm_answer = extract_question_prompt_and_answer(
                             image_path=Path(tmp.name),
                             config=ollama_config
                         )
                         if vlm_prompt:
-                            full_text = vlm_prompt # Use VLM's cleaner prompt extraction
+                            full_text = vlm_prompt
                     except Exception as e:
                         print(f"  Warning: Ollama check failed for Q{qnum}: {e}", file=sys.stderr)
 
         pts_match = re.search(POINTS_SPEC, full_text, re.IGNORECASE)
         points = pts_match.group(1) if pts_match else "10"
 
-        # Split logic: Priority to 1. "Solution:" keyword, 2. Inner Box
         sol_match = re.search(r"(?i)solution\s*:?\s*", full_text)
 
         if sol_match:
-            # Question stem is everything before "solution:"
             stem_text = full_text[: sol_match.start()].strip()
             question_stem = stem_text
             answer_body = full_text[sol_match.end() :].strip()
@@ -453,34 +354,28 @@ def extract_content(
             question_stem = full_text
             answer_body = vlm_answer
         elif inner_box_y_frac:
-            # If no solution keyword, use detected inner box
             lines = [l.strip() for l in full_text.split("\n") if l.strip()]
             split_idx = int(len(lines) * inner_box_y_frac)
             question_stem = " ".join(lines[:split_idx])
             answer_body = " ".join(lines[split_idx:])
         else:
-            # Default fallback
             lines = [l.strip() for l in full_text.split("\n") if l.strip()]
             question_stem = " ".join(lines) if lines else f"Question {qnum}"
             answer_body = "No answer detected."
 
-        # Clean up the stem: Remove redundant "N." and "(X points)"
         question_stem = re.sub(rf"^\s*{qnum}\.?\s*", "", question_stem)
         question_stem = re.sub(
             r"\(?\d+\s*points?\)?", "", question_stem, flags=re.IGNORECASE
         ).strip()
         question_stem = re.sub(r"\s+", " ", question_stem).strip()
 
-        # Clean up answer: Remove prefixes if they were accidentally caught in the answer crop
         answer_body = re.sub(r"(?i)^solution\s*:?\s*", "", answer_body).strip()
-        # Strip leading question numbers and points if they leaked into the answer
         answer_body = re.sub(rf"^\s*{qnum}\.?\s*", "", answer_body)
         answer_body = re.sub(
             r"^\s*\(?\d+\s*points?\)?\s*", "", answer_body, flags=re.IGNORECASE
         ).strip()
         answer_body = re.sub(r"\s+", " ", answer_body).strip()
 
-        # Calculate half points for rubric
         try:
             pts_val = int(points)
         except ValueError:
@@ -489,12 +384,10 @@ def extract_content(
         if half_pts.is_integer():
             half_pts = int(half_pts)
 
-        # Split multiple answers delimited by slashes into a bulleted list
         answer_parts = [a.strip() for a in re.split(r'[\\/]', answer_body)]
         answer_parts = [a for a in answer_parts if a]
         correct_section = "\n".join([f"    - {a}" for a in answer_parts]) or "    - No answer detected."
 
-        # Format into the Opengrader Markdown structure
         block = (
             f"- ({points} points) {question_stem}\n"
             f"  - **Correct**\n"
@@ -519,13 +412,6 @@ def extract_qa_markdown_from_pdf(
     emit: Callable[[str], None] | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> str:
-    """Extract a QA-format answer key from an answer-key PDF and return markdown.
-
-    ``ollama_config`` must already be verified (server boot is the caller's job);
-    pass ``None`` to run Tesseract-only. Raises ``FileNotFoundError``/``ValueError``
-    on unusable inputs rather than exiting, so callers control error reporting.
-    ``progress(current_question, total_questions)`` is called once per question.
-    """
     say = emit or (lambda _message: None)
 
     answer_key_doc = fitz.open(str(pdf_path))

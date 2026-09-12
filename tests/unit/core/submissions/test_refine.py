@@ -1,9 +1,3 @@
-"""Confidence-driven selective re-extraction: what gets re-read, and what sticks.
-
-The engine is pure, so every rule is tested against hand-built documents with no
-PDF, no Tesseract and no scratch directory in sight.
-"""
-
 from pathlib import Path
 
 from opengrader.core.question_types import FREE_RESPONSE
@@ -56,11 +50,7 @@ def _doc(*questions: StudentSubmissionQuestion) -> StudentSubmissionDocument:
     )
 
 
-# --- Selection ------------------------------------------------------------
-
-
 def test_the_floor_is_the_review_queues_floor() -> None:
-    """One number, or the tool re-reads answers nobody was worried about."""
     assert DEFAULT_REFINE_FLOOR == DEFAULT_OCR_CONFIDENCE_FLOOR
 
 
@@ -76,7 +66,6 @@ def test_selects_only_measured_readings_below_the_floor() -> None:
 
 
 def test_an_unverified_model_reading_is_never_a_target() -> None:
-    """`None` means unmeasured, not bad — the convention `review.py` also keeps."""
     question = _question("q1", text="a vision-model transcription", confidence=None)
 
     assert not is_refine_target(question, floor=DEFAULT_REFINE_FLOOR)
@@ -112,9 +101,6 @@ def test_candidate_carries_the_targets_and_identity() -> None:
     assert candidate.key == "submission-0001"
     assert candidate.target_ids == ("q1", "q2")
     assert candidate.identity == "Tommy Liu (123456789)"
-
-
-# --- The merge ------------------------------------------------------------
 
 
 def _targets(*pairs: tuple[str, str, float]) -> tuple[RefineTarget, ...]:
@@ -159,7 +145,6 @@ def test_refuses_an_equally_confident_reading() -> None:
 
 
 def test_refuses_an_empty_reading() -> None:
-    """A second attempt that reads nothing means the crop is hard, not blank."""
     existing = _doc(_question("q1", text="a partial reading", confidence=20.0))
     refreshed = _doc(_question("q1", text="   ", confidence=100.0))
 
@@ -171,7 +156,6 @@ def test_refuses_an_empty_reading() -> None:
 
 
 def test_refuses_an_unverified_model_reading_by_default() -> None:
-    """Trading a known-42% reading for an unknown one launders the review flag."""
     existing = _doc(_question("q1", text="original", confidence=42.0))
     refreshed = _doc(_question("q1", text="a model's words", confidence=None))
 
@@ -193,7 +177,6 @@ def test_accepts_an_unverified_model_reading_when_the_pass_escalated() -> None:
 
     (adopted,) = result.adopted
     assert adopted.new_text == "a model's words"
-    # Recorded as unmeasured rather than inheriting the old number.
     assert adopted.new_confidence is None
     assert adopted.confidence_summary == "42 → model read (unverified)"
 
@@ -211,7 +194,6 @@ def test_identical_text_is_not_rewritten() -> None:
 
 
 def test_only_targeted_questions_are_ever_considered() -> None:
-    """A refine may not rewrite an answer it was not launched to fix."""
     existing = _doc(
         _question("q1", text="shaky", confidence=20.0),
         _question("q2", text="already good", confidence=95.0),
@@ -228,13 +210,6 @@ def test_only_targeted_questions_are_ever_considered() -> None:
 
 
 def test_a_grader_correcting_the_answer_mid_run_wins() -> None:
-    """The plan is stale; the file is not. The file wins.
-
-    A grader who fixed the transcription by hand while the re-extraction was in
-    flight has moved the stored confidence off the value the target recorded, so
-    the merge refuses rather than overwriting their typing with a machine's
-    second guess.
-    """
     existing = _doc(_question("q1", text="human typed this", confidence=100.0))
     refreshed = _doc(_question("q1", text="machine guess", confidence=70.0))
 
@@ -253,9 +228,6 @@ def test_a_question_missing_from_the_re_extraction_is_reported() -> None:
     result = merge_refined_responses(existing, refreshed, _targets(("q1", "shaky", 20.0)))
 
     assert result.rejected == (("q1", RefineRejection.MISSING),)
-
-
-# --- Reporting ------------------------------------------------------------
 
 
 def test_summary_counts_what_a_second_attempt_could_not_fix() -> None:

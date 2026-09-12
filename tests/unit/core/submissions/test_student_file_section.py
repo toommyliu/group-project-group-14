@@ -1,5 +1,3 @@
-"""Tests for the class-section frontmatter field on student submissions."""
-
 from opengrader.core.submissions import student_file
 from opengrader.core.submissions.student_file import (
     StudentSubmissionDocument,
@@ -20,7 +18,6 @@ def _doc(section: str | None = None) -> StudentSubmissionDocument:
 
 
 def test_section_absent_renders_null() -> None:
-    """No section → `section: null`, consistent with the other optional scalars."""
     markdown = student_file.render_student_submission_markdown(_doc(section=None))
     assert "section: null" in markdown
 
@@ -50,5 +47,4 @@ def test_set_section_overwrites_existing() -> None:
     updated = set_student_section_markdown(original, section="New")
     parsed = student_file.parse_student_submission_markdown(updated)
     assert parsed.section == "New"
-    # Only one section line, not a duplicate.
     assert updated.count("section:") == 1

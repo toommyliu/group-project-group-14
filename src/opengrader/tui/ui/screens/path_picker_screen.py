@@ -1,5 +1,3 @@
-"""Modal file-system browser used to fill path inputs from a click."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,21 +14,11 @@ PathPickMode = Literal["file", "directory", "any"]
 
 
 class _FilteredDirectoryTree(DirectoryTree):
-    """Directory tree that hides dotfiles."""
-
     def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
         return [path for path in paths if not path.name.startswith(".")]
 
 
 class PathPickerScreen(ModalScreen[Path | None]):
-    """Browse the file system and dismiss with the chosen path, or None.
-
-    ``mode`` controls what can be confirmed: a file, a directory, or any
-    path. Selecting a file in the tree confirms immediately (file/any modes);
-    directories are confirmed with the Select button so clicking them still
-    expands the tree while navigating.
-    """
-
     DEFAULT_CSS = """
     PathPickerScreen {
         align: center middle;

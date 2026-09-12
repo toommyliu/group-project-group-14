@@ -1,26 +1,3 @@
-"""Modal inter-grader agreement view, opened with I (teacher mode only).
-
-A read-only pop-up answering the question a professor running a TA team has and
-could not previously ask: *are we marking this the same way?* Where the session
-view (``V``) reports how **fast** each grader worked from the audit journal,
-this reports how **generously** — and whether either of them drifted over the
-afternoon — from the same journal plus the submissions it refers to.
-
-Two things it is careful about, both inherited from the engine
-(:mod:`opengrader.core.analytics.grader_agreement`):
-
-* **Leniency is a residual**, not a raw average. The TA handed the hard half of
-  the exam has a low mean and may be the fairest person on the team, so every
-  figure is measured against how that question was marked overall.
-* **It says when it cannot compare.** On a cleanly divided cohort no two graders
-  mark comparable work, and the honest answer is to say so and point at
-  ``calibrate pack`` — not to print residuals that sit near zero only because
-  each grader is their own sole reference.
-
-Because it names graders, it is teacher-mode only, exactly like grade history
-(``H``) and the session analytics (``V``). esc or I closes it.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -39,8 +16,6 @@ from opengrader.tui.formatting import (
 
 
 class GraderAgreementScreen(ModalScreen[None]):
-    """Read-only leniency, drift and pairwise-agreement summary per grader."""
-
     DEFAULT_CSS = """
     GraderAgreementScreen {
         align: center middle;
@@ -125,9 +100,6 @@ class GraderAgreementScreen(ModalScreen[None]):
                         "early in their own session[/dim]",
                         classes="grader-agreement-legend",
                     )
-                # Same-answer overlap is a superset of same-work overlap, so
-                # showing both would state the same finding twice, the second
-                # time more weakly. Prefer the stronger basis when it exists.
                 pairs = self._report.same_work_pairs or self._report.same_answer_pairs
                 if pairs:
                     basis = (

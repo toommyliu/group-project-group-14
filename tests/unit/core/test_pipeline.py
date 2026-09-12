@@ -1,21 +1,3 @@
-"""The pipeline orchestrator: what each stage does, skips, reuses and refuses.
-
-Two kinds of test live here and they are testing different risks.
-
-The **argv** tests are the important ones for orchestration correctness. Almost
-every bug this module can have is a wiring bug — the extractor pointed at the
-bundle instead of the split folder, ``--resume`` quietly dropped, the vision
-model handed to the text grader — and none of those raise. They produce a
-plausible-looking run with the wrong result, so the argv each stage would build
-is asserted literally.
-
-The **run** tests stub the inner CLIs, because what is being checked is the
-orchestration around them (order, ledger, blocking, partial reports), not the
-splitting and OCR those tools have their own suites for. The single exception is
-the end-to-end test at the bottom, which runs the real scan pre-flight and the
-real grader over a copy of the real ``cs146-quiz1`` sample.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -54,13 +36,7 @@ from opengrader.core.submissions.scan_check import (
 _SAMPLES = Path(__file__).resolve().parents[3] / "samples"
 
 
-# --------------------------------------------------------------------------- #
-# Fixtures
-# --------------------------------------------------------------------------- #
-
-
 def _pdf(path: Path, pages: int = 2) -> Path:
-    """A small but real PDF — the fingerprint reads its bytes, so it must exist."""
     path.parent.mkdir(parents=True, exist_ok=True)
     doc = fitz.open()
     for index in range(pages):
@@ -72,8 +48,6 @@ def _pdf(path: Path, pages: int = 2) -> Path:
 
 
 class _StageRecorder:
-    """Stands in for the three CLIs and records exactly how each was called."""
-
     def __init__(self, split_dir: Path, submissions_dir: Path) -> None:
         self.calls: list[tuple[str, list[str]]] = []
         self._split_dir = split_dir
@@ -130,7 +104,6 @@ def _report(issues=()):
 
 @pytest.fixture
 def clean_scan(monkeypatch):
-    """A pre-flight that finds nothing. Real OSD is exercised in test_scan_check."""
     monkeypatch.setattr(
         scan_check_module, "analyze_scan_pdf", lambda *_args, **_kwargs: _report()
     )
@@ -138,7 +111,6 @@ def clean_scan(monkeypatch):
 
 @pytest.fixture
 def rotated_scan(monkeypatch):
-    """A pre-flight with one high-severity finding — the blocking case."""
     issue = ScanIssue(
         kind=ScanIssueKind.ROTATED_PAGE,
         severity="high",
@@ -161,11 +133,6 @@ def _request(tmp_path, **overrides) -> PipelineRequest:
     )
     base.update(overrides)
     return PipelineRequest(**base)  # type: ignore[arg-type]
-
-
-# --------------------------------------------------------------------------- #
-# Planning — the argv each stage would build
-# --------------------------------------------------------------------------- #
 
 
 def test_plan_covers_every_stage_in_run_order(tmp_path) -> None:
@@ -306,11 +273,6 @@ def test_auto_grade_is_skipped_when_turned_off(tmp_path) -> None:
     assert plan.status is StageStatus.SKIPPED
 
 
-# --------------------------------------------------------------------------- #
-# Running
-# --------------------------------------------------------------------------- #
-
-
 def test_stages_run_in_order_and_report_what_they_did(tmp_path, stages, clean_scan) -> None:
     qa = tmp_path / "qa.md"
     qa.write_text("# key\n", encoding="utf-8")
@@ -327,7 +289,6 @@ def test_stages_run_in_order_and_report_what_they_did(tmp_path, stages, clean_sc
 def test_the_stage_runs_exactly_the_command_the_plan_advertised(
     tmp_path, stages, clean_scan
 ) -> None:
-    """The plan and the run must not be able to drift apart."""
     request = _request(tmp_path, pages_per_submission=6)
     planned = {plan.stage: plan.argv for plan in plan_pipeline(request)}
     run_pipeline(request)
@@ -376,7 +337,6 @@ def test_force_proceeds_past_a_blocking_finding_but_still_reports_it(
 def test_a_blocking_finding_is_never_written_to_the_ledger(
     tmp_path, stages, rotated_scan
 ) -> None:
-    """Or a later run would inherit it as "already checked, all fine"."""
     run_pipeline(_request(tmp_path, force=True))
     ledger = read_manifest(tmp_path / "cohort", filename=RUN_LEDGER_FILENAME)
     assert STAGE_SCAN_CHECK not in ledger
@@ -392,7 +352,6 @@ def test_a_failing_stage_returns_the_partial_report(tmp_path, stages, clean_scan
     assert report.stage(STAGE_SPLIT).status is StageStatus.RAN
     extract = report.stage(STAGE_EXTRACT)
     assert extract.status is StageStatus.FAILED
-    # A bare `str(SystemExit(1))` is "1", which says nothing in a status bar.
     assert "exited with status 1" in extract.message
     assert "submission-extractor" in extract.detail
     assert report.stage(STAGE_AUTO_GRADE) is None
@@ -414,11 +373,6 @@ def test_a_keyboard_interrupt_is_not_swallowed(tmp_path, stages, clean_scan) -> 
         run_pipeline(_request(tmp_path))
 
 
-# --------------------------------------------------------------------------- #
-# Resume — the point of the ledger
-# --------------------------------------------------------------------------- #
-
-
 def test_a_second_run_on_an_unchanged_input_reuses_instead_of_repeating(
     tmp_path, stages, clean_scan
 ) -> None:
@@ -433,9 +387,7 @@ def test_a_second_run_on_an_unchanged_input_reuses_instead_of_repeating(
     assert second.stage(STAGE_SCAN_CHECK).status is StageStatus.REUSED
     assert second.stage(STAGE_SPLIT).status is StageStatus.REUSED
     assert second.stage(STAGE_AUTO_GRADE).status is StageStatus.REUSED
-    # Reused means the tool was not invoked at all, not that it ran quickly.
     assert stages.stages() == [STAGE_EXTRACT]
-    # …and the message has to be concrete enough to teach what resume bought.
     assert "reused 2 split PDF(s)" in second.stage(STAGE_SPLIT).message
 
 
@@ -454,7 +406,7 @@ def test_extraction_always_runs_because_its_resume_is_one_level_down(
 def test_a_changed_scan_invalidates_the_split(tmp_path, stages, clean_scan) -> None:
     request = _request(tmp_path)
     run_pipeline(request)
-    _pdf(request.scan, pages=8)  # re-scanned
+    _pdf(request.scan, pages=8)
     stages.calls.clear()
     second = run_pipeline(request)
 
@@ -479,13 +431,12 @@ def test_a_changed_answer_key_invalidates_only_the_grading(
 
 
 def test_a_grown_cohort_invalidates_the_grading_pass(tmp_path, stages, clean_scan) -> None:
-    """Otherwise students who arrived on the second run are never graded."""
     qa = tmp_path / "qa.md"
     qa.write_text("# key\n", encoding="utf-8")
     request = _request(tmp_path, qa_file=qa)
     run_pipeline(request)
 
-    stages.split_count = 3  # a third student turned up
+    stages.split_count = 3
     stages.calls.clear()
     second = run_pipeline(request)
 
@@ -496,7 +447,6 @@ def test_a_grown_cohort_invalidates_the_grading_pass(tmp_path, stages, clean_sca
 def test_grading_a_reused_cohort_is_not_re_run_just_because_grades_changed(
     tmp_path, stages, clean_scan
 ) -> None:
-    """The TUI rewrites these files constantly; that must not cost a model pass."""
     qa = tmp_path / "qa.md"
     qa.write_text("# key\n", encoding="utf-8")
     request = _request(tmp_path, qa_file=qa)
@@ -522,7 +472,6 @@ def test_fresh_ignores_the_ledger_entirely(tmp_path, stages, clean_scan) -> None
 
 
 def test_jobs_is_not_part_of_any_settings_fingerprint(tmp_path, stages, clean_scan) -> None:
-    """Adding --jobs must not re-split and re-grade a whole class."""
     request = _request(tmp_path)
     run_pipeline(request)
     stages.calls.clear()
@@ -538,11 +487,6 @@ def test_a_reused_stage_reports_usable_paths(tmp_path, stages, clean_scan) -> No
     outputs = second.stage(STAGE_SPLIT).outputs
     assert outputs
     assert all(Path(item).is_absolute() and Path(item).exists() for item in outputs)
-
-
-# --------------------------------------------------------------------------- #
-# Progress
-# --------------------------------------------------------------------------- #
 
 
 def test_progress_reports_every_stage_start_and_finish(tmp_path, stages, clean_scan) -> None:
@@ -575,20 +519,8 @@ def test_status_lines_are_forwarded_from_the_inner_clis(
     assert "Wrote 2 split PDFs" in seen
 
 
-# --------------------------------------------------------------------------- #
-# End to end, on the real sample cohort
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.skipif(not _SAMPLES.is_dir(), reason="sample data not present")
 def test_end_to_end_on_the_cs146_sample(tmp_path, monkeypatch) -> None:
-    """A real directory-input run: real pre-flight, real grading, real answer key.
-
-    Only extraction is stubbed — re-OCR'ing the sample would need Tesseract and
-    minutes, and the extracted cohort it would produce is already in the
-    samples. Everything else is the genuine article, working on a **copy**:
-    grading rewrites these files in place.
-    """
     scans = tmp_path / "scans"
     shutil.copytree(_SAMPLES / "cs146-quiz1" / "split-submissions", scans)
     cohort = tmp_path / "cohort"
@@ -613,21 +545,17 @@ def test_end_to_end_on_the_cs146_sample(tmp_path, monkeypatch) -> None:
     assert first.stage(STAGE_AUTO_GRADE).status is StageStatus.RAN
     assert first.submission_count == 2
     assert first.ready_to_grade
-    # The extractor is pointed at the already-split folder, never at a split/
-    # directory that this run had no reason to create.
     assert extract_calls[0][:2] == ["--input", str(scans)]
     assert not (cohort / "split").exists()
 
-    # Grades actually landed, from the real rubric in the real answer key.
     graded = (
         cohort / "submissions" / "submission-0001" / "submission-0001.submission.md"
     ).read_text(encoding="utf-8")
     assert "- Analysis: Correct" in graded
 
-    # …and a second run of the identical command repeats none of it.
     extract_calls.clear()
     second = run_pipeline(request)
     assert second.stage(STAGE_SCAN_CHECK).status is StageStatus.REUSED
     assert second.stage(STAGE_SPLIT).status is StageStatus.SKIPPED
     assert second.stage(STAGE_AUTO_GRADE).status is StageStatus.REUSED
-    assert len(extract_calls) == 1  # only the per-PDF-resuming stage runs again
+    assert len(extract_calls) == 1

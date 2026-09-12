@@ -1,23 +1,4 @@
-"""Divide grading between several TAs — claim slices of the class.
-
-The anonymity lock makes a multi-grader team fair; this makes it *divided*. A
-claim records that one grader has taken a slice ("TA1 takes q1-q3", "TA2 takes
-the first forty students") so nobody grades a paper someone else already did,
-and the optimistic mtime guard stops firing as a conflict after the fact.
-
-    # split ten questions between three TAs, evenly and contiguously:
-    uv run claim divide --submissions out/subs/ --graders alice,bob,carol
-
-    # or take a slice by hand:
-    uv run claim add --submissions out/subs/ --questions q1-q3
-    uv run claim add --submissions out/subs/ --student-range 1-40
-
-    uv run claim status --submissions out/subs/     # coverage, gaps, overlaps
-    uv run claim list --submissions out/subs/       # who holds what
-    uv run claim complete cl-1a2b3c4d --submissions out/subs/
-
-Read-only with respect to grades: a claim never touches a `.submission.md`.
-"""
+"""Claim and divide assignment work between graders."""
 
 from __future__ import annotations
 
@@ -61,18 +42,7 @@ examples:
 _STATUS_GLYPH = {"active": "●", "completed": "✓", "released": "○"}
 
 
-# --------------------------------------------------------------------------- #
-# Cohort + argument parsing
-# --------------------------------------------------------------------------- #
-
-
 def _read_cohort(submissions: Path) -> tuple[list[str], list[str]]:
-    """The assignment's question ids and student ids, in the app's own order.
-
-    Student order is submission-discovery order, which is exactly the order the
-    TUI numbers students ``s1..sN`` — so "the first forty students" means the
-    same thing here and on screen.
-    """
     paths = discover_submission_paths(submissions)
     if not paths:
         raise FileNotFoundError(f"no .submission.md files found under {submissions}")
@@ -87,12 +57,6 @@ def _read_cohort(submissions: Path) -> tuple[list[str], list[str]]:
 
 
 def _expand_ids(raw: str, known: list[str]) -> list[str]:
-    """Expand a comma list that may contain ``a-b`` ranges, preserving order.
-
-    ``q1-q3`` and ``q1,q2,q7`` both work, and a range is resolved against the
-    cohort's *actual* ids rather than by arithmetic — so it can never invent a
-    ``q4`` the assignment does not have.
-    """
     wanted: list[str] = []
     position = {value: index for index, value in enumerate(known)}
     for chunk in raw.split(","):
@@ -110,18 +74,11 @@ def _expand_ids(raw: str, known: list[str]) -> list[str]:
     unknown = [value for value in wanted if value not in position]
     if unknown:
         raise ValueError(f"not in this assignment: {', '.join(unknown)}")
-    # De-duplicate while keeping cohort order stable.
     chosen = set(wanted)
     return [value for value in known if value in chosen]
 
 
 def _expand_student_range(raw: str, students: list[str]) -> list[str]:
-    """Resolve ``1-40`` (1-based positions) to that many real student ids.
-
-    Positions rather than ids because "students 1-40" is how a teacher divides a
-    pile, but the claim is stored as explicit ids so it stays correct if the
-    folder is later re-extracted or re-ordered.
-    """
     chunk = raw.strip()
     start_text, _, end_text = chunk.partition("-")
     try:
@@ -154,11 +111,6 @@ def _slice_from_args(args: Namespace, submissions: Path) -> WorkSlice:
     return WorkSlice(
         question_ids=tuple(chosen_questions), student_ids=tuple(chosen_students)
     )
-
-
-# --------------------------------------------------------------------------- #
-# Output
-# --------------------------------------------------------------------------- #
 
 
 def _claim_row(claim: WorkClaim) -> str:
@@ -201,7 +153,6 @@ def _print_status(report: CoverageReport) -> None:
             print(f"  {actor:<14} {cells} answer(s)")
 
     if report.has_overlaps:
-        # The one genuinely bad state: two graders pointed at the same paper.
         print("\n! double-booked work:")
         for overlap in report.overlaps:
             print(
@@ -211,11 +162,6 @@ def _print_status(report: CoverageReport) -> None:
             )
     elif report.is_fully_claimed:
         print("\nEvery answer is claimed exactly once. ✓")
-
-
-# --------------------------------------------------------------------------- #
-# Subcommands
-# --------------------------------------------------------------------------- #
 
 
 def _run_list(args: Namespace, submissions: Path) -> None:
@@ -335,11 +281,6 @@ def _run_close(args: Namespace, submissions: Path, *, complete: bool) -> None:
         sys.exit(1)
     verb = "Completed" if complete else "Released"
     print(f"{verb} {claim.claim_id} ({claim.work.describe()}, {claim.actor}).")
-
-
-# --------------------------------------------------------------------------- #
-# Parser
-# --------------------------------------------------------------------------- #
 
 
 def _add_submissions(parser: ArgumentParser) -> None:

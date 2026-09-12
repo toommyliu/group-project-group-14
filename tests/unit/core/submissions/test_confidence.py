@@ -1,5 +1,3 @@
-"""OCR/transcription confidence: format round-trip + Tesseract aggregation."""
-
 import pytesseract
 
 from opengrader.core.question_types import FREE_RESPONSE
@@ -48,7 +46,7 @@ def test_question_confidence_round_trips():
 def test_absent_question_confidence_is_omitted_and_none():
     doc = _doc([_question(response_confidence=None)])
     rendered = render_student_submission_markdown(doc)
-    assert "Confidence:" not in rendered  # not emitted when unset
+    assert "Confidence:" not in rendered
     parsed = parse_student_submission_markdown(rendered)
     assert parsed.questions[0].response_confidence is None
 
@@ -83,7 +81,6 @@ def test_assigning_identity_drops_stale_id_confidence():
     updated = set_student_identity_markdown(
         content, student_id="123456789", student_name="Ann Smith"
     )
-    # A human-assigned identity is verified, so OCR confidence for it is dropped.
     assert "student_id_confidence" not in updated
     assert "student_name_confidence" not in updated
     parsed = parse_student_submission_markdown(updated)
@@ -104,17 +101,11 @@ def test_ocr_image_with_confidence_averages_word_confidence(monkeypatch, tmp_pat
         def __exit__(self, *a):
             return False
 
-    # pytesseract is imported locally inside _ocr_image_with_confidence
-    # (deferred so the pytesseract import doesn't tax every TUI startup — see
-    # core/submissions/processor.py), so it must be patched on the real
-    # pytesseract module rather than a processor.pytesseract module-level
-    # binding, which no longer exists.
     monkeypatch.setattr(processor.Image, "open", lambda _p: _FakeImg())
     monkeypatch.setattr(pytesseract, "image_to_data", lambda *a, **k: fake)
 
     text, conf = processor._ocr_image_with_confidence(tmp_path / "x.png")
-    assert text == "The answer is"  # empty token dropped
-    # -1 (no confidence) excluded; mean of 90, 80, 70.
+    assert text == "The answer is"
     assert conf == (90 + 80 + 70) / 3
 
 

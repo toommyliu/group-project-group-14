@@ -1,9 +1,3 @@
-"""A read bubble sheet must produce an ordinary submission document.
-
-The point of the OMR path is that nothing downstream needs to know about it, so
-these assert the *shape* of what it writes as much as the answers it reads.
-"""
-
 import fitz
 
 from opengrader.core.bubble_sheet import (
@@ -66,8 +60,6 @@ def test_a_read_sheet_becomes_a_normal_submission_document(tmp_path) -> None:  #
 
 
 def test_the_document_round_trips_through_the_submission_format(tmp_path) -> None:  # noqa: ANN001
-    # If it did not, every downstream tool would read something different from
-    # what the extractor built.
     layout, pdf = _filled_sheet(tmp_path, {"q1": "C"})
     document = build_bubble_sheet_document(
         pdf, tmp_path / "out", layout, student_id="1001"
@@ -81,7 +73,6 @@ def test_the_document_round_trips_through_the_submission_format(tmp_path) -> Non
 
 
 def test_each_question_gets_a_crop_of_its_own_bubble_row(tmp_path) -> None:  # noqa: ANN001
-    # The crop is what lets a grader settle an unclear mark by eye.
     layout, pdf = _filled_sheet(tmp_path, {"q1": "B"})
     document = build_bubble_sheet_document(
         pdf, tmp_path / "out", layout, student_id="1001"
@@ -110,8 +101,6 @@ def test_a_confident_mark_is_recorded_as_high_confidence(tmp_path) -> None:  # n
 
 
 def test_a_double_marked_question_is_blank_zero_confidence_and_flagged(tmp_path) -> None:  # noqa: ANN001
-    # The whole reason ambiguity is expressed as "empty + zero confidence"
-    # rather than a new concept: it lands in the existing review queue.
     layout, pdf = _filled_sheet(tmp_path, {"q1": ("B", "D")})
     result = build_bubble_sheet_document(
         pdf, tmp_path / "out", layout, student_id="1001", student_name="Ada"
@@ -126,8 +115,6 @@ def test_a_double_marked_question_is_blank_zero_confidence_and_flagged(tmp_path)
 
 
 def test_a_skipped_question_is_a_confident_blank_and_not_flagged(tmp_path) -> None:  # noqa: ANN001
-    # A student who answered nothing is not a review item; only an
-    # un-interpretable mark is.
     layout, pdf = _filled_sheet(tmp_path, {"q1": "A"})
     document = build_bubble_sheet_document(
         pdf, tmp_path / "out", layout, student_id="1001", student_name="Ada"
@@ -142,8 +129,6 @@ def test_a_skipped_question_is_a_confident_blank_and_not_flagged(tmp_path) -> No
 
 
 def test_an_unregistered_page_leaves_every_question_unverified(tmp_path) -> None:  # noqa: ANN001
-    # No readings at all: the questions exist but claim no confidence, which is
-    # honest — nothing was measured.
     layout = build_bubble_sheet_layout(QUESTIONS)
     blank = fitz.Document()
     blank.new_page(width=612, height=792)
@@ -158,8 +143,6 @@ def test_an_unregistered_page_leaves_every_question_unverified(tmp_path) -> None
 
 
 def test_companion_questions_get_an_empty_block_in_answer_key_order(tmp_path) -> None:  # noqa: ANN001
-    # A bubble sheet plus a written section: without these blocks the grading
-    # TUI cannot save a grade for the written questions at all.
     layout = build_bubble_sheet_layout(
         [BubbleQuestion(question_id="q1", points=10.0),
          BubbleQuestion(question_id="q3", points=10.0)],
@@ -181,7 +164,6 @@ def test_companion_questions_get_an_empty_block_in_answer_key_order(tmp_path) ->
 
 
 def test_questions_are_emitted_even_when_the_reader_saw_nothing(tmp_path) -> None:  # noqa: ANN001
-    # A missing block would silently drop the question from the gradebook.
     layout = build_bubble_sheet_layout([BubbleQuestion(question_id="q1")])
     questions = build_bubble_submission_questions(layout, (), {}, tmp_path)
     assert [q.question_id for q in questions] == ["q1"]

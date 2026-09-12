@@ -20,9 +20,6 @@ def _detect(environ: dict[str, str], *, queried=None, is_tty: bool = True):
     )
 
 
-# --- environment fingerprinting -------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("environ", "protocol", "terminal"),
     [
@@ -44,7 +41,7 @@ def _detect(environ: dict[str, str], *, queried=None, is_tty: bool = True):
 def test_known_terminals_are_recognised_without_probing(
     environ, protocol, terminal
 ) -> None:
-    def explode():  # the terminal must not be queried when the env is enough
+    def explode():
         raise AssertionError("terminal was probed despite a known environment")
 
     capability = detect_graphics_capability(
@@ -57,9 +54,6 @@ def test_known_terminals_are_recognised_without_probing(
 
 
 def test_wezterm_prefers_iterm2_over_its_partial_kitty_support() -> None:
-    """WezTerm advertises Kitty graphics but not the placeholder cells the
-    renderer needs; its iTerm2 support is complete, so we must pick that even
-    though a capability query would answer "kitty"."""
     capability = _detect({"TERM_PROGRAM": "WezTerm"}, queried="kitty")
 
     assert capability.protocol == "iterm2"
@@ -79,9 +73,6 @@ def test_pixel_accuracy_split() -> None:
     assert GraphicsCapability("sixel", source="x").pixel_accurate
     assert not GraphicsCapability("halfcell", source="x").pixel_accurate
     assert not GraphicsCapability("unicode", source="x").pixel_accurate
-
-
-# --- queries and fallbacks -------------------------------------------------
 
 
 def test_unknown_terminal_falls_back_to_the_capability_query() -> None:
@@ -108,9 +99,6 @@ def test_non_tty_never_probes_and_uses_unicode() -> None:
     )
 
     assert capability.protocol == "unicode"
-
-
-# --- overrides -------------------------------------------------------------
 
 
 def test_explicit_override_wins_over_everything() -> None:
@@ -143,9 +131,6 @@ def test_unknown_override_is_rejected_with_the_valid_choices() -> None:
     assert "halfcell" in str(excinfo.value)
 
 
-# --- process-wide selection ------------------------------------------------
-
-
 def test_configure_graphics_sets_the_process_wide_answer(monkeypatch) -> None:
     monkeypatch.setenv(ENV_OVERRIDE, "sixel")
     try:
@@ -169,7 +154,6 @@ def test_graphics_report_explains_the_degraded_case() -> None:
     assert "Terminal.app" in report
     assert "NOT rendered in the terminal" in report
     assert "--graphics" in report
-    # The escape hatch has to be in the diagnostic, not just the UI.
     assert "'o'" in report
 
 
@@ -181,8 +165,6 @@ def test_graphics_report_is_quiet_about_the_escape_hatch_when_images_work() -> N
 
 
 def test_auto_from_the_cli_does_not_shadow_the_environment_variable() -> None:
-    """argparse defaults --graphics to "auto"; that is "no opinion", not an
-    override, so OPENGRADER_GRAPHICS must still win over detection."""
     capability = detect_graphics_capability(
         "auto",
         environ={"TERM": "xterm-kitty", ENV_OVERRIDE: "sixel"},

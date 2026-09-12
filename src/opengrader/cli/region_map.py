@@ -1,36 +1,4 @@
-"""Teach Opengrader an assignment it did not generate.
-
-The rest of the pipeline learns an assignment's layout by reading the text layer
-of a blank template *it wrote*. An instructor who already has an assignment — a
-Word document, a LaTeX build, a photocopy of last year's paper original with no
-text layer at all — has nothing for that to read, and no way in.
-
-This is the way in. Draw a box around each answer area once, on a blank copy of
-your own assignment, save it as a region map, and every scan of that assignment
-extracts against those boxes:
-
-    region-map propose  --input midterm.pdf --output midterm.regions.json
-    region-map preview  --map midterm.regions.json --input midterm.pdf \\
-                        --output midterm-preview.pdf
-    submission-extractor --input scans/ --output out/student-submissions/ \\
-                        --region-map midterm.regions.json
-
-``propose`` does the first draft with the same layout detector the OCR
-extraction path uses, so the usual job is *correcting* boxes rather than drawing
-them. When the detector cannot read an unusual assignment at all — an outcome
-it will tell you about — ``--grid`` lays out evenly spaced boxes to nudge
-instead, and ``--blank`` starts from nothing.
-
-``preview`` is the command that earns the tool. It renders the assignment with
-every mapped region outlined and labelled, which is how you check a map in ten
-seconds instead of discovering it was wrong after extracting two hundred
-students.
-
-A map is bound to the exact PDF it was drawn on (by SHA-256), and applying it to
-any other file is refused rather than attempted: re-exporting an assignment
-moves the boxes, and a mis-crop is silent — the run succeeds, the crops are of
-the wrong part of the page, and nothing says so.
-"""
+"""Create, validate, and preview answer-region maps for existing PDFs."""
 
 from __future__ import annotations
 
@@ -91,9 +59,6 @@ _SEVERITY_GLYPH = {"error": "●", "warning": "◐", "info": "○"}
 _SEVERITY_LABEL = {"error": "ERROR", "warning": "WARN", "info": "INFO"}
 
 
-# ── shared rendering ───────────────────────────────────────────────────────
-
-
 def _print_findings(findings: tuple[RegionMapFinding, ...]) -> None:
     if not findings:
         print("  No problems found. ✓")
@@ -106,9 +71,6 @@ def _print_findings(findings: tuple[RegionMapFinding, ...]) -> None:
 
 
 def _print_summary(region_map: RegionMap) -> None:
-    """What is in this map, page by page — the answer to "did it find anything?"."""
-    # Labels padded to a common width so the values line up in a column; the
-    # longest label ("Assignment:") sets it.
     print(f"  Assignment: {region_map.source_name} ({region_map.source_pages} page(s))")
     if region_map.assignment_title:
         print(f"  Title:      {region_map.assignment_title}")
@@ -151,9 +113,6 @@ def _verify_or_exit(region_map: RegionMap, pdf_path: str) -> None:
     if not verification:
         print(f"error: {verification.message}", file=sys.stderr)
         sys.exit(1)
-
-
-# ── propose ────────────────────────────────────────────────────────────────
 
 
 def _run_propose(args: Namespace) -> None:
@@ -229,9 +188,6 @@ def _run_propose(args: Namespace) -> None:
     )
 
 
-# ── validate ───────────────────────────────────────────────────────────────
-
-
 def _run_validate(args: Namespace) -> None:
     region_map = _load(args.map)
     page_count: int | None = None
@@ -279,9 +235,6 @@ def _run_validate(args: Namespace) -> None:
         sys.exit(2)
 
 
-# ── preview ────────────────────────────────────────────────────────────────
-
-
 def _run_preview(args: Namespace) -> None:
     region_map = _load(args.map)
     _verify_or_exit(region_map, args.input)
@@ -290,7 +243,7 @@ def _run_preview(args: Namespace) -> None:
         written = write_region_map_preview(
             args.input, region_map, args.output, dpi=args.dpi
         )
-    except Exception as exc:  # noqa: BLE001 - render/save failures are user-facing
+    except Exception as exc:  # noqa: BLE001
         print(f"error: could not write the preview: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -302,9 +255,6 @@ def _run_preview(args: Namespace) -> None:
         "mis-placed box\nproduces a clean, confident crop of the wrong part of "
         "the page."
     )
-
-
-# ── from-qa ────────────────────────────────────────────────────────────────
 
 
 def _run_from_qa(args: Namespace) -> None:
@@ -330,16 +280,8 @@ def _run_from_qa(args: Namespace) -> None:
     print(f"Wrote {output}")
 
 
-# ── parser ─────────────────────────────────────────────────────────────────
-
-
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        # Deliberately no `prog=`: argparse then names whatever was
-        # actually invoked — the standalone `region-map` script, or
-        # `opengrader region-map` when the front-door command dispatched
-        # here (cli/main.py patches sys.argv[0] for exactly this). A
-        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Draw the answer regions on an assignment Opengrader did not generate, "
             "once, and reuse them for every scan of it."

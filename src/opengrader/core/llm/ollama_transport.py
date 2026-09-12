@@ -1,14 +1,3 @@
-"""Domain-free ``urllib`` transport shared by every Ollama client.
-
-Both `core/llm/ollama_client.py` (text grading) and `core/ocr/ollama_vlm.py`
-(vision transcription) talk to the same local Ollama server over the same
-HTTP API, differing only in prompts, models, and the error type each raises.
-This module holds the one wire-level implementation; each caller supplies its
-own ``error_factory`` so ``OllamaError`` and ``OllamaVisionError`` stay
-distinct exception types — code across the codebase catches them by name, so
-they must never be unified.
-"""
-
 from __future__ import annotations
 
 import json
@@ -24,16 +13,6 @@ ErrorFactory = Callable[[str], Exception]
 
 
 def parse_json_object(raw: str) -> dict | None:
-    """Best-effort extraction of a single JSON object from an LLM response.
-
-    Handles bare JSON, fenced ```json blocks, and prose wrapped around an
-    object. Returns ``None`` when nothing parseable is found.
-
-    This is the *fallback* safety net now that structured calls pass a
-    ``format`` JSON schema to Ollama — replies should already be valid JSON,
-    but a model can still wrap output in prose or a fence, so the salvager
-    stays in the loop rather than being trusted as the primary parse path.
-    """
     text = raw.strip()
     if not text:
         return None
@@ -66,7 +45,6 @@ def fetch_model_names(
     timeout_seconds: float,
     error_factory: ErrorFactory,
 ) -> list[str]:
-    """Return the model names installed on the Ollama server at ``host``."""
     endpoint = f"{host.rstrip('/')}/api/tags"
     req = request.Request(endpoint, method="GET")
     try:
@@ -106,13 +84,6 @@ def generate_raw(
     timeout_seconds: float,
     error_factory: ErrorFactory,
 ) -> str:
-    """POST one prompt to ``/api/generate`` and return the response text.
-
-    ``options`` overrides Ollama generation options (e.g. ``temperature``);
-    ``num_predict`` is merged into it when given, capping generation length.
-    ``response_format`` is passed through as Ollama's ``format`` field — a
-    JSON schema that constrains the reply to structurally valid JSON.
-    """
     merged_options = dict(options) if options is not None else {"temperature": 0}
     if num_predict is not None:
         merged_options["num_predict"] = num_predict

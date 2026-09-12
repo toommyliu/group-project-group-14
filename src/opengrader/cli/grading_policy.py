@@ -1,27 +1,4 @@
-"""Get or set the anonymity policy for a submissions folder — the headless twin
-of the TUI's "Set grading policy" collapsible.
-
-Anonymity has two layers (see `core/policy.py` and `core/anonymize.py`):
-
-* **Layer 1 — the soft lock.** ``lock``/``unlock`` write
-  ``<submissions>/.opengrader/policy.json``. A locked folder disables the TUI's
-  teacher-mode toggle so a grader can't reveal names or open the audit view. The
-  decision travels with the folder, so graders inherit it rather than opting in.
-* **Layer 2 — data minimization.** ``redact-names`` strips the names out of the
-  submission files entirely (keeping ids) and writes a *name map* the teacher
-  keeps; ``restore-names`` re-joins that map. This is the real enforcement: a
-  copy with no names has nothing to reveal.
-
-Recommended teacher workflow for a multi-grader assignment:
-
-    # resolve any missing/duplicate ids first (needs the names), then:
-    uv run grading-policy lock --submissions out/subs/
-    uv run grading-policy redact-names --submissions out/subs/ \\
-        --name-map ~/private/quiz1-names.json
-    # ... hand out out/subs/, keep quiz1-names.json ...
-    uv run grading-policy restore-names --submissions out/subs/ \\
-        --name-map ~/private/quiz1-names.json    # before Canvas export
-"""
+"""Manage anonymity and traversal policies for a submissions folder."""
 
 from __future__ import annotations
 

@@ -30,7 +30,6 @@ ____
 
     q1, q2, q3, q4, q5 = parsed.questions
     assert q1.correct_lines() == ["A"]
-    # multiple-answer: labels auto-assigned a/b/c, correct = a and c
     assert q2.correct_lines() == ["A", "C"]
     assert q3.correct_lines() == ["42"]
     assert q4.correct_lines() == ["photosynthesis"]
@@ -50,7 +49,6 @@ b) wrong
 """
     parsed = parse_text2qti(text)
     q = parsed.questions[0]
-    # Only the real MC options are answers; the fenced * / = are prompt text.
     assert q.correct_lines() == ["A"]
     assert any("not an answer" in line for line in q.prompt_lines)
 
@@ -62,9 +60,6 @@ def test_render_qa_emits_frontmatter_and_rubric() -> None:
     assert "questions_start_page: 2" in md
     assert "- **Correct**" in md
     assert "- **Rubric**" in md
-
-
-# ── learning outcomes in the plain-text source format ───────────────────────
 
 
 def _qa(source: str):  # noqa: ANN202
@@ -85,8 +80,6 @@ def test_outcomes_repeat_and_comma_separate() -> None:
 
 
 def test_an_outcome_before_the_first_question_applies_to_all_of_them() -> None:
-    """"The next ten questions all measure CLO2" is the common case, and
-    repeating the line ten times is how one of them gets missed."""
     doc = _qa("Outcome: CLO2\n\n1. A?\n* a\n\n2. B?\n* b\n")
     assert [q.outcomes for q in doc.questions] == [("CLO2",), ("CLO2",)]
 
@@ -103,8 +96,6 @@ def test_an_outcome_line_is_not_mistaken_for_prompt_text() -> None:
 
 
 def test_a_source_file_with_no_outcomes_generates_none() -> None:
-    """The optional-syntax rule: an untagged file produces exactly the QA
-    markdown it always did."""
     from opengrader.core.qa_file.text2qti import parse_text2qti, render_qa
 
     markdown = render_qa(parse_text2qti("1. What is X?\n* x\n"))

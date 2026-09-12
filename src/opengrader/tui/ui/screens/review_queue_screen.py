@@ -1,14 +1,3 @@
-"""Modal "needs review" triage list, opened with r.
-
-A pop-up over the QA picker / grade screen that lists the submissions most
-likely to hold a silent OCR/extraction error or a low-confidence AI grade,
-most severe first. Rows are actionable: selecting a row opens that student/
-question on the grade screen, so triage flows straight into fixing — except a
-missing/suspect student-id row, which opens the identity picker
-(`AssignIdentityScreen`) so the reviewer resolves a duplicate name in place.
-Read-only otherwise; esc or r closes it.
-"""
-
 from __future__ import annotations
 
 from rich.text import Text
@@ -34,8 +23,6 @@ class _ReviewListItem(ListItem):
 
 
 class ReviewQueueScreen(ModalScreen["ReviewItem | None"]):
-    """List of needs-review flags; selecting one returns it to the caller."""
-
     DEFAULT_CSS = """
     ReviewQueueScreen {
         align: center middle;
@@ -144,8 +131,6 @@ class ReviewQueueScreen(ModalScreen["ReviewItem | None"]):
 
 
 class _CandidateListItem(ListItem):
-    """A roster candidate the reviewer can pick to assign the student id."""
-
     def __init__(self, candidate: IdentityCandidate) -> None:
         self.candidate = candidate
         label = Text()
@@ -157,8 +142,6 @@ class _CandidateListItem(ListItem):
 
 
 class _ManualEntryListItem(ListItem):
-    """Sentinel row that reveals the free-text id input."""
-
     def __init__(self) -> None:
         super().__init__(
             Label(Text("✎ Enter ID manually…", style="italic")),
@@ -167,15 +150,6 @@ class _ManualEntryListItem(ListItem):
 
 
 class AssignIdentityScreen(ModalScreen["tuple[str, str] | None"]):
-    """Resolve a missing/ambiguous student id.
-
-    Returns ``(student_id, student_name)`` on assignment or ``None`` on cancel.
-    When the extractor recorded roster candidates (a duplicate-name collision)
-    they are offered as a pick list so the reviewer chooses from the exact set
-    the matcher considered; a "manually" row (and the no-candidate case) reveals
-    a free-text id box for students not on the roster.
-    """
-
     DEFAULT_CSS = """
     AssignIdentityScreen {
         align: center middle;
@@ -261,7 +235,6 @@ class AssignIdentityScreen(ModalScreen["tuple[str, str] | None"]):
             list_view.index = 0
             list_view.focus()
         else:
-            # No roster candidates — go straight to manual entry.
             self.query_one("#identity-manual-id", Input).focus()
 
     def _summary_text(self) -> str:
@@ -303,7 +276,6 @@ class AssignIdentityScreen(ModalScreen["tuple[str, str] | None"]):
         if not student_id:
             self.app.notify("Enter a student ID first.", severity="warning")
             return
-        # Keep the extracted name; the reviewer is only supplying the id.
         self.dismiss((student_id, self._item.student_name))
 
     @on(Button.Pressed, "#identity-cancel")

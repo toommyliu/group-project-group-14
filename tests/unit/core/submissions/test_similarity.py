@@ -9,8 +9,6 @@ from opengrader.core.submissions.student_file import (
     StudentSubmissionQuestion,
 )
 
-# A substantive answer, comfortably above the default min-length guard, reused
-# so tests exercise the metric rather than the length filter.
 _LONG_A = (
     "A binary search halves the search interval each step, comparing the target "
     "to the middle element and discarding the half that cannot contain it."
@@ -23,9 +21,6 @@ _LONG_B = (
     "Depth-first search explores as far as possible along each branch before "
     "backtracking, using a stack to remember where to resume the traversal."
 )
-# A moderate rewrite of _LONG_A: shares most wording but rephrases the tail, so
-# it lands in the medium band (~0.87) — above the flag threshold, below the
-# near-verbatim "high" cutoff.
 _LONG_A_MEDIUM = _LONG_A.replace(
     "discarding the half that cannot contain it.",
     "then it throws away the half that cannot possibly hold it.",
@@ -91,7 +86,7 @@ def test_near_identical_answers_flagged():
     assert flag.question_id == "q1"
     assert flag.member_count == 2
     assert flag.max_score == 1.0
-    assert flag.severity == "high"  # verbatim → high
+    assert flag.severity == "high"
     assert {m.student_name for m in flag.members} == {"Ann", "Bob"}
     assert len(flag.pairs) == 1
 
@@ -105,7 +100,6 @@ def test_distinct_answers_not_flagged():
 
 
 def test_short_answers_are_never_compared():
-    # Identical, but below the default min-length guard: a canonical short answer.
     docs = [
         _doc("1", "Ann", [_question(response_text="O(n log n)")]),
         _doc("2", "Bob", [_question(response_text="O(n log n)")]),
@@ -154,8 +148,6 @@ def test_versions_are_partitioned():
 
 
 def test_threshold_is_respected():
-    # Same opening, diverging tail: alike but not identical. A high threshold
-    # rejects it; a low one accepts it.
     shared_head = _LONG_A + " "
     docs = [
         _doc("1", "Ann", [_question(response_text=shared_head + "It runs in logarithmic time.")]),
@@ -175,9 +167,7 @@ def test_three_way_ring_is_one_cluster():
     assert len(flags) == 1
     flag = flags[0]
     assert flag.member_count == 3
-    # Three students → three pairwise matches in the one cluster.
     assert len(flag.pairs) == 3
-    # Pairs are strongest-first.
     scores = [pair.score for pair in flag.pairs]
     assert scores == sorted(scores, reverse=True)
 
@@ -199,7 +189,6 @@ def test_two_independent_clusters_on_same_question():
 
 
 def test_severity_medium_for_strong_but_not_verbatim():
-    # Alike but rephrased: above threshold, below the verbatim cutoff.
     docs = [
         _doc("1", "Ann", [_question(response_text=_LONG_A)]),
         _doc("2", "Bob", [_question(response_text=_LONG_A_MEDIUM)]),
@@ -212,10 +201,8 @@ def test_severity_medium_for_strong_but_not_verbatim():
 
 def test_ordering_high_severity_and_tightest_first():
     docs = [
-        # q1: medium (strong but not verbatim)
         _doc("1", "Ann", [_question("q1", response_text=_LONG_A)]),
         _doc("2", "Bob", [_question("q1", response_text=_LONG_A_MEDIUM)]),
-        # q2: high (verbatim)
         _doc("3", "Cid", [_question("q2", response_text=_LONG_B)]),
         _doc("4", "Dan", [_question("q2", response_text=_LONG_B)]),
     ]

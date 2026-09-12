@@ -1,10 +1,3 @@
-"""The grader-copy and merge modals (start-up screen → Helper Tools).
-
-These drive the real screens against real folders, because the thing worth
-testing is the part the CLI cannot have: a conflict list where each row carries
-its own decision, and an Apply that writes exactly those decisions.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -59,8 +52,6 @@ student_score: ""
 
 
 class _Host(App):
-    """Minimal app so a modal can be pushed without the whole TUI."""
-
     def __init__(self, screen) -> None:  # noqa: ANN001
         super().__init__()
         self._screen = screen
@@ -118,15 +109,11 @@ def _points(folder: Path, question_id: str) -> float | None:
 
 
 async def _settle(pilot, predicate, limit: int = 80) -> None:  # noqa: ANN001
-    """Pump the event loop until a worker's result has landed."""
     for _ in range(limit):
         await pilot.pause()
         await asyncio.sleep(0.01)
         if predicate():
             return
-
-
-# ── creating a grader copy ────────────────────────────────────────────────
 
 
 def test_creating_a_copy_writes_a_redacted_packet(cohort: Path, tmp_path: Path) -> None:
@@ -154,8 +141,6 @@ def test_creating_a_copy_writes_a_redacted_packet(cohort: Path, tmp_path: Path) 
 
 
 def test_the_key_location_is_stated_in_the_result(cohort: Path, tmp_path: Path) -> None:
-    """Losing the key makes the returned copy unmergeable, so it is not a detail."""
-
     async def run() -> None:
         screen = GraderPacketScreen(
             submissions_path=str(cohort), output_path=str(tmp_path / "out")
@@ -196,9 +181,6 @@ def test_a_failure_is_shown_rather_than_raised(cohort: Path, tmp_path: Path) -> 
     asyncio.run(run())
 
 
-# ── merging one back ──────────────────────────────────────────────────────
-
-
 def _pack(cohort: Path, out: Path) -> Path:
     from opengrader.core.handoff.packet import build_packet
 
@@ -227,7 +209,6 @@ def test_preview_lists_changes_and_conflicts_and_writes_nothing(
             assert [change.question_id for change in plan.changes] == ["q1"]
             assert [conflict.question_id for conflict in plan.conflicts] == ["q2"]
             assert len(list(screen.query(_ConflictRow))) == 1
-            # Preview must not touch a grade.
             assert _points(cohort, "q1") is None
             assert _points(cohort, "q2") == 4.0
 
@@ -237,7 +218,6 @@ def test_preview_lists_changes_and_conflicts_and_writes_nothing(
 def test_a_conflict_row_defaults_to_keeping_ours_and_is_focused(
     cohort: Path, tmp_path: Path
 ) -> None:
-    """The safe default, and immediately operable without the mouse."""
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 2.0)
     _grade(cohort, "prof", "q1", 5.0)
@@ -288,8 +268,8 @@ def test_t_and_o_set_one_conflict_and_apply_honours_it(
             await pilot.click("#merge-apply")
             await _settle(pilot, lambda: screen._plan is None)
 
-            assert _points(cohort, "q1") == 2.0  # took theirs
-            assert _points(cohort, "q2") == 4.0  # kept ours
+            assert _points(cohort, "q1") == 2.0
+            assert _points(cohort, "q2") == 4.0
 
     asyncio.run(run())
 
@@ -348,7 +328,6 @@ def test_take_theirs_for_all_sets_every_row(cohort: Path, tmp_path: Path) -> Non
 
 
 def test_apply_is_disabled_until_a_preview_has_run(cohort: Path, tmp_path: Path) -> None:
-    """A merge must never be written from a plan the grader has not seen."""
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 5.0)
 
@@ -366,7 +345,6 @@ def test_apply_is_disabled_until_a_preview_has_run(cohort: Path, tmp_path: Path)
 
             await pilot.click("#merge-apply")
             await _settle(pilot, lambda: screen._plan is None)
-            # The plan is stale once written, so it cannot be applied twice.
             assert screen._plan is None
 
     asyncio.run(run())
@@ -389,9 +367,6 @@ def test_the_merge_is_journalled_so_it_can_be_undone(cohort: Path, tmp_path: Pat
 
             actors = {entry.actor for entry in read_journal(resolve_history_dir(cohort))}
             assert "merge:p1" in actors
-            # The result pane spells the undo out, since a grader who has just
-            # written someone else's grades into theirs needs the way back to be
-            # visible, not documented elsewhere.
             result = str(screen.query_one("#merge-body").children[0].render())
             assert "--without-actor merge:p1" in result
 
@@ -399,8 +374,6 @@ def test_the_merge_is_journalled_so_it_can_be_undone(cohort: Path, tmp_path: Pat
 
 
 def test_history_import_is_unchecked_by_default(cohort: Path, tmp_path: Path) -> None:
-    """It trades away the one-click undo, so it must be a deliberate choice."""
-
     async def run() -> None:
         screen = MergeScreen(submissions_path=str(cohort))
         app = _Host(screen)
@@ -439,9 +412,6 @@ def test_a_missing_handoff_key_is_reported_not_read_as_no_changes(
     asyncio.run(run())
 
 
-# ── where the copy is saved ───────────────────────────────────────────────
-
-
 def test_the_destination_field_is_hidden_until_the_box_is_ticked(cohort: Path) -> None:
     async def run() -> None:
         screen = GraderPacketScreen(submissions_path=str(cohort))
@@ -461,8 +431,6 @@ def test_the_destination_field_is_hidden_until_the_box_is_ticked(cohort: Path) -
 def test_the_default_destination_is_named_before_anything_is_written(
     cohort: Path,
 ) -> None:
-    """A default is only a good default if the user can see where it points."""
-
     async def run() -> None:
         screen = GraderPacketScreen(submissions_path=str(cohort))
         app = _Host(screen)
@@ -513,9 +481,6 @@ def test_a_ticked_box_with_a_path_wins(cohort: Path, tmp_path: Path) -> None:
 def test_a_stale_path_in_a_hidden_field_is_ignored_entirely(
     cohort: Path, tmp_path: Path
 ) -> None:
-    """The rule `_ollama_values` and `_jobs_argv` follow: unticked means unused,
-    so a value left behind can never silently apply to a later run."""
-
     async def run() -> None:
         screen = GraderPacketScreen(submissions_path=str(cohort))
         app = _Host(screen)
@@ -525,7 +490,6 @@ def test_a_stale_path_in_a_hidden_field_is_ignored_entirely(
             screen.query_one("#packet-custom-output", Checkbox).value = True
             screen.query_one("#packet-output", Input).value = str(tmp_path / "stale")
             await pilot.pause()
-            # Changed their mind and unticked it — the typed path must not apply.
             screen.query_one("#packet-custom-output", Checkbox).value = False
             await pilot.pause()
             await pilot.click("#packet-run")
@@ -538,11 +502,7 @@ def test_a_stale_path_in_a_hidden_field_is_ignored_entirely(
     asyncio.run(run())
 
 
-# ── reachable from a real grading session ─────────────────────────────────
-
-
 def _launch(cohort: Path, qa: Path):  # noqa: ANN202
-    """A session started the way a grader starts one: straight into the cohort."""
     from opengrader.tui.tui import TuiApp
 
     return TuiApp(qa_file_path=qa, submissions_path=cohort)
@@ -550,12 +510,6 @@ def _launch(cohort: Path, qa: Path):  # noqa: ANN202
 
 @pytest.fixture()
 def sample_session(tmp_path: Path) -> tuple[Path, Path]:
-    """A copy of the real sample cohort, per About/VERIFY_SKILL.md.
-
-    These tests launch the whole app, which resolves each submission's source
-    PDF — something a hand-written fixture cannot provide. Copied rather than
-    used in place, because grading persists into the files.
-    """
     import shutil
 
     repo = Path(__file__).resolve().parents[3]
@@ -570,9 +524,6 @@ def sample_session(tmp_path: Path) -> tuple[Path, Path]:
 def test_the_tools_are_reachable_from_a_real_grading_session(
     sample_session: tuple[Path, Path],
 ) -> None:
-    """The bug this fixes: launching with --qa-file/--submissions opens the QA
-    picker and never shows the setup screen, so a setup-only tool is invisible."""
-
     qa, cohort = sample_session
 
     async def run() -> None:
@@ -606,7 +557,7 @@ def test_the_tools_are_reachable_mid_question_too(
         app = _launch(cohort, qa)
         async with app.run_test(size=(140, 45)) as pilot:
             await pilot.pause()
-            await pilot.press("enter")  # into the grade screen
+            await pilot.press("enter")
             await pilot.pause()
             from opengrader.tui.state import PAGE_GRADE
 
@@ -621,8 +572,6 @@ def test_the_tools_are_reachable_mid_question_too(
 def test_the_merge_screen_names_students_by_id_outside_teacher_mode(
     sample_session: tuple[Path, Path],
 ) -> None:
-    """Anonymity-aware rather than teacher-gated, like the consistency audit."""
-
     qa, cohort = sample_session
 
     async def run() -> None:
@@ -636,7 +585,7 @@ def test_the_merge_screen_names_students_by_id_outside_teacher_mode(
             app.screen.dismiss(None)
             await pilot.pause()
 
-            await pilot.press("t")  # teacher mode on
+            await pilot.press("t")
             await pilot.pause()
             await pilot.press("M")
             await pilot.pause()
@@ -648,9 +597,6 @@ def test_the_merge_screen_names_students_by_id_outside_teacher_mode(
 def test_a_merge_reloads_the_session_so_the_next_save_still_works(
     sample_session: tuple[Path, Path], tmp_path: Path
 ) -> None:
-    """A merge rewrites files the session has open. Without the reload the
-    workspace shows stale grades *and* the mtime guard refuses the grader's very
-    next save — an error caused by their own merge."""
     qa, cohort = sample_session
     packet = _pack(cohort, tmp_path / "out")
     _grade(packet / "submissions", "alice", "q1", 5.0)
@@ -670,8 +616,6 @@ def test_a_merge_reloads_the_session_so_the_next_save_still_works(
             merge.dismiss(merge._merged)
             await _settle(pilot, lambda: not isinstance(app.screen, MergeScreen))
 
-            # The provider must now agree with the files on disk, or the next
-            # save raises ConcurrentModificationError.
             path = sorted(cohort.glob("*/*.submission.md"))[0]
             from opengrader.core.concurrency import file_mtime_ns
 
@@ -681,9 +625,6 @@ def test_a_merge_reloads_the_session_so_the_next_save_still_works(
             assert loaded[0].mtime_ns == file_mtime_ns(path)
 
     asyncio.run(run())
-
-
-# ── sealing a copy from the dialog ────────────────────────────────────────
 
 
 def test_a_passphrase_seals_the_copy_into_one_file(cohort: Path, tmp_path: Path) -> None:
@@ -706,8 +647,6 @@ def test_a_passphrase_seals_the_copy_into_one_file(cohort: Path, tmp_path: Path)
 
             sealed = tmp_path / "out" / "quiz-1-for-alice.zip.enc"
             assert sealed.is_file()
-            # The plaintext folder is gone, so the copy that gets sent cannot be
-            # the unprotected one.
             assert not (tmp_path / "out" / "quiz-1-for-alice").exists()
             assert b"Ada" not in sealed.read_bytes()
 
@@ -730,8 +669,6 @@ def test_mismatched_passphrases_do_not_create_anything(
             screen.query_one("#packet-passphrase-confirm", Input).value = "two"
             await pilot.click("#packet-run")
             await pilot.pause()
-            # Caught before any work is done — a mistyped passphrase on an
-            # already-sealed packet would mean the packet is gone.
             assert not (tmp_path / "out").exists()
 
     asyncio.run(run())
@@ -758,8 +695,6 @@ def test_the_merge_dialog_asks_for_a_passphrase_only_when_the_copy_is_sealed(
             await pilot.pause()
             assert screen.query_one("#merge-passphrase-area").has_class("hidden")
 
-            # Detected from the file, not asked as a question: whoever merges
-            # did not necessarily create the packet.
             field.value = str(sealed)
             await pilot.pause()
             assert not screen.query_one("#merge-passphrase-area").has_class("hidden")

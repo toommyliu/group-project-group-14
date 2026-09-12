@@ -1,5 +1,3 @@
-"""Rubric drift: grades awarded before the rubric under them last moved."""
-
 from __future__ import annotations
 
 from opengrader.core.analytics.rubric_drift import (
@@ -71,7 +69,6 @@ def test_grade_after_a_rubric_edit_is_not_stale():
 
 
 def test_a_regrade_after_the_edit_clears_an_earlier_stale_grade():
-    """Rule 3: the *latest* grade decides, not the first."""
     entries = [
         _grade(at="2026-08-01T09:00:00+00:00"),
         _rubric(at="2026-08-01T10:00:00+00:00"),
@@ -82,7 +79,6 @@ def test_a_regrade_after_the_edit_clears_an_earlier_stale_grade():
 
 
 def test_a_rubric_save_that_changed_nothing_is_not_a_change():
-    """Rule 2: opening the editor and saving must not mark a cohort stale."""
     entries = [
         _grade(at="2026-08-01T09:00:00+00:00"),
         _rubric(
@@ -107,7 +103,6 @@ def test_only_the_edited_question_is_examined():
 
 
 def test_a_grade_with_no_journal_entry_is_never_flagged():
-    """Rule 1: only on evidence. Nothing recorded ⇒ nothing asserted."""
     assert detect_rubric_drift([_rubric(at="2026-08-01T10:00:00+00:00")]) == []
 
 
@@ -125,7 +120,6 @@ def test_the_latest_of_several_edits_is_the_one_compared_against():
     stale = detect_rubric_drift(entries)
 
     assert len(stale) == 1
-    # Flagged against the *second* edit, which is the one it predates.
     assert stale[0].change.added == ("Bonus",)
 
 
@@ -139,7 +133,6 @@ def test_an_unattributable_grade_is_skipped():
 
 
 def test_a_tool_actor_grade_is_still_stale():
-    """A batch auto-grade is a grade: it was awarded under the old options too."""
     entries = [
         _grade(at="2026-08-01T09:00:00+00:00", actor="automated-grading:llm"),
         _rubric(at="2026-08-01T10:00:00+00:00"),
@@ -183,7 +176,6 @@ def test_describe_names_what_moved():
 
 
 def test_describe_falls_back_when_only_points_moved():
-    """The journal records labels only, so a points-only edit must still speak."""
     change = find_rubric_changes(
         [
             _rubric(
@@ -195,9 +187,6 @@ def test_describe_falls_back_when_only_points_moved():
     )["q1"]
 
     assert change.describe() == "rubric options changed"
-
-
-# ── The review-queue flag built from the drift ──────────────────────────────
 
 
 def _document(student_id: str = "s1", name: str = "Tommy Liu") -> StudentSubmissionDocument:
@@ -228,7 +217,6 @@ def test_flag_carries_the_question_and_enriches_from_the_submission():
 
 
 def test_flag_survives_a_missing_submission():
-    """A grade that was handed out is worth naming even if the file is gone."""
     stale = detect_rubric_drift(
         [_grade(at="2026-08-01T09:00:00+00:00"), _rubric(at="2026-08-01T10:00:00+00:00")]
     )

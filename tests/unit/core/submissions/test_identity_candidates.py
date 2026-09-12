@@ -1,10 +1,3 @@
-"""Persistence + surgical rewrite of resolved/ambiguous student identity.
-
-Covers the `id_candidates` frontmatter round trip (recorded when a duplicate
-name leaves the id blank) and `set_student_identity_*`, the review-queue write
-path that assigns an id and drops the now-resolved candidates.
-"""
-
 from pathlib import Path
 
 import pytest
@@ -49,7 +42,6 @@ def test_candidates_round_trip_through_render_and_parse() -> None:
 
 
 def test_no_candidates_emits_no_frontmatter_key() -> None:
-    # The common (resolved) case must not add noise to the file.
     rendered = render_student_submission_markdown(_document(student_id="123456789"))
     assert "id_candidates" not in rendered
 
@@ -84,7 +76,6 @@ def test_set_identity_leaves_question_blocks_untouched() -> None:
 
     updated = set_student_identity_markdown(original, student_id="123456789")
 
-    # Only the frontmatter changed; everything after the closing --- is intact.
     assert updated.split("---", 2)[2] == body
 
 

@@ -11,15 +11,10 @@ from .fakes import DEFAULT_IMAGE_PATH
 
 
 def _setup_app() -> TuiApp:
-    # Without paths the app uses the stub provider and opens on the setup page.
     return TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
 
 
 async def _expand_splitter_section(app: TuiApp, pilot: Pilot) -> None:
-    # The splitter form lives in a pipeline step that is collapsed by
-    # default; its widgets must be visible before they can be clicked.
-    # Wait out the expand/scroll animations so clicks land where the
-    # final layout puts the widgets.
     app.query_one("#section-splitter", Collapsible).collapsed = False
     await pilot.pause()
     await pilot.wait_for_scheduled_animations()
@@ -36,7 +31,6 @@ def test_browse_button_opens_picker_and_file_click_fills_input(tmp_path: Path) -
             await pilot.pause()
             await _expand_splitter_section(app, pilot)
 
-            # Seed the input so the picker opens rooted at tmp_path.
             split_input = app.query_one("#split-input", Input)
             split_input.value = str(tmp_path)
 
@@ -44,7 +38,6 @@ def test_browse_button_opens_picker_and_file_click_fills_input(tmp_path: Path) -
             await pilot.pause()
             assert isinstance(app.screen, PathPickerScreen)
 
-            # Root is auto-expanded; the only child is the sample file.
             await pilot.pause()
             await pilot.press("down", "enter")
             await pilot.pause()
@@ -94,7 +87,6 @@ def test_directory_mode_select_button_confirms_highlighted_directory(
             await pilot.pause()
             assert isinstance(app.screen, PathPickerScreen)
 
-            # Cursor starts on the root directory node; Select confirms it.
             await pilot.click("#path-picker-select")
             await pilot.pause()
 
@@ -117,7 +109,6 @@ def test_file_mode_select_button_rejects_directory(tmp_path: Path) -> None:
             await pilot.click("#browse-split-input")
             await pilot.pause()
 
-            # Cursor is on the root directory; file mode must not accept it.
             await pilot.click("#path-picker-select")
             await pilot.pause()
 

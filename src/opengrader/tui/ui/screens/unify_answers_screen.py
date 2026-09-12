@@ -1,33 +1,3 @@
-"""Modal "unify answers" view, opened with U on the grade screen.
-
-The exact answer-group tier (the ``g`` hotkey) can only batch students whose
-answers are *identical* after cosmetic normalization, because merging on
-anything looser would risk applying one grade to two different answers. This
-screen is where that risk is handed to a human instead: it lists the merges
-:mod:`opengrader.core.submissions.suggested_groups` proposes for the question in
-front of the grader, shows the full text of every answer a merge would join and
-the weakest similarity inside it, and merges nothing until the grader says so.
-
-Every answer but the representative is shown **diffed against it** — added words
-highlighted, omitted words struck through. That is not decoration: no similarity
-metric can tell a rewording from a reversal (an inserted "not" scores 0.96), so
-the grader's judgement is the only thing standing between a proposal and a wrong
-grade for a dozen students, and it has to be a judgement about a highlighted word
-rather than about two paragraphs that look identical.
-
-Accepting a proposal does not grade anybody. It only widens what the ``g``
-hotkey will cover for this question, so the grader still reads the answer,
-picks a rubric option, and presses ``g`` exactly as before — one confirmation
-step added, no new grading path. That is deliberate: a screen that both proposed
-a merge *and* applied a grade would be one keypress away from marking a dozen
-students on a proposal the grader had not finished reading.
-
-Acceptance is session state, not a file. The confirmation authorizes one batch
-action; once the grades are written they are the durable thing, and a persisted
-"these answers are the same" claim would be a second source of truth about
-grouping that nothing else in the app reads.
-"""
-
 from __future__ import annotations
 
 from textual import events, on
@@ -47,14 +17,6 @@ from opengrader.core.submissions.suggested_groups import (
 
 
 def _diff_markup(reference: str, other: str) -> str:
-    """Render one answer with its differences from the graded answer marked up.
-
-    Added/changed words are highlighted and words this answer *omits* are shown
-    struck through, so the grader is reading a difference rather than comparing
-    two paragraphs by eye. Every span is escaped: a student's answer is
-    arbitrary text and a stray ``[`` in it would otherwise be parsed as Rich
-    markup and swallow the rest of the line.
-    """
     parts: list[str] = []
     for span in diff_answer_spans(reference, other):
         text = escape(span.text)
@@ -68,18 +30,10 @@ def _diff_markup(reference: str, other: str) -> str:
 
 
 def floor_percent(score: float) -> int:
-    """Render a similarity as a whole percent, rounding **down**.
-
-    Every label here reads "at least N% alike", so rounding up would print 100%
-    for answers that are 99.5% alike — claiming the answers are identical when
-    they are not. Understating is the only safe direction.
-    """
     return int(score * 100)
 
 
 class _SuggestionRow(Static):
-    """A focusable proposal; selecting it accepts the merge."""
-
     can_focus = True
 
     def __init__(self, index: int, label: str, *, accepted: bool) -> None:
@@ -95,8 +49,6 @@ class _SuggestionRow(Static):
         self._select()
 
     def on_key(self, event: events.Key) -> None:
-        # The focused row is first in the bubble path, so intercepting the nav
-        # keys here keeps the enclosing VerticalScroll from hijacking up/down.
         if event.key in ("enter", "space"):
             event.stop()
             self._select()
@@ -109,11 +61,6 @@ class _SuggestionRow(Static):
 
 
 class UnifyAnswersScreen(ModalScreen["int | None"]):
-    """Proposed merges of near-identical answers for one question.
-
-    Dismisses with the index of the accepted proposal, or ``None`` on close.
-    """
-
     DEFAULT_CSS = """
     UnifyAnswersScreen {
         align: center middle;
@@ -196,8 +143,6 @@ class UnifyAnswersScreen(ModalScreen["int | None"]):
     ]
 
     class SuggestionAccepted(Message):
-        """Posted when a proposal is chosen, to widen this question's group."""
-
         def __init__(self, index: int) -> None:
             self.index = index
             super().__init__()
@@ -231,9 +176,6 @@ class UnifyAnswersScreen(ModalScreen["int | None"]):
                 yield Button("Close", id="unify-close", compact=True)
 
     def on_mount(self) -> None:
-        # Land on the first proposal so enter accepts immediately; fall back to
-        # the close button when there is nothing to act on (Textual's `.first()`
-        # raises on an empty query, so iterate instead).
         rows = list(self.query(_SuggestionRow))
         if rows:
             rows[0].focus()
@@ -241,7 +183,6 @@ class UnifyAnswersScreen(ModalScreen["int | None"]):
             self.query_one("#unify-close", Button).focus()
 
     def focus_relative_suggestion(self, current: _SuggestionRow, delta: int) -> None:
-        """Move focus to the next/previous proposal (arrow / j·k keys)."""
         rows = list(self.query(_SuggestionRow))
         if current not in rows:
             return
@@ -263,12 +204,6 @@ class UnifyAnswersScreen(ModalScreen["int | None"]):
         for group in suggestion.groups:
             lead = group is suggestion.representative
             prefix = "grade this" if lead else f"+{group.size}"
-            # The full answer, never a snippet: the grader is being asked
-            # whether these are the same answer, and a truncated one cannot be
-            # judged. Every answer but the representative is shown *diffed*
-            # against it, because the similarity score cannot tell a rewording
-            # from a reversal and an unhighlighted "not" is invisible inside a
-            # paragraph that is otherwise word-for-word identical.
             body = (
                 escape(" ".join(reference.split()))
                 if lead

@@ -1,5 +1,3 @@
-"""Journal replay and restore planning — the pure engine, no files involved."""
-
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -49,9 +47,6 @@ def _grade(points, rubric=()):  # noqa: ANN001
     return {"points": points, "rubric": list(rubric)}
 
 
-# ── replay ────────────────────────────────────────────────────────────────
-
-
 def test_replay_takes_the_last_entry_at_or_before_the_target_time() -> None:
     entries = [
         _entry(minutes=0, old=_grade(None), new=_grade(5, ("Partial",))),
@@ -72,8 +67,6 @@ def test_replay_with_no_target_time_takes_the_latest_state() -> None:
 
 
 def test_replay_before_the_first_entry_uses_its_old_value_as_the_baseline() -> None:
-    # This is what lets a restore reach back past the first recorded change:
-    # the earliest entry's `old` is by construction the pre-journal state.
     entries = [_entry(minutes=10, old=_grade(None), new=_grade(10, ("Correct",)))]
     snapshot = replay_journal(entries, at=BASE)
     value = snapshot.cell("1001", "q1").value("grade")
@@ -87,7 +80,6 @@ def test_excluding_an_actor_falls_back_to_the_baseline_when_only_they_touched_it
 
 
 def test_excluding_an_actor_keeps_a_later_graders_edit() -> None:
-    # bob's bad grade was overwritten by alice; dropping bob must not undo her.
     entries = [
         _entry(minutes=0, actor="bob", old=_grade(None), new=_grade(0)),
         _entry(minutes=5, actor="alice", old=_grade(0), new=_grade(9)),
@@ -115,7 +107,6 @@ def test_comment_and_transcription_aspects_replay_independently() -> None:
     cell = replay_journal(entries).cell("1001", "q1")
     assert cell.value("comment").text == "Good"
     assert cell.value("transcription").text == "xyz"
-    # No grade event, so the journal has no opinion on the grade at all.
     assert cell.value("grade") is None
     assert cell.known == frozenset({"comment", "transcription"})
 
@@ -129,8 +120,6 @@ def test_rubric_and_identity_events_are_not_restorable() -> None:
 
 
 def test_identity_events_alias_earlier_work_onto_todays_id() -> None:
-    # Graded before the id was known, then the id was assigned: the grade must
-    # still be found under the id the file carries now.
     entries = [
         _entry(minutes=0, sid="", name="Ada", old=_grade(None), new=_grade(7)),
         _entry(
@@ -178,15 +167,11 @@ def test_malformed_payload_values_degrade_instead_of_raising() -> None:
 
 
 def test_same_instant_entries_keep_journal_order() -> None:
-    # Two saves inside one clock tick: the later line still wins.
     entries = [
         _entry(minutes=0, new=_grade(1)),
         _entry(minutes=0, new=_grade(2)),
     ]
     assert replay_journal(entries).cell("1001", "q1").value("grade").points == 2.0
-
-
-# ── planning ──────────────────────────────────────────────────────────────
 
 
 def _current(points=None, rubric=(), analysis="", text=""):  # noqa: ANN001
@@ -211,9 +196,6 @@ def test_plan_reports_only_what_actually_differs_on_disk() -> None:
 
 
 def test_plan_diffs_against_the_file_not_the_journals_idea_of_now() -> None:
-    # The journal says the grade ended at 10; the file was edited out of band
-    # to 3. Restoring to the journal's state is a real change and must be
-    # reported with the *file's* value as "before".
     snapshot = replay_journal([_entry(minutes=0, old=_grade(None), new=_grade(10))])
     plan = plan_restore(
         snapshot,
@@ -305,9 +287,6 @@ def test_plan_orders_changes_by_student_then_question_then_aspect() -> None:
     ]
 
 
-# ── helpers ───────────────────────────────────────────────────────────────
-
-
 def test_student_key_prefers_id_then_name_then_nothing() -> None:
     assert student_key("1001", "Ada") == "1001"
     assert student_key("  ", " Ada  Lovelace ") == "name:ada lovelace"
@@ -327,7 +306,6 @@ def test_absolute_times_parse_and_a_date_means_the_start_of_that_day() -> None:
     assert parse_restore_time("2026-08-02T14:30:00+00:00") == datetime(
         2026, 8, 2, 14, 30, tzinfo=timezone.utc
     )
-    # A bare date is midnight local, so only the date component is asserted.
     assert parse_restore_time("2026-08-02").date() in {
         datetime(2026, 8, 1).date(),
         datetime(2026, 8, 2).date(),
@@ -357,9 +335,6 @@ def test_float_noise_does_not_count_as_a_change() -> None:
         known_students=["1001"],
     )
     assert plan.changes == ()
-
-
-# ── transcription provenance travels with the words ────────────────────────
 
 
 def test_a_transcription_replay_carries_its_confidence_and_reader() -> None:
@@ -405,7 +380,6 @@ def test_an_entry_from_before_provenance_existed_replays_unchanged() -> None:
 
 
 def test_provenance_is_not_part_of_what_a_restore_decides() -> None:
-    """Same words, different label: not a change worth rewriting a file for."""
     left = AspectValue(text="abc", confidence=42.0, source="tesseract")
     right = AspectValue(text="abc", confidence=100.0, source="human")
 
@@ -413,7 +387,6 @@ def test_provenance_is_not_part_of_what_a_restore_decides() -> None:
 
 
 def test_restoring_a_reading_puts_its_reader_back_too() -> None:
-    """Otherwise the file keeps claiming a human typed the machine's words."""
     update = merge_update_for_question(
         "q1",
         {
@@ -430,7 +403,6 @@ def test_restoring_a_reading_puts_its_reader_back_too() -> None:
 
 
 def test_restoring_a_model_reading_clears_the_confidence_rather_than_keeping_one() -> None:
-    """`response_confidence=None` means "leave unchanged", which cannot say it."""
     update = merge_update_for_question(
         "q1",
         {"transcription": AspectValue(text="abc", confidence=None, source="vision-model")},
@@ -441,7 +413,6 @@ def test_restoring_a_model_reading_clears_the_confidence_rather_than_keeping_one
 
 
 def test_restoring_a_reading_with_no_recorded_provenance_leaves_the_file_alone() -> None:
-    """The old rule still applies where the journal knows nothing."""
     update = merge_update_for_question("q1", {"transcription": AspectValue(text="abc")})
 
     assert update.response_text == "abc"
@@ -451,7 +422,6 @@ def test_restoring_a_reading_with_no_recorded_provenance_leaves_the_file_alone()
 
 
 def test_the_journal_payload_omits_provenance_it_does_not_have() -> None:
-    """An old-shaped entry keeps exactly the shape it always had."""
     assert journal_payload("transcription", AspectValue(text="abc")) == {
         "response_text": "abc"
     }

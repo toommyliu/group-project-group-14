@@ -1,5 +1,3 @@
-"""The splitter→extractor sidecar that carries extra work pages forward."""
-
 from pathlib import Path
 
 from opengrader.core.submissions.extra_pages import (
@@ -19,8 +17,6 @@ def test_map_round_trips(tmp_path: Path) -> None:
 
 
 def test_map_lives_in_the_dot_dir(tmp_path: Path) -> None:
-    # Same `.opengrader/` convention as policy.json / curve.json, so it travels
-    # with the folder and stays out of submission discovery.
     path = write_extra_pages_map(tmp_path, {"a": (2,)})
     assert path == resolve_extra_pages_path(tmp_path)
     assert path.parent.name == ".opengrader"
@@ -36,7 +32,6 @@ def test_missing_file_reads_as_empty(tmp_path: Path) -> None:
 
 
 def test_malformed_file_degrades_to_empty(tmp_path: Path) -> None:
-    # Losing the hint costs a fallback to inference, never an extraction.
     path = resolve_extra_pages_path(tmp_path)
     path.parent.mkdir(parents=True)
     path.write_text("{not json")
@@ -46,7 +41,6 @@ def test_malformed_file_degrades_to_empty(tmp_path: Path) -> None:
 def test_unrecorded_pdf_is_none_but_a_recorded_empty_list_is_authoritative(
     tmp_path: Path,
 ) -> None:
-    # The distinction the extractor keys off: None -> infer, () -> trust it.
     write_extra_pages_map(tmp_path, {"checked": ()})
     assert read_extra_pages_for(tmp_path / "checked.pdf") == ()
     assert read_extra_pages_for(tmp_path / "never-split.pdf") is None
@@ -56,10 +50,6 @@ def test_lookup_is_by_stem_so_the_folder_can_move(tmp_path: Path) -> None:
     write_extra_pages_map(tmp_path, {"submission-0007": (3,)})
     assert read_extra_pages_for(tmp_path / "submission-0007.pdf") == (3,)
 
-
-# --------------------------------------------------------------------------- #
-# The extractor's three-source decision (_apply_extra_pages)
-# --------------------------------------------------------------------------- #
 
 import fitz  # noqa: E402
 
@@ -113,7 +103,6 @@ def test_explicit_pages_win(tmp_path: Path) -> None:
 def test_sidecar_is_used_when_no_explicit_pages(tmp_path: Path) -> None:
     pdf = _scan(tmp_path, 3)
     write_extra_pages_map(tmp_path, {"student": (3,)})
-    # Page 2 is uncovered too, but the splitter's verdict is more informed.
     assert _apply_extra_pages(_document(1), pdf, None).extra_pages == (3,)
 
 
@@ -124,8 +113,6 @@ def test_recorded_empty_sidecar_suppresses_inference(tmp_path: Path) -> None:
 
 
 def test_uncovered_pages_are_inferred_without_a_sidecar(tmp_path: Path) -> None:
-    # The common case: an exam split without --extra-work-pages whose student
-    # continued an answer on the back.
     pdf = _scan(tmp_path, 3)
     assert _apply_extra_pages(_document(1), pdf, None).extra_pages == (2, 3)
 

@@ -1,19 +1,4 @@
-"""File and track student regrade requests — the headless twin of the TUI's
-regrade queue.
-
-A regrade request is a first-class, tracked record of a grade dispute (see
-`core/submissions/regrade.py`), stored in ``<submissions>/.opengrader/regrades.jsonl``.
-Open requests surface automatically at the top of the needs-review triage
-(``review-queue`` and the TUI ``r`` / regrade modals), routing a grader straight
-to the disputed question.
-
-    # a student contests Q3:
-    uv run regrade add --submissions out/subs/ --student 012345 \\
-        --question q3 --reason "Rubric says partial credit for a valid method."
-    uv run regrade list --submissions out/subs/            # open disputes
-    uv run regrade resolve rg-1a2b3c4d --submissions out/subs/ --note "Regraded: +5"
-    uv run regrade deny rg-9f8e7d6c --submissions out/subs/ --note "Answer is wrong."
-"""
+"""File and track student regrade requests."""
 
 from __future__ import annotations
 

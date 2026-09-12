@@ -57,10 +57,6 @@ def test_sharp_image_can_limit_width_to_keep_height_bounded(
 
 
 def test_tgp_cleanup_sends_spec_correct_delete(monkeypatch) -> None:
-    """The library's cleanup sends `a=d,I=<id>`, which spec-following
-    terminals ignore because the image was registered under `i=<id>`; the
-    stale image then ghosts through leftover placeholder cells. Our subclass
-    must send `a=d,d=I,i=<id>` with responses suppressed (q=2)."""
     from opengrader.tui.ui.widgets import sharp_image as module
 
     sent: list[dict] = []
@@ -79,7 +75,6 @@ def test_tgp_cleanup_sends_spec_correct_delete(monkeypatch) -> None:
     assert sent == [{"a": "d", "d": "I", "i": 42, "q": 2}]
     assert renderable.terminal_image_id is None
 
-    # Idempotent: a second cleanup must not send another delete.
     renderable.cleanup()
     assert len(sent) == 1
 
@@ -119,8 +114,6 @@ def test_sharp_image_cleans_up_renderable_on_unmount(tmp_path: Path) -> None:
 
 
 def test_renderable_is_chosen_from_the_detected_protocol(tmp_path: Path) -> None:
-    """Kitty, half-block and unicode all go through a Rich renderable; only
-    the class differs, and it is picked per widget from the capability."""
     from opengrader.tui.terminal_graphics import GraphicsCapability
     from opengrader.tui.ui.widgets import sharp_image as module
 
@@ -144,9 +137,6 @@ def test_renderable_is_chosen_from_the_detected_protocol(tmp_path: Path) -> None
 def test_inline_protocols_compose_a_graphics_pane_instead_of_rendering(
     tmp_path: Path,
 ) -> None:
-    """Sixel/iTerm2 are raw escape blobs Rich cannot carry, so the widget
-    delegates to a child that writes them straight into Textual's output --
-    and must render nothing itself, or it would paint over those pixels."""
     from opengrader.tui.terminal_graphics import GraphicsCapability
     from opengrader.tui.ui.widgets.inline_graphics import InlineGraphicsPane
 
@@ -166,8 +156,6 @@ def test_inline_protocols_compose_a_graphics_pane_instead_of_rendering(
 
 
 def test_inline_pane_reuses_the_widgets_scaling_pipeline(tmp_path: Path) -> None:
-    """The pane must go through `_prepare_image` so sixel/iTerm2 inherit the
-    same LANCZOS downscaling (and caching) as the Kitty path."""
     from opengrader.tui.terminal_graphics import GraphicsCapability
 
     image_path = tmp_path / "img.png"
@@ -182,7 +170,6 @@ def test_inline_pane_reuses_the_widgets_scaling_pipeline(tmp_path: Path) -> None
     prepared = pane._prepare(120, 60)
     assert prepared is not None
     assert prepared.size == (120, 60)
-    # Second call comes straight out of the widget's prepared-image cache.
     assert pane._prepare(120, 60) is prepared
 
 

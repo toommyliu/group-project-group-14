@@ -69,7 +69,6 @@ def test_empty_state_row_is_not_clickable() -> None:
             )
             await pilot.pause()
 
-            # The placeholder row is a plain ListItem, not an entry item.
             assert not app.pane.query(_GradingLogEntryItem)
             await pilot.click("#grading-log-latest")
             await pilot.pause()

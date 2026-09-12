@@ -47,7 +47,6 @@ def test_read_survives_malformed_json(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{ not json", encoding="utf-8")
 
-    # A corrupt store only costs saved phrases — it must never block grading.
     assert read_comments(tmp_path) == CommentLibrary()
 
 
@@ -55,7 +54,6 @@ def test_with_snippet_is_no_op_for_blank_or_duplicate() -> None:
     library = CommentLibrary().with_snippet("See Lecture 5")
 
     assert library.with_snippet("   ") is library
-    # Whitespace-only differences don't create a duplicate.
     assert library.with_snippet("See   Lecture 5") is library
     assert len(library.snippets) == 1
 
@@ -74,7 +72,6 @@ def test_without_removes_by_text() -> None:
     trimmed = library.without("first")
 
     assert [s.text for s in trimmed.snippets] == ["second"]
-    # Unknown text is a no-op.
     assert trimmed.without("missing") is trimmed
 
 
@@ -85,9 +82,7 @@ def test_record_use_bumps_count_and_reorders_display() -> None:
 
     used = library.record_use("second").record_use("second")
 
-    # Storage order is stable (insertion order)...
     assert [s.text for s in used.snippets] == ["first", "second"]
-    # ...but display order puts the most-used first.
     assert [s.text for s in used.ordered()] == ["second", "first"]
     assert used.record_use("missing") is used
 
@@ -100,7 +95,6 @@ def test_ordered_is_stable_for_ties() -> None:
         .with_snippet("c")
     )
 
-    # No uses recorded: display order matches insertion order.
     assert [s.text for s in library.ordered()] == ["a", "b", "c"]
 
 
@@ -114,7 +108,7 @@ def test_record_use_with_question_bumps_global_and_per_question() -> None:
     )
 
     snippet = used.snippets[0]
-    assert snippet.uses == 3  # global total across all questions
+    assert snippet.uses == 3
     assert snippet.uses_on("q1") == 2
     assert snippet.uses_on("q2") == 1
     assert snippet.uses_on("q3") == 0
@@ -134,9 +128,6 @@ def test_per_question_ordering_prioritizes_this_question_then_global() -> None:
         .with_snippet("global favorite")
         .with_snippet("loop note")
     )
-    # "global favorite" is used a lot overall, but "loop note" is the one used
-    # on q1. Per-question order must surface "loop note" first on q1, while the
-    # global order keeps "global favorite" on top everywhere.
     library = (
         library.record_use("global favorite", "q2")
         .record_use("global favorite", "q2")
@@ -146,7 +137,6 @@ def test_per_question_ordering_prioritizes_this_question_then_global() -> None:
 
     assert [s.text for s in library.ordered()] == ["global favorite", "loop note"]
     assert [s.text for s in library.ordered("q1")] == ["loop note", "global favorite"]
-    # A question with no specific uses falls back to the global order.
     assert [s.text for s in library.ordered("q9")] == [
         "global favorite",
         "loop note",
@@ -168,7 +158,6 @@ def test_per_question_counts_survive_round_trip_and_omit_when_empty(
     reloaded = read_comments(tmp_path)
     assert reloaded == library
 
-    # The per-question map is emitted only for the snippet that has one.
     raw = (resolve_comments_path(tmp_path)).read_text(encoding="utf-8")
     assert '"uses_by_question"' in raw
     assert raw.count('"uses_by_question"') == 1
@@ -179,11 +168,11 @@ def test_from_dict_drops_bad_entries_and_dedupes() -> None:
         {
             "snippets": [
                 {"text": "keep", "uses": 3},
-                {"text": "   "},  # blank -> dropped
-                {"uses": 1},  # no text -> dropped
-                "not a dict",  # dropped
-                {"text": "keep", "uses": 9},  # duplicate -> dropped
-                {"text": "other", "uses": -5},  # negative uses -> 0
+                {"text": "   "},
+                {"uses": 1},
+                "not a dict",
+                {"text": "keep", "uses": 9},
+                {"text": "other", "uses": -5},
             ]
         }
     )
@@ -203,10 +192,10 @@ def test_from_dict_sanitizes_per_question_counts() -> None:
                     "uses": 5,
                     "uses_by_question": {
                         "q1": 2,
-                        "q2": 0,  # non-positive -> dropped
-                        "q3": -1,  # negative -> dropped
-                        "": 4,  # blank question id -> dropped
-                        "q4": "3",  # non-int -> dropped
+                        "q2": 0,
+                        "q3": -1,
+                        "": 4,
+                        "q4": "3",
                     },
                 },
             ]

@@ -1,11 +1,4 @@
-"""Analyze a graded set item-by-item: how well did each question perform?
-
-For every question it reports the difficulty (fraction of points the cohort
-earned — higher is easier), the separation (how well the question tells stronger
-students from weaker ones — the neutral name for the discrimination index), and,
-for multiple-choice questions, a per-choice breakdown. Reads only the persisted
-``.submission.md`` files; it never re-runs OCR or changes a grade.
-"""
+"""Report question difficulty, separation, and outcome mastery."""
 
 from __future__ import annotations
 
@@ -58,7 +51,6 @@ _SEPARATION_LABELS = {
 
 
 def _submission_paths(input_path: Path) -> list[Path]:
-    """Discover submission files, matching SubmissionFilesProvider's rules."""
     if input_path.is_file():
         return [input_path]
     direct = sorted(input_path.glob("*.submission.md"))
@@ -227,7 +219,6 @@ def _outcomes_to_dict(report) -> dict[str, object]:  # noqa: ANN001
 
 
 def _print_outcomes(report) -> None:  # noqa: ANN001
-    """Print per-outcome mastery, coverage first so the numbers can be read."""
     print("\nLearning outcomes")
     tagged = report.tagged_share
     if tagged is not None and tagged < 1.0:
@@ -306,8 +297,6 @@ def run_cli(argv: list[str] | None = None) -> None:
         }
         if outcome_report is not None:
             payload["outcomes"] = _outcomes_to_dict(outcome_report)
-        # A bare list stays the output when no outcomes were asked for, so an
-        # existing script parsing this JSON keeps working unchanged.
         print(json.dumps(payload["items"] if outcome_report is None else payload, indent=2))
     else:
         _print_human(list(report.items), report.class_size, flagged_only=args.flagged_only)

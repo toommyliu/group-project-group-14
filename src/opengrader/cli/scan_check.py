@@ -1,21 +1,4 @@
-"""Check scans before grading them — the "scan doctor".
-
-Run this on a bulk scan (or a directory of already-split submissions) before
-the rest of the pipeline touches it. It reports the problems that otherwise
-fail *silently* all the way to a cohort of zeros: pages fed in upside down or
-sideways, **sheets that ended up out of order**, blank sheets that shift a
-fixed-count split, scans below the resolution handwriting OCR needs, content
-clipped off at the margin, and a page count that is not a whole number of
-submissions.
-
-``--fix`` corrects the one problem this tool can correct — rotation — by writing
-an upright **copy**. Nothing here ever overwrites an original scan. Out-of-order
-pages are *reported* here and *repaired* by ``submission-splitter``, which is
-the stage that can: page numbers restart at 1 for every student, so pages can
-only be put back in order once the bundle has been cut into submissions.
-
-Read-only otherwise; it never re-runs extraction or changes a grade.
-"""
+"""Check scan quality, orientation, and page order before extraction."""
 
 from __future__ import annotations
 
@@ -57,7 +40,6 @@ _SEVERITY_LABEL = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
 
 
 def _template_page_count(template_path: Path) -> int:
-    """Page count of the blank template — the length a submission should be."""
     from pypdf import PdfReader
 
     return len(PdfReader(str(template_path)).pages)
@@ -81,8 +63,6 @@ def _print_report(report: ScanReport, *, show_source: bool) -> None:
             f"{counts['low']} low."
         )
 
-    # State what was *not* checked before anything that looks like a clean bill
-    # of health, so an absent rotation report is never mistaken for a passed one.
     if not report.orientation_available:
         print(f"  ! {report.orientation_note}")
     elif report.rotation_plan.unverified_pages:
@@ -92,9 +72,6 @@ def _print_report(report: ScanReport, *, show_source: bool) -> None:
             "(too little text to read); they were left as they are"
         )
 
-    # Same rule for page order, and it needs saying at least as loudly: this is
-    # the check most likely to go unrun, because it is the only one that needs
-    # the caller to say how long a submission is.
     order = report.page_order_plan
     if not order.checked:
         if order.note:
@@ -139,9 +116,6 @@ def _report_to_dict(
             "submission_length": order.submission_length,
             "detected_page_numbers": list(order.detected),
             "unread_pages": list(order.unread_pages),
-            # Whether the splitter may correct this unattended, decided by the
-            # one shared predicate rather than re-derived from `evidence` here —
-            # a script reading this must reach the same verdict the splitter does.
             "fix_is_safe": page_order_fix_is_safe(
                 order, has_blank_template=has_blank_template
             ),
@@ -169,11 +143,6 @@ def _report_to_dict(
 
 
 def _fix_destination(source: Path, output: str | None, *, many: bool) -> Path:
-    """Where the upright copy of ``source`` is written.
-
-    With several inputs ``--output`` is a directory; with one it may be either a
-    directory or the corrected file's own path. Never the source itself.
-    """
     if output is None:
         return default_upright_path(source)
     destination = Path(output)
@@ -301,14 +270,6 @@ def run_cli(argv: list[str] | None = None) -> None:
             sys.exit(1)
         expected_page_count = _template_page_count(template_path)
 
-    # What "pages per submission" asserts depends on what was pointed at, and
-    # neither reading may be silently dropped. One PDF is a bundle of students,
-    # so the claim is divisibility — a leftover page means a sheet is missing or
-    # doubled. A directory is already-split submissions, so the same number is
-    # each file's exact length. A blank template always describes one submission.
-    # Keyed off what was *pointed at*, not how many PDFs turned up: a directory
-    # that happens to hold a single submission is still a directory of
-    # submissions, not a bundle.
     is_bundle = input_path.is_file()
     bundle_expectation = args.pages_per_submission if is_bundle else None
     per_file_expectation = expected_page_count
@@ -322,12 +283,6 @@ def run_cli(argv: list[str] | None = None) -> None:
             path,
             pages_per_submission=bundle_expectation,
             expected_page_count=per_file_expectation,
-            # A directory holds already-split submissions, so each file is one
-            # student's work and its own length is the window page numbers
-            # should run through — which is what lets `scan-check --input split/`
-            # check page order with nothing else supplied. Never on a bundle,
-            # where treating the whole stack as one submission would read every
-            # student's restart at page 1 as a jump backwards.
             single_submission=not is_bundle,
             dpi_floor=args.dpi_floor,
             check_orientation=not args.no_orientation,

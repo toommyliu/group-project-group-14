@@ -25,18 +25,10 @@ from opengrader.core.question_types import (
 from .numeric import format_numeric_spec, parse_numeric_answers
 from .scoring import RubricOptionKind, RubricSelectionMode, rubric_scoring_mode
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
+if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.bubble_sheet import BubbleQuestion
-    # QuestionInput is only used in annotations here (this module has
-    # ``from __future__ import annotations``, so it's never evaluated at
-    # runtime); deferring it avoids importing anything from the
-    # ``pdf.templates`` package at qa_file import time.
     from opengrader.core.pdf.templates.utils import QuestionInput
 
-# Values accepted in a question's optional ``**Type**`` section. True/False
-# forces the two-option multiple-choice expansion; the others are documentary
-# (the type is otherwise inferred from the answer key), but a wrong spelling is
-# rejected so typos surface at validation time.
 _TYPE_TRUE_FALSE_ALIASES = {
     "true/false",
     "true false",
@@ -51,7 +43,6 @@ _TYPE_NUMERIC_ALIASES = {"numeric", "number", "num"}
 _TYPE_FREE_RESPONSE_ALIASES = {"free response", "free_response", "free-response", "free"}
 _TYPE_MULTIPLE_CHOICE_ALIASES = {"multiple choice", "multiple_choice", "mc"}
 
-# "(10 points) Question prompt" -> points=10, prompt="Question prompt"
 _INLINE_POINTS_RE = re.compile(r"^\((\d+(?:\.\d+)?)\s*points?\)\s*(.*)$", re.IGNORECASE)
 _FRONTMATTER_RE = re.compile(r"^---$")
 _VERSION_HEADER_RE = re.compile(r"^\s*##\s+(.+?)\s*$")
@@ -61,29 +52,11 @@ _RUBRIC_OPTION_RE = re.compile(
     r"^(?P<label>.+?)\s*(?:\(\s*(?P<paren>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?\s*\)|:\s*(?P<colon>[+-]?\d+(?:\.\d+)?)\s*(?:points?)?)\s*$",
     re.IGNORECASE,
 )
-# A ``**Comment**`` child bullet under a rubric option supplies the default
-# feedback text auto-inserted when a grader picks that option. It is stored
-# apart from freeform ``notes`` (which are grader-facing guidance). Both the
-# inline form (``**Comment** text``) and a nested-bullet form are accepted.
 _RUBRIC_COMMENT_RE = re.compile(
     r"^\*\*\s*Comment\s*\*\*\s*(?P<text>.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 
-# An ``**Outcome**`` child bullet tags a question with a learning outcome it
-# measures (``CLO3``, ``ABET-2``, "Applies Bayes' rule" — the text is the
-# instructor's, we never interpret it). Repeatable: one question can serve
-# several outcomes, and one outcome is usually spread over several questions.
-# Same shape as ``**Comment**``: an inline form (``**Outcome** CLO3``) and a
-# nested-bullet form (``**Outcome**`` with one outcome per child bullet) are
-# both accepted, and the section is emitted only when non-empty so files that
-# don't use outcomes round-trip byte-identically.
-#
-# Matched by its own regex rather than through `_normalize_section_name`, for
-# the same reason `**Comment**` is: that helper only recognizes a *bare*
-# ``**Header**`` bullet, and the inline ``**Outcome** CLO3`` form — the one
-# instructors actually write — would fall through it to be mistaken for a
-# subquestion.
 _OUTCOME_SECTION_RE = re.compile(
     r"^\*\*\s*Outcomes?\s*\*\*\s*(?P<text>.*)$",
     re.IGNORECASE | re.DOTALL,
@@ -106,19 +79,14 @@ class FrontmatterMarker(str, Enum):
 
 @dataclass
 class QARubricItem:
-    """One rubric category or weighted checklist leaf from a QA file."""
-
     label: str
     points_delta: float | None = None
     notes: list[str] = field(default_factory=list)
     subitems: list["QARubricItem"] = field(default_factory=list)
-    # Feedback auto-inserted into the comment box when a grader selects this
-    # option, authored as a ``**Comment**`` child bullet in the QA file.
     default_comment: str | None = None
 
 
 def _is_bonus(item: QARubricItem | QARubricFlatOption) -> bool:
-    """Return whether a rubric item is categorized as Bonus/Extra Credit."""
     if isinstance(item, QARubricFlatOption):
         return item.kind == "bonus"
     return item.label == "Bonus"
@@ -126,30 +94,21 @@ def _is_bonus(item: QARubricItem | QARubricFlatOption) -> bool:
 
 @dataclass(frozen=True)
 class QARubricFlatOption:
-    """Flattened rubric leaf option with grading selection semantics."""
-
     label: str
     points_delta: float
     kind: RubricOptionKind
     selection_mode: RubricSelectionMode
-    # Feedback auto-inserted into the comment box when this option is selected
-    # (carried through from the option's ``**Comment**`` bullet). ``None`` when
-    # the option declares no default comment.
     default_comment: str | None = None
 
 
 @dataclass
 class QAChoice:
-    """One multiple-choice option declared in a QA file."""
-
     label: str
     text: str
 
 
 @dataclass
 class QASubquestion:
-    """A graded part nested under a parent QA question."""
-
     id: str
     prompt: str
     points: int
@@ -157,47 +116,28 @@ class QASubquestion:
     answers: list[str] = field(default_factory=list)
     choices: list[QAChoice] = field(default_factory=list)
     correct_choice_label: str | None = None
-    # Populated (with 2+ labels) only for "select all that apply" questions; a
-    # single-correct multiple choice uses correct_choice_label instead.
     correct_choice_labels: tuple[str, ...] = ()
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
-    # Learning outcomes this part measures (``**Outcome**`` bullets). A
-    # subquestion carries its own because it is separately graded — "q5a tests
-    # CLO2, q5b tests CLO4" is the normal case for a multi-part question.
     outcomes: tuple[str, ...] = ()
 
 
 @dataclass
 class QAQuestion:
-    """A top-level QA question with optional answers, choices, or subquestions."""
-
     id: str
     prompt: str
     points: int
     answers: list[str] = field(default_factory=list)
     choices: list[QAChoice] = field(default_factory=list)
     correct_choice_label: str | None = None
-    # Populated (with 2+ labels) only for "select all that apply" questions; a
-    # single-correct multiple choice uses correct_choice_label instead.
     correct_choice_labels: tuple[str, ...] = ()
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
     subquestions: list[QASubquestion] = field(default_factory=list)
-    # Learning outcomes this question measures (``**Outcome**`` bullets).
-    # Optional and repeatable; empty for the overwhelming majority of QA files,
-    # which is why nothing downstream may require it.
     outcomes: tuple[str, ...] = ()
 
     @property
     def graded_outcomes(self) -> tuple[str, ...]:
-        """This question's outcomes, or the union of its subquestions'.
-
-        A parent with subquestions is not itself graded — its parts are — so
-        when only the parent is tagged, the tag has to reach the parts that
-        actually carry points. Tagging both is allowed and the parent's tag
-        applies to every part that doesn't override it.
-        """
         if not self.subquestions:
             return self.outcomes
         merged: list[str] = []
@@ -208,12 +148,6 @@ class QAQuestion:
         return tuple(merged)
 
     def outcomes_for(self, question_id: str) -> tuple[str, ...]:
-        """The outcomes that apply to one graded id under this question.
-
-        For a plain question that is its own id; for a subquestion id (``q5a``)
-        it is the subquestion's own tags, falling back to the parent's — the
-        inheritance that lets an instructor tag a multi-part question once.
-        """
         if not self.subquestions:
             return self.outcomes if question_id == self.id else ()
         for subquestion in self.subquestions:
@@ -224,8 +158,6 @@ class QAQuestion:
 
 @dataclass
 class QADocument:
-    """Parsed QA markdown plus assignment-level metadata."""
-
     questions: list[QAQuestion]
     title: str | None = None
     instructions: str | None = None
@@ -260,7 +192,6 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
         frontmatter_lines.append(lines[i])
         i += 1
     else:
-        # Still haven't found a closing delimiter...
         return {}, 0
 
     frontmatter: Frontmatter = {}
@@ -292,7 +223,6 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
     for raw in frontmatter_lines:
         line = raw.rstrip("\n")
 
-        # Start of a new key must be at indentation level 0.
         if line == line.lstrip() and ":" in line:
             name, value = line.split(":", 1)
             name = name.strip()
@@ -373,13 +303,6 @@ def _parse_points(raw: str | None) -> int | None:
 
 
 def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
-    """Strip an ``(N points)`` marker from the start of a question prompt.
-
-    The marker only ever appears on the first line of a bullet; subsequent
-    lines (e.g., a fenced code block embedded in the prompt) are preserved
-    so multi-line prompts retain their body while their points are still
-    extracted.
-    """
     text = prompt.strip()
     first_line, sep, rest = text.partition("\n")
     matched = _INLINE_POINTS_RE.match(first_line.strip())
@@ -567,11 +490,6 @@ def _validate_multiple_choice(
     correct_values: list[str],
     context: str,
 ) -> list[str]:
-    """Validate a choice question and return its correct labels (in choice order).
-
-    One correct label is a normal multiple choice; two or more make it a
-    "select all that apply" question. Zero is always an error.
-    """
     if not choices:
         return []
 
@@ -604,29 +522,21 @@ def _validate_multiple_choice(
             raise ValueError(
                 f"{context} correct answer {correct_label!r} is not one of the defined choices"
             )
-        if correct_label not in correct_labels:  # dedupe, keep first-seen order
+        if correct_label not in correct_labels:
             correct_labels.append(correct_label)
 
-    # Canonicalize to choice order so a re-render is stable regardless of the
-    # order the correct labels were listed in.
     return [label for label in labels if label in correct_labels]
 
 
 def _split_correct_labels(
     correct_labels: list[str],
 ) -> tuple[str | None, tuple[str, ...]]:
-    """Route validated correct labels into the single vs. multi-answer fields.
-
-    Exactly one correct label ⇒ ``correct_choice_label`` (a normal multiple
-    choice); two or more ⇒ ``correct_choice_labels`` (select all that apply).
-    """
     if len(correct_labels) <= 1:
         return (correct_labels[0] if correct_labels else None), ()
     return None, tuple(correct_labels)
 
 
 def _normalize_type_hint(raw: str | None) -> str | None:
-    """Canonicalize a ``**Type**`` value, or raise on an unknown spelling."""
     if raw is None:
         return None
     normalized = " ".join(raw.strip().lower().split())
@@ -653,15 +563,6 @@ def _maybe_expand_true_false(
     choices: list[QAChoice],
     context: str,
 ) -> tuple[list[QAChoice], list[str]]:
-    """Expand a True/False shortcut into a constrained two-option multiple choice.
-
-    A True/False question is authored concisely (``**Correct** True`` or an
-    explicit ``**Type** True/False``) but stored as a normal multiple-choice
-    question — ``A) True`` / ``B) False`` with the correct label — so it reuses
-    the entire multiple-choice pipeline (template rendering, OCR classification,
-    grading, statistics) with no parallel question type. Returns the inputs
-    unchanged when the question is not True/False.
-    """
     if choices:
         return choices, correct_values
 
@@ -730,12 +631,6 @@ def _canonical_rubric_category(label: str) -> str | None:
 
 
 def _extract_rubric_comment(child: _BulletItem) -> str | None:
-    """Return the feedback text of a ``**Comment**`` bullet, or ``None``.
-
-    Accepts the inline form (``**Comment** great work``) and the nested form
-    (``**Comment**`` with the text on child bullets), joining multi-line text
-    with single spaces so it round-trips onto one rendered line.
-    """
     matched = _RUBRIC_COMMENT_RE.match(child.text.strip())
     if matched is None:
         return None
@@ -745,16 +640,6 @@ def _extract_rubric_comment(child: _BulletItem) -> str | None:
 
 
 def _parse_outcomes_section(child: _BulletItem) -> list[str]:
-    """Read one ``**Outcome**`` bullet into its outcome names.
-
-    Accepts the inline form (``**Outcome** CLO3``), the nested form (child
-    bullets), and a comma-separated inline list (``**Outcome** CLO2, CLO3``) —
-    an instructor writing three tags on one line is the obvious shorthand and
-    refusing it would be pedantry. Names are kept **verbatim apart from
-    surrounding whitespace**: they are the instructor's own vocabulary (CLO3,
-    ABET-2, "Applies Bayes' rule") and normalizing case or punctuation would
-    silently merge two outcomes they meant to keep apart.
-    """
     matched = _OUTCOME_SECTION_RE.match(child.text.strip())
     values: list[str] = []
     if matched is not None and matched.group("text").strip():
@@ -765,20 +650,12 @@ def _parse_outcomes_section(child: _BulletItem) -> list[str]:
     for value in values:
         for part in value.split(","):
             name = part.strip()
-            # Deduplicated per question: tagging CLO3 twice is a typo, and a
-            # double-count would inflate that outcome's coverage.
             if name and name not in outcomes:
                 outcomes.append(name)
     return outcomes
 
 
 def _render_outcomes(lines: list[str], outcomes: tuple[str, ...], *, indent: int) -> None:
-    """Render the outcomes back as one ``**Outcome**`` bullet per tag.
-
-    One bullet each rather than a comma list, so the round trip is stable no
-    matter which input form was used — and emitted only when there are any, so
-    a QA file without outcomes is byte-identical after a load/save cycle.
-    """
     for outcome in outcomes:
         if outcome.strip():
             _append_bullet(lines, indent=indent, text=f"**Outcome** {outcome.strip()}")
@@ -861,7 +738,6 @@ def _parse_rubric_section(item: _BulletItem) -> list[QARubricItem]:
     for rubric_item in rubric:
         counts[rubric_item.label] += 1
 
-    # Correct, Partial, and Incorrect must be unique. Bonus can be omitted.
     duplicates = [
         label
         for label, count in counts.items()
@@ -904,7 +780,6 @@ def _rubric_effective_deltas(
                     )
                 sub_deltas.append(sub.points_delta)
 
-            # Skip sum validation for Bonus items; they are unrestricted.
             if not _is_bonus(item):
                 if item.points_delta is not None:
                     total = sum(sub_deltas)
@@ -934,7 +809,6 @@ def _validate_correct_and_incorrect_shortcuts(
     mode: str,
     context: str,
 ) -> None:
-    """Enforce exclusive full-credit and zero-credit shortcut values."""
     by_label = {item.label: item for item in rubric}
     correct = by_label.get("Correct")
     incorrect = by_label.get("Incorrect")
@@ -967,8 +841,6 @@ def _validate_nested_partial_exact_sum(
     mode: str,
     context: str,
 ) -> None:
-    """Ensure checklist partial weights exactly cover the question value."""
-    # Filter out bonus items before validating checklist sum.
     standard_items = [item for item in rubric if not _is_bonus(item)]
 
     partial = next(
@@ -994,7 +866,6 @@ def _validate_rubric_points(
     if not rubric:
         return
 
-    # Validation only applies to standard items.
     standard_rubric = [item for item in rubric if not _is_bonus(item)]
     deltas = _rubric_effective_deltas(standard_rubric, context=context)
     if not deltas:
@@ -1346,7 +1217,6 @@ def _render_correct_choice(
     *,
     indent: int,
 ) -> None:
-    # Multi-answer questions carry 2+ labels; single choice carries one.
     labels = (
         list(correct_choice_labels)
         if correct_choice_labels
@@ -1522,14 +1392,6 @@ def find_qa_question(
 
 
 def qa_question_type(question: QAQuestion | QASubquestion) -> QuestionType:
-    """Infer a QA question's grading type from its structure and answer key.
-
-    Multiple choice (including a materialized True/False) is detected by its
-    choices; a question whose every accepted answer parses as a numeric spec is
-    numeric; everything else is free response. A parent question with
-    subquestions is reported as free response — the meaningful type lives on each
-    subquestion.
-    """
     if question.correct_choice_labels:
         return MULTIPLE_ANSWER
     if question.choices or question.correct_choice_label:
@@ -1542,7 +1404,6 @@ def qa_question_type(question: QAQuestion | QASubquestion) -> QuestionType:
 
 
 def _numeric_answer_hint(question: QAQuestion | QASubquestion) -> str | None:
-    """A short printed-template hint for a numeric answer box, or ``None``."""
     specs = parse_numeric_answers(question.answers)
     if specs is None:
         return None
@@ -1553,13 +1414,6 @@ def _numeric_answer_hint(question: QAQuestion | QASubquestion) -> str | None:
 def flatten_rubric_options(
     rubric_items: list[QARubricItem],
 ) -> list[QARubricFlatOption]:
-    """Return rubric leaf options with UI selection metadata.
-
-    Bonus options are listed after the base outcome rows (below Incorrect)
-    regardless of where the QA file declares them: they combine with the
-    base outcome rather than replacing it, so the base rows keep the low
-    selection slots.
-    """
     options = _flatten_rubric_options(rubric_items)
     base = [option for option in options if option.kind != "bonus"]
     bonus = [option for option in options if option.kind == "bonus"]
@@ -1585,8 +1439,6 @@ def replace_qa_rubric_options(
 ) -> None:
     question = find_qa_question(document, question_id, version=version)
     rubric = _rubric_from_flat_options(options, points=question.points)
-    # Validate before assigning so invalid option sets can never be written
-    # into the QA file and fail only on the next load.
     _validate_rubric_points(
         rubric,
         points=question.points,
@@ -1618,9 +1470,6 @@ def _flatten_rubric_options(
         if item.points_delta is None:
             continue
         kind = _flat_option_kind(labels)
-        # Partial subitems compose as a checklist; top-level rows
-        # (Correct/Incorrect) remain exclusive shortcuts. Bonus options are
-        # always checklist: extra credit stacks on top of any base outcome.
         selection_mode: RubricSelectionMode = (
             "checklist"
             if kind == "bonus"
@@ -1640,7 +1489,6 @@ def _flatten_rubric_options(
 
 
 def _flat_option_kind(labels: tuple[str, ...]) -> RubricOptionKind:
-    """Map flattened label ancestry to the stable rubric option kind."""
     if labels == ("Correct",):
         return "correct"
     if labels == ("Incorrect",):
@@ -1719,7 +1567,6 @@ def _rubric_from_flat_options(
 def _partial_rubric_item(
     partial_options: list[QARubricFlatOption],
 ) -> QARubricItem:
-    """Build either a direct partial shortcut or checklist partial subitems."""
     if len(partial_options) == 1:
         option = partial_options[0]
         label = option.label.strip()
@@ -1817,19 +1664,8 @@ def qa_to_template_questions(
 def qa_to_bubble_questions(
     document: QADocument, version: str | None = None
 ) -> list["BubbleQuestion"]:
-    """Bridge a QA file to a bubble answer sheet's question list.
-
-    The sibling of :func:`qa_to_template_questions`, and the reason a bubble
-    sheet can be *generated* and later *read* from nothing but the QA file:
-    both sides call this, so the sheet's rows and the reader's expectations are
-    derived from one source.
-
-    Only questions a bubble can express are included — a single-answer multiple
-    choice (which is also what a True/False question materializes into) and its
-    multiple-choice subquestions. Free-response, numeric and select-all
-    questions are skipped: a row of circles cannot capture them, and silently
-    printing one would lose the student's answer entirely. Callers that need to
-    know what was left out compare the result against the QA questions.
+    """Omits free-response, numeric, and select-all questions; callers must compare IDs
+    to report omissions.
     """
     from opengrader.core.bubble_sheet import BubbleQuestion
 
@@ -1843,9 +1679,6 @@ def qa_to_bubble_questions(
                 continue
             labels = tuple(choice.label for choice in item.choices)
             if not labels:
-                # A question keyed by `correct_choice_label` with no printed
-                # choices still needs somewhere to mark; fall back to the
-                # standard five so the row exists.
                 labels = DEFAULT_BUBBLE_CHOICE_LABELS
             bubbles.append(
                 BubbleQuestion(
@@ -1865,7 +1698,6 @@ def save_qa_markdown(document: QADocument, path: str | Path) -> None:
 
 
 def _partial_subitem_label(label: str) -> str:
-    """Strip the partial-credit prefix from a flat rubric label."""
     stripped = label.strip()
     prefix = "Partially Correct - "
     if stripped.startswith(prefix):
@@ -1876,7 +1708,6 @@ def _partial_subitem_label(label: str) -> str:
 
 
 def _bonus_subitem_label(label: str) -> str:
-    """Strip the bonus prefix from a flat rubric label."""
     stripped = label.strip()
     prefix = "Bonus - "
     if stripped.startswith(prefix):
@@ -1887,19 +1718,6 @@ def _bonus_subitem_label(label: str) -> str:
 
 
 def outcomes_by_question(document: "QADocument") -> dict[str, tuple[str, ...]]:
-    """Map every *graded* question id in a QA document to its learning outcomes.
-
-    The single bridge from the answer key to the outcome analytics, so the item
-    report, the analysis PDF, the gradebook and the course roll-up can never
-    disagree about which questions measure what. Graded ids only: a parent
-    question with subquestions contributes ``q5a``/``q5b``, never ``q5``, since
-    that is what the ``.submission.md`` files carry and what has points.
-
-    Multi-version assignments are merged across versions, because an outcome is
-    a property of the *material* rather than of which form a student sat. Where
-    two versions tag the same id differently the tags union, which is the safe
-    direction: an outcome is reported as covered when any version covers it.
-    """
     merged: dict[str, tuple[str, ...]] = {}
 
     def add(question: QAQuestion) -> None:
@@ -1926,12 +1744,6 @@ def outcomes_by_question(document: "QADocument") -> dict[str, tuple[str, ...]]:
 
 
 def possible_points_by_question(document: "QADocument") -> dict[str, float]:
-    """Map every graded question id to its point value, merged across versions.
-
-    The companion to :func:`outcomes_by_question`: outcome mastery is measured
-    in points, and the answer key is the authoritative source for them (an
-    extracted ``.submission.md`` often leaves ``Possible points`` blank).
-    """
     points: dict[str, float] = {}
 
     def add(question: QAQuestion) -> None:

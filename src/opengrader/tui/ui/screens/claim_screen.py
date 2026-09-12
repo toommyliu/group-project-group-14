@@ -1,22 +1,3 @@
-"""Modal multi-grader work claims, opened with Shift+D.
-
-Who is grading what. The anonymity lock makes a TA team fair; claims
-(`core/claims.py`) make it *divided*, so nobody marks a paper someone else
-already did. This pop-up is the in-app view of that division:
-
-* your own slices at the top, then everyone else's, then the coverage line;
-* **claim** a run of questions (``c``) by typing it into the field — the same
-  ``q1-q3`` syntax the ``claim`` CLI takes;
-* **release** (``r``) a slice back to the pool, or mark it **done** (``d``);
-* toggle the navigation filter (``a``) between "only my slice" and the whole
-  cohort.
-
-Every action dismisses with a :class:`ClaimAction`; ``TuiApp`` performs it
-against the append-only log and reopens the refreshed modal, mirroring
-`AssignIdentityScreen` and the regrade queue. Nothing here can block a save — a
-claim is coordination, not permission, so the worst an overlap does is warn.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,8 +18,6 @@ ClaimActionKind = Literal["claim", "release", "complete", "toggle_filter"]
 
 @dataclass(frozen=True)
 class ClaimAction:
-    """What the grader asked for, returned on dismiss."""
-
     kind: ClaimActionKind
     claim_id: str = ""
     work: WorkSlice | None = None
@@ -46,8 +25,6 @@ class ClaimAction:
 
 
 class _ClaimRow(Static):
-    """A focusable claim row: r releases it, d marks it done."""
-
     can_focus = True
 
     def __init__(self, claim: WorkClaim, label: str, *, mine: bool) -> None:
@@ -56,8 +33,6 @@ class _ClaimRow(Static):
         super().__init__(label, classes="claim-row")
 
     def _post(self, kind: ClaimActionKind) -> None:
-        # Releasing or completing someone else's slice is not this grader's
-        # call — the row is still listed, just not actionable.
         if not self._mine:
             return
         self.post_message(
@@ -65,8 +40,6 @@ class _ClaimRow(Static):
         )
 
     def on_key(self, event: events.Key) -> None:
-        # The focused row is first in the bubble path, so intercepting the nav
-        # keys here keeps the enclosing VerticalScroll from hijacking them.
         if event.key == "r":
             event.stop()
             self._post("release")
@@ -82,8 +55,6 @@ class _ClaimRow(Static):
 
 
 class ClaimScreen(ModalScreen["ClaimAction | None"]):
-    """Who holds which slice of the grading, and how to change it."""
-
     DEFAULT_CSS = """
     ClaimScreen {
         align: center middle;
@@ -197,9 +168,6 @@ class ClaimScreen(ModalScreen["ClaimAction | None"]):
         self._filter_enabled = filter_enabled
         super().__init__()
 
-    # ------------------------------------------------------------------ #
-    # Layout
-    # ------------------------------------------------------------------ #
 
     def compose(self) -> ComposeResult:
         mine = [claim for claim in self._claims if claim.actor == self._actor]
@@ -253,9 +221,6 @@ class ClaimScreen(ModalScreen["ClaimAction | None"]):
             rows[target].focus()
             rows[target].scroll_visible()
 
-    # ------------------------------------------------------------------ #
-    # Text
-    # ------------------------------------------------------------------ #
 
     def _row_label(self, claim: WorkClaim) -> str:
         who = "you" if claim.actor == self._actor else claim.actor
@@ -285,7 +250,6 @@ class ClaimScreen(ModalScreen["ClaimAction | None"]):
         )
 
     def _overlap_warnings(self) -> list[str]:
-        """One line per double-booked pair — the state claims exist to prevent."""
         report = coverage_report(
             self._claims,
             question_ids=self._question_ids,
@@ -297,9 +261,6 @@ class ClaimScreen(ModalScreen["ClaimAction | None"]):
             for overlap in report.overlaps
         ]
 
-    # ------------------------------------------------------------------ #
-    # Actions
-    # ------------------------------------------------------------------ #
 
     def action_focus_new(self) -> None:
         self.query_one("#claim-new-questions", Input).focus()
@@ -325,12 +286,6 @@ class ClaimScreen(ModalScreen["ClaimAction | None"]):
         )
 
     def _expand(self, raw: str) -> list[str]:
-        """Expand ``q1-q3``/``q1,q2`` against the cohort's real question ids.
-
-        Deliberately the same rule as the CLI's ``_expand_ids``: a range is
-        resolved by *position in the real id list*, never by arithmetic, so it
-        can't invent a question the assignment doesn't have.
-        """
         position = {value: index for index, value in enumerate(self._question_ids)}
         wanted: list[str] = []
         for chunk in raw.split(","):

@@ -1,12 +1,3 @@
-# Lazy re-exports (PEP 562): ``.generate`` and ``.fonts`` both import ``fitz``
-# (PyMuPDF, ~110ms cold) at module scope. Python always runs a package's
-# ``__init__`` before any of its submodules, so an eager ``from .generate
-# import ...`` here would drag fitz onto *every* import of a sibling
-# submodule too — including ``opengrader.core.pdf.templates.utils``, which the
-# qa_file markdown parser imports for the dependency-free
-# ``default_subquestion_label``/``QuestionInput`` and has no other reason to
-# need PDF generation at all. Resolving names to their real module only on
-# first access keeps that path fitz-free.
 from typing import Any
 
 __all__ = [

@@ -118,12 +118,6 @@ class QAPickerScreen(Vertical):
                                 ("u", "Jump to ungraded"),
                                 ("d", "Student display"),
                                 ("t", "Teacher mode (names)"),
-                                # Shift+letter, like every other report — these
-                                # three read `r`/`s`/`h` until 2026-08-05, which
-                                # were the *pre-2026-08-02* keys and had been
-                                # bound to nothing since the keymap moved
-                                # reports behind Shift. The card was telling
-                                # people to press keys that did nothing.
                                 ("shift+R", "Needs-review queue"),
                                 ("shift+S", "Item analysis"),
                                 ("shift+H", "Grade history · teacher"),
@@ -234,14 +228,11 @@ class QAPickerScreen(Vertical):
         return None
 
     def _extract_prompt(self, item: NavItem) -> str:
-        """Extract the question prompt text from a NavItem or its payload."""
-        # Try NavItem attributes directly
         for attr in ("prompt", "description"):
             val = getattr(item, attr, None)
             if val and isinstance(val, str):
                 return val
 
-        # Try item.payload, supporting both objects and dictionaries
         payload = getattr(item, "payload", None)
         if payload:
             if isinstance(payload, dict):
@@ -255,12 +246,9 @@ class QAPickerScreen(Vertical):
                     if val and isinstance(val, str):
                         return val
 
-        # Fallback to the NavItem's label (usually q1, q2...)
         return item.label
 
     def show_question_details(self, item: NavItem) -> None:
-        # "Question Details" (not just "Question") so the pane cannot be
-        # mistaken for the "Questions" list next to it.
         self.query_one("#qa-details").border_title = "Question Details"
         status = f"\nStatus: {item.meta}" if item.meta else ""
         prompt = self._extract_prompt(item)
@@ -435,12 +423,6 @@ class QAPickerScreen(Vertical):
         self.apply_teacher_mode()
 
     def apply_teacher_mode(self) -> None:
-        """Sync the Students pane tabs with the current anonymity mode.
-
-        Anonymous grading hides the Name tab entirely; teacher mode brings
-        it back. The grading log follows the same rule: its Student/Question
-        tabs (and student names in rows) exist only in teacher mode.
-        """
         self._student_pane().set_tab_hidden(
             self._STUDENT_NAME_TAB_INDEX,
             not self._teacher_mode(),
@@ -448,7 +430,6 @@ class QAPickerScreen(Vertical):
         self.refresh_grading_log()
 
     def refresh_grading_log(self) -> None:
-        """Re-render the grading log pane from the shared session log."""
         state = getattr(self.app, "workflow_state", None)
         log = getattr(state, "grading_log", None)
         if log is None or not self.is_mounted:
@@ -583,7 +564,6 @@ class QAPickerScreen(Vertical):
         if isinstance(event.item, _QAListItem):
             self.post_message(self.QASelected(event.item.nav))
         elif isinstance(event.item, _StudentListItem):
-            # Ensure we jump to the correct question when a student is selected via keyboard/click
             self._set_active_list("student-list")
             self._sync_student_index_from_list(event.item)
             self._jump_to_student_ungraded(event.item)
@@ -628,7 +608,6 @@ class QAPickerScreen(Vertical):
         event.stop()
 
     def _jump_to_student_ungraded(self, student_item: _StudentListItem) -> None:
-        """Helper to jump the question list to the first ungraded item for a student."""
         target_q_idx = 0
         for i, q_nav in enumerate(self._items):
             status = self._student_question_statuses.get(
@@ -681,7 +660,6 @@ class QAPickerScreen(Vertical):
             event.stop()
 
     def _open_curve(self) -> None:
-        """Open the score-curve editor; persist the chosen curve on save."""
         provider = getattr(self.app, "data_provider", None)
         read_curve = getattr(provider, "read_curve", None)
         distribution_fn = getattr(provider, "curve_score_distribution", None)
@@ -695,7 +673,7 @@ class QAPickerScreen(Vertical):
             try:
                 save_curve(result)
                 self.app.notify(f"Curve saved: {format_curve_label(result)}")
-            except Exception as exc:  # surface a save failure, keep grading
+            except Exception as exc:
                 self.app.notify(f"Could not save curve: {exc}", severity="error")
 
         self.app.push_screen(
@@ -703,12 +681,6 @@ class QAPickerScreen(Vertical):
         )
 
     def _open_return_bundle(self) -> None:
-        """Open the return-bundle export dialog, prefilled from the session.
-
-        The destination defaults to the submissions folder and the folder name to
-        the cohort's suggested bundle name, so a one-keystroke Export produces a
-        complete, professionally-named hand-back package.
-        """
         provider = getattr(self.app, "data_provider", None)
         submissions = str(getattr(provider, "submissions_path", "") or "")
         default_output = ""
@@ -733,7 +705,6 @@ class QAPickerScreen(Vertical):
         )
 
     def _open_canvas_export(self) -> None:
-        """Open the Canvas export dialog, prefilled from the current session."""
         provider = getattr(self.app, "data_provider", None)
         submissions = str(getattr(provider, "submissions_path", "") or "")
 
@@ -826,7 +797,6 @@ class QAPickerScreen(Vertical):
         self._set_student_index(index)
 
     def _teacher_mode(self) -> bool:
-        """Whether names may be revealed; grading is anonymous by default."""
         state = getattr(self.app, "workflow_state", None)
         return bool(getattr(state, "teacher_mode", False))
 
@@ -871,7 +841,7 @@ class QAPickerScreen(Vertical):
 
     def _restore_list_highlight(self, list_view: ListView) -> None:
         self._normalize_list_highlight(list_view)
-        # ListView clear/mount settles later; reapply the restored row highlight.
+        # ListView children mount asynchronously; highlighting must wait until after refresh.
         self.set_timer(0.01, lambda: self._normalize_list_highlight(list_view))
 
     def _focused_within(self, widget: Widget) -> bool:

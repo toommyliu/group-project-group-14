@@ -1,3 +1,5 @@
+"""Validate QA files and generate printable assignment templates."""
+
 from __future__ import annotations
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -16,9 +18,6 @@ from opengrader.core.qa_file import (
 )
 from opengrader.core.roster import load_roster_students
 
-"""
-CLI (Command Line Interface) utility for converting Markdown-based Question & Answer (QA) documents into PDF templates.
-"""
 
 EPILOG = """
 examples:
@@ -178,7 +177,7 @@ def _run_validate(args: object) -> None:
 
 def _run_generate_bubble_sheet(
     *,
-    qa_doc,  # noqa: ANN001 - QADocument, imported lazily by the caller
+    qa_doc,  # noqa: ANN001
     versions: list[str],
     title: str,
     instructions: str | None,
@@ -187,12 +186,6 @@ def _run_generate_bubble_sheet(
     copies: int | None = None,
     shuffle: bool = False,
 ) -> None:
-    """Write bubble answer sheets, one PDF per version (or one batch).
-
-    Reports what could *not* be bubbled before reporting success: a
-    free-response question silently missing from the answer sheet would only be
-    discovered when the class had already sat the exam.
-    """
     from opengrader.core.pdf.templates.bubble_sheet import (
         generate_bubble_sheet_batch,
         generate_bubble_sheet_pdf,
@@ -265,9 +258,6 @@ def _run_generate_bubble_sheet(
                 f"{scrambling}): {output_pdf}"
             )
             if shuffle:
-                # The form key is how a sheet is read back, so say plainly that
-                # it lives on the paper — a teacher who crops the header off
-                # when scanning would otherwise lose the question order.
                 print(
                     "      Each sheet prints its own form key (and encodes it in "
                     "the QR); extraction re-derives that sheet's question order "
@@ -348,11 +338,6 @@ def _run_generate_template(args: object) -> None:
         )
         return
 
-    # A written template's answers are read back by matching each scan against
-    # one blank template's layout, so a per-student question order would leave
-    # nothing to align against — the scans would extract into the wrong
-    # questions with no error anywhere. Refuse rather than print an exam that
-    # cannot be graded.
     if shuffle:
         raise ValueError(
             "--shuffle needs --bubble-sheet: a written template is read back by "
@@ -362,7 +347,6 @@ def _run_generate_template(args: object) -> None:
     if copies is not None:
         raise ValueError("--copies needs --bubble-sheet")
 
-    # Personalized batch: one anonymous QR sheet per roster student + master key.
     if roster_path is not None:
         if len(versions_to_generate) > 1:
             raise ValueError(

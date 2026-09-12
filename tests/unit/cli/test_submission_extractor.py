@@ -64,15 +64,6 @@ def test_prompt_eof_returns_none(monkeypatch) -> None:
 
 
 def _stub_build(monkeypatch, captured: dict) -> None:
-    """Stub the heavy build call and template loader so run_cli exercises only
-    argument plumbing (no OCR, no Ollama, no PDF rendering).
-
-    The builder is patched on ``core.submissions.batch`` because that is where
-    the batch runner calls it. The in-process (``--jobs 1``) path picks the patch
-    up; the parallel path deliberately would not, since a locally defined stub
-    cannot be pickled into a worker process — which is why these single-PDF runs
-    stay sequential."""
-
     def fake_build(**kwargs):
         captured.update(kwargs)
         return _doc(), Path(kwargs["output_dir"]) / "x.submission.md"
@@ -85,12 +76,6 @@ def _stub_build(monkeypatch, captured: dict) -> None:
 
 
 def _scan_dir(tmp_path: Path) -> Path:
-    """One-submission input dir, kept separate from the blank template.
-
-    The template must not live in --input, or it would be picked up as a
-    submission itself (and, with two PDFs, push the run onto the parallel path
-    where the stubbed builder does not apply).
-    """
     scans = tmp_path / "scans"
     scans.mkdir()
     (scans / "submission-0001.pdf").write_bytes(b"%PDF-1.4\n")
@@ -111,8 +96,6 @@ def test_llm_responses_flag_enables_vlm_in_template_mode(monkeypatch, tmp_path) 
         "--llm-responses",
     ])
 
-    # The flag reaches the builder AND an Ollama config is provided even though
-    # this is template mode (the bug fix: template mode used to null it out).
     assert captured["llm_responses"] is True
     assert captured["ollama_config"] is not None
     assert isinstance(captured["progress"], ExtractionProgress)
@@ -132,7 +115,7 @@ def test_template_mode_without_flag_has_no_ollama(monkeypatch, tmp_path) -> None
     ])
 
     assert captured["llm_responses"] is False
-    assert captured["ollama_config"] is None  # no VLM work requested
+    assert captured["ollama_config"] is None
 
 
 def test_injected_progress_is_passed_through(monkeypatch, tmp_path) -> None:
@@ -147,11 +130,7 @@ def test_injected_progress_is_passed_through(monkeypatch, tmp_path) -> None:
         progress=sentinel,
         status_callback=statuses.append,
     )
-    # The caller's reporter is used verbatim (its display, not the rich bar).
     assert captured["progress"] is sentinel
-
-
-# --- Section routing (--id-file / --section) -----------------------------------
 
 
 def _write_roster(path: Path, rows: list[tuple[str, str]]) -> None:
@@ -196,7 +175,6 @@ def test_single_named_roster_sets_default_section(monkeypatch, tmp_path) -> None
 
 
 def test_single_bare_roster_has_no_section(monkeypatch, tmp_path) -> None:
-    """A bare --id-file keeps the pre-section behavior (identity fill only)."""
     captured: dict = {}
     _stub_build(monkeypatch, captured)
     (tmp_path / "submission-0001.pdf").write_bytes(b"%PDF-1.4\n")
@@ -242,8 +220,8 @@ def test_multiple_rosters_build_section_map(monkeypatch, tmp_path) -> None:
     run_cli([
         "--input", str(tmp_path),
         "--output", str(tmp_path / "out"),
-        "--id-file", str(mw),               # section defaults to filename "mw"
-        "--id-file", f"{tth}=Thursday",     # explicit name
+        "--id-file", str(mw),
+        "--id-file", f"{tth}=Thursday",
         "--no-ollama-qa",
     ])
 
@@ -254,12 +232,9 @@ def test_multiple_rosters_build_section_map(monkeypatch, tmp_path) -> None:
     }
 
 
-# --- Parallelism (--jobs) ------------------------------------------------------
-
-
 def test_jobs_accepts_auto_and_positive_integers() -> None:
     assert _parse_jobs("auto") is None
-    assert _parse_jobs("0") is None  # 0 reads as "let the runner decide"
+    assert _parse_jobs("0") is None
     assert _parse_jobs(" 4 ") == 4
 
 
@@ -270,8 +245,6 @@ def test_jobs_rejects_nonsense() -> None:
 
 
 def test_interactive_roster_forces_one_job(monkeypatch, tmp_path, capsys) -> None:
-    """The duplicate-name prompt needs stdin, so an explicit --jobs is refused
-    out loud rather than ignored."""
     captured: dict = {}
     _stub_build(monkeypatch, captured)
     monkeypatch.setattr(extractor_cli.sys.stdin, "isatty", lambda: True)
@@ -291,16 +264,7 @@ def test_interactive_roster_forces_one_job(monkeypatch, tmp_path, capsys) -> Non
     assert "runs with --jobs 1" in capsys.readouterr().err
 
 
-# --- Resume (--resume) ---------------------------------------------------------
-
-
 def _stub_writing_build(monkeypatch, calls: list[str]) -> None:
-    """Like `_stub_build`, but actually writes the .submission.md.
-
-    The resume check requires the recorded outputs to still exist, so a stub
-    that writes nothing would never be reusable.
-    """
-
     def fake_build(**kwargs):
         stem = Path(kwargs["pdf_path"]).stem
         calls.append(stem)
@@ -321,8 +285,6 @@ def _extract(scans: Path, out: Path, *extra: str) -> None:
 
 
 def test_manifest_is_written_even_without_resume(monkeypatch, tmp_path) -> None:
-    """That is what makes an interrupted run resumable afterwards — the user
-    doesn't have to have predicted the crash."""
     calls: list[str] = []
     _stub_writing_build(monkeypatch, calls)
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
@@ -340,7 +302,7 @@ def test_resume_skips_an_unchanged_submission(monkeypatch, tmp_path) -> None:
     _extract(scans, out)
     _extract(scans, out, "--resume")
 
-    assert calls == ["submission-0001"]  # the second run did no work
+    assert calls == ["submission-0001"]
 
 
 def test_without_resume_everything_is_re_extracted(monkeypatch, tmp_path) -> None:
@@ -367,7 +329,6 @@ def test_resume_re_extracts_when_the_scan_changes(monkeypatch, tmp_path) -> None
 
 
 def test_resume_re_extracts_when_a_setting_changes(monkeypatch, tmp_path) -> None:
-    """A different DPI produces different crops, so the ledger must not match."""
     calls: list[str] = []
     _stub_writing_build(monkeypatch, calls)
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
@@ -391,8 +352,6 @@ def test_resume_re_extracts_when_an_output_was_deleted(monkeypatch, tmp_path) ->
 
 
 def test_resume_keeps_a_graded_submission(monkeypatch, tmp_path) -> None:
-    """The TUI rewrites .submission.md when a grader saves. Re-extracting would
-    wipe those grades, so a changed output must NOT invalidate the record."""
     calls: list[str] = []
     _stub_writing_build(monkeypatch, calls)
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
@@ -404,9 +363,6 @@ def test_resume_keeps_a_graded_submission(monkeypatch, tmp_path) -> None:
 
     assert calls == ["submission-0001"]
     assert graded.read_text() == "Points Awarded: 8"
-
-
-# --- Failure handling ----------------------------------------------------------
 
 
 def test_a_failed_scan_exits_nonzero_but_lets_the_others_finish(
@@ -433,14 +389,14 @@ def test_a_failed_scan_exits_nonzero_but_lets_the_others_finish(
             "--input", str(scans),
             "--output", str(tmp_path / "out"),
             "--no-ollama-qa",
-            "--jobs", "1",  # keep the stubbed builder in this process
+            "--jobs", "1",
         ])
 
     assert exit_info.value.code == 1
-    assert calls == ["submission-0001", "submission-0002"]  # the good one still ran
+    assert calls == ["submission-0001", "submission-0002"]
     stderr = capsys.readouterr().err
     assert "1 of 2 submission(s) failed" in stderr
-    assert "--resume" in stderr  # tells the user how to retry just that one
+    assert "--resume" in stderr
 
 
 def test_section_flag_with_multiple_rosters_errors(monkeypatch, tmp_path) -> None:
@@ -463,14 +419,11 @@ def test_section_flag_with_multiple_rosters_errors(monkeypatch, tmp_path) -> Non
         ])
 
 
-# ── OMR mode (--bubble-sheet) ─────────────────────────────────────────────
-
 _SAMPLES = Path(__file__).resolve().parents[3] / "samples"
 _MC_QA = _SAMPLES / "qa-multiple-choice.md"
 
 
 def _fill_bubble_sheet(source_pdf: Path, layout, marks: dict, dest: Path) -> None:  # noqa: ANN001
-    """Draw a student's marks onto a generated sheet and save it as a scan."""
     import fitz
 
     doc = fitz.open(str(source_pdf))
@@ -528,13 +481,9 @@ def test_bubble_sheet_mode_extracts_marks_without_ocr_or_a_vision_model(
     assert answers["q1"] == "B"
     assert answers["q2a"] == "B"
     assert answers["q3"] == "C"
-    # The written subquestion has no row of circles but still gets a block, or
-    # the grading TUI could not save a grade for it.
     assert answers["q2b"] == ""
     assert [q.question_id for q in document.questions] == ["q1", "q2a", "q2b", "q3"]
 
-    # No Ollama probe: OMR needs no model, and warning about a missing one on a
-    # machine that legitimately has none would be noise.
     captured = capsys.readouterr()
     assert "Ollama" not in captured.out
 
@@ -587,8 +536,6 @@ def test_bubble_sheet_mode_rejects_a_qa_file_with_no_multiple_choice(
 
 
 def test_the_layout_not_just_the_flag_invalidates_a_resumed_run(tmp_path: Path) -> None:
-    # Re-generating the sheet from an edited answer key moves the bubbles; a
-    # --resume that reused the old readings would score against the wrong rows.
     from opengrader.cli.submission_extractor import _bubble_layout_fingerprint
     from opengrader.core.bubble_sheet import BubbleQuestion, build_bubble_sheet_layout
 
@@ -608,7 +555,6 @@ def test_the_layout_not_just_the_flag_invalidates_a_resumed_run(tmp_path: Path) 
 
 
 def _scrambled_batch(tmp_path: Path, students: int = 3):
-    """Print a scrambled batch and split it into per-student scans."""
     import fitz
 
     from opengrader.core.pdf.templates.bubble_sheet import generate_bubble_sheet_batch
@@ -633,7 +579,7 @@ def _scrambled_batch(tmp_path: Path, students: int = 3):
     scans.mkdir()
     doc = fitz.open(str(batch))
     for index, form in enumerate(forms):
-        page = doc[index + 1]  # skip the master key
+        page = doc[index + 1]
         w, h = page.rect.width, page.rect.height
         sheet = build_bubble_sheet_layout(shuffle_questions(questions, form.form_key))
         for row in sheet.rows:
@@ -653,8 +599,6 @@ def _scrambled_batch(tmp_path: Path, students: int = 3):
 
 
 def test_a_scrambled_batch_grades_identically_for_every_form(tmp_path: Path) -> None:
-    """The end-to-end promise: students sit different question orders and the
-    extracted submissions are indistinguishable."""
     from opengrader.core.submissions.student_file import (
         load_student_submission_markdown,
     )
@@ -679,8 +623,6 @@ def test_a_scrambled_batch_grades_identically_for_every_form(tmp_path: Path) -> 
 def test_a_scrambled_batch_is_detected_without_being_told(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Forgetting a flag must not be the difference between right and silently
-    # wrong grades, so the form keys on the sheets are what switch this on.
     scans, _forms, _key = _scrambled_batch(tmp_path)
     run_cli([
         "--input", str(scans), "--output", str(tmp_path / "out"),
@@ -692,8 +634,6 @@ def test_a_scrambled_batch_is_detected_without_being_told(
 def test_a_scrambled_sheet_with_an_unreadable_form_key_is_refused(
     tmp_path: Path,
 ) -> None:
-    """Reading it against the unscrambled layout would map every answer to the
-    wrong question and report confident, wrong grades."""
     import fitz
 
     from opengrader.core.submissions.student_file import (
@@ -701,7 +641,6 @@ def test_a_scrambled_sheet_with_an_unreadable_form_key_is_refused(
     )
 
     scans, _forms, _key = _scrambled_batch(tmp_path)
-    # Wipe the QR off one sheet, leaving its bubbles intact.
     damaged = sorted(scans.glob("*.pdf"))[0]
     doc = fitz.open(str(damaged))
     page = doc[0]
@@ -721,12 +660,10 @@ def test_a_scrambled_sheet_with_an_unreadable_form_key_is_refused(
     document = load_student_submission_markdown(
         out_dir / damaged.stem / f"{damaged.stem}.submission.md"
     )
-    # Every question present, but unread and unverified — not wrong.
     assert [q.question_id for q in document.questions] == ["q1", "q2a", "q2b", "q3"]
     assert all(q.response_text == "" for q in document.questions)
     assert all(q.response_confidence is None for q in document.questions)
 
-    # ...while its undamaged neighbours read normally.
     other = sorted(scans.glob("*.pdf"))[1]
     neighbour = load_student_submission_markdown(
         out_dir / other.stem / f"{other.stem}.submission.md"
@@ -735,8 +672,6 @@ def test_a_scrambled_sheet_with_an_unreadable_form_key_is_refused(
 
 
 def test_a_form_key_read_off_the_paper_rescues_the_sheet(tmp_path: Path) -> None:
-    """The escape hatch for a sheet whose QR will not scan: the form code is
-    printed in plain text for exactly this."""
     import fitz
 
     from opengrader.core.submissions.student_file import (
@@ -770,9 +705,6 @@ def test_a_form_key_read_off_the_paper_rescues_the_sheet(tmp_path: Path) -> None
     assert answers == key
 
 
-# --- Selective re-extraction (--refine) -----------------------------------
-
-
 def _refine_submission(
     out: Path,
     stem: str,
@@ -780,11 +712,6 @@ def _refine_submission(
     confidences: dict[str, float | None],
     graded: str | None = None,
 ) -> Path:
-    """Write an existing extraction with per-question confidences to refine.
-
-    Real markdown rather than a stub blob, because the whole feature turns on
-    parsing the confidences back out and writing exactly one field back in.
-    """
     directory = out / stem
     directory.mkdir(parents=True, exist_ok=True)
     lines = [
@@ -822,7 +749,6 @@ def _refine_submission(
 
 
 def _stub_refine_build(monkeypatch, *, readings: dict[str, tuple[str, float | None]], calls: list[str]):
-    """Stub the re-extraction so it writes a document with the given readings."""
     from opengrader.core.submissions.student_file import (
         StudentSubmissionQuestion,
         render_student_submission_markdown,
@@ -882,17 +808,14 @@ def test_refine_rewrites_only_the_low_confidence_answer(monkeypatch, tmp_path) -
 
     after = path.read_text()
     assert "a clearer reading" in after
-    # q2 was already confident, so the re-extraction's reading of it is ignored.
     assert "TOTALLY DIFFERENT" not in after
     assert "original q2" in after
-    # ...and the grade, rubric and comment on the refined question survive.
     assert "  - Points: 8" in after
     assert "solid reasoning" in after
     assert before.count("- q") == after.count("- q")
 
 
 def test_refine_skips_submissions_with_nothing_below_the_floor(monkeypatch, tmp_path) -> None:
-    """The selectivity is the feature: a confident submission is never re-rendered."""
     calls: list[str] = []
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
     _refine_submission(out, "submission-0001", confidences={"q1": 92.0})
@@ -911,7 +834,7 @@ def test_refine_keeps_a_worse_reading_out(monkeypatch, tmp_path) -> None:
 
     _extract(scans, out, "--refine")
 
-    assert calls == ["submission-0001"]  # it did try
+    assert calls == ["submission-0001"]
     assert "original q1" in path.read_text()
 
 
@@ -930,11 +853,6 @@ def test_refine_dry_run_writes_nothing(monkeypatch, tmp_path) -> None:
 
 
 def test_refine_never_touches_the_resume_ledger(monkeypatch, tmp_path) -> None:
-    """A refine did not produce the output folder, so it must not claim to have.
-
-    Recording one would make a later --resume skip a submission on the strength
-    of a pass that only re-read three of its answers.
-    """
     calls: list[str] = []
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
     _refine_submission(out, "submission-0001", confidences={"q1": 21.0})
@@ -958,8 +876,6 @@ def test_refine_journals_under_its_own_actor(monkeypatch, tmp_path) -> None:
     entries = read_journal(resolve_history_dir(out))
     assert [entry.actor for entry in entries] == [extractor_cli.JOURNAL_ACTOR_REFINE]
     assert entries[0].kind == "transcription"
-    # The old value is recorded, which is what makes `grade-restore` able to
-    # undo the whole pass.
     assert entries[0].old["response_text"] == "original q1"
     assert entries[0].new["response_text"] == "better"
 
@@ -1003,7 +919,6 @@ def test_refine_dpi_reaches_the_extraction(monkeypatch, tmp_path) -> None:
     _extract(scans, out, "--refine", "--refine-dpi", "450")
 
     assert captured["dpi"] == 450
-    # The re-extraction lands in a scratch directory, never over the original.
     assert Path(captured["output_dir"]) != out
 
 
@@ -1031,11 +946,6 @@ def test_refine_leaves_no_scratch_directory_behind(monkeypatch, tmp_path) -> Non
 def test_refine_model_adopts_a_model_reading_and_clears_the_confidence(
     monkeypatch, tmp_path
 ) -> None:
-    """Escalating to a model is what makes an unmeasured reading acceptable.
-
-    And the stale number has to go with it: leaving "Confidence: 21" beside a
-    vision model's words would attach a score to text nothing scored.
-    """
     calls: list[str] = []
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
     path = _refine_submission(out, "submission-0001", confidences={"q1": 21.0})
@@ -1051,7 +961,6 @@ def test_refine_model_adopts_a_model_reading_and_clears_the_confidence(
 
 
 def test_a_model_reading_is_refused_without_the_escalation(monkeypatch, tmp_path) -> None:
-    """Otherwise a plain re-run would launder a flagged answer out of the queue."""
     calls: list[str] = []
     scans, out = _scan_dir(tmp_path), tmp_path / "out"
     path = _refine_submission(out, "submission-0001", confidences={"q1": 21.0})
@@ -1084,11 +993,6 @@ def test_refine_knobs_warn_without_refine(monkeypatch, tmp_path, capsys) -> None
     assert "--refine-dpi does nothing without --refine" in capsys.readouterr().err
 
 
-# --------------------------------------------------------------------------- #
-# --llm-escalate: cheap reader first, a model only where it read badly
-# --------------------------------------------------------------------------- #
-
-
 def test_llm_escalate_reaches_the_builder_and_implies_transcription(
     monkeypatch, tmp_path
 ) -> None:
@@ -1106,8 +1010,6 @@ def test_llm_escalate_reaches_the_builder_and_implies_transcription(
     ])
 
     assert captured["escalate_floor"] == 60.0
-    # Escalation is a transcription *order*, so it has to turn transcription on
-    # or the flag would silently do nothing in template mode.
     assert captured["llm_responses"] is True
     assert captured["ollama_config"] is not None
 
@@ -1154,7 +1056,6 @@ def test_an_out_of_range_floor_is_refused(monkeypatch, tmp_path, capsys) -> None
 
 
 def test_escalate_confidence_alone_warns(monkeypatch, tmp_path, capsys) -> None:
-    """A half-remembered flag pair must not silently apply nothing."""
     captured: dict = {}
     _stub_build(monkeypatch, captured)
     scans = _scan_dir(tmp_path)
@@ -1170,7 +1071,6 @@ def test_escalate_confidence_alone_warns(monkeypatch, tmp_path, capsys) -> None:
 
 
 def test_the_floor_is_in_the_resume_fingerprint(monkeypatch, tmp_path) -> None:
-    """Escalation decides which reader read each crop, so it shapes the output."""
     from opengrader.core.submissions.manifest import read_manifest
 
     scans = _scan_dir(tmp_path)
@@ -1237,12 +1137,6 @@ def test_the_run_reports_which_readers_produced_the_answers(
     assert "Escalated 1 of 2 answers to a model (below 60% OCR confidence)." in out
 
 
-# --------------------------------------------------------------------------- #
-# AI Setup defaults: --llm-responses / --llm-escalate / --llm-math follow the
-# settings file (core/ai_config.py) unless overridden on the command line.
-# --------------------------------------------------------------------------- #
-
-
 def test_llm_responses_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
     ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
     captured: dict = {}
@@ -1280,7 +1174,6 @@ def test_llm_responses_defaults_off_when_ai_setup_leaves_it_off(monkeypatch, tmp
 
 
 def test_explicit_no_llm_responses_beats_ai_setup(monkeypatch, tmp_path) -> None:
-    """An explicit CLI flag must still win over a settings file: CLI > env > file."""
     ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
     captured: dict = {}
     _stub_build(monkeypatch, captured)
@@ -1352,17 +1245,7 @@ def test_explicit_no_llm_math_beats_ai_setup(monkeypatch, tmp_path) -> None:
     assert captured["llm_math"] is False
 
 
-# --- Region maps (--region-map) -------------------------------------------
-#
-# A region map is the structural input for an exam Opengrader did not generate.
-# It converts to the same `AssignmentTemplate` --blank-template produces, so the
-# only extractor-level behaviour worth asserting here is the plumbing: the two
-# structural sources must not be combinable, and the map's *contents* must reach
-# the resume ledger.
-
-
 def _region_map_exam(tmp_path: Path, *, pages: int = 1) -> Path:
-    """A blank "exam" PDF with no text layer, and a fingerprint of its own."""
     import fitz
     from PIL import Image
 
@@ -1400,7 +1283,6 @@ def _region_map_file(exam: Path, *, points: float = 10.0) -> Path:
 
 
 def test_region_map_and_blank_template_together_are_refused(tmp_path, capsys) -> None:
-    """Two structural sources would silently fight over where question 4 lives."""
     scans = _scan_dir(tmp_path)
     exam = _region_map_exam(tmp_path)
     blank = tmp_path / "blank.pdf"
@@ -1435,14 +1317,12 @@ def test_the_region_map_becomes_the_structural_template(monkeypatch, tmp_path) -
 
     template = captured["blank_assignment_template"]
     assert template is not None
-    # The mapped rectangles are the answer regions themselves, not y-anchors.
     assert template.exact_regions is True
     assert template.assignment_title == "Paper Exam"
     assert template.questions[0].source_segments[0].bbox_norm == (0.08, 0.30, 0.84, 0.20)
 
 
 def test_a_region_map_with_an_error_finding_is_refused(monkeypatch, tmp_path, capsys) -> None:
-    """Better to stop than to write a folder of empty crops for the whole class."""
     import json
 
     captured: dict = {}
@@ -1452,7 +1332,7 @@ def test_a_region_map_with_an_error_finding_is_refused(monkeypatch, tmp_path, ca
     map_path = _region_map_file(exam)
 
     data = json.loads(map_path.read_text())
-    data["questions"][0]["bbox"] = [0.5, 0.5, 0.0, 0.0]  # zero area
+    data["questions"][0]["bbox"] = [0.5, 0.5, 0.0, 0.0]
     map_path.write_text(json.dumps(data))
 
     with pytest.raises(SystemExit) as exit_info:
@@ -1473,7 +1353,6 @@ def test_a_region_map_for_another_exam_is_refused(monkeypatch, tmp_path, capsys)
     exam = _region_map_exam(tmp_path)
     map_path = _region_map_file(exam)
 
-    # A different exam: same shape, different bytes.
     other_dir = tmp_path / "other"
     other_dir.mkdir()
     other = _region_map_exam(other_dir, pages=2)
@@ -1491,12 +1370,6 @@ def test_a_region_map_for_another_exam_is_refused(monkeypatch, tmp_path, capsys)
 
 
 def test_the_region_map_contents_are_in_the_resume_fingerprint(monkeypatch, tmp_path) -> None:
-    """Editing one box has to invalidate the ledger.
-
-    Fingerprinting the map's *path* instead would let --resume hand back crops
-    cut against the previous version of the map — silently wrong output, which
-    is precisely what the ledger exists to prevent.
-    """
     from opengrader.core.submissions.manifest import read_manifest
 
     calls: list[str] = []
@@ -1508,10 +1381,9 @@ def test_the_region_map_contents_are_in_the_resume_fingerprint(monkeypatch, tmp_
     _extract(scans, out, "--region-map", str(map_path))
     first_id = next(iter(read_manifest(out).values())).settings_id
 
-    # Same path, edited contents.
     _region_map_file(exam, points=25.0)
     _extract(scans, out, "--region-map", str(map_path), "--resume")
     second_id = next(iter(read_manifest(out).values())).settings_id
 
     assert first_id != second_id
-    assert calls == ["submission-0001", "submission-0001"]  # it really re-extracted
+    assert calls == ["submission-0001", "submission-0001"]

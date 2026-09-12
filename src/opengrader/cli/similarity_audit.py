@@ -1,21 +1,4 @@
-"""Audit a graded set for answer similarity: did students hand in the same work?
-
-Two audits over one exam, because an instructor asking "did anyone copy?" asks
-it once and the answer lives in two disjoint halves of the paper:
-
-* **Free responses** are clustered by near-identical text. Deliberately
-  conservative: only free responses (a text diff over "B" and "B" says 100% for
-  every honest pair in the class), only answers long enough to carry a signal.
-* **Objective answers** — with ``--solutions`` — are audited by the statistic
-  that *does* work there: identical **wrong** choices, far more often than the
-  class's own distractor spread can explain. Two students picking the same right
-  answer is the exam working; two students repeatedly picking the same wrong one
-  is the signal. This half needs the answer key, since "wrong" is undefined
-  without it, which is why it is opt-in rather than always on.
-
-Both report for a human to judge — neither accuses, grades, or changes anything.
-Reads only the persisted ``.submission.md`` files; it never re-runs OCR.
-"""
+"""Report similar answers across submissions."""
 
 from __future__ import annotations
 
@@ -58,13 +41,10 @@ also audit the objective questions (needs the answer key):
 
 _SEVERITY_GLYPH = {"high": "●", "medium": "◐"}
 
-# How many of a pair's shared wrong answers to print. The full list is always in
-# --json; on screen the rarest few are what make the case, and the rest is noise.
 _MAX_SHARED_LINES = 8
 
 
 def _submission_paths(input_path: Path) -> list[Path]:
-    """Discover submission files, matching SubmissionFilesProvider's rules."""
     if input_path.is_file():
         return [input_path]
     direct = sorted(input_path.glob("*.submission.md"))
@@ -114,18 +94,11 @@ def _print_human(flags: list[SimilarityFlag]) -> None:
             print(
                 f"        {pair.score * 100:5.0f}%  {pair.a.label} ↔ {pair.b.label}"
             )
-        # Echo one answer so the reviewer can eyeball what matched.
         print(f'        e.g. "{_snippet(flag.members[0].response_text)}"')
         print()
 
 
 def _print_pattern_scope(report: AnswerPatternReport) -> None:
-    """State what the objective audit could and could not look at, first.
-
-    Printed before any finding (or any "nothing found"), following the same rule
-    as ``scan-check``: a report that quietly analyzed four questions of a fifty
-    question exam and found nothing reads exactly like a clean bill of health.
-    """
     analyzed = len(report.analyzed_questions)
     excluded = len(report.excluded_questions)
     print(
@@ -140,8 +113,6 @@ def _print_pattern_scope(report: AnswerPatternReport) -> None:
         for label, question_ids in by_reason.items():
             print(f"    not analyzed ({label}): {', '.join(question_ids)}")
     if not report.analyzed:
-        # Not a pass — there was nothing to test. Say which, since the two look
-        # identical from the outside and only one of them is reassuring.
         print(
             "    Nothing to compare: this exam has no rule-graded question with a "
             "spread of wrong answers.\n"
@@ -170,9 +141,6 @@ def _print_pattern_flag(flag: AnswerPatternFlag) -> None:
         f"        both wrong on {flag.both_wrong_count}, answered differently on "
         f"{flag.difference_count} · Harpp-Hogan index {index_text}"
     )
-    # Rarest agreements first (the engine's order), and only the leading few:
-    # a wholesale copier can share twenty answers, and printing all of them
-    # buries the next pair rather than telling the reader anything more.
     for shared in flag.shared_wrong[:_MAX_SHARED_LINES]:
         print(
             f'        {shared.question_id:<8} both "{shared.answer}" '

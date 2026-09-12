@@ -1,5 +1,3 @@
-"""grade-restore end to end: a real journal, real submission files, real writes."""
-
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -57,7 +55,6 @@ def cohort(tmp_path: Path) -> Path:
 
 
 def _journal(subs: Path, entries: list[dict]) -> None:
-    """Write one session file straight to the history dir."""
     history = resolve_history_dir(subs)
     history.mkdir(parents=True, exist_ok=True)
     path = history / "grade-journal-test.jsonl"
@@ -79,7 +76,6 @@ def _event(minutes, kind, actor, qid, old, new):  # noqa: ANN001
 
 
 def _good_then_bad(subs: Path) -> None:
-    """Alice grades 10/Correct; a batch run then overwrites it with 0/Incorrect."""
     _journal(
         subs,
         [
@@ -150,8 +146,6 @@ def test_apply_is_idempotent(cohort, capsys) -> None:  # noqa: ANN001
 
 
 def test_apply_restores_a_question_back_to_ungraded(cohort, capsys) -> None:  # noqa: ANN001
-    # The batch graded a question nobody had touched; undoing it must clear the
-    # Points line, not merely change the number.
     (cohort / "s1" / "s1.submission.md").write_text(
         SUBMISSION.format(points="0", rubric=" Incorrect", analysis="Wrong.")
     )
@@ -197,7 +191,6 @@ def test_apply_records_itself_in_the_journal(cohort) -> None:  # noqa: ANN001
     restored = [e for e in entries if "restored" in e.summary]
     assert len(restored) == 2
     assert all("bad batch" in e.summary for e in restored)
-    # And the recorded old/new describe the write that actually happened.
     grade = next(e for e in restored if e.kind == "grade")
     assert grade.old["points"] == 0.0 and grade.new["points"] == 10.0
 
@@ -213,7 +206,7 @@ def test_question_filter_narrows_the_restore(cohort, capsys) -> None:  # noqa: A
     question = load_student_submission_markdown(
         cohort / "s1" / "s1.submission.md"
     ).questions[0]
-    assert question.points_awarded == 0.0  # q1 untouched
+    assert question.points_awarded == 0.0
 
 
 def test_only_filter_restores_one_aspect(cohort) -> None:  # noqa: ANN001
@@ -226,7 +219,7 @@ def test_only_filter_restores_one_aspect(cohort) -> None:  # noqa: ANN001
         cohort / "s1" / "s1.submission.md"
     ).questions[0]
     assert question.analysis == "Nice work."
-    assert question.points_awarded == 0.0  # the grade was not in scope
+    assert question.points_awarded == 0.0
 
 
 def test_show_prints_the_reconstructed_state(cohort, capsys) -> None:  # noqa: ANN001

@@ -1,5 +1,3 @@
-"""The backup & integrity modal (start-up screen → Helper Tools)."""
-
 from __future__ import annotations
 
 import asyncio
@@ -66,8 +64,6 @@ async def _settle(pilot, predicate, limit: int = 80) -> None:  # noqa: ANN001
 
 
 def test_it_says_up_front_when_no_checksums_exist(folder: Path) -> None:
-    """Verify has nothing to compare against, and the fix is one button away."""
-
     async def run() -> None:
         screen = BackupScreen(submissions_path=str(folder))
         app = _Host(screen)
@@ -161,9 +157,6 @@ def test_checking_an_archive_reports_it_intact(folder: Path, tmp_path: Path) -> 
     asyncio.run(run())
 
 
-# ── where the archive is saved ────────────────────────────────────────────
-
-
 def test_the_archive_field_is_hidden_until_the_box_is_ticked(folder: Path) -> None:
     async def run() -> None:
         screen = BackupScreen(submissions_path=str(folder))
@@ -181,8 +174,6 @@ def test_the_archive_field_is_hidden_until_the_box_is_ticked(folder: Path) -> No
 
 
 def test_the_hint_names_the_archive_and_explains_the_snapshot(folder: Path) -> None:
-    """The two locations differ on purpose, so the dialog says both."""
-
     async def run() -> None:
         screen = BackupScreen(submissions_path=str(folder))
         app = _Host(screen)
@@ -207,7 +198,6 @@ def test_backing_up_with_the_box_unticked_writes_beside_the_folder(
             await _settle(pilot, lambda: bool(list(folder.parent.glob("*.zip"))))
             written = list(folder.parent.glob("*.zip"))
             assert len(written) == 1
-            # Never inside the folder it backs up.
             assert not list(folder.rglob("*.zip"))
 
     asyncio.run(run())
@@ -231,9 +221,6 @@ def test_a_stale_archive_path_in_a_hidden_field_is_ignored(
             assert not (tmp_path / "stale.zip").exists()
 
     asyncio.run(run())
-
-
-# ── encrypted archives ────────────────────────────────────────────────────
 
 
 def test_a_passphrase_encrypts_the_archive(folder: Path, tmp_path: Path) -> None:
@@ -277,8 +264,6 @@ def test_mismatched_passphrases_write_nothing(folder: Path, tmp_path: Path) -> N
             screen.query_one("#backup-passphrase-confirm", Input).value = "two"
             await pilot.click("#backup-run")
             await pilot.pause()
-            # A typo here cannot be recovered from, so it is caught before the
-            # archive exists rather than after.
             assert not archive.exists()
 
     asyncio.run(run())
@@ -296,8 +281,6 @@ def test_the_passphrase_fields_stay_hidden_until_asked_for(
             screen.query_one("#backup-encrypt", Checkbox).value = True
             await pilot.pause()
             assert not screen.query_one("#backup-passphrase-area").has_class("hidden")
-            # The default file name gains its .enc, so the line naming what will
-            # be written stays true.
             assert str(screen._resolved_archive()).endswith(".zip.enc")
 
     asyncio.run(run())

@@ -1,5 +1,3 @@
-"""Modal dialog that runs the canvas-export CLI from inside the TUI."""
-
 from __future__ import annotations
 
 import io
@@ -18,14 +16,6 @@ from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
 
 class CanvasExportScreen(ModalScreen[None]):
-    """Collect canvas-export flags, run the export, and show its output.
-
-    The export shells out to canvas-sak (network) per student, so it runs in
-    a thread worker; the CLI's stdout/stderr are captured and shown in the
-    dialog's log. Dry run is on by default because a real run posts grades
-    to Canvas.
-    """
-
     DEFAULT_CSS = """
     CanvasExportScreen {
         align: center middle;
@@ -111,7 +101,6 @@ class CanvasExportScreen(ModalScreen[None]):
 
     @staticmethod
     def _field_label(text: str, detail: str = "") -> Static:
-        """A bold label with an optional muted detail, as on the setup screen."""
         markup = f"[b]{text}[/b]"
         if detail:
             markup = f"{markup}  [dim]{detail}[/dim]"
@@ -225,7 +214,6 @@ class CanvasExportScreen(ModalScreen[None]):
         )
 
     def _run_export(self, argv: list[str]) -> None:
-        """Worker thread: run the CLI with its output captured."""
         buffer = io.StringIO()
         succeeded = True
         try:
@@ -233,7 +221,7 @@ class CanvasExportScreen(ModalScreen[None]):
                 run_canvas_export_cli(argv)
         except SystemExit as exc:
             succeeded = exc.code in (0, None)
-        except Exception as exc:  # surface unexpected failures in the log
+        except Exception as exc:
             succeeded = False
             buffer.write(f"\nerror: {exc}")
         self.app.call_from_thread(self._show_result, buffer.getvalue(), succeeded)

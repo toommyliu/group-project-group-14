@@ -1,9 +1,3 @@
-"""Ollama call hygiene for the vision client: format schema, keep_alive,
-num_predict, and that the JSON salvager (via the shared transport) and the
-vision client's own error type still behave as before consolidation onto
-``core/llm/ollama_transport.py``.
-"""
-
 from __future__ import annotations
 
 import json
@@ -38,8 +32,6 @@ class _FakeResponse:
 
 @pytest.fixture(autouse=True)
 def _skip_model_check(monkeypatch) -> None:
-    # Focused on the /api/generate call shape; model-availability checking is
-    # covered separately.
     monkeypatch.setattr(ollama_vlm, "ensure_model_available", lambda config: None)
 
 
@@ -109,11 +101,7 @@ def test_extract_question_prompt_and_answer_uses_generous_transcription_cap(
         "properties": {"answer": {"type": "string"}, "prompt": {"type": "string"}},
         "required": ["answer", "prompt"],
     }
-    # `answer` is declared first so constrained decoding emits the field that is
-    # actually graded before the printed prompt the extractor throws away.
     assert list(body["format"]["properties"]) == ["answer", "prompt"]
-    # The only call producing long output, and the schema makes it produce two
-    # long fields — capped generously so a real answer is never truncated.
     assert body["options"]["num_predict"] == 2048
 
 
@@ -136,8 +124,6 @@ def test_generate_with_image_sends_keep_alive(monkeypatch, image_path):
 
 
 def test_parse_json_from_response_still_salvages_fenced_json():
-    # The salvager (shared with core/llm/ollama_client.parse_json_object) is
-    # the fallback when a model wraps its structured reply in a fence.
     result = ollama_vlm._parse_json_from_response('```json\n{"value": "x"}\n```')
     assert result == {"value": "x"}
 

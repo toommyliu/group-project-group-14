@@ -1,33 +1,3 @@
-"""Run the extraction of many submission PDFs in parallel.
-
-Extraction is *embarrassingly parallel*: every PDF is read from its own file and
-everything it produces (the ``.submission.md`` plus the ``responses/`` and
-``identifiers/`` crops) lands in its own ``<output-dir>/<stem>/`` folder. No two
-submissions read or write the same byte, so N of them can be processed at once
-with no locking at all.
-
-**Why processes and not threads.** The two things that dominate the wall clock
-are page rendering (PyMuPDF/MuPDF) and OCR. MuPDF is explicitly documented as
-not thread-safe, and PyMuPDF holds the GIL across its calls, so threads would
-add risk and buy nothing for the render half of the work. Separate processes
-sidestep both problems and give true multi-core rendering. The ``spawn`` start
-method is requested explicitly so behaviour is identical on macOS, Linux, and
-Windows instead of inheriting the parent's memory on Linux only.
-
-**Getting progress back out.** A worker process cannot call the parent's
-``ExtractionProgress`` callbacks directly, so each one pushes plain tuples onto
-a shared queue and a small drain thread in the parent replays them onto the real
-reporter. From the caller's point of view the progress bar behaves exactly as it
-did in the sequential pipeline.
-
-**Picking a worker count.** :func:`resolve_worker_count` is deliberately
-conservative, because "as many workers as cores" is the wrong answer here twice
-over: a 300 DPI page render costs ~25 MB per page held in memory, and when the
-vision model is in play the real bottleneck is Ollama, which serves only a few
-generations concurrently — piling more workers on just makes requests queue
-until they hit the per-request timeout.
-"""
-
 from __future__ import annotations
 
 import multiprocessing
@@ -53,21 +23,13 @@ from .template import AssignmentTemplate
 from .student_file import StudentSubmissionDocument
 from .transcription import tally_reading_sources
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
+if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.bubble_sheet import BubbleSheetLayout
-    # OcrConfig is annotation-only here (ExtractionJob.ocr_config); a real
-    # import would resolve opengrader.core.ocr's cv2/fitz-backed extractor
-    # module just to type one dataclass field, taxing every TUI startup since
-    # this module is loaded eagerly by core/submissions/__init__.py.
     from opengrader.core.ocr import OcrConfig
 
-# Auto worker caps. Beyond these, extra workers cost memory (and, with the
-# vision model, request-queue latency) without finishing the batch any sooner.
 AUTO_WORKER_CAP = 8
 VLM_AUTO_WORKER_CAP = 4
 
-# How long the drain thread waits for a progress event before re-checking
-# whether the batch has finished. Short enough that shutdown feels instant.
 _DRAIN_POLL_SECONDS = 0.1
 
 OutcomeStatus = Literal["extracted", "skipped", "failed"]
@@ -75,15 +37,6 @@ OutcomeStatus = Literal["extracted", "skipped", "failed"]
 
 @dataclass(frozen=True)
 class ExtractionJob:
-    """Everything one worker needs to extract one PDF, and nothing else.
-
-    Every field is a plain value or a plain dataclass so the whole job can be
-    pickled and shipped to another process. Callables (the interactive
-    duplicate-name prompt, progress callbacks) are deliberately absent — they
-    cannot cross a process boundary, and the runner handles each of them
-    separately.
-    """
-
     pdf_path: Path
     output_dir: Path
     ocr_config: OcrConfig | None = None
@@ -98,42 +51,22 @@ class ExtractionJob:
     refresh_layout: bool = False
     llm_responses: bool = False
     llm_math: bool = False
-    # When set, the crop readers run cheapest-first and a model is asked only
-    # about readings below this confidence (`--llm-escalate`). A plain float so
-    # the job stays picklable, like every other field here.
     escalate_floor: float | None = None
-    # Which math-OCR backend transcribes the crops (`core/ocr/math_ocr.py`).
-    # A **name**, not a callable: every job field has to pickle into a worker,
-    # and resolving it on the far side is also what gives each process its own
-    # cached model instead of shipping one across.
     math_backend: str = DEFAULT_MATH_BACKEND
     default_section: str | None = None
     section_by_id: dict[str, str] | None = None
-    # OMR mode: the geometry of the generated answer sheet these scans are.
-    # A frozen dataclass tree of plain values, so it pickles into a worker like
-    # every other field here.
     bubble_sheet_layout: "BubbleSheetLayout | None" = None
-    # The batch was printed with a different question order per sheet, so a
-    # sheet whose form key cannot be read must be refused rather than read
-    # against the wrong rows.
     bubble_shuffled: bool = False
-    # A form key read off the paper by hand, for the one sheet whose QR will
-    # not scan. Only meaningful for a single-file run.
     bubble_form_key: str | None = None
-    # Carried through untouched so the caller can key its resume ledger off the
-    # outcome without hashing the input a second time.
     source_sha256: str = ""
 
     @property
     def key(self) -> str:
-        """The manifest key / output folder name for this PDF."""
         return self.pdf_path.stem
 
 
 @dataclass(frozen=True)
 class ExtractionOutcome:
-    """What happened to one PDF, in a form that survives pickling."""
-
     pdf_path: Path
     key: str
     status: OutcomeStatus
@@ -145,14 +78,10 @@ class ExtractionOutcome:
     error: str = ""
     duration_seconds: float = 0.0
     source_sha256: str = ""
-    # How many answers each reader produced, counted from the document that was
-    # actually written. A tuple of pairs rather than a dict so it pickles back
-    # from a worker unchanged, and so the aggregate order stays deterministic.
     reading_counts: tuple[tuple[str, int], ...] = ()
 
     @property
     def identity(self) -> str:
-        """Human-facing 'Name (id)' label, or a clear stand-in when unknown."""
         if self.student_id:
             return f"{self.student_name} ({self.student_id})"
         return "Unidentified"
@@ -160,8 +89,6 @@ class ExtractionOutcome:
 
 @dataclass
 class BatchReport:
-    """Aggregate result of a batch, in the caller's original input order."""
-
     outcomes: list[ExtractionOutcome] = field(default_factory=list)
     workers: int = 1
 
@@ -184,14 +111,6 @@ def resolve_worker_count(
     *,
     vlm_active: bool,
 ) -> int:
-    """Decide how many worker processes to run.
-
-    ``requested`` of ``None`` means "auto". Auto never exceeds the number of
-    jobs (spawning a process that has nothing to do is pure loss), the CPU
-    count, or the relevant cap — :data:`VLM_AUTO_WORKER_CAP` when the vision
-    model will be called, :data:`AUTO_WORKER_CAP` otherwise. An explicit
-    ``requested`` is honoured but still clamped to the job count.
-    """
     if job_count <= 1:
         return 1
     if requested is not None:
@@ -206,17 +125,6 @@ def document_outputs(
     document: StudentSubmissionDocument,
     markdown_path: Path,
 ) -> tuple[str, ...]:
-    """List every file an extraction produced, for the resume ledger.
-
-    The markdown file plus the identity crops plus one crop per question
-    response. Recording the crops (not just the markdown) is what lets a resumed
-    run notice that someone deleted the ``responses/`` folder and re-extract
-    that submission instead of trusting a ``.submission.md`` whose images are
-    all broken links.
-    """
-    # Every recorded image path is stored relative to the submission dir (see
-    # `_save_field_crop` / `_question_with_scan_crop`), so resolve them against
-    # it before handing them to the ledger.
     submission_dir = markdown_path.parent
     candidates: list[str | Path] = [markdown_path]
     for image in (document.name_image_path, document.id_image_path):
@@ -233,15 +141,6 @@ def _execute_job(
     event_queue: "queue_module.Queue | None" = None,
     build: Callable[..., tuple[StudentSubmissionDocument, Path]] | None = None,
 ) -> ExtractionOutcome:
-    """Extract one PDF and describe the result. Never raises.
-
-    This is the function that runs inside a worker process, so it must be
-    importable at module level and must not let an exception escape — a worker
-    that dies takes the pool down with it, whereas a failed *outcome* only costs
-    that one submission. Progress is reported by pushing tuples onto
-    ``event_queue``; with no queue (the sequential path) the reporter passed by
-    the caller is used directly.
-    """
     started = time.monotonic()
 
     if event_queue is not None:
@@ -254,7 +153,7 @@ def _execute_job(
 
         def status(message: str) -> None:
             event_queue.put(("status", message, None))
-    else:  # pragma: no cover - the sequential path supplies its own reporter
+    else:  # pragma: no cover
         progress = ExtractionProgress()
 
         def status(message: str) -> None:
@@ -288,7 +187,7 @@ def _execute_job(
             bubble_shuffled=job.bubble_shuffled,
             bubble_form_key=job.bubble_form_key,
         )
-    except Exception as exc:  # noqa: BLE001 - one bad scan must not kill the batch
+    except Exception as exc:  # noqa: BLE001
         return ExtractionOutcome(
             pdf_path=job.pdf_path,
             key=job.key,
@@ -323,13 +222,6 @@ def _replay_events(
     progress: ExtractionProgress,
     status_callback: Callable[[str], None] | None,
 ) -> None:
-    """Drain worker progress events onto the parent's reporter until told to stop.
-
-    Runs on its own thread so the main thread stays free to collect finished
-    futures. After ``stop`` is set it makes one last non-blocking pass so events
-    already in flight when the batch ended are not dropped.
-    """
-
     def dispatch(event: tuple) -> None:
         kind, first, second = event
         if kind == "file_start":
@@ -344,7 +236,7 @@ def _replay_events(
             dispatch(event_queue.get(timeout=_DRAIN_POLL_SECONDS))
         except queue_module.Empty:
             continue
-        except (EOFError, OSError, ValueError):  # queue closed during shutdown
+        except (EOFError, OSError, ValueError):
             return
     while True:
         try:
@@ -366,26 +258,9 @@ def run_extraction_batch(
     resolve_ambiguous: Callable | None = None,
     fail_fast: bool = False,
 ) -> BatchReport:
-    """Extract every job, on ``workers`` processes, and report what happened.
-
-    ``on_outcome`` fires on the calling thread as each PDF finishes — that is
-    where the caller prints its per-submission line and appends to the resume
-    ledger, so a run killed halfway still has a correct ledger for everything
-    that did finish. Outcomes fire in *completion* order; the returned report
-    restores the caller's original input order.
-
-    Two arguments force single-process execution because neither can cross a
-    process boundary, and both are meaningless in parallel anyway:
-
-    - ``build`` swaps in a different builder (tests use it to stub out the OCR
-      work) — an arbitrary callable is not picklable.
-    - ``resolve_ambiguous`` is the interactive duplicate-name prompt, which
-      needs the terminal; several workers racing for stdin would be unusable.
-
-    ``fail_fast`` stops scheduling further work after the first failure. By
-    default the batch runs to completion instead, since on a long overnight run
-    one unreadable scan should not throw away the other 199 submissions — the
-    caller reports the failures and can re-run with ``--resume`` afterwards.
+    """on_outcome runs on the calling thread in completion order; results use input order.
+    Injected build or resolve_ambiguous forces sequential execution. fail_fast stops
+    further scheduling after failure.
     """
     progress = progress or ExtractionProgress()
     if not jobs:
@@ -424,16 +299,8 @@ def _run_sequential(
     resolve_ambiguous: Callable | None,
     fail_fast: bool,
 ) -> BatchReport:
-    """One PDF at a time in this process — the original pipeline, unchanged.
-
-    Kept as a real code path (not "a pool of one") because it is what runs for a
-    single PDF, for ``--jobs 1``, and whenever the interactive duplicate-name
-    prompt needs a terminal, and because it avoids all process-startup cost.
-    """
     report = BatchReport(workers=1)
     for job in jobs:
-        # The reporter and status sink are already in this process, so they are
-        # wired straight through instead of going via the event queue.
         outcome = _execute_job_inline(
             job,
             progress=progress,
@@ -457,7 +324,6 @@ def _execute_job_inline(
     build: Callable[..., tuple[StudentSubmissionDocument, Path]] | None,
     resolve_ambiguous: Callable | None = None,
 ) -> ExtractionOutcome:
-    """In-process variant of :func:`_execute_job` that uses the real callbacks."""
     started = time.monotonic()
     builder = build or build_student_submission_document_unified
     status: Callable[[str], None] = status_callback or (lambda _message: None)
@@ -488,7 +354,7 @@ def _execute_job_inline(
             bubble_shuffled=job.bubble_shuffled,
             bubble_form_key=job.bubble_form_key,
         )
-    except Exception as exc:  # noqa: BLE001 - reported as a failed outcome
+    except Exception as exc:  # noqa: BLE001
         return ExtractionOutcome(
             pdf_path=job.pdf_path,
             key=job.key,
@@ -517,16 +383,6 @@ def _execute_job_inline(
 
 
 def _worker_render_cache_bytes(workers: int) -> int:
-    """The render-cache budget one worker process may hold.
-
-    The default budget is sized against the whole machine's memory, but under
-    ``--jobs N`` there are N independent processes each with their own cache, so
-    the machine-wide figure has to be shared out or N workers would together
-    retain N× what a sequential run does. A floor keeps the split from making
-    the cache useless at high job counts: one submission's pages at 300 DPI are
-    ~25 MB each, so 64 MiB still covers a worker's per-submission working set,
-    which is all a worker ever reuses (each job is a different PDF).
-    """
     from opengrader.core.render_cache import default_render_cache_bytes
 
     budget = default_render_cache_bytes()
@@ -536,11 +392,6 @@ def _worker_render_cache_bytes(workers: int) -> int:
 
 
 def _init_worker(render_cache_bytes: int) -> None:
-    """Process initializer for the extraction pool.
-
-    Module-level and trivially picklable because the pool uses the ``spawn``
-    start method, which re-imports rather than forking.
-    """
     from opengrader.core.render_cache import configure_render_cache
 
     configure_render_cache(max_bytes=render_cache_bytes)
@@ -558,13 +409,8 @@ def _run_parallel(
     on_outcome: Callable[[ExtractionOutcome], None] | None,
     fail_fast: bool,
 ) -> BatchReport:
-    """Extract on a spawn-based process pool, replaying progress as it arrives."""
     context = multiprocessing.get_context("spawn")
-    # A Manager queue (a proxy) is used rather than a raw multiprocessing.Queue
-    # because it can be pickled as an ordinary argument; a raw queue may only be
-    # shared through process inheritance, which ProcessPoolExecutor does not
-    # promise. Event volume is tiny (one per transcribed response), so the extra
-    # hop costs nothing measurable next to the OCR it is reporting on.
+    # Pool arguments must be picklable; raw queues require process inheritance.
     manager = context.Manager()
     stop = threading.Event()
     order = {job.key: index for index, job in enumerate(jobs)}
@@ -612,16 +458,9 @@ def _run_parallel(
 
 
 def _outcome_from_future(future, job: ExtractionJob) -> ExtractionOutcome:
-    """Unwrap a finished future, turning a dead worker into a failed outcome.
-
-    ``_execute_job`` already converts extraction errors into outcomes, so
-    anything raised here is the pool itself failing — a worker killed by the OOM
-    killer, say. Reporting it against the job keeps the batch honest instead of
-    losing the submission silently.
-    """
     try:
         return future.result()
-    except Exception as exc:  # noqa: BLE001 - worker process died
+    except Exception as exc:  # noqa: BLE001
         return ExtractionOutcome(
             pdf_path=job.pdf_path,
             key=job.key,

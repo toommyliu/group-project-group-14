@@ -1,3 +1,5 @@
+"""Extract student identities, answers, and response crops from PDFs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -54,7 +56,7 @@ from opengrader.core.submissions import (
     AssignmentTemplate,
     _load_blank_assignment_template,
     _RosterEntry,
-    _load_roster, # Import _load_roster
+    _load_roster,
     ExtractionProgress,
 )
 from opengrader.core.submissions.batch import (
@@ -106,12 +108,6 @@ def _prompt_for_duplicate_name(
     document: StudentSubmissionDocument,
     candidates: tuple[_RosterEntry, ...],
 ) -> _RosterEntry | None:
-    """Ask the grader which roster student a duplicate-named submission is.
-
-    Shows the extracted name and the source file so the user knows which
-    submission they're resolving. Returns the chosen entry, or None to skip
-    (leaving the ID blank for later manual assignment).
-    """
     source = Path(document.source_pdf).name if document.source_pdf else "?"
     print(f"\n  Duplicate name in {source}:", file=sys.stderr)
     print(f"    Extracted name: {document.student_name!r}", file=sys.stderr)
@@ -128,83 +124,6 @@ def _prompt_for_duplicate_name(
             return candidates[int(choice) - 1]
         print("    Enter a listed number, or 's' to skip.", file=sys.stderr)
 
-"""
-Extract per-student .submission.md files from PDFs.
-
-Without --blank-template: each --input PDF must have a real text layer. fitz
-text extraction + regex pulls out the assignment title, student name/ID,
-and question prompts/points. The command exits with an error if the PDF
-has no text layer.
-
-With --blank-template PATH.pdf: PATH.pdf is the blank version of the assignment
-(same layout as the scans, no answers, real text layer required). Its
-question prompts, points, answer-region bboxes, and name/ID field bboxes
-are extracted once and applied to every scan in --input. The scans
-themselves do not need a text layer; each scan page is rendered and run
-through pytesseract to find the actual on-paper positions of question
-prefixes (``N. (M points) ...``) and Name/ID labels, so per-question
-response crops land on the real student-writing region even when the scan
-sits at a slightly different vertical position than the blank template.
-
-With --region-map PATH.json: this is how you grade an assignment Opengrader
-didn't generate. PATH.json is a region map — the answer regions an instructor
-drew once, on a blank copy of their own assignment, with ``region-map`` or the
-TUI's region-map editor. The assignment needs no text layer at all (it may be a
-flat scan of a paper original), because nothing is read off it: the boxes *are*
-the
-answer regions and every scan is cropped against them verbatim. Mutually
-exclusive with --blank-template — two structural sources would silently fight
-over where question 4 lives. See ``core/region_map.py``.
-
-
-OPERATIONAL MODES:
-1. Template-Based Alignment (The "Scan with Template" Mode)
-Trigger: You provide --blank-template PATH.pdf.
-Process: The script reads the "source of truth" (the blank assignment template) to know exactly where questions and Name/ID fields should be. 
-         Since scanned student papers are often slightly shifted or skewed, it uses Tesseract to find the "anchor" text 
-         (like "Name:" or "1. (10 points)") on the student's paper.
-Result: It calculates a median vertical offset and "snaps" the crop boxes to the student's handwriting. It saves image crops but does not 
-         transcribe text yet (that is left for a downstream OCR pass).
-
-2. Digital Text Layer Extraction (The "Born-Digital" Mode)
-Trigger: No blank assignment is provided, and the PDF contains a selectable text layer (e.g., a PDF exported from Microsoft Word).
-Process: It uses the fitz (PyMuPDF) library to pull raw text directly from the PDF. It uses Regex patterns (_QUESTION_INLINE_RE) to find 
-         the question numbers and points.
-Result: This is the fastest mode. It populates the .submission.md file with text immediately because the data is already digital.
-
-3. Full OCR & Vision Extraction (The "Dark Scan" Mode)
-Trigger: No blank assignment provided, and the PDF has no text layer (it's just a raw image of a page).
-Process: This is the most computationally expensive mode. It uses the core/ocr engine to detect the visual layout (lines, boxes, and grids). 
-         If you have Ollama running with a vision model (like qwen2.5vl), it sends the crops to the AI to transcribe handwritten names, IDs, 
-         and answers.
-Result: A fully populated markdown file with AI-transcribed handwriting.
-
-
-NOTES:
-Per-question response crops are saved under ``responses/``, and Name/ID
-field crops are saved under ``identifiers/`` inside each submission's
-folder. The frontmatter holds ``name_image`` and ``id_image`` references
-to those crops at the top, plus normalized bboxes for the Name/ID fields
-under ``name_field`` / ``student_id_field``. No value-extraction OCR is
-done here — populating ``name`` / ``student_id`` / per-question Response
-text is the job of a downstream OCR pass.
-
-
-Regardless of which strategy found the images, the unified engine then:
-    - Sends the Name/ID crops to Ollama/Tesseract.
-    - Fuzzy matches those results against your roster to get the "Real" Student ID.
-    - Sends answer crops to Ollama for handwriting transcription.
-
-
-Markdown Generation: Lastly it writes a single .submission.md file that is fully populated with canonical IDs, transcribed text, and image references.
-
-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-How the update flag works:
-Skip PDF Rendering and Layout Detection: If --update is set, the engine assumes the .submission.md file and its associated image crops (in the identifiers/ 
-and responses/ directories) already exist. It skips the rendering and "dark scan" layout detection phases entirely.
-
-
-"""
 
 EPILOG = """
 examples:
@@ -237,7 +156,6 @@ examples:
 
 
 def _parse_jobs(value: str) -> int | None:
-    """Parse ``--jobs``: ``auto`` (or 0) means "let the runner decide"."""
     text = value.strip().lower()
     if text in ("auto", "0"):
         return None
@@ -251,11 +169,6 @@ def _parse_jobs(value: str) -> int | None:
 
 
 def _roster_fingerprint(roster: list[_RosterEntry] | None) -> list[str]:
-    """A stable, order-independent view of the roster for the settings hash.
-
-    Sorted so that reordering ``--id-file`` arguments — which cannot change the
-    extracted result — doesn't needlessly invalidate a resumable run.
-    """
     if not roster:
         return []
     return sorted(f"{entry.student_id}\t{entry.name}" for entry in roster)
@@ -275,15 +188,6 @@ def _collect_input_pdfs(input_path: str) -> list[Path]:
 
 
 def _load_bubble_sheet_layout(qa_path: Path, *, version: str | None = None):  # noqa: ANN202
-    """Rebuild the printed answer sheet's geometry from its QA file.
-
-    The reader has to agree with the generator to the pixel, and the way to
-    guarantee that is to derive both from the same source rather than store the
-    geometry twice. Raises when the QA file has no multiple-choice questions —
-    that means these scans cannot be the sheets this file generates, and
-    reading them would produce a document full of empty answers instead of an
-    error.
-    """
     from opengrader.core.bubble_sheet import (
         CompanionQuestion,
         build_bubble_sheet_layout,
@@ -305,9 +209,6 @@ def _load_bubble_sheet_layout(qa_path: Path, *, version: str | None = None):  # 
             "a bubble sheet"
         )
 
-    # Every gradable question in the answer key, bubbled or not. The ones the
-    # sheet cannot carry still need a block in the submission, or the TUI has
-    # nothing to write a grade for when the exam has a written section too.
     bubbled = {question.question_id for question in questions}
     companions: list[CompanionQuestion] = []
     order: list[str] = []
@@ -333,22 +234,10 @@ def _load_bubble_sheet_layout(qa_path: Path, *, version: str | None = None):  # 
     )
 
 
-# How many scans to sample when deciding whether a batch was printed scrambled.
-# A batch is printed in one go, so if it is scrambled essentially every sheet
-# carries a form key; sampling a handful is enough to notice, and costs a few
-# page renders rather than one per submission.
 _SHUFFLE_DETECT_SAMPLE = 8
 
 
 def _detect_shuffled_batch(pdfs: list[Path]) -> bool:
-    """Return whether these scans look like a scrambled batch.
-
-    Auto-detection exists because forgetting ``--bubble-shuffled`` on a
-    scrambled batch is silently catastrophic: every sheet whose QR failed to
-    scan would be read against the wrong question order and produce confident,
-    wrong grades. Requiring the user to remember a flag to avoid that is a bad
-    trade, so the flag becomes a *forcing* option rather than the only signal.
-    """
     from opengrader.core.submissions.processor import _read_qr_code
 
     for pdf_path in pdfs[:_SHUFFLE_DETECT_SAMPLE]:
@@ -359,7 +248,6 @@ def _detect_shuffled_batch(pdfs: list[Path]) -> bool:
 
 
 def _bubble_layout_fingerprint(layout) -> str:  # noqa: ANN001
-    """Stable digest of a bubble layout, for the resume ledger's settings id."""
     if layout is None:
         return ""
     parts = [
@@ -371,22 +259,12 @@ def _bubble_layout_fingerprint(layout) -> str:  # noqa: ANN001
 
 
 def _parse_roster_arg(value: str) -> tuple[Path, str | None]:
-    """Split a ``--id-file`` value into (path, explicit section name or None).
-
-    Accepts ``roster.tsv`` or ``roster.tsv=SectionA``. A value that is itself an
-    existing file is kept intact, so a real path that happens to contain ``=``
-    is not mistaken for a section suffix.
-    """
     if Path(value).exists() or "=" not in value:
         return Path(value), None
     path_str, name = value.rsplit("=", 1)
     return Path(path_str), (name.strip() or None)
 
 
-# The journal actor a refine pass writes its corrected transcriptions under.
-# Named after the tool rather than the person (the operator is named in each
-# entry's summary), following `automated-grading:llm`, so a whole pass is undone
-# with one command: `grade-restore apply --without-actor submission-extractor:refine --yes`.
 JOURNAL_ACTOR_REFINE = "submission-extractor:refine"
 
 
@@ -397,13 +275,6 @@ def _plan_refine(
     floor: float,
     emit: "Callable[[str], None]",
 ) -> list[RefineCandidate]:
-    """Find the submissions holding an answer worth a second attempt.
-
-    Reads each input PDF's *existing* ``.submission.md`` — a refine is a second
-    pass over work that already landed, so an input with no extraction yet is
-    reported and skipped rather than quietly extracted, which would make
-    ``--refine`` a slow synonym for a plain run.
-    """
     candidates: list[RefineCandidate] = []
     missing = 0
     for pdf_path in pdfs:
@@ -437,14 +308,6 @@ def _apply_refined_document(
     operator: str,
     emit: "Callable[[str], None]",
 ) -> int:
-    """Merge one re-extraction into the real submission. Returns answers adopted.
-
-    The existing document is re-read here rather than reused from the planning
-    pass, so a grader who corrected one of these answers by hand while the
-    re-extraction was running keeps their correction: their edit moved the
-    stored confidence off the value the target recorded, and the merge refuses
-    anything that no longer matches.
-    """
     try:
         refreshed = load_student_submission_markdown(staged_markdown)
         existing = load_student_submission_markdown(candidate.markdown_path)
@@ -473,13 +336,7 @@ def _apply_refined_document(
                 question_id=refined.question_id,
                 response_text=refined.new_text,
                 response_confidence=refined.new_confidence,
-                # A model reading has no measured confidence, so the line is
-                # removed rather than left showing the old number — which would
-                # attach a score of 42 to words nothing scored.
                 clear_response_confidence=refined.new_confidence is None,
-                # ...and the same for the reader: an adopted re-read that kept
-                # saying "tesseract" would hide the escalation this pass exists
-                # to perform, from the grader *and* from `transcribe-eval`.
                 response_source=refined.new_source,
                 clear_response_source=refined.new_source is None,
             ),
@@ -487,9 +344,6 @@ def _apply_refined_document(
         if journal is None:
             continue
         try:
-            # Appended only after the write succeeded: journalling a change that
-            # never landed would make `grade-restore` propose an undo for
-            # something that never happened.
             journal.append(
                 kind="transcription",
                 student_id=candidate.student_id,
@@ -498,11 +352,6 @@ def _apply_refined_document(
                 summary=(
                     f"re-read at {refined.confidence_summary} (run by {operator})"
                 ),
-                # Both sides carry their confidence and reader, through the same
-                # shared builder the TUI and `grade-restore` use — which is what
-                # lets an undo put the *whole* previous reading back, and what
-                # lets `transcribe-eval` tell a machine's second attempt (this)
-                # apart from a human's correction.
                 old=journal_payload(
                     "transcription",
                     AspectValue(
@@ -521,8 +370,6 @@ def _apply_refined_document(
                 ),
             )
         except OSError:
-            # Accountability must never fail a correction that already landed —
-            # the same best-effort rule the TUI provider and the auto-grader use.
             pass
     return len(result.adopted)
 
@@ -533,14 +380,6 @@ def _print_reading_summary(
     escalate_floor: float | None,
     emit: "Callable[[str], None]",
 ) -> None:
-    """Say which reader produced the answers this run transcribed.
-
-    Printed for **every** run, not just an escalated one: "who read this exam"
-    is the question behind every later argument about a wrong transcription, and
-    a line that only appears with one flag is a line nobody learns to look for.
-    Silent when nothing was transcribed (a template run that only cut crops),
-    where a zeroed breakdown would read as a failure.
-    """
     tally = ReadingTally()
     for outcome in report.extracted:
         tally = tally.merge(ReadingTally(counts=outcome.reading_counts))
@@ -553,8 +392,6 @@ def _print_reading_summary(
     escalated = sum(
         tally.count_of(source) for source in (SOURCE_VISION_MODEL, SOURCE_MATH_MODEL)
     )
-    # The number the flag exists for: how many model calls the escalation
-    # actually spent, against how many reading it every answer would have cost.
     emit(
         f"  Escalated {escalated} of {tally.total} "
         f"answer{'s' if tally.total != 1 else ''} to a model "
@@ -568,7 +405,6 @@ def _print_refine_summary(
     dry_run: bool,
     emit: "Callable[[str], None]",
 ) -> None:
-    """Close the run with what changed, what didn't, and how to undo it."""
     emit("")
     emit(
         f"Refine: {summary.targets} low-confidence answer(s) across "
@@ -586,9 +422,6 @@ def _print_refine_summary(
         f"submission(s); {summary.unchanged} kept their original reading."
     )
     if summary.unchanged:
-        # Naming this is the point: an answer a second attempt could not improve
-        # is the one that genuinely needs a person, and it is still sitting in
-        # the review queue waiting for one.
         emit(
             "  The ones that were kept are still flagged — see: "
             "uv run review-queue --input <output> --ocr-confidence"
@@ -606,19 +439,6 @@ def run_cli(
     progress: ExtractionProgress | None = None,
     status_callback: "Callable[[str], None] | None" = None,
 ) -> None:
-    """Run the extractor.
-
-    When called programmatically (e.g. from the setup-screen worker), pass a
-    ``progress`` reporter to receive per-response ticks and a ``status_callback``
-    to receive status lines; the built-in rich progress bar is then suppressed
-    so the caller owns the display.
-    """
-    # Resolved once, here, rather than read as a module-level constant: the AI
-    # Setup screen lets a teacher change their saved model/host at any time, and
-    # a module-level constant would freeze whatever was on disk the moment this
-    # file was first imported (including for `--help`-only runs of unrelated
-    # tools). Resolving inside the function means every invocation picks up
-    # whatever is current, while an explicit CLI flag below still wins.
     ai = ai_config.resolve()
     parser = ArgumentParser(
         description=(
@@ -755,7 +575,6 @@ def run_cli(
             "blank. Ignored when stdin is not a TTY (e.g. batch runs)."
         ),
     )
-    # Arguments from submission_file.py
     parser.add_argument(
         "--dpi",
         type=int,
@@ -991,9 +810,6 @@ def run_cli(
     )
     args = parser.parse_args(argv)
 
-    # --refine answers a different question from --resume ("what finished
-    # badly?" vs "what didn't finish?"), and combining them would have to mean
-    # one or the other. Refusing says so instead of silently picking.
     if args.refine:
         conflicting = [
             name
@@ -1018,9 +834,6 @@ def run_cli(
             print("error: --refine-dpi must be at least 1.", file=sys.stderr)
             sys.exit(1)
     else:
-        # A refine knob without --refine is a half-remembered flag pair, and
-        # ignoring it silently would leave an instructor believing a second pass
-        # ran — the same reason --math-backend warns without --llm-math.
         idle = [
             name
             for name, given in (
@@ -1036,9 +849,6 @@ def run_cli(
                 file=sys.stderr,
             )
 
-    # Escalation is a transcription *order*, so it only means anything once
-    # transcription is on — implying the flag rather than rejecting the pair is
-    # what makes `--llm-escalate` a complete instruction on its own.
     if args.llm_escalate:
         args.llm_responses = True
         if not 0.0 < args.escalate_confidence <= 100.0:
@@ -1048,9 +858,6 @@ def run_cli(
             )
             sys.exit(1)
     elif args.escalate_confidence != DEFAULT_ESCALATION_FLOOR:
-        # The same half-remembered-flag-pair note --math-backend gets: silently
-        # ignoring a number the user typed would leave them believing a floor
-        # was applied.
         print(
             "note: --escalate-confidence does nothing without --llm-escalate.",
             file=sys.stderr,
@@ -1061,19 +868,11 @@ def run_cli(
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # A refine pass escalates to a model on purpose, so its transcription flag
-    # and model name are folded into the ordinary options here — everything
-    # downstream (the Ollama probe, the progress bar, the jobs) then behaves as
-    # if the user had asked for that model in the first place.
     if args.refine and args.refine_model:
         args.llm_responses = True
         args.ollama_model = args.refine_model
     render_dpi = args.refine_dpi if (args.refine and args.refine_dpi) else args.dpi
 
-    # Check the math backend before a single page is rendered. Resolving it here
-    # costs a path lookup and turns "not installed" into an actionable line at
-    # second zero, rather than a silent degradation discovered after an
-    # overnight batch has transcribed the whole class with the other reader.
     if args.llm_math:
         try:
             resolve_math_transcriber(args.math_backend, strict=True)
@@ -1081,22 +880,12 @@ def run_cli(
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)
     elif args.math_backend != ai.math_backend:
-        # Compared against the resolved default (not the hardcoded literal): a
-        # teacher who saved a non-default backend in AI Setup shouldn't see this
-        # note just because their configured backend differs from the literal —
-        # only an explicit --math-backend without --llm-math should trigger it.
-        # A backend with nothing to transcribe is a misunderstanding worth
-        # naming: the flag pair is easy to half-remember, and silently ignoring
-        # it would leave an instructor believing the model ran.
         print(
             f"note: --math-backend {args.math_backend} does nothing without "
             "--llm-math, so no LaTeX will be transcribed.",
             file=sys.stderr,
         )
 
-    # Two structural sources would silently fight over where question 4 lives,
-    # and whichever lost would do so without a word. Refuse, and name the one to
-    # keep rather than picking for them.
     if args.blank_template and args.region_map:
         print(
             "error: --blank-template and --region-map both describe where the "
@@ -1115,12 +904,6 @@ def run_cli(
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)
     elif args.region_map:
-        # A region map produces the very same `AssignmentTemplate` the blank
-        # template does (`core/region_map.region_map_to_blank_template`), so
-        # from here on there is one extraction path, not two. Verification is
-        # against the assignment the boxes were drawn on: a map applied to a
-        # different (or re-exported) PDF mis-crops every answer of every
-        # student without raising anything, so it is refused up front.
         try:
             region_map = load_verified_region_map(
                 Path(args.region_map),
@@ -1148,10 +931,6 @@ def run_cli(
 
         blank_assignment_template = region_map_to_blank_template(region_map)
 
-    # OMR mode: rebuild the printed sheet's geometry from the QA file it was
-    # generated from. Deriving it (rather than storing a sidecar next to the
-    # PDF) means there is one description of the sheet and it is the same file
-    # the exam itself is defined in — the pattern --blank-template already uses.
     bubble_sheet_layout = None
     if args.bubble_sheet:
         try:
@@ -1162,9 +941,6 @@ def run_cli(
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)
         if blank_assignment_template is not None:
-            # Name whichever structural source is being overridden — being told
-            # "--blank-template was ignored" when you passed --region-map reads
-            # as a different bug entirely.
             overridden = "--region-map" if args.region_map else "--blank-template"
             print(
                 f"note: --bubble-sheet overrides {overridden}; reading marks, "
@@ -1173,8 +949,6 @@ def run_cli(
             )
             blank_assignment_template = None
 
-        # Notice a scrambled batch even when the user did not say so — see
-        # `_detect_shuffled_batch` for why this is worth the sampling cost.
         if not args.bubble_shuffled and _detect_shuffled_batch(pdfs):
             args.bubble_shuffled = True
             print(
@@ -1184,10 +958,6 @@ def run_cli(
             )
 
 
-    # Rosters (one per --id-file). All are merged into a single flat list for
-    # identity resolution; when several are given (a mixed scan stack) each also
-    # contributes its members to `section_by_id` so a student is routed to the
-    # section whose roster holds their id.
     id_file_args: list[str] = args.id_file or []
     roster: list | None = None
     default_section: str | None = args.section
@@ -1223,7 +993,6 @@ def run_cli(
         roster = [entry for _, _, entries in parsed_rosters for entry in entries]
 
         if not args.section and len(parsed_rosters) > 1:
-            # Mixed stack: route by roster membership.
             section_by_id = {}
             for roster_path, explicit_name, entries in parsed_rosters:
                 section_name = explicit_name or roster_path.stem
@@ -1238,16 +1007,10 @@ def run_cli(
                         )
                     section_by_id[entry.student_id] = section_name
         elif not args.section and len(parsed_rosters) == 1:
-            # A single roster only assigns a section when the user named it
-            # (roster.tsv=SectionA); a bare --id-file keeps the pre-section
-            # behavior (identity fill only, no section field).
             _, explicit_name, _ = parsed_rosters[0]
             if explicit_name:
                 default_section = explicit_name
 
-    # Interactive duplicate-name resolution only makes sense with a roster and a
-    # real terminal; a batch/redirected run silently keeps the safe default
-    # (leave the ID blank and report it).
     resolve_ambiguous = None
     if args.interactive_roster:
         if roster and sys.stdin.isatty():
@@ -1260,17 +1023,13 @@ def run_cli(
                 file=sys.stderr,
             )
 
-    # Auto-start Ollama if requested
     ollama_server_proc = None
     ollama_log_file = None
-    # `and bubble_sheet_layout is None`: OMR needs no model, so booting a server
-    # and pulling several GB for it would be pure waste.
     if args.auto_ollama and bubble_sheet_layout is None:
         parsed_url = urlparse(args.ollama_host)
         host = parsed_url.hostname or "127.0.0.1"
         port = parsed_url.port or 11434
 
-        # Check if something is already listening on the host/port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex((host, port)) != 0:
                 print(f"Ollama server not found at {args.ollama_host}. Starting 'ollama serve'...")
@@ -1281,7 +1040,6 @@ def run_cli(
                         stdout=ollama_log_file,
                         stderr=ollama_log_file
                     )
-                    # Wait for server to bind
                     start_time = time.time()
                     while time.time() - start_time < 30:
                         time.sleep(1)
@@ -1291,7 +1049,7 @@ def run_cli(
                     else:
                         print("Warning: Timed out waiting for Ollama to start. Extraction may fail.", file=sys.stderr)
                         if ollama_log_file:
-                            ollama_log_file.seek(0) # Go to beginning of file
+                            ollama_log_file.seek(0)
                             logs = ollama_log_file.read()
                             if logs:
                                 print("\n--- Ollama Server Logs (failed to start) ---", file=sys.stderr)
@@ -1313,22 +1071,14 @@ def run_cli(
                             print("----------------------------------------------\n", file=sys.stderr)
                     sys.exit(1)
 
-        # Ensure model is present (pull is idempotent and cheap if already present)
         print(f"Ensuring model '{args.ollama_model}' is available...")
         subprocess.run(["ollama", "pull", args.ollama_model], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     ocr_config = None
     ollama_config = None
 
-    # The OMR path reads marks geometrically: no Tesseract, no vision model, not
-    # even a server to reach. Skipping this setup is not just tidiness — probing
-    # for a model that will never be called prints a scary warning on a machine
-    # that legitimately has no Ollama, which is exactly the machine a
-    # multiple-choice-only instructor is running on.
     omr_mode = bubble_sheet_layout is not None
 
-    # OCR config is only needed for the scan path (no blank template), which may
-    # fall back to Tesseract.
     if not args.blank_template and not omr_mode:
         ocr_config = OcrConfig(
             lang=args.lang,
@@ -1336,8 +1086,6 @@ def run_cli(
             confidence_threshold=args.confidence_threshold,
         )
 
-    # The vision model is used by the scan path (name/ID/answers) and, when
-    # --llm-responses is set, by the blank-template path to transcribe answers.
     if not omr_mode and (not args.blank_template or args.llm_responses):
         print(f"Using Ollama vision model: {args.ollama_model}")
         ollama_config = OllamaVisionConfig(
@@ -1349,15 +1097,10 @@ def run_cli(
             ensure_model_available(ollama_config)
         except Exception as exc:
             print(f"Warning: Ollama model not available ({exc}). Proceeding without VLM for text extraction.", file=sys.stderr)
-            ollama_config = None # Disable Ollama if not available
+            ollama_config = None
 
     print(f"Found {len(pdfs)} submission PDF(s)")
 
-    # A live progress bar (bar + %/count + elapsed + ETA) is only meaningful
-    # when the vision model actually transcribes responses; otherwise there is
-    # nothing to count, so we fall back to plain status lines. When a caller
-    # injects its own progress reporter (the TUI), it owns the display and the
-    # built-in rich bar is suppressed.
     external_progress = progress is not None
     vlm_possible = bool(ollama_config) and not args.no_ollama_qa
     progress_bar: Progress | None = None
@@ -1377,7 +1120,6 @@ def run_cli(
     response_task: dict[str, object] = {"id": None, "total": 0}
 
     def emit(message: str) -> None:
-        """Print a status line above the live bar (or plainly without one)."""
         if status_callback is not None:
             status_callback(message)
         elif progress_bar is not None:
@@ -1386,8 +1128,6 @@ def run_cli(
             print(message)
 
     def progress_status(message: str) -> None:
-        """Per-question builder chatter: keep only warnings once a bar owns the
-        screen (the bar's current-item field already shows progress)."""
         if status_callback is not None:
             if "warning" in message.lower() or "error" in message.lower():
                 status_callback(f"  {message}")
@@ -1422,15 +1162,6 @@ def run_cli(
             on_response=on_response if vlm_possible else None,
         )
 
-    # ---------------------------------------------------------------------
-    # Resume ledger: which of these PDFs is already done?
-    #
-    # `settings_id` covers every option that changes what extraction produces,
-    # so flipping (say) --llm-math or swapping the blank template correctly
-    # invalidates the whole ledger. Options that only affect *how fast* or *how
-    # loudly* we run (--jobs, --resume itself, the Ollama host and timeout) are
-    # left out on purpose, so they never force needless re-extraction.
-    # ---------------------------------------------------------------------
     settings_id = settings_fingerprint(
         {
             "dpi": args.dpi,
@@ -1439,15 +1170,7 @@ def run_cli(
             "confidence_threshold": args.confidence_threshold,
             "split_subquestions": not args.no_split_subquestions,
             "blank_template": file_fingerprint(args.blank_template) if args.blank_template else "",
-            # The map's *contents*, not its path: every crop's geometry comes
-            # from this file, so editing one box has to invalidate the ledger.
-            # Fingerprinting the path instead would let --resume hand back crops
-            # cut against the previous version of the map — silently wrong
-            # output, which is exactly what the ledger exists to prevent.
             "region_map": file_fingerprint(args.region_map) if args.region_map else "",
-            # The layout, not the flag: re-generating the sheet from an edited
-            # QA file changes where the bubbles are, and a --resume that reused
-            # the old readings would score the class against the wrong rows.
             "bubble_sheet": _bubble_layout_fingerprint(bubble_sheet_layout),
             "bubble_shuffled": args.bubble_shuffled,
             "roster": _roster_fingerprint(roster),
@@ -1456,13 +1179,7 @@ def run_cli(
             "interactive_roster": resolve_ambiguous is not None,
             "llm_responses": args.llm_responses,
             "llm_math": args.llm_math,
-            # Output-shaping for the same reason `math_backend` is: escalation
-            # decides *which reader* transcribed each crop, so the same page
-            # resumed under a different floor holds different `Response text`.
             "escalate_floor": escalate_floor,
-            # Output-shaping: the same crop transcribed by a different backend
-            # is a different `Response text`, so a resumed run must not hand
-            # back the previous backend's readings.
             "math_backend": args.math_backend,
             "skip_ollama_qa": args.no_ollama_qa,
             "vlm_model": ollama_config.model if ollama_config else "",
@@ -1473,15 +1190,6 @@ def run_cli(
     )
     ledger = read_manifest(output_dir) if args.resume else {}
 
-    # ---------------------------------------------------------------------
-    # --refine reroutes the whole batch. Only the submissions holding an answer
-    # below the confidence floor are re-extracted, and they are extracted into a
-    # **scratch directory** rather than over the originals: a second attempt can
-    # come back worse, and writing it into place before anything has judged it
-    # would destroy the better reading (and re-cut every crop) to fix nothing.
-    # The real files are touched later, one field at a time, and only for the
-    # answers the merge rules accept.
-    # ---------------------------------------------------------------------
     refine_candidates: dict[str, RefineCandidate] = {}
     refine_staging: Path | None = None
     refine_scanned = len(pdfs)
@@ -1505,8 +1213,6 @@ def run_cli(
                 f"{len(candidates)} submission(s) at {render_dpi} DPI{escalation}"
             )
 
-    # Where the extraction writes. For a refine that is the scratch dir; for
-    # every other run it is the real output dir, exactly as before.
     job_output_dir = refine_staging or output_dir
 
     jobs: list[ExtractionJob] = []
@@ -1522,8 +1228,6 @@ def run_cli(
             skipped.append(pdf_path)
             continue
 
-        # An --update run still needs a full extraction when the .submission.md
-        # it would update isn't there yet.
         expected_md = output_dir / pdf_path.stem / f"{pdf_path.stem}.submission.md"
         performing_update = args.update and expected_md.exists()
         if args.update and not performing_update:
@@ -1559,8 +1263,6 @@ def run_cli(
     if skipped:
         emit(f"Resuming: {len(skipped)} already extracted, {len(jobs)} to do")
 
-    # The interactive duplicate-name prompt owns stdin, so it can only run
-    # one-at-a-time; say so rather than silently ignoring an explicit --jobs.
     if resolve_ambiguous is not None:
         workers = 1
         if args.jobs is not None and args.jobs > 1:
@@ -1575,9 +1277,6 @@ def run_cli(
         emit(f"Extracting {len(jobs)} submissions across {workers} parallel workers")
 
     completed = {"count": 0}
-    # A refine pass writes under its own actor so `grade-restore` can drop the
-    # whole thing in one command. Opened lazily by GradeJournal itself, so a dry
-    # run that adopts nothing leaves no session file behind.
     refine_journal = (
         GradeJournal(resolve_history_dir(output_dir), actor=JOURNAL_ACTOR_REFINE)
         if args.refine and not args.refine_dry_run
@@ -1587,17 +1286,6 @@ def run_cli(
     refine_tally = {"adopted": 0, "changed": 0}
 
     def report_outcome(outcome: ExtractionOutcome) -> None:
-        """Print one submission's result and either ledger it or merge it back.
-
-        Called as each PDF finishes, so on an ordinary run the ledger on disk
-        always reflects the work actually done — kill the run at any point and
-        --resume picks up exactly where it stopped. A **refine** pass instead
-        merges the scratch extraction into the real submission here, and
-        deliberately writes *no* ledger record: the ledger describes the
-        extraction that produced the output folder, and a refine did not produce
-        it — recording one would make a later --resume skip a submission on the
-        strength of a run that only re-read three of its answers.
-        """
         completed["count"] += 1
         position = f"[{completed['count']}/{len(jobs)}]"
         if outcome.status == "failed":
@@ -1657,8 +1345,6 @@ def run_cli(
                 fail_fast=args.fail_fast,
             )
         _print_reading_summary(report, escalate_floor=escalate_floor, emit=emit)
-        # Skipped when nothing qualified: the "Nothing to refine" line above has
-        # already said it, and a row of zeros underneath reads as a failure.
         if args.refine and refine_candidates:
             _print_refine_summary(
                 RefineSummary(
@@ -1691,9 +1377,6 @@ def run_cli(
             sys.exit(1)
     finally:
         if refine_staging is not None:
-            # The scratch extraction has served its purpose the moment the merge
-            # is done; leaving a second copy of a cohort's crops on disk would be
-            # a quiet way to fill a drive.
             shutil.rmtree(refine_staging, ignore_errors=True)
         if ollama_server_proc:
             print("Stopping auto-started Ollama server...")

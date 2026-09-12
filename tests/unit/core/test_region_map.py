@@ -1,10 +1,3 @@
-"""Region maps: the format, its guardrails, and the seam into extraction.
-
-The expensive failure this feature can have is silent: a map applied to the
-wrong assignment mis-crops every answer of every student and nothing raises. Most of
-what is asserted here is therefore about *refusing*, not about succeeding.
-"""
-
 from __future__ import annotations
 
 import json
@@ -41,15 +34,7 @@ from opengrader.core.region_map import (
 )
 
 
-# ── fixtures ───────────────────────────────────────────────────────────────
-
-
 def _image_only_pdf(path: Path, pages: int = 2, marker: str = "ASSIGNMENT") -> Path:
-    """A PDF with **no text layer** — the exact case this feature exists for.
-
-    Every page is a rasterized image, so ``page.get_text()`` returns nothing and
-    the blank-template path would refuse the file outright.
-    """
     doc = fitz.open()
     for index in range(pages):
         canvas = Image.new("RGB", (850, 1100), "white")
@@ -90,17 +75,10 @@ def assignment(tmp_path: Path) -> Path:
     return _image_only_pdf(tmp_path / "midterm.pdf")
 
 
-# ── the assignment has no text layer, which is the whole point ───────────────────
-
-
 def test_the_assignment_a_region_map_is_for_has_no_text_layer(assignment: Path) -> None:
     with fitz.open(str(assignment)) as doc:
         assert all(not page.get_text("text").strip() for page in doc)
-    # ...and building a map for it still works, unlike --blank-template.
     assert blank_region_map(assignment).source_pages == 2
-
-
-# ── round trip ─────────────────────────────────────────────────────────────
 
 
 def test_json_round_trip_is_lossless(assignment: Path, tmp_path: Path) -> None:
@@ -129,11 +107,7 @@ def test_written_file_names_the_format_and_version(assignment: Path, tmp_path: P
     assert data["source"]["sha256"]
 
 
-# ── version handling ───────────────────────────────────────────────────────
-
-
 def test_a_newer_format_version_is_refused_not_half_read(assignment: Path, tmp_path: Path) -> None:
-    """Half-reading a format that learned a new field silently drops it."""
     path = save_region_map(_map_with_two_questions(assignment), tmp_path / "m.json")
     data = json.loads(path.read_text())
     data["version"] = REGION_MAP_VERSION + 5
@@ -157,9 +131,6 @@ def test_unparseable_json_is_refused_with_the_path(tmp_path: Path) -> None:
         load_region_map(path)
 
 
-# ── fingerprint verification ───────────────────────────────────────────────
-
-
 def test_verification_accepts_the_pdf_the_map_was_drawn_on(assignment: Path) -> None:
     assert verify_region_map(_map_with_two_questions(assignment), assignment).ok
 
@@ -170,7 +141,6 @@ def test_verification_refuses_a_different_pdf(assignment: Path, tmp_path: Path) 
 
     assert not verification
     assert verification.kind == "fingerprint"
-    # The message has to be actionable, not "invalid region map".
     assert "final.pdf" in verification.message
     assert "region-map propose" in verification.message
 
@@ -178,7 +148,6 @@ def test_verification_refuses_a_different_pdf(assignment: Path, tmp_path: Path) 
 def test_verification_reports_a_page_count_change_in_its_own_terms(
     assignment: Path, tmp_path: Path
 ) -> None:
-    """The commonest real cause: the assignment was re-exported and grew a page."""
     longer = _image_only_pdf(tmp_path / "midterm-v2.pdf", pages=3)
     verification = verify_region_map(_map_with_two_questions(assignment), longer)
 
@@ -195,16 +164,12 @@ def test_load_verified_refuses_the_wrong_assignment(assignment: Path, tmp_path: 
     path = save_region_map(_map_with_two_questions(assignment), tmp_path / "m.json")
     other = _image_only_pdf(tmp_path / "other.pdf", pages=2, marker="OTHER")
 
-    assert load_verified_region_map(path, assignment)  # the right one loads
+    assert load_verified_region_map(path, assignment)
     with pytest.raises(RegionMapError):
         load_verified_region_map(path, other)
 
 
-# ── clamping ───────────────────────────────────────────────────────────────
-
-
 def test_a_box_running_off_the_page_is_clamped_on_load(assignment: Path, tmp_path: Path) -> None:
-    """A hand-edited file must never crash an overnight extraction."""
     path = save_region_map(_map_with_two_questions(assignment), tmp_path / "m.json")
     data = json.loads(path.read_text())
     data["questions"][0]["bbox"] = [0.9, 0.9, 5.0, 5.0]
@@ -229,9 +194,6 @@ def test_a_junk_bbox_drops_the_question_rather_than_raising(
 
     restored = load_region_map(path)
     assert [question.question_id for question in restored.questions] == ["q2"]
-
-
-# ── validation ─────────────────────────────────────────────────────────────
 
 
 def _kinds(region_map: RegionMap, **kwargs) -> set[str]:
@@ -305,7 +267,6 @@ def test_a_zero_area_box_is_an_error(assignment: Path) -> None:
 
 
 def test_an_inverted_box_collapses_to_the_same_error(assignment: Path) -> None:
-    """Negative width is what a box dragged backwards produces."""
     region_map = _map_with_two_questions(assignment)
     inverted = replace(
         region_map,
@@ -356,7 +317,6 @@ def test_substantially_overlapping_regions_are_reported(assignment: Path) -> Non
 
 
 def test_touching_regions_are_not_reported_as_overlapping(assignment: Path) -> None:
-    """Answer boxes genuinely sit next to each other; sharing an edge is normal."""
     region_map = _map_with_two_questions(assignment)
     stacked = replace(
         region_map,
@@ -404,9 +364,6 @@ def test_findings_are_ordered_worst_first(assignment: Path) -> None:
     assert findings[0].severity == "error"
 
 
-# ── the seam into extraction ───────────────────────────────────────────────
-
-
 def test_conversion_produces_a_template_the_processor_accepts(assignment: Path) -> None:
     from opengrader.core.submissions.processor import (
         _combined_question_positions,
@@ -425,11 +382,9 @@ def test_conversion_produces_a_template_the_processor_accepts(assignment: Path) 
     assert template.questions[1].question_type == MULTIPLE_CHOICE
     assert template.name_field is not None and template.name_field.page == 1
 
-    # The bbox survives the conversion untouched — this is the promise.
     assert template.questions[0].source_segments[0].bbox_norm == (0.08, 0.30, 0.84, 0.20)
     assert len(template.questions[1].source_segments) == 2
 
-    # And the existing processor helpers still take the structure happily.
     empty_layout = _ScanLayout({}, {}, None, None, {})
     assert _scan_offset_by_page(template, empty_layout) == {}
     positions = _combined_question_positions(template, empty_layout, {})
@@ -451,9 +406,6 @@ def test_the_template_falls_back_to_the_filename_for_a_title(assignment: Path) -
     assert region_map_to_blank_template(region_map).assignment_title == "midterm"
 
 
-# ── starting points ────────────────────────────────────────────────────────
-
-
 def test_a_grid_map_covers_every_page(assignment: Path) -> None:
     region_map = grid_region_map(assignment, per_page=3)
     assert len(region_map.questions) == 6
@@ -466,7 +418,6 @@ def test_a_grid_map_covers_every_page(assignment: Path) -> None:
 
 
 def test_grid_boxes_do_not_overlap_each_other(assignment: Path) -> None:
-    """A starting point that immediately reports warnings is a bad starting point."""
     assert "overlapping_regions" not in _kinds(grid_region_map(assignment, per_page=4))
 
 
@@ -488,11 +439,7 @@ def test_a_missing_assignment_is_refused_by_name(tmp_path: Path) -> None:
         blank_region_map(tmp_path / "nowhere.pdf")
 
 
-# ── proposal ───────────────────────────────────────────────────────────────
-
-
 def test_proposal_returns_a_map_bound_to_the_assignment(assignment: Path) -> None:
-    """Detection may find nothing on a synthetic page; the binding still holds."""
     proposal = __import__(
         "opengrader.core.region_map", fromlist=["propose_region_map"]
     ).propose_region_map(assignment, dpi=100)
@@ -500,12 +447,7 @@ def test_proposal_returns_a_map_bound_to_the_assignment(assignment: Path) -> Non
     assert verify_region_map(proposal.region_map, assignment).ok
     assert proposal.region_map.source_pages == 2
     for question in proposal.region_map.questions:
-        # Whatever it found, the confidence is carried so the editor can lead
-        # with the least trustworthy boxes.
         assert question.confidence is not None
-
-
-# ── seeding from a QA file ─────────────────────────────────────────────────
 
 
 def test_from_qa_fills_points_and_types(assignment: Path, tmp_path: Path) -> None:
@@ -541,11 +483,7 @@ def test_from_qa_fills_points_and_types(assignment: Path, tmp_path: Path) -> Non
     assert seeded.questions[0].question_type == FREE_RESPONSE
     assert seeded.questions[1].possible_points == 4.0
     assert seeded.questions[1].question_type == MULTIPLE_CHOICE
-    # Geometry is never touched by seeding.
     assert seeded.questions[0].bbox == region_map.questions[0].bbox
-
-
-# ── rendering ──────────────────────────────────────────────────────────────
 
 
 def test_a_rendered_page_is_the_page_size_and_draws_something(assignment: Path) -> None:

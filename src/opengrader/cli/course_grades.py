@@ -1,20 +1,4 @@
-"""Roll a semester of assignment folders into one course gradebook.
-
-Every other tool in Opengrader works on one assignment, which is right for
-grading and useless at the end of a term. This reads a ``course.toml`` naming
-the assignment folders and their weights, and answers the questions that only
-exist at course level: what is each student's weighted grade and letter, who is
-at risk, who is trending down, and — with answer keys supplied — did the class
-meet the learning outcomes.
-
-    uv run course-grades --course course.toml
-    uv run course-grades --course course.toml --csv grades.csv
-    uv run course-grades --course course.toml --at-risk
-    uv run course-grades --course course.toml --outcomes
-
-Read-only: it never writes into an assignment folder, and writes at all only
-where ``--csv`` says to.
-"""
+"""Combine assignment grades into a course gradebook."""
 
 from __future__ import annotations
 
@@ -82,8 +66,6 @@ def _print_report(report: CourseReport, *, show_all: bool) -> None:
     weights = ", ".join(f"{a.name} ({a.weight:g})" for a in report.assignments)
     print(f"  Weights: {weights}\n")
 
-    # Problems first: a course report built on a folder that failed to load is
-    # still a number, and a reader must not meet the number before the caveat.
     for problem in report.problems:
         print(f"  ! {problem}", file=sys.stderr)
     if report.problems:
@@ -118,8 +100,6 @@ def _print_report(report: CourseReport, *, show_all: bool) -> None:
                 f"{student.letter}{note}"
             )
             if trend:
-                # The trend arrow needs two graded assignments to mean
-                # anything; with one, printing "—" is noise.
                 direction = student.direction()
                 suffix = (
                     f"   trend {_signed(direction)} pts" if direction is not None else ""
@@ -136,8 +116,6 @@ def _print_at_risk(report: CourseReport) -> None:
     for student in at_risk:
         label = student.student_name or student.student_id or "?"
         direction = student.direction()
-        # A falling grade is the actionable half: two students at 68% are not
-        # the same student if one is climbing and the other is not.
         arrow = ""
         if direction is not None:
             arrow = "  ↓ falling" if direction < -2 else ("  ↑ improving" if direction > 2 else "")
@@ -178,7 +156,6 @@ def _print_outcomes(report: CourseReport) -> None:
 
 
 def _print_student(report: CourseReport, needle: str) -> int:
-    """Print one student's full picture. Returns an exit code."""
     wanted = needle.strip().casefold()
     matches = [
         student
@@ -210,12 +187,6 @@ def _print_student(report: CourseReport, needle: str) -> int:
 
 
 def build_csv_rows(report: CourseReport) -> list[list[str]]:
-    """The course gradebook as a table: one row per student, one column each.
-
-    Deliberately the same shape as the per-assignment gradebook — ids and names
-    first, then one column per assignment, then the totals — so an instructor
-    who has imported one already knows how to import this.
-    """
     header = ["student_id", "student_name"]
     header += [f"{a.name} %" for a in report.assignments]
     header += ["course %", "letter", "missing"]
@@ -370,9 +341,6 @@ def run_cli(argv: list[str] | None = None) -> None:
 
     _print_report(report, show_all=not args.summary)
 
-    # The at-risk list is shown unasked when there is one: an instructor running
-    # this at all is asking "how is my class doing", and a list of struggling
-    # students behind an extra flag is a list that goes unread.
     if args.at_risk or report.at_risk:
         _print_at_risk(report)
     if args.outcomes or report.outcomes:

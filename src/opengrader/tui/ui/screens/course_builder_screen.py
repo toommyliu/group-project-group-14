@@ -1,20 +1,3 @@
-"""Build a ``course.toml`` from form fields, instead of writing TOML by hand.
-
-The course gradebook needs a file the instructor has never seen the format of.
-Asking them to hand-write TOML to try a feature is a bad trade, so this drafts
-it: **Scan a folder** finds every assignment under a course directory and fills
-in a row each — name, submissions path, and answer key all guessed — and rows
-can be added or edited by hand.
-
-The screen's real job, though, is teaching one word. ``weight`` is the only
-concept in the file, and rather than explain the ratio anywhere, each row shows
-a live **"→ 25%"** that updates as the numbers change. An instructor who types
-``10, 20, 30, 40`` sees exactly 10/20/30/40%; one who types ``1, 1, 2`` sees
-25/25/50%. Both mental models are correct, and neither had to be described.
-
-Dismisses with the written :class:`Path`, or ``None`` if cancelled.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,21 +21,10 @@ from opengrader.core.course import (
 )
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
-# Every new row starts here. Equal weighting is a real grading policy and the
-# least surprising default — and with the live share beside it, an instructor
-# who wants something else can see the effect of changing it immediately.
 DEFAULT_WEIGHT = "1"
 
 
 class _AssignmentRow(Vertical):
-    """One assignment: name + weight + share on top, paths beneath.
-
-    Owns its own widgets rather than being addressed by generated ids — the
-    screen just queries for ``_AssignmentRow`` and asks each one for its values,
-    which is what makes adding and removing rows trivial (the `_RubricEditRow`
-    precedent on the grade screen).
-    """
-
     def __init__(self, assignment: DiscoveredAssignment | None = None) -> None:
         super().__init__(classes="assignment-row")
         self.name_input = Input(
@@ -101,11 +73,6 @@ class _AssignmentRow(Vertical):
 
     @property
     def weight(self) -> float:
-        """The typed weight, or 0 when it isn't a usable number.
-
-        0 rather than raising: a half-typed weight must not break the live
-        share of every *other* row while the instructor is still typing.
-        """
         try:
             value = float(self.weight_input.value.strip())
         except ValueError:
@@ -116,11 +83,6 @@ class _AssignmentRow(Vertical):
         self.share_label.update(f"→ {share:.0%}" if share > 0 else "→ —")
 
     def to_assignment(self) -> CourseAssignment | None:
-        """This row as a `CourseAssignment`, or ``None`` when it isn't filled in.
-
-        A blank row is skipped rather than rejected — an instructor who adds one
-        row too many should be able to just save.
-        """
         name = self.name_input.value.strip()
         submissions = self.submissions_input.value.strip().strip("'\"")
         if not name or not submissions:
@@ -135,8 +97,6 @@ class _AssignmentRow(Vertical):
 
 
 class CourseBuilderScreen(ModalScreen[Path | None]):
-    """Fill in a course's assignments and weights, and write the course file."""
-
     DEFAULT_CSS = """
     CourseBuilderScreen {
         align: center middle;
@@ -186,10 +146,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
         margin-top: 1;
         scrollbar-size: 1 1;
     }
-
-    /* Bare Verticals default to 1fr and would each try to fill the scroll
-       view; size every row to its content. (Same trap the setup screen's
-       #ext-parallel-options comment documents.) */
     CourseBuilderScreen .assignment-row {
         height: auto;
         border: round $surface-lighten-2;
@@ -321,7 +277,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
     def on_mount(self) -> None:
         self.query_one("#course-builder-name", Input).focus()
 
-    # ── rows ─────────────────────────────────────────────────────────────────
 
     def _rows(self) -> list[_AssignmentRow]:
         return list(self.query(_AssignmentRow))
@@ -335,11 +290,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
         self.call_after_refresh(self._refresh_shares)
 
     def _refresh_shares(self) -> None:
-        """Recompute every row's share of the final grade.
-
-        Runs on every weight keystroke: the live number *is* the explanation of
-        what a weight is, so it must never lag behind what was typed.
-        """
         rows = self._rows()
         for row, share in zip(rows, weight_shares([row.weight for row in rows])):
             row.set_share(share)
@@ -372,13 +322,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
 
     @on(Button.Pressed, ".assignment-remove")
     async def _on_remove_row(self, event: Button.Pressed) -> None:
-        """Drop a row, then rebalance the remaining shares.
-
-        ``remove()`` is awaited rather than fired and forgotten: it returns an
-        awaitable, and refreshing the shares before it completes counts the row
-        that is on its way out — which showed up as the shares simply not
-        changing, intermittently and only under load.
-        """
         event.stop()
         for row in self._rows():
             if event.button in row.walk_children(Button):
@@ -391,7 +334,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
         event.stop()
         self._add_rows([None])
 
-    # ── scanning ─────────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#course-builder-scan")
     def _on_scan_pressed(self, event: Button.Pressed) -> None:
@@ -409,8 +351,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
                 )
                 return
             self._add_rows(found)
-            # Prefill the destination too: the folder you scanned is almost
-            # always where the course file belongs.
             output = self.query_one("#course-builder-output", Input)
             if not output.value.strip():
                 output.value = str(path)
@@ -477,8 +417,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
                 return
             target.value = str(path)
             target.cursor_position = len(target.value)
-            # Picking a submissions folder is the moment we can guess the rest,
-            # and only for the fields the instructor hasn't already filled in.
             if not want_solutions:
                 if not row.name_input.value.strip():
                     row.name_input.value = humanize_assignment_name(path)
@@ -497,7 +435,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
             _apply,
         )
 
-    # ── saving ───────────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#course-builder-save")
     def _on_save_pressed(self, event: Button.Pressed) -> None:

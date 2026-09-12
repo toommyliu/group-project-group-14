@@ -1,47 +1,3 @@
-"""Multi-grader work claims — divide the pile so two TAs never grade one paper.
-
-The anonymity lock (`core/policy.py`) makes a multi-grader team *fair*: every TA
-sees student ids instead of names. What it does not do is make the work
-*divided*. Two TAs opening the same folder both start at question 1, student 1,
-and grade straight down the same list. The only thing that eventually notices is
-the optimistic mtime guard (`core/concurrency.py`), which refuses the second
-save with a "changed on disk" error — after both people have already done the
-work, and phrased as a *conflict* rather than as what it is: nobody said who was
-grading what.
-
-This module is the missing agreement. A **claim** records that one grader has
-taken a slice of the cohort — "TA1 takes q1-q3", "TA2 takes the first forty
-students" — so each person's queue is disjoint by construction and the mtime
-guard goes back to being the last-resort safety net it was designed as.
-
-Design decisions (mirroring `submissions/regrade.py` and `policy.py`):
-
-* **Location** — ``<submissions>/.opengrader/claims.jsonl``. Co-located with the
-  assignment so claims travel when the folder is copied or synced, in the
-  ``.opengrader`` dot-dir so they read as tool metadata and stay out of
-  submission discovery.
-* **Append-only, event-sourced JSONL** — one self-contained record per line; a
-  release/complete appends a *fresh* line for the same ``claim_id`` and
-  :func:`read_claims` folds so the latest wins. Appending is what makes this
-  safe for the exact situation it exists for: several graders on one shared or
-  synced folder, all writing at once. A mutable blob would need the very
-  read-modify-write lock we cannot have.
-* **Absent/malformed = no claims** — an unclaimed folder behaves exactly as
-  before, and a truncated line is skipped rather than fatal. Losing this file
-  costs coordination, never grades.
-
-**A claim is a coordination record, not a permission system.** It is the same
-honest scope as the anonymity lock: a semi-trusted professor+TA team, on a
-shared disk, where the failure being prevented is *duplicated effort*, not
-malice. Nothing here can stop a determined grader from editing any file — the
-value is that their queue no longer points them at someone else's slice, and
-that a teacher can see the division and its gaps up front.
-
-The whole module is pure: it is handed the cohort's question and student ids
-rather than reading submissions itself, so the CLI, the TUI (which already has
-them loaded) and any later web layer all divide work identically.
-"""
-
 from __future__ import annotations
 
 import json
@@ -63,12 +19,6 @@ _VALID_STATUSES: frozenset[str] = frozenset({"active", "released", "completed"})
 
 
 class ClaimConflictError(RuntimeError):
-    """A slice overlaps work another grader has already claimed.
-
-    Carries the conflicting claims so the caller can name who holds the
-    overlapping work rather than just refusing.
-    """
-
     def __init__(self, conflicts: Sequence["WorkClaim"]) -> None:
         self.conflicts = tuple(conflicts)
         who = ", ".join(sorted({claim.actor for claim in self.conflicts}))
@@ -84,25 +34,11 @@ def _now_iso() -> str:
 
 
 def _new_claim_id() -> str:
-    """A short, stable, collision-free id (e.g. ``cl-1a2b3c4d``)."""
     return f"cl-{uuid.uuid4().hex[:8]}"
 
 
 @dataclass(frozen=True)
 class WorkSlice:
-    """Which work a claim covers, as a question axis and a student axis.
-
-    **An empty axis means "all of it"**, so the slice is the cross product of
-    the two: ``WorkSlice(question_ids=("q1", "q2"))`` is those two questions for
-    every student, and ``WorkSlice()`` is the entire assignment.
-
-    That default is convenient and dangerous in the same breath — an empty
-    *share* produced by dividing work between too many graders would silently
-    mean "everything" — so :func:`divide_work` never emits one and
-    :func:`claim_work` refuses to store a slice that claims the whole cohort
-    unless it is asked for explicitly.
-    """
-
     question_ids: tuple[str, ...] = ()
     student_ids: tuple[str, ...] = ()
 
@@ -111,7 +47,6 @@ class WorkSlice:
         return not self.question_ids and not self.student_ids
 
     def covers(self, question_id: str, student_id: str) -> bool:
-        """Whether one unit of work (a student's answer) falls in this slice."""
         if self.question_ids and question_id not in self.question_ids:
             return False
         if self.student_ids and student_id not in self.student_ids:
@@ -119,25 +54,11 @@ class WorkSlice:
         return True
 
     def overlaps(self, other: "WorkSlice") -> bool:
-        """Whether two slices share any work at all.
-
-        Both axes must intersect: "q1-q3 for everyone" and "q4-q6 for everyone"
-        are disjoint, and so are "all questions for students A-M" and "all
-        questions for students N-Z". An empty axis intersects everything.
-        """
         return _axis_overlaps(self.question_ids, other.question_ids) and _axis_overlaps(
             self.student_ids, other.student_ids
         )
 
     def describe(self) -> str:
-        """A short human summary ("q1-q3 · 40 students").
-
-        The two axes are summarized differently on purpose. A grader needs to
-        know *which questions* they hold — real assignments number them
-        ``q1, q2, q5a, q5b`` and a bare "6 questions" tells them nothing — but
-        student ids are opaque digits, so "40 students" is the more useful
-        summary than forty of them listed out.
-        """
         parts = [
             _describe_questions(self.question_ids),
             _describe_students(self.student_ids),
@@ -147,8 +68,6 @@ class WorkSlice:
 
 @dataclass(frozen=True)
 class WorkClaim:
-    """One grader's claim on a slice of the cohort."""
-
     claim_id: str
     actor: str
     work: WorkSlice = field(default_factory=WorkSlice)
@@ -196,8 +115,6 @@ class WorkClaim:
 
 @dataclass(frozen=True)
 class ClaimOverlap:
-    """Two active claims that share work — the thing claims exist to prevent."""
-
     first: WorkClaim
     second: WorkClaim
     shared_cells: int
@@ -205,14 +122,6 @@ class ClaimOverlap:
 
 @dataclass(frozen=True)
 class CoverageReport:
-    """How much of the cohort is spoken for, by whom, and where it double-books.
-
-    "Cells" are units of work — one student's answer to one question — which is
-    the granularity a claim actually divides. Counting them lets a mixed set of
-    slices (some by question, some by student) be summarized honestly, where
-    counting questions or students alone could not.
-    """
-
     total_cells: int
     claimed_cells: int
     cells_by_actor: dict[str, int]
@@ -231,13 +140,7 @@ class CoverageReport:
         return bool(self.overlaps)
 
 
-# --------------------------------------------------------------------------- #
-# Store
-# --------------------------------------------------------------------------- #
-
-
 def resolve_claims_path(submissions_path: str | Path) -> Path:
-    """Return the ``.opengrader/claims.jsonl`` path for a file or dir."""
     base = Path(submissions_path)
     if base.is_file():
         base = base.parent
@@ -245,12 +148,6 @@ def resolve_claims_path(submissions_path: str | Path) -> Path:
 
 
 def read_claims(submissions_path: str | Path) -> list[WorkClaim]:
-    """Every claim's current state, oldest creation first.
-
-    Folds the append-only log so the latest line per ``claim_id`` wins, and
-    skips malformed lines so one truncated write never makes the log unreadable
-    (identical semantics to ``submissions/regrade.read_regrade_requests``).
-    """
     path = resolve_claims_path(submissions_path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -269,7 +166,6 @@ def read_claims(submissions_path: str | Path) -> list[WorkClaim]:
         if not record.claim_id:
             continue
         existing = latest.get(record.claim_id)
-        # A strictly newer updated_at wins; equal/absent falls back to file order.
         if existing is None or record.updated_at >= existing.updated_at:
             latest[record.claim_id] = record
 
@@ -277,7 +173,6 @@ def read_claims(submissions_path: str | Path) -> list[WorkClaim]:
 
 
 def active_claims(submissions_path: str | Path) -> list[WorkClaim]:
-    """Just the claims still held (what coordination cares about)."""
     return [claim for claim in read_claims(submissions_path) if claim.is_active]
 
 
@@ -298,16 +193,6 @@ def claim_work(
     allow_overlap: bool = False,
     allow_everything: bool = False,
 ) -> WorkClaim:
-    """Record that ``actor`` has taken ``work``. Returns the stored claim.
-
-    Raises :class:`ClaimConflictError` when the slice overlaps another grader's
-    active claim, unless ``allow_overlap``. Overlapping *your own* claims is
-    always fine — re-claiming or widening your slice is not a double-booking.
-
-    Claiming the entire assignment (an empty slice on both axes) needs
-    ``allow_everything``, because that is far more often a caller that computed
-    an empty share than a grader who genuinely means "all of it".
-    """
     who = (actor or current_actor()).strip()
     if not who:
         raise ValueError("a claim needs an actor")
@@ -363,30 +248,18 @@ def _close_claim(
 def release_claim(
     submissions_path: str | Path, claim_id: str, *, actor: str | None = None
 ) -> WorkClaim | None:
-    """Give a slice back to the pool (someone else may take it). ``None`` if unknown."""
     return _close_claim(submissions_path, claim_id, status="released", actor=actor)
 
 
 def complete_claim(
     submissions_path: str | Path, claim_id: str, *, actor: str | None = None
 ) -> WorkClaim | None:
-    """Mark a slice finished — released, and recorded as *done*. ``None`` if unknown.
-
-    Kept distinct from a release on purpose: "I finished my forty" and "I am
-    handing mine back" are different answers to "is this assignment graded yet".
-    """
     return _close_claim(submissions_path, claim_id, status="completed", actor=actor)
-
-
-# --------------------------------------------------------------------------- #
-# Queries (pure — the TUI and CLI both route through these)
-# --------------------------------------------------------------------------- #
 
 
 def find_conflicts(
     work: WorkSlice, claims: Iterable[WorkClaim], *, actor: str
 ) -> list[WorkClaim]:
-    """Active claims by *other* graders whose work overlaps ``work``."""
     return [
         claim
         for claim in claims
@@ -399,12 +272,6 @@ def find_conflicts(
 def claim_for(
     claims: Iterable[WorkClaim], question_id: str, student_id: str
 ) -> WorkClaim | None:
-    """The active claim covering one unit of work, or ``None`` if unclaimed.
-
-    First match wins; with overlapping claims (which :func:`claim_work` refuses
-    to create by default) the answer is simply the earliest, and
-    :func:`coverage_report` is where a human is told the overlap exists.
-    """
     for claim in claims:
         if claim.is_active and claim.covers(question_id, student_id):
             return claim
@@ -413,13 +280,6 @@ def claim_for(
 def is_owned_by_other(
     claims: Iterable[WorkClaim], question_id: str, student_id: str, *, actor: str
 ) -> bool:
-    """Whether this work belongs to a grader who is not ``actor``.
-
-    The predicate a front-end filters a queue with. **Unclaimed work is not
-    owned by anyone**, so it returns False — an assignment nobody has divided
-    behaves exactly as it did before claims existed, and a partial division
-    leaves the remainder open to whoever gets there.
-    """
     owner = claim_for(claims, question_id, student_id)
     return owner is not None and owner.actor != actor
 
@@ -431,20 +291,7 @@ def divide_work(
     student_ids: Sequence[str] = (),
     axis: DivideAxis = "question",
 ) -> list[tuple[str, WorkSlice]]:
-    """Split the cohort into one contiguous slice per grader.
-
-    ``axis`` picks what gets cut: ``"question"`` gives each grader a run of
-    questions across every student (the usual choice — a grader who marks q1-q3
-    for everyone applies one rubric consistently), ``"student"`` gives each a run
-    of students across every question (better when questions are interdependent
-    or the marking is holistic).
-
-    Slices are contiguous and in order, so "TA2 has q4-q6" is something a person
-    can hold in their head. Remainders go to the earliest graders, and a grader
-    who would receive **nothing is dropped rather than given an empty slice** —
-    an empty slice means *everything* (see :class:`WorkSlice`), which would hand
-    one person the whole assignment.
-    """
+    """Empty WorkSlice fields mean the whole assignment, so empty slices must be omitted."""
     names = [name.strip() for name in graders if name.strip()]
     if not names:
         raise ValueError("dividing work needs at least one grader")
@@ -470,7 +317,6 @@ def coverage_report(
     question_ids: Sequence[str],
     student_ids: Sequence[str],
 ) -> CoverageReport:
-    """Summarize who has what, what nobody has, and what is double-booked."""
     held = [claim for claim in claims if claim.is_active]
     total = len(question_ids) * len(student_ids)
 
@@ -507,26 +353,16 @@ def coverage_report(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Internals
-# --------------------------------------------------------------------------- #
-
-
 def _axis_overlaps(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
-    """Whether two axis selections intersect; an empty axis means "all"."""
     if not left or not right:
         return True
     return bool(set(left) & set(right))
 
 
-# How many question ids to spell out before a claim's summary switches to a
-# count. Real assignments run to a dozen or so questions, and a grader has to be
-# able to read which ones are theirs off one line.
 _MAX_LISTED_QUESTIONS = 8
 
 
 def _describe_questions(ids: tuple[str, ...]) -> str:
-    """"q1-q3" for a run, "q1, q2, q5a" for a short set, a count for a long one."""
     if not ids:
         return ""
     if len(ids) == 1:
@@ -534,14 +370,11 @@ def _describe_questions(ids: tuple[str, ...]) -> str:
     if _is_contiguous_run(ids):
         return f"{ids[0]}-{ids[-1]}"
     if len(ids) <= _MAX_LISTED_QUESTIONS:
-        # Subquestions (q5a/q5b) break the numeric run, and they are exactly the
-        # case where naming the ids matters most.
         return ", ".join(ids)
     return f"{ids[0]}…{ids[-1]} ({len(ids)} questions)"
 
 
 def _describe_students(ids: tuple[str, ...]) -> str:
-    """A count, because student ids are opaque — except for a single student."""
     if not ids:
         return ""
     if len(ids) == 1:
@@ -550,7 +383,6 @@ def _describe_students(ids: tuple[str, ...]) -> str:
 
 
 def _is_contiguous_run(ids: tuple[str, ...]) -> bool:
-    """Whether ids look like ``q4, q5, q6`` — a run worth writing as a range."""
     numbers = []
     for value in ids:
         digits = "".join(char for char in value if char.isdigit())
@@ -561,7 +393,6 @@ def _is_contiguous_run(ids: tuple[str, ...]) -> bool:
 
 
 def _even_chunks(items: Sequence[str], parts: int) -> list[list[str]]:
-    """Split into ``parts`` contiguous chunks, remainder to the earliest ones."""
     size, remainder = divmod(len(items), parts)
     chunks: list[list[str]] = []
     start = 0

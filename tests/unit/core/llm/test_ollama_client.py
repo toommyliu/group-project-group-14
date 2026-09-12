@@ -72,7 +72,6 @@ def test_generate_raises_ollama_error_on_transport_failure(monkeypatch) -> None:
 
 
 def _capture_request_body(monkeypatch, payload: dict) -> dict:
-    """Patch urlopen to record the posted request body and return the payload."""
     captured: dict = {}
 
     def fake_urlopen(req, timeout=None):
@@ -99,6 +98,4 @@ def test_generate_sends_response_format_schema(monkeypatch) -> None:
 def test_generate_sends_num_predict_in_options(monkeypatch) -> None:
     captured = _capture_request_body(monkeypatch, {"response": "ok"})
     generate(prompt="hi", config=OllamaConfig())
-    # OllamaConfig's default num_predict (512, sized for the short grading
-    # JSON reply) is threaded into options unless overridden per call.
     assert captured["body"]["options"]["num_predict"] == 512

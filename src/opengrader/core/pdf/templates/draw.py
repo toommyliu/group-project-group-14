@@ -21,12 +21,6 @@ from .constants import (
 )
 from .fonts import ResolvedTemplateFonts, measure_text_width
 
-# fitz (PyMuPDF) is only needed for the type annotations below and for the
-# runtime calls each drawing function imports locally right before using it
-# (see the first such import, in _draw_centered_text, for why it's local
-# rather than up here at module scope). `from __future__ import annotations`
-# above means the `fitz.Page` / `fitz.Document` annotations never need fitz
-# bound at import time, so this stays TYPE_CHECKING-only.
 if TYPE_CHECKING:
     import fitz
 
@@ -48,14 +42,6 @@ def _draw_centered_text(
     fonts: ResolvedTemplateFonts,
     color: ColorType = COLOR_BLACK,
 ) -> None:
-    """Draw a single line centered at ``center_x`` using the given baseline."""
-    # Import lazily: fitz (PyMuPDF) is a heavy import (~85ms cold, pulls in
-    # its own mupdf C extension), and this module sits on the TUI startup
-    # chain (it's reached while building the setup/qa-file screens). Every
-    # function below that touches ``fitz.`` at runtime repeats this same
-    # one-line import — after the first call it's just a sys.modules lookup,
-    # so the repetition costs nothing but keeps each function correct on its
-    # own without relying on module-level state.
     import fitz
 
     width = measure_text_width(text, fontsize, bold=bold, fonts=fonts)
@@ -78,7 +64,6 @@ def _fit_font_size(
     bold: bool,
     fonts: ResolvedTemplateFonts,
 ) -> float:
-    """Scale text down just enough to fit a target width."""
     if not text:
         return base_size
     width = measure_text_width(text, base_size, bold=bold, fonts=fonts)
@@ -95,7 +80,6 @@ def _wrap_text(
     fontsize: float,
     fonts: ResolvedTemplateFonts,
 ) -> list[str]:
-    """Wrap plain text into lines that fit within ``max_width``."""
     words = [w for w in text.split() if w]
     if not words:
         return []
@@ -124,7 +108,6 @@ def _truncate_text_to_width(
     bold: bool,
     fonts: ResolvedTemplateFonts,
 ) -> str:
-    """Trim text to one line while preserving as much content as possible."""
     clean = " ".join(text.split())
     if not clean:
         return ""
@@ -147,7 +130,6 @@ def _truncate_text_to_width(
     if out:
         return out + "..."
 
-    # Fallback: trim by characters when even one word is too wide.
     chars = ""
     for ch in clean:
         candidate = chars + ch
@@ -185,8 +167,6 @@ def _draw_choice_rows(
     color: ColorType,
     context: str,
 ) -> None:
-    """Draw a vertical list of labeled choices within a fixed answer area."""
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
     if not choices:
@@ -243,7 +223,6 @@ def _instruction_wrap(
     fontsize: float,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[float, str, list[str]]:
-    """Wrap instructions while reserving space for the leading label."""
     prefix_width = measure_text_width(f"{label} ", fontsize, bold=True, fonts=fonts)
     first_width = max(24.0, max_width - prefix_width)
 
@@ -278,7 +257,6 @@ def _instruction_wrap(
 
 
 def create_page(doc: fitz.Document, page_w: float, page_h: float) -> fitz.Page:
-    """Create one blank template page with the requested dimensions."""
     return doc.new_page(width=page_w, height=page_h)
 
 
@@ -291,8 +269,6 @@ def draw_field_box(
     value: str,
     fonts: ResolvedTemplateFonts,
 ) -> None:
-    """Draw a name or student-id field with an underline for handwritten input."""
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
     center_x = (x0 + x1) / 2.0
@@ -324,7 +300,6 @@ def draw_page_number(
     page_h: float,
     fonts: ResolvedTemplateFonts,
 ) -> None:
-    """Render the page number centered at the bottom margin."""
     baseline_y = page_h - PRINT_SAFE_MARGIN - (PAGE_NUMBER_FONTSIZE * 0.35)
     _draw_centered_text(
         page,
@@ -337,7 +312,7 @@ def draw_page_number(
     )
 
 
-QR_SIZE = 60.0  # points (~0.83 in) — big enough for a phone/scan camera to read.
+QR_SIZE = 60.0
 
 
 def draw_qr_on_page(
@@ -345,13 +320,6 @@ def draw_qr_on_page(
     png_bytes: bytes,
     page_w: float,
 ) -> None:
-    """Stamp a QR-code image in the page's top-right corner.
-
-    Sits above and right of the centered title block (which starts near y=116),
-    so it never collides with title, fields, or questions. Reusable for both the
-    first page and continuation pages.
-    """
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
     x1 = page_w - PAGE_EDGE_MARGIN
@@ -367,18 +335,6 @@ def draw_continued_page_header(
     header_text: str,
     fonts: ResolvedTemplateFonts,
 ) -> float:
-    """Draw the repeated top header used on continuation pages.
-
-    Args:
-        page: PDF page to draw on.
-        page_w: Page width in PDF points.
-        header_text: Text shown above the underline.
-        fonts: Resolved template fonts.
-
-    Returns:
-        The y-coordinate where question content should begin.
-    """
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
     content_x0 = CONTENT_SIDE_MARGIN
@@ -423,7 +379,6 @@ def _display_question_id(qid: str) -> str:
 
 
 def _question_min_height(question: dict) -> float:
-    """Compute the minimum height needed to render one question box."""
     choices = question.get("choices", [])
     subquestions = question.get("subquestions", [])
     if choices and not subquestions:
@@ -448,7 +403,6 @@ def _question_min_height(question: dict) -> float:
 
 
 def _subquestion_min_height(subquestion: dict) -> float:
-    """Compute the minimum height needed to render one subquestion box."""
     choices = subquestion.get("choices", [])
     if not choices:
         return SUBQUESTION_MIN_HEIGHT
@@ -512,8 +466,6 @@ def _draw_answer_hint(
     hint: str,
     fonts: ResolvedTemplateFonts,
 ) -> None:
-    """Draw a small muted hint (e.g. expected units) in a numeric answer box."""
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
     text = hint.strip()
@@ -553,28 +505,8 @@ def draw_question_box(
     subquestions: list[dict] | None = None,
     answer_hint: str = "",
 ) -> list[dict]:
-    """Draw one question and return layout metadata for downstream extraction.
-
-    Args:
-        page: PDF page to draw on.
-        x0: Left edge of the question box.
-        y0: Top edge of the question box.
-        x1: Right edge of the question box.
-        y1: Bottom edge of the question box.
-        qid: Question identifier shown in the header.
-        points: Points possible for the question.
-        prompt: Prompt text shown on the header line.
-        fonts: Resolved template fonts.
-        choices: Optional multiple-choice options for a top-level question.
-        subquestions: Optional nested question definitions.
-
-    Returns:
-        Metadata for drawn subquestions, including prompt and answer regions.
-    """
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
-    # Question Prompt
 
     header_prefix = f"{_display_question_id(qid)}.  ({points} pts)"
     header_y = y0 + 16
@@ -606,7 +538,6 @@ def draw_question_box(
             color=COLOR_QUESTION_TEXT,
         )
 
-    # Answer area
 
     if not subquestions:
         if choices:
@@ -631,7 +562,6 @@ def draw_question_box(
                 _draw_answer_hint(page, answer_rect, answer_hint, fonts)
         return []
 
-    # Subquestion layout
 
     sub_area_top = y0 + QUESTION_HEADER_HEIGHT + QUESTION_INNER_PADDING
     sub_area_bottom = y1 - QUESTION_INNER_PADDING
@@ -672,7 +602,6 @@ def draw_question_box(
                 f"Question {qid!r} subquestion {subquestion['id']!r} does not fit on the page"
             )
         sub_header_x = sub_rect[0] + CHOICE_LEFT_INSET
-        # Subquestion Prompt
 
         raw_label = str(subquestion.get("label", chr(ord("a") + i))).strip()
         label = raw_label if raw_label.endswith(")") else f"{raw_label})"
@@ -720,7 +649,6 @@ def draw_question_box(
         }
         sub_choices = subquestion.get("choices", [])
 
-        # Subquestion Answer Area
 
         if sub_choices:
             _draw_choice_rows(
@@ -753,33 +681,12 @@ def build_info_section(
     instructions: str | None,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[float, dict[str, tuple[float, float, float, float]]]:
-    """Draw the non-question content at the top of the first page.
-
-    This includes the centered title/subtitle block, the student name and ID
-    fields, and the optional instruction paragraph.
-
-    Args:
-        page: PDF page to draw on.
-        name: Pre-filled student name, if any.
-        student_id: Pre-filled student ID, if any.
-        page_w: Page width in PDF points.
-        title: Full title text. The first line is treated as the main title.
-        instructions: Optional instruction text shown above the questions.
-        fonts: Resolved template fonts.
-
-    Returns:
-        A tuple of ``(start_y, regions)`` where ``start_y`` is the first y-position
-        available for questions and ``regions`` contains key bounding boxes.
-    """
-    # Import lazily: see _draw_centered_text above — same reason.
     import fitz
 
-    # Content bounds
 
     content_x0 = CONTENT_SIDE_MARGIN
     content_x1 = page_w - CONTENT_SIDE_MARGIN
 
-    # Title lines
 
     lines = [line.strip() for line in title.strip().split("\n") if line.strip()]
     if not lines:
@@ -825,7 +732,6 @@ def build_info_section(
         title_bounds_right = max(title_bounds_right, line_right)
         title_bounds_bottom = max(title_bounds_bottom, line_bottom)
 
-    # Centered title block
 
     header_top_y = 116.0
     cursor_y = header_top_y + title_size
@@ -862,7 +768,6 @@ def build_info_section(
         include_title_line_bounds(line, cursor_y, subtitle_size, bold=False)
         cursor_y += subtitle_size * 1.32
 
-    # Student fields
 
     row_y = cursor_y
     label_w = measure_text_width("Student ID", 11, bold=False, fonts=fonts) + 1
@@ -914,7 +819,6 @@ def build_info_section(
         fonts,
     )
 
-    # Instructions block
 
     q_start_y = sid_box[3] + 22
 
@@ -985,20 +889,6 @@ def draw_questions_on_page(
     start_y: float,
     fonts: ResolvedTemplateFonts,
 ) -> tuple[int, list[dict]]:
-    """Lay out as many questions as will fit on the current page.
-
-    Args:
-        page: PDF page to draw on.
-        page_number: Human-visible page number.
-        questions: Normalized question payloads.
-        page_w: Page width in PDF points.
-        page_h: Page height in PDF points.
-        start_y: First y-position available for question content.
-        fonts: Resolved template fonts.
-
-    Returns:
-        A tuple of ``(drawn_count, metadata)`` for the questions placed on this page.
-    """
     content_x0 = CONTENT_SIDE_MARGIN
     content_x1 = page_w - CONTENT_SIDE_MARGIN
     content_top = start_y
@@ -1044,7 +934,6 @@ def draw_questions_on_page(
     drawn_meta: list[dict] = []
     y = content_top
     for i in range(max_fit):
-        # Question block
         question = questions[i]
         qid = str(question["id"])
         points = int(question["points"])

@@ -1,11 +1,3 @@
-"""The three-way merge decision table — pure, no folders involved.
-
-The value of this feature is entirely in *which* answer wins, so the table gets
-tested directly rather than through two directories on disk. The I/O half
-(reading both sides, translating aliases, writing) is covered in the CLI tests,
-which have real folders anyway.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -23,7 +15,6 @@ BASE_TIME = datetime(2026, 8, 4, 9, 0, 0, tzinfo=timezone.utc)
 
 
 def _cell(points=None, rubric=(), comment="", text=""):  # noqa: ANN001, ANN202
-    """One (student, question) cell with all three aspects, as a file reads."""
     return CellState(
         values={
             "grade": AspectValue(points=points, rubric=tuple(rubric)),
@@ -34,11 +25,7 @@ def _cell(points=None, rubric=(), comment="", text=""):  # noqa: ANN001, ANN202
 
 
 def _side(**cells):  # noqa: ANN003, ANN202
-    """``q1=_cell(...)`` → the ``(student, question)`` mapping plan_merge takes."""
     return {("s1", qid): cell for qid, cell in cells.items()}
-
-
-# ── the decision table ────────────────────────────────────────────────────
 
 
 def test_incoming_edit_is_taken_when_ours_never_moved() -> None:
@@ -77,18 +64,16 @@ def test_both_edited_differently_is_a_conflict() -> None:
 
 
 def test_both_reaching_the_same_answer_is_not_a_conflict() -> None:
-    """Converging on the same grade is agreement, not a disagreement."""
     plan = plan_merge(
         _side(q1=_cell(5, ("Correct",))),
         _side(q1=_cell(5, ("Correct",))),
         _side(q1=_cell()),
     )
     assert not plan.changes and not plan.conflicts
-    assert plan.already_agree == 3  # all three aspects match
+    assert plan.already_agree == 3
 
 
 def test_every_aspect_is_decided_separately() -> None:
-    """A merged grade and a conflicting comment on one answer coexist."""
     plan = plan_merge(
         _side(q1=_cell(points=None, comment="mine")),
         _side(q1=_cell(points=4, comment="theirs")),
@@ -98,11 +83,7 @@ def test_every_aspect_is_decided_separately() -> None:
     assert [conflict.aspect for conflict in plan.conflicts] == ["comment"]
 
 
-# ── the no-baseline rules ─────────────────────────────────────────────────
-
-
 def test_without_a_baseline_a_blank_is_filled() -> None:
-    """Taking their answer where we have none cannot destroy work."""
     plan = plan_merge(_side(q1=_cell()), _side(q1=_cell(3, ("Partial",))), None)
     assert [change.reason for change in plan.changes] == ["filled_blank"]
     assert not plan.conflicts
@@ -119,9 +100,6 @@ def test_a_whitespace_only_comment_still_counts_as_blank() -> None:
         _side(q1=_cell(comment="   ")), _side(q1=_cell(comment="see me")), None
     )
     assert [change.aspect for change in plan.changes] == ["comment"]
-
-
-# ── what could not be decided ─────────────────────────────────────────────
 
 
 def test_a_question_we_do_not_have_is_reported_not_written() -> None:
@@ -145,11 +123,7 @@ def test_labels_name_the_student_in_every_row() -> None:
     assert plan.changes[0].student_label == "Ada Lovelace"
 
 
-# ── conflict resolution ───────────────────────────────────────────────────
-
-
 def test_resolve_conflicts_only_produces_work_for_theirs() -> None:
-    """Keeping ours is not a write — the file already says that."""
     plan = plan_merge(_side(q1=_cell(8)), _side(q1=_cell(2)), _side(q1=_cell()))
     assert resolve_conflicts(plan.conflicts, policy="ours") == ()
     taken = resolve_conflicts(plan.conflicts, policy="theirs")
@@ -182,9 +156,6 @@ def test_conflict_ids_are_stable_and_unique() -> None:
     assert all(conflict.question_id in cid for conflict, cid in zip(plan.conflicts, ids))
 
 
-# ── the journal baseline ──────────────────────────────────────────────────
-
-
 def _entry(minutes: int, old, new, *, qid="q1", kind="grade"):  # noqa: ANN001, ANN202
     return GradeJournalEntry(
         timestamp=(BASE_TIME + timedelta(minutes=minutes)).isoformat(),
@@ -200,7 +171,6 @@ def _entry(minutes: int, old, new, *, qid="q1", kind="grade"):  # noqa: ANN001, 
 
 
 def test_baseline_from_journal_takes_the_earliest_recorded_old_value() -> None:
-    """The pre-copy state is the first entry's ``old``, not the last one's."""
     entries = [
         _entry(0, {"points": None, "rubric": []}, {"points": 3, "rubric": []}),
         _entry(5, {"points": 3, "rubric": []}, {"points": 7, "rubric": []}),
@@ -210,7 +180,6 @@ def test_baseline_from_journal_takes_the_earliest_recorded_old_value() -> None:
 
 
 def test_a_journal_baseline_makes_the_merge_take_their_edit() -> None:
-    """The end-to-end point of the baseline: without it this would conflict."""
     entries = [_entry(0, {"points": None, "rubric": []}, {"points": 6, "rubric": []})]
     plan = plan_merge(
         _side(q1=_cell(points=None)),
@@ -225,20 +194,12 @@ def test_an_answer_nobody_touched_has_no_baseline_and_no_change() -> None:
     assert ("s1", "q2") not in baseline
 
 
-# ── the undo handle ───────────────────────────────────────────────────────
-
-
 def test_merge_actor_is_a_stable_slug() -> None:
-    """It is typed into a grade-restore command, so it must be shell-friendly."""
     assert merge_actor("Quiz 1 for Alice") == "merge:quiz-1-for-alice"
     assert merge_actor("") == "merge:copy"
 
 
-# ── anonymity ─────────────────────────────────────────────────────────────
-
-
 def test_anonymous_labels_fall_back_to_the_student_key() -> None:
-    """So a merge plan can be read during anonymous grading without naming anyone."""
     plan = plan_merge(
         _side(q1=_cell()),
         _side(q1=_cell(5)),
@@ -247,8 +208,6 @@ def test_anonymous_labels_fall_back_to_the_student_key() -> None:
     )
     assert plan.changes[0].student_label == "Ada Lovelace"
 
-    # `build_merge_plan(anonymous=True)` supplies key-as-label; the planner just
-    # uses whatever labels it is handed, which is what keeps it UI-agnostic.
     anonymous = plan_merge(
         _side(q1=_cell()),
         _side(q1=_cell(5)),

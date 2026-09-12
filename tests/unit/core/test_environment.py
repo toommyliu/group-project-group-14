@@ -1,10 +1,3 @@
-"""The environment pre-flight's judgement half (`core/environment.py`).
-
-Every test here feeds a *measurement* to a pure ``evaluate_*`` function, so the
-whole suite runs with no Tesseract, no Ollama server and no terminal — which is
-the point of keeping the probes separate from the judging.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -30,12 +23,8 @@ from opengrader.core.environment import (
 )
 
 
-# Construct test doubles for ResolvedAI and LatencyMeasurement without
-# importing those modules (keeping the test suite pure and fast).
 @dataclass(frozen=True)
 class FakeResolvedAI:
-    """Minimal ResolvedAI-like stub for testing evaluate_ai_features."""
-
     read_handwriting: bool = False
     escalate_only: bool = False
     transcribe_math: bool = False
@@ -46,14 +35,11 @@ class FakeResolvedAI:
         return self.read_handwriting or self.grade_written
 
     def problems(self) -> tuple[str, ...]:
-        # Return empty for testing; override in subclasses for specific findings.
         return ()
 
 
 @dataclass(frozen=True)
 class FakeLatencyMeasurement:
-    """Minimal LatencyMeasurement-like stub for testing evaluate_ai_latency."""
-
     role: str = "handwriting"
     model: str = "qwen2.5vl:7b"
     limit: float = 120.0
@@ -80,9 +66,6 @@ class FakeLatencyMeasurement:
         )
 
 
-# --- Python -----------------------------------------------------------------
-
-
 def test_python_312_is_ready() -> None:
     check = evaluate_python((3, 12, 4))
     assert check.status == "ready"
@@ -96,15 +79,10 @@ def test_other_python_versions_are_broken_and_name_the_fix() -> None:
         assert "uv python install 3.12" in check.fix
 
 
-# --- Tesseract --------------------------------------------------------------
-
-
 def test_missing_tesseract_is_broken() -> None:
-    # Broken, not degraded: without it a scanned exam extracts to empty answers,
-    # which is the silent failure the whole pre-flight exists to surface.
     check = evaluate_tesseract(ToolProbe(found=False))
     assert check.status == "broken"
-    assert check.fix  # an actionable install command, whatever the platform
+    assert check.fix
 
 
 def test_recent_tesseract_is_ready() -> None:
@@ -118,8 +96,6 @@ def test_recent_tesseract_is_ready() -> None:
 
 
 def test_old_tesseract_is_degraded_not_broken() -> None:
-    # 3.x still reads text; it only lacks the orientation detection the scan
-    # pre-flight uses, so extraction as a whole still works.
     probe = ToolProbe(found=True, version=(3, 5, 1), version_text="3.5.1")
     check = evaluate_tesseract(probe)
     assert check.status == "degraded"
@@ -127,20 +103,13 @@ def test_old_tesseract_is_degraded_not_broken() -> None:
 
 
 def test_unrunnable_tesseract_is_unknown_never_ready() -> None:
-    # An installed-but-unrunnable binary is not evidence that OCR works. It must
-    # never be reported as ready, or the report claims a check it never made.
     probe = ToolProbe(found=False, error="permission denied")
     check = evaluate_tesseract(probe)
     assert check.status == "unknown"
     assert "permission denied" in check.detail
 
 
-# --- Ollama -----------------------------------------------------------------
-
-
 def test_unreachable_ollama_is_only_degraded() -> None:
-    # Ollama is opt-in. Calling a missing optional integration a failure would
-    # train people to ignore the report.
     checks = evaluate_ollama(
         OllamaProbe(host="http://127.0.0.1:11434", reachable=False, error="no server listening"),
         vision_model="qwen2.5vl:7b",
@@ -173,9 +142,6 @@ def test_missing_vision_model_names_the_pull_command() -> None:
     vision = next(check for check in checks if check.name == "Ollama vision model")
     assert vision.status == "degraded"
     assert vision.fix == "ollama pull qwen2.5vl:7b"
-
-
-# --- packages ---------------------------------------------------------------
 
 
 def test_all_imports_present_is_one_ready_row() -> None:
@@ -214,9 +180,6 @@ def test_missing_canvas_sak_is_degraded() -> None:
     assert "canvas-export" in check.impact
 
 
-# --- terminal + smoke test --------------------------------------------------
-
-
 def test_pixel_accurate_terminal_is_ready() -> None:
     check = evaluate_graphics(
         protocol="kitty", pixel_accurate=True, description="Kitty graphics (Ghostty)"
@@ -238,9 +201,6 @@ def test_failed_smoke_test_is_broken() -> None:
     assert "boom" in check.detail
 
 
-# --- report aggregation -----------------------------------------------------
-
-
 def _check(name: str, status: str) -> EnvironmentCheck:
     return EnvironmentCheck(name=name, status=status, detail="")  # type: ignore[arg-type]
 
@@ -259,8 +219,6 @@ def test_report_status_is_ready_only_when_everything_is() -> None:
 
 
 def test_an_empty_report_is_unknown_not_ready() -> None:
-    # Nothing was checked, so nothing is known — the same rule the scan
-    # pre-flight follows for a measurement it could not take.
     assert EnvironmentReport().status == "unknown"
 
 
@@ -281,9 +239,6 @@ def test_broken_lists_only_core_failures() -> None:
     assert [check.name for check in report.broken] == ["b"]
 
 
-# --- helpers ----------------------------------------------------------------
-
-
 def test_install_hint_is_a_runnable_command_for_this_platform() -> None:
     hint = install_hint(brew="tesseract", apt="tesseract-ocr", winget="UB-Mannheim.TesseractOCR")
     assert any(tool in hint for tool in ("brew", "apt-get", "winget"))
@@ -300,20 +255,15 @@ def test_unrecognized_connection_errors_keep_their_first_line() -> None:
     assert summarize_connection_error("something odd\nsecond line") == "something odd"
 
 
-# --- AI features ────────────────────────────────────────────────────────────
-
-
 def test_ai_off_is_ready() -> None:
-    """When AI is switched off, that is a legitimate choice (not a failure)."""
     resolved = FakeResolvedAI(read_handwriting=False, grade_written=False)
     check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
     assert check.status == "ready"
     assert "switched off" in check.detail.lower()
-    assert not check.fix  # no fix for a legitimate choice
+    assert not check.fix
 
 
 def test_ai_on_and_clean_is_ready() -> None:
-    """AI enabled with no configuration errors."""
     resolved = FakeResolvedAI(read_handwriting=True, grade_written=True)
     check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
     assert check.status == "ready"
@@ -322,8 +272,6 @@ def test_ai_on_and_clean_is_ready() -> None:
 
 
 def test_ai_with_configuration_problems_is_degraded() -> None:
-    """Configuration errors returned by problems() appear in detail and fix."""
-
     class ResolvedWithProblems(FakeResolvedAI):
         def problems(self) -> tuple[str, ...]:
             return ("Unknown AI provider 'bogus' — falling back to 'ollama'.",)
@@ -336,24 +284,18 @@ def test_ai_with_configuration_problems_is_degraded() -> None:
 
 
 def test_escalation_mode_is_reported() -> None:
-    """Escalation mode refinement of handwriting reading is listed separately."""
     resolved = FakeResolvedAI(read_handwriting=True, escalate_only=True)
     check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
     assert "escalation mode" in check.detail
 
 
 def test_math_transcription_is_reported() -> None:
-    """Math transcription is listed when enabled."""
     resolved = FakeResolvedAI(read_handwriting=True, transcribe_math=True)
     check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
     assert "transcribing maths" in check.detail
 
 
-# --- AI latency ─────────────────────────────────────────────────────────────
-
-
 def test_latency_not_measured_is_unknown() -> None:
-    """When measurement is None, report unknown and name the flag."""
     check = evaluate_ai_latency(None)
     assert check.status == "unknown"
     assert "not timed" in check.detail
@@ -361,7 +303,6 @@ def test_latency_not_measured_is_unknown() -> None:
 
 
 def test_latency_error_is_degraded() -> None:
-    """A measurement with an error is degraded and describes the error."""
     measurement = FakeLatencyMeasurement(
         seconds=None, error="Connection refused"
     )
@@ -373,7 +314,6 @@ def test_latency_error_is_degraded() -> None:
 
 
 def test_latency_fast_response_is_ready() -> None:
-    """A fast response (well below the warn threshold) is ready."""
     measurement = FakeLatencyMeasurement(seconds=15.0, limit=120.0)
     check = evaluate_ai_latency(measurement)  # type: ignore[arg-type]
     assert check.status == "ready"
@@ -382,33 +322,20 @@ def test_latency_fast_response_is_ready() -> None:
 
 
 def test_latency_slow_response_recommends_higher_limit() -> None:
-    """A response near the limit is degraded and recommends a higher timeout."""
     measurement = FakeLatencyMeasurement(seconds=70.0, limit=120.0)
     check = evaluate_ai_latency(measurement)  # type: ignore[arg-type]
     assert check.status == "degraded"
     assert "70.0 s" in check.detail
-    # The recommend_timeout function should suggest 4x the measured time,
-    # rounded up to the next 30s, so 70*4 = 280, which rounds up to 300.
-    assert "300" in check.fix or "330" in check.fix  # depending on rounding
+    assert "300" in check.fix or "330" in check.fix
 
 
 def test_latency_very_slow_remains_unknown_if_already_high_limit() -> None:
-    """If the measured time is slow but recommend_timeout returns None
-    (already a high enough limit), we stay ready or degraded appropriately."""
-    # A measurement that's slow but recommend_timeout still returns None
-    # because the current limit is already high enough.
     measurement = FakeLatencyMeasurement(seconds=30.0, limit=600.0)
     check = evaluate_ai_latency(measurement)  # type: ignore[arg-type]
-    # share_of_limit = 30/600 = 0.05, which is below 0.5 (TIMEOUT_WARN_FRACTION)
-    # so this should be ready, not degraded.
     assert check.status == "ready"
 
 
-# --- build_environment_report with AI checks ────────────────────────────────
-
-
 def test_build_report_includes_ai_features_when_ai_is_given() -> None:
-    """When ai= is passed, the AI features check is included."""
     from opengrader.core.environment import build_environment_report
 
     resolved = FakeResolvedAI(read_handwriting=True)
@@ -425,7 +352,6 @@ def test_build_report_includes_ai_features_when_ai_is_given() -> None:
 
 
 def test_build_report_excludes_latency_when_time_ai_is_false() -> None:
-    """When time_ai=False, no latency check is added (to avoid noise)."""
     from opengrader.core.environment import build_environment_report
 
     resolved = FakeResolvedAI(read_handwriting=True)
@@ -442,7 +368,6 @@ def test_build_report_excludes_latency_when_time_ai_is_false() -> None:
 
 
 def test_build_report_without_ai_has_no_ai_checks() -> None:
-    """When ai=None, neither AI feature nor latency check is added."""
     from opengrader.core.environment import build_environment_report
 
     report = build_environment_report(

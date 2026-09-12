@@ -69,14 +69,12 @@ def test_points_divergence_flagged_as_high():
     assert flag.question_id == "q1"
     assert flag.member_count == 2
     assert flag.point_spread == 5
-    # Two distinct outcomes, each with its student.
     assert len(flag.variants) == 2
     outcomes = {(v.points_awarded, v.members[0].student_name) for v in flag.variants}
     assert outcomes == {(10, "Ann"), (5, "Bob")}
 
 
 def test_cosmetic_answer_differences_still_group():
-    # "42." and "  42 " normalize to the same free-response key.
     docs = [
         _doc("1", "Ann", [_question(response_text="42.", points_awarded=10)]),
         _doc("2", "Bob", [_question(response_text="  42 ", points_awarded=4)]),
@@ -95,7 +93,6 @@ def test_genuinely_different_answers_are_not_compared():
 
 
 def test_rubric_only_divergence_flagged_as_low():
-    # Same points, different rubric selection → low severity.
     docs = [
         _doc(
             "1",
@@ -132,8 +129,6 @@ def test_rubric_label_order_is_not_significant():
 
 
 def test_versions_are_partitioned():
-    # Same answer text, same score-conflict, but different versions: no flag,
-    # because "42" may be correct on A and wrong on B.
     docs = [
         _doc("1", "Ann", [_question(response_text="42", points_awarded=10)], assignment_version="A"),
         _doc("2", "Bob", [_question(response_text="42", points_awarded=0)], assignment_version="B"),
@@ -152,7 +147,6 @@ def test_same_version_conflict_reported_with_version():
 
 
 def test_ungraded_members_are_ignored():
-    # Only one graded member — nothing to compare.
     docs = [
         _doc("1", "Ann", [_question(response_text="42", points_awarded=10)]),
         _doc("2", "Bob", [_question(response_text="42", points_awarded=None)]),
@@ -212,13 +206,10 @@ def test_float_noise_does_not_create_a_false_conflict():
 
 def test_ordering_is_high_severity_and_widest_spread_first():
     docs = [
-        # q1: rubric-only divergence (low)
         _doc("1", "Ann", [_question("q1", response_text="x", points_awarded=5, rubric_labels=("A",))]),
         _doc("2", "Bob", [_question("q1", response_text="x", points_awarded=5, rubric_labels=("B",))]),
-        # q2: small point spread (high)
         _doc("3", "Cid", [_question("q2", response_text="y", points_awarded=10)]),
         _doc("4", "Dan", [_question("q2", response_text="y", points_awarded=9)]),
-        # q3: large point spread (high) — should sort first
         _doc("5", "Eve", [_question("q3", response_text="z", points_awarded=10)]),
         _doc("6", "Fay", [_question("q3", response_text="z", points_awarded=0)]),
     ]
@@ -238,7 +229,7 @@ def test_three_way_split_keeps_largest_variant_first():
     flags = build_consistency_flags(docs)
     assert len(flags) == 1
     variants = flags[0].variants
-    assert variants[0].size == 2  # the two 10-pt students lead
+    assert variants[0].size == 2
     assert variants[0].points_awarded == 10
     assert flags[0].member_count == 4
 

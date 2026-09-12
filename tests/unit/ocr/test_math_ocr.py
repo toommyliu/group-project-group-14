@@ -1,10 +1,3 @@
-"""The math crop → LaTeX seam and its backends.
-
-pix2tex itself is never imported here — the point of the seam is that a backend
-is a ``Path -> str | None`` callable, so the wiring is testable with a two-line
-fake and no gigabyte of torch.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -23,20 +16,15 @@ from opengrader.core.ocr.math_ocr import (
 )
 
 
-# --------------------------------------------------------------------------- #
-# normalize_latex — what makes a backend's output actually render
-# --------------------------------------------------------------------------- #
-
-
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        (r"\frac{1}{2}", r"$\frac{1}{2}$"),      # bare LaTeX gets delimiters
-        (r"$x^2$", r"$x^2$"),                     # already delimited, untouched
-        (r"\[a+b\]", "$a+b$"),                   # display math unwrapped
+        (r"\frac{1}{2}", r"$\frac{1}{2}$"),
+        (r"$x^2$", r"$x^2$"),
+        (r"\[a+b\]", "$a+b$"),
         (r"\(a+b\)", "$a+b$"),
-        ("  x + y  ", "$x + y$"),                 # trimmed
-        ("x", ""),                                # too short to be an answer
+        ("  x + y  ", "$x + y$"),
+        ("x", ""),
         ("", ""),
         (None, ""),
     ],
@@ -46,16 +34,10 @@ def test_normalize_latex(raw, expected):
 
 
 def test_normalized_output_is_what_the_grade_screen_looks_for():
-    """Without the delimiters the transcription is correct and never renders."""
     from opengrader.tui.latex_render import response_has_latex
 
     assert not response_has_latex(r"\frac{1}{2}")
     assert response_has_latex(normalize_latex(r"\frac{1}{2}"))
-
-
-# --------------------------------------------------------------------------- #
-# Backend description and resolution
-# --------------------------------------------------------------------------- #
 
 
 def test_the_vlm_backend_is_always_available():
@@ -70,7 +52,6 @@ def test_every_backend_is_described():
 
 
 def test_describing_pix2tex_does_not_import_it(monkeypatch):
-    """Availability must cost a path lookup, not a torch import."""
     monkeypatch.setattr(math_ocr, "pix2tex_installed", lambda: False)
     backend = describe_backend("pix2tex")
 
@@ -79,7 +60,6 @@ def test_describing_pix2tex_does_not_import_it(monkeypatch):
 
 
 def test_the_default_backend_resolves_to_the_builtin_path():
-    """``None`` means "keep using the vision model exactly as before"."""
     assert resolve_math_transcriber(DEFAULT_MATH_BACKEND) is None
 
 
@@ -91,7 +71,6 @@ def test_a_missing_pix2tex_refuses_loudly_when_strict(monkeypatch):
 
 
 def test_a_missing_pix2tex_degrades_quietly_when_not_strict(monkeypatch):
-    """A worker mid-batch degrades; the CLI already refused at startup."""
     monkeypatch.setattr(math_ocr, "pix2tex_installed", lambda: False)
     assert resolve_math_transcriber("pix2tex", strict=False) is None
 
@@ -108,7 +87,6 @@ def test_an_unknown_backend_names_the_real_ones():
 
 
 def test_pix2tex_returns_none_rather_than_raising_when_it_cannot_load(monkeypatch):
-    """Never lose an answer: an unusable backend falls through, it doesn't fail."""
     def _boom():
         raise MathOcrError("no model")
 
@@ -141,11 +119,6 @@ def test_pix2tex_shrugging_reads_as_nothing(monkeypatch, tmp_path):
     assert math_ocr.transcribe_with_pix2tex(crop) is None
 
 
-# --------------------------------------------------------------------------- #
-# The extraction wiring
-# --------------------------------------------------------------------------- #
-
-
 def _question(question_id: str = "q1", *, image: str | None = "responses/q1.png"):
     from opengrader.core.submissions.student_file import StudentSubmissionQuestion
 
@@ -167,7 +140,7 @@ def _fill(questions, transcriber, **kwargs):
     return _fill_responses_with_vlm(
         questions,
         Path("/nowhere"),
-        None,  # type: ignore[arg-type] — never reached when the backend answers
+        None,  # type: ignore[arg-type]
         pdf_name="sub-0001.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _message: None,
@@ -181,12 +154,10 @@ def test_a_math_backend_transcription_is_used_and_left_unverified():
     filled = _fill([_question()], lambda _path: r"$x^2$")
 
     assert filled[0].response_text == r"$x^2$"
-    # A model reading carries no calibrated confidence, like the VLM's.
     assert filled[0].response_confidence is None
 
 
 def test_a_backend_that_reads_nothing_falls_through(monkeypatch):
-    """The whole safety property: a backend choice can't cost an answer."""
     from opengrader.core.submissions import processor
 
     monkeypatch.setattr(
@@ -206,7 +177,6 @@ def test_a_question_with_no_crop_is_untouched():
 
 
 def test_the_backend_name_crosses_the_process_boundary_not_a_callable():
-    """`batch.ExtractionJob` must stay picklable — see core/submissions/batch.py."""
     import pickle
 
     from opengrader.core.submissions.batch import ExtractionJob
@@ -222,15 +192,9 @@ def test_the_backend_name_crosses_the_process_boundary_not_a_callable():
     assert pickle.loads(pickle.dumps(job)).math_backend == "pix2tex"
 
 
-# --------------------------------------------------------------------------- #
-# The CLI's gate
-# --------------------------------------------------------------------------- #
-
-
 def test_the_cli_refuses_a_missing_backend_before_rendering_a_page(
     monkeypatch, tmp_path, capsys
 ):
-    """Fail at second zero, not after an overnight batch has used the other one."""
     from opengrader.cli import submission_extractor
 
     monkeypatch.setattr(math_ocr, "pix2tex_installed", lambda: False)
@@ -252,7 +216,6 @@ def test_the_cli_refuses_a_missing_backend_before_rendering_a_page(
 def test_a_backend_without_llm_math_says_it_does_nothing(
     monkeypatch, tmp_path, capsys
 ):
-    """Silently ignoring it would leave the instructor believing it ran."""
     from opengrader.cli import submission_extractor
 
     monkeypatch.setattr(math_ocr, "pix2tex_installed", lambda: True)
@@ -270,7 +233,6 @@ def test_a_backend_without_llm_math_says_it_does_nothing(
 
 
 def test_the_backend_invalidates_a_resumed_run():
-    """A different reader produces a different transcription of the same crop."""
     from opengrader.core.submissions.manifest import settings_fingerprint
 
     base = {"dpi": 300, "llm_math": True, "math_backend": "vlm"}

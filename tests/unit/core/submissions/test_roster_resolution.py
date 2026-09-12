@@ -7,7 +7,7 @@ from opengrader.core.submissions.processor import (
     _apply_roster_identity,
     _apply_section,
     _RosterEntry,
-    build_student_submission_document_unified,  # noqa: F401  (import sanity)
+    build_student_submission_document_unified,  # noqa: F401
 )
 from opengrader.core.submissions.student_file import StudentSubmissionDocument
 
@@ -16,7 +16,7 @@ ROSTER = [
     _RosterEntry(student_id="111111111", name="Tommy Liu"),
     _RosterEntry(student_id="222222222", name="Andy Cortes"),
     _RosterEntry(student_id="333333333", name="John Smith"),
-    _RosterEntry(student_id="444444444", name="John Smith"),  # duplicate name
+    _RosterEntry(student_id="444444444", name="John Smith"),
 ]
 
 
@@ -27,14 +27,13 @@ def test_usable_id_uses_combined_match() -> None:
 
 
 def test_name_only_unique_match_fills_id() -> None:
-    # Id box was blank; the name alone identifies the student.
     result = resolve_student_identity("", "Andy Cortes", ROSTER)
     assert result.status == "matched"
     assert result.entry.student_id == "222222222"
 
 
 def test_name_only_slightly_misread_still_matches() -> None:
-    result = resolve_student_identity("", "Tommy Liu", ROSTER)  # missing an 'l'
+    result = resolve_student_identity("", "Tommy Liu", ROSTER)
     assert result.status == "matched"
     assert result.entry.student_id == "111111111"
 
@@ -51,8 +50,6 @@ def _noop(_msg: str) -> None:
 
 
 def test_qr_id_overrides_ambiguous_name() -> None:
-    # Duplicate name would normally be ambiguous; a QR id resolves it outright,
-    # pulling the canonical roster name and skipping the candidate list entirely.
     doc = StudentSubmissionDocument(
         student_name="John Smith",
         student_id="",
@@ -66,7 +63,7 @@ def test_qr_id_overrides_ambiguous_name() -> None:
     resolved = _apply_roster_identity(doc, ROSTER, _noop, None, "444444444")
     assert resolved.student_id == "444444444"
     assert resolved.student_name == "John Smith"
-    assert resolved.id_candidates == ()  # no ambiguity recorded
+    assert resolved.id_candidates == ()
 
 
 def test_qr_id_not_on_roster_is_still_trusted() -> None:
@@ -93,7 +90,6 @@ def test_blank_identity_is_unmatched() -> None:
 
 
 def test_short_garbage_id_falls_back_to_name() -> None:
-    # An unusable id ("1") should not block a confident name match.
     result = resolve_student_identity("1", "Andy Cortes", ROSTER)
     assert result.status == "matched"
     assert result.entry.student_id == "222222222"
@@ -122,12 +118,9 @@ def test_apply_roster_identity_fills_id_and_reports() -> None:
 def test_apply_roster_identity_leaves_ambiguous_blank_and_warns() -> None:
     messages: list[str] = []
     updated = _apply_roster_identity(_doc("John Smith", ""), ROSTER, messages.append)
-    # Never guesses between duplicate names.
     assert updated.student_id == ""
     assert updated.student_name == "John Smith"
     assert any("multiple students" in m for m in messages)
-    # The tied roster people are recorded so a human can pick from them later
-    # (in the review queue) instead of re-typing an id.
     assert {c.student_id for c in updated.id_candidates} == {"333333333", "444444444"}
 
 
@@ -155,7 +148,6 @@ def test_apply_roster_identity_uses_injected_resolver_on_ambiguous() -> None:
     def resolver(document, candidates):
         seen["name"] = document.student_name
         seen["candidates"] = candidates
-        # Pick the second "John Smith".
         return next(c for c in candidates if c.student_id == "444444444")
 
     updated = _apply_roster_identity(
@@ -170,16 +162,11 @@ def test_apply_roster_identity_resolver_returning_none_leaves_blank() -> None:
     updated = _apply_roster_identity(
         _doc("John Smith", ""), ROSTER, lambda _m: None, lambda _d, _c: None
     )
-    assert updated.student_id == ""  # skipped -> still needs manual assignment
-    # Still records the candidates for the review queue to offer.
+    assert updated.student_id == ""
     assert {c.student_id for c in updated.id_candidates} == {"333333333", "444444444"}
 
 
-# --- Section assignment (`_apply_section`) --------------------------------------
-
-
 def test_apply_section_default_tags_every_submission() -> None:
-    # One-stack-per-section: even an unidentified paper takes the run's section.
     updated = _apply_section(
         _doc("", ""), "SectionA", None, lambda _m: None
     )
@@ -204,7 +191,6 @@ def test_apply_section_unknown_id_is_unassigned() -> None:
 
 
 def test_apply_section_blank_id_in_mixed_mode_is_unassigned() -> None:
-    # A mixed stack can only route by a resolved id; a blank one can't be placed.
     updated = _apply_section(
         _doc("Someone", ""), None, {"111111111": "MW"}, lambda _m: None
     )

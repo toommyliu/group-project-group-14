@@ -1,6 +1,3 @@
-"""Tests for response-text extraction: text-layer typed capture, template
-vision-model fill, and the ExtractionProgress reporter."""
-
 from pathlib import Path
 
 import opengrader.core.submissions.processor as processor
@@ -16,11 +13,6 @@ from opengrader.core.submissions.student_file import StudentSubmissionQuestion
 
 def _line(text: str) -> _TextLine:
     return _TextLine(page=1, page_w=612, page_h=792, x0=0, y0=0, x1=10, y1=10, text=text)
-
-
-# --------------------------------------------------------------------------- #
-# _split_prompt_and_response
-# --------------------------------------------------------------------------- #
 
 
 def test_split_on_answer_marker() -> None:
@@ -43,22 +35,15 @@ def test_split_on_blank_line_when_no_marker() -> None:
 
 
 def test_split_keeps_all_as_prompt_when_ambiguous() -> None:
-    # No marker, no blank line -> conservative: never guess, response empty.
     prompt, response = _split_prompt_and_response("Capital of France?\nParis")
     assert prompt.strip() == "Capital of France?\nParis"
     assert response == ""
 
 
 def test_marker_inside_prompt_line_not_split_midline() -> None:
-    # The marker is anchored to a line start, so "answer" mid-sentence is safe.
     prompt, response = _split_prompt_and_response("Explain your answer below.\n\nBecause reasons.")
     assert prompt.strip() == "Explain your answer below."
     assert response.strip() == "Because reasons."
-
-
-# --------------------------------------------------------------------------- #
-# _extract_questions_from_text
-# --------------------------------------------------------------------------- #
 
 
 def test_text_layer_captures_typed_response() -> None:
@@ -74,11 +59,6 @@ def test_text_layer_captures_typed_response() -> None:
     assert by_id["q1"].response_text == "4"
     assert by_id["q1"].possible_points == 5.0
     assert by_id["q2"].response_text == "7"
-
-
-# --------------------------------------------------------------------------- #
-# _fill_responses_with_vlm (template mode)
-# --------------------------------------------------------------------------- #
 
 
 def _question(qid: str, image: str | None, text: str = "") -> StudentSubmissionQuestion:
@@ -108,7 +88,7 @@ def test_vlm_fill_transcribes_each_crop(monkeypatch, tmp_path: Path) -> None:
     filled = _fill_responses_with_vlm(
         questions,
         tmp_path,
-        config := object(),  # noqa: F841 - config is passed through untouched
+        config := object(),  # noqa: F841
         pdf_name="submission-0001.pdf",
         progress=progress,
         progress_callback=lambda _m: None,
@@ -127,7 +107,7 @@ def test_vlm_fill_skips_already_filled_and_imageless(monkeypatch, tmp_path: Path
 
     questions = [
         _question("q1", "responses/q1.png", text="already graded text"),
-        _question("q2", None),  # no crop image
+        _question("q2", None),
     ]
     ticks: list[str] = []
     filled = _fill_responses_with_vlm(
@@ -140,7 +120,7 @@ def test_vlm_fill_skips_already_filled_and_imageless(monkeypatch, tmp_path: Path
     )
     assert filled[0].response_text == "already graded text"
     assert filled[1].response_text == ""
-    assert ticks == []  # neither question triggered a transcription tick
+    assert ticks == []
 
 
 def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:
@@ -164,18 +144,11 @@ def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:
         progress_callback=warnings.append,
     )
     assert filled[0].response_text == "ocr fallback text"
-    # The Tesseract fallback also carries a real transcription confidence.
     assert filled[0].response_confidence == 55.0
     assert any("Warning" in w for w in warnings)
 
 
-# --------------------------------------------------------------------------- #
-# ExtractionProgress
-# --------------------------------------------------------------------------- #
-
-
 def test_extraction_progress_noop_by_default() -> None:
-    # A bare reporter must be safely callable (core calls it unconditionally).
     progress = ExtractionProgress()
     progress.file_start("x.pdf", 3)
     progress.response("x.pdf", "q1")
@@ -194,11 +167,6 @@ def test_extraction_progress_invokes_callbacks() -> None:
     assert responses == [("a.pdf", "q1")]
 
 
-# --------------------------------------------------------------------------- #
-# Escalation: cheap reader first, a model only where it read badly
-# --------------------------------------------------------------------------- #
-
-
 def _escalating_fill(
     questions,
     tmp_path: Path,
@@ -208,7 +176,6 @@ def _escalating_fill(
     floor: float = 60.0,
     monkeypatch,
 ):
-    """Run the template fill in escalated order with both readers stubbed."""
     vlm_calls: list[str] = []
 
     def fake_vlm(*, image_path, config, math_latex=False):
@@ -245,7 +212,6 @@ def test_escalation_keeps_a_confident_ocr_reading_and_never_calls_the_model(
     assert filled[0].response_text == "clear handwriting"
     assert filled[0].response_confidence == 91.0
     assert filled[0].response_source == "tesseract"
-    # The whole point of the flag: no model call for an answer read well.
     assert vlm_calls == []
 
 
@@ -260,8 +226,6 @@ def test_escalation_re_reads_a_shaky_answer_with_the_model(
     )
 
     assert filled[0].response_text == "model reading"
-    # A model reading carries no measured confidence, so the number the OCR
-    # claimed must not survive next to words it never scored.
     assert filled[0].response_confidence is None
     assert filled[0].response_source == "vision-model"
     assert vlm_calls == ["q1.png"]
@@ -282,7 +246,6 @@ def test_escalation_re_reads_an_empty_ocr_result(monkeypatch, tmp_path: Path) ->
 def test_a_model_that_reads_nothing_cannot_cost_the_ocr_answer(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """The rule that makes escalating safe: the worst case is wasted time."""
     filled, vlm_calls = _escalating_fill(
         [_question("q1", "responses/q1.png")],
         tmp_path,
@@ -321,7 +284,6 @@ def test_a_failing_model_cannot_cost_the_ocr_answer(monkeypatch, tmp_path: Path)
 
 
 def test_the_default_order_is_still_model_first(monkeypatch, tmp_path: Path) -> None:
-    """Without the flag nothing changes: every crop goes to the model."""
     ocr_calls: list[str] = []
 
     def fake_vlm(*, image_path, config, math_latex=False):
@@ -349,7 +311,6 @@ def test_the_default_order_is_still_model_first(monkeypatch, tmp_path: Path) -> 
 
 
 def test_the_maths_backend_still_wins_when_escalating(monkeypatch, tmp_path: Path) -> None:
-    """A specialist reader stays the specialist — it is just asked less often."""
     monkeypatch.setattr(
         processor,
         "extract_question_prompt_and_answer",

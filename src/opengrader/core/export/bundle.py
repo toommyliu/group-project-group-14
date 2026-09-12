@@ -1,22 +1,3 @@
-"""Return-bundle export: package a graded cohort for hand-back and archival.
-
-The final step of the offline workflow. Where ``grades-export`` emits one CSV and
-the grade screen annotates one PDF at a time, this assembles a single,
-professionally-named directory an instructor can hand back wholesale:
-
-    <assignment>-return-<date>/
-        README.txt              <- manifest describing the contents
-        gradebook/gradebook.csv <- one row per student (curve-aware)
-        student-pdfs/*.pdf       <- each student's annotated + summarized scan
-        analysis/analysis-report.pdf  <- cohort item analysis + score spread
-
-Which of the three sections are produced is chosen by the caller (a
-:class:`BundleContent` selection / named preset), so the same engine backs
-"gradebook only", "student PDFs only", and "everything". It reuses the existing
-gradebook, annotated-PDF, and item-analysis building blocks — no duplicated
-export logic — and only ever reads the grading truth (never mutates a grade).
-"""
-
 from __future__ import annotations
 
 import re
@@ -49,7 +30,6 @@ from opengrader.core.submissions import (
     load_student_submission_markdown,
 )
 
-# Subdirectory names inside a bundle, one per content kind.
 _GRADEBOOK_DIR = "gradebook"
 _STUDENT_PDF_DIR = "student-pdfs"
 _ANALYSIS_DIR = "analysis"
@@ -62,8 +42,6 @@ ProgressFn = Callable[[str], None]
 
 @dataclass(frozen=True)
 class BundleContent:
-    """Which sections a bundle should contain."""
-
     gradebook: bool = False
     student_pdfs: bool = False
     analysis: bool = False
@@ -73,8 +51,6 @@ class BundleContent:
         return not (self.gradebook or self.student_pdfs or self.analysis)
 
 
-# Named presets — the vocabulary the CLI ``--content`` flag and the TUI dropdown
-# both speak, so a bundle requested from either front-end means the same thing.
 BUNDLE_PRESETS: dict[str, BundleContent] = {
     "all": BundleContent(gradebook=True, student_pdfs=True, analysis=True),
     "gradebook": BundleContent(gradebook=True),
@@ -86,14 +62,10 @@ BUNDLE_PRESETS: dict[str, BundleContent] = {
 
 @dataclass(frozen=True)
 class BundleResult:
-    """What a bundle build produced, for a caller to report."""
-
     bundle_dir: Path
     gradebook_path: Path | None = None
     student_pdf_paths: tuple[Path, ...] = ()
     analysis_path: Path | None = None
-    # Human-readable notes about work skipped (e.g. a student with no source PDF
-    # to annotate) — surfaced so a partial bundle is never silently partial.
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -102,7 +74,6 @@ class BundleResult:
 
 
 def _slugify(text: str, *, fallback: str = "assignment") -> str:
-    """Filesystem- and URL-friendly slug: lowercase, hyphen-separated tokens."""
     slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
     return slug or fallback
 
@@ -112,12 +83,6 @@ def default_bundle_name(
     *,
     today: date | None = None,
 ) -> str:
-    """A professional default folder name: ``<assignment>-return-<YYYY-MM-DD>``.
-
-    The assignment slug comes from the cohort's assignment title (the first
-    document that has one); it falls back to ``assignment`` when unknown, so the
-    name is always well-formed.
-    """
     today = today or date.today()
     title = ""
     for document in documents:
@@ -128,7 +93,6 @@ def default_bundle_name(
 
 
 def _safe_filename(text: str) -> str:
-    """A conservative filename component (no separators, collapsed whitespace)."""
     cleaned = re.sub(r"[^\w.\- ]+", "", text).strip()
     cleaned = re.sub(r"\s+", "_", cleaned)
     return cleaned.strip("._") or "student"
@@ -139,11 +103,6 @@ def _student_pdf_stem(
     *,
     anonymous: bool,
 ) -> str:
-    """Build a professional, readable base filename for a student's PDF.
-
-    ``Lastname_Firstname_<id>`` when a name is known and names are allowed; the
-    id alone when anonymous or nameless. Collisions are resolved by the caller.
-    """
     name = document.student_name.strip()
     student_id = document.student_id.strip()
     if anonymous or not name:
@@ -180,20 +139,7 @@ def build_return_bundle(
     progress: ProgressFn | None = None,
     qa_document: object | None = None,
 ) -> BundleResult:
-    """Assemble a return bundle under ``output_dir`` and return what was written.
-
-    ``content`` selects which sections to produce. ``name`` overrides the
-    generated folder name. ``curve`` overrides the assignment's on-disk curve
-    (defaults to it) so gradebook totals and summary pages match the rest of the
-    app. ``anonymous`` keeps student names out of filenames and summary pages.
-    ``progress`` receives short status strings for a UI/CLI to echo.
-    ``qa_document`` (a parsed ``QADocument``) is optional and only unlocks the
-    analysis report's learning-outcome section — the ``**Outcome**`` tags live
-    in the answer key, so without it the bundle is exactly as before.
-
-    Raises :class:`ValueError` when no submissions are found or ``content`` is
-    empty (nothing to do).
-    """
+    """curve=None uses the assignment's saved curve."""
     emit = progress or _noop
     submissions_path = Path(submissions_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser()
@@ -290,8 +236,6 @@ def _build_analysis(
     qa_document: object | None = None,
 ) -> Path:
     report = build_item_analysis(documents)
-    # Outcome mastery needs the answer key (the tags live there, not in the
-    # submissions), so it appears only when the caller supplied one.
     outcomes = None
     if qa_document is not None:
         tags = outcomes_by_question(qa_document)  # type: ignore[arg-type]
@@ -341,7 +285,6 @@ def _write_manifest(
     anonymous: bool,
     curve: Curve,
 ) -> None:
-    """Write a plain-text README describing the bundle's contents."""
     lines = [
         "Opengrader return bundle",
         "=" * 24,

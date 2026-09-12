@@ -1,28 +1,4 @@
-"""Are the graders on this assignment marking it the same way?
-
-Two things an instructor running a TA team needs, and one engine underneath both
-(:mod:`opengrader.core.analytics.grader_agreement`):
-
-* ``pack`` cuts a **calibration set** — the same small sample of answers, blind
-  and ungraded, to every grader. They mark it independently, hand the packets
-  back, and ``report --set`` says where the rubric meant different things to
-  different people. This is a norming session, and it is the cheap moment to
-  find disagreement: the same finding after the pile is graded costs a regrade.
-
-* ``report`` with no set reads the **audit journal** of grading that already
-  happened. Overlap there is accidental rather than designed, so the numbers are
-  weaker — but they need no meeting and no extra marking, and they are the only
-  way to see *drift*, since a returned packet records the grade and not the hour
-  it was made.
-
-Leniency is always reported as a **residual** against how each question was
-marked overall, never as a raw average: the TA who was handed questions 8-10 of
-a hard exam has a low raw mean and may be the fairest person on the team.
-
-Everything except ``pack`` is read-only — no grade, annotation or journal entry
-is ever written by this tool, and ``pack`` writes only into the packet
-directory and the assignment's own ``.opengrader/`` metadata.
-"""
+"""Compare graders using calibration packets or production grades."""
 
 from __future__ import annotations
 
@@ -76,7 +52,6 @@ _BASIS_LABEL: dict[OverlapBasis, str] = {
 
 
 def _fmt_signed(value: float | None) -> str:
-    """A residual/gap in percentage points, always carrying its sign."""
     if value is None:
         return "  n/a"
     return f"{value:+5.1f}"
@@ -84,9 +59,6 @@ def _fmt_signed(value: float | None) -> str:
 
 def _fmt_percent(value: float | None) -> str:
     return "  n/a" if value is None else f"{value:5.1f}%"
-
-
-# ── report rendering ──────────────────────────────────────────────────────
 
 
 def _print_graders(report: GraderAgreementReport) -> None:
@@ -113,8 +85,6 @@ def _print_pairs(pairs: tuple[PairAgreement, ...], basis: OverlapBasis) -> None:
     if not pairs:
         return
     print(f"\nAGREEMENT on {_BASIS_LABEL[basis]}")
-    # The pair is padded as one field: padding only the second name leaves the
-    # columns ragged, because the first name varies in width too.
     width = max((len(f"{pair.a} <-> {pair.b}") for pair in pairs), default=0)
     for pair in pairs:
         provisional = "" if pair.sufficient else "  (provisional — small sample)"
@@ -144,8 +114,6 @@ def _print_report(report: GraderAgreementReport, *, source: str) -> None:
 
     _print_graders(report)
     _print_pairs(report.same_work_pairs, "same_work")
-    # Same-answer overlap is a strict superset of same-work in a calibration
-    # set, so showing both there would say the same thing twice, more weakly.
     if not report.same_work_pairs:
         _print_pairs(report.same_answer_pairs, "same_answer")
 
@@ -221,9 +189,6 @@ def _report_to_dict(report: GraderAgreementReport, *, source: str) -> dict[str, 
             for norm in report.questions
         ],
     }
-
-
-# ── subcommands ───────────────────────────────────────────────────────────
 
 
 def _load_documents(submissions: Path) -> list:

@@ -1,5 +1,3 @@
-"""Cohort export bundles — packaging graded work for return and archival."""
-
 from .bundle import (
     BUNDLE_PRESETS,
     BundleContent,

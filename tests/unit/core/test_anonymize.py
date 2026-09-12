@@ -51,13 +51,11 @@ def test_redact_strips_names_keeps_ids_and_returns_map(tmp_path: Path) -> None:
 
     name_map = redact_submission_names(subs)
 
-    # Names gone from the files, ids intact.
     for filename, sid in (("a.submission.md", "111111111"), ("b.submission.md", "222222222")):
         doc = load_student_submission_markdown(subs / filename)
         assert doc.student_name == ""
         assert doc.student_id == sid
 
-    # The map carries what was removed, keyed by filename.
     assert name_map["a.submission.md"] == {"student_id": "111111111", "student_name": "Ann Lee"}
     assert name_map["b.submission.md"] == {"student_id": "222222222", "student_name": "Bo Ng"}
 
@@ -102,7 +100,6 @@ def test_restore_ignores_files_absent_from_map(tmp_path: Path) -> None:
     _write_submission(subs / "b.submission.md", student_name="Bo Ng")
 
     redact_submission_names(subs)
-    # A partial map only mentions a; b must be left as-is (still redacted).
     restored = restore_submission_names(
         subs, {"a.submission.md": {"student_id": "123456789", "student_name": "Ann Lee"}}
     )

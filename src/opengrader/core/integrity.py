@@ -1,42 +1,3 @@
-"""Integrity snapshots and verified backups for a grading folder.
-
-Every durable thing Opengrader produces is a file in one directory: the
-``.submission.md`` grades, the crops they are graded from, the audit journal,
-the curve, the claims. There is no database to repair it and no server holding a
-second copy. A folder on a USB stick that gets yanked mid-write, a sync client
-that resolves a conflict by picking a side, a shell glob that hits one directory
-too many — all of these fail *silently*, and the first symptom is a student
-asking why their grade changed.
-
-Two capabilities, deliberately in that order:
-
-* **Verify** — record a checksum of every file once (`build_snapshot`), then
-  ask later what moved (`verify_snapshot`). Cheap enough to run before and
-  after anything risky.
-* **Back up** — write a single archive with its own manifest inside, and
-  *verify it after writing* (`create_backup`). An unverified backup is a belief,
-  not a copy; the whole point is that this one has been read back.
-
-Two design decisions carry most of the value:
-
-* **Append-only logs are verified by their prefix.** The journal, the claims
-  and the regrade logs are *supposed* to grow, so a whole-file hash would
-  report every one of them as "modified" on every run and the report would
-  become noise nobody reads. Instead the recorded length and the hash of
-  exactly those first bytes are checked: growth is normal, a changed prefix is
-  rewriting history and is called out as such.
-* **A modified grade file is not automatically a problem, and the tool says
-  which.** Cross-referencing the audit journal separates "changed, and there
-  are 12 grading actions recorded since the snapshot" from "changed, with no
-  recorded grading activity at all" — the second is the one worth
-  investigating, and burying it among ordinary grading is how a real
-  corruption goes unnoticed.
-
-The classification layer is pure — it is handed measurements — so the whole
-report unit-tests with no folder. Only the functions below the I/O divider
-touch a disk.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -57,35 +18,26 @@ from opengrader.core.crypto import (
     is_encrypted,
 )
 
-# Files whose whole purpose is to grow. Verified by prefix (see the module
-# docstring) rather than reported as modified on every append.
 APPEND_ONLY_SUFFIXES = (".jsonl",)
 
-# Never recorded: the snapshot cannot contain its own checksum, and the image
-# caches are derived data that is rebuilt on demand and would only add churn.
 EXCLUDED_DIR_NAMES = (".tui_cache", "__pycache__")
 
 SNAPSHOT_DOTDIR = ".opengrader"
 SNAPSHOT_FILENAME = "integrity.json"
-# Written inside every backup archive so an archive can be checked on its own,
-# on a machine that never had the folder.
 BACKUP_MANIFEST_NAME = "opengrader-backup.json"
 
 SNAPSHOT_FORMAT = 1
 
 VerifyStatus = Literal[
-    "unchanged",  # byte-identical to the snapshot
-    "appended",   # append-only file grew, recorded prefix intact — expected
-    "rewritten",  # append-only file's recorded prefix changed — history edited
-    "modified",   # ordinary file's contents differ
-    "missing",    # recorded, but no longer on disk
-    "added",      # on disk, but not in the snapshot
-    "unreadable", # present but could not be read
+    "unchanged",
+    "appended",
+    "rewritten",
+    "modified",
+    "missing",
+    "added",
+    "unreadable",
 ]
 
-# The statuses that mean "look at this". `added` is intentionally not one of
-# them: grading a folder legitimately creates files (annotated PDFs, journals,
-# new crops), and flagging those would train the reader to ignore the report.
 CONCERNING_STATUSES: tuple[VerifyStatus, ...] = (
     "rewritten",
     "modified",
@@ -95,14 +47,12 @@ CONCERNING_STATUSES: tuple[VerifyStatus, ...] = (
 
 
 class IntegrityError(ValueError):
-    """A snapshot or backup could not be read."""
+    pass
 
 
 @dataclass(frozen=True)
 class FileRecord:
-    """The recorded fingerprint of one file."""
-
-    path: str  # relative to the snapshot root, posix-separated
+    path: str
     size: int
     sha256: str
     append_only: bool = False
@@ -110,8 +60,6 @@ class FileRecord:
 
 @dataclass(frozen=True)
 class IntegritySnapshot:
-    """Every file in a grading folder as it stood at one moment."""
-
     created_at: str
     root: str
     files: tuple[FileRecord, ...] = ()
@@ -126,15 +74,10 @@ class IntegritySnapshot:
 
 @dataclass(frozen=True)
 class FileFinding:
-    """One file's verdict, with enough detail to act on it."""
-
     path: str
     status: VerifyStatus
     detail: str = ""
-    # Grading actions recorded in the journal since the snapshot for the student
-    # this file belongs to. ``None`` means the question was never asked (not a
-    # submission file, or no journal); ``0`` means asked and answered "none",
-    # which is the interesting case.
+    # None means unchecked; zero means checked with no activity.
     recorded_activity: int | None = None
 
     @property
@@ -156,8 +99,6 @@ class FileFinding:
 
 @dataclass(frozen=True)
 class IntegrityReport:
-    """The full comparison of a folder against its snapshot."""
-
     snapshot_at: str
     root: str
     findings: tuple[FileFinding, ...] = ()
@@ -168,11 +109,6 @@ class IntegrityReport:
 
     @property
     def unexplained(self) -> tuple[FileFinding, ...]:
-        """Modified grade files with no grading recorded to explain them.
-
-        The one list worth reading first: everything here changed without the
-        app being the thing that changed it.
-        """
         return tuple(
             finding
             for finding in self.findings
@@ -188,7 +124,6 @@ class IntegrityReport:
 
 
 def is_append_only(relative_path: str) -> bool:
-    """Should this file be verified by prefix rather than in full?"""
     return Path(relative_path).suffix.lower() in APPEND_ONLY_SUFFIXES
 
 
@@ -202,17 +137,6 @@ def compare_measurements(
     *,
     activity: Mapping[str, int] | None = None,
 ) -> IntegrityReport:
-    """Classify a folder against its snapshot from measurements alone.
-
-    ``measured`` maps a relative path to ``(size, whole_file_sha256,
-    recorded_prefix_sha256)``. The third element is the hash of just the first
-    *recorded* bytes, which is what makes an append-only log verifiable while it
-    is still being appended to; for a file that shrank, or one the caller could
-    not read, pass an empty string and it is reported rather than guessed at.
-
-    Pure on purpose: the decision table is the part worth testing, and it needs
-    no files to exercise.
-    """
     recorded_activity = activity or {}
     findings: list[FileFinding] = []
     known = snapshot.by_path()
@@ -279,7 +203,6 @@ def compare_measurements(
 
 
 def render_snapshot(snapshot: IntegritySnapshot) -> str:
-    """Serialize a snapshot to JSON text."""
     payload = {
         "snapshot_format": SNAPSHOT_FORMAT,
         "created_at": snapshot.created_at,
@@ -298,12 +221,6 @@ def render_snapshot(snapshot: IntegritySnapshot) -> str:
 
 
 def parse_snapshot(text: str) -> IntegritySnapshot:
-    """Read a snapshot, raising `IntegrityError` on anything unusable.
-
-    Loud rather than lenient: a half-read snapshot would verify a folder against
-    a subset of itself and report a clean bill of health for files it never
-    looked at, which is worse than having no snapshot at all.
-    """
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -346,22 +263,7 @@ def parse_snapshot(text: str) -> IntegritySnapshot:
     )
 
 
-# --------------------------------------------------------------------------
-# Everything below touches the filesystem. Keep new classification logic above
-# this line so it stays testable without a folder to build.
-# --------------------------------------------------------------------------
-
-
 def resolve_snapshot_path(root: str | Path) -> Path:
-    """The ``.opengrader/integrity.json`` path for a grading folder.
-
-    Deliberately **not** configurable. A snapshot is a fingerprint *of* this
-    folder and is only meaningful beside it: put it anywhere else and `verify`
-    cannot find it without being told where, and moving or copying the folder
-    silently orphans it. It lives in the same dot-dir as `policy.json`,
-    `curve.json` and `claims.jsonl` for exactly the reason those do — so it
-    travels with the assignment and stays out of submission discovery.
-    """
     base = Path(root)
     if base.is_file():
         base = base.parent
@@ -371,18 +273,6 @@ def resolve_snapshot_path(root: str | Path) -> Path:
 def default_backup_path(
     root: str | Path, *, today: datetime | None = None, encrypted: bool = False
 ) -> Path:
-    """Where an archive of ``root`` goes unless the user says otherwise.
-
-    ``<parent>/<folder>-backup-<YYYY-MM-DD>.zip`` — **beside** the folder, never
-    inside it, which is the whole point: a backup stored in the thing it backs
-    up is lost with it, and would be swept into every later backup besides. A
-    same-day repeat is suffixed rather than refused, since `create_backup` will
-    not overwrite and being told "that name is taken" helps nobody.
-
-    ``encrypted=True`` appends ``.enc``, so an archive that needs a passphrase
-    says so in its own name — the person who finds it in two years is usually
-    not the person who wrote it.
-    """
     base = Path(root)
     if base.is_file():
         base = base.parent
@@ -397,12 +287,6 @@ def default_backup_path(
 
 
 def iter_tracked_files(root: str | Path) -> list[Path]:
-    """Every file worth fingerprinting under ``root``, in a stable order.
-
-    The snapshot file itself is excluded because it is written *after* the
-    measurements and so could never match them, and the disposable caches are
-    excluded because their churn would drown the report.
-    """
     base = Path(root)
     snapshot_path = resolve_snapshot_path(base).resolve()
     tracked: list[Path] = []
@@ -418,12 +302,6 @@ def iter_tracked_files(root: str | Path) -> list[Path]:
 
 
 def _is_inside(candidate: Path, folder: Path) -> bool:
-    """Would ``candidate`` land under ``folder``?
-
-    Resolved on both sides so a relative path, a ``..`` or a symlinked folder
-    cannot sneak past — the check exists to prevent a real mistake, not to
-    pass a string comparison.
-    """
     try:
         resolved_folder = folder.resolve()
         resolved_candidate = (
@@ -437,7 +315,6 @@ def _is_inside(candidate: Path, folder: Path) -> bool:
 
 
 def _hash_file(path: Path, *, limit: int | None = None) -> tuple[int, str]:
-    """Stream a file's size and SHA-256, optionally only its first ``limit`` bytes."""
     digest = hashlib.sha256()
     read = 0
     with path.open("rb") as handle:
@@ -456,7 +333,6 @@ def _hash_file(path: Path, *, limit: int | None = None) -> tuple[int, str]:
 def build_snapshot(
     root: str | Path, *, now: datetime | None = None
 ) -> IntegritySnapshot:
-    """Fingerprint every tracked file under ``root``."""
     base = Path(root)
     if not base.is_dir():
         raise IntegrityError(f"not a directory: {base}")
@@ -484,7 +360,6 @@ def build_snapshot(
 
 
 def write_snapshot(root: str | Path, snapshot: IntegritySnapshot) -> Path:
-    """Persist a snapshot into the folder it describes."""
     target = resolve_snapshot_path(root)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(render_snapshot(snapshot), encoding="utf-8")
@@ -492,7 +367,6 @@ def write_snapshot(root: str | Path, snapshot: IntegritySnapshot) -> Path:
 
 
 def read_snapshot(root: str | Path) -> IntegritySnapshot | None:
-    """Load a folder's snapshot, or ``None`` when it has never been taken."""
     path = resolve_snapshot_path(root)
     try:
         text = path.read_text(encoding="utf-8")
@@ -504,13 +378,6 @@ def read_snapshot(root: str | Path) -> IntegritySnapshot | None:
 def measure_folder(
     root: str | Path, snapshot: IntegritySnapshot
 ) -> dict[str, tuple[int, str, str]]:
-    """Measure a folder for `compare_measurements`.
-
-    Each file yields its size, its whole-file hash, and — only where the
-    snapshot recorded an append-only file that has grown — the hash of exactly
-    the recorded number of leading bytes. The prefix hash is computed on demand
-    rather than always, so an ordinary run does not read the journal twice.
-    """
     base = Path(root)
     known = snapshot.by_path()
     measured: dict[str, tuple[int, str, str]] = {}
@@ -536,18 +403,6 @@ def journal_activity_by_file(
     root: str | Path,
     snapshot: IntegritySnapshot,
 ) -> dict[str, int]:
-    """Count grading actions recorded since the snapshot, per submission file.
-
-    This is what turns "modified" into an answer. It maps each submission file
-    to its student key, then counts journal entries for that student that are
-    newer than the snapshot. A submission that changed with a matching burst of
-    recorded grading is ordinary work; one that changed with none is the thing
-    the report exists to surface.
-
-    Best-effort throughout: a folder with no journal, or a file that will not
-    parse, simply yields no count, and the finding falls back to saying only
-    that the file changed.
-    """
     from opengrader.core.history.journal import read_journal, resolve_history_dir
     from opengrader.core.history.restore import document_student_key
     from opengrader.core.submissions.student_file import (
@@ -562,8 +417,6 @@ def journal_activity_by_file(
     since = snapshot.created_at
     counts_by_key: dict[str, int] = {}
     for entry in entries:
-        # ISO-8601 UTC strings compare correctly as text, which keeps this a
-        # string comparison rather than a parse of every entry in a long journal.
         if entry.timestamp <= since:
             continue
         key = (entry.student_id or "").strip().casefold()
@@ -592,7 +445,6 @@ def verify_folder(
     *,
     explain: bool = True,
 ) -> IntegrityReport:
-    """Compare a folder against its snapshot (or a supplied one)."""
     base = Path(root)
     resolved = snapshot or read_snapshot(base)
     if resolved is None:
@@ -607,16 +459,11 @@ def verify_folder(
 
 @dataclass(frozen=True)
 class BackupResult:
-    """What `create_backup` wrote, and whether reading it back agreed."""
-
     archive_path: Path
     file_count: int
     total_bytes: int
     verified: bool
     mismatches: tuple[str, ...] = ()
-    # Whether the archive needs a passphrase to read. Reported so the CLI and
-    # the TUI can say it out loud: an archive nobody remembers the passphrase
-    # for is indistinguishable from a lost one.
     encrypted: bool = False
 
 
@@ -624,19 +471,9 @@ class BackupResult:
 def _readable_archive(
     archive_path: str | Path, passphrase: str = ""
 ) -> Iterator[Path]:
-    """Yield a path to a plain zip, decrypting an encrypted archive if needed.
-
-    Every reader (manifest, verify, restore) goes through here, so encryption is
-    invisible to them and there is exactly one place that knows how to open a
-    backup. The decrypted copy lives in a temporary directory and is removed on
-    the way out — an encrypted archive that leaves a plaintext twin lying beside
-    it has protected nothing.
-    """
     source = Path(archive_path)
     if not is_encrypted(source):
         if passphrase:
-            # Said rather than ignored: someone who typed a passphrase for an
-            # unencrypted archive has misunderstood which file they are holding.
             raise IntegrityError(
                 f"{source} is not encrypted — no passphrase is needed to read it"
             )
@@ -663,24 +500,6 @@ def create_backup(
     now: datetime | None = None,
     passphrase: str = "",
 ) -> BackupResult:
-    """Write a verified zip archive of a grading folder.
-
-    The snapshot is embedded in the archive, so the copy can be checked years
-    later on a machine that never had the original. Then the archive is
-    **read back and compared against that manifest** before this returns: a
-    backup nobody has read is a belief about a file, and the entire reason to
-    make one is the day the original is gone.
-
-    With a ``passphrase`` the archive is encrypted (``core/crypto.py``) — the
-    answer to a backup on a stick or a laptop that gets stolen, since a backup
-    holds every name, id and scan there is. The read-back verification then
-    happens **through the decryption**, so what is checked is the file that was
-    actually written: an encrypted backup that cannot be decrypted is not a
-    backup, and finding that out years later is finding out too late.
-
-    Refuses to overwrite an existing archive — a backup file is exactly the kind
-    of thing that must not be silently replaced by a shorter one.
-    """
     base = Path(root)
     target = Path(archive_path)
     if target.exists():
@@ -689,9 +508,6 @@ def create_backup(
             "existing one may be the only copy"
         )
     if _is_inside(target, base):
-        # Not a matter of taste: the drive that loses the folder loses the
-        # backup with it, and every later backup would pack the previous one
-        # inside itself.
         raise IntegrityError(
             f"{target} is inside the folder being backed up — a backup kept "
             "there is lost with the thing it protects. Write it somewhere else "
@@ -701,9 +517,6 @@ def create_backup(
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if passphrase:
-        # Build the zip in a temporary directory and encrypt it into place, so
-        # the plaintext archive never exists at the destination — not even for
-        # the moment between writing and encrypting.
         with tempfile.TemporaryDirectory(prefix="opengrader-backup-") as workspace:
             staged = Path(workspace) / "archive.zip"
             _write_archive(base, staged, snapshot)
@@ -728,7 +541,6 @@ def create_backup(
 def _write_archive(
     base: Path, target: Path, snapshot: IntegritySnapshot
 ) -> None:
-    """Write the zip itself: every tracked file, plus the manifest inside it."""
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for record in snapshot.files:
             archive.write(base / record.path, arcname=record.path)
@@ -738,7 +550,6 @@ def _write_archive(
 def read_backup_manifest(
     archive_path: str | Path, *, passphrase: str = ""
 ) -> IntegritySnapshot:
-    """Read the snapshot embedded in a backup archive."""
     with _readable_archive(archive_path, passphrase) as readable:
         try:
             with zipfile.ZipFile(readable) as archive:
@@ -757,13 +568,6 @@ def read_backup_manifest(
 def verify_backup(
     archive_path: str | Path, *, passphrase: str = ""
 ) -> tuple[str, ...]:
-    """Check an archive's contents against its own manifest.
-
-    Returns the paths that disagree — empty means the archive holds exactly what
-    it claims to. Reads each member's bytes rather than trusting the zip
-    directory's CRC, since the question being asked is whether the *grading
-    data* survived, not whether the container is well-formed.
-    """
     with _readable_archive(archive_path, passphrase) as readable:
         snapshot = _manifest_from_open_archive(readable, archive_path)
         mismatches: list[str] = []
@@ -782,11 +586,6 @@ def verify_backup(
 def _manifest_from_open_archive(
     readable: Path, original: str | Path
 ) -> IntegritySnapshot:
-    """Read the manifest out of an already-decrypted archive.
-
-    Split out so verify/restore decrypt **once** rather than once per read; on a
-    multi-gigabyte archive the difference is minutes.
-    """
     try:
         with zipfile.ZipFile(readable) as archive:
             return parse_snapshot(archive.read(BACKUP_MANIFEST_NAME).decode("utf-8"))
@@ -802,12 +601,6 @@ def _manifest_from_open_archive(
 def restore_backup(
     archive_path: str | Path, destination: str | Path, *, passphrase: str = ""
 ) -> BackupResult:
-    """Extract a backup into a **new** directory, then verify what landed.
-
-    ``destination`` must not already exist. Restoring on top of a folder is how
-    a good backup destroys a better original — the caller can always merge
-    afterwards, but they cannot un-overwrite.
-    """
     target = Path(destination)
     if target.exists():
         raise IntegrityError(
@@ -844,7 +637,6 @@ def restore_backup(
 
 
 def summarize_report(report: IntegrityReport) -> str:
-    """One line naming every status that occurred, for a CLI or a status bar."""
     order: Sequence[VerifyStatus] = (
         "unchanged",
         "appended",
@@ -861,7 +653,6 @@ def summarize_report(report: IntegrityReport) -> str:
 
 
 def iter_concerning(report: IntegrityReport) -> Iterable[FileFinding]:
-    """The findings a reader must see, worst first."""
     severity = {"rewritten": 0, "missing": 1, "unreadable": 2, "modified": 3}
     return sorted(
         report.concerning, key=lambda f: (severity.get(f.status, 9), f.path)

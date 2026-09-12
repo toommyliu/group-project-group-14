@@ -1,5 +1,3 @@
-"""Tests for the CurveScreen target solver (Solve button)."""
-
 import asyncio
 
 from textual.app import App
@@ -30,14 +28,13 @@ def test_solve_scale_sets_value_input() -> None:
         async with app.run_test(size=(120, 44)) as pilot:
             await pilot.pause()
             screen = app.screen
-            _select_method(screen, 2)  # scale
+            _select_method(screen, 2)
             screen.query_one("#curve-target-value", Input).value = "75"
             await pilot.pause()
 
             await pilot.click("#curve-solve")
             await pilot.pause()
 
-            # raw mean is 60%; scaling to a 75% mean needs ×1.25.
             assert screen.query_one("#curve-value", Input).value == "1.25"
 
     asyncio.run(run())
@@ -49,7 +46,7 @@ def test_solve_bonus_sets_value_input() -> None:
         async with app.run_test(size=(120, 44)) as pilot:
             await pilot.pause()
             screen = app.screen
-            _select_method(screen, 1)  # bonus
+            _select_method(screen, 1)
             screen.query_one("#curve-target-value", Input).value = "75"
             screen.query_one("#curve-target-stat", Select).value = "mean"
             await pilot.pause()
@@ -57,7 +54,6 @@ def test_solve_bonus_sets_value_input() -> None:
             await pilot.click("#curve-solve")
             await pilot.pause()
 
-            # +15 points lifts a 60% mean to 75%.
             assert screen.query_one("#curve-value", Input).value == "15"
 
     asyncio.run(run())
@@ -69,7 +65,6 @@ def test_solve_with_no_method_notifies_and_leaves_value() -> None:
         async with app.run_test(size=(120, 44)) as pilot:
             await pilot.pause()
             screen = app.screen
-            # Default method is "No curve" (index 0) — not solvable.
             screen.query_one("#curve-target-value", Input).value = "75"
             await pilot.pause()
             before = screen.query_one("#curve-value", Input).value
@@ -88,7 +83,7 @@ def test_solve_unreachable_target_leaves_value_unchanged() -> None:
         async with app.run_test(size=(120, 44)) as pilot:
             await pilot.pause()
             screen = app.screen
-            _select_method(screen, 2)  # scale — can't lift the zero-scorer
+            _select_method(screen, 2)
             screen.query_one("#curve-value", Input).value = "1"
             screen.query_one("#curve-target-value", Input).value = "100"
             await pilot.pause()

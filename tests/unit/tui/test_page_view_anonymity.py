@@ -1,14 +1,3 @@
-"""Anonymous grading survives the whole-page view.
-
-The `w` view shows a whole sheet of the student's scan, and a real sheet has
-the student's name written across the top — so without this the one screen
-that grades most of the exam would undo the anonymity every other screen keeps.
-The fix is to redact rather than to hide the hotkey (see
-`core/submissions/identity_redaction.py`), and that only holds if it is checked
-against the real app: the flag has to travel state -> controller -> screen ->
-render, and the *cache* has to notice when teacher mode flips.
-"""
-
 import asyncio
 from pathlib import Path
 
@@ -53,9 +42,7 @@ student_score: ""
   - Analysis:
 """
 
-# Where the header lands on the 792pt-tall page below, as a page fraction.
 HEADER_ROW = 150 / 792
-# Where the student's work lands — must stay legible under any redaction.
 WORK_ROW = 600 / 792
 
 
@@ -76,7 +63,6 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def workspace(tmp_path: Path):
-    """A submission whose scan carries a real Name/Student ID header."""
     (tmp_path / "qa.md").write_text(QA)
 
     split_dir = tmp_path / "split-submissions"
@@ -135,9 +121,7 @@ async def _test_anonymous_grading_redacts_the_header(workspace) -> None:
         page = _viewer_path(app)
         assert page.name.endswith("-anon.png")
         assert _row_is_redacted(page, HEADER_ROW) is True
-        # The work the grader came here for is untouched.
         assert _row_is_redacted(page, WORK_ROW) is False
-        # And the black bar is announced, so it doesn't read as a broken render.
         assert "identity redacted" in _caption(app)
 
 
@@ -151,19 +135,16 @@ async def _test_teacher_mode_reveals_the_header(workspace) -> None:
         await pilot.pause()
         anonymous_page = _viewer_path(app)
 
-        await pilot.press("t")  # teacher mode on
+        await pilot.press("t")
         await pilot.pause()
         assert app.workflow_state.teacher_mode is True
 
         revealed = _viewer_path(app)
-        # A separate cache slot: flipping the mode must never serve the render
-        # made under the other one.
         assert revealed != anonymous_page
         assert not revealed.name.endswith("-anon.png")
         assert _row_is_redacted(revealed, HEADER_ROW) is False
         assert "identity redacted" not in _caption(app)
 
-        # …and back off again re-hides it.
         await pilot.press("t")
         await pilot.pause()
         assert _row_is_redacted(_viewer_path(app), HEADER_ROW) is True

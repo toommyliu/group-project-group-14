@@ -1,23 +1,3 @@
-"""Draw a machine-readable bubble answer sheet with PyMuPDF.
-
-The write half of the OMR path. Every coordinate comes from
-`core/bubble_sheet.build_bubble_sheet_layout` — this module only turns
-normalized positions into PDF drawing calls, and deliberately computes no
-geometry of its own, so the sheet that gets printed and the geometry the reader
-samples can never drift apart.
-
-What ends up on the page, and why each part is there:
-
-* **Four corner registration squares** per page. They give the reader four
-  known points, which is what lets a crooked scan (or a phone photo taken at an
-  angle) be mapped back onto the layout exactly instead of approximately.
-* **An identity QR** on page 1, reusing the existing `core/qr_codes` payload —
-  so a personalized batch identifies the student with no handwriting to read,
-  and the whole sheet needs no OCR at all.
-* **Name/ID fields** anyway, because a student handed the wrong sheet, or a
-  reprint, still has to be identifiable by a human.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -46,7 +26,6 @@ ROW_LABEL_FONTSIZE = 9.0
 TITLE_FONTSIZE = 15.0
 INSTRUCTION_FONTSIZE = 8.5
 
-# A light grey, so the instruction line reads as guidance rather than content.
 COLOR_INSTRUCTION = (0.35, 0.35, 0.35)
 
 DEFAULT_INSTRUCTION = (
@@ -56,12 +35,6 @@ DEFAULT_INSTRUCTION = (
 
 
 def _draw_fiducials(page: fitz.Page, layout: BubbleSheetLayout, page_number: int) -> None:
-    """Stamp the corner registration squares.
-
-    Drawn as solid filled black squares: the reader looks for the darkest
-    square-ish blob in each corner, and a filled shape survives a bad scan,
-    a photocopy and a fax far better than an outline would.
-    """
     page_w, page_h = page.rect.width, page.rect.height
     for mark in layout.fiducials_on_page(page_number):
         half = mark.size * page_w / 2.0
@@ -81,7 +54,6 @@ def _draw_rows(
     page_number: int,
     fonts: ResolvedTemplateFonts,
 ) -> None:
-    """Draw each question's row label and its empty choice circles."""
     page_w, page_h = page.rect.width, page.rect.height
     for row in layout.rows_on_page(page_number):
         first = row.bubbles[0]
@@ -107,9 +79,7 @@ def _draw_rows(
                 color=COLOR_BLACK,
                 width=BUBBLE_LINE_WIDTH,
             )
-            # The choice letter goes *inside* the circle, faint enough that it
-            # barely moves the measured fill of an unmarked bubble but is
-            # readable by the student choosing an answer.
+            # Dark choice letters would count as filled bubbles.
             letter = bubble.choice_label
             letter_width = fonts.regular_metrics.text_length(
                 letter, fontsize=BUBBLE_LABEL_FONTSIZE
@@ -132,7 +102,6 @@ def _draw_header(
     student_id: str,
     fonts: ResolvedTemplateFonts,
 ) -> None:
-    """Title, instruction line and the name/id fields on page 1."""
     page_w = page.rect.width
     title_width = fonts.bold_metrics.text_length(title, fontsize=TITLE_FONTSIZE)
     page.insert_text(
@@ -145,10 +114,6 @@ def _draw_header(
 
     text = instructions if instructions is not None else DEFAULT_INSTRUCTION
     if text:
-        # Wrapped by hand into at most two centered lines: the instruction is
-        # fixed-length boilerplate, so a full text-layout engine would be
-        # ceremony for no gain. The width stops short of the QR block on the
-        # right (and the same distance in on the left, to stay centered).
         instruction_width = page_w - 2 * (QR_SIZE + 60.0)
         for offset, line in enumerate(_wrap_centered(text, fonts, instruction_width)):
             line_width = fonts.regular_metrics.text_length(
@@ -182,7 +147,6 @@ def _draw_header(
 def _wrap_centered(
     text: str, fonts: ResolvedTemplateFonts, max_width: float
 ) -> list[str]:
-    """Greedy word wrap for the short instruction line."""
     words = text.split()
     lines: list[str] = []
     current = ""
@@ -211,11 +175,6 @@ def _draw_qr(
     total_pages: int,
     form_key: str | None = None,
 ) -> None:
-    """Stamp the identity/page QR in the top-right, clear of the fiducials.
-
-    Placed below the corner square rather than in it: the registration mark has
-    to be the darkest thing in that corner for the reader to lock onto it.
-    """
     code = OpengraderCode(
         student_id=student_id,
         version=version,
@@ -234,14 +193,6 @@ def _draw_qr(
 def _draw_form_label(
     page: fitz.Page, form_key: str, fonts: ResolvedTemplateFonts
 ) -> None:
-    """Print the form key in plain text beside the QR.
-
-    Redundant with the QR on purpose. The QR is what the pipeline reads, but a
-    scrambled sheet whose code will not scan (a fold, a torn corner, a photo
-    with glare) is otherwise ungradable — the order it was printed in would be
-    unrecoverable. Six readable characters mean a human can always type it back
-    in. It is also how an invigilator tells two forms apart at a glance.
-    """
     text = f"Form {form_key}"
     width = fonts.bold_metrics.text_length(text, fontsize=9.0)
     x1 = page.rect.width - 40.0
@@ -269,7 +220,6 @@ def render_bubble_sheet(
     page_h: float = LETTER_H,
     fonts: ResolvedTemplateFonts | None = None,
 ) -> None:
-    """Append one complete answer sheet (all its pages) to ``doc``."""
     fonts = fonts or resolve_template_fonts()
     for page_number in range(1, layout.page_count + 1):
         page = create_page(doc, page_w, page_h)
@@ -324,12 +274,6 @@ def generate_bubble_sheet_pdf(
     font_regular_file: str | Path | None = None,
     font_bold_file: str | Path | None = None,
 ) -> BubbleSheetLayout:
-    """Write one blank bubble sheet and return the layout it was drawn to.
-
-    Returning the layout is deliberate: the caller needs exactly this object to
-    read the sheet back, and handing it over removes any chance of rebuilding
-    it from different arguments later.
-    """
     layout = build_bubble_sheet_layout(
         questions, config=config, aspect=page_w / page_h
     )
@@ -359,28 +303,13 @@ def generate_bubble_sheet_pdf(
 
 @dataclass(frozen=True)
 class BubbleSheetForm:
-    """One printed sheet in a batch: who it is for, and how it was scrambled."""
-
     form_key: str
     student_id: str = ""
     student_name: str = ""
-    # The order this sheet's questions were printed in, as question ids. Handed
-    # back so a caller can write an answer-key-per-form report if it wants one;
-    # the *pipeline* never needs it, since the reader re-derives the order from
-    # the form key on the sheet.
     question_order: tuple[str, ...] = ()
 
 
 def _form_seed(*, assignment: str, student_id: str, index: int) -> str:
-    """Seed one sheet's form key.
-
-    A roster sheet is keyed by the **student**, so re-running the generator
-    hands the same student the same form — reprint one lost sheet and it still
-    matches what the reader expects. A copy-count sheet has no student, so it
-    falls back to its position in the batch, which is equally stable. The
-    assignment title is mixed in so two different exams do not scramble
-    identically.
-    """
     who = student_id.strip() or f"copy-{index}"
     return f"{assignment}|{who}"
 
@@ -400,18 +329,6 @@ def generate_bubble_sheet_batch(
     page_h: float = LETTER_H,
     include_master_key: bool = True,
 ) -> tuple[BubbleSheetLayout, list[BubbleSheetForm]]:
-    """Write a batch of answer sheets — one per roster student, or ``copies`` of them.
-
-    Exactly one of ``students`` / ``copies`` decides how many sheets there are.
-    They are two answers to the same question ("how many, and for whom"), and a
-    roster additionally lets each sheet carry its student's id in a QR so no
-    handwriting has to be read to identify it.
-
-    With ``shuffle``, every sheet gets its own question order, derived from a
-    form key printed and QR'd on the sheet — see `core/bubble_sheet`. The
-    returned layout is the **unscrambled** one (the answer key's order); each
-    form's own order is in its :class:`BubbleSheetForm`.
-    """
     from opengrader.core.roster import assign_student_ids
 
     from .master_key import draw_master_key_page
@@ -434,9 +351,6 @@ def generate_bubble_sheet_batch(
     fonts = resolve_template_fonts()
 
     doc = fitz.Document()
-    # The master key names students, so it only exists for a roster batch — and
-    # only that first page ever ties an id to a name, which is what lets the
-    # rest of the stack be handed out anonymously.
     if include_master_key and resolved:
         entries = sorted(
             ((student.student_id, student.name) for student in resolved),
