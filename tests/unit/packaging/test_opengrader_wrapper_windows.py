@@ -1,30 +1,3 @@
-"""`packaging/opengrader.ps1` — the Windows launcher, exercised under pwsh.
-
-The PowerShell launcher is the twin of `packaging/opengrader`, and the logic
-worth testing is the part that is *not* Windows-specific: the order it resolves
-a checkout in, that it refuses a wrong `$env:OPENGRADER_HOME` instead of
-silently searching past it, that it recognises the project by the name in
-pyproject.toml rather than by folder name, and that a missing uv is not fatal.
-All of that is plain PowerShell and runs identically under pwsh on Linux and
-macOS, which is what lets these tests run in CI at all — GitHub's
-`ubuntu-latest` image ships pwsh, and the workflow's path filter includes
-`packaging/opengrader*` so a change to the script triggers them.
-
-**What these tests deliberately do not cover**: the runner rules that depend on
-Windows layout — `Scripts\\python.exe` inside a venv, `Lib\\site-packages`,
-`$env:CONDA_PREFIX\\python.exe`. On a non-Windows host `Join-Path` does not
-treat a backslash as a separator, so those paths cannot resolve and the rules
-are unreachable here. Rule 1 (`$env:OPENGRADER_PYTHON`) is the exception: it
-takes a path as given, so the "an interpreter you name yourself" path *is*
-covered below. Anything else in job 2 needs a real Windows machine, and the
-POSIX twin's suite (`test_opengrader_wrapper.py`) is what pins the shared
-design those rules mirror.
-
-Every test pins `$env:OPENGRADER_SEARCH_ROOTS`. Without it, the search falls
-back to enumerating drive roots, which on a Unix host means `/` — a filesystem
-walk no test should ever start.
-"""
-
 from __future__ import annotations
 
 import os
@@ -44,8 +17,6 @@ pytestmark = pytest.mark.skipif(
     reason="no PowerShell on this machine; these run in CI, where ubuntu-latest ships pwsh",
 )
 
-# A path component with a space: the real checkout has one, and quoting is
-# exactly where a shell or PowerShell script goes wrong.
 CHECKOUT_DIRNAME = "Samsung T5 1"
 
 
@@ -59,7 +30,6 @@ def _make_checkout(root: Path, name: str = "group-project-group-14") -> Path:
 
 
 def _make_decoy(root: Path, name: str) -> Path:
-    """Another Python project — a pyproject.toml that is *not* Opengrader."""
     decoy = root / CHECKOUT_DIRNAME / name
     decoy.mkdir(parents=True)
     (decoy / "pyproject.toml").write_text(
@@ -70,12 +40,6 @@ def _make_decoy(root: Path, name: str) -> Path:
 
 @pytest.fixture
 def launcher(tmp_path: Path) -> Path:
-    """The launcher, copied somewhere that is *not* inside a checkout.
-
-    This mirrors the installed state and disables the launcher's rule 2 ("the
-    checkout this script lives in"), so the rules below it are the ones under
-    test.
-    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     target = bin_dir / "opengrader.ps1"
@@ -85,7 +49,6 @@ def launcher(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def stub_uv(tmp_path: Path) -> Path:
-    """A fake `uv` that reports the command line it was handed, then succeeds."""
     stub_dir = tmp_path / "stub-bin"
     stub_dir.mkdir()
     uv = stub_dir / "uv"
@@ -119,10 +82,7 @@ def _run(
             ([str(stub_uv_dir)] if stub_uv_dir else []) + ["/usr/bin", "/bin", "/usr/local/bin"]
         ),
         "HOME": str(home),
-        # The launcher prefers LOCALAPPDATA for its remembered path; setting it
-        # keeps the cache inside tmp_path on any host.
         "LOCALAPPDATA": str(cache),
-        # Never let a test fall through to enumerating real drive roots.
         "OPENGRADER_SEARCH_ROOTS": search_roots or str(home / "no-such-root"),
     }
     env.update(env_extra or {})
@@ -137,7 +97,6 @@ def _run(
 
 
 def _chosen_project(result: subprocess.CompletedProcess[str]) -> str:
-    """The checkout the launcher passed to `uv run --project`."""
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     line = next((ln for ln in result.stdout.splitlines() if ln.startswith("UV-ARGS: ")), None)
     assert line is not None, f"stub uv was never reached: {result.stdout!r}"
@@ -148,12 +107,6 @@ def _chosen_project(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def test_the_script_parses_and_runs_at_all(launcher, stub_uv, sandbox, tmp_path) -> None:
-    """A syntax error in PowerShell is only ever found by running it.
-
-    This file's real job: the launcher is authored on a machine with no
-    PowerShell, so the first thing worth asserting is that pwsh can parse and
-    execute it end to end.
-    """
     checkout = _make_checkout(tmp_path / "pinned")
     result = _run(
         launcher,
@@ -168,7 +121,6 @@ def test_the_script_parses_and_runs_at_all(launcher, stub_uv, sandbox, tmp_path)
 
 
 def test_explicit_home_wins(launcher, stub_uv, sandbox, tmp_path) -> None:
-    """`$env:OPENGRADER_HOME` beats every other rule, including the current dir."""
     pinned = _make_checkout(tmp_path / "pinned")
     standing_in = _make_checkout(tmp_path / "elsewhere")
 
@@ -183,7 +135,6 @@ def test_explicit_home_wins(launcher, stub_uv, sandbox, tmp_path) -> None:
 
 
 def test_explicit_home_that_is_wrong_is_an_error(launcher, stub_uv, sandbox, tmp_path) -> None:
-    """A bad `$env:OPENGRADER_HOME` must be an error, not a silent fallback."""
     not_a_checkout = tmp_path / "just some folder"
     not_a_checkout.mkdir()
 
@@ -203,7 +154,6 @@ def test_explicit_home_that_is_wrong_is_an_error(launcher, stub_uv, sandbox, tmp
 def test_the_checkout_you_are_standing_in_is_the_one_that_runs(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """Deep inside a checkout, that checkout wins over a remembered other one."""
     remembered = _make_checkout(tmp_path / "remembered")
     standing_in = _make_checkout(tmp_path / "current", name="another-clone")
     cache_file = sandbox["cache"] / "opengrader" / "checkout-path"
@@ -222,7 +172,6 @@ def test_the_checkout_you_are_standing_in_is_the_one_that_runs(
 def test_remembered_path_is_used_when_standing_somewhere_unrelated(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """The fast path: outside any checkout, use the one from last time."""
     remembered = _make_checkout(tmp_path / "remembered")
     cache_file = sandbox["cache"] / "opengrader" / "checkout-path"
     cache_file.parent.mkdir(parents=True)
@@ -237,10 +186,6 @@ def test_remembered_path_is_used_when_standing_somewhere_unrelated(
 def test_a_stale_remembered_path_is_dropped_and_the_search_takes_over(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """The case the whole design exists for: the path changed underneath us.
-
-    On Windows that is a removable drive coming back as a different letter.
-    """
     moved_to = _make_checkout(tmp_path / "new location")
     cache_file = sandbox["cache"] / "opengrader" / "checkout-path"
     cache_file.parent.mkdir(parents=True)
@@ -262,11 +207,6 @@ def test_a_stale_remembered_path_is_dropped_and_the_search_takes_over(
 def test_a_folder_of_other_python_projects_is_not_a_checkout(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """Decoys alone must find nothing — the marker is the *name*, not the file.
-
-    Asserted with no real checkout present, so there is no lucky answer a
-    launcher that accepted any pyproject.toml could stumble onto.
-    """
     root = tmp_path / "drive"
     _make_decoy(root, "invoice-generator")
     _make_decoy(root, "honeypot")
@@ -287,10 +227,7 @@ def test_a_folder_of_other_python_projects_is_not_a_checkout(
 def test_the_search_ignores_other_python_projects(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """Only a pyproject.toml naming *this* project counts as a checkout."""
     root = tmp_path / "drive"
-    # Named to sort ahead of the real checkout, so a launcher that took the
-    # first pyproject.toml it met would take one of these.
     _make_decoy(root, "aaa-invoice-generator")
     _make_decoy(root, "aab-honeypot")
     real = _make_checkout(root)
@@ -310,12 +247,6 @@ def test_the_search_ignores_other_python_projects(
 def test_two_checkouts_are_reported_rather_than_silently_picked(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """Running the wrong clone is expensive and silent; say something.
-
-    Asserted on stderr specifically: this launcher forwards a CLI whose stdout
-    may be JSON, so a diagnostic on stdout would corrupt a caller piping into
-    ConvertFrom-Json.
-    """
     root = tmp_path / "drive"
     _make_checkout(root, name="clone-a")
     _make_checkout(root, name="clone-b")
@@ -336,7 +267,6 @@ def test_two_checkouts_are_reported_rather_than_silently_picked(
 
 
 def test_diagnostics_stay_off_stdout(launcher, stub_uv, sandbox, tmp_path) -> None:
-    """Debug output must not pollute the forwarded command's stdout."""
     checkout = _make_checkout(tmp_path / "pinned")
     result = _run(
         launcher,
@@ -348,16 +278,10 @@ def test_diagnostics_stay_off_stdout(launcher, stub_uv, sandbox, tmp_path) -> No
     assert result.returncode == 0, result.stderr
     assert "opengrader[wrapper]" in result.stderr
     assert "opengrader[wrapper]" not in result.stdout
-    # stdout carries the forwarded command and nothing else.
     assert result.stdout.strip().startswith("UV-ARGS: ")
 
 
 def test_an_explicit_interpreter_skips_uv(launcher, stub_uv, sandbox, tmp_path) -> None:
-    """Rule 1 of the runner list, and the only one testable off Windows.
-
-    It takes the interpreter path exactly as given, so it needs none of the
-    `Scripts\\python.exe` layout the other venv rules depend on.
-    """
     checkout = _make_checkout(tmp_path / "pinned")
     fake_python = tmp_path / "my python" / "python"
     fake_python.parent.mkdir()
@@ -388,7 +312,6 @@ def test_an_explicit_interpreter_skips_uv(launcher, stub_uv, sandbox, tmp_path) 
 def test_an_explicit_interpreter_that_cannot_import_is_rejected_clearly(
     launcher, stub_uv, sandbox, tmp_path
 ) -> None:
-    """Naming a wrong interpreter must not fall through to a traceback."""
     checkout = _make_checkout(tmp_path / "pinned")
     fake_python = tmp_path / "wrong python" / "python"
     fake_python.parent.mkdir()
@@ -410,12 +333,6 @@ def test_an_explicit_interpreter_that_cannot_import_is_rejected_clearly(
 
 
 def test_arguments_reach_the_tool_unchanged(launcher, stub_uv, sandbox, tmp_path) -> None:
-    """The launcher forwards; it must not parse, reorder or swallow anything.
-
-    Flag-shaped arguments are the risk here: PowerShell binds `-name` tokens to
-    script parameters, so this script deliberately declares none and reads the
-    automatic `$args`.
-    """
     assert PWSH is not None
     checkout = _make_checkout(tmp_path / "pinned")
     env = {

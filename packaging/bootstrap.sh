@@ -1,45 +1,21 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Opengrader bootstrap / launcher (macOS + Linux)
-#
-# This is the entry point the desktop shortcut executes. On every launch it:
-#   1. Ensures `uv` (the Python package manager) is installed
-#   2. Ensures Python 3.12 is available (uv downloads it if missing)
-#   3. Ensures project dependencies are synced from uv.lock
-#   4. Ensures Tesseract OCR is installed (best-effort, non-fatal)
-# then execs the TUI. Every step is a fast no-op when already satisfied, so
-# after first run this adds well under a second of startup time.
-#
-# It works from two layouts:
-#   - installed:  <root>/bootstrap.sh  with the project in  <root>/app/
-#   - repo:       <repo>/packaging/bootstrap.sh  (project root is its parent)
-# =============================================================================
 set -euo pipefail
 
-# --- Locate the application ---------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$SCRIPT_DIR/app/pyproject.toml" ]]; then
-  APP_DIR="$SCRIPT_DIR/app"                      # installed layout
+  APP_DIR="$SCRIPT_DIR/app"
 elif [[ -f "$SCRIPT_DIR/../pyproject.toml" ]]; then
-  APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"        # running from the repo
+  APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
   echo "error: cannot find Opengrader next to $SCRIPT_DIR" >&2
   exit 1
 fi
 
-# uv's installer targets ~/.local/bin (older versions used ~/.cargo/bin); a
-# double-clicked shortcut gets a minimal PATH, so add both explicitly.
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-# All installer noise goes to a log file so the terminal stays clean; we only
-# surface the log if a step fails.
 LOG="${TMPDIR:-/tmp}/opengrader-bootstrap.log"
 : >"$LOG"
 
-# Installed layout only: install.sh records the checkout it copied from in
-# <root>/source-path. When that checkout still exists (e.g. a dev machine),
-# we mirror it before launching so the desktop icon always runs the latest
-# code without re-running the installer.
 SYNC_SOURCE=""
 if [[ -f "$SCRIPT_DIR/source-path" ]] && command -v rsync >/dev/null 2>&1; then
   candidate="$(cat "$SCRIPT_DIR/source-path")"
@@ -52,12 +28,8 @@ STEP=0
 TOTAL=4
 [[ -n "$SYNC_SOURCE" ]] && TOTAL=5
 
-# --- Minimal UI helpers -------------------------------------------------------
 say()  { printf '%s\n' "$*"; }
 
-# fail <message> — print the failure, show the tail of the log, and (when the
-# script was launched by double-click, i.e. stdin is a terminal) wait for a
-# keypress so the window doesn't vanish before the user can read the error.
 fail() {
   printf '\r\033[K  \033[31m✖\033[0m %s\n\n' "$1"
   say "Last lines of $LOG:"
@@ -69,9 +41,6 @@ fail() {
   exit 1
 }
 
-# run_step <title> <cmd...> — run a quiet step behind a spinner.
-# The command's output is appended to $LOG; the spinner is skipped when stdout
-# is not a TTY (e.g. invoked from another script or CI).
 run_step() {
   local title=$1; shift
   STEP=$((STEP + 1))
@@ -95,7 +64,6 @@ run_step() {
   fi
 }
 
-# skip_step <title> — count a step as already satisfied.
 skip_step() {
   STEP=$((STEP + 1))
   printf '  [%d/%d] \033[32m✔\033[0m %s\n' "$STEP" "$TOTAL" "$1"
@@ -105,12 +73,6 @@ say ""
 say "  Opengrader — checking environment"
 say ""
 
-# --- Step 0 (installed layout only): refresh from the source checkout ---------
-# Mirrors the recorded checkout into the local copy (same excludes as the
-# installer; .venv is excluded so it survives untouched). A no-op sync is
-# near-instant. Afterwards, stage the possibly-updated launcher for the NEXT
-# run: mv replaces the file atomically, which is safe while this copy of the
-# script is still executing (bash keeps reading the old inode).
 if [[ -n "$SYNC_SOURCE" ]]; then
   run_step "Refreshing application files" \
     rsync -a --delete \
@@ -123,9 +85,6 @@ if [[ -n "$SYNC_SOURCE" ]]; then
   fi
 fi
 
-# --- Step 1: uv ---------------------------------------------------------------
-# uv is the only hard prerequisite we install ourselves: it then manages the
-# Python runtime and every pip dependency for us, pinned by uv.lock.
 if command -v uv >/dev/null 2>&1; then
   skip_step "uv package manager"
 else
@@ -134,28 +93,16 @@ else
   command -v uv >/dev/null 2>&1 || fail "uv not on PATH after install"
 fi
 
-# --- Step 2: Python 3.12 ------------------------------------------------------
-# Opengrader pins >=3.12,<3.13. `uv python install` is a no-op when a managed
-# 3.12 already exists, and never touches the system Python.
 run_step "Python 3.12 runtime" uv python install 3.12
 
-# --- Step 3: project dependencies --------------------------------------------
-# --frozen: install exactly what uv.lock records (no resolution surprises).
-# --no-dev: end-users don't need pytest/textual-dev tooling.
 run_step "Project dependencies" \
   uv sync --frozen --no-dev --project "$APP_DIR"
 
-# --- Step 4: Tesseract OCR (system package, best-effort) ----------------------
-# The TUI itself runs without Tesseract; it is required by the extraction
-# tools. We install it when we can do so non-interactively (Homebrew), prompt
-# when sudo is needed (Linux), and otherwise just warn — never block launch.
 if command -v tesseract >/dev/null 2>&1; then
   skip_step "Tesseract OCR"
 elif [[ "$(uname -s)" == "Darwin" ]] && command -v brew >/dev/null 2>&1; then
   run_step "Installing Tesseract OCR (brew)" brew install tesseract
 elif [[ "$(uname -s)" == "Linux" ]]; then
-  # Package installs need sudo, so this step runs interactively (no spinner):
-  # hiding a password prompt behind output redirection would hang the script.
   STEP=$((STEP + 1))
   PKG=""
   command -v apt-get >/dev/null 2>&1 && PKG="sudo apt-get install -y tesseract-ocr"
@@ -176,17 +123,12 @@ else
   printf '  [%d/%d] \033[33m⚠\033[0m Tesseract OCR not found — install Homebrew + tesseract for scan extraction.\n' "$STEP" "$TOTAL"
 fi
 
-# --- Friendly capability notes (never fatal) ----------------------------------
-# In-terminal images need a graphics protocol (Kitty / iTerm2 / Sixel); Apple's
-# Terminal.app implements none of them, so scans degrade to character art. Not
-# a blocker — the TUI says so and offers 'o' to open a crop in Preview.app.
 if [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
   say ""
   say "  note: Terminal.app can't show images. Grading still works — press 'o'"
   say "        to open a scan in Preview. For crisp in-app previews, install"
   say "        Ghostty, iTerm2, WezTerm, or kitty and relaunch."
 fi
-# Ollama is only needed for handwriting extraction — mention, don't install.
 if ! command -v ollama >/dev/null 2>&1; then
   say "  note: Ollama not found — handwriting extraction (submission-extractor)"
   say "        will be unavailable until you install it from https://ollama.com"
@@ -196,9 +138,5 @@ say ""
 say "  Launching Opengrader..."
 say ""
 
-# --- Launch -------------------------------------------------------------------
-# --no-sync: we just synced above; skip uv's own re-check for a snappy start.
-# exec replaces this shell so the TUI owns the terminal (signals, resize, exit
-# code all behave as if it were launched directly).
 cd "$APP_DIR"
 exec uv run --no-sync tui "$@"

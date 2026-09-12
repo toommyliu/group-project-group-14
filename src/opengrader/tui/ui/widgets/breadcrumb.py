@@ -4,8 +4,6 @@ from textual.widgets import Label
 
 
 class Breadcrumb(Label):
-    """Muted location trail; the current (last) segment renders bold."""
-
     _SEPARATOR = " › "
 
     def __init__(self, *, id: str | None = None) -> None:

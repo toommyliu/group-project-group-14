@@ -1,11 +1,3 @@
-"""Modal dialog that assembles a return bundle from inside the TUI.
-
-Opened with b from the QA picker. A whole-cohort action — one folder holding the
-gradebook, each student's annotated PDF, and the analysis report — so it lives at
-the QA-picker level alongside Canvas export, not on the per-student grade screen.
-Runs the return-bundle CLI in a thread worker so the UI stays responsive.
-"""
-
 from __future__ import annotations
 
 import io
@@ -22,8 +14,6 @@ from textual.widgets import Button, Input, RichLog, Select, Static
 from opengrader.cli.return_bundle import run_cli as run_return_bundle_cli
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
-# Dropdown options ↔ the CLI's --content presets. Order runs most-complete to
-# least, so "Everything" is the default first row.
 _CONTENT_OPTIONS: list[tuple[str, str]] = [
     ("Everything (gradebook + PDFs + analysis)", "all"),
     ("Gradebook CSV only", "gradebook"),
@@ -34,8 +24,6 @@ _CONTENT_OPTIONS: list[tuple[str, str]] = [
 
 
 class ReturnBundleScreen(ModalScreen[None]):
-    """Collect return-bundle options, build the bundle, and show the result."""
-
     DEFAULT_CSS = """
     ReturnBundleScreen {
         align: center middle;
@@ -222,7 +210,6 @@ class ReturnBundleScreen(ModalScreen[None]):
         self.run_worker(lambda: self._run_export(argv), thread=True, exclusive=True)
 
     def _run_export(self, argv: list[str]) -> None:
-        """Worker thread: run the CLI with its output captured."""
         buffer = io.StringIO()
         succeeded = True
         try:
@@ -230,7 +217,7 @@ class ReturnBundleScreen(ModalScreen[None]):
                 run_return_bundle_cli(argv)
         except SystemExit as exc:
             succeeded = exc.code in (0, None)
-        except Exception as exc:  # surface unexpected failures in the log
+        except Exception as exc:
             succeeded = False
             buffer.write(f"\nerror: {exc}")
         self.app.call_from_thread(self._show_result, buffer.getvalue(), succeeded)

@@ -1,12 +1,3 @@
-"""The ``region-map`` CLI, and the end-to-end claim the whole feature makes.
-
-The last test in this file is the one that earns the feature: a blank "assignment"
-with **no text layer** — the file every other structural mode refuses — a
-hand-written region map for it, a fake filled-in scan, and a real extraction
-that produces one question per mapped region with a crop whose geometry is
-exactly the mapped box.
-"""
-
 from __future__ import annotations
 
 import json
@@ -28,7 +19,6 @@ from opengrader.core.region_map import (
 
 
 def _image_only_pdf(path: Path, pages: int = 2, marker: str = "ASSIGNMENT") -> Path:
-    """A PDF whose pages are pictures — no text layer to read anything off."""
     doc = fitz.open()
     for index in range(pages):
         canvas = Image.new("RGB", (850, 1100), "white")
@@ -62,9 +52,6 @@ def assignment(tmp_path: Path) -> Path:
     return _image_only_pdf(tmp_path / "midterm.pdf")
 
 
-# ── propose ────────────────────────────────────────────────────────────────
-
-
 def test_propose_grid_writes_a_map_and_reports_it(assignment: Path, tmp_path: Path, capsys) -> None:
     output = tmp_path / "grid.regions.json"
     run_cli(["propose", "--input", str(assignment), "--output", str(output), "--grid", "3"])
@@ -75,7 +62,7 @@ def test_propose_grid_writes_a_map_and_reports_it(assignment: Path, tmp_path: Pa
 
     out = capsys.readouterr().out
     assert "page 1: q1, q2, q3" in out
-    assert "region-map preview" in out  # tells you the exact next command
+    assert "region-map preview" in out
 
 
 def test_propose_blank_writes_an_empty_map(assignment: Path, tmp_path: Path) -> None:
@@ -100,7 +87,7 @@ def test_propose_refuses_to_clobber_hand_corrected_boxes(
 
     assert exit_info.value.code == 1
     assert "--force" in capsys.readouterr().err
-    assert len(load_region_map(output).questions) == 2  # untouched
+    assert len(load_region_map(output).questions) == 2
 
 
 def test_propose_force_replaces_the_map(assignment: Path, tmp_path: Path) -> None:
@@ -127,9 +114,6 @@ def test_propose_refuses_a_missing_assignment(tmp_path: Path, capsys) -> None:
     assert "not found" in capsys.readouterr().err
 
 
-# ── validate ───────────────────────────────────────────────────────────────
-
-
 def test_validate_passes_a_good_map(assignment: Path, capsys) -> None:
     run_cli(["validate", "--map", str(_write_map(assignment)), "--input", str(assignment)])
     assert "No problems found" in capsys.readouterr().out
@@ -138,7 +122,7 @@ def test_validate_passes_a_good_map(assignment: Path, capsys) -> None:
 def test_validate_exits_two_on_an_error_level_finding(assignment: Path, tmp_path: Path) -> None:
     path = _write_map(assignment)
     data = json.loads(path.read_text())
-    data["questions"][1]["id"] = "q1"  # duplicate id — overwrites the other crop
+    data["questions"][1]["id"] = "q1"
     path.write_text(json.dumps(data))
 
     with pytest.raises(SystemExit) as exit_info:
@@ -147,13 +131,12 @@ def test_validate_exits_two_on_an_error_level_finding(assignment: Path, tmp_path
 
 
 def test_validate_does_not_fail_on_warnings_alone(assignment: Path, tmp_path: Path) -> None:
-    """An unmapped extra-credit question is ordinary, not a failure."""
     path = _write_map(assignment)
     data = json.loads(path.read_text())
-    data["fields"]["name"] = None  # a warning-level finding
+    data["fields"]["name"] = None
     path.write_text(json.dumps(data))
 
-    run_cli(["validate", "--map", str(path)])  # no SystemExit
+    run_cli(["validate", "--map", str(path)])
 
 
 def test_validate_refuses_a_map_for_a_different_assignment(assignment: Path, tmp_path: Path, capsys) -> None:
@@ -186,9 +169,6 @@ def test_validate_refuses_an_unreadable_map(tmp_path: Path, capsys) -> None:
         run_cli(["validate", "--map", str(broken)])
     assert exit_info.value.code == 1
     assert "not valid JSON" in capsys.readouterr().err
-
-
-# ── preview ────────────────────────────────────────────────────────────────
 
 
 def test_preview_writes_a_pdf(assignment: Path, tmp_path: Path, capsys) -> None:
@@ -249,9 +229,6 @@ def test_preview_refuses_the_wrong_assignment(assignment: Path, tmp_path: Path, 
     assert "not the file this region map was drawn on" in capsys.readouterr().err
 
 
-# ── from-qa ────────────────────────────────────────────────────────────────
-
-
 def test_from_qa_seeds_points_in_place(assignment: Path, tmp_path: Path, capsys) -> None:
     path = _write_map(assignment)
     data = json.loads(path.read_text())
@@ -293,20 +270,9 @@ def test_from_qa_can_write_elsewhere(assignment: Path, tmp_path: Path) -> None:
     assert load_region_map(output).questions[0].possible_points == 7.0
 
 
-# ── the end-to-end claim ───────────────────────────────────────────────────
-
-
 def test_an_assignment_with_no_text_layer_extracts_against_its_region_map(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The promise of the whole feature, asserted directly.
-
-    A blank assignment that ``--blank-template`` would refuse outright (no text layer),
-    a map drawn on it by hand, and a scan that is only pixels. The result must
-    hold one question per mapped region, and each crop must be exactly the
-    rectangle that was mapped — because "the box you drew is the box you get" is
-    the only thing that makes drawing them worth doing.
-    """
     import opengrader.cli.submission_extractor as extractor_cli
 
     monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
@@ -346,17 +312,14 @@ def test_an_assignment_with_no_text_layer_extracts_against_its_region_map(
         "q1": (1, (0.08, 0.30, 0.84, 0.20)),
         "q2": (2, (0.08, 0.55, 0.84, 0.25)),
     }
-    # A US-Letter page (612x792pt) at 150 DPI.
     page_w, page_h = 1275, 1650
     for question in document.questions:
         page, bbox = expected[question.question_id]
 
-        # The recorded provenance is the mapped box, unmoved.
         assert len(question.source_segments) == 1
         assert question.source_segments[0].page_number == page
         assert question.source_segments[0].bbox_norm == bbox
 
-        # And so are the pixels on disk.
         crop_path = markdown.parent / question.response_image_path
         assert crop_path.exists()
         with Image.open(crop_path) as crop:
@@ -365,7 +328,5 @@ def test_an_assignment_with_no_text_layer_extracts_against_its_region_map(
                 round(bbox[3] * page_h),
             )
 
-    # The identity fields were cropped too, so this submission is not doomed to
-    # the needs-review queue for want of a name.
     assert (markdown.parent / "identifiers" / "name.png").exists()
     assert (markdown.parent / "identifiers" / "id.png").exists()

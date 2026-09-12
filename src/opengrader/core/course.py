@@ -1,60 +1,3 @@
-"""Course-level gradebook: a semester's assignments rolled into one grade.
-
-One folder per assignment is the right unit for *grading* — it keeps each
-exam's scans, submissions, journal and curve together — and the wrong unit for a
-*semester*. An instructor at the end of a term has eight of those folders and
-one question the app could not answer: what is each student's course grade?
-
-This module is the thin layer that answers it, over a ``course.toml`` the
-instructor writes once:
-
-    name = "CS 146 — Spring 2026"
-
-    [[assignment]]
-    name = "Quiz 1"
-    path = "quizzes/quiz-1/student-submissions"
-    weight = 10
-    solutions = "quizzes/quiz-1/solutions.md"   # optional; unlocks outcomes
-
-    [[assignment]]
-    name = "Midterm"
-    path = "exams/midterm/student-submissions"
-    weight = 30
-
-    [grades]
-    A = 90
-    B = 80
-    C = 70
-    D = 60
-
-Design rules, each of them a deliberate constraint:
-
-* **Nothing new is written inside an assignment folder.** The course file lives
-  *above* them and only ever reads. An assignment folder stays exactly what it
-  was — portable, gradeable on its own, and unaware a course exists. That is
-  what keeps a mid-semester re-grade from needing a course-level migration.
-* **Per-assignment scores come from `export/gradebook.py`**, the same code the
-  CSV and the return bundle use. A student's course grade is therefore built
-  from the identical numbers on the gradebook they were handed, curve included;
-  a second scoring path would eventually disagree with the first, and the
-  disagreement would surface as a grade dispute.
-* **Weights are relative, not required to sum to 100.** Instructors write
-  ``10, 10, 30, 50`` and also ``1, 1, 3, 5``; normalizing means neither is
-  wrong, and a missing assignment simply doesn't dilute the rest.
-* **Missing work is *missing*, not zero — until the instructor says otherwise.**
-  A student with no submission for an assignment is reported as *not counted*
-  by default, because mid-semester that overwhelmingly means "not graded yet"
-  rather than "scored nothing", and silently averaging in zeros produces an
-  at-risk list full of false alarms. ``missing = "zero"`` per assignment (or
-  course-wide) switches it, which is what an instructor does at final-grade
-  time.
-* **Read-only.** Nothing here changes a grade. It reads assignment folders and
-  reports.
-
-``tomllib`` is in the standard library from Python 3.11, so this adds no
-dependency.
-"""
-
 from __future__ import annotations
 
 import tomllib
@@ -79,9 +22,6 @@ from opengrader.core.submissions import (
 
 COURSE_FILENAME = "course.toml"
 
-# The conventional US letter scale, used when the course file names none. Kept
-# as a plain ordered list of (letter, minimum percent) so a course can replace
-# it wholesale without this module knowing anything about grading philosophy.
 DEFAULT_GRADE_SCALE: tuple[tuple[str, float], ...] = (
     ("A", 90.0),
     ("B", 80.0),
@@ -90,31 +30,18 @@ DEFAULT_GRADE_SCALE: tuple[tuple[str, float], ...] = (
     ("F", 0.0),
 )
 
-# A student at or below this course percentage is surfaced as at-risk. 70 is the
-# usual "C" line — the point at which most programmes expect an intervention
-# rather than a note.
 DEFAULT_AT_RISK_PERCENT = 70.0
 
-# How an assignment a student has no graded work for is treated.
-#   "skip" — leave it out of both the earned and the possible totals, so the
-#            course percentage describes what *has* been graded.
-#   "zero" — count its full weight as earned nothing.
-MissingPolicy = str  # Literal["skip", "zero"] without importing typing at runtime
+MissingPolicy = str
 _MISSING_POLICIES = ("skip", "zero")
 
 
 class CourseConfigError(ValueError):
-    """Raised when a ``course.toml`` cannot be understood.
-
-    Always names the offending key and the file, because this is a
-    hand-written file and a silent default here would misreport grades.
-    """
+    pass
 
 
 @dataclass(frozen=True)
 class CourseAssignment:
-    """One assignment in the course, as declared in ``course.toml``."""
-
     name: str
     path: Path
     weight: float
@@ -124,8 +51,6 @@ class CourseAssignment:
 
 @dataclass(frozen=True)
 class CourseConfig:
-    """A parsed ``course.toml``."""
-
     name: str
     assignments: tuple[CourseAssignment, ...]
     grade_scale: tuple[tuple[str, float], ...] = DEFAULT_GRADE_SCALE
@@ -146,11 +71,6 @@ def _as_float(value: object, *, key: str, source: Path) -> float:
 
 
 def load_course_config(path: str | Path) -> CourseConfig:
-    """Read and validate a ``course.toml`` (or the directory holding one).
-
-    Every relative path inside the file resolves against the **file's own
-    directory**, so a course folder can be moved or shared without editing it.
-    """
     path = Path(path).expanduser()
     if path.is_dir():
         path = path / COURSE_FILENAME
@@ -189,8 +109,6 @@ def load_course_config(path: str | Path) -> CourseConfig:
                 f"{path}: [[assignment]] #{index} needs both a name and a path"
             )
         if name in seen_names:
-            # Names key the per-assignment columns, so a duplicate would make
-            # one assignment silently overwrite another in every output.
             raise CourseConfigError(f"{path}: duplicate assignment name {name!r}")
         seen_names.add(name)
 
@@ -222,7 +140,6 @@ def load_course_config(path: str | Path) -> CourseConfig:
     grades = data.get("grades")
     scale = DEFAULT_GRADE_SCALE
     if isinstance(grades, dict) and grades:
-        # Highest cut first, so `letter_for` can take the first match.
         scale = tuple(
             sorted(
                 (
@@ -252,11 +169,6 @@ def load_course_config(path: str | Path) -> CourseConfig:
 
 
 def letter_for(percent: float | None, scale: tuple[tuple[str, float], ...]) -> str:
-    """The letter grade for a course percentage, or ``"-"`` when unknown.
-
-    Falls to the lowest letter rather than raising when a percentage sits under
-    every cut, so a scale that omits an explicit F still produces a grade.
-    """
     if percent is None:
         return "-"
     for letter, minimum in scale:
@@ -265,13 +177,8 @@ def letter_for(percent: float | None, scale: tuple[tuple[str, float], ...]) -> s
     return scale[-1][0] if scale else "-"
 
 
-# ── reading one assignment ───────────────────────────────────────────────────
-
-
 @dataclass(frozen=True)
 class AssignmentScore:
-    """One student's result on one assignment."""
-
     assignment: str
     earned: float
     possible: float
@@ -286,8 +193,6 @@ class AssignmentScore:
 
 @dataclass(frozen=True)
 class LoadedAssignment:
-    """One assignment's submissions, scored and keyed by student."""
-
     assignment: CourseAssignment
     scores: dict[str, AssignmentScore]
     names: dict[str, str]
@@ -302,15 +207,6 @@ class LoadedAssignment:
 
 
 def student_key(document: StudentSubmissionDocument) -> str:
-    """How a student is matched *across* assignments.
-
-    The student id, because it is the only field stable between two separately
-    extracted folders — names get OCR'd differently on different scans and a
-    file path is per-assignment by construction. A submission with no id falls
-    back to a normalized name so it still appears somewhere rather than being
-    dropped; those are exactly the rows the needs-review queue already asks the
-    instructor to fix, and the course report says so rather than guessing.
-    """
     student_id = document.student_id.strip()
     if student_id:
         return student_id
@@ -318,12 +214,6 @@ def student_key(document: StudentSubmissionDocument) -> str:
 
 
 def load_assignment(assignment: CourseAssignment) -> LoadedAssignment:
-    """Score one assignment folder, curve included.
-
-    Failures are captured on the result rather than raised: one unreadable
-    folder in a twelve-assignment course should downgrade that column, not
-    destroy the whole course report a week before grades are due.
-    """
     empty: dict = {}
     try:
         paths = discover_submission_paths(assignment.path)
@@ -355,8 +245,6 @@ def load_assignment(assignment: CourseAssignment) -> LoadedAssignment:
         try:
             document = load_student_submission_markdown(path)
         except ValueError:
-            # A malformed file is skipped rather than fatal, matching how every
-            # other whole-folder reader in the app behaves.
             continue
         key = student_key(document)
         earned, possible, graded = _score_document(document, question_points)
@@ -383,12 +271,6 @@ def _score_document(
     document: StudentSubmissionDocument,
     question_points: dict[str, float],
 ) -> tuple[float, float, int]:
-    """(earned, possible, graded-question count) for one submission.
-
-    Only *graded* questions contribute to `possible`, the same rule the
-    gradebook CSV uses: an assignment half-marked must read as a percentage of
-    what was marked, never as a student having lost the rest.
-    """
     earned = 0.0
     possible = 0.0
     graded = 0
@@ -406,13 +288,8 @@ def _score_document(
     return earned, possible, graded
 
 
-# ── the course roll-up ───────────────────────────────────────────────────────
-
-
 @dataclass(frozen=True)
 class StudentCourseGrade:
-    """One student's course result across every assignment."""
-
     student_key: str
     student_id: str
     student_name: str
@@ -426,11 +303,6 @@ class StudentCourseGrade:
         return not self.missing
 
     def trend(self) -> tuple[tuple[str, float], ...]:
-        """Per-assignment percentages in course order — the student's trajectory.
-
-        Only assignments the student actually has a score for, so a gap reads as
-        a gap rather than as a crash to zero.
-        """
         return tuple(
             (name, score.percent)
             for name, score in self.scores.items()
@@ -438,13 +310,6 @@ class StudentCourseGrade:
         )
 
     def direction(self) -> float | None:
-        """Change in percentage points from the first half to the second.
-
-        A deliberately blunt measure — first-half mean vs second-half mean —
-        because the alternative (a regression slope over 4 points) reports
-        precision this data does not have. ``None`` until there are at least two
-        graded assignments to compare.
-        """
         points = [percent for _, percent in self.trend()]
         if len(points) < 2:
             return None
@@ -456,8 +321,6 @@ class StudentCourseGrade:
 
 @dataclass(frozen=True)
 class CourseOutcomeMastery:
-    """One learning outcome, aggregated across every assignment that tags it."""
-
     outcome: str
     assignments: tuple[str, ...]
     possible_points: float
@@ -474,8 +337,6 @@ class CourseOutcomeMastery:
 
 @dataclass(frozen=True)
 class CourseReport:
-    """The whole semester: weighted grades, at-risk list, outcome mastery."""
-
     course: str
     assignments: tuple[CourseAssignment, ...]
     students: tuple[StudentCourseGrade, ...]
@@ -487,12 +348,6 @@ class CourseReport:
 
     @property
     def at_risk(self) -> tuple[StudentCourseGrade, ...]:
-        """Students at or below the at-risk line, lowest first.
-
-        A student with no graded work at all is **not** here: there is no
-        evidence they are struggling, and burying the real cases under an
-        entire un-graded class is how an at-risk list gets ignored.
-        """
         flagged = [
             student
             for student in self.students
@@ -510,11 +365,6 @@ class CourseReport:
 
 
 def build_course_report(config: CourseConfig) -> CourseReport:
-    """Roll a semester of assignment folders into one course report (reads only).
-
-    Every assignment is loaded once and reused for the grade roll-up *and* the
-    outcome roll-up, so the two can never describe different data.
-    """
     loaded = [load_assignment(assignment) for assignment in config.assignments]
     problems = [
         f"{item.assignment.name}: {item.error}" for item in loaded if item.error
@@ -527,8 +377,6 @@ def build_course_report(config: CourseConfig) -> CourseReport:
         for key in item.scores:
             if key not in names:
                 keys.append(key)
-            # A later assignment's name wins only when the earlier one was
-            # blank — anonymized folders legitimately carry no name.
             if item.names.get(key):
                 names[key] = item.names[key]
             names.setdefault(key, "")
@@ -558,14 +406,6 @@ def _grade_student(
     loaded: list[LoadedAssignment],
     config: CourseConfig,
 ) -> StudentCourseGrade:
-    """Weighted course percentage for one student.
-
-    The weighted mean is over the assignments that *count* for this student:
-    each contributes ``weight × percent``, normalized by the weight actually
-    included. That normalization is what makes a mid-semester report meaningful
-    — with three of eight assignments graded, a student sits at their average so
-    far rather than at 37% of the course.
-    """
     scores: dict[str, AssignmentScore] = {}
     missing: list[str] = []
     weighted_sum = 0.0
@@ -580,8 +420,6 @@ def _grade_student(
         if percent is None:
             missing.append(assignment.name)
             if assignment.missing == "zero" and assignment.weight > 0:
-                # Counted as earning nothing: the weight is included in the
-                # denominator but contributes no numerator.
                 weight_used += assignment.weight
             continue
         weighted_sum += assignment.weight * percent
@@ -602,19 +440,6 @@ def _grade_student(
 def _course_outcomes(
     loaded: list[LoadedAssignment], config: CourseConfig
 ) -> tuple[CourseOutcomeMastery, ...]:
-    """Aggregate learning-outcome mastery across every assignment that tags one.
-
-    **This is the accreditation artifact.** A single exam measures an outcome
-    once; a programme review asks whether students met it over a course, which
-    only exists at this level. Points are pooled across assignments rather than
-    averaging each assignment's rate, so a 40-point final carrying CLO2 counts
-    for more than a 4-point quiz question carrying it — the instructor's own
-    weighting, already expressed in the points.
-
-    Deliberately independent of assignment *weights*: those govern the grade an
-    outcome roll-up is not. Mixing them would make "did they learn it" depend on
-    how much the exam was worth.
-    """
     earned: dict[tuple[str, str], float] = {}
     possible: dict[tuple[str, str], float] = {}
     outcome_points: dict[str, float] = {}
@@ -644,8 +469,6 @@ def _course_outcomes(
                     names = outcome_assignments.setdefault(outcome, [])
                     if item.assignment.name not in names:
                         names.append(item.assignment.name)
-                    # The outcome's point pool is per question, not per
-                    # response, or it would be multiplied by the class size.
                     marker = f"{item.assignment.name}:{question.question_id}:{outcome}"
                     if marker not in counted_questions:
                         counted_questions.add(marker)
@@ -674,36 +497,13 @@ def _course_outcomes(
     return tuple(results)
 
 
-# ── weighting, explained ─────────────────────────────────────────────────────
-
-
 def weight_shares(weights: list[float]) -> list[float]:
-    """Turn relative weights into the share of the final grade each one is.
-
-    This is the whole meaning of ``weight`` in one function, and the reason the
-    course builder can show a live "→ 25%" beside every row. Weights are
-    *relative*: what an assignment is worth is its weight over the total, so
-    ``1, 1, 2`` and ``25, 25, 50`` and ``10, 10, 20`` are all the same course.
-
-    Showing the share rather than explaining the ratio is deliberate — an
-    instructor who types ``10, 20, 30, 40`` and sees exactly 10/20/30/40% has
-    learned the rule without reading it, and one who types ``1, 1, 2`` and sees
-    25/25/50% has learned it too.
-
-    All-zero (or empty) weights have no meaningful share, so every entry is
-    ``0.0`` rather than a division by zero.
-    """
     total = sum(w for w in weights if w > 0)
     if total <= 0:
         return [0.0 for _ in weights]
     return [(w / total if w > 0 else 0.0) for w in weights]
 
 
-# ── writing a course file ────────────────────────────────────────────────────
-
-# Assignment folders are usually called one of these, in which case the *parent*
-# directory is the assignment's real name ("midterm/student-submissions" is the
-# midterm, not a thing called "student submissions").
 _GENERIC_SUBMISSION_DIR_NAMES = {
     "student-submissions",
     "student_submissions",
@@ -712,9 +512,6 @@ _GENERIC_SUBMISSION_DIR_NAMES = {
     "out",
 }
 
-# Filenames an answer key is likely to have, most specific first. Guessing is
-# safe here because the builder only *prefills* the field — a wrong guess is
-# corrected by the instructor before saving, and a miss just leaves it blank.
 _LIKELY_SOLUTION_NAMES = (
     "solutions.md",
     "solution.md",
@@ -723,29 +520,14 @@ _LIKELY_SOLUTION_NAMES = (
     "qa.md",
 )
 
-# How deep to look for assignment folders under a course root. Three levels
-# covers `course/exams/midterm/student-submissions` without turning a scan of a
-# home directory into a filesystem crawl.
 _DISCOVERY_DEPTH = 3
 
 
 def _escape_toml(value: str) -> str:
-    """Escape a string for a TOML basic (double-quoted) string.
-
-    Hand-written because Python has no stdlib TOML *writer* and the schema here
-    is tiny and fully ours. Backslash first, or it would double-escape the
-    escapes it just added — the classic ordering bug in this two-line function.
-    """
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def humanize_assignment_name(path: Path) -> str:
-    """Guess a readable assignment name from a submissions folder path.
-
-    ``exams/midterm-2/student-submissions`` → ``Midterm 2``. A guess the
-    instructor can overwrite, so it optimizes for "usually right and always
-    editable" rather than correctness.
-    """
     directory = path if path.name else path.parent
     name = directory.name
     if name.lower() in _GENERIC_SUBMISSION_DIR_NAMES and directory.parent.name:
@@ -753,15 +535,12 @@ def humanize_assignment_name(path: Path) -> str:
     cleaned = name.replace("-", " ").replace("_", " ").strip()
     if not cleaned:
         return "Assignment"
-    # Title-case only the words that are entirely lowercase, so "CS146" and
-    # "HW2b" keep the casing the instructor chose.
     return " ".join(
         word.capitalize() if word.islower() else word for word in cleaned.split()
     )
 
 
 def find_solutions_near(submissions: Path) -> Path | None:
-    """Look for an answer key beside (or just above) a submissions folder."""
     for directory in (submissions, submissions.parent):
         try:
             if not directory.is_dir():
@@ -772,9 +551,6 @@ def find_solutions_near(submissions: Path) -> Path | None:
             path = directory / candidate
             if path.is_file():
                 return path
-        # A lone markdown file next to the submissions is almost certainly it —
-        # but student submissions are markdown too, and a folder holding exactly
-        # one of them would otherwise be "found" as its own answer key.
         try:
             markdown = [
                 p
@@ -790,26 +566,12 @@ def find_solutions_near(submissions: Path) -> Path | None:
 
 @dataclass(frozen=True)
 class DiscoveredAssignment:
-    """A submissions folder found under a course root, with its guessed name."""
-
     name: str
     path: Path
     solutions: Path | None
 
 
 def discover_course_assignments(root: str | Path) -> list[DiscoveredAssignment]:
-    """Find every assignment folder under ``root``, for prefilling a course file.
-
-    Saves the instructor from typing a path per assignment: point this at the
-    semester's folder and the builder drafts a row for each. Ordered by path so
-    two scans agree, and bounded by :data:`_DISCOVERY_DEPTH` so pointing it
-    somewhere broad is slow at worst, never unbounded.
-
-    A folder is an assignment when submissions are directly in it or one level
-    down — the same rule every other tool discovers by. Nested matches are
-    skipped: with `midterm/student-submissions` found, `midterm` itself would
-    otherwise be reported as a second, duplicate assignment.
-    """
     root = Path(root).expanduser()
     if not root.is_dir():
         return []
@@ -824,7 +586,7 @@ def discover_course_assignments(root: str | Path) -> list[DiscoveredAssignment]:
             continue
         if any(directory.glob("*.submission.md")):
             found.append(directory)
-            continue  # its children are per-student folders, not assignments
+            continue
         if depth < _DISCOVERY_DEPTH:
             queue.extend((child, depth + 1) for child in children)
 
@@ -847,18 +609,6 @@ def render_course_toml(
     relative_to: Path | None = None,
     at_risk_percent: float | None = None,
 ) -> str:
-    """Render a ``course.toml``. The one definition of the file we write.
-
-    Paths are written **relative to the course file** when ``relative_to`` is
-    given and they sit underneath it — that is what makes the whole course
-    folder movable and shareable, which `load_course_config` already assumes.
-    An assignment stored elsewhere on disk keeps its absolute path rather than a
-    fragile `../../..` chain.
-
-    The comments in the output are part of the artifact, not decoration: this
-    file is hand-edited afterwards, and the next person to open it needs to know
-    what ``weight`` means without finding the docs.
-    """
     lines = [
         "# Opengrader course gradebook.",
         "#   uv run course-grades --course course.toml",
@@ -880,8 +630,6 @@ def render_course_toml(
         lines.append(
             f'path = "{_escape_toml(_relative_path(assignment.path, relative_to))}"'
         )
-        # The share is a comment, not a key: it is derived from the weights and
-        # would go stale the moment one is edited by hand.
         lines.append(f"weight = {assignment.weight:g}  # {share:.0%} of the grade")
         if assignment.solutions is not None:
             lines.append(
@@ -899,8 +647,6 @@ def _relative_path(path: Path, relative_to: Path | None) -> str:
     try:
         return str(path.resolve().relative_to(relative_to.resolve()))
     except (ValueError, OSError):
-        # Outside the course folder: an absolute path is honest and stable,
-        # where a computed `../../` chain would break as soon as it moved.
         return str(path)
 
 
@@ -911,7 +657,6 @@ def write_course_toml(
     assignments: list[CourseAssignment],
     at_risk_percent: float | None = None,
 ) -> Path:
-    """Write a course file, with its assignment paths relative to itself."""
     output_path = Path(output_path).expanduser()
     if output_path.is_dir():
         output_path = output_path / COURSE_FILENAME

@@ -81,7 +81,6 @@ class TemplatePreview(VerticalScroll):
                 self._image.display = False
                 return
 
-        # TODO: move this to status_bar?
         if self._total_pages > 1:
             pagination_text = f"Page {self._current_page + 1} of {self._total_pages}"
             self._header.update(pagination_text)

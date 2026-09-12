@@ -1,12 +1,3 @@
-"""LLM-assisted grading logic (provider-agnostic).
-
-Only the model-facing pieces are re-exported here. ``solutions`` (the answer-key
-model and the rule-based grading decisions) and ``evaluation`` (the ``llm-eval``
-harness) are imported from their submodules instead, deliberately: both sit
-alongside ``core.submissions``, which imports *this* package for the AI analysis
-tag, and re-exporting them would turn that into an import cycle.
-"""
-
 from .llm_grader import (
     AiAnalysisTag,
     GradeSuggestion,

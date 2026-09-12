@@ -1,12 +1,3 @@
-"""The fuzzy answer-grouping tier as the grader meets it.
-
-The assertions that matter are the ones about *authority*: a proposal must
-change nothing until it is accepted, and once accepted the widened group has to
-be what the indicator reports **and** what the batch grade writes — a count that
-says one thing while `g` does another is the failure mode this whole design is
-arranged to prevent.
-"""
-
 from dataclasses import replace
 
 from opengrader.tui.controllers.grade_controller import GradeController
@@ -15,8 +6,6 @@ from opengrader.tui.state import PAGE_GRADE, TuiWorkflowState
 from .fakes import FakeDataProvider
 from .test_grade_controller import FakeApp
 
-# Two renderings of one answer that the *exact* tier keeps apart (internal
-# punctuation is not cosmetic to it) but a grader would call the same answer.
 _ANSWER = (
     "A stack is a last in first out structure where the newest item added is "
     "the first one removed from it."
@@ -25,11 +14,7 @@ _ANSWER_VARIANT = (
     "A stack is a last-in-first-out structure where the newest item added is "
     "the first one removed from it!"
 )
-# Deliberately unrelated wording, not merely a different claim: two answers
-# with parallel structure ("a stack is…" / "a queue is…") score ~0.90 on any
-# string metric, which is exactly the limitation documented in
-# `core/submissions/suggested_groups` — so a fixture meant to test "nothing is
-# proposed" has to be different in its words, not only in its meaning.
+# Parallel sentence structure can exceed the similarity threshold despite unrelated claims.
 _DIFFERENT = (
     "Recursion means a function calls itself on a smaller input until it "
     "reaches a base case that returns without recursing."
@@ -37,8 +22,6 @@ _DIFFERENT = (
 
 
 class GroupingFakeDataProvider(FakeDataProvider):
-    """Three students on Q1: two near-identical answers and one different."""
-
     def __init__(self, responses: dict[str, str] | None = None) -> None:
         self.responses = responses or {
             "s1": _ANSWER,
@@ -87,9 +70,6 @@ def build_controller(
     controller.attach_student_refresh(lambda: None)
     controller.open_question_picker_for_assignment()
     controller.open_question_by_index(0)
-    # The shared FakeApp records the page on itself rather than on the workflow
-    # state, so the grade-screen guard has to be set the way the other
-    # controller tests set it.
     state.current_page = PAGE_GRADE
     return app, state, controller, data_provider
 
@@ -101,7 +81,6 @@ def test_a_near_identical_answer_is_proposed_not_merged() -> None:
 
     assert len(suggestions) == 1
     assert set(suggestions[0].member_ids) == {"s1", "s2"}
-    # Nothing is accepted until a grader says so, so the group is still exact.
     assert controller.accepted_merge_indices("Q1") == frozenset()
     group = controller._answer_group_for_student("Q1", "s1")
     assert group is not None
@@ -124,14 +103,12 @@ def test_accepting_widens_the_group_and_says_how() -> None:
     group = controller._answer_group_for_student("Q1", "s1")
     assert group is not None
     assert set(group.member_ids) == {"s1", "s2"}
-    # The grader is told which students got there by a similarity judgement.
     assert controller._answer_group_label() == (
         "Answer group: 2 students (1 identical + 1 merged as similar)"
     )
 
 
 def test_accepting_grades_nobody_on_its_own() -> None:
-    """The confirmation authorizes a batch action; it is not the batch action."""
     _, _, controller, provider = build_controller()
 
     controller.accept_suggested_merge("Q1", 0)
@@ -142,14 +119,13 @@ def test_accepting_grades_nobody_on_its_own() -> None:
 def test_the_batch_grade_follows_the_widened_group() -> None:
     _, state, controller, provider = build_controller()
     controller.accept_suggested_merge("Q1", 0)
-    # Grade the student in front of us, then batch it out.
     controller.on_rubric_selected(0)
     provider.saved_grades.clear()
 
     controller.apply_grade_to_answer_group()
 
     graded = {call["student_item_id"] for call in provider.saved_grades}
-    assert graded == {"s2"}  # s1 was already persisted by the selection itself
+    assert graded == {"s2"}
     assert all(call["question_id"] == "Q1" for call in provider.saved_grades)
     assert state.selection.student_item_id == "s1"
 
@@ -161,7 +137,6 @@ def test_an_unaccepted_merge_leaves_the_batch_grade_exact() -> None:
 
     controller.apply_grade_to_answer_group()
 
-    # s2's answer only *resembles* s1's, and nobody confirmed that.
     assert provider.saved_grades == []
 
 
@@ -192,14 +167,12 @@ def test_a_question_with_no_similar_answers_proposes_nothing() -> None:
     _, _, controller, _ = build_controller(provider)
 
     assert controller.suggested_merges_for_question("Q1") == []
-    # s2 and s3 are exactly identical, so the exact tier already covers them.
     group = controller._answer_group_for_student("Q1", "s2")
     assert group is not None
     assert set(group.member_ids) == {"s2", "s3"}
 
 
 def test_reopening_the_assignment_clears_accepted_merges() -> None:
-    """A confirmation is scoped to the session that made it."""
     _, _, controller, _ = build_controller()
     controller.accept_suggested_merge("Q1", 0)
 

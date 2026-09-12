@@ -1,24 +1,3 @@
-"""Hand a cohort to another grader, and merge their copy back — in the TUI.
-
-Two modals for the two halves of the round trip (`core/handoff/`), reached from
-the setup screen's Helper Tools:
-
-* :class:`GraderPacketScreen` cuts an anonymous copy for a TA. It is a form and
-  a result, because creating a packet has exactly one decision in it (redact or
-  not) and one thing the user must not miss afterwards (where the key went).
-* :class:`MergeScreen` brings one back. It is deliberately *not* a form and a
-  log: a merge's whole difficulty is the handful of answers both copies changed,
-  and reading those out of a text dump and re-running a CLI with a blanket
-  ``--conflicts theirs`` is the worst possible way to decide them. So the plan
-  is rendered, every conflict is a focusable row, and ``o``/``t`` set that one
-  answer's outcome before a single Apply writes the lot.
-
-Both call the core engine directly rather than shelling through the CLI. The
-merge needs the *structured* plan to build the conflict list, and a merge spans
-two folders — one of which this session was never opened with — which is the
-same reason the course gradebook does not go through the data provider either.
-"""
-
 from __future__ import annotations
 
 import tempfile
@@ -68,7 +47,6 @@ def _field_label(text: str, detail: str = "") -> Static:
 
 
 def _browse_into(screen: ModalScreen, target: Input, *, title: str, mode: str) -> None:
-    """Open the shared path picker and write the choice into ``target``."""
     start_path: Path | None = None
     current = target.value.strip().strip("'\"")
     if current:
@@ -90,8 +68,6 @@ def _browse_into(screen: ModalScreen, target: Input, *, title: str, mode: str) -
 
 
 class GraderPacketScreen(ModalScreen[None]):
-    """Create an anonymous copy of this cohort for another grader."""
-
     DEFAULT_CSS = """
     GraderPacketScreen {
         align: center middle;
@@ -142,10 +118,6 @@ class GraderPacketScreen(ModalScreen[None]):
         padding: 0;
         margin-top: 1;
     }
-
-    /* Explicit auto height: a bare Vertical defaults to 1fr and would stretch
-       to fill the dialog, pushing the log and the buttons off-screen — the same
-       trap #ext-parallel-options documents. */
     #packet-output-area, #packet-passphrase-area {
         width: 100%;
         height: auto;
@@ -154,12 +126,6 @@ class GraderPacketScreen(ModalScreen[None]):
     #packet-passphrase, #packet-passphrase-confirm {
         width: 1fr;
     }
-
-    /* Declared on the screen, not only on the app (`tui.py`), so a disclosure
-       area really does collapse wherever this modal is hosted — including in
-       tests, where a bare host app supplies no CSS of its own and the "hidden"
-       rows would otherwise take up space and push the buttons off-screen.
-       Same reason `llm_eval_screen.py` carries its own copy. */
     .hidden {
         display: none;
     }
@@ -170,11 +136,6 @@ class GraderPacketScreen(ModalScreen[None]):
         margin-top: 1;
         color: $text-muted;
     }
-
-    /* The form scrolls, the result pane and the buttons do not. Without this
-       the dialog's content can grow past its own height once a disclosure area
-       is revealed, and the buttons are then drawn *outside* the dialog — where
-       they look fine and cannot be clicked. */
     #packet-form {
         width: 100%;
         height: 1fr;
@@ -216,18 +177,12 @@ class GraderPacketScreen(ModalScreen[None]):
         self._initial_output = output_path
 
     def _default_output(self) -> Path:
-        """Where the copy lands when the destination box is left alone."""
         return default_packet_output_dir(self._submissions_path or ".")
 
     def _output_area_classes(self) -> str:
         return "" if self._initial_output else "hidden"
 
     def _destination_hint(self) -> str:
-        """One muted line naming the folder that will actually be written.
-
-        The default is only a good default if the user can see where it points;
-        an unexplained "it went somewhere" is worse than asking.
-        """
         if self.is_mounted and self.query_one("#packet-custom-output", Checkbox).value:
             typed = self.query_one("#packet-output", Input).value.strip()
             if typed:
@@ -235,12 +190,6 @@ class GraderPacketScreen(ModalScreen[None]):
         return f"[dim]The copy will be created in {self._default_output()}[/dim]"
 
     def _resolved_output(self) -> Path:
-        """The destination to actually use.
-
-        With the box unchecked the field is ignored **entirely**, so a path left
-        behind in a hidden input can never silently apply to a later run — the
-        same rule `SetupScreen._ollama_values` and `_jobs_argv` follow.
-        """
         if self.query_one("#packet-custom-output", Checkbox).value:
             typed = self.query_one("#packet-output", Input).value.strip()
             if typed:
@@ -265,11 +214,6 @@ class GraderPacketScreen(ModalScreen[None]):
                     value=True,
                     id="packet-redact",
                 )
-                # Redaction and encryption answer different questions and are worth
-                # keeping visibly separate: hiding names stops the *grader* knowing
-                # whose work they mark, a passphrase stops *everyone else* reading
-                # the copy at all — which is what matters once it is on a USB stick
-                # or in an inbox.
                 yield Checkbox(
                     "Protect the copy with a passphrase",
                     value=False,
@@ -283,10 +227,6 @@ class GraderPacketScreen(ModalScreen[None]):
                     id="packet-encrypt-hint",
                 )
                 with Vertical(id="packet-passphrase-area", classes="hidden"):
-                    # Both boxes on one row rather than stacked with a label each:
-                    # a revealed disclosure area that costs ten rows pushes the
-                    # buttons off a short terminal, which is the trap the dialog's
-                    # CSS comments already warn about.
                     yield _field_label(
                         "Passphrase",
                         "typed twice — nobody can recover it for you; "
@@ -303,9 +243,6 @@ class GraderPacketScreen(ModalScreen[None]):
                             placeholder="Confirm",
                             id="packet-passphrase-confirm",
                         )
-                # Same disclosure pattern as the extractor's parallel/Ollama
-                # options: a sensible default, and the field only appears for
-                # someone who wants a different answer.
                 yield Checkbox(
                     "Save the copy somewhere else",
                     value=bool(self._initial_output),
@@ -349,12 +286,7 @@ class GraderPacketScreen(ModalScreen[None]):
             self.query_one("#packet-passphrase", Input).focus()
 
     def _resolved_passphrase(self) -> str | None:
-        """The passphrase to seal with: "" for none, None when it is unusable.
-
-        Validated here rather than in the worker thread, so a typo comes back as
-        a notification the moment the button is pressed instead of as a failure
-        after the packet has already been built.
-        """
+        """Empty string means no passphrase; None means invalid input."""
         if not self.query_one("#packet-encrypt", Checkbox).value:
             return ""
         first = self.query_one("#packet-passphrase", Input).value
@@ -413,7 +345,6 @@ class GraderPacketScreen(ModalScreen[None]):
     def _create(
         self, output: Path, grader: str, redact: bool, passphrase: str = ""
     ) -> None:
-        """Worker thread: build the packet and report it back to the UI."""
         try:
             result = build_packet(
                 self._submissions_path,
@@ -422,9 +353,6 @@ class GraderPacketScreen(ModalScreen[None]):
                 qa_file_path=self._qa_file_path or None,
                 redact=redact,
             )
-            # Sealed as a second step, exactly like the CLI: the plaintext
-            # folder is removed so the thing that gets sent cannot be the
-            # unprotected one.
             sealed = seal_packet(result.packet_path, passphrase) if passphrase else None
         except (PacketError, OSError, ValueError) as exc:
             self.app.call_from_thread(self._show_error, str(exc))
@@ -488,13 +416,6 @@ class GraderPacketScreen(ModalScreen[None]):
 
 
 class _ConflictRow(Static):
-    """One conflicting answer, with the grader's decision attached to it.
-
-    Focusable, and it owns its keys: ``o`` keeps ours, ``t`` takes theirs, and
-    ``j``/``k`` (or the arrows) move — the same row grammar the consistency,
-    similarity and claim modals use, so the muscle memory transfers.
-    """
-
     can_focus = True
 
     def __init__(self, conflict: MergeConflict) -> None:
@@ -516,8 +437,6 @@ class _ConflictRow(Static):
         self.set_class(self.decision == "theirs", "takes-theirs")
 
     def on_key(self, event: events.Key) -> None:
-        # The focused row is first in the bubble path, so handling movement here
-        # stops the enclosing VerticalScroll from turning j/k into scrolling.
         if event.key == "o":
             event.stop()
             self.set_decision("ours")
@@ -533,13 +452,6 @@ class _ConflictRow(Static):
 
 
 class MergeScreen(ModalScreen[bool]):
-    """Preview a returned grader copy, settle its conflicts, and merge it.
-
-    Dismisses with **True when it wrote something**, so the app knows to re-read
-    the cohort: a merge rewrites files the session already has open, and a stale
-    cache would show old grades *and* trip the mtime guard on the next save.
-    """
-
     DEFAULT_CSS = """
     MergeScreen {
         align: center middle;
@@ -557,8 +469,6 @@ class MergeScreen(ModalScreen[bool]):
         padding: 1 2;
     }
 
-    /* Auto height + a screen-local .hidden, for the same reasons spelled out
-       in GraderPacketScreen's CSS above. */
     #merge-passphrase-area {
         width: 100%;
         height: auto;
@@ -677,22 +587,13 @@ class MergeScreen(ModalScreen[bool]):
         super().__init__()
         self._submissions_path = submissions_path
         self._initial_incoming = incoming_path
-        # Anonymity-aware rather than teacher-gated, like the consistency and
-        # similarity audits: the plan names students, so outside teacher mode it
-        # names them by display id. Hiding the screen instead would withdraw it
-        # from exactly the people most likely to be merging.
         self._teacher_mode = teacher_mode
         self._merged = False
-        # Set by a successful preview; Apply refuses to run without them, so a
-        # merge can never be written from a plan the grader never saw.
         self._plan: MergePlan | None = None
         self._ours: SideSnapshot | None = None
         self._key: HandoffKey | None = None
         self._manifest: PacketManifest | None = None
         self._incoming_root: Path | None = None
-        # Where a sealed packet gets unpacked. Held on the screen rather than in
-        # a `with` block because it has to survive from Preview until Apply;
-        # `on_unmount` deletes it.
         self._workspace: tempfile.TemporaryDirectory | None = None
 
     def compose(self) -> ComposeResult:
@@ -714,10 +615,6 @@ class MergeScreen(ModalScreen[bool]):
                     id="merge-incoming",
                 )
                 yield Button("Browse", id="merge-browse", compact=True)
-            # Revealed only when the chosen path turns out to be a sealed
-            # packet. Detected from the file rather than asked as a question,
-            # because whoever is merging did not necessarily create the packet
-            # and has no reason to know how it was packed.
             with Vertical(id="merge-passphrase-area", classes="hidden"):
                 yield _field_label(
                     "Passphrase", "this copy was sealed when it was handed out"
@@ -751,14 +648,6 @@ class MergeScreen(ModalScreen[bool]):
         self._sync_passphrase_row()
 
     def on_unmount(self) -> None:
-        """Delete the unsealed copy when the dialog closes.
-
-        A sealed packet is unpacked into a temporary directory that has to live
-        from Preview until Apply, so it cannot be cleaned up by a `with` block
-        around either one. Closing the dialog is the moment it is certainly
-        finished with — and leaving a decrypted cohort on disk would undo the
-        protection the packet was sealed with.
-        """
         self._discard_workspace()
 
     def _discard_workspace(self) -> None:
@@ -766,9 +655,6 @@ class MergeScreen(ModalScreen[bool]):
             self._workspace.cleanup()
             self._workspace = None
 
-    # ------------------------------------------------------------------ #
-    # Preview
-    # ------------------------------------------------------------------ #
 
     @on(Button.Pressed, "#merge-browse")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -777,7 +663,6 @@ class MergeScreen(ModalScreen[bool]):
             self,
             self.query_one("#merge-incoming", Input),
             title="Choose the returned grader copy",
-            # "any": a returned copy is a folder, but a sealed one is a file.
             mode="any",
         )
 
@@ -787,7 +672,6 @@ class MergeScreen(ModalScreen[bool]):
         self._sync_passphrase_row()
 
     def _sync_passphrase_row(self) -> None:
-        """Show the passphrase box exactly when the chosen path needs one."""
         raw = self.query_one("#merge-incoming", Input).value.strip()
         sealed = bool(raw) and is_sealed_packet(Path(raw).expanduser())
         self.query_one("#merge-passphrase-area").set_class(not sealed, "hidden")
@@ -813,7 +697,6 @@ class MergeScreen(ModalScreen[bool]):
         )
 
     def _preview(self, incoming: str, passphrase: str = "") -> None:
-        """Worker thread: read both folders and plan the merge."""
         try:
             incoming_path = self._readable_incoming(Path(incoming).expanduser(), passphrase)
             key, manifest = locate_handoff_key(self._submissions_path, incoming_path)
@@ -831,12 +714,6 @@ class MergeScreen(ModalScreen[bool]):
         self.app.call_from_thread(self._show_plan, plan, ours, key, manifest, root)
 
     def _readable_incoming(self, path: Path, passphrase: str) -> Path:
-        """Return a packet folder, unsealing into this dialog's temp dir first.
-
-        Re-unsealed on every Preview rather than cached: the grader may have
-        corrected the path or the passphrase, and reusing a previous unpacking
-        would compare against the wrong copy.
-        """
         if not is_sealed_packet(path):
             return path
         self._discard_workspace()
@@ -895,8 +772,6 @@ class MergeScreen(ModalScreen[bool]):
 
         rows = list(self.query(_ConflictRow))
         if rows:
-            # Focus the first thing needing a decision, so the modal is
-            # immediately operable without reaching for the mouse.
             rows[0].focus()
 
     def _summary_text(self, plan: MergePlan) -> str:
@@ -909,12 +784,6 @@ class MergeScreen(ModalScreen[bool]):
         return " · ".join(parts)
 
     def _caveats(self, plan: MergePlan) -> list[str]:
-        """What the merge could not account for — never left implicit.
-
-        Shown inside the plan rather than as a notification, because "nothing to
-        merge" must not be readable as "everything is accounted for" when a
-        dozen submissions failed to match.
-        """
         notes: list[str] = []
         if plan.unmatched_students:
             notes.append(
@@ -928,9 +797,6 @@ class MergeScreen(ModalScreen[bool]):
             )
         return notes
 
-    # ------------------------------------------------------------------ #
-    # Conflict decisions
-    # ------------------------------------------------------------------ #
 
     def focus_relative_conflict(self, current: _ConflictRow, delta: int) -> None:
         rows = list(self.query(_ConflictRow))
@@ -963,9 +829,6 @@ class MergeScreen(ModalScreen[bool]):
             row.conflict.conflict_id: row.decision for row in self.query(_ConflictRow)
         }
 
-    # ------------------------------------------------------------------ #
-    # Apply
-    # ------------------------------------------------------------------ #
 
     @on(Button.Pressed, "#merge-apply")
     def _on_apply(self, event: Button.Pressed) -> None:
@@ -990,7 +853,6 @@ class MergeScreen(ModalScreen[bool]):
         )
 
     def _apply(self, changes, ours: SideSnapshot, import_history: bool) -> None:  # noqa: ANN001
-        """Worker thread: write the merged answers and report what happened."""
         label = (self._manifest.packet_id if self._manifest else "") or (
             self._incoming_root.name if self._incoming_root else "copy"
         )
@@ -1043,8 +905,6 @@ class MergeScreen(ModalScreen[bool]):
         body.remove_children()
         body.mount(Label(text, classes="merge-note"))
         self.query_one("#merge-summary", Static).update("Merged.")
-        # The plan is now stale — the files it was diffed against have changed —
-        # so Apply stays disabled until a fresh preview is run.
         self._plan = None
         self._merged = True
         if succeeded:

@@ -1,5 +1,3 @@
-"""The `doctor` CLI front end."""
-
 from __future__ import annotations
 
 import json
@@ -16,8 +14,6 @@ def _report(*checks: EnvironmentCheck) -> EnvironmentReport:
 
 @pytest.fixture
 def stub_report(monkeypatch: pytest.MonkeyPatch):
-    """Replace the probing engine so the CLI tests need no real environment."""
-
     def install(report: EnvironmentReport) -> dict:
         recorded: dict = {}
 
@@ -64,8 +60,6 @@ def test_findings_print_their_impact_and_fix(
 def test_findings_are_repeated_as_a_todo_list_worst_first(
     stub_report, capsys: pytest.CaptureFixture
 ) -> None:
-    # The findings are already above, mixed among the passing rows; the reader's
-    # actual question is "what do I have to do now?".
     stub_report(
         _report(
             EnvironmentCheck(name="Python", status="ready", detail="3.12.4"),
@@ -78,7 +72,7 @@ def test_findings_are_repeated_as_a_todo_list_worst_first(
     out = capsys.readouterr().out
     todo = out.split("To do, most important first:")[1]
     assert todo.index("Tesseract OCR") < todo.index("pix2tex")
-    assert "Python" not in todo  # a passing check is not a to-do
+    assert "Python" not in todo
 
 
 def test_fail_on_problem_exits_two_only_for_broken_checks(stub_report) -> None:
@@ -87,8 +81,6 @@ def test_fail_on_problem_exits_two_only_for_broken_checks(stub_report) -> None:
 
 
 def test_fail_on_problem_ignores_optional_gaps(stub_report) -> None:
-    # A missing optional integration must never fail a scripted run, or CI would
-    # demand an Ollama server to grade a typed assignment.
     stub_report(_report(EnvironmentCheck(name="Ollama server", status="degraded", detail="")))
     assert doctor.run_cli(["--fail-on-problem"]) == 0
 
@@ -139,27 +131,23 @@ def test_flags_reach_the_engine(stub_report) -> None:
     assert recorded["ollama_host"] == "http://box:11434"
     assert recorded["check_graphics"] is False
     assert recorded["smoke_test"] is True
-    assert "ai" in recorded  # Now passed
-    assert recorded["time_ai"] is False  # Now passed
+    assert "ai" in recorded
+    assert recorded["time_ai"] is False
 
 
 def test_main_returns_the_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A console_scripts wrapper does sys.exit(main()); returning anything other
-    # than the code makes a clean run exit 1 and print a repr.
     monkeypatch.setattr(doctor, "run_cli", lambda argv=None: 0)
     assert doctor.main() == 0
 
 
 def test_time_ai_flag_reaches_the_engine(stub_report) -> None:
-    """The --time-ai flag is passed through to build_environment_report."""
     recorded = stub_report(_report())
     doctor.run_cli(["--time-ai"])
     assert recorded.get("time_ai") is True
-    assert "ai" in recorded  # ai should also be passed
+    assert "ai" in recorded
 
 
 def test_ai_features_and_latency_in_json_output(stub_report, capsys: pytest.CaptureFixture) -> None:
-    """JSON output includes AI features and latency checks when present."""
     stub_report(
         _report(
             EnvironmentCheck(name="Python", status="ready", detail="3.12.4"),

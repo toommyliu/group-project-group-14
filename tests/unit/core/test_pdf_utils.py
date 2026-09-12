@@ -25,13 +25,6 @@ _ORIGINAL_MAX_BYTES = render_cache_max_bytes()
 
 @pytest.fixture(autouse=True)
 def _reset_render_cache():
-    """Isolate every test in this module from the process-wide render cache.
-
-    ``render_page_to_image`` reads and writes a module-level cache shared
-    across the whole test session (see ``opengrader.core.render_cache``), so
-    a test that renders a page must not leave entries or a resized budget
-    behind for a later test — in this file or elsewhere.
-    """
     clear_render_cache()
     configure_render_cache(max_bytes=_ORIGINAL_MAX_BYTES)
     try:
@@ -43,7 +36,7 @@ def _reset_render_cache():
 
 def test_render_normal_page_succeeds() -> None:
     doc = fitz.open()
-    doc.new_page(width=612, height=792)  # US Letter, points
+    doc.new_page(width=612, height=792)
     try:
         img, w, h = render_page_to_image(doc, 0, dpi=150)
         assert w > 0 and h > 0
@@ -53,10 +46,7 @@ def test_render_normal_page_succeeds() -> None:
 
 
 def test_render_rejects_oversized_page() -> None:
-    """A page whose geometry would rasterize to billions of pixels is refused."""
     doc = fitz.open()
-    # 14000 pt square at 300 DPI ≈ 58000×58000 px (~3.4 billion pixels), well
-    # over the safety ceiling — a decompression-bomb-style malformed PDF.
     doc.new_page(width=14000, height=14000)
     try:
         with pytest.raises(PdfRenderLimitError):
@@ -66,8 +56,6 @@ def test_render_rejects_oversized_page() -> None:
 
 
 def test_render_limit_is_a_valueerror() -> None:
-    # ValueError subclass so existing bad-input handling around PDF parsing
-    # keeps working without a new except clause.
     assert issubclass(PdfRenderLimitError, ValueError)
     assert MAX_RENDER_PIXELS > 0
 
@@ -75,13 +63,6 @@ def test_render_limit_is_a_valueerror() -> None:
 def test_oversized_page_guard_fires_before_any_cache_interaction(
     tmp_path: Path,
 ) -> None:
-    """The MAX_RENDER_PIXELS guard must raise before touching the cache.
-
-    ``get_pixmap`` allocates the full bitmap up front, so the guard has to
-    run ahead of the cache lookup too — an oversized page must raise
-    identically whether or not some earlier call already cached this file at
-    a smaller DPI, and it must never be able to populate an entry itself.
-    """
     doc = fitz.open()
     doc.new_page(width=14000, height=14000)
     path = tmp_path / "huge.pdf"
@@ -99,11 +80,6 @@ def test_oversized_page_guard_fires_before_any_cache_interaction(
         assert after.entries == before.entries
     finally:
         doc.close()
-
-
-# --------------------------------------------------------------------------- #
-# render_page_to_image <-> the render cache seam
-# --------------------------------------------------------------------------- #
 
 
 def _saved_two_page_pdf(tmp_path: Path) -> Path:
@@ -132,16 +108,12 @@ def test_repeated_render_is_pixel_identical_but_a_distinct_object_and_a_hit(
         assert img1 is not img2
         assert list(img1.getdata()) == list(img2.getdata())
 
-        # First render: a miss that populates one entry.
         assert mid.misses == before.misses + 1
         assert mid.entries == before.entries + 1
-        # Second render of the same (doc, page, dpi): a hit, no new entry.
         assert after.hits == mid.hits + 1
         assert after.misses == mid.misses
         assert after.entries == mid.entries
 
-        # Mutating the first image must never corrupt what a later cache hit
-        # returns (the cache stores packed samples, never the Image itself).
         img1.putpixel((0, 0), (0, 0, 0))
         img3, _, _ = render_page_to_image(doc, 0, dpi=100)
         assert img3.getpixel((0, 0)) == img2.getpixel((0, 0))
@@ -194,9 +166,7 @@ def test_cache_false_neither_reads_nor_writes_the_cache(tmp_path: Path) -> None:
         assert after.entries == before.entries
         assert after.bytes_used == before.bytes_used
 
-        # And an explicit cache=False render must not even see an entry that
-        # a normal (cached) render for the same key already populated.
-        render_page_to_image(doc, 1, dpi=100)  # cache=True (default) -> populates
+        render_page_to_image(doc, 1, dpi=100)
         populated = render_cache_stats()
         render_page_to_image(doc, 1, dpi=100, cache=False)
         after_uncached = render_cache_stats()
@@ -226,7 +196,6 @@ def test_cache_disabled_via_zero_budget_falls_back_to_uncached_render(
 
 
 def test_uncachable_stream_document_still_renders_correctly(tmp_path: Path) -> None:
-    """A document with no file behind it renders fine but is never cached."""
     doc = fitz.open()
     doc.new_page(width=200, height=300)
     raw = doc.tobytes()
@@ -248,14 +217,6 @@ def test_uncachable_stream_document_still_renders_correctly(tmp_path: Path) -> N
 def test_rendered_image_matches_old_png_round_trip_mode_and_size(
     tmp_path: Path,
 ) -> None:
-    """The direct-from-pixmap path must match what ``pix.tobytes("png")`` gave.
-
-    ``render_page_to_image`` now builds the PIL image straight from the
-    pixmap's packed samples instead of round-tripping through a PNG encode;
-    this pins the externally-visible contract (mode, size, and pixel values)
-    against the old approach so that optimization can never silently change
-    what callers see.
-    """
     path = _saved_two_page_pdf(tmp_path)
     doc = fitz.open(str(path))
     try:
@@ -263,7 +224,6 @@ def test_rendered_image_matches_old_png_round_trip_mode_and_size(
         assert img.mode == "RGB"
         assert img.size == (w, h)
 
-        # Reference: the old approach, rendered independently for comparison.
         page = doc[0]
         zoom = 100 / 72.0
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
@@ -281,7 +241,6 @@ def test_rendered_image_matches_old_png_round_trip_mode_and_size(
 
 
 def test_render_cache_put_and_get_round_trip_via_public_api(tmp_path: Path) -> None:
-    """Exercise the render_cache_put/get/RenderedPage seam pdf_utils relies on."""
     path = _saved_two_page_pdf(tmp_path)
     doc = fitz.open(str(path))
     try:
@@ -298,11 +257,6 @@ def test_render_cache_put_and_get_round_trip_via_public_api(tmp_path: Path) -> N
         assert cached.to_image().size == img.size
     finally:
         doc.close()
-
-
-# --------------------------------------------------------------------------- #
-# render_page_with_highlights (the grade screen's whole-page view)
-# --------------------------------------------------------------------------- #
 
 
 def _two_page_pdf(tmp_path: Path) -> Path:
@@ -327,11 +281,9 @@ def test_highlight_tints_the_region_and_leaves_the_rest_alone(tmp_path: Path) ->
     marked = render_page_with_highlights(
         str(pdf), 1, [(0.25, 0.25, 0.5, 0.5)], dpi=72
     )
-    # Inside the box the blank page is tinted toward the highlight colour...
     inside = marked.getpixel((306, 396))
     assert inside != plain.getpixel((306, 396))
-    assert inside[0] > inside[2]  # warmer: more red than blue
-    # ...and outside it the page is untouched, so nothing is obscured.
+    assert inside[0] > inside[2]
     assert marked.getpixel((10, 10)) == plain.getpixel((10, 10))
 
 
@@ -339,7 +291,6 @@ def test_outline_is_drawn_in_the_highlight_colour(tmp_path: Path) -> None:
     marked = render_page_with_highlights(
         str(_two_page_pdf(tmp_path)), 1, [(0.25, 0.25, 0.5, 0.5)], dpi=72
     )
-    # The top edge of the box sits at y = 0.25 * 792 = 198.
     edge = marked.getpixel((306, 198))
     assert max(abs(a - b) for a, b in zip(edge, HIGHLIGHT_RGB)) <= 2
 

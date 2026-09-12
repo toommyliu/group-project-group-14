@@ -1,21 +1,3 @@
-"""Environment pre-flight from inside the TUI.
-
-The headless `doctor` CLI is the right tool for someone already in a terminal.
-This dialog is for the person Opengrader is actually aimed at: an instructor who
-launched the app from a desktop icon, has no terminal open, and is looking at
-answer crops rendered as coloured blocks or an extraction that produced empty
-answers. Asking them to find a shell and type a command is how a fixable problem
-becomes an abandoned tool.
-
-It lives on the setup screen's Helper Tools and deliberately has **no workspace
-hotkey**: unlike the sharing and backup tools, this is about the machine rather
-than about the cohort being graded, and the keymap's shift+letter group is
-reserved for reports about the class.
-
-Engine: ``core/environment.py`` (all the judgement); rendering:
-``tui/formatting.py``.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -35,8 +17,6 @@ from opengrader.tui.formatting import (
 
 
 class DoctorScreen(ModalScreen[None]):
-    """Check this machine for everything Opengrader needs, and say how to fix it."""
-
     DEFAULT_CSS = """
     DoctorScreen {
         align: center middle;
@@ -98,9 +78,6 @@ class DoctorScreen(ModalScreen[None]):
         ollama_host: str = OllamaConfig.host,
     ) -> None:
         super().__init__()
-        # Prefilled from whatever the setup screen's Ollama fields say, so the
-        # check is run against the models this user's pipeline would actually
-        # ask for rather than against the defaults.
         self._vision_model = vision_model
         self._text_model = text_model
         self._ollama_host = ollama_host
@@ -115,9 +92,6 @@ class DoctorScreen(ModalScreen[None]):
                 "the exact command to fix anything missing. Nothing is changed.",
                 id="doctor-hint",
             )
-            # Short label, detail underneath: a Textual Checkbox is one line
-            # tall (ToggleButton.get_content_height returns 1), so anything past
-            # the dialog's width is silently dropped.
             yield Checkbox(
                 "Also build a test exam PDF",
                 value=False,
@@ -139,8 +113,6 @@ class DoctorScreen(ModalScreen[None]):
                 yield Button("Close", id="doctor-close", compact=True)
 
     def on_mount(self) -> None:
-        # Run once on open rather than making the user press a button to learn
-        # anything: they opened this dialog because something is already wrong.
         self._start_run()
 
     @on(Button.Pressed, "#doctor-run")
@@ -155,8 +127,6 @@ class DoctorScreen(ModalScreen[None]):
         log = self.query_one("#doctor-log", RichLog)
         log.clear()
         log.write("Checking…")
-        # A thread worker: probing reaches out to the Ollama server and runs the
-        # Tesseract binary, and neither may block the UI event loop.
         self.run_worker(lambda: self._run(smoke), thread=True, exclusive=True)
 
     def _run(self, smoke: bool) -> None:
@@ -164,24 +134,9 @@ class DoctorScreen(ModalScreen[None]):
             vision_model=self._vision_model,
             text_model=self._text_model,
             ollama_host=self._ollama_host,
-            # The terminal check is skipped here on purpose: inside a running
-            # Textual app the answer is already known and re-probing would write
-            # escape sequences into a terminal the app owns. The setup screen
-            # states the detected protocol instead.
             check_graphics=False,
             smoke_test=smoke,
-            # What the AI is switched on to *do*, not only which models are
-            # configured. Someone whose scans extract to empty answers may
-            # simply have handwriting reading turned off, and until this row
-            # existed the report could not say so. Resolved here rather than
-            # passed in by the caller, for the same reason the setup screen
-            # re-reads on every use: AI setup may have been saved since this
-            # screen was opened.
             ai=ai_config.resolve(),
-            # Timing a real request is deliberately left to `doctor --time-ai`
-            # and to AI setup's Test connection: a first call loads the model's
-            # weights and can take half a minute, which is too slow to spend on
-            # every press of a button labelled "Run check".
             time_ai=False,
         )
         self.app.call_from_thread(self._show, report)
@@ -198,8 +153,6 @@ class DoctorScreen(ModalScreen[None]):
         log.write("")
         log.write(format_environment_verdict(report))
 
-        # A modal the user has to read to discover a failure is a modal whose
-        # failures get missed; the notification carries the verdict out.
         if report.broken:
             self.app.notify(
                 f"{len(report.broken)} problem(s) need fixing — see the result pane.",

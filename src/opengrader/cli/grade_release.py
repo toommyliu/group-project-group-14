@@ -1,28 +1,4 @@
-"""Record a grade release, and say what has changed since one.
-
-Handing an assignment back is the moment a grade stops being a working number
-and becomes something a student has seen. This records that moment:
-
-    # what would this release look like? (the same check grade-check prints)
-    uv run grade-release create --submissions out/subs/
-
-    # write it
-    uv run grade-release create --submissions out/subs/ --label "returned in class" --yes
-
-    # every release, oldest first
-    uv run grade-release list --submissions out/subs/
-
-    # what has moved since the students got theirs back?
-    uv run grade-release diff --submissions out/subs/
-
-A release **records; it never locks.** Nothing consults it before writing a
-grade, and no later regrade, curve or merge is refused because of one. That is
-deliberate: an assignment is released precisely *because* regrades are expected,
-so a release that froze grades would break the workflow it exists to serve. What
-it buys instead is ``diff`` — the answer to "my grade changed", naming the
-question, which was previously unanswerable from an audit journal that knows
-every change but not which side of the hand-back it happened on.
-"""
+"""Record grade releases and report changes since the last release."""
 
 from __future__ import annotations
 
@@ -185,9 +161,6 @@ def _cmd_create(args: Namespace) -> None:
         sys.exit(2)
 
     if not args.yes:
-        # Preview by default, like `grade-merge apply` and `curve suggest`: the
-        # thing being written is a record of what students were told, so it is
-        # worth one confirmation.
         print(
             f"Would record a release of {len(context.documents)} student(s). "
             "Re-run with --yes to write it."
@@ -311,8 +284,6 @@ def _print_comparison(comparison: ReleaseComparison, *, compared_curve: str) -> 
         f"compared with curve: {compared_curve}\n"
     )
 
-    # Caveats before the summary, following grade-restore's rule that "nothing
-    # changed" must never be read as "everything is accounted for".
     if comparison.missing_students:
         print(
             f"{len(comparison.missing_students)} released student(s) have no "
@@ -364,8 +335,6 @@ def _cmd_diff(args: Namespace) -> None:
     submissions = _resolve_submissions(args.submissions)
     release = _resolve_release(submissions, args.release)
     context = load_release_context(submissions)
-    # --raw reuses the release's own curve, which is what `compare_release`
-    # does when no curve is passed.
     current_curve = None if args.raw else read_curve(submissions)
     comparison = compare_release(release, context.documents, curve=current_curve)
 

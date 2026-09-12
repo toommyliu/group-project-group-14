@@ -1,9 +1,3 @@
-"""Tests for the course-gradebook modal (start-up screen → Helper Tools).
-
-The modal is a front end over the `course-grades` CLI, so the tests patch that
-one seam and check what it is handed, plus the setup screen's prefill.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -57,9 +51,6 @@ def _run(screen: CourseGradesScreen, body):  # noqa: ANN001, ANN202
     return result[0]
 
 
-# ── argv ─────────────────────────────────────────────────────────────────────
-
-
 def test_the_course_path_is_passed_through(monkeypatch) -> None:  # noqa: ANN001
     captured: list[list[str]] = []
     _patch_cli(monkeypatch, captured)
@@ -85,8 +76,6 @@ def test_running_with_no_course_file_is_refused(monkeypatch) -> None:  # noqa: A
 
 
 def test_each_view_only_adds_flags(monkeypatch) -> None:  # noqa: ANN001
-    """The narrower views must never suppress something the default shows —
-    the at-risk list and outcomes already print unasked when non-empty."""
     captured: list[list[str]] = []
     _patch_cli(monkeypatch, captured)
 
@@ -121,9 +110,6 @@ def test_a_csv_path_becomes_a_flag(monkeypatch) -> None:  # noqa: ANN001
     assert captured[0] == ["--course", "/c.toml", "--csv", "/out/grades.csv"]
 
 
-# ── output ───────────────────────────────────────────────────────────────────
-
-
 def test_the_report_lands_in_the_log(monkeypatch) -> None:  # noqa: ANN001
     _patch_cli(monkeypatch, [])
 
@@ -152,8 +138,6 @@ def test_a_failing_report_leaves_the_screen_usable(monkeypatch) -> None:  # noqa
 
 
 def test_per_assignment_load_failures_reach_the_log(monkeypatch) -> None:  # noqa: ANN001
-    """The CLI sends those to stderr, and they are exactly the caveats a reader
-    of the numbers must not miss — so stderr is captured too."""
     import sys
 
     def _warn(_argv):  # noqa: ANN001, ANN202
@@ -170,9 +154,6 @@ def test_per_assignment_load_failures_reach_the_log(monkeypatch) -> None:  # noq
 
     text = _run(CourseGradesScreen(course_path="/c.toml"), body)
     assert "Midterm" in text
-
-
-# ── the setup-screen prefill ─────────────────────────────────────────────────
 
 
 def test_the_course_file_is_found_by_walking_up_from_the_submissions(tmp_path: Path) -> None:
@@ -192,12 +173,7 @@ def test_no_course_file_nearby_means_an_empty_field(tmp_path: Path) -> None:
     assert _find_course_file(deep) is None
 
 
-# ── the "New…" builder hand-off ──────────────────────────────────────────────
-
-
 def test_new_opens_the_builder_and_takes_back_the_written_path(tmp_path: Path) -> None:
-    """The instructor should land one click from their first report, not have
-    to go find the file they just made."""
     import asyncio
 
     from opengrader.tui.ui.screens.course_builder_screen import CourseBuilderScreen
@@ -213,7 +189,7 @@ def test_new_opens_the_builder_and_takes_back_the_written_path(tmp_path: Path) -
             await pilot.pause()
             builder = app.screen
             assert isinstance(builder, CourseBuilderScreen), type(builder)
-            builder.dismiss(written)  # as if it had saved
+            builder.dismiss(written)
             await pilot.pause()
             return screen.query_one("#course-grades-path", Input).value
 

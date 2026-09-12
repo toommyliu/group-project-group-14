@@ -109,9 +109,6 @@ def test_generate_bubble_sheet_writes_a_sheet_and_names_what_it_skipped(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    # The sample has one free-response subquestion, which no row of circles can
-    # capture. Saying so *before* the success line is the point: an instructor
-    # who discovers it after the exam has lost the answers.
     output_path = tmp_path / "sheet.pdf"
 
     _run_cli(
@@ -169,9 +166,7 @@ def test_generate_bubble_sheet_with_a_roster_makes_one_sheet_per_student(
 
     assert "bubble batch (2 students, master key on page 1" in capsys.readouterr().out
     with fitz.open(output_path) as document:
-        assert len(document) == 3  # master key + one sheet each
-        # The sheets print the id, never the name — that is what makes a
-        # personalized stack safe to hand out.
+        assert len(document) == 3
         sheet_text = document[1].get_text() + document[2].get_text()
     assert "Ada Lovelace" not in sheet_text
 
@@ -192,7 +187,6 @@ def test_copies_prints_that_many_sheets(
     )
     assert "4 copies" in capsys.readouterr().out
     with fitz.open(output_path) as document:
-        # No roster, so no master key — four sheets and nothing else.
         assert len(document) == 4
 
 
@@ -213,8 +207,6 @@ def test_shuffle_gives_each_sheet_its_own_order_and_form_code(
     )
     out = capsys.readouterr().out
     assert "distinct question orders" in out
-    # The form code must be printed, not only encoded: a QR that will not scan
-    # would otherwise make the sheet ungradable.
     assert "form key" in out
     with fitz.open(output_path) as document:
         forms = {
@@ -260,9 +252,6 @@ def test_a_roster_and_copies_together_are_refused(
 def test_shuffling_a_written_template_is_refused_with_the_reason(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A written template is read back by aligning scans to one blank layout,
-    so a per-sheet order could never be recovered — refuse rather than print an
-    exam that cannot be graded."""
     with pytest.raises(ValueError, match="needs --bubble-sheet"):
         _run_cli(
             monkeypatch,

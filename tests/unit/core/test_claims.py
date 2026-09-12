@@ -1,10 +1,3 @@
-"""Multi-grader work claims.
-
-The engine's whole job is that two graders never hold the same work, so most of
-these tests are about the boundary: what overlaps, what doesn't, what gets
-refused, and the one dangerous default (an empty slice means *everything*).
-"""
-
 from pathlib import Path
 
 import pytest
@@ -39,11 +32,6 @@ def _claim(actor: str, **slice_kwargs) -> WorkClaim:
     )
 
 
-# --------------------------------------------------------------------------- #
-# WorkSlice: what a slice covers and what it collides with
-# --------------------------------------------------------------------------- #
-
-
 def test_an_empty_slice_is_the_whole_assignment() -> None:
     everything = WorkSlice()
     assert everything.is_everything
@@ -52,7 +40,6 @@ def test_an_empty_slice_is_the_whole_assignment() -> None:
 
 
 def test_one_axis_left_empty_means_all_of_that_axis() -> None:
-    # "q1-q2, every student" — the shape `divide --by question` produces.
     work = WorkSlice(question_ids=("q1", "q2"))
     assert work.covers("q1", "s-a")
     assert work.covers("q2", "s-zzz")
@@ -77,7 +64,6 @@ def test_disjoint_student_runs_do_not_overlap() -> None:
 
 
 def test_overlap_needs_both_axes_to_intersect() -> None:
-    # Same questions but different students is a legitimate division of labour.
     first = WorkSlice(question_ids=("q1",), student_ids=("s-a",))
     second = WorkSlice(question_ids=("q1",), student_ids=("s-b",))
     assert not first.overlaps(second)
@@ -101,33 +87,21 @@ def test_describe_reads_like_a_person_wrote_it() -> None:
 
 
 def test_a_broken_question_run_is_still_named_not_counted() -> None:
-    """Real assignments number questions q1, q2, q5a, q5b — not 1..n.
-
-    Those ids are not a numeric run, and a grader told they hold "6 questions"
-    has learned nothing about which six. Short sets are spelled out.
-    """
     assert WorkSlice(question_ids=("q1", "q4")).describe() == "q1, q4"
     assert (
         WorkSlice(question_ids=("q1", "q2", "q3", "q4", "q5a", "q5b")).describe()
         == "q1, q2, q3, q4, q5a, q5b"
     )
-    # Past the point where a line stays readable, fall back to bounds + a count.
     many = tuple(f"q{n}" for n in (1, 3, 5, 7, 9, 11, 13, 15, 17))
     assert WorkSlice(question_ids=many).describe() == "q1…q17 (9 questions)"
 
 
 def test_a_single_student_is_named_but_a_pile_is_counted() -> None:
-    # Student ids are opaque digits: forty of them listed helps nobody.
     assert WorkSlice(student_ids=("id07",)).describe() == "student id07"
     assert (
         WorkSlice(student_ids=tuple(f"id{n:02d}" for n in range(40))).describe()
         == "40 students"
     )
-
-
-# --------------------------------------------------------------------------- #
-# Conflicts and ownership
-# --------------------------------------------------------------------------- #
 
 
 def test_a_conflict_is_another_actors_overlapping_claim() -> None:
@@ -138,7 +112,6 @@ def test_a_conflict_is_another_actors_overlapping_claim() -> None:
 
 
 def test_overlapping_your_own_claim_is_not_a_conflict() -> None:
-    # Re-claiming or widening your own slice is not a double-booking.
     held = [_claim("alice", question_ids=("q1", "q2"))]
     assert find_conflicts(WorkSlice(question_ids=("q2",)), held, actor="alice") == []
 
@@ -162,22 +135,11 @@ def test_claim_for_finds_the_owner_of_one_answer() -> None:
 
 
 def test_unclaimed_work_belongs_to_nobody() -> None:
-    """The property that keeps an undivided assignment working exactly as before.
-
-    A folder with no claims — or the remainder of a partial division — must not
-    read as "someone else's", or a lone grader would be locked out of their own
-    assignment the moment anyone claimed anything.
-    """
     held = [_claim("alice", question_ids=("q1",))]
     assert not is_owned_by_other(held, "q4", "s-a", actor="bob")
     assert not is_owned_by_other([], "q1", "s-a", actor="bob")
     assert is_owned_by_other(held, "q1", "s-a", actor="bob")
     assert not is_owned_by_other(held, "q1", "s-a", actor="alice")
-
-
-# --------------------------------------------------------------------------- #
-# Dividing the pile
-# --------------------------------------------------------------------------- #
 
 
 def test_divide_by_question_gives_contiguous_runs() -> None:
@@ -199,12 +161,6 @@ def test_the_remainder_goes_to_the_earliest_graders() -> None:
 
 
 def test_a_grader_with_no_work_is_dropped_not_given_everything() -> None:
-    """The dangerous case: an empty slice means *all* work, not none.
-
-    Five graders over three questions must leave two graders with no claim at
-    all — emitting an empty ``WorkSlice`` for them would hand each of them the
-    entire assignment.
-    """
     shares = divide_work(["a", "b", "c", "d", "e"], question_ids=["q1", "q2", "q3"])
     assert [actor for actor, _ in shares] == ["a", "b", "c"]
     assert all(not work.is_everything for _actor, work in shares)
@@ -222,11 +178,6 @@ def test_dividing_needs_graders_and_work() -> None:
         divide_work([], question_ids=QUESTIONS)
     with pytest.raises(ValueError, match="no questions to divide"):
         divide_work(["a"], question_ids=[])
-
-
-# --------------------------------------------------------------------------- #
-# The append-only store
-# --------------------------------------------------------------------------- #
 
 
 def test_a_claim_round_trips_through_the_log(tmp_path: Path) -> None:
@@ -252,8 +203,6 @@ def test_releasing_appends_rather_than_rewrites(tmp_path: Path) -> None:
     claim = claim_work(tmp_path, WorkSlice(question_ids=("q1",)), actor="alice")
     release_claim(tmp_path, claim.claim_id, actor="alice")
 
-    # Two lines on disk, one claim after the fold — that is what makes several
-    # graders writing at once safe.
     lines = resolve_claims_path(tmp_path).read_text().strip().splitlines()
     assert len(lines) == 2
     (stored,) = read_claims(tmp_path)
@@ -262,8 +211,6 @@ def test_releasing_appends_rather_than_rewrites(tmp_path: Path) -> None:
 
 
 def test_completing_is_distinct_from_releasing(tmp_path: Path) -> None:
-    # "I finished my forty" and "I'm handing mine back" are different answers to
-    # "is this assignment graded yet".
     claim = claim_work(tmp_path, WorkSlice(question_ids=("q1",)), actor="alice")
     complete_claim(tmp_path, claim.claim_id)
     (stored,) = read_claims(tmp_path)
@@ -282,7 +229,6 @@ def test_claiming_taken_work_is_refused(tmp_path: Path) -> None:
 
     assert conflict.value.conflicts[0].actor == "alice"
     assert "alice" in str(conflict.value)
-    # The refusal must not have written anything.
     assert len(read_claims(tmp_path)) == 1
 
 
@@ -302,7 +248,6 @@ def test_released_work_can_be_reclaimed(tmp_path: Path) -> None:
 
 
 def test_claiming_everything_needs_saying_so(tmp_path: Path) -> None:
-    # Guards against a caller that computed an empty slice by accident.
     with pytest.raises(ValueError, match="entire assignment"):
         claim_work(tmp_path, WorkSlice(), actor="alice")
     claim = claim_work(tmp_path, WorkSlice(), actor="alice", allow_everything=True)
@@ -318,19 +263,13 @@ def test_a_truncated_line_is_skipped_not_fatal(tmp_path: Path) -> None:
     claim_work(tmp_path, WorkSlice(question_ids=("q1",)), actor="alice")
     path = resolve_claims_path(tmp_path)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write('{"claim_id": "cl-broken", "actor":\n')  # killed mid-write
+        handle.write('{"claim_id": "cl-broken", "actor":\n')
     claim_work(tmp_path, WorkSlice(question_ids=("q2",)), actor="bob")
 
     assert [claim.actor for claim in read_claims(tmp_path)] == ["alice", "bob"]
 
 
-# --------------------------------------------------------------------------- #
-# Coverage
-# --------------------------------------------------------------------------- #
-
-
 def test_coverage_counts_answers_not_claims() -> None:
-    # alice holds q1+q2 for all 3 students = 6 of the 12 answers.
     held = [_claim("alice", question_ids=("q1", "q2"))]
     report = coverage_report(held, question_ids=QUESTIONS, student_ids=STUDENTS)
     assert report.total_cells == 12
@@ -360,7 +299,6 @@ def test_coverage_names_double_booked_work() -> None:
     report = coverage_report(held, question_ids=QUESTIONS, student_ids=STUDENTS)
     (overlap,) = report.overlaps
     assert {overlap.first.actor, overlap.second.actor} == {"alice", "bob"}
-    # q2 for each of the three students.
     assert overlap.shared_cells == 3
 
 

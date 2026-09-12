@@ -229,8 +229,6 @@ def test_submission_files_provider_returns_student_specific_response_images() ->
     first_student = provider.build_question_seeds(student_item_id="s1")
     second_student = provider.build_question_seeds(student_item_id="s2")
 
-    # The regenerated samples carry no OCR transcription, so student-specific
-    # content is asserted through the per-version prompts and image crops.
     assert first_student[0].prompt == "Convert decimal 5 to binary [A]."
     assert second_student[0].prompt == "Convert decimal 6 to binary [B]."
     assert first_student[0].image_path.endswith("submission-0001/responses/q1.png")
@@ -327,8 +325,6 @@ def test_submission_files_provider_falls_back_to_first_version_when_unknown(
         )
     )
 
-    # A version that matches no QA version ("Z") is treated like a missing one:
-    # it falls back to the first (only) version rather than blocking grading.
     provider = SubmissionFilesProvider(
         qa_file_path=qa_path,
         submissions_path=submission_path,
@@ -392,11 +388,8 @@ def test_save_question_transcription_persists_text_and_marks_verified(
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     assert saved.questions[0].response_text == "corrected handwriting reading"
-    # A human-verified reading is recorded at full confidence, so it drops out
-    # of the low-confidence review queue.
     assert saved.questions[0].response_confidence == 100.0
 
-    # The change is attributed in the durable audit journal.
     history = provider.read_grade_history()
     assert any(entry.kind == "transcription" for entry in history)
 
@@ -409,13 +402,11 @@ def test_comment_library_round_trips_through_the_provider(tmp_path: Path) -> Non
         default_image_path=DEFAULT_IMAGE_PATH,
     )
 
-    # A fresh folder has no saved snippets.
     assert provider.read_comment_library().snippets == ()
 
     library = provider.read_comment_library().with_snippet("See Lecture 5")
     provider.save_comment_library(library)
 
-    # Persisted into the folder's .opengrader dot-dir, so it travels with it.
     assert (submissions_path / ".opengrader" / "comments.json").exists()
     reloaded = SubmissionFilesProvider(
         qa_file_path="samples/qa-multi.md",
@@ -435,10 +426,8 @@ def test_regrade_requests_flow_through_the_provider(tmp_path: Path) -> None:
         default_image_path=DEFAULT_IMAGE_PATH,
     )
 
-    # A fresh folder has no disputes.
     assert provider.build_regrade_items() == []
 
-    # File a dispute for a real student (id 987654321 == submission-0001 == s1).
     add_regrade_request(
         submissions_path, student_id="987654321", reason="Q1 method valid", question_id="q1"
     )
@@ -446,19 +435,16 @@ def test_regrade_requests_flow_through_the_provider(tmp_path: Path) -> None:
     items = provider.build_regrade_items()
     assert len(items) == 1
     item = items[0]
-    assert item.is_navigable  # mapped to a real submission's nav id
-    assert item.student_item_id  # the "s{n}" the grade screen opens by
+    assert item.is_navigable
+    assert item.student_item_id
     assert item.question_id == "q1"
     assert item.reason == "Q1 method valid"
 
-    # It also surfaces in the unified review triage, high severity, at the top,
-    # bound to the same nav id so opening it routes to the right student.
     review = provider.build_review_items()
     assert any(r.reason is ReviewReason.OPEN_REGRADE_REQUEST for r in review)
     assert review[0].reason is ReviewReason.OPEN_REGRADE_REQUEST
     assert review[0].student_item_id == item.student_item_id
 
-    # Resolving it removes it from the open queue and the triage.
     provider.resolve_regrade(item.request_id, note="regraded +3")
     assert provider.build_regrade_items() == []
     assert not any(
@@ -508,7 +494,6 @@ def test_saving_a_grade_writes_an_accountability_journal_entry(
     from opengrader.core.history import read_journal, resolve_history_dir
 
     history_dir = resolve_history_dir(submissions_path)
-    # Namespaced dot-dir, co-located with the exam data.
     assert history_dir == submissions_path / ".opengrader" / "history"
     entries = read_journal(history_dir)
     assert [e.kind for e in entries] == ["grade", "comment"]
@@ -531,17 +516,13 @@ def test_build_review_items_binds_flags_to_nav_ids(tmp_path: Path) -> None:
     items = provider.build_review_items()
 
     assert items, "sample submissions have blank responses to flag"
-    # Every item is addressable by the same nav id the grade screen opens.
     assert all(item.student_item_id in {"s1", "s2"} for item in items)
-    # Sorted most-severe-first.
     ranks = [item.severity_rank for item in items]
     assert ranks == sorted(ranks)
-    # A flag carries a display id for anonymous rendering.
     assert all(item.student_display_id for item in items)
 
 
 def _write_ambiguous_submission(path: Path) -> None:
-    """A duplicate-name submission: blank id + recorded roster candidates."""
     path.write_text(
         "\n".join(
             [
@@ -588,7 +569,6 @@ def test_build_review_items_carries_source_pdf_and_candidates(tmp_path: Path) ->
     items = provider.build_review_items()
     identity = next(item for item in items if item.is_identity_flag)
 
-    # The reviewer can find the paper and pick from the tied roster people.
     assert identity.source_pdf_name == "submission-0009.pdf"
     assert [(c.student_id, c.name) for c in identity.id_candidates] == [
         ("123456789", "Tommy Liu"),
@@ -617,7 +597,6 @@ def test_assign_student_identity_persists_id_and_clears_candidates(
     reloaded = load_student_submission_markdown(sub_path)
     assert reloaded.student_id == "987654321"
     assert reloaded.id_candidates == ()
-    # The flag is gone on the next triage pass.
     assert not any(
         item.is_identity_flag and item.student_item_id == "s1"
         for item in provider.build_review_items()
@@ -686,7 +665,6 @@ def test_journal_write_failure_never_blocks_a_grade(
 
     monkeypatch.setattr(provider._journal, "append", _boom)
 
-    # The grade must still persist even though journalling fails.
     provider.save_question_grade(
         student_item_id="s1",
         question_id="q1",
@@ -706,7 +684,6 @@ def test_update_student_submission_file_rejects_stale_mtime(tmp_path: Path) -> N
     stale_mtime = file_mtime_ns(submission_file)
     assert stale_mtime is not None
 
-    # Another writer touches the file after we recorded its mtime.
     os.utime(submission_file, ns=(stale_mtime + 1_000_000, stale_mtime + 1_000_000))
 
     with pytest.raises(ConcurrentModificationError):
@@ -727,7 +704,6 @@ def test_submission_files_provider_detects_external_submission_change(
         default_image_path=DEFAULT_IMAGE_PATH,
     )
 
-    # Simulate a second grader saving this submission after we loaded it.
     submission_file = (
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
@@ -755,8 +731,6 @@ def test_submission_files_provider_save_succeeds_after_reload(
         default_image_path=DEFAULT_IMAGE_PATH,
     )
 
-    # Two consecutive saves: the provider reloads (recapturing mtime) after
-    # each write, so the second save must not trip the concurrency guard.
     provider.save_question_grade(
         student_item_id="s1",
         question_id="q1",
@@ -837,8 +811,6 @@ def test_submission_files_provider_saves_question_comment_annotation(
 
     assert annotated_path == submissions_path / "annotated-pdfs" / "student.annotated.pdf"
     with fitz.open(annotated_path) as document:
-        # The total-score annotation is synced alongside the comment, so
-        # find the comment by its subject prefix instead of assuming order.
         comment_annots = [
             annot
             for annot in document[0].annots()
@@ -1296,7 +1268,6 @@ def test_build_consistency_report_flags_same_answer_different_grade(
 ) -> None:
     submissions_path = tmp_path / "student-submissions"
     submissions_path.mkdir()
-    # Two students give the same answer, graded differently → one conflict.
     _write_graded_submission(
         submissions_path / "ann.submission.md",
         student_id="111111111",
@@ -1308,7 +1279,7 @@ def test_build_consistency_report_flags_same_answer_different_grade(
         submissions_path / "bob.submission.md",
         student_id="222222222",
         student_name="Bob Lee",
-        response="paris.",  # same answer up to cosmetics
+        response="paris.",
         points=30,
     )
 
@@ -1327,13 +1298,10 @@ def test_build_consistency_report_flags_same_answer_different_grade(
     assert item.member_count == 2
     assert {v.points_awarded for v in item.variants} == {50, 30}
 
-    # Every member is bound to a real nav id the grade screen opens by, and the
-    # id resolves back to the submission whose answer produced that grade.
     members = [m for variant in item.variants for m in variant.members]
     assert {m.student_item_id for m in members} == {"s1", "s2"}
     assert all(m.is_navigable for m in members)
     by_item_id = {m.student_item_id: m for m in members}
-    # ann (111…) sorts first → s1 and holds the 50-pt answer; bob → s2, 30 pts.
     assert by_item_id["s1"].student_id == "111111111"
     assert by_item_id["s2"].student_id == "222222222"
 
@@ -1341,11 +1309,6 @@ def test_build_consistency_report_flags_same_answer_different_grade(
 def _write_submission_without_possible_points(
     path: Path, *, name: str, student_id: str, points: float
 ) -> None:
-    """A submission with Points filled but Possible points left blank.
-
-    Mirrors real extractions, where the point value lives in the QA file, not
-    the submission — the case the provider's QA-points override handles.
-    """
     path.write_text(
         "\n".join(
             [
@@ -1378,7 +1341,7 @@ def test_build_item_analysis_report_uses_qa_points_for_difficulty(
     tmp_path: Path,
 ) -> None:
     qa_path = tmp_path / "qa.md"
-    _write_simple_qa(qa_path)  # q1 is worth 10 points
+    _write_simple_qa(qa_path)
     submissions_path = tmp_path / "student-submissions"
     submissions_path.mkdir()
     _write_submission_without_possible_points(
@@ -1398,12 +1361,7 @@ def test_build_item_analysis_report_uses_qa_points_for_difficulty(
     assert report.class_size == 2
     (item,) = report.items
     assert item.question_id == "q1"
-    # Difficulty resolves from the QA file's 10 points even though the
-    # submissions left "Possible points" blank: (10 + 0) / 2 / 10 == 0.5.
     assert item.difficulty == 0.5
-
-
-# --- Per-section item analysis --------------------------------------------------
 
 
 def _write_sectioned_submission(
@@ -1440,7 +1398,7 @@ def _write_sectioned_submission(
 
 def _sectioned_provider(tmp_path: Path) -> SubmissionFilesProvider:
     qa_path = tmp_path / "qa.md"
-    _write_simple_qa(qa_path)  # q1 worth 10 points
+    _write_simple_qa(qa_path)
     subs = tmp_path / "student-submissions"
     subs.mkdir()
     _write_sectioned_submission(
@@ -1494,18 +1452,12 @@ def test_item_analysis_scoped_to_section(tmp_path: Path) -> None:
     assert tth.class_size == 1
 
 
-# --------------------------------------------------------------------------- #
-# Whole-page context (the grade screen's `w` view)
-# --------------------------------------------------------------------------- #
-
-
 def _page_context_fixture(
     tmp_path: Path,
     *,
     pages: int,
     extra_pages_frontmatter: str = "",
 ) -> SubmissionFilesProvider:
-    """A one-question submission whose scan has `pages` pages, only page 1 cropped."""
     qa_path = tmp_path / "qa.md"
     _write_simple_qa(qa_path)
     split_dir = tmp_path / "split-submissions"
@@ -1542,13 +1494,10 @@ def test_page_context_starts_with_the_question_source_page(tmp_path: Path) -> No
 
     assert seed.source_pdf_path.endswith("student.pdf")
     assert [(e.page_number, e.kind) for e in seed.page_context] == [(1, "response")]
-    # The crop's own bbox is what gets outlined on that page.
     assert seed.page_context[0].highlights == ((0.2, 0.3, 0.5, 0.2),)
 
 
 def test_uncovered_pages_are_offered_as_extra_work(tmp_path: Path) -> None:
-    # A 3-page scan where only page 1 was cropped: pages 2-3 are the student's
-    # "continued on back" work, invisible before this feature.
     provider = _page_context_fixture(tmp_path, pages=3)
     seed = provider.build_question_seeds(student_item_id="s1")[0]
 
@@ -1561,8 +1510,6 @@ def test_uncovered_pages_are_offered_as_extra_work(tmp_path: Path) -> None:
 
 
 def test_extra_pages_frontmatter_wins_over_inference(tmp_path: Path) -> None:
-    # The extractor recorded page 3 only (the splitter's --extra-work-pages
-    # verdict); page 2 is a template page nothing happened to be cropped from.
     provider = _page_context_fixture(
         tmp_path, pages=3, extra_pages_frontmatter="extra_pages: [3]"
     )
@@ -1575,7 +1522,6 @@ def test_extra_pages_frontmatter_wins_over_inference(tmp_path: Path) -> None:
 
 
 def test_extra_pages_are_clamped_to_the_pdf(tmp_path: Path) -> None:
-    # A stale record pointing past the end must not offer a page that can't render.
     provider = _page_context_fixture(
         tmp_path, pages=2, extra_pages_frontmatter="extra_pages: [2, 9]"
     )
@@ -1585,8 +1531,6 @@ def test_extra_pages_are_clamped_to_the_pdf(tmp_path: Path) -> None:
 
 
 def test_missing_source_pdf_yields_no_page_context(tmp_path: Path) -> None:
-    # Nothing to render from: the grade screen hides the toggle rather than
-    # offering a view that would always fail.
     qa_path = tmp_path / "qa.md"
     _write_simple_qa(qa_path)
     submissions_path = tmp_path / "student-submissions"
@@ -1603,9 +1547,6 @@ def test_missing_source_pdf_yields_no_page_context(tmp_path: Path) -> None:
     seed = provider.build_question_seeds(student_item_id="s1")[0]
     assert seed.page_context == ()
     assert seed.source_pdf_path == ""
-
-
-# --- Objective answer patterns (the similarity modal's `o` view) -----------
 
 
 def _write_mc_qa(path: Path, questions: int) -> None:
@@ -1682,7 +1623,6 @@ def _mc_cohort(tmp_path: Path, *, copier: bool = True) -> SubmissionFilesProvide
 
 
 def test_answer_pattern_report_binds_members_to_nav_ids(tmp_path) -> None:
-    """The audit is only useful if a flagged student can be opened in place."""
     provider = _mc_cohort(tmp_path)
 
     view = provider.build_answer_pattern_report()
@@ -1696,7 +1636,6 @@ def test_answer_pattern_report_binds_members_to_nav_ids(tmp_path) -> None:
 
 
 def test_answer_pattern_report_carries_its_own_scope(tmp_path) -> None:
-    """Findings without the comparison count behind them cannot be judged."""
     provider = _mc_cohort(tmp_path, copier=False)
 
     view = provider.build_answer_pattern_report()
@@ -1710,7 +1649,6 @@ def test_answer_pattern_report_carries_its_own_scope(tmp_path) -> None:
 
 
 def test_answer_pattern_report_needs_no_answer_key_argument() -> None:
-    """The TUI is the one front end that never has to be told where the key is."""
     provider = SubmissionFilesProvider(
         qa_file_path="samples/qa-multi.md",
         submissions_path="samples/cs146-quiz1/student-submissions",
@@ -1719,8 +1657,6 @@ def test_answer_pattern_report_needs_no_answer_key_argument() -> None:
 
     view = provider.build_answer_pattern_report()
 
-    # Two students and nothing marked wrong: the report exists but says it had
-    # nothing to analyze, which is not the same as a clean result.
     assert view.items == ()
     assert not view.analyzed
 
@@ -1728,12 +1664,6 @@ def test_answer_pattern_report_needs_no_answer_key_argument() -> None:
 def test_a_correction_records_the_reading_it_replaced_as_ground_truth(
     tmp_path: Path,
 ) -> None:
-    """The pipeline's only labelled data, collected at no cost to the grader.
-
-    `transcribe-eval` measures transcription accuracy from exactly this pair, so
-    the `old` payload has to carry the machine's confidence and reader and not
-    only its words.
-    """
     submissions_path = _copy_sample_submissions(tmp_path)
     markdown_path = (
         submissions_path / "submission-0001" / "submission-0001.submission.md"
@@ -1743,7 +1673,6 @@ def test_a_correction_records_the_reading_it_replaced_as_ground_truth(
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
-    # Give the answer a machine reading to be corrected.
     update_student_submission_file(
         markdown_path,
         StudentSubmissionGradeUpdate(
@@ -1774,7 +1703,6 @@ def test_a_correction_records_the_reading_it_replaced_as_ground_truth(
 
 
 def test_undoing_a_correction_restores_the_whole_reading(tmp_path: Path) -> None:
-    """Words, confidence and reader move together, or the file tells a lie."""
     submissions_path = _copy_sample_submissions(tmp_path)
     markdown_path = (
         submissions_path / "submission-0001" / "submission-0001.submission.md"
@@ -1798,7 +1726,6 @@ def test_undoing_a_correction_restores_the_whole_reading(tmp_path: Path) -> None
     provider.save_question_transcription(
         student_item_id="s1", question_id="q1", response_text="human reading"
     )
-    # The undo path: hand back the previous reading exactly as it was.
     provider.save_question_transcription(
         student_item_id="s1",
         question_id="q1",
@@ -1810,8 +1737,6 @@ def test_undoing_a_correction_restores_the_whole_reading(tmp_path: Path) -> None
     saved = load_student_submission_markdown(markdown_path)
     assert saved.questions[0].response_text == "model reading"
     assert saved.questions[0].response_source == "vision-model"
-    # A model reading has no measured confidence: the correction's 100 must not
-    # survive next to words the model produced.
     assert saved.questions[0].response_confidence is None
 
 
@@ -1824,8 +1749,6 @@ def test_review_items_include_grades_awarded_before_a_rubric_edit(
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
-    # The journal files a grade under the student's real id, which is what
-    # `detect_rubric_drift` keys on and what the provider maps back to "s1".
     student_id = load_student_submission_markdown(
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     ).student_id
@@ -1859,22 +1782,14 @@ def test_review_items_include_grades_awarded_before_a_rubric_edit(
 
     assert len(stale) == 1
     assert stale[0].question_id == "q1"
-    # Bound to a nav id, so the review modal can route straight to the answer.
     assert stale[0].student_item_id == "s1"
-    # ...and the release gate reads the same finding.
     readiness = provider.build_readiness_report()
     assert any(
         issue.kind.value == "stale_rubric_grades" for issue in readiness.issues
     )
 
 
-# --------------------------------------------------------------------------- #
-# Background extraction fold-in (`load_new_submissions`, `core/submissions/watch.py`)
-# --------------------------------------------------------------------------- #
-
-
 def _write_nested_submission(submissions_path: Path, key: str, *, name: str) -> None:
-    """Write a submission the way the extractor lays it out: <key>/<key>.submission.md."""
     submission_dir = submissions_path / key
     submission_dir.mkdir(parents=True, exist_ok=True)
     _write_simple_submission(submission_dir / f"{key}.submission.md", name=name)
@@ -1904,7 +1819,6 @@ def test_load_new_submissions_appends_only_new_submissions(tmp_path: Path) -> No
         "Student 2",
     ]
 
-    # Calling it again with the same key is a no-op — already loaded.
     again = provider.load_new_submissions(["student-2"])
     assert again.added == ()
     assert [s.full_name for s in provider.list_students(1)] == [
@@ -1916,9 +1830,6 @@ def test_load_new_submissions_appends_only_new_submissions(tmp_path: Path) -> No
 def test_load_new_submissions_leaves_existing_recorded_mtimes_untouched(
     tmp_path: Path,
 ) -> None:
-    """The whole point of the incremental path: an untouched submission's
-    recorded mtime must not change, or the next save on it trips the
-    "changed on disk" concurrency guard for no reason (`core/concurrency.py`)."""
     qa_path = tmp_path / "qa.md"
     _write_simple_qa(qa_path)
     submissions_path = tmp_path / "submissions"
@@ -1936,14 +1847,9 @@ def test_load_new_submissions_leaves_existing_recorded_mtimes_untouched(
     _write_nested_submission(submissions_path, "student-2", name="Student 2")
     provider.load_new_submissions(["student-2"])
 
-    # The already-loaded submission is the exact same object — never
-    # re-read, re-parsed, or re-stat'd — and its recorded mtime is identical.
     assert provider._submissions[0] is original_object
     assert provider._submissions[0].mtime_ns == original_mtime
 
-    # And a save on it still works: a wrongly-refreshed mtime would make this
-    # raise `ConcurrentModificationError` even though nothing external
-    # touched the file.
     provider.save_question_grade(
         student_item_id="s1",
         question_id="q1",
@@ -1954,8 +1860,6 @@ def test_load_new_submissions_leaves_existing_recorded_mtimes_untouched(
 
 
 def test_load_new_submissions_ignores_a_key_with_no_file_yet(tmp_path: Path) -> None:
-    """A manifest key with nothing on disk yet (the watcher's own next poll
-    will bring it back) must not be treated as "loaded" or crash the fold-in."""
     qa_path = tmp_path / "qa.md"
     _write_simple_qa(qa_path)
     submissions_path = tmp_path / "submissions"
@@ -1968,15 +1872,11 @@ def test_load_new_submissions_ignores_a_key_with_no_file_yet(tmp_path: Path) -> 
         default_image_path=DEFAULT_IMAGE_PATH,
     )
     result = provider.load_new_submissions(["student-2"])
-    assert result == provider.load_new_submissions([])  # both empty
+    assert result == provider.load_new_submissions([])
     assert [s.full_name for s in provider.list_students(1)] == ["Student 1"]
 
 
 def _write_multi_version_qa(qa_path: Path) -> None:
-    """Version A has one question; Version B has two — genuinely different
-    question-id sets, unlike the single-question-per-version QA used
-    elsewhere in this file (where both versions happen to auto-number to
-    the same "q1")."""
     qa_path.write_text(
         """---
 title: Quiz
@@ -2026,8 +1926,6 @@ def test_load_new_submissions_skips_a_mismatched_question_set_instead_of_raising
     )
     assert [s.full_name for s in provider.list_students(1)] == ["Student A"]
 
-    # Version B has two questions where the cohort's version (A) has one —
-    # a real question-set mismatch, not just a relabeling.
     _write_nested_submission(submissions_path, "student-b", name="Student B")
     (submissions_path / "student-b" / "student-b.submission.md").write_text(
         (submissions_path / "student-b" / "student-b.submission.md")
@@ -2039,7 +1937,6 @@ def test_load_new_submissions_skips_a_mismatched_question_set_instead_of_raising
 
     assert result.added == ()
     assert result.skipped == ("Student B",)
-    # The session keeps going on everyone else — not torn down by one file.
     assert [s.full_name for s in provider.list_students(1)] == ["Student A"]
 
 
@@ -2062,18 +1959,12 @@ def test_empty_folder_message_names_a_wrong_path_when_extraction_never_ran(
 def test_empty_folder_message_says_extraction_in_progress_when_manifest_is_live(
     tmp_path: Path,
 ) -> None:
-    """Opening a folder mid-extraction (someone else's run, or a restarted
-    app) must not read as "you gave me the wrong folder" — see
-    `SubmissionFilesProvider._empty_folder_message`."""
     from opengrader.core.submissions.manifest import ExtractionRecord, append_record
 
     qa_path = tmp_path / "qa.md"
     _write_simple_qa(qa_path)
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    # A manifest with a record — recently written, so it "appears active" —
-    # but nothing has landed as a `*.submission.md` in the top-level glob yet
-    # (imagine the very first submission is still a few files away).
     append_record(
         output_dir,
         ExtractionRecord(
@@ -2092,18 +1983,7 @@ def test_empty_folder_message_says_extraction_in_progress_when_manifest_is_live(
         )
 
 
-# --------------------------------------------------------------------------- #
-# Report cache
-# --------------------------------------------------------------------------- #
-
-
 def _spy(monkeypatch: pytest.MonkeyPatch, name: str) -> list[int]:
-    """Wrap a `core` engine function the provider imported by name, counting calls.
-
-    Patches the name as it lives in `submission_files_provider`'s own module
-    namespace (`from opengrader.core... import build_x`), which is the copy
-    the provider actually calls — patching the origin module wouldn't be seen.
-    """
     import opengrader.tui.data.submission_files_provider as provider_module
 
     calls: list[int] = []
@@ -2164,7 +2044,7 @@ def test_item_analysis_report_is_memoized_until_a_save(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     qa_path = tmp_path / "qa.md"
-    _write_simple_qa(qa_path)  # q1 worth 10 points
+    _write_simple_qa(qa_path)
     submissions_path = tmp_path / "student-submissions"
     submissions_path.mkdir()
     _write_submission_without_possible_points(
@@ -2200,8 +2080,6 @@ def test_item_analysis_report_is_memoized_until_a_save(
 def test_item_analysis_section_argument_is_not_confused_with_unscoped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A section-scoped call must never be served the all-sections report
-    (or vice versa) — the easiest way to get the cache key wrong."""
     provider = _sectioned_provider(tmp_path)
     calls = _spy(monkeypatch, "build_item_analysis")
 
@@ -2214,8 +2092,6 @@ def test_item_analysis_section_argument_is_not_confused_with_unscoped(
     assert mw_only.class_size == 2
     assert everyone_again == everyone
     assert mw_again == mw_only
-    # Two distinct cache entries, each computed once — not four recomputes,
-    # and critically not one entry stomping the other.
     assert len(calls) == 2
 
 
@@ -2263,9 +2139,6 @@ def test_outcome_mastery_section_argument_is_not_confused_with_unscoped(
     assert everyone is not None and mw_only is not None
     assert everyone.class_size == 3
     assert mw_only.class_size == 2
-    # Calling the unscoped report again must still see all three students,
-    # not the two-student report a prior scoped call might have cached under
-    # the same key.
     assert provider.build_outcome_mastery_report().class_size == 3
 
 
@@ -2326,8 +2199,6 @@ def test_reload_all_invalidates_the_similarity_report(
     provider.build_similarity_report()
     assert len(calls) == 1
 
-    # Something outside this session rewrites a submission file directly
-    # (e.g. `grade-merge`) without going through any provider save path.
     _write_graded_submission(
         submissions_path / "bob.submission.md",
         student_id="222222222",
@@ -2343,14 +2214,6 @@ def test_reload_all_invalidates_the_similarity_report(
 def test_review_queue_notices_another_process_writing_the_journal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A journal write is the one report input no *submission* write accompanies.
-
-    A second grader on a shared folder, `grade-restore` or `grade-merge apply`
-    appends its own session file and touches nothing else. The review queue's
-    rubric-drift flags are read out of that journal, so the cached report has
-    to be thrown away — which is what putting `journal_fingerprint` in the
-    cohort fingerprint buys.
-    """
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
         qa_file_path="samples/qa-multi.md",
@@ -2364,8 +2227,6 @@ def test_review_queue_notices_another_process_writing_the_journal(
     provider.build_review_items()
     assert len(calls) == after_first, "a repeat call must be served from the cache"
 
-    # Another process grades: a whole new session file, written directly, with
-    # no provider save path and no submission file touched.
     GradeJournal(
         resolve_history_dir(submissions_path), actor="ta_other", session_id="other"
     ).append(

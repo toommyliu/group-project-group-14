@@ -13,13 +13,9 @@ from opengrader.tui.data.stub_question_content import StubQuestionContent
 class StubDataProvider:
     def __init__(self, default_image_path: str) -> None:
         self._question_content = StubQuestionContent(default_image_path)
-        # Demo mode has no submissions folder to persist to, so the reusable
-        # comment library lives in memory for the session.
         self._comment_library = CommentLibrary()
         self._claims: list[WorkClaim] = []
 
-    # Demo data has no assignment folder to store claims in, so they live for
-    # the session only — enough for the modal to work against stub data.
     def grader_actor(self) -> str:
         return "demo"
 

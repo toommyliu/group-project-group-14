@@ -1,19 +1,3 @@
-"""Modal reference for the plain-text assignment file format, opened with t on
-the start-up page.
-
-Shows the handful of syntax rules plus three ready-to-use templates — a short
-one to start from, a full one exercising every supported question type, and an
-all-multiple-choice one for the bubble-sheet workflow. The teacher copies a
-template (button or mouse selection), pastes it into a text file, edits it, and
-loads it as the answer-key source in step 3.
-
-The templates below are the single on-screen source of truth for the format;
-`tests/unit/tui/test_format_guide_screen.py` parses all three through the real
-`text2qti` pipeline so they can never silently drift from what the parser
-accepts — and checks that the bubble-sheet one really is entirely multiple
-choice, since anything else in it would be dropped from a printed sheet.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -28,7 +12,6 @@ from textual.widgets import Button, Select, Static
 
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
-# One row per syntax marker: (marker shown in the left column, what it does).
 _SYNTAX_ROWS: list[tuple[str, str]] = [
     ("1.  2.  3.", "Start each question with its number. Number them in order."),
     ("a)  *b)", "Multiple choice — list options a) b) c); mark the correct one with a *."),
@@ -46,7 +29,6 @@ _SYNTAX_ROWS: list[tuple[str, str]] = [
     ("Quiz title:", 'Optional header (the keyword is literally "Quiz" for any assignment).'),
 ]
 
-# A short starter to fill in — one of the three most common question types.
 SIMPLE_TEMPLATE = """\
 Quiz title: Chapter 3 Homework
 
@@ -62,8 +44,6 @@ c) Rome
 * photosynthesis
 """
 
-# A full example exercising every supported type, per-question points, and the
-# optional title/description header.
 COMPLEX_TEMPLATE = """\
 Quiz title: Biology Midterm
 Quiz description: Answer every question. Show your work where asked.
@@ -96,11 +76,6 @@ Points possible: 5
 ____
 """
 
-# A starter that tags questions with the learning outcomes they measure — the
-# evidence a programme or accreditation review asks for. Kept as its own
-# template rather than folded into the others because outcomes are entirely
-# optional: most assignments never use them, and a reader comparing the Simple
-# and Full templates should not have to mentally strip a concept out of both.
 OUTCOMES_TEMPLATE = """\
 Quiz title: CS 146 Quiz 3 — Sorting
 
@@ -137,11 +112,6 @@ Points possible: 1
 ____
 """
 
-# An all-multiple-choice starter, for the bubble-sheet workflow. Kept separate
-# from the other two on purpose: a bubble sheet can only carry multiple-choice
-# questions, so a teacher who starts from the "Full" template and generates a
-# sheet gets a warning that half their exam was left off. Starting here instead
-# means every question they write will fit on the sheet.
 BUBBLE_TEMPLATE = """\
 Quiz title: Chapter 5 Quiz
 Quiz description: Fill in one circle per question.
@@ -184,8 +154,6 @@ d) Radix sort
 
 
 class FormatGuideScreen(ModalScreen[None]):
-    """The assignment-file format guide + copy-paste templates, in the card style."""
-
     DEFAULT_CSS = """
     FormatGuideScreen {
         align: center middle;
@@ -250,7 +218,6 @@ class FormatGuideScreen(ModalScreen[None]):
         margin-top: 1;
     }
 
-    /* Template blocks: a bordered, selectable code panel + a Copy button. */
     FormatGuideScreen .template-card {
         width: 100%;
         height: auto;
@@ -275,7 +242,6 @@ class FormatGuideScreen(ModalScreen[None]):
         padding-bottom: 1;
     }
 
-    /* Save-a-starter-file footer: template picker + Save button. */
     FormatGuideScreen #format-save-row {
         height: auto;
         align-vertical: middle;
@@ -433,7 +399,6 @@ class FormatGuideScreen(ModalScreen[None]):
         self.dismiss(None)
 
     def _save_template(self) -> None:
-        """Pick a directory, then write the chosen template there as a .md file."""
         choice = self.query_one("#template-choice", Select).value
         template = {
             "full": COMPLEX_TEMPLATE,
@@ -467,7 +432,6 @@ class FormatGuideScreen(ModalScreen[None]):
 
     @staticmethod
     def _unique_path(path: Path) -> Path:
-        """Never clobber an existing file — suffix -1, -2, … until free."""
         if not path.exists():
             return path
         counter = 1
@@ -478,8 +442,6 @@ class FormatGuideScreen(ModalScreen[None]):
             counter += 1
 
     def _copy(self, text: str, label: str) -> None:
-        # OSC 52 copy — works in the terminals Opengrader targets (Ghostty,
-        # iTerm2, WezTerm). If a terminal ignores it, the text stays selectable.
         self.app.copy_to_clipboard(text)
         self.app.notify(
             f"{label} template copied. Paste it into a .txt or .md file.",

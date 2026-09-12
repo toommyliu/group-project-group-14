@@ -1,11 +1,3 @@
-"""Modal grade-change audit log, opened with h.
-
-A read-only pop-up showing the durable history journal — who changed which
-grade, from what to what, when — merged across every grading session, newest
-last. This is the accountability surface for multi-grader work. esc or h
-closes it.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -20,8 +12,6 @@ from opengrader.tui.formatting import format_history_row
 
 
 class GradeHistoryScreen(ModalScreen[None]):
-    """Read-only, newest-last list of recorded grade changes."""
-
     DEFAULT_CSS = """
     GradeHistoryScreen {
         align: center middle;
@@ -76,7 +66,6 @@ class GradeHistoryScreen(ModalScreen[None]):
         *,
         teacher_mode: bool,
     ) -> None:
-        # Newest first reads best for a "what just happened" audit view.
         self._entries = list(reversed(entries))
         self._teacher_mode = teacher_mode
         super().__init__()
@@ -124,7 +113,6 @@ class GradeHistoryScreen(ModalScreen[None]):
 
     @on(ListView.Selected)
     def _swallow_selection(self, event: ListView.Selected) -> None:
-        # Read-only view: selecting a row does nothing but must not bubble.
         event.stop()
 
     @on(Button.Pressed, "#history-close")

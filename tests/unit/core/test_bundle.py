@@ -1,5 +1,3 @@
-"""Tests for the return-bundle export engine (core/export/bundle.py)."""
-
 from __future__ import annotations
 
 import csv
@@ -24,7 +22,6 @@ from opengrader.core.submissions import (
 
 
 def _make_source_pdf(path: Path) -> None:
-    """Write a minimal one-page PDF to stand in for a scanned submission."""
     document = fitz.open()
     page = document.new_page(width=612, height=792)
     page.insert_text((72, 72), "Exam page")
@@ -54,7 +51,6 @@ def _question(
 
 
 def _write_cohort(directory: Path) -> None:
-    """Two graded students, each with a real source PDF beside the .submission.md."""
     for index, (name, sid) in enumerate(
         [("Tommy Liu", "111"), ("Andy Cortes", "222")], start=1
     ):
@@ -126,20 +122,17 @@ def test_build_all_produces_every_section(tmp_path: Path) -> None:
     assert result.bundle_dir.is_dir()
     assert result.warnings == ()
 
-    # Gradebook CSV.
     assert result.gradebook_path == result.bundle_dir / "gradebook" / "gradebook.csv"
     rows = list(csv.reader(result.gradebook_path.read_text().splitlines()))
     assert rows[0] == ["student_id", "student_name", "Q1", "Q2", "total", "possible"]
     assert {row[0] for row in rows[1:]} == {"111", "222"}
 
-    # Student PDFs — one per student, each a valid multi-page PDF (scan + summary).
     assert result.student_count == 2
     for pdf_path in result.student_pdf_paths:
         assert pdf_path.parent == result.bundle_dir / "student-pdfs"
         with fitz.open(pdf_path) as doc:
-            assert doc.page_count >= 2  # original page + appended summary
+            assert doc.page_count >= 2
 
-    # Analysis report + manifest.
     assert result.analysis_path == result.bundle_dir / "analysis" / "analysis-report.pdf"
     assert result.analysis_path.exists()
     assert (result.bundle_dir / "README.txt").exists()
@@ -174,7 +167,7 @@ def test_anonymous_names_pdfs_by_id(tmp_path: Path) -> None:
     )
 
     stems = sorted(p.stem for p in result.student_pdf_paths)
-    assert stems == ["111", "222"]  # ids only, no names in filenames
+    assert stems == ["111", "222"]
 
 
 def test_missing_source_pdf_becomes_a_warning(tmp_path: Path) -> None:
@@ -218,7 +211,6 @@ def test_no_submissions_is_rejected(tmp_path: Path) -> None:
 
 
 def test_the_analysis_pdf_gains_an_outcomes_section(tmp_path) -> None:  # noqa: ANN001
-    """The accreditation page: present when the answer key tags outcomes."""
     import fitz
 
     from opengrader.core.analytics import build_outcome_report
@@ -270,7 +262,6 @@ def test_the_analysis_pdf_gains_an_outcomes_section(tmp_path) -> None:  # noqa: 
         text = "".join(page.get_text() for page in document)
     assert "Learning outcomes" in text
     assert "CLO1" in text
-    # Coverage is printed beside mastery so the number can't be over-read.
     assert "outcome tag" in text
 
 

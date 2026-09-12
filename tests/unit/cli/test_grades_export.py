@@ -64,7 +64,7 @@ def _write_submissions(directory: Path) -> None:
         student_id="s2",
         questions=[
             _question("q1", 10, 0, ("Incorrect (+0)",)),
-            _question("q2", 10, None),  # ungraded
+            _question("q2", 10, None),
         ],
     )
 
@@ -79,7 +79,6 @@ def test_grades_export_writes_gradebook_csv(tmp_path: Path) -> None:
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     assert rows[0] == ["student_id", "student_name", "Q1", "Q2", "total", "possible"]
-    # Rows follow filename order: andy.submission.md before tommy.submission.md.
     assert rows[1] == ["s2", "Andy Cortes", "0", "", "0", "20"]
     assert rows[2] == ["s1", "Tommy Liu", "10", "4", "14", "20"]
 
@@ -94,7 +93,6 @@ def test_grades_export_ungraded_cell_is_blank(tmp_path: Path) -> None:
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     andy = rows[1]
-    # Andy's q2 is ungraded → blank cell, and it doesn't inflate the total.
     assert andy[3] == ""
     assert andy[4] == "0"
 
@@ -114,14 +112,12 @@ def test_grades_export_adds_curved_column_when_curve_active(tmp_path: Path) -> N
     assert rows[0] == [
         "student_id", "student_name", "Q1", "Q2", "total", "curved", "possible"
     ]
-    # Tommy: raw 14 → curved 19 (bonus +5), capped at 20 possible.
     tommy = rows[2]
-    assert tommy[4] == "14"   # raw total
-    assert tommy[5] == "19"   # curved
+    assert tommy[4] == "14"
+    assert tommy[5] == "19"
 
 
 def test_grades_export_neutralizes_csv_formula_injection(tmp_path: Path) -> None:
-    """An OCR'd name that looks like a spreadsheet formula is escaped on export."""
     submissions = tmp_path / "subs"
     submissions.mkdir()
     _write_submission(
@@ -135,11 +131,8 @@ def test_grades_export_neutralizes_csv_formula_injection(tmp_path: Path) -> None
     run_cli(["--submissions", str(submissions), "--output", str(output)])
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
-    # The dangerous cells are prefixed with a single quote so a spreadsheet
-    # renders them as literal text instead of evaluating a formula.
     assert rows[1][0] == "'@SUM(A1:A9)"
     assert rows[1][1] == '\'=HYPERLINK("http://evil","click")'
-    # Numeric columns are untouched.
     assert rows[1][2] == "10"
 
 
@@ -169,10 +162,8 @@ def test_grades_export_stdout_also_escapes_formulas(tmp_path: Path, capsys) -> N
         ("-cmd|'/c calc'", "'-cmd|'/c calc'"),
         ("\ttab", "'\ttab"),
         ("\rcr", "'\rcr"),
-        # Genuine signed numbers stay numeric (not text).
         ("-5", "-5"),
         ("+3.0", "+3.0"),
-        # Ordinary values pass through untouched.
         ("Tommy Liu", "Tommy Liu"),
         ("s1", "s1"),
         ("", ""),
@@ -192,9 +183,6 @@ def test_grades_export_errors_on_empty_directory(tmp_path: Path, capsys) -> None
         run_cli(["--submissions", str(empty)])
     assert exc.value.code == 1
     assert "no *.submission.md" in capsys.readouterr().err
-
-
-# ── learning-outcome columns (--solutions) ──────────────────────────────────
 
 
 _OUTCOME_QA = """---
@@ -264,7 +252,6 @@ def test_outcome_columns_appear_only_with_solutions(tmp_path, capsys) -> None:  
 
 
 def test_outcome_columns_come_after_the_totals(tmp_path, capsys) -> None:  # noqa: ANN001
-    """Appended rather than interleaved, so an existing LMS import keeps working."""
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": 5}})
     grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
     header = capsys.readouterr().out.splitlines()[0].split(",")
@@ -276,25 +263,20 @@ def test_outcome_cells_are_percentages_of_the_tagged_points(tmp_path, capsys) ->
     grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
     rows = capsys.readouterr().out.splitlines()
     header, row = rows[0].split(","), rows[1].split(",")
-    # CLO1 spans q1+q2 = 14/20; CLO2 is q2 alone = 5/10.
     assert row[header.index("outcome:CLO1 %")] == "70.0"
     assert row[header.index("outcome:CLO2 %")] == "50.0"
 
 
 def test_an_ungraded_outcome_cell_is_blank_not_zero(tmp_path, capsys) -> None:  # noqa: ANN001
-    """Same rule as an ungraded question — a half-marked assignment must not
-    report a student as having scored nothing."""
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": None}})
     grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
     rows = capsys.readouterr().out.splitlines()
     header, row = rows[0].split(","), rows[1].split(",")
-    assert row[header.index("outcome:CLO1 %")] == "90.0"  # q1 only
-    assert row[header.index("outcome:CLO2 %")] == ""  # nothing graded
+    assert row[header.index("outcome:CLO1 %")] == "90.0"
+    assert row[header.index("outcome:CLO2 %")] == ""
 
 
 def test_an_untagged_answer_key_adds_no_columns(tmp_path, capsys) -> None:  # noqa: ANN001
-    """Passing --solutions for an untagged assignment is a no-op, not a pile of
-    empty columns."""
     from pathlib import Path
 
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": 5}})

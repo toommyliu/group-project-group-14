@@ -1,17 +1,3 @@
-"""Backup and integrity checks for the open cohort, from inside the TUI.
-
-Everything Opengrader keeps is a file in one folder and there is no server
-holding a second copy, so the two operations that matter are *record what is
-here* and *make a copy you have actually read back*. Both live here
-(`core/integrity.py`), on the setup screen's Helper Tools, because they are
-about the folder rather than about any answer in it.
-
-Restoring an archive is deliberately **not** here: it unpacks into a new
-directory, and a session pointed at the old one would carry on writing to the
-old one. That is a terminal job (``grade-backup restore``), and the hint says so
-rather than leaving the reader wondering where the button is.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -41,8 +27,6 @@ from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
 
 class BackupScreen(ModalScreen[None]):
-    """Record checksums, verify the folder, and write a verified archive."""
-
     DEFAULT_CSS = """
     BackupScreen {
         align: center middle;
@@ -86,11 +70,6 @@ class BackupScreen(ModalScreen[None]):
         margin-left: 1;
         margin-top: 1;
     }
-
-    /* The form scrolls, the result pane and the buttons do not. Without this
-       the dialog's content can grow past its own height once the passphrase
-       fields are revealed, and the buttons are then drawn *outside* the dialog
-       — where they look fine and cannot be clicked. */
     #backup-form {
         width: 100%;
         height: 1fr;
@@ -112,9 +91,6 @@ class BackupScreen(ModalScreen[None]):
         padding: 0;
         margin-top: 1;
     }
-
-    /* Explicit auto height: a bare Vertical defaults to 1fr and would stretch
-       to fill the dialog, pushing the log and the buttons off-screen. */
     #backup-archive-area, #backup-passphrase-area {
         width: 100%;
         height: auto;
@@ -125,11 +101,6 @@ class BackupScreen(ModalScreen[None]):
         height: auto;
         color: $text-muted;
     }
-
-    /* Declared on the screen, not only on the app (`tui.py`), so a disclosure
-       area really collapses wherever this modal is hosted — including in tests,
-       where a bare host app supplies no CSS and the "hidden" rows would take up
-       space and push the buttons off-screen. */
     .hidden {
         display: none;
     }
@@ -160,12 +131,6 @@ class BackupScreen(ModalScreen[None]):
         self._initial_archive = archive_path
 
     def _default_archive(self) -> Path:
-        """Where the archive lands when the location box is left alone.
-
-        An encrypted archive gets a ``.enc`` name, so the file says out loud
-        that it needs a passphrase — the person who finds it in two years is
-        usually not the person who wrote it.
-        """
         return default_backup_path(
             self._submissions_path or ".", encrypted=self._encrypting()
         )
@@ -174,13 +139,7 @@ class BackupScreen(ModalScreen[None]):
         return self.is_mounted and self.query_one("#backup-encrypt", Checkbox).value
 
     def _resolved_passphrase(self, *, confirm: bool) -> str | None:
-        """The passphrase to use: "" for none, None when it is unusable.
-
-        Validated on the UI thread so a mismatch comes back as a notification
-        immediately, rather than as a failure after a long archive has been
-        written. ``confirm`` is only asked when *creating* something, since a
-        typo there is what cannot be recovered from.
-        """
+        """Empty string means no passphrase; None means invalid input."""
         if not self._encrypting():
             return ""
         first = self.query_one("#backup-passphrase", Input).value
@@ -198,13 +157,6 @@ class BackupScreen(ModalScreen[None]):
         return "" if self._initial_archive else "hidden"
 
     def _archive_hint(self) -> str:
-        """One muted line naming the file that will actually be written.
-
-        It also says where the *checksums* go, because that is the question a
-        reader of this dialog has and the answer is different: a snapshot is a
-        fingerprint of the folder and only means anything beside it, so it is
-        not relocatable at all.
-        """
         target = str(self._resolved_archive())
         return (
             f"[dim]The archive will be written to {target}\n"
@@ -214,11 +166,6 @@ class BackupScreen(ModalScreen[None]):
         )
 
     def _resolved_archive(self) -> Path:
-        """The archive path to actually use.
-
-        With the box unchecked the field is ignored **entirely**, so a path left
-        behind in a hidden input can never silently apply to a later run.
-        """
         if self.is_mounted and self.query_one("#backup-custom-archive", Checkbox).value:
             typed = self.query_one("#backup-archive", Input).value.strip()
             if typed:
@@ -248,9 +195,6 @@ class BackupScreen(ModalScreen[None]):
                     f"Folder: {self._submissions_path or '(none open)'}",
                     id="backup-folder",
                 )
-                # Same disclosure pattern as the extractor's advanced options: a
-                # sensible default, and the field only appears for someone who
-                # wants a different answer.
                 yield Checkbox(
                     "Save the archive somewhere else",
                     value=bool(self._initial_archive),
@@ -267,8 +211,6 @@ class BackupScreen(ModalScreen[None]):
                             id="backup-archive",
                         )
                         yield Button("Browse", id="backup-browse", compact=True)
-                # A backup holds every name, id and scan there is, and it is the one
-                # artifact that routinely leaves this machine on a stick or a drive.
                 yield Checkbox(
                     "Protect the archive with a passphrase",
                     value=False,
@@ -302,9 +244,6 @@ class BackupScreen(ModalScreen[None]):
         snapshot = read_snapshot(self._submissions_path) if self._submissions_path else None
         log = self.query_one("#backup-log", RichLog)
         if snapshot is None:
-            # Said up front rather than as an error later: "Verify" has nothing
-            # to compare against until checksums exist, and the fix is one click
-            # away in this same dialog.
             log.write(
                 "No checksums recorded for this folder yet.\n"
                 "Press 'Record checksums' to take the first one — then 'Verify "
@@ -326,8 +265,6 @@ class BackupScreen(ModalScreen[None]):
     def _on_encrypt_toggled(self, event: Checkbox.Changed) -> None:
         event.stop()
         self.query_one("#backup-passphrase-area").set_class(not event.value, "hidden")
-        # The default archive name gains or loses its .enc, so the line naming
-        # the file that will be written has to be redrawn with it.
         self._refresh_archive_hint()
         if event.value:
             self.query_one("#backup-passphrase", Input).focus()
@@ -353,9 +290,6 @@ class BackupScreen(ModalScreen[None]):
         def _apply(path: Path | None) -> None:
             if path is None:
                 return
-            # A directory choice is completed into a filename, since the field
-            # wants an archive and the picker cannot confirm a file that does
-            # not exist yet.
             chosen = path / "opengrader-backup.zip" if path.is_dir() else path
             target.value = str(chosen)
             target.cursor_position = len(target.value)
@@ -481,9 +415,6 @@ class BackupScreen(ModalScreen[None]):
     @on(Button.Pressed, "#backup-check")
     def _on_check(self, event: Button.Pressed) -> None:
         event.stop()
-        # Checking re-reads an archive that already exists, so — unlike writing
-        # one — an unchecked box has nothing sensible to fall back to: today's
-        # default name is a file that was never created.
         archive = self._resolved_archive()
         if not archive.exists():
             self.app.notify(
@@ -492,8 +423,6 @@ class BackupScreen(ModalScreen[None]):
                 severity="error",
             )
             return
-        # Whether a passphrase is needed is read off the file, not off the
-        # checkbox: a year later nobody remembers which archives were encrypted.
         passphrase = ""
         if is_encrypted(archive):
             typed = self._resolved_passphrase(confirm=False)
@@ -538,7 +467,6 @@ class BackupScreen(ModalScreen[None]):
 
 
 def _format_report(report: IntegrityReport) -> str:
-    """Render a verify report: the headline, then only what needs attention."""
     lines = [
         f"Checksums recorded {report.snapshot_at}",
         summarize_report(report),
@@ -552,9 +480,6 @@ def _format_report(report: IntegrityReport) -> str:
     lines.append(f"{len(concerning)} file(s) need attention:")
     lines += [f"  {finding.describe()}" for finding in concerning]
     if report.unexplained:
-        # The conclusion, not another list: these changed with nothing in the
-        # audit trail saying why, which is what the journal cross-reference is
-        # for in the first place.
         lines += [
             "",
             f"{len(report.unexplained)} of those changed with no grading "

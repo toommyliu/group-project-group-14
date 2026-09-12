@@ -129,11 +129,6 @@ class TabbedPane(Vertical):
         return [index for index, tab in enumerate(self._tabs) if not tab.hidden]
 
     def set_tab_hidden(self, tab_index: int, hidden: bool) -> None:
-        """Hide or reveal a tab.
-
-        Hidden tabs are dropped from the border title and refuse activation.
-        Hiding the active tab falls back to the first visible tab.
-        """
         if tab_index < 0 or tab_index >= len(self._tabs):
             return
         tab = self._tabs[tab_index]
@@ -230,8 +225,6 @@ class TabbedPane(Vertical):
 
         self._sync_chrome()
         self._sync_focus_class()
-        # TODO: might not be needed anymore?
-        # self.refresh(layout=True)
 
     def _sync_chrome(self) -> None:
         self.border_title = self._build_border_title()

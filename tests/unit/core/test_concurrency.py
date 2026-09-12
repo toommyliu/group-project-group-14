@@ -19,14 +19,14 @@ def test_check_unmodified_passes_for_matching_mtime(tmp_path: Path) -> None:
     path.write_text("x")
     mtime = file_mtime_ns(path)
 
-    check_unmodified(path, mtime)  # must not raise
+    check_unmodified(path, mtime)
 
 
 def test_check_unmodified_opts_out_when_expected_is_none(tmp_path: Path) -> None:
     path = tmp_path / "f.txt"
     path.write_text("x")
 
-    check_unmodified(path, None)  # None disables the guard
+    check_unmodified(path, None)
 
 
 def test_check_unmodified_raises_when_file_changed(tmp_path: Path) -> None:
@@ -35,7 +35,6 @@ def test_check_unmodified_raises_when_file_changed(tmp_path: Path) -> None:
     stale = file_mtime_ns(path)
     assert stale is not None
 
-    # Simulate another writer touching the file after we recorded its mtime.
     os.utime(path, ns=(stale + 1_000_000, stale + 1_000_000))
 
     with pytest.raises(ConcurrentModificationError):

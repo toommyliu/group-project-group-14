@@ -1,20 +1,4 @@
-"""How much of this assignment is actually distinct work to grade?
-
-Grouping is the biggest lever on grading time — students who wrote the same
-answer can be marked once — but nothing said *in advance* how much it would
-save, so an instructor deciding whether to grade question-major or hand the pile
-to two TAs was guessing. This reports it: per question, how many responses came
-in, how many *distinct* answers that is (the exact tier), and how many remain
-once near-identical answers are merged (the suggested tier).
-
-``--suggestions`` prints the proposed merges themselves, which is the same list
-the TUI's Unify view offers — reading it here first is a cheap way to sanity-
-check the threshold on a real cohort before grading against it.
-
-Strictly read-only: no grade, comment, annotation or journal entry is written.
-Nothing is ever merged by this tool — a merge is a proposal a grader accepts in
-the TUI, and this is the report about them.
-"""
+"""Report exact answer groups and proposed merges for an assignment."""
 
 from __future__ import annotations
 
@@ -55,12 +39,6 @@ examples:
 
 
 def _floor_percent(score: float) -> int:
-    """Render a similarity as a whole percent, rounding **down**.
-
-    The label reads "at least N% alike", so rounding up would print 100% for a
-    pair that is 99.5% alike — a claim of identical answers where there is a
-    real difference. Understating is the only safe direction here.
-    """
     return int(score * 100)
 
 
@@ -72,11 +50,6 @@ def _snippet(text: str, width: int = 68) -> str:
 
 
 def _ordered_question_ids(documents: list[StudentSubmissionDocument]) -> list[str]:
-    """Union of question ids in first-seen order (multi-version safe).
-
-    The same rule the gradebook export uses, so a cohort sitting two versions
-    reports every question rather than only the first student's.
-    """
     ordered: list[str] = []
     seen: set[str] = set()
     for document in documents:
@@ -90,7 +63,6 @@ def _ordered_question_ids(documents: list[StudentSubmissionDocument]) -> list[st
 def _groups_for_question(
     documents: list[StudentSubmissionDocument], question_id: str
 ) -> list[AnswerGroup]:
-    """Exact answer groups for one question, keyed by the student's own id."""
     responses: list[GroupableResponse] = []
     for document in documents:
         for question in document.questions:
@@ -125,13 +97,6 @@ def _print_effort_table(rows: list[GroupingEffort]) -> None:
 
 
 def _diff_text(reference: str, other: str) -> str:
-    """Mark how one answer differs from the answer that would be graded.
-
-    Words this answer adds are wrapped in ``{+ +}`` and words it omits in
-    ``{- -}``. A similarity score cannot tell a rewording from a reversal — an
-    inserted "not" scores 0.96 — so the difference has to be visible, not
-    inferred from two paragraphs printed one above the other.
-    """
     parts: list[str] = []
     for span in diff_answer_spans(reference, other):
         if span.kind == "added":

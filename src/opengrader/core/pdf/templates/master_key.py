@@ -1,13 +1,3 @@
-"""Master-key page for personalized QR templates.
-
-When ``generate-template`` builds a *personalized* batch (one QR-stamped sheet
-per roster student), the student sheets are deliberately anonymous — they print
-the student's **id**, never their name, so a grader handling a blank never sees
-who it belongs to. The teacher still needs to know which id is which student:
-that mapping is this master-key page, rendered as **page 1 of the batch** so the
-teacher keeps (and detaches) it before distributing the assignments.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -34,15 +24,6 @@ def draw_master_key_page(
     page_w: float = LETTER_W,
     page_h: float = LETTER_H,
 ) -> None:
-    """Append master-key page(s) mapping ``(student_id, name)`` to ``doc``.
-
-    Entries are printed in the order given (the caller sorts by name). Rows
-    overflow onto additional pages automatically so a large class still fits.
-    """
-    # Import lazily: fitz (PyMuPDF) is a heavy import and this module is on
-    # the TUI startup chain (reached while building the qa-file/setup
-    # screens), but master-key pages are only drawn for personalized batches
-    # — most sessions never call this function.
     import fitz
 
     from .draw import create_page, _draw_centered_text
@@ -52,8 +33,6 @@ def draw_master_key_page(
     name_col_x = content_x0 + 150
     bottom_limit = page_h - 48
 
-    # Use only the first line of a (possibly multi-line) QA title so the centered
-    # heading can't overflow the page edge.
     title_lines = [line.strip() for line in title.splitlines() if line.strip()]
     heading = title_lines[0] if title_lines else "Assignment"
 

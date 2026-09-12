@@ -1,11 +1,3 @@
-"""Work claims in the TUI: the filter, the annotations, and the modal.
-
-The engine is covered in ``tests/unit/core/test_claims.py``. What matters here
-is the promise the TUI makes on top of it — your queue stops pointing you at
-someone else's work — and the two ways that promise could go wrong: filtering so
-hard a grader gets stuck, or filtering silently.
-"""
-
 import asyncio
 from pathlib import Path
 
@@ -73,7 +65,6 @@ student_score: ""
 
 @pytest.fixture
 def workspace(tmp_path: Path):
-    """Four questions, three students — enough to split two ways."""
     (tmp_path / "qa.md").write_text(QA)
     submissions = tmp_path / "student-submissions"
     for index, (name, student_id) in enumerate(
@@ -97,7 +88,6 @@ def workspace(tmp_path: Path):
 def _app(workspace, actor: str = "me") -> TuiApp:
     qa_file, submissions = workspace
     app = TuiApp(qa_file_path=qa_file, submissions_path=submissions)
-    # Pin the identity rather than depending on whatever OS user runs the tests.
     app.data_provider.grader_actor = lambda: actor  # type: ignore[method-assign]
     return app
 
@@ -112,14 +102,8 @@ def _student(app: TuiApp) -> str:
     return app.workflow_state.selection.student_item_id
 
 
-# --------------------------------------------------------------------------- #
-# The filter
-# --------------------------------------------------------------------------- #
-
-
 async def _test_navigation_skips_another_graders_students(workspace) -> None:
     _qa, submissions = workspace
-    # bob takes the first two students on every question.
     claim_work(
         submissions, WorkSlice(student_ids=("id01", "id02")), actor="bob"
     )
@@ -127,18 +111,14 @@ async def _test_navigation_skips_another_graders_students(workspace) -> None:
     app = _app(workspace)
     async with app.run_test(size=(140, 45)) as pilot:
         await _open_grade_screen(app, pilot)
-        # The queue opens on the first student that is *not* bob's.
         assert _student(app) == "s3"
 
-        # ...and stepping back doesn't wander into his slice.
         await pilot.press("ctrl+k")
         await pilot.pause()
         assert _student(app) == "s3"
 
 
 async def _test_unclaimed_work_stays_available(workspace) -> None:
-    # The property that keeps a partial division usable: bob took two students,
-    # nobody took the third, so it belongs to whoever gets there.
     _qa, submissions = workspace
     claim_work(submissions, WorkSlice(student_ids=("id01",)), actor="bob")
 
@@ -150,11 +130,10 @@ async def _test_unclaimed_work_stays_available(workspace) -> None:
             await pilot.press("ctrl+j")
             await pilot.pause()
             seen.add(_student(app))
-        assert seen == {"s2", "s3"}  # s1 is bob's, the rest are open
+        assert seen == {"s2", "s3"}
 
 
 async def _test_an_undivided_assignment_is_untouched(workspace) -> None:
-    # No claims at all must behave exactly as it did before the feature existed.
     app = _app(workspace)
     async with app.run_test(size=(140, 45)) as pilot:
         await _open_grade_screen(app, pilot)
@@ -175,8 +154,6 @@ async def _test_your_own_claim_never_filters_you_out(workspace) -> None:
 
 
 async def _test_the_filter_announces_itself(workspace) -> None:
-    # A silent filter would look like missing students. The status line says
-    # which mode navigation is in and how to leave it.
     _qa, submissions = workspace
     claim_work(submissions, WorkSlice(student_ids=("id01", "id02")), actor="bob")
 
@@ -190,8 +167,6 @@ async def _test_the_filter_announces_itself(workspace) -> None:
 
 
 async def _test_the_picker_annotates_rather_than_hides(workspace) -> None:
-    # The picker stays a complete view of the assignment: a professor has to be
-    # able to see the shape of the work, not just their own share.
     _qa, submissions = workspace
     claim_work(submissions, WorkSlice(question_ids=("q3", "q4")), actor="bob")
 
@@ -206,8 +181,6 @@ async def _test_the_picker_annotates_rather_than_hides(workspace) -> None:
 
 
 async def _test_a_split_question_names_nobody(workspace) -> None:
-    # bob has q1 for one student only, so q1 has no single owner — labelling it
-    # "bob" would be a lie.
     _qa, submissions = workspace
     claim_work(
         submissions,
@@ -223,11 +196,6 @@ async def _test_a_split_question_names_nobody(workspace) -> None:
 
 
 async def _test_opening_another_graders_question_warns_but_allows(workspace) -> None:
-    """Coordination, not permission: it opens, but it says whose it is.
-
-    Silence here is the exact failure the feature exists to stop — two people
-    quietly grading the same paper.
-    """
     _qa, submissions = workspace
     claim_work(submissions, WorkSlice(question_ids=("q1",)), actor="bob")
 
@@ -238,11 +206,6 @@ async def _test_opening_another_graders_question_warns_but_allows(workspace) -> 
         status = str(app.get_grade_screen().query_one("#db-status", Static).render())
         assert "bob" in status
         assert "still save" in status
-
-
-# --------------------------------------------------------------------------- #
-# The modal
-# --------------------------------------------------------------------------- #
 
 
 async def _test_shift_d_opens_the_claims_modal(workspace) -> None:
@@ -273,8 +236,6 @@ async def _test_claiming_from_the_modal_persists(workspace) -> None:
 
 
 async def _test_the_modal_can_turn_the_filter_off(workspace) -> None:
-    # The escape hatch: a TA who finishes early, or a professor, must be able to
-    # see the whole cohort without releasing anything.
     _qa, submissions = workspace
     claim_work(submissions, WorkSlice(student_ids=("id01", "id02")), actor="bob")
 
@@ -285,13 +246,12 @@ async def _test_the_modal_can_turn_the_filter_off(workspace) -> None:
 
         await pilot.press("D")
         await pilot.pause()
-        await pilot.press("a")  # toggle the filter
+        await pilot.press("a")
         await pilot.pause()
         assert app.workflow_state.claim_filter_enabled is False
 
         await pilot.press("escape")
         await pilot.pause()
-        # bob's students are reachable again.
         app.grade_controller.first_student_for_question()
         await pilot.pause()
         assert _student(app) == "s1"
@@ -306,14 +266,13 @@ async def _test_releasing_frees_the_slice(workspace) -> None:
         await pilot.pause()
         await pilot.press("D")
         await pilot.pause()
-        await pilot.press("r")  # release the focused (own) claim
+        await pilot.press("r")
         await pilot.pause()
 
     assert read_claims(submissions)[0].status == "released"
 
 
 async def _test_another_graders_row_is_not_actionable(workspace) -> None:
-    # Releasing someone else's slice is not this grader's call.
     _qa, submissions = workspace
     claim_work(submissions, WorkSlice(question_ids=("q1",)), actor="bob")
 
@@ -328,7 +287,6 @@ async def _test_another_graders_row_is_not_actionable(workspace) -> None:
     assert read_claims(submissions)[0].status == "active"
 
 
-# Sync wrappers (the suite's convention: no async pytest plugin).
 def test_navigation_skips_another_graders_students(workspace) -> None:
     asyncio.run(_test_navigation_skips_another_graders_students(workspace))
 

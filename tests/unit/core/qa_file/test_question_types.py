@@ -32,7 +32,6 @@ class TestNumericInference:
         )
         question = doc.questions[0]
         assert qa_question_type(question) == NUMERIC
-        # The numeric spec is kept verbatim as the answer key.
         assert question.answers == ["1000 ±10 units:mL"]
         assert question.choices == []
 
@@ -63,7 +62,6 @@ class TestTrueFalse:
             "- (2 points) The Earth is flat.\n  - **Correct**\n    - False\n"
         )
         question = doc.questions[0]
-        # Materialized into a constrained two-option multiple choice.
         assert qa_question_type(question) == MULTIPLE_CHOICE
         assert [(c.label, c.text) for c in question.choices] == [
             ("A", "True"),

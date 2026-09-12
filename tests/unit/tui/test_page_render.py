@@ -19,7 +19,6 @@ def _pdf(tmp_path: Path) -> Path:
 
 
 def _identified_pdf(tmp_path: Path) -> Path:
-    """A scan whose first page carries a Name/Student ID header, as a real one does."""
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text(fitz.Point(72, 150), "Name: Ann Lee", fontsize=16)
@@ -57,7 +56,7 @@ def test_renders_a_page_to_png(tmp_path):
     dest = tmp_path / "page.png"
     entry = PageContextEntry(page_number=1, kind="response", highlights=((0.1, 0.1, 0.5, 0.2),))
     assert render_page_context_png(_pdf(tmp_path), entry, dest, dpi=72).ok is True
-    assert dest.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic number
+    assert dest.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_extra_page_renders_without_highlights(tmp_path):
@@ -68,7 +67,6 @@ def test_extra_page_renders_without_highlights(tmp_path):
 
 
 def test_missing_pdf_fails_cleanly_without_writing(tmp_path):
-    # A moved or deleted scan must leave the grader on the crop, not crash.
     dest = tmp_path / "page.png"
     entry = PageContextEntry(page_number=1, kind="response")
     assert render_page_context_png(tmp_path / "gone.pdf", entry, dest).ok is False
@@ -83,15 +81,8 @@ def test_page_past_the_end_fails_cleanly(tmp_path):
 
 
 def test_no_pdf_path_is_a_clean_false(tmp_path):
-    # Stub/demo submissions carry no source PDF at all.
     entry = PageContextEntry(page_number=1, kind="response")
     assert render_page_context_png("", entry, tmp_path / "page.png").ok is False
-
-
-# --- anonymous grading ----------------------------------------------------- #
-#
-# The whole-page view stays available to every grader; what changes outside
-# teacher mode is that the sheet's Name/Student-ID header never reaches the PNG.
 
 
 @needs_ocr
@@ -103,7 +94,6 @@ def test_identity_header_is_painted_out_for_anonymous_grading(tmp_path):
     )
     assert outcome.ok is True
     assert outcome.redacted is True
-    # 150/792 and 180/792 are the two header rows; the work at 600/792 is not.
     assert _row_is_redacted(dest, 150 / 792) is True
     assert _row_is_redacted(dest, 180 / 792) is True
     assert _row_is_redacted(dest, 600 / 792) is False
@@ -121,8 +111,6 @@ def test_teacher_mode_renders_the_page_untouched(tmp_path):
 
 @needs_ocr
 def test_redaction_never_covers_the_answer_being_graded(tmp_path):
-    # A crop region overlapping the header wins: hiding the answer under review
-    # would defeat the reason the page view exists.
     dest = tmp_path / "page.png"
     entry = PageContextEntry(
         page_number=1, kind="response", highlights=((0.0, 0.15, 1.0, 0.5),)
@@ -135,8 +123,6 @@ def test_redaction_never_covers_the_answer_being_graded(tmp_path):
 
 
 def test_a_page_is_refused_when_the_header_cannot_be_located(tmp_path, monkeypatch):
-    # No working OCR means no trustworthy redaction, so anonymous grading falls
-    # back to refusing the page — the one case that needs teacher mode.
     import pytesseract
 
     def boom(*args, **kwargs):

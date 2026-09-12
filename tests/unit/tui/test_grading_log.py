@@ -63,7 +63,6 @@ def test_coalescing_preserves_the_original_revert() -> None:
 
     assert len(log) == 1
     top = log.entries_latest_first()[0]
-    # The intermediate revert is discarded so undo restores the pre-streak state.
     assert top.revert is first
     assert top.summary == "5/10 pts"
 
@@ -72,7 +71,6 @@ def test_peek_and_drop_undoable_entries() -> None:
     log = GradingLog()
     revert = GradeRevert(kind="grade", student_item_id="s1", question_id="Q1")
     log.record(_entry(summary="0/10 pts", revert=revert))
-    # A rubric edit on top carries no revert and must be skipped.
     log.record(_entry(kind="rubric", student_item_id="", summary="Rubric edited"))
 
     peeked = log.peek_last_undoable()
@@ -83,7 +81,6 @@ def test_peek_and_drop_undoable_entries() -> None:
     assert log.version == version_before + 1
     assert log.peek_last_undoable() is None
     assert [entry.kind for entry in log.entries_latest_first()] == ["rubric"]
-    # Dropping an entry that is no longer present is a no-op.
     assert log.drop_entry(peeked) is False
 
 
@@ -114,8 +111,6 @@ def test_grading_log_filters_by_student_and_question() -> None:
     log = GradingLog()
     log.record(_entry(student_item_id="s1", question_id="Q1"))
     log.record(_entry(student_item_id="s2", question_id="Q1"))
-    # Question-scoped entries (rubric edits) have no student attribution and
-    # must never appear under a student filter.
     log.record(_entry(kind="rubric", student_item_id="", question_id="Q1"))
 
     assert [e.student_item_id for e in log.entries_for_student("s1")] == ["s1"]
@@ -127,7 +122,7 @@ def test_grading_log_version_increments_on_record() -> None:
     log = GradingLog()
     assert log.version == 0
     log.record(_entry())
-    log.record(_entry())  # coalesced, but still a change
+    log.record(_entry())
     assert log.version == 2
 
 
@@ -173,13 +168,10 @@ def test_unsupported_provider_records_no_log_entries() -> None:
 def test_comment_edits_record_once_and_coalesce_keystrokes() -> None:
     _app, state, controller = _build_controller(PersistentFakeDataProvider())
 
-    # The comment input emits one CommentUpdated per keystroke.
     controller.on_comment_updated("N")
     controller.on_comment_updated("Ni")
     controller.on_comment_updated("Nice work.")
 
-    # Keystrokes stage the text but write no history: the entry is the *edit*,
-    # and it lands when the grader finishes (enter, blur, or moving on).
     assert len(state.grading_log) == 0
     controller.commit_pending_comment()
 
@@ -195,7 +187,6 @@ def test_rebinding_unchanged_comment_is_not_logged() -> None:
     controller.commit_pending_comment()
     version_after_edit = state.grading_log.version
 
-    # Navigating back to a student re-emits their saved comment verbatim.
     controller.on_comment_updated("Nice work.")
     controller.commit_pending_comment()
 
@@ -254,7 +245,6 @@ def test_selected_log_entry_opens_its_question_and_student() -> None:
 
 def test_selected_log_entry_without_student_opens_first_ungraded() -> None:
     app, state, controller = _build_controller(PersistentFakeDataProvider())
-    # Grade Q1 for the first student so the first ungraded one is s2.
     controller.on_rubric_selected(1)
 
     controller.on_grading_log_entry_selected(

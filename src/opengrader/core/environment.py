@@ -1,35 +1,3 @@
-"""Environment pre-flight: does this machine have what Opengrader needs?
-
-Opengrader ships as a double-clickable desktop app that leans on things pip
-cannot install — the Tesseract binary, an Ollama server with a pulled model, a
-terminal that can draw images. When one of them is missing the failure surfaces
-far away from the cause: extraction produces empty transcriptions, the answer
-crop renders as coloured blocks, auto-grading refuses with a connection error.
-Diagnosing that today means knowing which of a dozen commands to run.
-
-This module answers the whole question at once, and — the part that matters for
-a non-technical instructor — names the exact command that fixes each finding.
-
-**The measurement/judgement split is deliberate**, matching
-``core/submissions/scan_check.py``: a *probe* touches the outside world and
-records what it found (``ToolProbe``, ``OllamaProbe``, ``ImportProbe``), and a
-pure ``evaluate_*`` function turns that record into an ``EnvironmentCheck`` with
-a status, an impact and a fix. The judgement half therefore unit-tests with no
-Tesseract, no Ollama and no terminal, which is exactly the environment a CI
-runner has.
-
-Two rules keep the report honest:
-
-* **A missing optional dependency is not a failure.** Ollama powers handwriting
-  transcription and LLM grading; an instructor grading typed submissions with a
-  rubric needs none of it. Reporting that as broken would train people to ignore
-  the report — the same reasoning that keeps ``added`` files out of
-  ``core/integrity.py``'s concerning statuses.
-* **"Could not measure" is its own answer.** A probe that cannot run reports
-  ``unknown``, never ``ready``, so the report can never be read as "checked, all
-  good" for something that was never checked.
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -42,14 +10,8 @@ from opengrader.core.crypto import encryption_available
 if TYPE_CHECKING:
     from opengrader.core.ai_config import LatencyMeasurement, ResolvedAI
 
-# How a check turned out.
-#   ready    - present and usable
-#   degraded - absent or old, but only an optional capability is lost
-#   broken   - a capability the core pipeline depends on does not work
-#   unknown  - the probe could not run, so nothing is known either way
 CheckStatus = Literal["ready", "degraded", "broken", "unknown"]
 
-# Worst-first, so a report can be sorted and a single overall verdict derived.
 _STATUS_ORDER: dict[CheckStatus, int] = {
     "broken": 0,
     "unknown": 1,
@@ -57,24 +19,15 @@ _STATUS_ORDER: dict[CheckStatus, int] = {
     "ready": 3,
 }
 
-# The lowest Tesseract release we are confident in. Older builds lack the
-# orientation-detection (OSD) output that the scan pre-flight reads, so they
-# would silently skip the rotation check rather than fail it.
 MINIMUM_TESSERACT_VERSION = (4, 0)
 
 
 @dataclass(frozen=True)
 class EnvironmentCheck:
-    """One finding: what was looked at, how it turned out, and what to do."""
-
     name: str
     status: CheckStatus
-    # What was actually found — a version, a path, an error. This is the line an
-    # instructor pastes into a bug report, so it records evidence, not a verdict.
     detail: str
-    # What stops working while this is not ready. Empty for a passing check.
     impact: str = ""
-    # The exact command to run. Empty when there is nothing to fix.
     fix: str = ""
 
     @property
@@ -84,13 +37,10 @@ class EnvironmentCheck:
 
 @dataclass(frozen=True)
 class EnvironmentReport:
-    """Every check, worst first."""
-
     checks: tuple[EnvironmentCheck, ...] = field(default_factory=tuple)
 
     @property
     def status(self) -> CheckStatus:
-        """The worst status in the report — 'ready' only when everything is."""
         if not self.checks:
             return "unknown"
         return min(self.checks, key=lambda check: _STATUS_ORDER[check.status]).status
@@ -101,7 +51,6 @@ class EnvironmentReport:
 
     @property
     def attention(self) -> tuple[EnvironmentCheck, ...]:
-        """Everything that is not ready, worst first."""
         return tuple(
             sorted(
                 (check for check in self.checks if check.needs_attention),
@@ -110,30 +59,17 @@ class EnvironmentReport:
         )
 
 
-# --- measurements -----------------------------------------------------------
-#
-# Plain records of what a probe saw. Every field is optional, and `None` always
-# means "not measurable", never "fine".
-
-
 @dataclass(frozen=True)
 class ToolProbe:
-    """What was found out about one external program."""
-
     found: bool = False
     version: tuple[int, ...] | None = None
     version_text: str | None = None
     path: str | None = None
-    # Why the probe could not answer, when it could not. Distinct from
-    # `found=False`: "tesseract is not installed" and "asking tesseract for its
-    # version raised" call for different fixes.
     error: str | None = None
 
 
 @dataclass(frozen=True)
 class ImportProbe:
-    """Whether an installed Python package can actually be imported."""
-
     module: str
     importable: bool
     version_text: str | None = None
@@ -142,24 +78,13 @@ class ImportProbe:
 
 @dataclass(frozen=True)
 class OllamaProbe:
-    """What was found out about the local Ollama server."""
-
     host: str
     reachable: bool = False
     models: tuple[str, ...] = ()
     error: str | None = None
 
 
-# --- install hints ----------------------------------------------------------
-
-
 def install_hint(*, brew: str, apt: str, winget: str) -> str:
-    """Return the install command for the platform we are actually running on.
-
-    A fix an instructor can copy is the whole point of this module, and
-    "install Tesseract" is not one. Mirrors the package names
-    ``packaging/bootstrap.sh`` already uses so the two never disagree.
-    """
     if sys.platform == "darwin":
         return f"brew install {brew}"
     if sys.platform.startswith("win"):
@@ -167,11 +92,7 @@ def install_hint(*, brew: str, apt: str, winget: str) -> str:
     return f"sudo apt-get install {apt}  (or your distribution's equivalent)"
 
 
-# --- judgement (pure) -------------------------------------------------------
-
-
 def evaluate_python(version: tuple[int, ...]) -> EnvironmentCheck:
-    """Judge the running interpreter against the pinned 3.12 requirement."""
     text = ".".join(str(part) for part in version[:3])
     if version[:2] == (3, 12):
         return EnvironmentCheck(
@@ -187,13 +108,6 @@ def evaluate_python(version: tuple[int, ...]) -> EnvironmentCheck:
 
 
 def evaluate_tesseract(probe: ToolProbe) -> EnvironmentCheck:
-    """Judge the Tesseract OCR binary.
-
-    Broken rather than degraded when missing: every extraction mode except the
-    born-digital text layer reads the page through Tesseract, so without it a
-    scanned exam extracts to empty answers — the silent cohort-of-zeros failure
-    the scan pre-flight exists to prevent.
-    """
     fix = install_hint(brew="tesseract", apt="tesseract-ocr", winget="UB-Mannheim.TesseractOCR")
     if probe.error is not None and not probe.found:
         return EnvironmentCheck(
@@ -234,13 +148,6 @@ def evaluate_ollama(
     vision_model: str,
     text_model: str | None = None,
 ) -> tuple[EnvironmentCheck, ...]:
-    """Judge the Ollama server and the models the pipeline would ask it for.
-
-    Everything here is **degraded, never broken**: Ollama powers handwriting
-    transcription and LLM-assisted free-response grading, both of which are
-    opt-in. An instructor grading with a rubric by hand needs none of it, and
-    calling that a failure would teach them to ignore the whole report.
-    """
     if not probe.reachable:
         reason = probe.error or "no server listening"
         return (
@@ -296,12 +203,6 @@ def evaluate_ollama(
 
 
 def evaluate_imports(probes: tuple[ImportProbe, ...]) -> EnvironmentCheck:
-    """Judge the Python packages the pipeline imports at runtime.
-
-    Reported as one check rather than a dozen: they are installed together by a
-    single ``uv sync``, so a dozen rows would all carry the same one-line fix and
-    bury the findings that differ.
-    """
     missing = [probe for probe in probes if not probe.importable]
     if not missing:
         return EnvironmentCheck(
@@ -322,7 +223,6 @@ def evaluate_imports(probes: tuple[ImportProbe, ...]) -> EnvironmentCheck:
 def evaluate_optional_import(
     probe: ImportProbe, *, feature: str, fix: str
 ) -> EnvironmentCheck:
-    """Judge one deliberately optional package (e.g. the pix2tex maths reader)."""
     if probe.importable:
         return EnvironmentCheck(
             name=probe.module,
@@ -339,13 +239,6 @@ def evaluate_optional_import(
 
 
 def evaluate_encryption(*, available: bool) -> EnvironmentCheck:
-    """Judge whether this install can encrypt packets and backups.
-
-    Broken rather than degraded, unlike the other optional integrations: the
-    library is a *base* dependency, so its absence means the install is
-    incomplete — and the failure would only surface on the day someone tries to
-    protect a copy before handing it over.
-    """
     if available:
         return EnvironmentCheck(
             name="Encryption",
@@ -362,7 +255,6 @@ def evaluate_encryption(*, available: bool) -> EnvironmentCheck:
 
 
 def evaluate_canvas_sak(probe: ToolProbe) -> EnvironmentCheck:
-    """Judge the Canvas export helper — optional, since export is opt-in."""
     if probe.found:
         where = f" at {probe.path}" if probe.path else ""
         return EnvironmentCheck(
@@ -380,12 +272,6 @@ def evaluate_canvas_sak(probe: ToolProbe) -> EnvironmentCheck:
 def evaluate_graphics(
     *, protocol: str, pixel_accurate: bool, description: str
 ) -> EnvironmentCheck:
-    """Judge the terminal's ability to draw answer crops.
-
-    Degraded rather than broken, and this is the whole point of the 2026-08-01
-    fallback work: grading still functions in any terminal, it just shows a
-    coarse preview plus the `o` hotkey to open the crop in a desktop viewer.
-    """
     if pixel_accurate:
         return EnvironmentCheck(
             name="Terminal graphics",
@@ -403,7 +289,6 @@ def evaluate_graphics(
 
 
 def evaluate_smoke_test(*, ok: bool, detail: str) -> EnvironmentCheck:
-    """Judge the end-to-end smoke test (answer key -> template PDF)."""
     if ok:
         return EnvironmentCheck(
             name="Pipeline smoke test", status="ready", detail=detail
@@ -418,12 +303,6 @@ def evaluate_smoke_test(*, ok: bool, detail: str) -> EnvironmentCheck:
 
 
 def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
-    """Report what the AI is set to do on this machine.
-
-    A user whose scans extract to empty answers may simply have handwriting
-    reading switched off, and that is currently invisible — this finding makes
-    that choice explicit.
-    """
     if not resolved.uses_ai:
         return EnvironmentCheck(
             name="AI features",
@@ -443,7 +322,6 @@ def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
 
     problems = resolved.problems()
     if problems:
-        # Degraded: configuration errors found in resolved.problems()
         detail = "\n".join(problems)
         return EnvironmentCheck(
             name="AI features",
@@ -453,7 +331,6 @@ def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
             fix=problems[0],
         )
 
-    # Ready: AI is enabled and no configuration problems
     detail = ", ".join(features) if features else "nothing — the AI is switched off"
     return EnvironmentCheck(
         name="AI features",
@@ -463,12 +340,6 @@ def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
 
 
 def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> EnvironmentCheck:
-    """Judge the AI response time against the configured timeout.
-
-    Not measured at all (caller passed None) reports unknown and names the flag
-    that times it. If measured, checks whether it is fast enough or recommends
-    a higher limit.
-    """
     from opengrader.core import ai_config
 
     if measurement is None:
@@ -491,7 +362,6 @@ def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> Environment
 
     share = measurement.share_of_limit
     if share is not None and share >= ai_config.TIMEOUT_WARN_FRACTION:
-        # Measurement is ok but uses too much of the limit; recommend a higher one.
         recommended = ai_config.recommend_timeout(measurement.seconds or 0, measurement.limit)
         if recommended is not None:
             return EnvironmentCheck(
@@ -502,7 +372,6 @@ def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> Environment
                 fix=f"Raise 'How long to wait for the AI' in AI setup to {recommended:.0f} s — a request that takes most of the limit will time out on a longer answer, and a timed-out read shows up as an empty answer, not as an error.",
             )
 
-    # Fast or measurement is below the warn threshold; ready
     return EnvironmentCheck(
         name="AI response time",
         status="ready",
@@ -510,27 +379,20 @@ def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> Environment
     )
 
 
-# --- probes (these touch the outside world) ---------------------------------
-
-
 def probe_python() -> tuple[int, ...]:
     return sys.version_info[:3]
 
 
 def probe_tesseract() -> ToolProbe:
-    """Look for the Tesseract binary and ask it for its version."""
     path = shutil.which("tesseract")
     try:
         import pytesseract
-    except Exception as exc:  # pragma: no cover - only when the install is broken
+    except Exception as exc:  # pragma: no cover
         return ToolProbe(found=path is not None, path=path, error=str(exc))
 
     try:
         raw = pytesseract.get_tesseract_version()
     except Exception as exc:
-        # pytesseract raises when the binary is absent *or* unrunnable. A missing
-        # binary is the ordinary case and is reported as such; anything else
-        # keeps its message, since the two need different fixes.
         if path is None:
             return ToolProbe(found=False)
         return ToolProbe(found=True, path=path, error=str(exc))
@@ -545,11 +407,6 @@ def probe_tesseract() -> ToolProbe:
 
 
 def _parse_version(text: str) -> tuple[int, ...] | None:
-    """Pull a numeric version out of a tool's version string.
-
-    Tools report things like ``5.5.0`` or ``4.1.1-rc2-25-g9707``; only the
-    leading dotted numbers are meaningful for a minimum-version comparison.
-    """
     parts: list[int] = []
     for chunk in text.strip().split("."):
         digits = ""
@@ -564,7 +421,6 @@ def _parse_version(text: str) -> tuple[int, ...] | None:
 
 
 def probe_import(module: str) -> ImportProbe:
-    """Import a module and record whether it worked (never raises)."""
     import importlib
 
     try:
@@ -580,12 +436,6 @@ def probe_import(module: str) -> ImportProbe:
 
 
 def probe_optional_import(module: str) -> ImportProbe:
-    """Answer "is this installed?" without paying to import it.
-
-    ``pix2tex`` drags in torch, which is far too slow to import for a diagnostic
-    line, so this checks whether the module *could* be found instead — the same
-    ``find_spec`` trick ``core/ocr/math_ocr.py`` uses for the same reason.
-    """
     from importlib.util import find_spec
 
     try:
@@ -596,11 +446,6 @@ def probe_optional_import(module: str) -> ImportProbe:
 
 
 def probe_ollama(host: str, *, timeout_seconds: float = 3.0) -> OllamaProbe:
-    """Ask the local Ollama server which models it has.
-
-    The timeout is deliberately short: this is a diagnostic, and an instructor
-    waiting two minutes to be told a server is not running has been failed twice.
-    """
     from opengrader.core.llm.ollama_client import OllamaConfig, OllamaError, list_models
 
     config = OllamaConfig(host=host, timeout_seconds=timeout_seconds)
@@ -608,18 +453,12 @@ def probe_ollama(host: str, *, timeout_seconds: float = 3.0) -> OllamaProbe:
         models = list_models(config)
     except OllamaError as exc:
         return OllamaProbe(host=host, reachable=False, error=summarize_connection_error(str(exc)))
-    except Exception as exc:  # pragma: no cover - defensive; a diagnostic must not crash
+    except Exception as exc:  # pragma: no cover
         return OllamaProbe(host=host, reachable=False, error=summarize_connection_error(str(exc)))
     return OllamaProbe(host=host, reachable=True, models=tuple(models))
 
 
 def summarize_connection_error(message: str) -> str:
-    """Compress a urllib traceback string into a phrase a person can act on.
-
-    The raw message repeats the URL we already print and buries the one useful
-    word ("refused", "timed out") inside nested exception text. A diagnostic
-    whose findings are hard to read is a diagnostic nobody reads.
-    """
     lowered = message.lower()
     if "refused" in lowered:
         return "no server listening"
@@ -636,7 +475,6 @@ def probe_canvas_sak() -> ToolProbe:
 
 
 def probe_graphics() -> tuple[str, bool, str]:
-    """Return (protocol, pixel_accurate, description) for this terminal."""
     from opengrader.tui.terminal_graphics import detect_graphics_capability
 
     capability = detect_graphics_capability()
@@ -644,13 +482,6 @@ def probe_graphics() -> tuple[str, bool, str]:
 
 
 def run_smoke_test() -> tuple[bool, str]:
-    """Turn a tiny answer key into a template PDF, in a temp directory.
-
-    This is the one check that exercises the real pipeline rather than its
-    ingredients: the QA parser, the PDF generator and the bundled fonts all have
-    to work together for it to pass. Writes only into a temporary directory,
-    which is removed either way.
-    """
     import tempfile
     from pathlib import Path
 
@@ -682,11 +513,6 @@ def run_smoke_test() -> tuple[bool, str]:
 
 
 def probe_ai_latency(resolved: "ResolvedAI") -> "LatencyMeasurement | None":
-    """Measure the AI response time by calling measure_generate_latency.
-
-    Imported lazily inside the function to avoid importing ai_config at module
-    scope, matching how probe_ollama imports its client inside the function.
-    """
     from opengrader.core import ai_config
 
     return ai_config.measure_generate_latency(resolved)
@@ -702,37 +528,18 @@ def build_environment_report(
     ai: "ResolvedAI | None" = None,
     time_ai: bool = False,
 ) -> EnvironmentReport:
-    """Run every probe and return the judged report.
-
-    Ordered as a reader needs it: the interpreter and packages first (nothing
-    works without them), then the external tools the pipeline calls, then the
-    optional integrations, then the terminal, then AI-specific checks if
-    requested.
-
-    Args:
-        vision_model: Vision model to check
-        text_model: Text model to check (optional)
-        ollama_host: Ollama server host
-        check_graphics: Whether to check terminal graphics capability
-        smoke_test: Whether to run the pipeline smoke test
-        ai: ResolvedAI settings for AI feature checks (optional)
-        time_ai: Whether to measure AI response time (only adds a check if True)
-    """
     checks: list[EnvironmentCheck] = [evaluate_python(probe_python())]
 
-    # The third-party packages every pipeline stage imports. Kept as an explicit
-    # list rather than parsed out of pyproject.toml: a diagnostic should not
-    # depend on the packaging metadata being readable in an installed app.
     runtime_modules = (
-        "fitz",  # PyMuPDF: all PDF reading and writing
-        "pypdf",  # page-level splitting and reordering
-        "cv2",  # OpenCV: layout detection, QR and bubble reading
-        "PIL",  # Pillow: image crops
+        "fitz",
+        "pypdf",
+        "cv2",
+        "PIL",
         "numpy",
-        "matplotlib",  # statistics charts and rendered maths
+        "matplotlib",
         "pytesseract",
-        "textual",  # the grading TUI
-        "segno",  # QR generation
+        "textual",
+        "segno",
     )
     checks.append(
         evaluate_imports(tuple(probe_import(module) for module in runtime_modules))
@@ -774,8 +581,6 @@ def build_environment_report(
     if ai is not None:
         checks.append(evaluate_ai_features(ai))
 
-    # Only add a latency check when explicitly requested; do not add an
-    # unknown row to every ordinary report, which would be noise.
     if time_ai and ai is not None:
         measurement = probe_ai_latency(ai)
         checks.append(evaluate_ai_latency(measurement))

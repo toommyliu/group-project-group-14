@@ -1,9 +1,3 @@
-"""Tests for the course-level gradebook (course.toml → weighted grades).
-
-Builds real assignment folders on disk, because the whole point of the module is
-that it reads ordinary assignment folders and writes nothing into them.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -87,16 +81,16 @@ def two_assignment_course(tmp_path: Path) -> Path:
         tmp_path,
         "quiz",
         {
-            "101": ("Ana", {"q1": 10, "q2": 8}),  # 90%
-            "102": ("Ben", {"q1": 5, "q2": 5}),  # 50%
+            "101": ("Ana", {"q1": 10, "q2": 8}),
+            "102": ("Ben", {"q1": 5, "q2": 5}),
         },
     )
     _assignment(
         tmp_path,
         "final",
         {
-            "101": ("Ana", {"q1": 8, "q2": 8}),  # 80%
-            "102": ("Ben", {"q1": 6, "q2": 6}),  # 60%
+            "101": ("Ana", {"q1": 8, "q2": 8}),
+            "102": ("Ben", {"q1": 6, "q2": 6}),
         },
     )
     return _course(
@@ -119,11 +113,7 @@ solutions = "final/solutions.md"
     )
 
 
-# ── the config file ──────────────────────────────────────────────────────────
-
-
 def test_relative_paths_resolve_against_the_course_file(two_assignment_course: Path) -> None:
-    """So a course folder can be moved or shared without editing it."""
     config = load_course_config(two_assignment_course)
     assert config.assignments[0].path.is_dir()
     assert config.assignments[0].solutions is not None
@@ -145,8 +135,6 @@ def test_a_course_with_no_assignments_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_duplicate_assignment_name_is_refused(tmp_path: Path) -> None:
-    """Names key every per-assignment column, so a duplicate would silently
-    overwrite one assignment with another."""
     body = (
         'name = "X"\n'
         '[[assignment]]\nname = "A"\npath = "a"\nweight = 1\n'
@@ -170,20 +158,14 @@ def test_invalid_toml_names_the_file(tmp_path: Path) -> None:
         load_course_config(_course(tmp_path, "name = [unclosed\n"))
 
 
-# ── weighting ────────────────────────────────────────────────────────────────
-
-
 def test_weighted_grades_use_the_declared_weights(two_assignment_course: Path) -> None:
     report = build_course_report(load_course_config(two_assignment_course))
     by_id = {s.student_id: s for s in report.students}
-    # Ana: 0.25*90 + 0.75*80 = 82.5
     assert by_id["101"].weighted_percent == pytest.approx(82.5)
-    # Ben: 0.25*50 + 0.75*60 = 57.5
     assert by_id["102"].weighted_percent == pytest.approx(57.5)
 
 
 def test_weights_are_relative_not_percentages(tmp_path: Path) -> None:
-    """1/3 must mean the same as 25/75."""
     _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": 10, "q2": 8})})
     _assignment(tmp_path, "final", {"101": ("Ana", {"q1": 8, "q2": 8})})
     path = _course(
@@ -199,13 +181,13 @@ def test_weights_are_relative_not_percentages(tmp_path: Path) -> None:
 def test_letter_grades_come_from_the_scale() -> None:
     scale = (("A", 90.0), ("B", 80.0), ("C", 70.0), ("F", 0.0))
     assert letter_for(95, scale) == "A"
-    assert letter_for(80, scale) == "B"  # the boundary counts
+    assert letter_for(80, scale) == "B"
     assert letter_for(12, scale) == "F"
     assert letter_for(None, scale) == "-"
 
 
 def test_a_custom_grade_scale_is_honoured(tmp_path: Path) -> None:
-    _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": 8, "q2": 8})})  # 80%
+    _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": 8, "q2": 8})})
     path = _course(
         tmp_path,
         'name = "X"\n'
@@ -216,12 +198,7 @@ def test_a_custom_grade_scale_is_honoured(tmp_path: Path) -> None:
     assert report.students[0].letter == "Pass"
 
 
-# ── missing work ─────────────────────────────────────────────────────────────
-
-
 def test_missing_work_is_skipped_by_default(tmp_path: Path) -> None:
-    """Mid-semester, no submission means "not marked yet" far more often than
-    "scored nothing" — averaging in zeros invents failing students."""
     _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": 10, "q2": 8})})
     _assignment(tmp_path, "final", {})
     (tmp_path / "final" / "student-submissions" / "x.submission.md").write_text(
@@ -235,7 +212,7 @@ def test_missing_work_is_skipped_by_default(tmp_path: Path) -> None:
     )
     report = build_course_report(load_course_config(path))
     ana = next(s for s in report.students if s.student_id == "101")
-    assert ana.weighted_percent == pytest.approx(90.0)  # her quiz alone
+    assert ana.weighted_percent == pytest.approx(90.0)
     assert ana.missing == ("Final",)
     assert not ana.is_complete
 
@@ -255,7 +232,6 @@ def test_missing_zero_counts_the_weight_against_the_student(tmp_path: Path) -> N
     )
     report = build_course_report(load_course_config(path))
     ana = next(s for s in report.students if s.student_id == "101")
-    # 0.25*90 + 0.75*0 = 22.5
     assert ana.weighted_percent == pytest.approx(22.5)
 
 
@@ -270,17 +246,12 @@ def test_an_ungraded_question_does_not_drag_the_assignment_down(tmp_path: Path) 
     assert report.students[0].weighted_percent == pytest.approx(90.0)
 
 
-# ── at risk and trend ────────────────────────────────────────────────────────
-
-
 def test_at_risk_lists_the_low_scorers_lowest_first(two_assignment_course: Path) -> None:
     report = build_course_report(load_course_config(two_assignment_course))
     assert [s.student_id for s in report.at_risk] == ["102"]
 
 
 def test_a_student_with_no_graded_work_is_not_at_risk(tmp_path: Path) -> None:
-    """There is no evidence they are struggling, and burying real cases under an
-    ungraded class is how an at-risk list gets ignored."""
     _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": None, "q2": None})})
     path = _course(
         tmp_path,
@@ -296,7 +267,7 @@ def test_trend_reports_the_per_assignment_percentages(two_assignment_course: Pat
     report = build_course_report(load_course_config(two_assignment_course))
     ana = next(s for s in report.students if s.student_id == "101")
     assert ana.trend() == (("Quiz", 90.0), ("Final", 80.0))
-    assert ana.direction() == pytest.approx(-10.0)  # 90 -> 80
+    assert ana.direction() == pytest.approx(-10.0)
 
 
 def test_direction_needs_two_graded_assignments(tmp_path: Path) -> None:
@@ -308,9 +279,6 @@ def test_direction_needs_two_graded_assignments(tmp_path: Path) -> None:
     )
     report = build_course_report(load_course_config(path))
     assert report.students[0].direction() is None
-
-
-# ── students across assignments ──────────────────────────────────────────────
 
 
 def test_students_are_matched_by_id_across_folders(two_assignment_course: Path) -> None:
@@ -332,12 +300,7 @@ def test_a_student_present_in_only_one_assignment_still_appears(tmp_path: Path) 
     assert {s.student_id for s in report.students} == {"101", "102"}
 
 
-# ── failures degrade, they don't destroy ─────────────────────────────────────
-
-
 def test_an_unreadable_assignment_is_a_problem_not_a_crash(tmp_path: Path) -> None:
-    """One bad folder in a twelve-assignment course must not destroy the report
-    a week before grades are due."""
     _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": 9, "q2": 9})})
     path = _course(
         tmp_path,
@@ -359,16 +322,12 @@ def test_the_course_report_writes_nothing(two_assignment_course: Path) -> None:
     assert after == before
 
 
-# ── outcomes across the course (the accreditation artifact) ──────────────────
-
-
 def test_outcomes_aggregate_across_assignments(two_assignment_course: Path) -> None:
     report = build_course_report(load_course_config(two_assignment_course))
     names = [o.outcome for o in report.outcomes]
     assert names == ["CLO1", "CLO2"]
     clo1 = report.outcomes[0]
     assert clo1.assignments == ("Quiz", "Final")
-    # q1 is worth 10 on each of the two assignments.
     assert clo1.possible_points == 20.0
     assert clo1.students_measured == 2
 
@@ -378,13 +337,11 @@ def test_outcome_mastery_pools_points_rather_than_averaging_assignments(
 ) -> None:
     report = build_course_report(load_course_config(two_assignment_course))
     clo1 = report.outcomes[0]
-    # Ana q1: 10/10 then 8/10 -> 18/20 = 90%. Ben: 5/10 then 6/10 -> 55%.
     assert clo1.students_mastered == 1
     assert clo1.mean_mastery == pytest.approx((0.9 + 0.55) / 2)
 
 
 def test_an_assignment_without_solutions_contributes_no_outcomes(tmp_path: Path) -> None:
-    """The tags live in the answer key; without one there is nothing to read."""
     _assignment(tmp_path, "quiz", {"101": ("Ana", {"q1": 9, "q2": 9})}, solutions=False)
     path = _course(
         tmp_path,
@@ -395,22 +352,15 @@ def test_an_assignment_without_solutions_contributes_no_outcomes(tmp_path: Path)
     assert report.outcomes == ()
 
 
-# ── building a course file ───────────────────────────────────────────────────
-
-
 def test_weight_shares_turn_relative_weights_into_percentages() -> None:
-    """The whole meaning of `weight`, and what the builder shows live."""
     from opengrader.core.course import weight_shares
 
     assert weight_shares([1, 1, 2]) == [0.25, 0.25, 0.5]
-    # The same course written as percentages.
     assert weight_shares([25, 25, 50]) == [0.25, 0.25, 0.5]
-    # A weight of 0 contributes nothing and takes no share.
     assert weight_shares([1, 0, 1]) == [0.5, 0.0, 0.5]
 
 
 def test_weight_shares_survive_all_zero_weights() -> None:
-    """A half-typed form must not divide by zero."""
     from opengrader.core.course import weight_shares
 
     assert weight_shares([0, 0]) == [0.0, 0.0]
@@ -442,7 +392,6 @@ def test_a_written_course_file_loads_back(tmp_path: Path) -> None:
 
 
 def test_written_paths_are_relative_to_the_course_file(tmp_path: Path) -> None:
-    """That relativity is what makes a course folder movable and shareable."""
     from opengrader.core.course import CourseAssignment, write_course_toml
 
     written = write_course_toml(
@@ -456,7 +405,6 @@ def test_written_paths_are_relative_to_the_course_file(tmp_path: Path) -> None:
 
 
 def test_a_path_outside_the_course_folder_stays_absolute(tmp_path: Path) -> None:
-    """An honest absolute path beats a fragile ../../ chain."""
     from opengrader.core.course import CourseAssignment, render_course_toml
 
     outside = Path("/somewhere/else/subs")
@@ -469,7 +417,6 @@ def test_a_path_outside_the_course_folder_stays_absolute(tmp_path: Path) -> None
 
 
 def test_the_written_file_explains_what_weight_means(tmp_path: Path) -> None:
-    """It is hand-edited afterwards; the next reader needs the rule in the file."""
     from opengrader.core.course import CourseAssignment, render_course_toml
 
     text = render_course_toml(
@@ -481,7 +428,6 @@ def test_the_written_file_explains_what_weight_means(tmp_path: Path) -> None:
 
 
 def test_shares_are_written_as_comments_not_keys(tmp_path: Path) -> None:
-    """They are derived from the weights and would go stale on a hand edit."""
     from opengrader.core.course import CourseAssignment, render_course_toml
 
     text = render_course_toml(
@@ -510,9 +456,6 @@ def test_quotes_in_names_and_paths_are_escaped(tmp_path: Path) -> None:
     assert config.assignments[0].name == 'Quiz "1"'
 
 
-# ── discovering assignments ──────────────────────────────────────────────────
-
-
 def test_discovery_finds_every_assignment_folder(tmp_path: Path) -> None:
     from opengrader.core.course import discover_course_assignments
 
@@ -524,13 +467,10 @@ def test_discovery_finds_every_assignment_folder(tmp_path: Path) -> None:
 
 
 def test_discovery_names_come_from_the_parent_of_a_generic_folder(tmp_path: Path) -> None:
-    """`midterm/student-submissions` is the midterm, not a thing called
-    "student submissions"."""
     from opengrader.core.course import humanize_assignment_name
 
     assert humanize_assignment_name(Path("/x/midterm-2/student-submissions")) == "Midterm 2"
     assert humanize_assignment_name(Path("/x/final_exam/submissions")) == "Final Exam"
-    # A non-generic folder keeps its own name, and existing casing is preserved.
     assert humanize_assignment_name(Path("/x/HW2b")) == "HW2b"
 
 
@@ -542,7 +482,6 @@ def test_discovery_does_not_report_a_parent_and_its_child(tmp_path: Path) -> Non
 
 
 def test_a_submission_file_is_never_mistaken_for_an_answer_key(tmp_path: Path) -> None:
-    """Student submissions are markdown too — the lone-.md guess must skip them."""
     from opengrader.core.course import find_solutions_near
 
     subs = tmp_path / "subs"

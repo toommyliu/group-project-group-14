@@ -1,16 +1,4 @@
-"""Check that this machine has everything Opengrader needs, and say how to fix it.
-
-The first command to run on a new machine, and the first thing to ask for when
-something misbehaves: one report covering the Python install, the packages, the
-Tesseract binary, the Ollama server and its models, the optional integrations,
-and whether this terminal can draw answer crops — each finding naming the exact
-command that fixes it.
-
-Strictly read-only apart from ``--smoke``, which writes a template PDF into a
-temporary directory and deletes it again.
-
-Engine: ``core/environment.py``.
-"""
+"""Check local tools and model connections needed for grading."""
 
 from __future__ import annotations
 
@@ -34,7 +22,6 @@ examples:
   uv run doctor --ollama-model llama3.1:8b
 """
 
-# Glyph per status, so the eye can find the failures without reading the words.
 _GLYPHS: dict[str, str] = {
     "ready": "OK  ",
     "degraded": "WARN",
@@ -42,7 +29,6 @@ _GLYPHS: dict[str, str] = {
     "broken": "FAIL",
 }
 
-# The one-line verdict, keyed by the report's worst status.
 _VERDICTS: dict[str, str] = {
     "ready": "Everything Opengrader needs is installed and working.",
     "degraded": "Opengrader will work. Some optional features are unavailable.",
@@ -53,9 +39,6 @@ _VERDICTS: dict[str, str] = {
 
 def _print_check(check: EnvironmentCheck) -> None:
     print(f"  [{_GLYPHS[check.status]}] {check.name}: {check.detail}")
-    # Impact and fix are indented under the finding they belong to, and only
-    # printed when there is something to say — a passing check with three blank
-    # lines under it is how a report becomes unreadable.
     if check.impact:
         print(f"           {check.impact}")
     if check.fix:
@@ -71,9 +54,6 @@ def _print_human(report: EnvironmentReport) -> None:
     print()
     print(_VERDICTS[report.status])
 
-    # Repeat what needs attention as a to-do list. The findings are already
-    # above, but they are scattered among the passing ones, and the reader's
-    # actual question is "what do I have to do now?".
     attention = report.attention
     if attention:
         print()
@@ -100,16 +80,8 @@ def _report_to_json(report: EnvironmentReport) -> dict:
 
 
 def build_parser() -> ArgumentParser:
-    # Resolved once, here, so `doctor` checks the same host/model every other
-    # tool would actually use — whatever is saved in AI Setup — rather than a
-    # hardcoded literal that could silently disagree with the real settings.
     ai = ai_config.resolve()
     parser = ArgumentParser(
-        # Deliberately no `prog=`: argparse then names whatever was
-        # actually invoked — the standalone `doctor` script, or
-        # `opengrader doctor` when the front-door command dispatched
-        # here (cli/main.py patches sys.argv[0] for exactly this). A
-        # hardcoded name would tell a user to fix a command they never ran.
         description="Check that this machine has everything Opengrader needs.",
         epilog=EPILOG,
         formatter_class=RawDescriptionHelpFormatter,
@@ -172,24 +144,14 @@ def run_cli(argv: list[str] | None = None) -> int:
     else:
         _print_human(report)
 
-    # A missing *optional* integration must not fail a scripted run: exit 2 is
-    # reserved for the findings that genuinely stop the pipeline, matching
-    # `scan-check --fail-on-high` and `grade-check --fail-on-blocking`.
     if args.fail_on_problem and report.broken:
         return 2
     return 0
 
 
 def main() -> int:
-    """Console-script entry point.
-
-    ``run_cli`` returns an exit code, and a ``console_scripts`` wrapper does
-    ``sys.exit(main())`` — so returning the code from here is what makes a clean
-    run exit 0 instead of printing a repr. (The same latent defect was fixed in
-    `llm-eval` and `grade-check`.)
-    """
     return run_cli()
 
 
-if __name__ == "__main__":  # pragma: no cover - manual invocation
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

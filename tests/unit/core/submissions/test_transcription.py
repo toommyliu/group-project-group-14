@@ -1,5 +1,3 @@
-"""Transcription provenance (`Read by`) and the escalation rule."""
-
 from __future__ import annotations
 
 import pytest
@@ -26,9 +24,6 @@ from opengrader.core.submissions.transcription import (
 )
 
 
-# ── The escalation decision ─────────────────────────────────────────────────
-
-
 def test_a_confident_reading_is_left_alone():
     assert should_escalate("the answer", 92.0, floor=60.0) is False
 
@@ -38,18 +33,15 @@ def test_a_shaky_reading_is_escalated():
 
 
 def test_nothing_read_is_always_escalated():
-    """Checked before the confidence: a reader with no words often has no number."""
     assert should_escalate("", None, floor=60.0) is True
     assert should_escalate("   ", 95.0, floor=60.0) is True
 
 
 def test_an_unmeasured_reading_with_text_is_not_escalated():
-    """`None` means unmeasured, never bad — and a model reading is the target."""
     assert should_escalate("the answer", None, floor=60.0) is False
 
 
 def test_the_floor_is_the_review_queues_own():
-    """Three floors for one idea would let an instructor tune the wrong one."""
     assert DEFAULT_ESCALATION_FLOOR == float(DEFAULT_OCR_CONFIDENCE_FLOOR)
 
 
@@ -63,15 +55,11 @@ def test_at_or_above_the_floor_does_not(confidence: float):
     assert should_escalate("x", confidence) is False
 
 
-# ── Source naming ───────────────────────────────────────────────────────────
-
-
 def test_a_never_recorded_source_says_so():
     assert describe_reading_source(None) == "unrecorded"
 
 
 def test_an_unknown_source_is_shown_rather_than_hidden():
-    """A file from a newer version names a reader this one has not heard of."""
     assert describe_reading_source("some-future-reader") == "some-future-reader"
 
 
@@ -104,9 +92,6 @@ def test_an_empty_tally_says_so_rather_than_printing_nothing():
     assert ReadingTally().describe() == "no responses transcribed"
 
 
-# ── Persistence: the `Read by` line ─────────────────────────────────────────
-
-
 def _document(**question_kwargs) -> StudentSubmissionDocument:
     return StudentSubmissionDocument(
         student_name="Tommy Liu",
@@ -118,10 +103,7 @@ def _document(**question_kwargs) -> StudentSubmissionDocument:
         questions=[
             StudentSubmissionQuestion(
                 question_id="q1",
-                # No inline points in the prompt and none stored: the renderer
-                # prefixes a stored value onto the prompt text, which is its own
-                # (pre-existing) round-trip wrinkle and not what these tests are
-                # about.
+                # Points would trigger prompt-prefix normalization during this round trip.
                 prompt="What is Ohm's law?",
                 possible_points=None,
                 response_image_path="responses/q1.png",
@@ -143,7 +125,6 @@ def test_the_source_round_trips():
 
 
 def test_a_file_with_no_source_stays_byte_identical():
-    """The rule every optional field here follows, so old files never churn."""
     rendered = render_student_submission_markdown(_document())
 
     assert "Read by" not in rendered
@@ -161,7 +142,6 @@ def test_an_unknown_source_survives_a_round_trip():
 
 
 def test_the_source_line_sits_above_its_confidence():
-    """Provenance then its number, matching the order the two are read in."""
     rendered = render_student_submission_markdown(
         _document(response_source=SOURCE_TESSERACT, response_confidence=42.0)
     )
@@ -186,8 +166,6 @@ def test_a_surgical_update_inserts_the_line_where_a_re_render_would():
     parsed = parse_student_submission_markdown(updated)
     assert parsed.questions[0].response_source == SOURCE_HUMAN
     assert parsed.questions[0].response_confidence == 100.0
-    # The same file re-rendered from the parse puts the fields in the same
-    # order, which is what keeps surgical and full writes interchangeable.
     assert render_student_submission_markdown(parsed) == updated
 
 
@@ -207,7 +185,6 @@ def test_omitting_the_source_leaves_the_existing_one_alone():
 
 
 def test_clearing_the_source_removes_the_line():
-    """What makes an undone correction stop claiming a human typed it."""
     original = render_student_submission_markdown(
         _document(response_source=SOURCE_HUMAN, response_confidence=100.0)
     )

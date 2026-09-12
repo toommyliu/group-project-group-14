@@ -1,11 +1,4 @@
-"""Print a prioritized "needs review" triage list for a set of submissions.
-
-Turns the silent anomalies the extraction/grading pipeline already knows about
-(unmatched student ids, empty handwriting transcriptions, low-confidence AI
-grades, whole-assignment zero sweeps, …) into an explicit list a grader can work
-through before scores reach Canvas. Reads only the persisted ``.submission.md``
-files — it never re-runs OCR.
-"""
+"""List submissions and answers that need review."""
 
 from __future__ import annotations
 
@@ -40,7 +33,6 @@ _SEVERITY_GLYPH = {"high": "●", "medium": "◐", "low": "○"}
 
 
 def _submission_paths(input_path: Path) -> list[Path]:
-    """Discover submission files, matching SubmissionFilesProvider's rules."""
     if input_path.is_file():
         return [input_path]
     direct = sorted(input_path.glob("*.submission.md"))
@@ -214,19 +206,10 @@ def run_cli(argv: list[str] | None = None) -> None:
             sys.exit(1)
         kwargs["roster"] = load_roster_students(roster_path)
 
-    # Open regrade requests (student grade disputes) live alongside the
-    # submissions in .opengrader/regrades.jsonl; fold them into triage so a
-    # dispute surfaces at the top of the queue automatically.
     regrade_requests = open_regrade_requests(input_path)
     if regrade_requests:
         kwargs["regrade_requests"] = regrade_requests
 
-    # Grades awarded under a rubric that has since been edited. Read from the
-    # audit journal alongside the submissions, and folded in automatically for
-    # the same reason the disputes above are: a fairness problem nobody thought
-    # to ask about is one nobody will pass a flag for. Absent journal ⇒ nothing
-    # to compare ⇒ no flags, so a folder graded before journalling is silent
-    # rather than wrong.
     if not args.no_rubric_drift:
         stale_grades = detect_rubric_drift(read_journal(resolve_history_dir(input_path)))
         if stale_grades:

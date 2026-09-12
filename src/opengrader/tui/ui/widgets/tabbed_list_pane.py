@@ -86,9 +86,6 @@ class IndexedListView(ListView):
             self.normalize_highlight_classes()
 
     def normalize_highlight_classes(self) -> None:
-        # TODO: don't know how to repro this
-        # but the current child maintains highlight so
-        # we just force it to be correct based on the index or highlighted_child
         if len(self.children) == 0:
             return
 

@@ -104,7 +104,6 @@ def test_format_consistency_variant_grade_hides_members() -> None:
     item = _consistency_item("points_divergence", "high")
     grade = format_consistency_variant_grade(item.variants[1]).plain
     assert "5 pts" in grade and "Partial" in grade
-    # The grade sub-header never names students; those are separate rows.
     assert "Bob" not in grade and "222" not in grade
 
 
@@ -118,7 +117,6 @@ def test_format_consistency_member_respects_anonymity() -> None:
     assert "→" in named and "Ann Smith" in named
 
     anon = format_consistency_member(bob, teacher_mode=False).plain
-    # Anonymous mode shows the id, never the name.
     assert "222" in anon and "Bob Lee" not in anon
 
 
@@ -148,13 +146,12 @@ def test_format_history_row_shows_actor_and_respects_anonymity() -> None:
     )
     anon = format_history_row(entry, teacher_mode=False).plain
     named = format_history_row(entry, teacher_mode=True).plain
-    assert "prof_kim" in anon  # actor always shown
+    assert "prof_kim" in anon
     assert "123456789" in anon and "Tommy Liu" not in anon
     assert "Tommy Liu" in named
     assert "2026-07-20 18:30" in anon and "9/10 pts" in anon
 
 
-# --- item analysis ---------------------------------------------------------
 from opengrader.core.analytics import build_item_analysis
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions.student_file import (
@@ -222,7 +219,7 @@ def test_format_item_separation_shows_signed_value() -> None:
     item = _cohort_item()
     plain = format_item_separation(item).plain
     assert "Separation" in plain
-    assert "+1.00" in plain  # q1 perfectly tracks the total
+    assert "+1.00" in plain
     assert "excellent" in plain
 
 
@@ -268,13 +265,11 @@ def test_format_comment_snippet_row_without_hotkey_or_uses() -> None:
     row = format_comment_snippet_row(
         CommentSnippet(text="Off-by-one", uses=0), hotkey=None
     ).plain
-    # No leading digit and no use-count suffix for an unused, un-numbered row.
     assert "Off-by-one" in row
     assert "×" not in row
     assert not row.strip().startswith(("1", "2", "3"))
 
 
-# --- Confidence chip -------------------------------------------------------
 from opengrader.tui.formatting import format_confidence_chip
 
 
@@ -296,7 +291,7 @@ def test_confidence_chip_none_with_response_is_unverified() -> None:
     chip = format_confidence_chip(None, has_response=True)
     assert chip is not None
     assert "unverified" in chip.plain
-    assert "%" not in chip.plain  # no fake number
+    assert "%" not in chip.plain
 
 
 def test_confidence_chip_none_without_response_is_hidden() -> None:
@@ -326,7 +321,5 @@ def test_page_context_label_distinguishes_source_and_extra_pages() -> None:
     extra = format_page_context_label(
         PageContextEntry(page_number=4, kind="extra"), 2, 3
     )
-    # The label must say the page belongs to no question — that is what tells a
-    # grader the work there is scratch/overflow rather than this answer's box.
     assert "extra work page" in extra.plain
     assert "(3/3)" in extra.plain

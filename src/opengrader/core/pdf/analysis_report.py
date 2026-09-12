@@ -1,16 +1,3 @@
-"""Render a cohort analysis report to a standalone PDF.
-
-The instructor-facing companion to the per-student annotated PDFs: one document
-summarizing how the *assignment* performed. It pairs the score distribution
-(how the students did) with per-item psychometrics from
-:mod:`core.analytics.item_analysis` (how each question did its job), so it can be
-filed alongside a returned exam or kept for course assessment / accreditation.
-
-Self-contained, like :mod:`core.pdf.annotations`: PyMuPDF base-14 fonts (no font
-registration) plus a single matplotlib histogram rasterized to a PNG. Pure
-w.r.t. grading — it only reads.
-"""
-
 from __future__ import annotations
 
 import statistics as _stats
@@ -29,34 +16,21 @@ from opengrader.core.analytics.item_analysis import (
 from opengrader.core.pdf.text_fonts import load_text_fonts
 from opengrader.core.question_types import humanize_question_label
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    # fitz (PyMuPDF, ~110ms cold) is only needed once a report PDF is
-    # actually rendered (see render_analysis_report_pdf/_draw_distribution
-    # below) — this module is pulled in by the grade-screen data provider at
-    # startup, well before any report is produced.
+if TYPE_CHECKING:  # pragma: no cover
     import fitz
 
 _PAGE_WIDTH = 612.0
 _PAGE_HEIGHT = 792.0
 _MARGIN = 54.0
-# Bold is asked for as a flag, not a font name: this report prints text the
-# instructor typed (the assignment title, outcome names, question labels), which
-# can be in any script, so the actual font is only decided once the string is in
-# hand — see `core/pdf/text_fonts.py` for why the built-in base-14 fonts cannot
-# be used for that.
 _FONT_REGULAR = False
 _FONT_BOLD = True
 
-# Column layout (x offsets from the left margin) for the per-item table.
 _COL_QUESTION = 0.0
 _COL_TYPE = 150.0
 _COL_N = 250.0
 _COL_DIFFICULTY = 300.0
 _COL_SEPARATION = 420.0
 
-# Column offsets for the learning-outcome table. Wider first column than the
-# item table's: an outcome name is an instructor's own phrase ("Applies Bayes'
-# rule"), not a short question id.
 _COL_OUTCOME_QUESTIONS = 170.0
 _COL_OUTCOME_WEIGHT = 300.0
 _COL_OUTCOME_MEAN = 370.0
@@ -86,8 +60,6 @@ _TYPE_LABELS = {
 
 @dataclass(frozen=True)
 class ScoreDistribution:
-    """The cohort's total-score spread, as percentages of each student's max."""
-
     percentages: tuple[float, ...]
 
     @property
@@ -118,11 +90,6 @@ class ScoreDistribution:
 def score_distribution_from_totals(
     totals: list[tuple[float, float]],
 ) -> ScoreDistribution:
-    """Build a distribution from ``(awarded, possible)`` pairs, one per student.
-
-    Students whose attainable total is zero (nothing graded yet) are skipped so
-    they don't sink the percentage stats to zero.
-    """
     percentages = [
         (awarded / possible) * 100.0
         for awarded, possible in totals
@@ -132,11 +99,8 @@ def score_distribution_from_totals(
 
 
 def _histogram_png(distribution: ScoreDistribution) -> bytes | None:
-    """Rasterize a score-percentage histogram to PNG bytes (Agg, headless)."""
     if distribution.count == 0:
         return None
-    # Lazy import so the whole module doesn't pay matplotlib's import cost unless
-    # an analysis PDF is actually produced.
     from matplotlib.figure import Figure
 
     figure = Figure(figsize=(6.6, 2.9), dpi=150)
@@ -167,8 +131,6 @@ def _one_decimal(value: float | None) -> str:
 
 
 class _PageCursor:
-    """A running write cursor that appends a fresh page when it runs out of room."""
-
     def __init__(self, document: fitz.Document) -> None:
         self._document = document
         self._page = document.new_page(-1, width=_PAGE_WIDTH, height=_PAGE_HEIGHT)
@@ -200,9 +162,6 @@ class _PageCursor:
         dx: float = 0.0,
         advance: bool = True,
     ) -> None:
-        # Resolve a font that can actually draw this string, then declare it on
-        # the page before use. Only the fonts a page really needs get declared,
-        # so an all-ASCII report embeds nothing extra.
         drawable = self._fonts.choose(text, bold=font)
         fontfile = self._fonts.fontfile_for(drawable.fontname)
         if fontfile is None:
@@ -238,20 +197,7 @@ def render_analysis_report_pdf(
     generated_on: date | None = None,
     outcomes: OutcomeReport | None = None,
 ) -> Path:
-    """Write the cohort analysis report PDF to ``output_path``.
-
-    Sections: a header, a score-distribution summary with a histogram, and a
-    per-item psychometrics table (question, type, N, difficulty, separation) with
-    flagged items called out. Returns the written path.
-
-    When ``outcomes`` is supplied and the answer key actually carries
-    ``**Outcome**`` tags, a learning-outcome mastery section is added between
-    the two: this is the page an accreditation review asks for, and it answers a
-    different question from the item table ("did they learn it?" rather than
-    "is this question any good?"). Omitted entirely when nothing is tagged, so
-    an ordinary assignment's report is unchanged.
-    """
-    import fitz  # see the TYPE_CHECKING import above for why this is deferred
+    import fitz
 
     generated_on = generated_on or date.today()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -308,7 +254,7 @@ def _draw_distribution(cursor: _PageCursor, distribution: ScoreDistribution) -> 
 
     png = _histogram_png(distribution)
     if png is not None:
-        import fitz  # see render_analysis_report_pdf for why this is deferred
+        import fitz
 
         image_height = 190.0
         cursor.ensure(image_height + 10)
@@ -323,13 +269,6 @@ def _draw_distribution(cursor: _PageCursor, distribution: ScoreDistribution) -> 
 
 
 def _draw_outcomes_table(cursor: _PageCursor, report: OutcomeReport) -> None:
-    """Per-outcome mastery: how many students met the bar, and on what evidence.
-
-    Coverage is printed *beside* mastery on purpose. A 100% mastery rate on an
-    outcome carried by 2 of 100 points is not evidence that the outcome was
-    achieved, and separating the two numbers onto different pages is how that
-    misreading happens.
-    """
     cursor.ensure(70)
     cursor.write("Learning outcomes", font=_FONT_BOLD, size=13)
     cursor.write(
@@ -340,8 +279,6 @@ def _draw_outcomes_table(cursor: _PageCursor, report: OutcomeReport) -> None:
     )
     tagged = report.tagged_share
     if tagged is not None and tagged < 1.0:
-        # Stated before the table, not after it: a reader who stops at the
-        # numbers must already know what fraction of the assignment they cover.
         cursor.write(
             f"{tagged:.0%} of this assignment's points carry an outcome tag; "
             f"the remaining {report.untagged_points:g} point(s) are untagged "
@@ -372,8 +309,6 @@ def _draw_outcomes_table(cursor: _PageCursor, report: OutcomeReport) -> None:
             for q in outcome.question_ids
         )
         rate = outcome.mastery_rate
-        # Red when most of the class missed the bar — the one row an instructor
-        # is meant to act on.
         row_color = (0.75, 0.2, 0.2) if rate is not None and rate < 0.5 else (0.0, 0.0, 0.0)
 
         cursor.write(
@@ -445,7 +380,7 @@ def _draw_items_table(cursor: _PageCursor, report: ItemAnalysisReport) -> None:
         cursor.rule()
 
     header()
-    current_version: str | None = ""  # sentinel distinct from None
+    current_version: str | None = ""
     for item in report.items:
         if item.assignment_version != current_version:
             current_version = item.assignment_version

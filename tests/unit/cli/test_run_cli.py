@@ -1,12 +1,3 @@
-"""The `opengrader-run` front end: flags in, exit codes and narration out.
-
-The engine has its own suite (``tests/unit/core/test_pipeline.py``); what is
-checked here is the thin layer around it — that every flag reaches the request
-it belongs in, that the summary tells a non-technical user what resume bought
-them, that the exit code says what happened, and that a successful run does not
-hand a scripted caller a full-screen app it never asked for.
-"""
-
 from __future__ import annotations
 
 import json
@@ -34,7 +25,6 @@ def _outcome(stage: str, status: StageStatus, message: str = "did a thing") -> S
 
 
 def _cohort(tmp_path: Path, submissions: int = 2) -> Path:
-    """A submissions folder with real `.submission.md` files to be counted."""
     root = tmp_path / "cohort" / "submissions"
     for index in range(1, submissions + 1):
         stem = f"submission-{index:04d}"
@@ -53,7 +43,6 @@ def _report(tmp_path: Path, *stages: StageOutcome, submissions: int = 2) -> Pipe
 
 @pytest.fixture
 def captured(monkeypatch, tmp_path):
-    """Replace the engine with a recorder; the CLI's own behaviour is the subject."""
     seen: dict[str, object] = {}
 
     def fake_run(request: PipelineRequest, *, progress=None):
@@ -77,11 +66,6 @@ def captured(monkeypatch, tmp_path):
 
 def _argv(tmp_path, *extra: str) -> list[str]:
     return ["--scan", str(tmp_path / "bundle.pdf"), "--out", str(tmp_path / "cohort"), *extra]
-
-
-# --------------------------------------------------------------------------- #
-# Flags → request
-# --------------------------------------------------------------------------- #
 
 
 def test_the_required_pair_is_scan_and_out(tmp_path, captured) -> None:
@@ -135,15 +119,7 @@ def test_no_auto_grade_turns_the_stage_off(tmp_path, captured) -> None:
     assert captured["request"].auto_grade is False
 
 
-# --------------------------------------------------------------------------- #
-# --llm follows AI Setup (tri-state), --auto-grade/--auto-ollama follow their
-# own switches
-# --------------------------------------------------------------------------- #
-
-
 def test_llm_absent_follows_the_two_settings_independently(tmp_path, captured) -> None:
-    """Left unset, reading handwriting and suggesting grades are two separate
-    decisions, each following its own AI Setup switch."""
     ai_config.save_settings(
         ai_config.AISettings(read_handwriting=True, grade_written=False)
     )
@@ -198,7 +174,6 @@ def test_auto_grade_defaults_off_from_ai_setup(tmp_path, captured) -> None:
 
 
 def test_no_auto_grade_still_works_with_ai_setup_on(tmp_path, captured) -> None:
-    """--no-auto-grade (the pre-existing spelling) must keep working."""
     ai_config.save_settings(ai_config.AISettings(auto_grade=True))
     run_module.run_cli(_argv(tmp_path, "--no-tui", "--no-auto-grade"))
     assert captured["request"].auto_grade is False
@@ -215,18 +190,12 @@ def test_auto_ollama_defaults_from_ai_setup(tmp_path, captured) -> None:
 
 
 def test_absent_paths_stay_none_rather_than_becoming_dot(tmp_path, captured) -> None:
-    """`Path("")` is `.`, which would silently point stages at the cwd."""
     run_module.run_cli(_argv(tmp_path, "--no-tui"))
     request = captured["request"]
     assert request.qa_file is None
     assert request.roster is None
     assert request.blank_template is None
     assert request.llm.min_confidence is None
-
-
-# --------------------------------------------------------------------------- #
-# Narration and summary
-# --------------------------------------------------------------------------- #
 
 
 def test_the_summary_names_every_stage_and_what_it_did(tmp_path, captured, capsys) -> None:
@@ -283,11 +252,6 @@ def test_progress_callbacks_are_wired_up(tmp_path, captured) -> None:
     assert progress.on_status is not None
 
 
-# --------------------------------------------------------------------------- #
-# Exit codes
-# --------------------------------------------------------------------------- #
-
-
 def test_a_clean_run_exits_zero(tmp_path, captured) -> None:
     assert run_module.main(_argv(tmp_path, "--no-tui")) == 0
 
@@ -300,7 +264,6 @@ def test_a_failed_stage_exits_one(tmp_path, captured) -> None:
 
 
 def test_a_blocked_run_exits_two(tmp_path, captured) -> None:
-    """2 means "a decision is needed", matching grade-check --fail-on-blocking."""
     captured["report"] = _report(
         tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.BLOCKED, "high-severity")
     )
@@ -308,18 +271,12 @@ def test_a_blocked_run_exits_two(tmp_path, captured) -> None:
 
 
 def test_main_returns_an_int_and_never_the_report(tmp_path, captured) -> None:
-    """console_scripts does sys.exit(main()); a report there prints a repr, exit 1."""
     assert isinstance(run_module.main(_argv(tmp_path, "--no-tui")), int)
     assert isinstance(run_module.run_cli(_argv(tmp_path, "--no-tui")), PipelineReport)
 
 
-# --------------------------------------------------------------------------- #
-# --dry-run and --json
-# --------------------------------------------------------------------------- #
-
-
 def test_dry_run_prints_the_plan_and_touches_nothing(tmp_path, monkeypatch, capsys) -> None:
-    def explode(*_args, **_kwargs):  # pragma: no cover - must never be reached
+    def explode(*_args, **_kwargs):  # pragma: no cover
         raise AssertionError("--dry-run ran the pipeline")
 
     monkeypatch.setattr(run_module, "run_pipeline", explode)
@@ -354,11 +311,6 @@ def test_json_is_machine_readable_and_never_opens_the_tui(
     assert "tui" not in captured
 
 
-# --------------------------------------------------------------------------- #
-# Handing off to the TUI
-# --------------------------------------------------------------------------- #
-
-
 def test_the_tui_opens_by_default_on_a_terminal(tmp_path, captured, monkeypatch) -> None:
     monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
     run_module.run_cli(_argv(tmp_path))
@@ -380,7 +332,6 @@ def test_a_blocked_run_does_not_open_the_tui(tmp_path, captured, monkeypatch) ->
 
 
 def test_the_tui_is_launched_through_its_own_entry_point(tmp_path, monkeypatch) -> None:
-    """Not TuiApp directly — graphics negotiation has to happen the usual way."""
     from opengrader.tui import main as tui_main
 
     launched: list[list[str]] = []
@@ -415,13 +366,7 @@ def test_without_an_answer_key_the_tui_is_not_launched_on_nothing(tmp_path, monk
     assert launched == []
 
 
-# --------------------------------------------------------------------------- #
-# One end-to-end pass through the real engine
-# --------------------------------------------------------------------------- #
-
-
 def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
-    """The stage CLIs are stubbed; everything between them is the real thing."""
     import fitz
 
     from opengrader.core.submissions import scan_check as scan_check_module
@@ -467,7 +412,6 @@ def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_json_stdout_is_not_polluted_by_the_inner_clis(tmp_path, monkeypatch, capsys) -> None:
-    """The stage CLIs print some lines directly; stdout must stay parseable."""
     import fitz
 
     from opengrader.core.submissions import scan_check as scan_check_module

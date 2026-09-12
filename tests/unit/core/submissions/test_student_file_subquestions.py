@@ -17,14 +17,6 @@ from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResu
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
 
-# student_file's build half imports process_submission_pdf/extract_*/
-# safe_image_to_data *locally*, right at their call sites (deferred so cv2,
-# fitz and pytesseract stay out of sys.modules for every TUI startup — see
-# core/submissions/student_file.py). A function-local ``from X import name``
-# reads ``X.name`` at call time, so patching must target the source module
-# (``ocr_extractor``/``ocr_ollama_vlm``/``pdf_utils``) rather than
-# ``student_file``, which never binds these names at module scope.
-
 
 def test_parse_assignment_metadata_extracts_compact_suffix_version() -> None:
     metadata = student_file.parse_assignment_metadata_from_title("cmpe 30 quiz 2_5a")
@@ -408,7 +400,6 @@ def test_parse_student_submission_markdown_reads_frontmatter_and_questions(
     assert document.assignment_title == "Quiz 1"
     assert document.assignment_version == "A"
     assert document.questions[0].question_id == "q1"
-    # The regenerated samples carry no OCR transcription for responses.
     assert document.questions[0].response_text == ""
     assert document.questions[0].response_image_path is not None
     assert Path(document.questions[0].response_image_path).is_absolute()

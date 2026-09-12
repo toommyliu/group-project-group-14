@@ -15,8 +15,6 @@ def test_enable_textual_feature_merges_and_deduplicates(monkeypatch) -> None:
 
 
 def test_run_app_launches_tui_app() -> None:
-    # Pass an explicit empty argv; a bare run_app() would parse pytest's own
-    # command line from sys.argv.
     with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
         run_app([])
 
@@ -51,7 +49,6 @@ def test_run_app_dev_enables_devtools_before_launch(monkeypatch) -> None:
 
 
 def test_check_graphics_reports_and_exits_without_launching(monkeypatch) -> None:
-    """The support command: an instructor runs it and pastes the answer."""
     monkeypatch.setenv("OPENGRADER_GRAPHICS", "sixel")
 
     with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
@@ -63,8 +60,6 @@ def test_check_graphics_reports_and_exits_without_launching(monkeypatch) -> None
 
 
 def test_graphics_override_is_applied_before_the_app_starts(monkeypatch) -> None:
-    """Probing the terminal is impossible once Textual owns stdin, so the
-    protocol must be settled before TuiApp is constructed."""
     from opengrader.tui import terminal_graphics
 
     monkeypatch.delenv("OPENGRADER_GRAPHICS", raising=False)
@@ -88,6 +83,5 @@ def test_graphics_override_is_applied_before_the_app_starts(monkeypatch) -> None
 
 
 def test_unknown_graphics_protocol_is_rejected() -> None:
-    # argparse rejects it before our own validation ever runs.
     with pytest.raises(SystemExit):
         run_app(["--graphics", "jpeg"])

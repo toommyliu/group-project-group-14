@@ -1,14 +1,3 @@
-"""Tests for the AI Setup modal (AISettingsScreen).
-
-This is the one place every CLI's model/host/confidence defaults come from
-(``core/ai_config``), so what matters here is not the widgets but the three
-rules the screen's own module docstring names: nothing is written until Save,
-blank stays blank on disk (never freezing today's default into the file), and
-a failed connection test says what to do about it. A fourth rule — the
-provider dropdown is built from the registry, not a hard-coded branch — is
-what lets a cloud provider show up here with zero edits to this file.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,8 +15,6 @@ _SIZE = (120, 44)
 
 
 class _Host(App):
-    """Hosts the modal and records what it dismissed with."""
-
     def __init__(self, screen: AISettingsScreen) -> None:
         super().__init__()
         self._screen = screen
@@ -43,7 +30,6 @@ class _Host(App):
 
 
 async def _settle(pilot, predicate, limit: int = 80) -> None:  # noqa: ANN001
-    """Pump the event loop until a thread worker's result lands, or give up."""
     for _ in range(limit):
         await pilot.pause()
         await asyncio.sleep(0.01)
@@ -52,19 +38,11 @@ async def _settle(pilot, predicate, limit: int = 80) -> None:  # noqa: ANN001
 
 
 def _log_text(screen: AISettingsScreen) -> str:
-    """The connection-test log, rejoined with spaces so a phrase split across
-    two wrapped RichLog lines is still one contiguous string to search."""
     return " ".join(str(line) for line in screen.query_one("#ai-log", RichLog).lines)
 
 
 @pytest.fixture
 def fake_cloud_provider():
-    """Register a throwaway cloud provider and remove it again afterward.
-
-    Proves the screen reads ``ai_config.registered_providers()`` rather than
-    hard-coding "ollama": if this test needed an edit to the screen to pass,
-    the registry claim in the module docstring would be false.
-    """
     spec = ProviderSpec(
         name="fake-cloud",
         label="Fake Cloud (test)",
@@ -84,17 +62,7 @@ def fake_cloud_provider():
         ai_config._REGISTRY.pop(spec.name, None)
 
 
-# ── Nothing is written until Save ────────────────────────────────────────────
-
-
 def test_cancel_writes_nothing_and_dismisses_with_none() -> None:
-    """Backing out of the dialog must not commit a half-typed model name.
-
-    A user trying a model name, deciding against it, and hitting Cancel (or
-    Escape) has to get their working setup back exactly as it was — including
-    "no file at all" for someone who never configured the AI.
-    """
-
     async def run() -> None:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -109,9 +77,6 @@ def test_cancel_writes_nothing_and_dismisses_with_none() -> None:
 
 
 def test_cancel_dismisses_with_none() -> None:
-    """The caller uses the dismiss value to know whether to refresh anything
-    showing a model name; a cancel must hand back nothing to refresh with."""
-
     async def run() -> tuple[bool, AISettings | None]:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -125,13 +90,7 @@ def test_cancel_dismisses_with_none() -> None:
     assert result is None
 
 
-# ── Save persists and returns the AISettings ─────────────────────────────────
-
-
 def test_save_persists_and_returns_the_settings() -> None:
-    """The whole point of the screen: what Save returns is what load_settings()
-    reads back, because every CLI resolves its defaults from that same file."""
-
     async def run() -> AISettings | None:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -154,16 +113,7 @@ def test_save_persists_and_returns_the_settings() -> None:
     assert reloaded.host == "http://box:11434"
 
 
-# ── Blank fields stay blank on disk ──────────────────────────────────────────
-
-
 def test_saving_with_nothing_typed_records_only_the_version() -> None:
-    """"Blank means follow the default" is load-bearing (see core/ai_config's
-    docstring): pre-filling today's recommendation into the file would freeze
-    an unconfigured user onto it forever instead of letting Opengrader's
-    recommendation move them forward. An untouched form must write nothing
-    but the schema version."""
-
     async def run() -> tuple[str, str, str]:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -179,7 +129,6 @@ def test_saving_with_nothing_typed_records_only_the_version() -> None:
         return placeholders
 
     vision_ph, text_ph, host_ph = asyncio.run(run())
-    # The placeholder names exactly what leaving the field blank resolves to.
     assert vision_ph == ai_config.DEFAULT_VISION_MODEL
     assert text_ph == ai_config.DEFAULT_TEXT_MODEL
     assert host_ph == ai_config.DEFAULT_HOST
@@ -188,13 +137,7 @@ def test_saving_with_nothing_typed_records_only_the_version() -> None:
     assert raw == {"version": ai_config.SETTINGS_VERSION}
 
 
-# ── An existing file pre-populates the form ──────────────────────────────────
-
-
 def test_existing_settings_prefill_the_form_and_resaving_is_a_no_op() -> None:
-    """Re-opening the screen must show the user's own choices — and only
-    those — so that closing it again without changing anything rewrites the
-    file byte-for-byte instead of freezing in whatever else was blank."""
     original = AISettings(
         vision_model="my-vision",
         text_model="my-text",
@@ -215,7 +158,7 @@ def test_existing_settings_prefill_the_form_and_resaving_is_a_no_op() -> None:
     }
 
     async def run() -> tuple[str, str, str, str, bool]:
-        app = _Host(AISettingsScreen())  # loads from disk, settings=None
+        app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             screen = app.screen
@@ -237,16 +180,9 @@ def test_existing_settings_prefill_the_form_and_resaving_is_a_no_op() -> None:
     assert after == before
 
 
-# ── Test connection touches the typed values, not the saved ones ────────────
-
-
 def test_connection_test_resolves_the_typed_values_and_writes_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Testing a connection must reflect what's in the boxes right now, not
-    whatever is (or isn't) saved — otherwise trying an unsaved model name
-    would either silently test the old one or force a save just to find out
-    whether it works, defeating the "nothing written until Save" rule."""
     captured: list = []
 
     def fake_list_models(config):  # noqa: ANN001
@@ -278,10 +214,6 @@ def test_connection_test_resolves_the_typed_values_and_writes_nothing(
 def test_a_failed_connection_test_shows_the_providers_setup_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """"The test says what to do, not just that it failed": a failure must
-    print the provider's own setup_hint (the fix), the same rule
-    core/environment.py follows for every other finding."""
-
     def boom(_config):
         raise RuntimeError("connection refused")
 
@@ -301,20 +233,13 @@ def test_a_failed_connection_test_shows_the_providers_setup_hint(
     text = asyncio.run(run())
     assert "connection refused" in text
     hint = ai_config.get_provider(ai_config.DEFAULT_PROVIDER).setup_hint
-    assert "ollama pull qwen2.5vl:7b" in hint  # sanity on the fixture text itself
+    assert "ollama pull qwen2.5vl:7b" in hint
     assert "ollama pull qwen2.5vl:7b" in text
-
-
-# ── The provider dropdown is built from the registry ─────────────────────────
 
 
 def test_a_registered_cloud_provider_appears_and_reveals_the_key_row(
     fake_cloud_provider: ProviderSpec,
 ) -> None:
-    """The dropdown, the summary line and the key row's visibility are all
-    driven by ``registered_providers()``/``requires_api_key`` — this is the
-    test that proves a cloud provider needs no edit to this screen at all."""
-
     async def run() -> tuple[bool, bool, str]:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -323,7 +248,7 @@ def test_a_registered_cloud_provider_appears_and_reveals_the_key_row(
             hidden_before = screen.query_one("#ai-key-row").has_class("hidden")
 
             select = screen.query_one("#ai-provider", Select)
-            select.value = fake_cloud_provider.name  # raises if not a real option
+            select.value = fake_cloud_provider.name
             await pilot.pause()
 
             summary = str(screen.query_one("#ai-provider-summary", Static).content)
@@ -331,20 +256,14 @@ def test_a_registered_cloud_provider_appears_and_reveals_the_key_row(
         return hidden_before, hidden_after, summary
 
     hidden_before, hidden_after, summary = asyncio.run(run())
-    assert hidden_before is True  # local Ollama needs no key
-    assert hidden_after is False  # the fake cloud provider does
+    assert hidden_before is True
+    assert hidden_after is False
     assert fake_cloud_provider.summary in summary
-
-
-# ── An API key is never stored ───────────────────────────────────────────────
 
 
 def test_an_api_key_is_never_written_to_the_settings_file(
     fake_cloud_provider: ProviderSpec, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """core/ai_config's contract: only the *name* of the environment variable
-    is ever recorded, never the key itself — so a settings file is safe to
-    hand to a TA or back up without leaking a secret."""
     monkeypatch.setenv(fake_cloud_provider.api_key_env, "sk-super-secret-value")
 
     async def run() -> None:
@@ -365,15 +284,9 @@ def test_an_api_key_is_never_written_to_the_settings_file(
     assert raw["provider"] == fake_cloud_provider.name
 
 
-# ── Validation is friendly, not fatal ────────────────────────────────────────
-
-
 def test_an_out_of_range_confidence_is_refused_with_a_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A confidence outside 0-1 must be refused with a visible notification —
-    not saved as-is, and not left to crash resolve() the next time any CLI
-    reads the file."""
     notices: list[tuple[str, str]] = []
 
     async def run() -> bool:
@@ -403,7 +316,6 @@ def test_an_out_of_range_confidence_is_refused_with_a_message(
 def test_a_non_numeric_confidence_is_refused_with_a_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Same rule for text that isn't a number at all: refused, not a crash."""
     notices: list[tuple[str, str]] = []
 
     async def run() -> bool:
@@ -431,10 +343,6 @@ def test_a_non_numeric_confidence_is_refused_with_a_message(
 
 
 def test_a_valid_confidence_is_accepted_and_round_trips() -> None:
-    """The counterpart to the two refusals above: a legal value in range must
-    actually be saved, or the validation would be indistinguishable from a
-    screen that rejects everything."""
-
     async def run() -> AISettings | None:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -451,19 +359,7 @@ def test_a_valid_confidence_is_accepted_and_round_trips() -> None:
     assert ai_config.load_settings().min_confidence == pytest.approx(0.42)
 
 
-# ── The timeout field: a hole this screen used to leave open ────────────────
-#
-# timeout_seconds used to have no widget at all: collect() passed
-# self._settings.timeout_seconds straight through, so a value on disk was
-# invisible and permanent, and the only way to change it from the TUI was an
-# environment variable or a hand-edited ai.json. These tests are the
-# regression coverage for that hole being closed.
-
-
 def test_timeout_prefills_from_settings_and_round_trips() -> None:
-    """A timeout already on disk (set by hand or via OPENGRADER_AI_TIMEOUT)
-    must be visible in the form, mirroring exactly how #ai-min-confidence
-    renders its own optional float."""
     ai_config.save_settings(AISettings(timeout_seconds=300.0))
 
     async def run() -> tuple[str, AISettings | None]:
@@ -484,9 +380,6 @@ def test_timeout_prefills_from_settings_and_round_trips() -> None:
 
 
 def test_blank_timeout_saves_none() -> None:
-    """Blank means "use the recommended default", the same rule every other
-    field on this screen follows — clearing the box must not merely fail to
-    change anything, it must actually erase a previously saved value."""
     ai_config.save_settings(AISettings(timeout_seconds=300.0))
 
     async def run() -> AISettings | None:
@@ -510,12 +403,6 @@ def test_blank_timeout_saves_none() -> None:
 def test_an_invalid_timeout_is_refused_with_a_message(
     bad: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Non-numeric, zero and negative must all be refused with a visible
-    notification, exactly like the confidence field. This is the regression
-    test for the hole itself: a saved timeout must be a live, validated field
-    a bad edit can't silently leave un-saved-but-unreachable — the file must
-    keep the last *good* value, not accept garbage and not vanish it.
-    """
     ai_config.save_settings(AISettings(timeout_seconds=300.0))
     notices: list[tuple[str, str]] = []
 
@@ -543,14 +430,7 @@ def test_an_invalid_timeout_is_refused_with_a_message(
     assert ai_config.load_settings().timeout_seconds == pytest.approx(300.0)
 
 
-# ── "What the AI does here" switches ─────────────────────────────────────────
-
-
 def test_new_ai_switches_round_trip_through_collect() -> None:
-    """Every switch this screen adds (the replacement for the six checkboxes
-    deleted from the setup screen) must reach the saved AISettings — this is
-    what makes AI Setup "the one place the AI is switched on and off"."""
-
     async def run() -> AISettings | None:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -588,10 +468,6 @@ def test_new_ai_switches_round_trip_through_collect() -> None:
 
 
 def test_auto_grade_defaults_on() -> None:
-    """AISettings.auto_grade defaults True (today's opengrader-run behaviour);
-    an untouched form must save that, not silently flip it off just because
-    the checkbox now exists to be unticked."""
-
     async def run() -> AISettings | None:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -606,9 +482,6 @@ def test_auto_grade_defaults_on() -> None:
 
 
 def test_handwriting_suboptions_hidden_until_ticked() -> None:
-    """#ai-handwriting-options starts hidden and is revealed by its parent
-    checkbox, mirroring setup_screen's #ext-parallel-options idiom."""
-
     async def run() -> tuple[bool, bool]:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -630,9 +503,6 @@ def test_handwriting_suboptions_hidden_until_ticked() -> None:
 
 
 def test_grading_suboptions_hidden_until_ticked() -> None:
-    """Same idiom, gated on #ai-grade-written instead — "require a measured
-    confidence" is meaningless until grade suggestions are on at all."""
-
     async def run() -> tuple[bool, bool]:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
@@ -654,10 +524,6 @@ def test_grading_suboptions_hidden_until_ticked() -> None:
 
 
 def test_suboptions_shown_at_compose_when_already_saved_on() -> None:
-    """The reveal must also happen at compose time from saved settings, not
-    only in reaction to a click — otherwise re-opening the screen on a
-    machine that already has these switched on would hide options that are
-    actually in effect."""
     ai_config.save_settings(AISettings(read_handwriting=True, grade_written=True))
 
     async def run() -> tuple[bool, bool]:
@@ -675,13 +541,7 @@ def test_suboptions_shown_at_compose_when_already_saved_on() -> None:
     assert grading_hidden is False
 
 
-# ── min_confidence_measured: provenance, not a knob ──────────────────────────
-
-
 def test_min_confidence_measured_is_preserved_when_the_box_is_untouched() -> None:
-    """Accepting llm-eval's recommendation (min_confidence_measured=True) and
-    then saving the form again — without touching the confidence box — must
-    not silently downgrade the value back to "a human typed this"."""
     ai_config.save_settings(
         AISettings(min_confidence=0.81, min_confidence_measured=True)
     )
@@ -690,8 +550,6 @@ def test_min_confidence_measured_is_preserved_when_the_box_is_untouched() -> Non
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
-            # Touch an unrelated field so Save has something to do, without
-            # touching the confidence box itself.
             app.screen.query_one("#ai-vision-model", Input).value = "other-model"
             await pilot.pause()
             await pilot.click("#ai-save")
@@ -706,10 +564,6 @@ def test_min_confidence_measured_is_preserved_when_the_box_is_untouched() -> Non
 
 
 def test_min_confidence_measured_is_cleared_when_the_value_is_edited() -> None:
-    """The whole reason "Only use suggestions I have measured" can mean
-    anything: typing a new number turns the confidence back into a guess, so
-    the provenance flag must drop to False even though the field itself still
-    saves fine."""
     ai_config.save_settings(
         AISettings(min_confidence=0.81, min_confidence_measured=True)
     )
@@ -731,28 +585,15 @@ def test_min_confidence_measured_is_cleared_when_the_value_is_edited() -> None:
     assert ai_config.load_settings().min_confidence_measured is False
 
 
-# ── Test connection also times a real generate call ──────────────────────────
-
-
 def test_connection_test_times_a_call_and_offers_to_apply_a_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test connection must not just say "connected" — it must time one real
-    generate call (so the timeout box is measured rather than guessed, the
-    same reason llm-eval exists so nobody guesses --llm-min-confidence) and,
-    when the measurement eats most of the configured limit, offer a button
-    that fills in a roomier one. Nothing here touches a network:
-    list_models and measure_generate_latency are both faked.
-    """
-
     def fake_list_models(config):  # noqa: ANN001
         return [ai_config.DEFAULT_VISION_MODEL, ai_config.DEFAULT_TEXT_MODEL]
 
     monkeypatch.setattr("opengrader.core.llm.list_models", fake_list_models)
 
     def fake_measure(resolved, *, role="handwriting", **kwargs):  # noqa: ANN001
-        # 100s against the 120s default limit is most of it, so
-        # recommend_timeout should recommend something roomier.
         return ai_config.LatencyMeasurement(
             role=role,
             model=resolved.vision_model,
@@ -784,18 +625,12 @@ def test_connection_test_times_a_call_and_offers_to_apply_a_recommendation(
     assert "responded in 100.0 s" in log_text
     assert "That is most of your limit" in log_text
     assert apply_hidden is False
-    # 100s measured, 4x headroom = 400s, rounded up to the next multiple of
-    # 30s = 420s (see ai_config.recommend_timeout / TIMEOUT_HEADROOM_MULTIPLE).
     assert timeout_value == "420"
 
 
 def test_apply_button_stays_hidden_and_disabled_with_no_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the measured call is nowhere near the limit, recommend_timeout
-    returns None and the apply button must neither appear nor be clickable —
-    _show()'s blanket "re-enable every button" must not leak onto it."""
-
     def fake_list_models(config):  # noqa: ANN001
         return [ai_config.DEFAULT_VISION_MODEL, ai_config.DEFAULT_TEXT_MODEL]
 

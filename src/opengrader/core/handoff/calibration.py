@@ -1,52 +1,3 @@
-"""Calibration (norming) sets — every grader marks the same sample, blind.
-
-A TA team's fairness problem has two halves and Opengrader only had the second
-one. :mod:`~opengrader.core.submissions.consistency` catches unequal grading
-*after* it has happened, one answer at a time, and the audit journal records who
-did it. Nothing existed for the half instructors do first: sit the team down
-before the pile is divided, have everyone grade the same handful of answers, and
-find out where the rubric means different things to different people. That is a
-*norming session*, and it is the cheapest fairness intervention there is —
-disagreement found here costs a five-minute conversation, and the same
-disagreement found in the consistency audit costs a regrade of every paper the
-harsh grader touched.
-
-A calibration set is deliberately built out of the machinery that already
-exists rather than a parallel one:
-
-* Each grader's sample is an ordinary **redacted packet** (:mod:`packet`), so a
-  TA opens it with the same ``uv run tui`` command as any handoff and needs to
-  learn nothing new.
-* Every packet holds the **same students**, which is the whole point:
-  agreement can only be measured on identical work
-  (:data:`~opengrader.core.analytics.grader_agreement.OverlapBasis` ``same_work``).
-* Comparing the returned copies is the same computation as auditing leniency in
-  production grading, so it is the same engine — see
-  :mod:`opengrader.core.analytics.grader_agreement`.
-
-Three decisions carry the value:
-
-- **Each grader gets their own aliases.** ``mint_alias`` is stable over
-  *(packet id, student key)*, and each grader's packet has its own id, so the
-  same student is ``og-1a2b3c4d`` in one packet and something else in the next.
-  Two TAs comparing notes over a shared alias is exactly the anchoring a norming
-  session exists to avoid.
-
-- **The sample is packed ungraded, always.** A packet cut from partly-graded
-  work would show the grader someone else's marks, and the first number a person
-  sees is the number they agree with. Grades, rubric selections and comments are
-  cleared from the copy — the *copy* only; nothing in the teacher's folder is
-  touched. This also means a calibration packet is deliberately **not
-  mergeable**: its baseline no longer describes its contents, and merging back a
-  set whose entire purpose is disagreement would overwrite the real grading with
-  whichever TA happened to be applied last.
-
-- **The sample is random, and the seed is recorded.** Nothing is graded yet, so
-  there is no difficulty signal to sample along; a uniform draw is the only
-  unbiased choice. Recording the seed keeps it reproducible — a set can be
-  re-cut for a grader who lost their packet and they will get the same students.
-"""
-
 from __future__ import annotations
 
 import json
@@ -78,26 +29,17 @@ from .packet import (
     slugify_packet_name,
 )
 
-# Where a calibration set's record lives — beside the handoff keys it indexes,
-# under the same dot-dir every other piece of assignment metadata uses, so it
-# travels with the folder and stays out of submission discovery.
 CALIBRATION_SUBDIR = "calibration"
 
-# How many students a set samples when the caller does not say. Small on
-# purpose: a norming session is a meeting, and eight answers per grader is about
-# twenty minutes of marking followed by a conversation. Larger samples measure
-# more precisely and get skipped.
 DEFAULT_SAMPLE_SIZE = 8
 
 
 class CalibrationError(ValueError):
-    """A calibration set could not be built or read."""
+    pass
 
 
 @dataclass(frozen=True)
 class CalibrationPacket:
-    """One grader's copy of the sample."""
-
     grader: str
     packet_id: str
     packet_path: str
@@ -105,14 +47,6 @@ class CalibrationPacket:
 
 @dataclass(frozen=True)
 class CalibrationSet:
-    """The record of one norming session, kept on the teacher's side.
-
-    Holds only what is needed to collect the packets back in: who got one, which
-    students were sampled, and the seed that chose them. The alias maps live
-    where every packet's does — in the handoff keys — rather than being copied
-    here, so there is one place a redaction can be undone.
-    """
-
     set_id: str
     created_at: str
     created_by: str
@@ -132,15 +66,12 @@ class CalibrationSet:
 
 @dataclass(frozen=True)
 class CalibrationResult:
-    """What :func:`build_calibration_set` wrote, for the CLI/TUI to report."""
-
     calibration_set: CalibrationSet
     record_path: Path
     packets: tuple[PacketResult, ...]
 
 
 def resolve_calibration_dir(submissions_path: str | Path) -> Path:
-    """The ``.opengrader/calibration`` dir for a submissions file or dir."""
     base = Path(submissions_path)
     if base.is_file():
         base = base.parent
@@ -148,7 +79,6 @@ def resolve_calibration_dir(submissions_path: str | Path) -> Path:
 
 
 def render_calibration_set(calibration_set: CalibrationSet) -> str:
-    """Serialize a set record. Indented and key-sorted so a diff is readable."""
     payload = {
         "format": 1,
         "set_id": calibration_set.set_id,
@@ -170,7 +100,6 @@ def render_calibration_set(calibration_set: CalibrationSet) -> str:
 
 
 def parse_calibration_set(text: str) -> CalibrationSet:
-    """Read a set record back, raising with context on anything malformed."""
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -210,11 +139,6 @@ def read_calibration_set(path: str | Path) -> CalibrationSet:
 
 
 def list_calibration_sets(submissions_path: str | Path) -> list[CalibrationSet]:
-    """Every calibration set recorded for a cohort, newest first.
-
-    An unreadable record is skipped rather than raised: one damaged file must
-    not hide the other sessions, exactly as the journal treats a bad line.
-    """
     directory = resolve_calibration_dir(submissions_path)
     if not directory.is_dir():
         return []
@@ -231,7 +155,6 @@ def list_calibration_sets(submissions_path: str | Path) -> list[CalibrationSet]:
 def find_calibration_set(
     submissions_path: str | Path, set_id: str = ""
 ) -> CalibrationSet | None:
-    """Look up one set by id, or the most recent when no id is given."""
     sets = list_calibration_sets(submissions_path)
     if not set_id:
         return sets[0] if sets else None
@@ -247,14 +170,6 @@ def sample_student_keys(
     size: int,
     seed: int,
 ) -> tuple[str, ...]:
-    """Draw ``size`` student keys uniformly, reproducibly from ``seed``.
-
-    Sorted before sampling so the draw depends on the seed alone and not on the
-    order the filesystem happened to list the submissions in — that is what
-    makes "re-cut this set" give the same students back. A ``size`` at or above
-    the cohort takes everyone rather than raising: a class of five is a small
-    class, not a mistake.
-    """
     pool = sorted({key for key in keys if key})
     if not pool:
         raise CalibrationError("no identifiable students to sample from")
@@ -266,14 +181,6 @@ def sample_student_keys(
 
 
 def _blank_grades(text: str, document: StudentSubmissionDocument) -> str:
-    """Clear every grade, rubric selection and comment from a copy's markdown.
-
-    Passing ``rubric_labels=()`` alongside ``points_awarded=None`` is what makes
-    the writer emit a *blank* Points line: ``None`` on its own reads as "leave
-    unchanged" for every field, so the rubric is the field that carries the
-    intent — the same rule ``history/restore`` relies on to restore an answer to
-    ungraded.
-    """
     updated = text
     for question in document.questions:
         updated = update_student_submission_markdown(
@@ -289,7 +196,6 @@ def _blank_grades(text: str, document: StudentSubmissionDocument) -> str:
 
 
 def _blank_packet_grades(packet_path: Path) -> int:
-    """Blank the grades in a freshly-built packet. Returns answers cleared."""
     root = packet_path / PACKET_SUBMISSIONS_DIRNAME
     cleared = 0
     for path in discover_submission_paths(root):
@@ -313,18 +219,6 @@ def build_calibration_set(
     actor: str = "",
     now: datetime | None = None,
 ) -> CalibrationResult:
-    """Cut one blind, identical packet per grader and record the session.
-
-    Every packet holds the same sampled students, ungraded, under per-packet
-    aliases. The teacher-side handoff keys are written by
-    :func:`~opengrader.core.handoff.packet.build_packet` as usual — they are what
-    :func:`collect_calibration_gradings` reads the returned copies back with.
-
-    Raises :class:`CalibrationError` rather than producing a half-built session
-    (no graders, an unusable sample, a name already taken); a partially-cut set
-    would be worse than none, because the missing grader's absence is invisible
-    until the report is short one column.
-    """
     names = [name.strip() for name in graders if name and name.strip()]
     if len(names) < 2:
         raise CalibrationError(
@@ -412,25 +306,17 @@ def build_calibration_set(
 
 @dataclass(frozen=True)
 class CollectedGrading:
-    """One grader's returned copy, re-keyed into the teacher's vocabulary."""
-
     grader: str
     packet_id: str
     documents: Mapping[str, StudentSubmissionDocument]
     graded_answers: int
-    # Submissions in the copy whose alias is not in the handoff key. Reported
-    # rather than dropped silently: it means part of that grader's work cannot
-    # be attributed, which changes how the report should be read.
     untranslated: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class CalibrationCollection:
-    """Every returned packet that could be read, and every one that could not."""
-
     calibration_set: CalibrationSet
     gradings: tuple[CollectedGrading, ...]
-    # (grader, why) for packets that are missing, unreadable, or unstarted.
     missing: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -442,7 +328,6 @@ def _read_returned_packet(
     packet_path: Path,
     handoff_key: HandoffKey,
 ) -> tuple[dict[str, StudentSubmissionDocument], list[str], int]:
-    """Load one returned packet, mapping each alias back to our student key."""
     translate = alias_translation(handoff_key)
     root = packet_path / PACKET_SUBMISSIONS_DIRNAME
     if not root.is_dir():
@@ -473,18 +358,6 @@ def collect_calibration_gradings(
     *,
     packet_paths: Mapping[str, str | Path] | None = None,
 ) -> CalibrationCollection:
-    """Read every grader's returned packet back into the teacher's vocabulary.
-
-    Packets are found where the set recorded them, unless ``packet_paths``
-    overrides a grader's location (a TA who handed the folder back somewhere
-    else). Each copy is de-aliased with its own handoff key, so what comes out
-    is keyed by real student — which is what makes two graders' marks on the
-    same answer comparable.
-
-    A packet that is missing, unreadable, or simply not graded yet becomes a
-    ``missing`` entry with the reason. Nothing raises: a norming session where
-    one TA has not finished should still report on the ones who have.
-    """
     overrides = {
         grader: Path(path) for grader, path in (packet_paths or {}).items()
     }
@@ -501,9 +374,6 @@ def collect_calibration_gradings(
 
         key_path = handoff_dir / f"{entry.packet_id}.json"
         if not key_path.exists():
-            # Without the key every alias fails to match, and the merge module's
-            # rule applies here too: report it loudly rather than returning an
-            # empty grading that reads as "this TA did nothing".
             missing.append((entry.grader, f"handoff key not found at {key_path}"))
             continue
         try:

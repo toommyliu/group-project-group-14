@@ -45,8 +45,8 @@ def _write_submission(
 def test_review_queue_lists_flags_human_readable(tmp_path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
-    _write_submission(subs / "a.submission.md", student_id="")  # missing id -> high
-    _write_submission(subs / "b.submission.md", response_text="")  # empty resp -> low
+    _write_submission(subs / "a.submission.md", student_id="")
+    _write_submission(subs / "b.submission.md", response_text="")
 
     run_cli(["--input", str(subs)])
 
@@ -54,7 +54,6 @@ def test_review_queue_lists_flags_human_readable(tmp_path, capsys) -> None:
     assert "need review" in out
     assert "missing_student_id" in out
     assert "empty_response" in out
-    # High severity is listed before low.
     assert out.index("HIGH") < out.index("LOW")
 
 
@@ -99,7 +98,6 @@ def test_review_queue_errors_on_empty_directory(tmp_path) -> None:
 
 
 def _rubric_drift_journal(root: Path, *, student_id: str = "123456789") -> None:
-    """One grade, then a rubric edit that leaves it behind."""
     from opengrader.core.history import GradeJournal, resolve_history_dir
 
     journal = GradeJournal(resolve_history_dir(root), actor="prof_kim")
@@ -147,7 +145,6 @@ def test_the_rubric_drift_check_can_be_switched_off(tmp_path, capsys) -> None:
 
 
 def test_a_folder_with_no_journal_reports_no_drift(tmp_path, capsys) -> None:
-    """Grading that predates journalling leaves no trace, and none is asserted."""
     _write_submission(tmp_path / "a.submission.md")
 
     run_cli(["--input", str(tmp_path), "--json"])

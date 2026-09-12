@@ -70,13 +70,6 @@ def test_response_viewer_updates_existing_image_widget_for_new_path(
 
 
 def test_new_image_triggers_full_screen_repaint(tmp_path: Path) -> None:
-    """Changing the displayed image must repaint the whole screen.
-
-    Terminal graphics (sixel pixels, TGP placeholders) survive Textual's
-    partial repaints, so a smaller replacement image would otherwise leave
-    remnants of the previous, larger one on screen.
-    """
-
     async def run() -> None:
         first_path = tmp_path / "first.png"
         second_path = tmp_path / "second.png"
@@ -107,8 +100,6 @@ def test_new_image_triggers_full_screen_repaint(tmp_path: Path) -> None:
 
 
 def test_degraded_terminal_gets_a_permanent_fallback_notice(tmp_path: Path) -> None:
-    """Without this the app just looks broken: colour mush where a scan
-    should be, and no hint that a working escape hatch exists."""
     from textual.widgets import Static
 
     from opengrader.tui.terminal_graphics import GraphicsCapability
@@ -134,7 +125,6 @@ def test_degraded_terminal_gets_a_permanent_fallback_notice(tmp_path: Path) -> N
             notice = app.query_one("#response-viewer-fallback", Static)
             rendered = str(notice.render())
             assert "Terminal.app" in rendered
-            # The hint must name the key, not just complain.
             assert "o" in rendered
 
     asyncio.run(run())
@@ -170,8 +160,6 @@ def test_pixel_capable_terminal_gets_no_notice(tmp_path: Path) -> None:
 
 
 def test_open_externally_targets_the_image_on_display(tmp_path: Path) -> None:
-    """It must open what the grader is looking at -- including the rendered
-    math PNG when the math toggle is on, not always the original crop."""
     import opengrader.tui.ui.widgets.response_viewer as module
 
     async def run() -> None:

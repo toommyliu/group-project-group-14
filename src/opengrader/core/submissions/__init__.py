@@ -173,7 +173,7 @@ from .processor import (
     build_student_submission_document_unified,
     resolve_student_identity,
     _load_blank_assignment_template,
-    _load_roster, # Added for roster loading
+    _load_roster,
     _RosterEntry,
 )
 from .batch import (
@@ -238,7 +238,6 @@ __all__ = [
     "build_similarity_flags",
     "normalize_for_similarity",
     "similarity_ratio",
-    # Objective-answer integrity — the half a text diff cannot audit.
     "DEFAULT_MIN_SHARED_WRONG",
     "DEFAULT_PATTERN_THRESHOLD",
     "AnswerPatternFlag",
@@ -253,7 +252,6 @@ __all__ = [
     "build_answer_pattern_report",
     "build_answer_pattern_report_for_documents",
     "objective_responses_from_documents",
-    # Fuzzy tier of answer grouping — proposals a human confirms.
     "DEFAULT_SUGGESTION_MIN_LENGTH",
     "DEFAULT_SUGGESTION_THRESHOLD",
     "AnswerDiffSpan",
@@ -265,7 +263,6 @@ __all__ = [
     "suggest_group_merges",
     "summarize_grouping_effort",
     "QuestionSourceSegment",
-    # Transcription provenance ("who read this answer") + the escalation rule.
     "DEFAULT_ESCALATION_FLOOR",
     "KNOWN_READING_SOURCES",
     "MODEL_READING_SOURCES",
@@ -280,7 +277,6 @@ __all__ = [
     "is_model_reading",
     "should_escalate",
     "tally_reading_sources",
-    # Confidence-driven selective re-extraction (`submission-extractor --refine`).
     "DEFAULT_REFINE_FLOOR",
     "REJECTION_LABELS",
     "RefineCandidate",
@@ -296,7 +292,6 @@ __all__ = [
     "ReorderResult",
     "reorder_pdf_pages",
     "_load_page_number_layout",
-    # Scan pre-flight ("scan doctor") — rotation/blank/DPI/clipping/page count.
     "OrientationUnavailableError",
     "PageOrderPlan",
     "PageOrderWindow",
@@ -319,7 +314,6 @@ __all__ = [
     "flag_submission_page_count",
     "plan_rotations",
     "summarize_issues",
-    # Whole-page context for a graded response + the extra-work-page hand-off.
     "PageContextEntry",
     "PageKind",
     "build_page_context",
@@ -339,7 +333,7 @@ __all__ = [
     "load_student_submission_markdown",
     "set_student_identity_file",
     "set_student_identity_markdown",
-    "_load_roster", # Added for roster loading
+    "_load_roster",
     "AssignmentTemplate",
     "FieldLocation",
     "_RosterEntry",
@@ -354,7 +348,6 @@ __all__ = [
     "render_student_submission_markdown",
     "update_student_submission_file",
     "update_student_submission_markdown",
-    # Parallel extraction + the resume ledger that backs it.
     "BatchReport",
     "ExtractionJob",
     "ExtractionOutcome",

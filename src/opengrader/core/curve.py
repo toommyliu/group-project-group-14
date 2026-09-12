@@ -1,27 +1,3 @@
-"""Per-assignment score curve — a transparent, reversible transform on totals.
-
-Grading truth is the rubric selections in the ``.submission.md`` files, and the
-raw total is derived from them (`core/qa_file/scoring.py`). A *curve* is a
-separate layer on top: a pure function of ``(raw_total, possible_total)`` an
-instructor sets once for the whole assignment (flat bonus, scale, or a
-square-root curve). It never touches a rubric selection or a stored grade, so it
-stays fully reversible — clearing the curve restores the raw totals exactly.
-
-Design decisions (mirroring `core/policy.py`):
-
-* **Location** — ``<submissions>/.opengrader/curve.json``. Co-located with the
-  assignment data so it travels with the folder, namespaced in the same
-  ``.opengrader`` dot-dir as the policy/comments/history so it reads as tool
-  metadata and stays out of submission discovery.
-* **Absent file = no curve** — a missing, unreadable, or malformed file resolves
-  to the identity curve (``Curve()``), so existing folders and un-curved
-  assignments behave exactly as before and a corrupt write never changes a grade.
-* **Applied at the edges, shown both ways** — the raw total is what's stored; the
-  curved total is computed on demand by every place a final score leaves the tool
-  (Canvas export, gradebook CSV, the returnable summary page), always alongside
-  the raw value so nothing is hidden.
-"""
-
 from __future__ import annotations
 
 import json
@@ -41,21 +17,6 @@ _VALID_METHODS: tuple[CurveMethod, ...] = ("none", "bonus", "scale", "sqrt")
 
 @dataclass(frozen=True)
 class Curve:
-    """One assignment's score curve.
-
-    ``method`` picks the transform; ``value`` is its single parameter:
-
-    * ``none``  — identity (``value`` ignored).
-    * ``bonus`` — add ``value`` points to every total (may be negative).
-    * ``scale`` — multiply every total by ``value`` (e.g. 1.1 = +10%).
-    * ``sqrt``  — the classic root curve: ``new% = sqrt(raw%)``, i.e.
-      ``sqrt(raw/possible) * possible`` (lifts low scores more than high ones).
-
-    ``cap_at_max`` clamps the curved total to the possible points (on by
-    default); turn it off to allow a curve to push past 100% (extra credit).
-    The result is always floored at 0.
-    """
-
     method: CurveMethod = "none"
     value: float = 0.0
     cap_at_max: bool = True
@@ -88,16 +49,7 @@ class Curve:
 
 
 def describe_curve(curve: Curve) -> str:
-    """Short human description of a curve ("bonus +5 pts", "scale x1.1").
-
-    Lives in core rather than in the TUI's formatting module because every
-    front end that mentions a curve needs the same sentence — the curve editor,
-    the CLI preview, and the release report that has to say *why* a total is not
-    the raw sum. A second phrasing of "square-root curve" would eventually
-    describe the same curve two ways in one workflow.
-    """
-    # ``×`` is U+00D7, which is inside WinAnsi — safe if this string is ever
-    # drawn into a PDF with the base-14 fonts (see core/pdf/annotations.py).
+    # The multiplication sign is in WinAnsi and works with PDF base-14 fonts.
     if not curve.is_active:
         return "none (raw totals)"
     cap = "" if curve.cap_at_max else "  (no cap)"
@@ -111,12 +63,6 @@ def describe_curve(curve: Curve) -> str:
 
 
 def apply_curve(raw_total: float, possible: float | None, curve: Curve) -> float:
-    """Return the curved total for one student (pure).
-
-    ``possible`` may be ``None``/0 (unknown max) — then the ``sqrt`` curve and
-    the max cap are skipped, since both need a denominator. The result is always
-    ``>= 0``.
-    """
     method = curve.method
     if method == "bonus":
         result = raw_total + curve.value
@@ -127,7 +73,7 @@ def apply_curve(raw_total: float, possible: float | None, curve: Curve) -> float
             result = math.sqrt(raw_total / possible) * possible
         else:
             result = raw_total
-    else:  # "none" or anything unexpected
+    else:
         result = raw_total
 
     result = max(0.0, result)
@@ -138,8 +84,6 @@ def apply_curve(raw_total: float, possible: float | None, curve: Curve) -> float
 
 @dataclass(frozen=True)
 class CurveEffect:
-    """A preview of what a curve does to a cohort's totals."""
-
     count: int
     possible: float | None
     raw_mean: float | None
@@ -154,13 +98,6 @@ class CurveEffect:
 def summarize_curve(
     totals: list[tuple[float, float | None]], curve: Curve
 ) -> CurveEffect:
-    """Compute before/after cohort statistics for a curve (pure, no I/O).
-
-    ``totals`` is one ``(raw_total, possible)`` pair per student, so a
-    multi-version cohort curves each student against their own maximum. The
-    reported ``possible`` is that shared maximum when every student has the same
-    one, else ``None``.
-    """
     if not totals:
         return CurveEffect(
             count=0,
@@ -199,9 +136,6 @@ def summarize_curve(
 
 CurveStatistic = Literal["mean", "median"]
 
-# The two methods that carry an adjustable parameter, so a target is solvable.
-# ``sqrt`` is a fixed, parameterless transform (its ``value`` is ignored) and
-# ``none`` is the identity, so neither can be steered to an arbitrary average.
 _SOLVABLE_METHODS: tuple[CurveMethod, ...] = ("bonus", "scale")
 
 
@@ -210,11 +144,6 @@ def _percent_statistic(
     curve: Curve,
     statistic: CurveStatistic,
 ) -> float | None:
-    """Cohort mean/median of curved scores as a percentage (0..100), or None.
-
-    Each student is scored against their own ``possible`` (multi-version safe);
-    students with no known maximum are skipped. ``None`` when none remain.
-    """
     percents = [
         apply_curve(raw, possible, curve) / possible * 100.0
         for raw, possible in totals
@@ -233,24 +162,6 @@ def solve_curve(
     statistic: CurveStatistic = "mean",
     cap_at_max: bool = True,
 ) -> Curve | None:
-    """Find the curve of ``method`` whose cohort ``statistic`` hits a target.
-
-    Instructors think in target grades ("I want a 78 average"), not scale
-    factors. Given one ``(raw_total, possible)`` pair per student, this returns
-    the :class:`Curve` whose curved cohort ``mean``/``median`` (as a **percentage**
-    of each student's possible) equals ``target_percent``.
-
-    Returns ``None`` when the target can't be solved: an unsolvable ``method``
-    (``none``/``sqrt`` carry no adjustable parameter), no students with a known
-    maximum, or a target outside what the method can reach (e.g. ``scale`` can
-    never lift a student who scored 0, so a 100% target is unreachable — and with
-    ``cap_at_max`` on, any target above 100 is too).
-
-    Implementation: ``apply_curve`` is monotonic non-decreasing in ``value`` (for
-    both solvable methods), so the cohort statistic is too. We bracket the
-    parameter and bisect — exact even across the floor-at-0 and cap-at-max clamps
-    that make a closed form wrong near the boundaries.
-    """
     if method not in _SOLVABLE_METHODS:
         return None
     usable = [(raw, possible) for raw, possible in totals if possible and possible > 0]
@@ -258,13 +169,11 @@ def solve_curve(
         return None
 
     def stat(value: float) -> float:
-        # usable guarantees at least one scorable student, so never None here.
         return _percent_statistic(usable, Curve(method, value, cap_at_max), statistic)  # type: ignore[return-value]
 
-    # Initial bracket, then widen until it straddles the target (or give up).
     if method == "scale":
         lo, hi = 0.0, 1.0
-    else:  # bonus
+    else:
         max_possible = max(possible for _raw, possible in usable)
         lo, hi = -float(max_possible), float(max_possible)
 
@@ -296,7 +205,6 @@ def solve_curve(
 
 
 def resolve_curve_path(submissions_path: str | Path) -> Path:
-    """Return the ``.opengrader/curve.json`` path for a submissions file or dir."""
     base = Path(submissions_path)
     if base.is_file():
         base = base.parent
@@ -304,11 +212,6 @@ def resolve_curve_path(submissions_path: str | Path) -> Path:
 
 
 def read_curve(submissions_path: str | Path) -> Curve:
-    """Load the curve for a submissions folder, or the identity curve.
-
-    A missing, unreadable, or malformed file resolves to ``Curve()`` (no curve)
-    so grading/export is never blocked and an un-curved assignment is unchanged.
-    """
     path = resolve_curve_path(submissions_path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -324,10 +227,6 @@ def read_curve(submissions_path: str | Path) -> Curve:
 
 
 def write_curve(submissions_path: str | Path, curve: Curve) -> Path:
-    """Write ``curve`` into ``<submissions>/.opengrader/curve.json``.
-
-    Returns the path written; creates the ``.opengrader`` dir if needed.
-    """
     path = resolve_curve_path(submissions_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(curve.to_dict(), ensure_ascii=False, indent=2)
@@ -336,7 +235,6 @@ def write_curve(submissions_path: str | Path, curve: Curve) -> Path:
 
 
 def clear_curve(submissions_path: str | Path) -> None:
-    """Remove the curve file, restoring raw totals. A no-op if none exists."""
     path = resolve_curve_path(submissions_path)
     try:
         path.unlink()

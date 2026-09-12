@@ -1,22 +1,3 @@
-"""Modal regrade-request queue, opened with Shift+R.
-
-A pop-up that turns student grade disputes into a worked list. Each open request
-(filed via the ``regrade`` CLI or a future student portal, stored in
-``.opengrader/regrades.jsonl``) is one actionable row showing who is disputing
-which question and why. From a focused row a grader can:
-
-* **open** the disputed question on the grade screen (enter / click) — the same
-  routing the needs-review queue uses (`GradeController.open_review_target`), so
-  they land exactly where the fix is needed;
-* **resolve** it (``r``) once the grade has been reviewed/adjusted;
-* **deny** it (``d``) when the grade stands.
-
-Resolve/deny dismiss with the chosen action; ``TuiApp`` performs it (persisting
-to the append-only log) and reopens the refreshed queue so triage continues —
-mirroring how `AssignIdentityScreen` resolves an identity flag. Anonymity-aware:
-names show only in teacher mode. esc or Shift+R closes it.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,8 +19,6 @@ RegradeActionKind = Literal["open", "resolve", "deny"]
 
 @dataclass(frozen=True)
 class RegradeChoice:
-    """What the grader chose to do with a dispute, returned on dismiss."""
-
     action: RegradeActionKind
     request_id: str
     student_item_id: str
@@ -47,8 +26,6 @@ class RegradeChoice:
 
 
 class _RegradeRow(Static):
-    """A focusable dispute row: enter opens it, r resolves, d denies."""
-
     can_focus = True
 
     def __init__(self, item: RegradeReportItem, label) -> None:
@@ -56,7 +33,6 @@ class _RegradeRow(Static):
         super().__init__(label, classes="regrade-headline")
 
     def _post(self, action: RegradeActionKind) -> None:
-        # "open" is only meaningful for a navigable dispute (mapped submission).
         if action == "open" and not self._item.is_navigable:
             return
         self.post_message(
@@ -75,9 +51,6 @@ class _RegradeRow(Static):
         self._post("open")
 
     def on_key(self, event: events.Key) -> None:
-        # The focused row is first in the bubble path, so intercepting the nav
-        # keys here (and stopping them) keeps the enclosing VerticalScroll from
-        # hijacking up/down to scroll instead of moving between disputes.
         if event.key in ("enter", "space"):
             event.stop()
             self._post("open")
@@ -96,12 +69,6 @@ class _RegradeRow(Static):
 
 
 class RegradeQueueScreen(ModalScreen["RegradeChoice | None"]):
-    """Worked list of open regrade requests (grade disputes).
-
-    Dismisses with a :class:`RegradeChoice` when the grader acts on a dispute,
-    or ``None`` on close.
-    """
-
     DEFAULT_CSS = """
     RegradeQueueScreen {
         align: center middle;
@@ -179,8 +146,6 @@ class RegradeQueueScreen(ModalScreen["RegradeChoice | None"]):
     ]
 
     class ActionChosen(Message):
-        """Posted when the grader opens/resolves/denies a dispute."""
-
         def __init__(self, choice: RegradeChoice) -> None:
             self.choice = choice
             super().__init__()
@@ -206,9 +171,6 @@ class RegradeQueueScreen(ModalScreen["RegradeChoice | None"]):
                 yield Button("Close", id="regrade-close", compact=True)
 
     def on_mount(self) -> None:
-        # Land on the first dispute so the keyboard actions work immediately;
-        # fall back to the close button when the queue is empty (Textual's
-        # `.first()` raises on an empty query, so iterate instead).
         rows = list(self.query(_RegradeRow))
         if rows:
             rows[0].focus()
@@ -216,7 +178,6 @@ class RegradeQueueScreen(ModalScreen["RegradeChoice | None"]):
             self.query_one("#regrade-close", Button).focus()
 
     def focus_relative_row(self, current: _RegradeRow, delta: int) -> None:
-        """Move focus to the next/previous dispute row (arrow / j·k keys)."""
         rows = list(self.query(_RegradeRow))
         if current not in rows:
             return

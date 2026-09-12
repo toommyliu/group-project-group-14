@@ -1,50 +1,3 @@
-"""Configure the AI once, for every tool that can use it.
-
-Before this screen, "which model, which server, how confident is confident
-enough" was asked separately by Split, Extract, Create-answer-key and
-Auto-grade — four copies of one answer, each easy to leave inconsistent with
-the others, and all of them properties of the *machine* rather than of the run
-being set up. The AI configuration lived where the work lived, which is exactly
-backwards: nobody wants to pick a vision model, they want their handwriting
-read.
-
-So the four disclosures are gone and this is the one place. What it saves is
-written to the user's config directory (``core/ai_config.settings_path``) and
-every CLI resolves its own defaults from that file, so a change here reaches
-``submission-extractor``, ``automated-grading``, ``opengrader-run``, ``doctor``
-and the pipeline card without any of them being told about it — including runs
-started from a plain terminal, which is what makes this a *setting* rather than
-a form field.
-
-That includes *whether* the AI runs at all. The six checkboxes that used to
-live on the setup screen's numbered steps ("Transcribe answers with the AI",
-"Grade written answers with the AI", and the rest) are gone too, replaced by
-the "What the AI does here" group at the top of this form. This screen is
-therefore not only where the AI is configured but where it is switched on and
-off — a distinction worth naming because a teacher who never opens this screen
-should get an AI that stays off, not one running on whatever a per-run
-checkbox happened to default to.
-
-Three rules this screen keeps:
-
-* **Blank means "use the recommended default".** Every model/host field is
-  optional and its placeholder names what blank resolves to. Pre-filling the
-  current default would save a value the user never chose, freezing them onto
-  today's recommendation forever; see the "blank is load-bearing" paragraph in
-  ``core/ai_config``.
-* **Nothing is written until Save.** Testing a connection resolves the *typed*
-  values without touching the file, so a user can try a model name they turn
-  out not to have and close the dialog with their working setup intact.
-* **The test says what to do, not just that it failed.** A failed connection
-  prints the provider's own ``setup_hint`` — the command that fixes it — for
-  the same reason ``core/environment.py`` attaches a fix to every finding.
-
-The provider dropdown is built from ``ai_config.registered_providers()``, so
-the day a cloud provider is registered it appears here with its own defaults,
-its own summary line, and — because ``requires_api_key`` drives the key row —
-its own key instructions, with no edit to this file.
-"""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -64,10 +17,6 @@ from opengrader.core.ocr.math_ocr import (
     describe_backend,
 )
 
-# The maths readers, labelled by the job rather than by the package — the
-# instructor is choosing between "prose with working" and "the answer is an
-# equation", not between a transformer and a VLM. Kept in step with the same
-# mapping the extractor's own docs use.
 _MATH_BACKEND_LABELS = {
     "vlm": "Vision model — answers that mix writing and maths",
     "pix2tex": "pix2tex — answers that are equations",
@@ -78,14 +27,6 @@ _MATH_BACKEND_CHOICES = [
 
 
 class AISettingsScreen(ModalScreen[AISettings | None]):
-    """Pick the provider, the two models, and the confidence gate — once.
-
-    Dismisses with the saved :class:`AISettings` when the user pressed Save, and
-    with ``None`` on cancel. The caller uses that to refresh anything showing a
-    model name; nothing depends on the return value to *apply* the settings,
-    because applying them is the settings file's job.
-    """
-
     DEFAULT_CSS = """
     AISettingsScreen {
         align: center middle;
@@ -102,10 +43,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         border-title-style: bold;
         padding: 1 2;
     }
-
-    /* The form scrolls rather than sizing to its content: a dialog with
-       height: auto whose disclosure rows expand draws its buttons outside
-       itself, where they look fine and cannot be clicked. */
     #ai-form {
         height: 1fr;
         scrollbar-size: 1 1;
@@ -171,20 +108,12 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     def __init__(self, settings: AISettings | None = None) -> None:
         super().__init__()
-        # Load here rather than in compose so a caller (and a test) can hand in
-        # settings that were never on disk.
         self._settings = settings if settings is not None else ai_config.load_settings()
-        # Filled in by a connection test that timed a real generate call; the
-        # "Use suggested limit" button reads this rather than re-deriving it.
-        # ``None`` until a test has run, and reset to ``None`` at the start of
-        # every new test so a stale recommendation can never be applied.
         self._timeout_recommendation: float | None = None
 
-    # ── Layout ──────────────────────────────────────────────────────────────
 
     @staticmethod
     def _label(text: str, detail: str = "") -> Static:
-        """A bold field label with an optional muted detail — the house style."""
         markup = f"[b]{text}[/b]"
         if detail:
             markup = f"{markup}  [dim]{detail}[/dim]"
@@ -192,7 +121,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     @staticmethod
     def _hidden_unless(shown: bool) -> str:
-        """The ``classes=`` string for a sub-option Vertical at compose time."""
         return "" if shown else "hidden"
 
     def compose(self) -> ComposeResult:
@@ -386,8 +314,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                     classes="ai-note",
                 )
 
-                # Present only for a provider that needs a key. The row is built
-                # from the spec, so a registered cloud provider gets it for free.
                 with Vertical(id="ai-key-row", classes=self._key_row_classes(provider)):
                     yield self._label("API key", "read from the environment")
                     yield Static(
@@ -469,12 +395,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     @staticmethod
     def _provider_summary(current: ResolvedAI) -> str:
-        """The provider's own one-liner, plus the privacy fact when it applies.
-
-        ``sends_data_off_machine`` is a property of the provider rather than a
-        sentence in this file, so every surface that names a provider can state
-        the same thing the same way.
-        """
         summary = current.provider.summary
         if current.sends_data_off_machine:
             summary = (
@@ -494,16 +414,8 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             "environment variable and it is picked up from there."
         )
 
-    # ── Reading the form ────────────────────────────────────────────────────
 
     def collect(self) -> AISettings | None:
-        """The typed values as :class:`AISettings`, or ``None`` if invalid.
-
-        Validation lives here rather than in the save handler so the connection
-        test refuses the same input the save would — a test that quietly ran
-        against the old confidence value while the box held nonsense would be
-        worse than no test.
-        """
         raw_confidence = self.query_one("#ai-min-confidence", Input).value.strip()
         confidence: float | None = None
         if raw_confidence:
@@ -524,10 +436,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         raw_timeout = self.query_one("#ai-timeout", Input).value.strip()
         timeout_seconds: float | None = None
         if raw_timeout:
-            # Reuse the exact rule ai_config applies when loading the file
-            # from disk (must parse as a number > 0), so a value the screen
-            # accepts and one a hand-edited ai.json is checked against can
-            # never disagree.
             timeout_seconds = ai_config.parse_timeout_seconds(raw_timeout)
             if timeout_seconds is None:
                 self.app.notify(
@@ -536,11 +444,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                 )
                 return None
 
-        # min_confidence_measured is provenance, not a knob (see AISettings'
-        # docstring): it is only true when the confidence being saved is the
-        # exact value that was already on disk, i.e. nobody retyped it. Any
-        # change — including clearing the box — means a human chose this
-        # number, so the "measured" claim no longer holds and must be dropped.
         min_confidence_measured = (
             self._settings.min_confidence_measured
             if confidence == self._settings.min_confidence
@@ -553,9 +456,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             host=self.query_one("#ai-host", Input).value.strip(),
             vision_model=self.query_one("#ai-vision-model", Input).value.strip(),
             text_model=self.query_one("#ai-text-model", Input).value.strip(),
-            # Only recorded when it differs from the default, for the same
-            # reason every other field is: an unset value keeps following
-            # Opengrader's recommendation.
             math_backend="" if math_backend == DEFAULT_MATH_BACKEND else math_backend,
             timeout_seconds=timeout_seconds,
             min_confidence=confidence,
@@ -571,12 +471,9 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             min_confidence_measured=min_confidence_measured,
         )
 
-    # ── Reacting to the form ────────────────────────────────────────────────
 
     @on(Checkbox.Changed, "#ai-read-handwriting")
     def _on_read_handwriting_changed(self, event: Checkbox.Changed) -> None:
-        """The escalation and maths sub-options are choices *about* reading
-        handwriting, and meaningless until reading handwriting is on."""
         event.stop()
         self.query_one("#ai-handwriting-options").set_class(
             not event.value, "hidden"
@@ -584,18 +481,11 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     @on(Checkbox.Changed, "#ai-grade-written")
     def _on_grade_written_changed(self, event: Checkbox.Changed) -> None:
-        """"Require a measured confidence" only means something once grade
-        suggestions are being written at all."""
         event.stop()
         self.query_one("#ai-grading-options").set_class(not event.value, "hidden")
 
     @on(Select.Changed, "#ai-provider")
     def _on_provider_changed(self, event: Select.Changed) -> None:
-        """Re-point every placeholder and note at the newly chosen provider.
-
-        Placeholders, not values: switching provider must not overwrite a model
-        name the user typed, only change what leaving it blank would mean.
-        """
         event.stop()
         provider = ai_config.get_provider(str(event.value))
         preview = ai_config.resolve(replace(self._settings, provider=provider.name))
@@ -615,18 +505,11 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     @on(Select.Changed, "#ai-math-backend")
     def _on_math_backend_changed(self, event: Select.Changed) -> None:
-        """Say whether the chosen maths reader is actually installed here.
-
-        Availability belongs in the UI and not only in a later error: offering
-        pix2tex to someone who hasn't installed it, and only saying so after a
-        long extraction fails, is worse than not offering it.
-        """
         event.stop()
         self.query_one("#ai-math-hint", Static).update(
             describe_backend(str(event.value)).detail
         )
 
-    # ── Buttons ─────────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#ai-test")
     def _on_test(self, event: Button.Pressed) -> None:
@@ -639,20 +522,17 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         log = self.query_one("#ai-log", RichLog)
         log.clear()
         log.write("Testing…")
-        # A thread worker: this reaches out to a server over HTTP and must not
-        # block the UI event loop.
         self.run_worker(
             lambda: self._test(ai_config.resolve(pending)), thread=True, exclusive=True
         )
 
     def _test(self, current: ResolvedAI) -> None:
-        """Ask the configured server which models it has. Never raises."""
         lines: list[str] = list(current.problems())
         try:
             from opengrader.core.llm import list_models
 
             available = list_models(ai_config.text_config(current))
-        except Exception as exc:  # noqa: BLE001 - any failure is a report, not a crash
+        except Exception as exc:  # noqa: BLE001
             lines.append(f"Could not reach {current.host}: {exc}")
             lines.append(current.provider.setup_hint)
             self.app.call_from_thread(self._show, lines, None)
@@ -663,8 +543,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             lines.append(f"Models installed: {', '.join(available)}")
         else:
             lines.append("No models installed yet.")
-        # Naming a missing model is the whole point of the test: a run that
-        # fails on a typo an hour into extraction is the failure this prevents.
         for role, name in (
             ("Handwriting", current.vision_model),
             ("Grading", current.text_model),
@@ -682,11 +560,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             else:
                 lines.append(f"{role} model: {name} — ready.")
 
-        # Time one small real generate call so the timeout above is measured,
-        # not guessed — the same reason llm-eval exists so nobody guesses
-        # --llm-min-confidence. Skipped when the handwriting model isn't
-        # installed: there is nothing to time and the call would just fail
-        # slowly, duplicating the "not installed" line above.
         recommendation: float | None = None
         if available and current.vision_model not in available:
             lines.append(
@@ -716,9 +589,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         self._timeout_recommendation = recommendation
         for button in self.query(Button):
             button.disabled = False
-        # The loop above just re-enabled every button, including the apply
-        # button — undo that when there is nothing to apply, so it neither
-        # un-hides nor stays clickable with no recommendation behind it.
         apply_button = self.query_one("#ai-apply-timeout", Button)
         apply_button.set_class(recommendation is None, "hidden")
         apply_button.disabled = recommendation is None
@@ -729,8 +599,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     @on(Button.Pressed, "#ai-apply-timeout")
     def _on_apply_timeout(self, event: Button.Pressed) -> None:
-        """Fill the box with the measured recommendation. Nothing is saved
-        here — same rule as everywhere else on this screen: only Save writes."""
         event.stop()
         if self._timeout_recommendation is None:
             return
@@ -747,8 +615,6 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         try:
             destination = ai_config.save_settings(pending)
         except OSError as exc:
-            # Deliberately not swallowed: a save that silently failed would
-            # leave the user believing they had configured something.
             self.app.notify(f"Could not save AI settings: {exc}", severity="error")
             return
         self.app.notify(f"AI settings saved to {destination}.")

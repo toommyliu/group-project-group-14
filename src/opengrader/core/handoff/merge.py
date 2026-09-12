@@ -1,55 +1,3 @@
-"""Three-way merge of two copies of one cohort — bring a grader's copy home.
-
-`packet.py` hands out a copy; this is the other half. A TA grades offline, hands
-back a folder, and the question is which of the two folders is right about each
-answer. "Newest file wins" is not an answer — both files changed, and the parts
-that changed are usually *different* answers, so either copy would be wrong.
-
-The merge is therefore the ordinary three-way one, over the same per-answer
-vocabulary the journal and the restore already use (`core/history/restore.py`'s
-``Aspect`` / ``AspectValue`` / ``CellState``, so a merged grade is written by the
-same code that writes a restored one):
-
-    base    what the answer held when the copy was made
-    ours    what the master copy holds now
-    theirs  what the returned copy holds now
-
-    ours == base, theirs != base   ->  take theirs      (their work)
-    ours != base, theirs == base   ->  keep ours        (nothing to do)
-    ours == theirs                 ->  already agree
-    both changed, and differently  ->  CONFLICT, a human decides
-
-Design decisions:
-
-* **The baseline comes from the packet when there is one.** A packet manifest
-  records every answer's value at the moment it was cut, so the merge knows
-  exactly what each side started from. That is the difference between a merge
-  and a guess.
-* **Without a packet, the incoming journal supplies the baseline** — the first
-  entry for an answer carries its ``old`` value, which `restore.py` already
-  establishes as the pre-journal state. This is what lets two hand-made ``cp
-  -r`` copies merge at all.
-* **With no baseline for an answer, the merge refuses to overwrite work.** It
-  will only fill a blank: if our copy has nothing there and theirs does, taking
-  theirs cannot destroy anything. Anything else is a conflict. Guessing here
-  would silently discard a grade, which is the one outcome that must not happen
-  quietly.
-* **Pure planning, isolated application.** Everything down to `plan_merge` is a
-  function over cells, so the whole decision table unit-tests with no folders.
-* **An applied merge is journalled**, like a restore, under an actor naming the
-  packet it came from. That is what makes it undoable:
-  ``grade-restore apply --without-actor merge:<packet>`` puts the master copy
-  back exactly as it was, so trying a merge is a reversible act. Importing the
-  other grader's own journal (`import_incoming_journal`) is therefore opt-in:
-  it is worth having, but it costs that one-command undo, and a safety property
-  should not be traded for an analytics one without being asked.
-
-Deliberately out of scope: the QA file (a rubric edit propagates across every
-student, so reconciling two rubric trees is a different problem with different
-rules) and submissions that exist only in the incoming copy (creating a
-submission is a copy, not a merge). Both are reported rather than half-done.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -88,28 +36,20 @@ from .packet import (
     slugify_packet_name,
 )
 
-# Why a change was taken automatically, or why one could not be.
 ChangeReason = Literal["incoming_edit", "filled_blank"]
 ConflictReason = Literal["both_edited", "no_baseline"]
-# What to do with every conflict at once, when a human does not want to sit
-# through them one at a time.
 ConflictPolicy = Literal["skip", "ours", "theirs"]
 
-# A timestamp guaranteed to precede every journal entry. Replaying "as of" it
-# lands on each answer's earliest recorded ``old`` — which is precisely the
-# pre-copy baseline, reusing the fallback `restore.py` already implements
-# rather than re-deriving it here.
+# Replay before all entries to recover the pre-copy baseline from each answer's earliest old value.
 _BEFORE_ANY_ENTRY = datetime(1, 1, 1, tzinfo=timezone.utc)
 
 
 class MergeError(ValueError):
-    """A merge could not be planned (unreadable folder, unusable key)."""
+    pass
 
 
 @dataclass(frozen=True)
 class MergeChange:
-    """One aspect of one answer that the merge can take without asking."""
-
     student_key: str
     student_label: str
     question_id: str
@@ -128,8 +68,6 @@ class MergeChange:
 
 @dataclass(frozen=True)
 class MergeConflict:
-    """One aspect both copies changed differently — only a human can settle it."""
-
     student_key: str
     student_label: str
     question_id: str
@@ -141,7 +79,6 @@ class MergeConflict:
 
     @property
     def conflict_id(self) -> str:
-        """A stable handle for one conflict, so a UI can record a decision."""
         return f"{self.student_key}|{self.question_id}|{self.aspect}"
 
     def describe(self) -> str:
@@ -154,13 +91,6 @@ class MergeConflict:
 
 @dataclass(frozen=True)
 class MergePlan:
-    """Everything the merge decided, and everything it could not decide.
-
-    ``kept_ours`` and ``already_agree`` are counts rather than lists on purpose:
-    they are how a reader confirms the merge looked at the whole cohort, but
-    naming three hundred unchanged answers would bury the dozen that matter.
-    """
-
     changes: tuple[MergeChange, ...] = ()
     conflicts: tuple[MergeConflict, ...] = ()
     unmatched_students: tuple[str, ...] = ()
@@ -182,13 +112,6 @@ class MergePlan:
 def baseline_from_journal(
     entries: Iterable[GradeJournalEntry],
 ) -> dict[tuple[str, str], CellState]:
-    """Reconstruct each answer's value *before* the incoming journal started.
-
-    Replaying "as of" a time older than any entry makes `restore.py` fall
-    through to each answer's earliest recorded ``old`` — the state the copy was
-    handed over in. Answers the grader never touched have no entry and so no
-    baseline, which is correct: they also have no change to merge.
-    """
     snapshot = replay_journal(entries, at=_BEFORE_ANY_ENTRY)
     return dict(snapshot.cells)
 
@@ -202,12 +125,6 @@ def plan_merge(
     aspects: Sequence[Aspect] = RESTORABLE_ASPECTS,
     unmatched_students: Iterable[str] = (),
 ) -> MergePlan:
-    """Decide, answer by answer, what the merged cohort should look like.
-
-    ``ours``/``theirs``/``base`` are all keyed by ``(student_key, question_id)``
-    in *our* vocabulary — the caller translates a packet's aliases before
-    calling, so the decision table never has to know packets exist.
-    """
     baseline = base or {}
     names = labels or {}
 
@@ -220,10 +137,6 @@ def plan_merge(
     for (key, question_id), their_cell in sorted(theirs.items()):
         our_cell = ours.get((key, question_id))
         if our_cell is None:
-            # Their copy has an answer ours has no block for (a different
-            # assignment version, or a question added after the copy was cut).
-            # There is nothing on disk to write it into, so say so instead of
-            # failing one write at a time during apply.
             unknown_questions.append(f"{names.get(key, key)} · {question_id}")
             continue
 
@@ -241,7 +154,6 @@ def plan_merge(
 
             base_value = base_cell.value(aspect) if base_cell is not None else None
             if base_value is None:
-                # No baseline: only a change that cannot destroy work is safe.
                 if _is_empty(aspect, our_value):
                     changes.append(
                         MergeChange(
@@ -284,7 +196,6 @@ def plan_merge(
                     )
                 )
             elif ours_moved and not theirs_moved:
-                # We moved on and they did not: their copy is simply stale here.
                 kept_ours += 1
             else:
                 conflicts.append(
@@ -313,11 +224,6 @@ def plan_merge(
 
 
 def _is_empty(aspect: Aspect, value: AspectValue) -> bool:
-    """Is this aspect unset — i.e. is there no work here to be destroyed?
-
-    An ungraded question has no points *and* no rubric selection; a comment or a
-    transcription is empty when it has no non-whitespace text.
-    """
     if aspect == "grade":
         return value.points is None and not value.rubric
     return not value.text.strip()
@@ -347,13 +253,6 @@ def resolve_conflicts(
     policy: ConflictPolicy = "skip",
     decisions: Mapping[str, ConflictPolicy] | None = None,
 ) -> tuple[MergeChange, ...]:
-    """Turn settled conflicts into applicable changes.
-
-    ``decisions`` is a per-conflict override keyed by
-    :attr:`MergeConflict.conflict_id` — how a UI records one click per row —
-    and ``policy`` covers the rest. Keeping ours is not a change (the file
-    already says that), so only "take theirs" produces work.
-    """
     chosen = decisions or {}
     resolved: list[MergeChange] = []
     for conflict in conflicts:
@@ -375,21 +274,11 @@ def resolve_conflicts(
     return tuple(resolved)
 
 
-# --------------------------------------------------------------------------
-# Everything below touches the filesystem. Keep new decision logic above this
-# line so the merge rules stay testable without two folders on disk.
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class SideSnapshot:
-    """One copy of the cohort, read into the shape `plan_merge` compares."""
-
     cells: Mapping[tuple[str, str], CellState] = field(default_factory=dict)
     paths_by_key: Mapping[str, Path] = field(default_factory=dict)
     labels: Mapping[str, str] = field(default_factory=dict)
-    # Submissions whose key could not be translated into our vocabulary — an
-    # alias missing from the handoff key, or a student added in the copy.
     untranslated: tuple[str, ...] = ()
     unreadable: tuple[str, ...] = ()
 
@@ -399,15 +288,6 @@ def read_side(
     *,
     translate: Mapping[str, str] | None = None,
 ) -> SideSnapshot:
-    """Load a cohort's answers, optionally re-keying it into our vocabulary.
-
-    ``translate`` maps the *file's* student key onto ours — the alias map of a
-    redacted packet. Omitted, keys are taken as they are, which is what merging
-    two un-redacted copies needs.
-
-    A submission that will not parse is recorded and skipped rather than
-    aborting: one damaged file must not make the other thirty unmergeable.
-    """
     base = Path(submissions_path)
     try:
         paths = discover_submission_paths(base)
@@ -455,12 +335,6 @@ def read_side(
 
 
 def alias_translation(key: HandoffKey) -> dict[str, str]:
-    """Alias → our student key, in the casefolded form journal keys use.
-
-    An alias is minted lowercase, but reading it out of a submission file goes
-    through the same normalization every other key does, so translate on the
-    normalized form or a stray upper-case alias silently matches nothing.
-    """
     return {
         member.alias.casefold(): member.student_key
         for member in key.members
@@ -469,13 +343,6 @@ def alias_translation(key: HandoffKey) -> dict[str, str]:
 
 
 def resolve_incoming_root(incoming_path: str | Path) -> Path:
-    """The cohort folder inside a returned copy.
-
-    A packet holds its submissions in a ``submissions/`` subfolder, while a
-    hand-made copy *is* the cohort folder. Preferring the subfolder when it
-    exists is what lets a grader hand the packet back exactly as they received
-    it, rather than having to know which level to point at.
-    """
     path = Path(incoming_path)
     nested = path / PACKET_SUBMISSIONS_DIRNAME
     return nested if nested.is_dir() else path
@@ -488,18 +355,6 @@ def locate_handoff_key(
     explicit_key: str | Path | None = None,
     packet_id: str = "",
 ) -> tuple[HandoffKey | None, PacketManifest | None]:
-    """Find the key and manifest for a returned copy.
-
-    Order: an explicitly named key wins, then the packet id (from the returned
-    folder's own manifest, or supplied) is looked up in our handoff directory.
-    ``(None, None)`` is a valid answer — merging two hand-made copies needs no
-    key at all.
-
-    A *redacted* packet whose key is missing raises instead of degrading: with
-    no map, every alias would fail to match and the merge would cheerfully
-    report that nothing came back, which is the worst possible way to lose an
-    evening of someone's grading.
-    """
     manifest = read_packet_manifest(incoming_path)
 
     if explicit_key is not None and str(explicit_key).strip():
@@ -531,14 +386,6 @@ def build_merge_plan(
     aspects: Sequence[Aspect] = RESTORABLE_ASPECTS,
     anonymous: bool = False,
 ) -> tuple[MergePlan, SideSnapshot, SideSnapshot]:
-    """Read both copies and plan the merge, picking the best baseline available.
-
-    Baseline preference, best first: the packet manifest (exact — it recorded
-    every answer at the moment the copy was cut), then the incoming journal
-    (which knows the ``old`` value of everything the grader actually changed,
-    and nothing about what they didn't — which is all that is needed). With
-    neither, `plan_merge` falls back to its no-baseline rules.
-    """
     translate = alias_translation(handoff_key) if handoff_key is not None else None
     ours = read_side(ours_path)
     theirs = read_side(theirs_path, translate=translate)
@@ -550,8 +397,6 @@ def build_merge_plan(
             if key:
                 base[(key, question_id)] = cell
     elif manifest is not None:
-        # An un-redacted packet: the manifest is already keyed the way the
-        # submissions are, so it needs no translation.
         base = dict(manifest.baseline_cells())
 
     if not base:
@@ -563,11 +408,6 @@ def build_merge_plan(
             if key:
                 base[(key, question_id)] = cell
 
-    # Our copy's names are the only real ones when the incoming copy is
-    # redacted, so ours win and theirs only fill gaps. ``anonymous`` drops back
-    # to the student key — what the UI shows as a display id — so a merge plan
-    # can be read during anonymous grading without naming anyone, the same
-    # treatment the consistency and similarity audits get.
     if anonymous:
         labels = {key: key for key in set(ours.labels) | set(theirs.labels)}
     else:
@@ -587,8 +427,6 @@ def build_merge_plan(
 
 @dataclass(frozen=True)
 class MergeOutcome:
-    """What `apply_merge_plan` actually wrote."""
-
     written: tuple[MergeChange, ...] = ()
     failed: tuple[tuple[MergeChange, str], ...] = ()
 
@@ -604,20 +442,6 @@ def apply_merge_plan(
     journal: GradeJournal | None = None,
     source_label: str = "",
 ) -> MergeOutcome:
-    """Write merged values into our copy, one write per (student, question).
-
-    Aspects of the same answer are folded into a single update through
-    `merge_update_for_question`, so a grade+comment merge cannot leave a file
-    half-written — and so a merged grade is written by exactly the code that
-    writes a restored one.
-
-    A failure on one answer is recorded and the rest still runs: a merge that
-    aborts halfway leaves a cohort in a state nobody chose, which is worse than
-    a complete one that names what it could not write.
-    """
-    # Imported here rather than at module scope: student_file pulls in OpenCV
-    # and PIL via the extractor, and the planning half of this module must stay
-    # importable (and fast) without them — the same split restore.py makes.
     from opengrader.core.submissions.student_file import update_student_submission_file
 
     grouped: dict[tuple[str, str], dict[Aspect, MergeChange]] = {}
@@ -662,9 +486,6 @@ def apply_merge_plan(
                     new=journal_payload(aspect, change.theirs),
                 )
             except OSError:
-                # Accountability is best-effort here exactly as it is on an
-                # ordinary save: a read-only history dir must never fail a
-                # write that already succeeded.
                 pass
 
     return MergeOutcome(written=tuple(written), failed=tuple(failed))
@@ -679,23 +500,11 @@ def _merge_summary(change: MergeChange, source_label: str) -> str:
 
 
 def merge_actor(source_label: str) -> str:
-    """The journal actor a merge writes under.
-
-    Naming the source rather than the person running the merge is what makes
-    the whole operation reversible in one command:
-    ``grade-restore apply --without-actor merge:<label>``.
-    """
     return f"merge:{slugify_packet_name(source_label, fallback='copy')}"
 
 
 @dataclass(frozen=True)
 class JournalImport:
-    """What `import_incoming_journal` brought across.
-
-    ``actors`` is not a statistic — it is what the caller needs to tell the user
-    how to undo the merge afterwards (see that function's warning).
-    """
-
     entries: int = 0
     actors: tuple[str, ...] = ()
     files: int = 0
@@ -709,25 +518,8 @@ def import_incoming_journal(
     names_by_key: Mapping[str, str] | None = None,
     source_label: str = "copy",
 ) -> JournalImport:
-    """Copy the incoming copy's audit journal into ours, de-aliased.
-
-    The merge journals its *net* effect, which is enough to undo it but loses the
-    grader's actual session: who marked what, in which order, and how long it
-    took — the input `grading-stats` runs on. Importing the session files keeps
-    that, with each entry's alias rewritten back to the real student so the
-    imported history reads like everyone else's.
-
-    **This costs the one-command undo, which is why it is opt-in.** Once the
-    other grader's entries are in our journal, the journal says they graded here
-    directly: a replay that drops only ``merge:<label>`` still finds their entry
-    asserting the merged value, so the merge does not come back out. Undoing an
-    imported merge means excluding the merge *and* every actor named in
-    :attr:`JournalImport.actors` — which is why they are returned rather than
-    counted.
-
-    Idempotent by construction: the destination filename is derived from the
-    source session's, so re-running a merge overwrites the same file instead of
-    doubling every entry.
+    """Undo must exclude every returned actor as well as the merge actor: imported entries
+    independently assert the merged grades.
     """
     source_dir = resolve_history_dir(theirs_path)
     if not source_dir.is_dir():
@@ -774,12 +566,6 @@ def _translate_entry(
     translate: Mapping[str, str] | None,
     names: Mapping[str, str],
 ) -> GradeJournalEntry:
-    """Rewrite one imported entry's student from an alias to the real person.
-
-    An entry whose alias is not in the map is imported unchanged: showing the
-    grader's work under a code they were given is honest, and dropping the
-    entry would quietly shorten the audit trail.
-    """
     if translate is None:
         return entry
     key = translate.get(entry.student_id.strip().casefold())

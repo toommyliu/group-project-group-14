@@ -1,14 +1,4 @@
-"""Export graded submissions to a class gradebook CSV.
-
-The opposite granularity from the annotated feedback PDF: one row per student,
-one column per question, plus totals — the spreadsheet an instructor drops into
-their own gradebook when they don't use Canvas. Read-only; never re-runs OCR or
-changes a grade.
-
-The gradebook layout itself lives in :mod:`opengrader.core.export.gradebook` so
-this CLI and the return-bundle exporter emit an identical table; this module is
-the thin CLI wrapper (argument parsing + stdout/file output).
-"""
+"""Export graded submissions to a class gradebook CSV."""
 
 from __future__ import annotations
 
@@ -31,7 +21,6 @@ from opengrader.core.export.gradebook import (
 )
 from opengrader.core.submissions import load_student_submission_markdown
 
-# Re-exported for backwards compatibility with earlier importers/tests.
 _submission_paths = discover_submission_paths
 
 
@@ -92,9 +81,6 @@ def run_cli(argv: list[str] | None = None) -> None:
     docs = [load_student_submission_markdown(path) for path in paths]
     curve = read_curve(submissions_path)
 
-    # Outcome columns appear only when an answer key is given *and* it carries
-    # **Outcome** tags — so passing --solutions for an untagged assignment is a
-    # no-op rather than a pile of empty columns.
     outcomes: dict[str, tuple[str, ...]] | None = None
     outcome_points: dict[str, float] | None = None
     if args.solutions:

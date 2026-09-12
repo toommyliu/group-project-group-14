@@ -1,10 +1,3 @@
-"""Integrity snapshots, the append-only rule, and verified backups.
-
-The classification table is pure, so it is tested from measurements; the file
-and archive halves are tested against real (tiny) folders, because the thing
-being claimed is that bytes survived.
-"""
-
 from __future__ import annotations
 
 import zipfile
@@ -49,9 +42,6 @@ def _record(path: str, data: bytes, *, append_only: bool = False) -> FileRecord:
     )
 
 
-# ── the classification table ──────────────────────────────────────────────
-
-
 def test_identical_bytes_are_unchanged() -> None:
     data = b"hello"
     report = compare_measurements(
@@ -75,8 +65,6 @@ def test_a_recorded_file_that_vanished_is_missing() -> None:
 
 
 def test_a_new_file_is_added_and_is_not_a_concern() -> None:
-    """Grading legitimately creates files; flagging them trains people to ignore
-    the report."""
     report = compare_measurements(_snapshot(), {"new.png": (3, hash_bytes(b"abc"), "")})
     assert report.count("added") == 1
     assert report.ok
@@ -123,9 +111,6 @@ def test_only_jsonl_is_treated_as_append_only() -> None:
     assert not is_append_only("a.submission.md")
 
 
-# ── the journal cross-reference ───────────────────────────────────────────
-
-
 def test_a_change_with_recorded_grading_is_labelled_explained() -> None:
     report = compare_measurements(
         _snapshot(_record("a.submission.md", b"hi")),
@@ -149,17 +134,13 @@ def test_a_change_with_no_recorded_grading_is_the_unexplained_one() -> None:
 
 
 def test_a_change_nobody_asked_about_is_neither(tmp_path: Path) -> None:
-    """A crop has no student to cross-reference; it must not claim to be clean."""
     report = compare_measurements(
         _snapshot(_record("responses/q1.png", b"hi")),
         {"responses/q1.png": (2, hash_bytes(b"ho"), "")},
     )
     assert report.findings[0].recorded_activity is None
     assert not report.unexplained
-    assert report.concerning  # still needs attention, just unexplainable
-
-
-# ── serialization ─────────────────────────────────────────────────────────
+    assert report.concerning
 
 
 def test_a_snapshot_round_trips() -> None:
@@ -175,12 +156,8 @@ def test_a_snapshot_from_a_newer_format_is_refused() -> None:
 
 
 def test_a_snapshot_with_no_file_list_is_refused_not_read_as_empty() -> None:
-    """Reading it as empty would report a clean folder it never looked at."""
     with pytest.raises(IntegrityError, match="no file list"):
         parse_snapshot('{"created_at": "x"}')
-
-
-# ── real folders ──────────────────────────────────────────────────────────
 
 
 @pytest.fixture()
@@ -199,8 +176,6 @@ def test_a_snapshot_covers_the_dot_dir_but_not_itself(folder: Path) -> None:
     paths = {record.path for record in snapshot.files}
     assert ".opengrader/history/grade-journal-a.jsonl" in paths
     write_snapshot(folder, snapshot)
-    # The snapshot is written after the measurements it contains, so recording
-    # itself would guarantee a mismatch on the very next verify.
     assert ".opengrader/integrity.json" not in {r.path for r in build_snapshot(folder).files}
 
 
@@ -235,9 +210,6 @@ def test_reading_a_snapshot_from_a_folder_without_one_is_none(folder: Path) -> N
     assert read_snapshot(folder) is not None
 
 
-# ── backups ───────────────────────────────────────────────────────────────
-
-
 def test_a_backup_is_verified_against_its_own_manifest(folder: Path, tmp_path: Path) -> None:
     result = create_backup(folder, tmp_path / "b.zip")
     assert result.verified and not result.mismatches
@@ -246,7 +218,6 @@ def test_a_backup_is_verified_against_its_own_manifest(folder: Path, tmp_path: P
 
 
 def test_the_manifest_travels_inside_the_archive(folder: Path, tmp_path: Path) -> None:
-    """So an old archive can be checked on a machine that never had the folder."""
     create_backup(folder, tmp_path / "b.zip")
     manifest = read_backup_manifest(tmp_path / "b.zip")
     assert any(r.path.endswith(".submission.md") for r in manifest.files)
@@ -261,8 +232,6 @@ def test_a_backup_never_overwrites_an_existing_archive(folder: Path, tmp_path: P
 def test_a_damaged_archive_is_caught_by_check(folder: Path, tmp_path: Path) -> None:
     archive = tmp_path / "b.zip"
     create_backup(folder, archive)
-    # Rebuild the zip with one member's bytes swapped, leaving the manifest
-    # claiming the original — the shape real corruption takes.
     tampered = tmp_path / "tampered.zip"
     with zipfile.ZipFile(archive) as source, zipfile.ZipFile(tampered, "w") as dest:
         for name in source.namelist():
@@ -292,26 +261,20 @@ def test_restore_recreates_every_file_and_verifies_it(folder: Path, tmp_path: Pa
 def test_restore_refuses_to_write_over_an_existing_folder(
     folder: Path, tmp_path: Path
 ) -> None:
-    """A good backup restored on top of a better original destroys the better one."""
     create_backup(folder, tmp_path / "b.zip")
     with pytest.raises(IntegrityError, match="already exists"):
         restore_backup(tmp_path / "b.zip", folder)
 
 
-# ── where an archive goes ─────────────────────────────────────────────────
-
-
 def test_the_default_archive_sits_beside_the_folder_never_inside_it(
     folder: Path,
 ) -> None:
-    """A backup inside the thing it backs up is lost with it."""
     destination = default_backup_path(folder, today=NOW)
     assert destination == folder.parent / f"{folder.name}-backup-2026-08-04.zip"
     assert folder not in destination.parents
 
 
 def test_a_same_day_second_backup_gets_its_own_name(folder: Path) -> None:
-    """Refusing the second one of the day would help nobody."""
     first = default_backup_path(folder, today=NOW)
     first.write_bytes(b"pretend archive")
     second = default_backup_path(folder, today=NOW)
@@ -331,20 +294,10 @@ def test_the_refusal_names_the_default_so_it_is_actionable(folder: Path) -> None
 
 
 def test_a_snapshot_always_lives_in_the_folder_it_describes(folder: Path) -> None:
-    """Deliberately not configurable: it only means anything beside the folder."""
     assert resolve_snapshot_path(folder) == folder / ".opengrader" / "integrity.json"
     assert resolve_snapshot_path(folder / "sub-0001" / "sub-0001.submission.md") == (
         folder / "sub-0001" / ".opengrader" / "integrity.json"
     )
-
-
-# --- encrypted backups ------------------------------------------------------
-#
-# A backup holds every name, id and scan there is, and it is the one artifact
-# that routinely leaves the machine on a stick or a drive. These tests assert
-# both halves of that: that the contents really are unreadable without the
-# passphrase, and that the "read it back before claiming success" guarantee
-# still holds *through* the encryption.
 
 
 def test_an_encrypted_backup_round_trips(folder: Path, tmp_path: Path) -> None:
@@ -362,7 +315,6 @@ def test_an_encrypted_backup_hides_its_contents(folder: Path, tmp_path: Path) ->
     archive = tmp_path / "quiz1.zip.enc"
     create_backup(folder, archive, passphrase="p")
     blob = archive.read_bytes()
-    # Neither the grades nor the file names a zip directory would otherwise list.
     assert b"grades" not in blob
     assert b"sub-0001" not in blob
 
@@ -383,23 +335,15 @@ def test_verifying_an_encrypted_backup_needs_the_passphrase(
 def test_the_read_back_check_still_runs_through_the_encryption(
     folder: Path, tmp_path: Path
 ) -> None:
-    """An encrypted backup that cannot be decrypted is not a backup.
-
-    ``verified`` has to mean the file *on disk* was opened and compared, not
-    that a plaintext archive was fine before it was encrypted.
-    """
     archive = tmp_path / "quiz1.zip.enc"
     result = create_backup(folder, archive, passphrase="p")
     assert result.verified
-    # The claim is checkable independently, with no reference to the original.
     assert read_backup_manifest(archive, passphrase="p").files
 
 
 def test_no_plaintext_archive_is_left_beside_an_encrypted_one(
     folder: Path, tmp_path: Path
 ) -> None:
-    # The zip is staged in a temp directory; a plaintext twin at the destination
-    # would defeat the whole point.
     archive = tmp_path / "quiz1.zip.enc"
     create_backup(folder, archive, passphrase="p")
     assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["quiz1.zip.enc"]
@@ -408,8 +352,6 @@ def test_no_plaintext_archive_is_left_beside_an_encrypted_one(
 def test_an_unencrypted_archive_rejects_a_passphrase(
     folder: Path, tmp_path: Path
 ) -> None:
-    # Someone supplying a passphrase for a plain archive has misunderstood which
-    # file they are holding; saying so beats silently ignoring it.
     archive = tmp_path / "plain.zip"
     create_backup(folder, archive)
     with pytest.raises(IntegrityError, match="not encrypted"):
@@ -423,7 +365,7 @@ def test_an_unencrypted_backup_is_unchanged_by_the_feature(
     result = create_backup(folder, archive)
     assert result.verified
     assert not result.encrypted
-    assert zipfile.is_zipfile(archive)  # still an ordinary zip anyone can open
+    assert zipfile.is_zipfile(archive)
 
 
 def test_the_default_name_says_when_a_passphrase_is_needed(folder: Path) -> None:

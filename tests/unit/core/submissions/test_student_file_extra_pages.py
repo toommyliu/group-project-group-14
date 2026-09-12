@@ -1,5 +1,3 @@
-"""The `extra_pages` frontmatter list on a student submission."""
-
 from opengrader.core.submissions import student_file
 from opengrader.core.submissions.student_file import StudentSubmissionDocument
 
@@ -17,7 +15,6 @@ def _doc(extra_pages: tuple[int, ...] = ()) -> StudentSubmissionDocument:
 
 
 def test_absent_when_there_are_no_extra_pages() -> None:
-    """Files without extra work keep the exact shape they had before this key."""
     markdown = student_file.render_student_submission_markdown(_doc())
     assert "extra_pages" not in markdown
 
@@ -40,7 +37,6 @@ def test_pages_are_sorted_and_deduplicated_on_parse() -> None:
 
 
 def test_bad_entries_are_dropped_rather_than_raising() -> None:
-    """A malformed hint costs a page toggle, never the ability to open the file."""
     markdown = student_file.render_student_submission_markdown(_doc())
     markdown = markdown.replace(
         "student_score:", 'extra_pages: [3, "x", 0, true]\nstudent_score:', 1
@@ -55,7 +51,6 @@ def test_non_list_value_is_ignored() -> None:
 
 
 def test_identity_rewrite_preserves_extra_pages() -> None:
-    """The surgical id write must not drop unrelated frontmatter."""
     markdown = student_file.render_student_submission_markdown(_doc((4,)))
     rewritten = student_file.set_student_identity_markdown(
         markdown, student_id="222222222", student_name="Bo Ng"

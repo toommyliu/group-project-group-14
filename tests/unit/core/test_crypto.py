@@ -1,13 +1,3 @@
-"""Passphrase encryption for artifacts that leave the machine (`core/crypto.py`).
-
-The interesting cases are all failure cases: encryption that cannot detect a
-wrong passphrase, a truncated file or a reordered chunk is worse than none,
-because it hands back plausible-looking nonsense instead of an error.
-
-A low iteration count is used throughout — these tests exercise the container,
-not the key-stretching, and 600,000 rounds per call would make the suite crawl.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,8 +34,6 @@ def test_round_trip_returns_the_original_bytes(tmp_path: Path) -> None:
 
 
 def test_an_empty_file_round_trips(tmp_path: Path) -> None:
-    # An empty input still has to produce one final-marked chunk, or decryption
-    # would report the file as incomplete.
     source = _write(tmp_path / "in.bin", b"")
     encrypt_file(source, tmp_path / "out.enc", "p", **FAST)
     decrypt_file(tmp_path / "out.enc", tmp_path / "back.bin", "p")
@@ -53,8 +41,6 @@ def test_an_empty_file_round_trips(tmp_path: Path) -> None:
 
 
 def test_a_multi_chunk_file_round_trips(tmp_path: Path) -> None:
-    # Larger than one chunk, and deliberately not a whole multiple of it, so the
-    # last chunk is short — the case the final-chunk marker has to get right.
     data = bytes(range(256)) * ((CHUNK_SIZE * 2) // 256 + 7)
     source = _write(tmp_path / "in.bin", data)
     encrypt_file(source, tmp_path / "out.enc", "p", **FAST)
@@ -71,8 +57,6 @@ def test_the_plaintext_does_not_survive_in_the_encrypted_file(tmp_path: Path) ->
 
 
 def test_encrypted_files_are_identifiable_without_the_passphrase(tmp_path: Path) -> None:
-    # Callers use this to say "this needs a passphrase" instead of letting a zip
-    # reader report a corrupt file.
     plain = _write(tmp_path / "plain.zip", b"PK\x03\x04 not encrypted")
     encrypt_file(plain, tmp_path / "out.enc", "p", **FAST)
     assert is_encrypted(tmp_path / "out.enc")
@@ -82,15 +66,10 @@ def test_encrypted_files_are_identifiable_without_the_passphrase(tmp_path: Path)
 
 
 def test_the_same_passphrase_twice_produces_different_files(tmp_path: Path) -> None:
-    # A fresh random salt and nonce each time: identical ciphertexts would leak
-    # that two backups of the same folder are unchanged.
     source = _write(tmp_path / "in.bin", b"same content")
     encrypt_file(source, tmp_path / "a.enc", "p", **FAST)
     encrypt_file(source, tmp_path / "b.enc", "p", **FAST)
     assert (tmp_path / "a.enc").read_bytes() != (tmp_path / "b.enc").read_bytes()
-
-
-# --- failure cases ----------------------------------------------------------
 
 
 def test_a_wrong_passphrase_is_refused(tmp_path: Path) -> None:
@@ -101,7 +80,6 @@ def test_a_wrong_passphrase_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_failed_decrypt_leaves_no_partial_file(tmp_path: Path) -> None:
-    # Half a submissions archive would be mistaken for a real one.
     source = _write(tmp_path / "in.bin", b"secret" * 1000)
     encrypt_file(source, tmp_path / "out.enc", "right", **FAST)
     with pytest.raises(EncryptionError):
@@ -129,16 +107,10 @@ def test_a_truncated_file_is_detected(tmp_path: Path) -> None:
 
 
 def test_dropping_a_whole_trailing_chunk_is_detected(tmp_path: Path) -> None:
-    """The case the final-chunk marker exists for.
-
-    Cutting a file at a chunk boundary leaves every remaining chunk perfectly
-    valid — only the missing "this is the last one" marker reveals the loss.
-    """
     source = _write(tmp_path / "in.bin", b"y" * (CHUNK_SIZE * 2 + 100))
     encrypt_file(source, tmp_path / "out.enc", "p", **FAST)
     raw = (tmp_path / "out.enc").read_bytes()
 
-    # Walk the framing and cut exactly after the first chunk.
     end_of_header = raw.index(b"\n", len(MAGIC)) + 1
     first_length = int.from_bytes(raw[end_of_header : end_of_header + 4], "big")
     cut = end_of_header + 4 + first_length
@@ -155,8 +127,6 @@ def test_a_plain_file_is_not_mistaken_for_an_encrypted_one(tmp_path: Path) -> No
 
 
 def test_neither_direction_overwrites_an_existing_file(tmp_path: Path) -> None:
-    # The destination of an encryption is often the only copy that gets kept,
-    # and the source is frequently deleted straight after.
     source = _write(tmp_path / "in.bin", b"data")
     _write(tmp_path / "taken.enc", b"do not clobber me")
     with pytest.raises(EncryptionError, match="already exists"):
@@ -173,9 +143,6 @@ def test_an_empty_passphrase_is_refused(tmp_path: Path) -> None:
     source = _write(tmp_path / "in.bin", b"data")
     with pytest.raises(EncryptionError):
         encrypt_file(source, tmp_path / "out.enc", "", **FAST)
-
-
-# --- key derivation and helpers ---------------------------------------------
 
 
 def test_the_salt_makes_identical_passphrases_produce_different_keys() -> None:
@@ -196,7 +163,6 @@ def test_passphrase_comparison_matches_only_identical_text() -> None:
 
 
 def test_encryption_is_available_in_this_install() -> None:
-    # A base dependency, so its absence means the install is incomplete.
     assert encryption_available()
 
 
@@ -205,7 +171,6 @@ def test_the_environment_variable_supplies_a_passphrase_for_scripts(
 ) -> None:
     monkeypatch.setenv("OPENGRADER_PASSPHRASE", "from-the-environment")
     assert passphrase_from_environment() == "from-the-environment"
-    # No prompt is shown when the variable is set, so an unattended run works.
     assert read_passphrase(confirm=True) == "from-the-environment"
 
 

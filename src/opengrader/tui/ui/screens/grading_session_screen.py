@@ -1,11 +1,3 @@
-"""Modal grading-session analytics, opened with v (teacher mode only).
-
-A read-only pop-up summarizing grading throughput — how much grading happened,
-how fast, over how many sessions, per grader — computed from the same audit
-journal the grade-history view (h) lists. Because it names graders, it's kept to
-teacher mode like grade history. esc or v closes it.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -23,8 +15,6 @@ from opengrader.tui.formatting import (
 
 
 class GradingSessionScreen(ModalScreen[None]):
-    """Read-only grading throughput summary + per-grader breakdown."""
-
     DEFAULT_CSS = """
     GradingSessionScreen {
         align: center middle;

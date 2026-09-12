@@ -1,25 +1,4 @@
-"""Pre-flight a graded assignment before handing it back.
-
-The scan doctor (``scan-check``) runs before the pipeline touches a scan. This
-is its twin at the other end: the last look before grades leave the tool, which
-is the more irreversible of the two — a rotated page can be re-scanned, but a
-student who has seen a number has seen it.
-
-    # is this ready to hand back?
-    uv run grade-check --submissions out/student-submissions/
-
-    # in a script / CI: exit 2 if anything blocks the release
-    uv run grade-check --submissions out/student-submissions/ --fail-on-blocking
-
-Nothing here writes anything. It aggregates the checks that already exist —
-the review queue, the consistency audit, the claims log, the curve — and adds
-the one judgement none of them make: which of those findings mean *releasing
-right now would be wrong* (blocking), which are worth a decision (warning), and
-which are simply context (note).
-
-``grade-release create`` runs this same check and refuses on a blocking issue,
-so this command is the preview of that gate.
-"""
+"""Check whether an assignment is ready for release."""
 
 from __future__ import annotations
 
@@ -117,12 +96,8 @@ def _print_group(title: str, issues: tuple[ReadinessIssue, ...]) -> None:
 
 
 def print_readiness(context: ReleaseContext) -> None:
-    """Human report, ordered as the decision the reader is making."""
     report: ReadinessReport = context.readiness
 
-    # What could not be checked comes *before* anything that looks like a clean
-    # bill of health — the same rule scan-check follows, and for the same reason:
-    # "nothing blocking" must never be read as "everything was examined".
     if context.unreadable_files:
         print(
             f"WARNING: {len(context.unreadable_files)} submission file(s) could "
@@ -161,14 +136,6 @@ def print_readiness(context: ReleaseContext) -> None:
 
 
 def run_cli(argv: list[str] | None = None) -> ReleaseContext:
-    """Run the readiness check.
-
-    Returns the loaded :class:`ReleaseContext` so an in-process caller (the TUI)
-    can read the verdict as data rather than scraping stdout — the same contract
-    `llm-eval` uses for its report.
-
-    **Not** the console entry point: see :func:`main`.
-    """
     args = _build_parser().parse_args(argv)
     submissions = Path(args.submissions).expanduser()
     if not submissions.exists():
@@ -190,11 +157,4 @@ def run_cli(argv: list[str] | None = None) -> ReleaseContext:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Console entry point.
-
-    A ``console_scripts`` wrapper calls ``sys.exit(main())``, so an entry point
-    that returned the report would print its ``repr`` and exit 1 on a perfectly
-    successful run. :func:`run_cli` returns the context for in-process callers;
-    this discards it.
-    """
     run_cli(argv)

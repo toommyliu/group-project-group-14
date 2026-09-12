@@ -48,7 +48,6 @@ _PERCENT_BUCKETS = (
 
 
 def selected_option_indices_for_seed(seed: QuestionSeed) -> set[int]:
-    """Resolve persisted rubric state to option indices without guessing."""
     if seed.selected_rubric_labels:
         selected_labels = set(seed.selected_rubric_labels)
         selected_indices = {
@@ -219,9 +218,6 @@ def question_statistics_chart_image(
     if stats.graded_count == 0 or not stats.buckets:
         return None
 
-    # Import lazily: matplotlib (~500ms cold) is only needed when a chart is
-    # actually drawn, and importing at module load would tax every TUI startup
-    # (statistics.py is on the grade-controller import chain).
     from matplotlib.figure import Figure
     from matplotlib.ticker import MaxNLocator
 
@@ -279,8 +275,6 @@ def question_statistics_chart_image(
     return PILImage.open(buffer).convert("RGB")
 
 
-# Separation band → bar color, matching tui/formatting.py's palette so the
-# chart and the on-screen chips read as one system.
 _SEPARATION_CHART_COLOR = {
     "excellent": "#A3BE8C",
     "good": "#8FBCBB",
@@ -297,19 +291,10 @@ def item_analysis_overview_chart_image(
     width: int = 1100,
     height: int = 520,
 ) -> PILImage.Image | None:
-    """Horizontal difficulty bars, colored by separation, one row per question.
-
-    A single at-a-glance read of the whole assignment: bar length is difficulty
-    (longer = easier), bar color is how well the item separates strong from
-    weak students (green good → red negative), and a shaded band marks the
-    healthy 50–85% difficulty zone. Returns ``None`` when nothing is gradeable.
-    """
     items = [item for item in report.items if item.difficulty is not None]
     if not items:
         return None
 
-    # Import lazily: see question_statistics_chart_image — matplotlib is only
-    # needed on this opt-in chart-rendering path.
     from matplotlib.figure import Figure
 
     dpi = 140
@@ -323,7 +308,6 @@ def item_analysis_overview_chart_image(
     axis = figure.subplots()
     axis.set_facecolor("#181818")
 
-    # Top-to-bottom in question order.
     ordered = list(items)
     positions = list(range(len(ordered)))[::-1]
     difficulties = [item.difficulty * 100 for item in ordered]
@@ -335,7 +319,6 @@ def item_analysis_overview_chart_image(
         for item in ordered
     ]
 
-    # Healthy difficulty zone.
     axis.axvspan(50, 85, color="#2E3440", alpha=0.55, zorder=0)
 
     bars = axis.barh(
@@ -394,7 +377,7 @@ def item_analysis_overview_chart_image(
 
 
 def _percent_bucket_index(percent: float) -> int:
-    """Map a 0-100(+) percentage to a decile bucket index (0..10; 10 = 100+)."""
+    """Bucket 10 includes 100% and above; buckets 0-9 are deciles below 100%."""
     if percent >= 100.0:
         return 10
     if percent < 0.0:
@@ -424,12 +407,6 @@ def curve_distribution_chart_image(
     width: int = 1100,
     height: int = 420,
 ) -> PILImage.Image | None:
-    """Grouped raw-vs-curved score histogram (percentage deciles) for a curve.
-
-    ``distribution`` is ``(raw_total, possible)`` per student. Only students with
-    a known, positive possible contribute (percentages need a denominator); when
-    none do, returns ``None`` so the modal hides the chart.
-    """
     from opengrader.core.curve import apply_curve
 
     raw_pcts: list[float] = []
@@ -443,8 +420,6 @@ def curve_distribution_chart_image(
     if not raw_pcts:
         return None
 
-    # Import lazily: see question_statistics_chart_image — matplotlib is only
-    # needed on this opt-in chart-rendering path.
     from matplotlib.figure import Figure
     from matplotlib.ticker import MaxNLocator
 

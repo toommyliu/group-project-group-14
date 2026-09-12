@@ -10,7 +10,7 @@ def format_output_filename(filename: str, start_page: int, end_page: int) -> str
 
 
 def pdf_splitter(path: Path, pages_per_chunk: int = 1, output_dir: Path | None = None) -> None:
-    filename = path.stem  # filename without extension
+    filename = path.stem
     pdf = PdfReader(path)
 
     if len(pdf.pages) == 0:
@@ -25,8 +25,6 @@ def pdf_splitter(path: Path, pages_per_chunk: int = 1, output_dir: Path | None =
             pdf_writer.add_page(page)
 
         start_page_number = i + 1
-        # cap the end page number to the total number of pages in the PDF
-        # if the last chunk has fewer pages than pages_per_chunk
         end_page_number = min(i + pages_per_chunk, len(pdf.pages))
         output_filename = format_output_filename(
             filename, start_page_number, end_page_number

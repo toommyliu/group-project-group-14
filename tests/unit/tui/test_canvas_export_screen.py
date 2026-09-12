@@ -11,7 +11,6 @@ from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
 
 
 def _qa_picker_app() -> TuiApp:
-    # A non-stub provider starts the app on the QA picker page.
     return TuiApp(
         default_image_path=DEFAULT_IMAGE_PATH,
         data_provider=FakeDataProvider(),
@@ -49,7 +48,6 @@ def test_export_requires_all_fields(monkeypatch) -> None:
             await pilot.press("x")
             await pilot.pause()
 
-            # Submissions/course/assignment are all empty.
             await pilot.click("#canvas-export-run")
             await pilot.pause()
 
@@ -91,7 +89,6 @@ def test_export_runs_cli_with_expected_argv(monkeypatch, tmp_path: Path) -> None
                     "--dry-run",
                 ]
             ]
-            # The Export button is usable again after the run.
             assert not app.screen.query_one("#canvas-export-run").disabled
 
     asyncio.run(run())
@@ -140,7 +137,6 @@ def test_browse_button_fills_submissions_input(tmp_path: Path) -> None:
             await pilot.pause()
             assert isinstance(app.screen, PathPickerScreen)
 
-            # Confirm the highlighted root directory ("any" mode accepts it).
             await pilot.click("#path-picker-select")
             await pilot.pause()
 

@@ -52,7 +52,6 @@ from .item_analysis import (
 )
 
 __all__ = [
-    # Transcription accuracy, measured from graders' own corrections.
     "DEFAULT_ERROR_TOLERANCE",
     "DEFAULT_TARGET_CATCH",
     "AccuracyStats",
@@ -67,7 +66,6 @@ __all__ = [
     "is_tool_actor",
     "normalize_transcription",
     "recommend_floor",
-    # Inter-grader agreement, leniency and drift (calibration + production).
     "DEFAULT_MIN_DRIFT_SAMPLES",
     "DEFAULT_MIN_PAIR_SAMPLES",
     "DriftStats",

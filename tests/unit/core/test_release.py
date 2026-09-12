@@ -1,5 +1,3 @@
-"""Grade release: readiness verdicts, the snapshot, and what moved since."""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -73,11 +71,6 @@ def _kinds(report) -> set[ReadinessKind]:
     return {issue.kind for issue in report.issues}
 
 
-# --------------------------------------------------------------------------- #
-# Readiness
-# --------------------------------------------------------------------------- #
-
-
 def test_fully_graded_cohort_is_ready():
     report = build_readiness_report([_doc()])
     assert report.ready
@@ -100,11 +93,6 @@ def test_ungraded_answers_block_the_release():
 
 
 def test_ungraded_issue_counts_answers_but_lists_students():
-    """The "and N more" tail must count students, not the answers they own.
-
-    Regression: computing it from ``count`` told the reader there were 20 more
-    students when there were none.
-    """
     docs = [
         _doc(student_id=f"s{index}", student_name=f"Student {index}",
              questions=[_question(f"q{n}") for n in range(1, 12)])
@@ -113,8 +101,8 @@ def test_ungraded_issue_counts_answers_but_lists_students():
     report = build_readiness_report(docs)
     issue = report.blocking[0]
 
-    assert issue.count == 22          # answers
-    assert issue.example_total == 2   # students
+    assert issue.count == 22
+    assert issue.example_total == 2
     assert "and" not in issue.describe().split("e.g.")[1]
 
 
@@ -147,15 +135,12 @@ def test_open_regrade_and_missing_submission_are_warnings_not_blockers():
         ),
     )
 
-    assert report.ready  # warnings never make a cohort un-ready
+    assert report.ready
     assert ReadinessKind.OPEN_REGRADE_REQUESTS in _kinds(report)
     assert ReadinessKind.MISSING_SUBMISSIONS in _kinds(report)
 
 
 def test_grades_predating_a_rubric_edit_warn_but_never_block():
-    """An instructor who edits a rubric and does not regrade is doing something
-    ordinary; what they must not do is fail to notice, and releasing is the last
-    honest moment to decide."""
     from opengrader.core.analytics.rubric_drift import detect_rubric_drift
     from opengrader.core.history.journal import GradeJournalEntry
 
@@ -272,11 +257,6 @@ def test_issues_are_ordered_worst_first():
     )
 
 
-# --------------------------------------------------------------------------- #
-# The release record
-# --------------------------------------------------------------------------- #
-
-
 def test_release_stores_raw_and_curved_totals():
     doc = _doc(
         questions=[
@@ -301,7 +281,6 @@ def test_release_caps_the_curved_total_like_the_gradebook():
 
 
 def test_release_skips_students_with_no_identity():
-    """Two keyless students would collide into one record and invent a change."""
     anonymous = _doc(student_id="", student_name="")
     release = build_release([anonymous, _doc()])
     assert release.student_count == 1
@@ -328,14 +307,9 @@ def test_parse_release_is_loud_about_unusable_input():
     with pytest.raises(ReleaseError):
         parse_release("{not json")
     with pytest.raises(ReleaseError):
-        parse_release('{"release_id": "x"}')  # no student list
+        parse_release('{"release_id": "x"}')
     with pytest.raises(ReleaseError):
         parse_release('{"release_format": 99, "students": []}')
-
-
-# --------------------------------------------------------------------------- #
-# Comparison
-# --------------------------------------------------------------------------- #
 
 
 def test_comparison_is_quiet_when_nothing_moved():
@@ -371,7 +345,6 @@ def test_comparison_flags_a_grade_removed_since_release():
 
 
 def test_a_recurve_moves_the_total_without_moving_a_grade():
-    """The reason the release stores the curved total as well as the raw one."""
     doc = _doc(questions=[_question("q1", points_awarded=5, possible_points=10)])
     release = build_release([doc], curve=Curve())
 
@@ -381,8 +354,6 @@ def test_a_recurve_moves_the_total_without_moving_a_grade():
     assert comparison.totals[0].after == 7
     assert comparison.curve_changed
 
-    # Asking the narrower question — "did any grade change?" — reuses the
-    # release's own curve and reports nothing.
     assert compare_release(release, [doc]).unchanged
 
 
@@ -392,12 +363,10 @@ def test_comparison_reports_missing_and_new_students_separately():
 
     assert comparison.missing_students == ("222",)
     assert comparison.new_students == ("333",)
-    # A vanished submission is a folder problem, not a grade going down.
     assert not any(change.kind == "lowered" for change in comparison.changes)
 
 
 def test_comparison_survives_an_id_assigned_after_the_release():
-    """Students are matched by the journal's key, so a filled-in name holds."""
     before = _doc(student_id="", student_name="Tommy Liu",
                   questions=[_question("q1", points_awarded=4)])
     release = build_release([before])
@@ -408,11 +377,6 @@ def test_comparison_survives_an_id_assigned_after_the_release():
     comparison = compare_release(release, [after])
     assert comparison.changes[0].kind == "raised"
     assert comparison.missing_students == ()
-
-
-# --------------------------------------------------------------------------- #
-# Storage
-# --------------------------------------------------------------------------- #
 
 
 def test_write_then_read_a_release(tmp_path):
@@ -462,4 +426,4 @@ def test_previous_release_turns_into_a_changed_since_warning(tmp_path):
 
     report = build_readiness_report([after], previous_release=release)
     assert ReadinessKind.CHANGED_SINCE_RELEASE in _kinds(report)
-    assert report.ready  # a warning, not a blocker
+    assert report.ready

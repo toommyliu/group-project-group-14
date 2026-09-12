@@ -49,9 +49,6 @@ def _doc(
     )
 
 
-# --- difficulty ------------------------------------------------------------
-
-
 def test_difficulty_is_fraction_of_possible_earned():
     docs = [
         _doc("1", [_question(points_awarded=10, possible_points=10)]),
@@ -85,18 +82,14 @@ def test_difficulty_none_when_no_point_value():
 def test_ungraded_questions_are_ignored():
     docs = [
         _doc("1", [_question(points_awarded=10)]),
-        _doc("2", [_question(points_awarded=None)]),  # not yet graded
+        _doc("2", [_question(points_awarded=None)]),
     ]
     (item,) = build_item_analysis(docs).items
     assert item.responses_count == 1
     assert item.difficulty == 1.0
 
 
-# --- separation ------------------------------------------------------------
-
-
 def _two_question_cohort(q1_perfectly_separating: bool) -> list[StudentSubmissionDocument]:
-    """10 students; q2 is a spread of totals. q1 either tracks it or is random."""
     docs = []
     for i in range(10):
         strong = i >= 5
@@ -104,8 +97,6 @@ def _two_question_cohort(q1_perfectly_separating: bool) -> list[StudentSubmissio
         if q1_perfectly_separating:
             q1_points = 10.0 if strong else 0.0
         else:
-            # Two weak + two strong earn it: exactly balanced against q2, so the
-            # item–total correlation is 0 by construction (genuine noise).
             q1_points = 10.0 if i in (0, 1, 5, 6) else 0.0
         docs.append(
             _doc(
@@ -136,7 +127,6 @@ def test_separation_low_when_item_is_noise():
 
 
 def test_separation_negative_flags_item_for_attention():
-    # q1 is inversely related to overall ability: weak students get it, strong miss.
     docs = []
     for i in range(10):
         strong = i >= 5
@@ -165,7 +155,6 @@ def test_separation_insufficient_data_below_sample_floor():
     (item,) = build_item_analysis(docs).items
     assert item.separation is None
     assert item.separation_band is SeparationBand.INSUFFICIENT_DATA
-    # difficulty still reported for a tiny cohort
     assert item.difficulty == 0.5
 
 
@@ -178,9 +167,6 @@ def test_separation_band_cutpoints():
     assert separation_band(None) is SeparationBand.INSUFFICIENT_DATA
 
 
-# --- distractors -----------------------------------------------------------
-
-
 def test_distractors_only_for_multiple_choice():
     docs = [_doc("1", [_question(question_type=FREE_RESPONSE, points_awarded=10)])]
     (item,) = build_item_analysis(docs).items
@@ -188,7 +174,6 @@ def test_distractors_only_for_multiple_choice():
 
 
 def test_distractor_tally_counts_and_key_inference():
-    # 6 students: "A" is the key (full credit), "B"/"C" distractors (0 credit).
     picks = [("A", 10), ("A", 10), ("A", 10), ("B", 0), ("B", 0), ("C", 0)]
     docs = [
         _doc(
@@ -203,7 +188,6 @@ def test_distractor_tally_counts_and_key_inference():
     assert by_choice["A"].is_likely_key is True
     assert by_choice["B"].count == 2
     assert by_choice["B"].is_likely_key is False
-    # largest share first
     assert item.distractors[0].choice == "A"
     assert abs(item.distractors[0].share - 0.5) < 1e-9
 
@@ -214,13 +198,11 @@ def test_distractor_normalizes_cosmetic_choice_differences():
         _doc("2", [_question(question_type=MULTIPLE_CHOICE, response_text="a", points_awarded=10)]),
     ]
     (item,) = build_item_analysis(docs).items
-    # "A)" and "a" collapse to one choice via normalize_answer_key
     assert len(item.distractors) == 1
     assert item.distractors[0].count == 2
 
 
 def test_distractor_chooser_performance_tracks_ability():
-    # Strong students pick A (key); weak students pick B (distractor).
     docs = []
     for i in range(8):
         strong = i >= 4
@@ -242,11 +224,7 @@ def test_distractor_chooser_performance_tracks_ability():
     by_choice = {d.choice: d for d in q1.distractors}
     assert by_choice["A"].mean_chooser_total_percent is not None
     assert by_choice["B"].mean_chooser_total_percent is not None
-    # the distractor's choosers performed worse overall than the key's
     assert by_choice["B"].mean_chooser_total_percent < by_choice["A"].mean_chooser_total_percent
-
-
-# --- versions & ordering ---------------------------------------------------
 
 
 def test_versions_are_analyzed_separately():
@@ -283,19 +261,17 @@ def test_report_class_size_and_flagged_count():
 
 
 def test_possible_points_override_fills_blank_submission_values():
-    # Submissions with blank Possible points (possible_points=None) get their
-    # denominator from the caller-supplied QA map.
     docs = [
         _doc("1", [_question(points_awarded=10, possible_points=None)]),
         _doc("2", [_question(points_awarded=5, possible_points=None)]),
     ]
     without = build_item_analysis(docs).items[0]
-    assert without.difficulty is None  # nothing to divide by
+    assert without.difficulty is None
 
     with_map = build_item_analysis(
         docs, possible_points_by_question={("q1", None): 10.0}
     ).items[0]
-    assert with_map.difficulty == 0.75  # (10 + 5) / 2 / 10
+    assert with_map.difficulty == 0.75
 
 
 def test_empty_cohort_produces_empty_report():

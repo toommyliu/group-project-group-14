@@ -30,12 +30,7 @@ def _key(text: str, *, question_id: str = "q1", version: str = "") -> AnswerGrad
     )
 
 
-# ── the key ──────────────────────────────────────────────────────────────────
-
-
 def test_cosmetically_different_answers_share_a_key() -> None:
-    # The whole point: these are one decision, not two, and the normalizer that
-    # says so is the same one a grader's `g` key uses.
     assert _key("Because it is stable.") == _key("  because it is STABLE  ")
 
 
@@ -44,8 +39,6 @@ def test_different_answers_do_not_share_a_key() -> None:
 
 
 def test_versions_do_not_share_a_key() -> None:
-    # A multi-version exam's q3 is a different question per version, so the
-    # same words are a different decision — the partition consistency.py makes.
     assert _key("42", version="A") != _key("42", version="B")
 
 
@@ -69,9 +62,6 @@ def test_multiple_choice_keys_normalize_labels() -> None:
     assert a == b
 
 
-# ── the cache ────────────────────────────────────────────────────────────────
-
-
 def test_identical_answers_cost_one_model_call() -> None:
     cache = AnswerGradeCache()
     calls = 0
@@ -91,8 +81,6 @@ def test_identical_answers_cost_one_model_call() -> None:
 
 
 def test_identical_answers_get_the_identical_decision() -> None:
-    # Consistency by construction: not "the model probably agrees with itself",
-    # but "there is only one decision and it was copied".
     cache = AnswerGradeCache()
     results = iter([_suggestion(5.0), _suggestion(0.0)])
     first = cache.suggest(_key("same"), lambda: next(results))
@@ -110,8 +98,6 @@ def test_distinct_answers_each_cost_a_call() -> None:
 
 
 def test_none_verdict_is_cached() -> None:
-    # An untrustworthy suggestion is a decision too. Re-asking until a
-    # different answer comes back is how two identical answers diverge.
     cache = AnswerGradeCache()
     calls = 0
 
@@ -126,8 +112,6 @@ def test_none_verdict_is_cached() -> None:
 
 
 def test_transport_errors_are_not_cached() -> None:
-    # A dead server says nothing about the answer, so the entry must stay open
-    # for a run that recovers.
     cache = AnswerGradeCache()
     attempts = 0
 
@@ -146,7 +130,6 @@ def test_transport_errors_are_not_cached() -> None:
 
 
 def test_summary_is_silent_when_nothing_was_reused() -> None:
-    # A cohort of unique answers gained nothing; claiming a win would be noise.
     cache = AnswerGradeCache()
     cache.suggest(_key("only one"), lambda: _suggestion())
     assert cache.summary_line() == ""

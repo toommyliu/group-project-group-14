@@ -1,28 +1,4 @@
-"""Hand a cohort to another grader, and merge their work back.
-
-Work claims (`claim`) divide a pile that everyone opens in *one* folder. This is
-for the other arrangement: a TA takes a copy away, grades it on their own
-machine, and hands the folder back.
-
-    # 1. cut an anonymous copy for Alice (names, ids and scans stay behind)
-    uv run grade-merge pack --submissions out/subs/ --output ~/handouts \\
-        --grader alice --qa-file qa.md
-
-    # 2. Alice grades it:  uv run tui --qa-file qa.md --submissions submissions/
-
-    # 3. see what came back, before writing anything
-    uv run grade-merge preview --submissions out/subs/ --incoming ~/from-alice/
-
-    # 4. take it
-    uv run grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --yes
-
-``preview`` and ``apply`` are the same three-way merge (`core/handoff/merge.py`):
-answers only Alice touched are taken, answers only you touched are kept, and
-answers you *both* changed are reported as conflicts for a human rather than
-resolved by a rule. ``apply`` is journalled under ``merge:<packet>``, so the
-whole thing is undone by
-``grade-restore apply --without-actor merge:<packet> --yes``.
-"""
+"""Create grader copies and merge their changes back."""
 
 from __future__ import annotations
 
@@ -223,7 +199,6 @@ def _resolve_path(raw: str, *, what: str) -> Path:
 
 
 def _passphrase(wanted: bool, *, confirm: bool = False) -> str:
-    """Collect a passphrase when one is needed, else "". Exits on a mismatch."""
     if not wanted:
         return ""
     try:
@@ -235,9 +210,6 @@ def _passphrase(wanted: bool, *, confirm: bool = False) -> str:
 
 def _cmd_pack(args: Namespace) -> None:
     submissions = _resolve_path(args.submissions, what="submissions path")
-    # Collected up front, so a typo is caught before a packet is built rather
-    # than after — and a mistyped passphrase on an already-sealed packet means
-    # the packet is gone.
     passphrase = _passphrase(args.encrypt, confirm=True)
     output = (
         Path(args.output).expanduser()
@@ -261,9 +233,6 @@ def _cmd_pack(args: Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
 
-    # Sealed as a second step, and the plaintext folder is removed: leaving both
-    # side by side means the copy that actually gets sent is whichever one the
-    # sender happens to pick up.
     sealed_path: Path | None = None
     if passphrase:
         try:
@@ -298,8 +267,6 @@ def _cmd_pack(args: Namespace) -> None:
             "a passphrase emailed alongside its own packet protects nothing."
         )
 
-    # The key is the whole security model, so it is the last thing printed and
-    # the only thing stated as a consequence rather than a fact.
     print(f"\nHandoff key kept here: {result.key_path}")
     what_to_send = "packet file" if sealed_path is not None else "packet folder"
     if result.manifest.redacted:
@@ -356,13 +323,7 @@ def _print_plan(plan: MergePlan) -> None:
     )
 
 
-def _print_caveats(plan: MergePlan, ours, theirs) -> None:  # noqa: ANN001 - snapshots
-    """What the merge could not account for — printed before any summary line.
-
-    Deliberately first-class output on stderr: "no changes" must never be
-    readable as "everything is accounted for" when a dozen submissions failed to
-    match (the same rule `grade-restore` follows for unresolved students).
-    """
+def _print_caveats(plan: MergePlan, ours, theirs) -> None:  # noqa: ANN001
     if plan.unmatched_students:
         print(
             f"\n{len(plan.unmatched_students)} submission(s) in the returned copy "
@@ -417,19 +378,9 @@ def _plan_json(plan: MergePlan) -> str:
 
 
 @contextmanager
-def _prepare_merge(args: Namespace):  # noqa: ANN202 - a small internal bundle
-    """Open the returned copy and build the merge plan.
-
-    A context manager because a *sealed* packet is unpacked into a temporary
-    directory that has to stay alive for as long as anything reads it — which
-    includes ``--import-history``, well after the plan itself is built. The
-    directory is removed on the way out, so a merge never leaves a decrypted
-    copy of the cohort lying around.
-    """
+def _prepare_merge(args: Namespace):  # noqa: ANN202
     ours = _resolve_path(args.submissions, what="submissions path")
     incoming = _resolve_path(args.incoming, what="incoming path")
-    # The file itself says whether a passphrase is needed, so the user never has
-    # to remember which packets they sealed.
     passphrase = _passphrase(is_sealed_packet(incoming))
     try:
         with opened_packet(incoming, passphrase) as unpacked:
@@ -469,10 +420,9 @@ def _cmd_apply(args: Namespace) -> None:
         _apply_prepared(args, *prepared)
 
 
-def _apply_prepared(  # noqa: ANN001 - unpacked bundle from _prepare_merge
+def _apply_prepared(  # noqa: ANN001
     args: Namespace, ours, incoming, key, manifest, plan, ours_side, theirs_side
 ) -> None:
-
     policy: ConflictPolicy = args.conflicts
     resolved = resolve_conflicts(plan.conflicts, policy=policy)
     changes = list(plan.changes) + list(resolved)
@@ -506,9 +456,6 @@ def _apply_prepared(  # noqa: ANN001 - unpacked bundle from _prepare_merge
         f"{outcome.files_touched} student file(s)."
     )
 
-    # The undo instruction has to name every actor now asserting a merged value,
-    # not just the merge itself: an imported entry from the other grader says
-    # they set that grade here, so dropping only `merge:<label>` would leave it.
     undo_actors = [merge_actor(label)]
     if args.import_history:
         imported = import_incoming_journal(

@@ -17,7 +17,6 @@ def test_resolve_history_dir_for_directory_and_file(tmp_path: Path) -> None:
 
     a_file = subs / "s1.submission.md"
     a_file.write_text("x")
-    # A file resolves to its parent's history dir.
     assert resolve_history_dir(a_file) == subs / ".opengrader" / "history"
 
 
@@ -62,11 +61,9 @@ def test_read_merges_multiple_sessions_in_time_order(tmp_path: Path) -> None:
     e2 = j2.append(kind="comment", student_id="2", student_name="B", question_id="q1", summary="two")
 
     merged = read_journal(history)
-    # Two separate session files, merged and ordered by timestamp.
     assert [e.actor for e in merged] == ["ta_a", "ta_b"]
     assert merged[0].timestamp <= merged[1].timestamp
     assert {e.summary for e in merged} == {"one", "two"}
-    # Distinct files: no contention between the two graders.
     assert j1.path != j2.path
 
 
@@ -105,7 +102,6 @@ def _append(journal: GradeJournal, summary: str) -> None:
 
 
 def test_journal_fingerprint_moves_on_an_appended_entry(tmp_path: Path) -> None:
-    """The append-only case: the same session file grows."""
     history = tmp_path / "history"
     journal = GradeJournal(history, actor="ta_bob", session_id="s1")
     _append(journal, "8/10 pts")
@@ -120,12 +116,6 @@ def test_journal_fingerprint_moves_on_an_appended_entry(tmp_path: Path) -> None:
 def test_journal_fingerprint_moves_when_another_session_appears(
     tmp_path: Path,
 ) -> None:
-    """The case a single file's size cannot see, and the one that matters most.
-
-    A second grader, `grade-restore` or `grade-merge apply` writes its *own*
-    session file rather than growing this session's, so a fingerprint built
-    from one known path would report the journal unchanged.
-    """
     history = tmp_path / "history"
     _append(GradeJournal(history, actor="ta_a", session_id="a"), "8/10 pts")
     before = journal_fingerprint(history)
@@ -137,5 +127,4 @@ def test_journal_fingerprint_moves_when_another_session_appears(
 
 
 def test_journal_fingerprint_missing_dir_is_empty(tmp_path: Path) -> None:
-    """Nothing has ever been graded here — not an error, just no journal."""
     assert journal_fingerprint(tmp_path / "nope") == ()

@@ -1,5 +1,3 @@
-"""The environment-check modal (start-up screen → Helper Tools)."""
-
 from __future__ import annotations
 
 import asyncio
@@ -35,7 +33,6 @@ async def _settle(pilot, predicate, limit: int = 80) -> None:  # noqa: ANN001
 
 
 def _stub_engine(monkeypatch: pytest.MonkeyPatch, report: EnvironmentReport) -> dict:
-    """Replace the probing engine so these tests need no Tesseract or Ollama."""
     recorded: dict = {}
 
     def fake_build(**kwargs) -> EnvironmentReport:
@@ -55,8 +52,6 @@ def _ready_report() -> EnvironmentReport:
 def test_checks_run_on_open_without_pressing_anything(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Someone opens this dialog because something is already wrong; making them
-    # press a button first to learn anything wastes the one interaction.
     _stub_engine(monkeypatch, _ready_report())
 
     async def run() -> None:
@@ -105,8 +100,6 @@ def test_a_failing_check_shows_its_impact_and_fix(
 def test_the_terminal_check_is_skipped_inside_the_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Re-probing the terminal would write escape sequences into a terminal
-    # Textual owns, and the answer is already known by the time the app runs.
     recorded = _stub_engine(monkeypatch, _ready_report())
 
     async def run() -> None:
@@ -159,8 +152,6 @@ def test_the_smoke_test_is_off_until_asked_for(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_buttons_come_back_after_a_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    # They are disabled while probing; leaving them disabled would strand the
-    # dialog with no way to close it.
     _stub_engine(monkeypatch, _ready_report())
 
     async def run() -> None:

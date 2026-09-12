@@ -53,7 +53,7 @@ def test_show_reports_current_policy(tmp_path: Path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
     run_cli(["lock", "--submissions", str(subs)])
-    capsys.readouterr()  # drop the lock output
+    capsys.readouterr()
 
     run_cli(["show", "--submissions", str(subs)])
 
@@ -79,13 +79,12 @@ def test_redact_refuses_to_overwrite_existing_map(tmp_path: Path) -> None:
     subs.mkdir()
     _write_submission(subs / "a.submission.md")
     name_map = tmp_path / "names.json"
-    name_map.write_text("{}")  # pretend a map is already there
+    name_map.write_text("{}")
 
     with pytest.raises(SystemExit):
         run_cli(
             ["redact-names", "--submissions", str(subs), "--name-map", str(name_map)]
         )
-    # The submission must be untouched since we bailed before redacting.
     assert load_student_submission_markdown(subs / "a.submission.md").student_name != ""
 
 

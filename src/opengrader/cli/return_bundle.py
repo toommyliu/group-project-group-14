@@ -1,18 +1,4 @@
-"""Package a graded class into a return bundle — one folder to hand back.
-
-The last step of the offline workflow: assemble the class gradebook, each
-student's annotated + summarized PDF, and a class analysis report into a single
-professionally-named directory. Which documents go in is chosen with the content
-flags (or ``--content``); with none given it builds everything.
-
-    uv run return-bundle --submissions out/student-submissions/            # everything
-    uv run return-bundle --submissions out/student-submissions/ --gradebook
-    uv run return-bundle --submissions out/student-submissions/ --student-pdfs --analysis
-    uv run return-bundle --submissions out/ --output ~/returns --name "quiz1-return"
-
-Read-only w.r.t. grades. The actual assembly lives in
-:mod:`opengrader.core.export.bundle`; this is the thin CLI wrapper.
-"""
+"""Package graded submissions for return."""
 
 from __future__ import annotations
 
@@ -109,12 +95,6 @@ def setup_args() -> ArgumentParser:
 
 
 def _resolve_content(args) -> BundleContent:
-    """Combine the content flags into a single selection.
-
-    Individual flags union together; ``--all`` and ``--content PRESET`` are
-    shortcuts. When nothing is specified we default to everything, since a bare
-    ``return-bundle`` most usefully produces a complete hand-back package.
-    """
     if args.content:
         preset = BUNDLE_PRESETS[args.content]
     else:

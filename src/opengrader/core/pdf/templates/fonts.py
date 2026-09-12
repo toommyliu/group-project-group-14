@@ -4,11 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    # fitz (PyMuPDF, ~110ms cold) is only needed once a template PDF is
-    # actually generated (see resolve_template_fonts below); this module is
-    # imported for the cheap CMU_REGULAR_FILE/CMU_BOLD_FILE path constants
-    # far more often than a PDF is built, so it must stay cheap to import.
+if TYPE_CHECKING:  # pragma: no cover
     import fitz
 
 DEFAULT_FONT = "times-roman"
@@ -44,7 +40,7 @@ def resolve_template_fonts(
     regular_file: str | Path | None = None,
     bold_file: str | Path | None = None,
 ) -> ResolvedTemplateFonts:
-    import fitz  # see the TYPE_CHECKING import above for why this is deferred
+    import fitz
 
     reg_candidate = Path(regular_file) if regular_file else CMU_REGULAR_FILE
     bold_candidate = Path(bold_file) if bold_file else CMU_BOLD_FILE

@@ -1,31 +1,4 @@
-"""Checksum, verify, back up and restore a grading folder.
-
-Everything Opengrader keeps is a file in one directory, and there is no server
-holding a second copy. The failures that follow from that are quiet ones: a
-drive yanked mid-write, a sync client resolving a conflict by picking a side, a
-stray command in the wrong folder. Nothing raises; a grade is simply different
-than it was.
-
-    # record what is here now (do this before anything risky)
-    uv run grade-backup snapshot --submissions out/subs/
-
-    # ...later: what moved?
-    uv run grade-backup verify --submissions out/subs/
-
-    # one verified archive of the lot
-    uv run grade-backup backup --submissions out/subs/ --output ~/backups/quiz1.zip
-
-    # check an old archive is still readable, years later
-    uv run grade-backup check --archive ~/backups/quiz1.zip
-
-    # unpack it somewhere new (never on top of an existing folder)
-    uv run grade-backup restore --archive ~/backups/quiz1.zip --output ~/recovered/
-
-``verify`` reads the audit journal too, so a changed ``.submission.md`` is
-reported as *explained* (grading was recorded for that student since) or
-*unexplained* (it changed and nothing recorded it) — which is the difference
-between ordinary work and the thing worth investigating.
-"""
+"""Checksum, verify, back up and restore a grading folder."""
 
 from __future__ import annotations
 
@@ -177,8 +150,6 @@ def _cmd_snapshot(args: Namespace) -> None:
         f"{snapshot.total_bytes:,} bytes → {path}"
     )
     if previous is not None:
-        # Overwriting a snapshot silently would let someone "fix" a failing
-        # verify by re-recording the damage as the new normal, so say it moved.
         print(f"(Replaced the snapshot taken at {previous.created_at}.)")
 
 
@@ -205,9 +176,6 @@ def _cmd_verify(args: Namespace) -> None:
             print(f"  {finding.describe()}")
         unexplained = report.unexplained
         if unexplained:
-            # Printed last because it is the conclusion, not another list: these
-            # are the files that changed with nothing in the audit trail saying
-            # why, which is the signal the whole cross-reference exists for.
             print(
                 f"\n{len(unexplained)} of those changed with no grading recorded "
                 "for that student since the snapshot — check these first:"
@@ -222,11 +190,6 @@ def _cmd_verify(args: Namespace) -> None:
 
 
 def _passphrase(wanted: bool, *, confirm: bool = False) -> str:
-    """Collect a passphrase when one was asked for, else return "".
-
-    Exits with a message rather than a traceback: "the two passphrases do not
-    match" is an ordinary thing to do, not a crash.
-    """
     if not wanted:
         return ""
     try:
@@ -237,20 +200,11 @@ def _passphrase(wanted: bool, *, confirm: bool = False) -> str:
 
 
 def _passphrase_for(archive: Path) -> str:
-    """Ask for a passphrase only when the archive actually needs one.
-
-    Detected from the file itself rather than from a flag the user has to
-    remember to pass — a year later nobody recalls which archives were
-    encrypted, and the file already knows.
-    """
     return _passphrase(is_encrypted(archive))
 
 
 def _cmd_backup(args: Namespace) -> None:
     folder = _resolve(args.submissions, what="submissions path")
-    # Asked for before anything is built, and confirmed by typing it twice: a
-    # mistyped passphrase cannot be recovered from, and discovering that at the
-    # end of a ten-minute archive of a 300-student cohort wastes both.
     passphrase = _passphrase(args.encrypt, confirm=True)
     destination = (
         Path(args.output).expanduser()
@@ -268,8 +222,6 @@ def _cmd_backup(args: Namespace) -> None:
         f"{result.archive_path}"
     )
     if result.encrypted:
-        # Stated as a consequence, not a fact: the passphrase is now the only
-        # thing standing between this archive and being unreadable forever.
         print(
             "Encrypted. Nobody — including you — can read this archive without "
             "that passphrase, so store it somewhere you will still have it in a "

@@ -5,10 +5,6 @@ from textual.widgets._tabs import Underline
 
 
 def patch_tabs() -> None:
-    """
-    Monkeypatch textual's Tab-related widgets to use proportional highlighting for the active tab.
-    """
-
     def proportional_highlight_active(
         self: textual.widgets.Tabs, animate: bool = False
     ) -> None:

@@ -1,13 +1,3 @@
-"""Modal dialog for filing a student regrade request from inside the TUI.
-
-Teacher-mode only (filing a dispute names a student). Opened with f from the QA
-picker or the grade screen. On the grade screen the student and question default
-to the ones in focus; on the QA picker the teacher picks a student (a dropdown of
-the cohort, with a manual-id escape hatch) and a question. Dismisses with a
-``FileRegradeResult`` to file, or ``None`` to cancel — the app persists it via
-``SubmissionFilesProvider.file_regrade`` (append-only, never changes a grade).
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,27 +9,19 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Select, Static
 
-# Sentinel option value that reveals the manual student-id box, for a student who
-# isn't in the dropdown (e.g. a dispute for a submission that didn't load).
 _MANUAL_STUDENT = "\x00manual-student"
 
-# Explicit option value for a whole-assignment dispute (empty question id in the
-# stored record). A real value, not Select.BLANK, so the dropdown never blanks.
 _WHOLE_ASSIGNMENT = ""
 
 
 @dataclass(frozen=True)
 class FileRegradeResult:
-    """A regrade request the teacher filled in, ready to persist."""
-
     student_id: str
     question_id: str
     reason: str
 
 
 class FileRegradeScreen(ModalScreen["FileRegradeResult | None"]):
-    """Collect a student, question, and reason and return them to file."""
-
     DEFAULT_CSS = """
     FileRegradeScreen {
         align: center middle;
@@ -118,7 +100,6 @@ class FileRegradeScreen(ModalScreen["FileRegradeResult | None"]):
             markup = f"{markup}  [dim]{detail}[/dim]"
         return Static(markup, classes="field-label")
 
-    # --- initial values ----------------------------------------------------
 
     def _student_select_options(self) -> list[tuple[str, str]]:
         options = [(label, sid) for sid, label in self._student_choices]
@@ -130,7 +111,6 @@ class FileRegradeScreen(ModalScreen["FileRegradeResult | None"]):
         if self._initial_student_id and self._initial_student_id in known:
             return self._initial_student_id
         if self._initial_student_id:
-            # Prefilled with a student not in the dropdown → manual entry.
             return _MANUAL_STUDENT
         if self._student_choices:
             return self._student_choices[0][0]
@@ -149,7 +129,6 @@ class FileRegradeScreen(ModalScreen["FileRegradeResult | None"]):
             return self._initial_question_id
         return _WHOLE_ASSIGNMENT
 
-    # --- compose -----------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-regrade-dialog") as dialog:
@@ -203,14 +182,11 @@ class FileRegradeScreen(ModalScreen["FileRegradeResult | None"]):
                 yield Button("Cancel", id="file-regrade-cancel", compact=True)
 
     def on_mount(self) -> None:
-        # Grade-screen flow prefills the student → land on the reason; QA-picker
-        # flow needs the teacher to choose a student first.
         if self._initial_student_id:
             self.query_one("#file-regrade-reason", Input).focus()
         else:
             self.query_one("#file-regrade-student", Select).focus()
 
-    # --- interactions ------------------------------------------------------
 
     @on(Select.Changed, "#file-regrade-student")
     def _on_student_changed(self, event: Select.Changed) -> None:

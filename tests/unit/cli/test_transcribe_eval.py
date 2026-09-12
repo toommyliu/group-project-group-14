@@ -1,5 +1,3 @@
-"""The `transcribe-eval` CLI: reads a journal, writes nothing."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +14,6 @@ from opengrader.core.submissions.student_file import (
 
 
 def _write_cohort(root: Path, *, questions: int = 4) -> Path:
-    """A minimal submissions folder: one student, `questions` transcribed answers."""
     root.mkdir(parents=True, exist_ok=True)
     document = StudentSubmissionDocument(
         student_name="Tommy Liu",
@@ -85,7 +82,6 @@ def test_reports_accuracy_from_recorded_corrections(tmp_path: Path, capsys) -> N
 
 
 def test_writes_nothing_at_all(tmp_path: Path) -> None:
-    """Read-only, asserted the way `llm-eval` and `grade-check` assert it."""
     root = _write_cohort(tmp_path / "subs")
     _correct(root, question_id="q1", machine="teh cat", human="the cat")
 
@@ -135,7 +131,7 @@ def test_json_carries_the_full_uncollapsed_curve(tmp_path: Path, capsys) -> None
 
     assert payload["overall"]["samples"] == 1
     assert payload["coverage"]["answers_with_text"] == 4
-    assert len(payload["floor_curve"]) == 21  # 0..100 by 5
+    assert len(payload["floor_curve"]) == 21
     assert payload["worst"][0]["machine_text"] == "teh cat"
 
 
@@ -188,7 +184,6 @@ def test_bad_arguments_are_refused(tmp_path: Path, argv: list[str], capsys) -> N
 
 
 def test_main_returns_an_exit_code_not_a_report(tmp_path: Path) -> None:
-    """A console_scripts target that returns an object prints its repr, exit 1."""
     root = _write_cohort(tmp_path / "subs")
 
     assert main(["--input", str(root)]) == 0
@@ -196,7 +191,6 @@ def test_main_returns_an_exit_code_not_a_report(tmp_path: Path) -> None:
 
 
 def test_pooled_cohorts_keep_students_apart(tmp_path: Path) -> None:
-    """Two terms both number from s1; merging them would discard the second."""
     fall = _write_cohort(tmp_path / "fall-2025" / "subs")
     spring = _write_cohort(tmp_path / "spring-2026" / "subs")
     _correct(fall, question_id="q1", machine="teh cat", human="the cat")

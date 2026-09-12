@@ -1,10 +1,4 @@
-"""Summarize grading throughput from the durable audit journal.
-
-The analytics counterpart to ``grade-history``: instead of listing every change,
-report how much grading happened, how fast, over how many sessions, per grader —
-computed from the timestamps already recorded under
-``<submissions>/.opengrader/history/``. Read-only; never changes a grade.
-"""
+"""Summarize grading activity from the audit journal."""
 
 from __future__ import annotations
 

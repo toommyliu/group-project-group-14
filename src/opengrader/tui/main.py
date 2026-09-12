@@ -10,7 +10,6 @@ from opengrader.tui.terminal_graphics import (
 )
 from opengrader.tui.tui import TuiApp
 
-# https://github.com/Textualize/textual/blob/f044be2a115a1f3655b8de9f734d2ba57ab2207e/src/textual/features.py#L10
 _TEXTUAL_ENV_VAR = "TEXTUAL"
 _DEVTOOLS_FEATURE = "devtools"
 
@@ -57,9 +56,7 @@ def run_app(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Settle the graphics protocol before the app starts: probing the terminal
-    # is impossible once Textual owns stdin, and every image widget snapshots
-    # the answer when it is built.
+    # Probe graphics before Textual owns stdin and image widgets snapshot the protocol.
     try:
         capability = configure_graphics(args.graphics)
     except GraphicsOverrideError as exc:

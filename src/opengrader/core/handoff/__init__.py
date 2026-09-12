@@ -1,11 +1,3 @@
-"""Handing a cohort to another grader and getting it back.
-
-Two halves of one round trip: `packet.py` cuts a redacted, self-contained copy
-for a TA to grade offline, and `merge.py` three-way merges the returned copy
-into the master. Split the way `core/history` is — the artifact and the
-reconciliation are separate concerns, and only the merge needs the journal.
-"""
-
 from .calibration import (
     DEFAULT_SAMPLE_SIZE,
     CalibrationCollection,
@@ -67,7 +59,6 @@ from .packet import (
 )
 
 __all__ = [
-    # Calibration (norming) sets — the same sample to every grader, blind.
     "DEFAULT_SAMPLE_SIZE",
     "CalibrationCollection",
     "CalibrationError",

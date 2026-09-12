@@ -1,5 +1,3 @@
-"""QA file parsing, rendering, and rubric scoring helpers."""
-
 from .markdown import (
     QAChoice,
     QADocument,

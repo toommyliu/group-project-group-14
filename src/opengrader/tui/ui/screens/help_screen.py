@@ -1,5 +1,3 @@
-"""Modal reference for every command and pipeline tool, opened with ?."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -25,10 +23,6 @@ _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("?", "Open this help."),
 ]
 
-# Every report/queue/audit, all on Shift + a mnemonic letter. Kept in their own
-# section (rather than mixed into ANYWHERE) because the shared modifier is the
-# thing worth learning: the grader reads one rule, then only has to remember the
-# letter. Ordered open-to-everyone first, teacher-mode-only last.
 _REPORT_ROWS: list[tuple[str, str]] = [
     (
         "shift+R",
@@ -131,12 +125,6 @@ _REPORT_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
-# Kept out of REPORTS & AUDITS on purpose. Those all answer a question about
-# work already done and change nothing; these three are the opposite — they
-# create a folder, take someone else's grades into yours, or write an archive.
-# Sharing the shift+letter grammar does not make them the same kind of thing,
-# and a reader looking for "how do I give this to my TA" should not have to
-# find it in a list of audits.
 _SHARING_ROWS: list[tuple[str, str]] = [
     (
         "shift+E",
@@ -384,9 +372,6 @@ _RUBRIC_EDITOR_ROWS: list[tuple[str, str]] = [
     ("esc", "Cancel without saving."),
 ]
 
-# The core flow. The whole-pipeline run comes first — it is the recommended
-# path and has a section of its own on the start-up screen; the numbered steps
-# below it are what it runs, and what you reach for when you want one alone.
 _PIPELINE_ROWS: list[tuple[str, str]] = [
     (
         "All of it, one command",
@@ -468,10 +453,6 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
-# The optional AI, configured in exactly one place. This section used to
-# document a model/host disclosure inside each of the four steps that could use
-# a model; those are gone, and "where do I set this" is now the first thing a
-# reader needs, so it leads.
 _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     (
         "Where you set it up",
@@ -658,8 +639,6 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
-# How scanned answers reach the screen — and the escape hatch when the
-# terminal can't draw pixels at all.
 _TERMINAL_GRAPHICS_ROWS: list[tuple[str, str]] = [
     (
         "Best terminals",
@@ -694,7 +673,6 @@ _TERMINAL_GRAPHICS_ROWS: list[tuple[str, str]] = [
     ),
 ]
 
-# Standalone scripts you reach for as needed, outside the numbered flow.
 _SCRIPT_ROWS: list[tuple[str, str]] = [
     (
         "Doctor",
@@ -1056,8 +1034,6 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
 
 
 class HelpScreen(ModalScreen[None]):
-    """Full command reference, grouped by screen, in the app's card style."""
-
     DEFAULT_CSS = """
     HelpScreen {
         align: center middle;
@@ -1091,8 +1067,7 @@ class HelpScreen(ModalScreen[None]):
         width: 100%;
         height: auto;
         color: $text-muted;
-        /* One line here + the trailing row's margin-bottom below = two blank
-           lines before each new section, so groups read as distinct blocks. */
+
         margin-top: 1;
         text-style: bold;
     }
@@ -1111,7 +1086,7 @@ class HelpScreen(ModalScreen[None]):
     HelpScreen .help-row {
         width: 100%;
         height: auto;
-        /* A blank line between commands so the reference doesn't feel squished. */
+
         margin-bottom: 1;
     }
 

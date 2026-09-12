@@ -1,9 +1,3 @@
-"""Tests for the course-file builder modal.
-
-Its two jobs: draft a working `course.toml` without the instructor writing any
-TOML, and make `weight` self-explanatory via the live share beside each row.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -51,9 +45,6 @@ async def _settle(pilot) -> None:  # noqa: ANN001
     await pilot.pause()
 
 
-# ── the live share: what teaches "weight" ────────────────────────────────────
-
-
 def test_new_rows_default_to_equal_weight(tmp_path: Path) -> None:
     async def body(pilot, screen, app):  # noqa: ANN001, ANN202
         screen._add_rows([_found("A", tmp_path / "a"), _found("B", tmp_path / "b")])
@@ -69,8 +60,6 @@ def test_new_rows_default_to_equal_weight(tmp_path: Path) -> None:
 
 
 def test_the_share_updates_as_a_weight_is_typed(tmp_path: Path) -> None:
-    """The live number *is* the explanation, so it must never lag."""
-
     async def body(pilot, screen, app):  # noqa: ANN001, ANN202
         screen._add_rows([_found("A", tmp_path / "a"), _found("B", tmp_path / "b")])
         await _settle(pilot)
@@ -83,8 +72,6 @@ def test_the_share_updates_as_a_weight_is_typed(tmp_path: Path) -> None:
 
 
 def test_percentages_and_ratios_produce_the_same_shares(tmp_path: Path) -> None:
-    """Typing 25/75 and typing 1/3 must look identical — both are correct."""
-
     async def body(pilot, screen, app):  # noqa: ANN001, ANN202
         screen._add_rows([_found("A", tmp_path / "a"), _found("B", tmp_path / "b")])
         await _settle(pilot)
@@ -102,15 +89,11 @@ def test_a_half_typed_weight_does_not_break_the_other_rows(tmp_path: Path) -> No
         screen._add_rows([_found("A", tmp_path / "a"), _found("B", tmp_path / "b")])
         await _settle(pilot)
         rows = list(screen.query(_AssignmentRow))
-        rows[0].weight_input.value = ""  # mid-edit
+        rows[0].weight_input.value = ""
         await _settle(pilot)
         return [str(row.share_label.render()) for row in rows]
 
-    # The blank row takes no share; the other still reads sensibly.
     assert _run(body) == ["→ —", "→ 100%"]
-
-
-# ── rows ─────────────────────────────────────────────────────────────────────
 
 
 def test_add_assignment_appends_a_blank_row() -> None:
@@ -123,7 +106,7 @@ def test_add_assignment_appends_a_blank_row() -> None:
     count, name, weight = _run(body)
     assert count == 1
     assert name == ""
-    assert weight == "1"  # still the default
+    assert weight == "1"
 
 
 def test_removing_a_row_rebalances_the_shares(tmp_path: Path) -> None:
@@ -158,9 +141,6 @@ def test_the_status_line_counts_rows_that_are_ready(tmp_path: Path) -> None:
     status = _run(body)
     assert "1 assignment(s) ready" in status
     assert "1 row(s) still need" in status
-
-
-# ── saving ───────────────────────────────────────────────────────────────────
 
 
 def test_saving_writes_a_file_that_loads_back(tmp_path: Path) -> None:
@@ -210,8 +190,6 @@ def test_saving_with_no_destination_is_refused(tmp_path: Path) -> None:
 
 
 def test_an_unfilled_row_is_skipped_rather_than_blocking_the_save(tmp_path: Path) -> None:
-    """Adding one row too many should not stop an instructor saving."""
-
     async def body(pilot, screen, app):  # noqa: ANN001, ANN202
         screen.query_one("#course-builder-output", Input).value = str(tmp_path)
         screen._add_rows([_found("Quiz 1", tmp_path / "subs"), None])
@@ -260,14 +238,7 @@ def test_a_scan_prefills_names_paths_and_answer_keys(tmp_path: Path) -> None:
     assert solutions.endswith("solutions.md")
 
 
-# ── discoverability: the help screen must document all of this ───────────────
-
-
 def test_the_help_screen_documents_outcomes_and_the_course_builder() -> None:
-    """A feature nobody can find is a feature nobody has. The help screen is
-    the only in-app place that says how to *author* an **Outcome** bullet (the
-    `t` format guide covers the plain-text source format, not QA markdown), and
-    the only place that says the course file can be built from a form."""
     from textual.widgets import Static
 
     from opengrader.tui.tui import TuiApp
@@ -283,11 +254,9 @@ def test_the_help_screen_documents_outcomes_and_the_course_builder() -> None:
             return " ".join(str(w.render()) for w in app.screen.query(Static))
 
     text = asyncio.run(go())
-    # How to tag an outcome, and where the tags then show up.
     assert "**Outcome**" in text
     assert "CLO3" in text
     assert "measured in points" in text
-    # The builder, and the explanation of `weight` it embodies.
     assert "New…" in text
     assert "10/10/30/50 and 1/1/3/5" in text
     assert "live share of the final grade" in text

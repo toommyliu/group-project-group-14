@@ -1,24 +1,4 @@
-"""Rewind grades to an earlier point in the audit journal — the undo that outlives a session.
-
-The journal (`core/history/journal.py`) has always recorded the *old* value of
-every grade, comment and transcription it saw change; this is the tool that
-reads it back. Three shapes, all one replay (`core/history/restore.py`):
-
-    # what did this look like before lunch?
-    uv run grade-restore show --submissions out/subs/ --at 2026-08-02T12:00
-
-    # what changed since then, and what would go back?
-    uv run grade-restore diff --submissions out/subs/ --at 2h
-
-    # put it back (dry run first — always shown before anything is written)
-    uv run grade-restore apply --submissions out/subs/ --at 2h --yes
-
-    # undo one grader — or one bad batch run — wherever nobody overwrote them
-    uv run grade-restore apply --submissions out/subs/ --without-actor ollama-bot --yes
-
-``apply`` is itself journalled, so a restore is an ordinary, reversible grade
-change rather than a hole in the audit trail.
-"""
+"""Preview and restore grades from the audit journal."""
 
 from __future__ import annotations
 
@@ -196,12 +176,6 @@ def _parse_at(raw: str) -> datetime | None:
 
 
 def _load_documents(path: Path) -> list[tuple[Path, object]]:
-    """Parse every submission in the cohort, skipping ones that will not read.
-
-    A single malformed file must not stop a restore of the other thirty — it
-    is reported and the run continues, matching how the extractor treats one
-    bad scan.
-    """
     loaded: list[tuple[Path, object]] = []
     for submission_path in discover_submission_paths(path):
         try:
@@ -213,8 +187,7 @@ def _load_documents(path: Path) -> list[tuple[Path, object]]:
     return loaded
 
 
-def _prepare(args: Namespace):  # noqa: ANN202 - a small internal bundle
-    """Everything the three grade commands share: journal, files, plan."""
+def _prepare(args: Namespace):  # noqa: ANN202
     path = _resolve_submissions(args.submissions)
     entries = read_journal(resolve_history_dir(path))
     if not entries:
@@ -267,8 +240,6 @@ def _describe_scope(args: Namespace, snapshot) -> str:  # noqa: ANN001
 def _print_unresolved(plan: RestorePlan) -> None:
     if not plan.unresolved:
         return
-    # Stated before any summary line, so "nothing to restore" can never be
-    # read as "everything is accounted for".
     print(
         f"\n{len(plan.unresolved)} student(s) in the history have no submission "
         "file here and were skipped:",
@@ -355,9 +326,6 @@ def _cmd_apply(args: Namespace) -> None:
     _print_unresolved(plan)
 
     if not args.yes:
-        # Preview is the default because a restore overwrites real grades; the
-        # confirmation is an explicit flag rather than a prompt so the tool
-        # stays scriptable.
         print("\nPreview only. Re-run with --yes to write these changes.")
         return
 

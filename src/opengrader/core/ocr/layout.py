@@ -1,7 +1,3 @@
-"""
-Detect semantic page regions with OpenCV geometry and Tesseract anchors.
-"""
-
 from __future__ import annotations
 
 import json
@@ -96,10 +92,10 @@ class _QuestionAnchor:
 
 _QUESTION_TOKEN_RE = re.compile(
     r"^(\d{1,3})[\.)]?$"
-)  # Match standalone question numbers like "1.", "2)" or "3".
+)
 _QUESTION_Q_RE = re.compile(
     r"^q(?:uestion)?\s*(\d{1,3})[\.)]?$", re.IGNORECASE
-)  # Match "q7", "Q 12.", "question 99)", etc.
+)
 _TITLE_COURSE_RE = re.compile(r"\b[A-Z]{2,}\s*\d{1,4}[A-Z]?\b", re.IGNORECASE)
 _TITLE_ASSIGNMENT_RE = re.compile(
     r"\b(?:quiz|midterm|exam|final|assignment|homework|hw)\b",
@@ -112,36 +108,31 @@ _TITLE_COMPACT_VERSION_RE = re.compile(
 )
 
 
-# Heuristic thresholds for page positions.
-
 _HEADER_MARK_MAX_Y_NORM = (
-    0.22  # Restrict header field marks to the top 22% of the page.
+    0.22
 )
-_HEADER_MARK_MIN_WIDTH_NORM = 0.06  # Ignore tiny line fragments and OCR noise.
+_HEADER_MARK_MIN_WIDTH_NORM = 0.06
 _HEADER_MARK_MAX_WIDTH_NORM = (
-    0.45  # Exclude wide separators unlikely to be field blanks.
+    0.45
 )
-_TITLE_SEARCH_MAX_Y_NORM = 0.34  # Keep title detection to the upper third of the page.
+_TITLE_SEARCH_MAX_Y_NORM = 0.34
 _QUESTION_CONTINUATION_TRIGGER_Y_NORM = (
-    0.70  # Only low-page questions may spill forward.
+    0.70
 )
-_QUESTION_CONTINUATION_TOP_NORM = 0.04  # Skip scanner/header noise at the top edge.
-_QUESTION_CONTINUATION_MIN_HEIGHT_NORM = 0.06  # Avoid stitching tiny slivers.
+_QUESTION_CONTINUATION_TOP_NORM = 0.04
+_QUESTION_CONTINUATION_MIN_HEIGHT_NORM = 0.06
 _QUESTION_CONTINUATION_MAX_BOX_TOP_NORM = (
-    0.38  # Limit continuation boxes to page-top regions.
+    0.38
 )
 _QUESTION_CONTINUATION_X_OVERLAP_MIN_RATIO = (
-    0.45  # Require boxes to align with the question column.
+    0.45
 )
 _QUESTION_CONTINUATION_PAGE_END_NORM = (
-    0.965  # Leave footer/page-number area out of fallback bands.
+    0.965
 )
-
-# Geometry helpers.
 
 
 def _clamp_bbox_norm(bbox: list[float]) -> list[float]:
-    """Clamp a normalized bbox to the page and round for cleaner output."""
     x, y, w, h = bbox
     x = max(0.0, min(1.0, x))
     y = max(0.0, min(1.0, y))
@@ -155,8 +146,6 @@ def bbox_px_to_norm(
     page_w: int,
     page_h: int,
 ) -> list[float]:
-    """Convert a pixel bbox to normalized page coordinates."""
-
     x0, y0, x1, y1 = bbox_px
     if page_w <= 0 or page_h <= 0:
         return [0.0, 0.0, 0.0, 0.0]
@@ -175,8 +164,6 @@ def bbox_norm_to_px(
     page_w: int,
     page_h: int,
 ) -> tuple[int, int, int, int]:
-    """Convert normalized page coordinates to a clamped pixel bbox."""
-
     x, y, w, h = _clamp_bbox_norm(bbox_norm)
     x0 = max(0, min(page_w - 1, int(round(x * page_w))))
     y0 = max(0, min(page_h - 1, int(round(y * page_h))))
@@ -197,8 +184,6 @@ def _expand_px(
     pad_x: int,
     pad_y: int,
 ) -> tuple[int, int, int, int]:
-    """Expand a pixel bbox by fixed padding while staying inside the page."""
-
     x0, y0, x1, y1 = bbox
     return (
         max(0, x0 - pad_x),
@@ -209,8 +194,6 @@ def _expand_px(
 
 
 def _union_px(boxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
-    """Return the smallest pixel bbox containing every input box."""
-
     return (
         min(b[0] for b in boxes),
         min(b[1] for b in boxes),
@@ -220,30 +203,23 @@ def _union_px(boxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, in
 
 
 def _normalize_token(text: str) -> str:
-    """Normalize OCR text for fuzzy label and marker matching."""
-
     text = text.translate(SUBSCRIPT_TRANSLATION)
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
 def _looks_like_name_label(token_norm: str) -> bool:
-    """Return whether a normalized token is a likely name label."""
-
     return token_norm in {"name", "nane", "naine", "narne"} or token_norm.startswith(
         ("name", "narn")
     )
 
 
 def _looks_like_sid_label(token_norm: str) -> bool:
-    """Return whether a normalized token is a likely student ID label."""
-
     if token_norm in {
         "studentid",
         "student1d",
         "studentld",
         "sid",
         "id",
-        # Potential OCR misreads
         "1d",
         "ld",
         "i0",
@@ -258,8 +234,6 @@ def _looks_like_sid_label(token_norm: str) -> bool:
 def _safe_image_to_data(
     image: Image.Image, *, lang: str, config: str
 ) -> dict[str, list[Any]]:
-    """Run Tesseract word extraction and return an empty result on failure."""
-
     try:
         return pytesseract.image_to_data(
             image,
@@ -268,8 +242,6 @@ def _safe_image_to_data(
             output_type=pytesseract.Output.DICT,
         )
     except Exception:
-        # A single Tesseract failure should produce missing regions, not abort
-        # the entire submission scan.
         return {
             "text": [],
             "conf": [],
@@ -284,8 +256,6 @@ def _safe_image_to_data(
 
 
 def _page_words(image: Image.Image, config: "OcrConfig") -> list[PageTextWord]:
-    """Extract confident OCR words from a page image."""
-
     data = _safe_image_to_data(image, lang=config.lang, config="--psm 6")
     words: list[PageTextWord] = []
     n = len(data.get("text", []))
@@ -323,8 +293,6 @@ def _page_words(image: Image.Image, config: "OcrConfig") -> list[PageTextWord]:
 
 
 def _group_lines(words: list[PageTextWord]) -> list[PageTextLine]:
-    """Group OCR words into ordered text lines using Tesseract line IDs."""
-
     grouped: dict[tuple[int, int, int], list[PageTextWord]] = {}
     for word in words:
         grouped.setdefault(word.line_id, []).append(word)
@@ -353,8 +321,6 @@ def _merge_boxes_px(
     max_gap_px: int,
     same_axis_px: int,
 ) -> list[tuple[int, int, int, int]]:
-    """Merge nearby pixel boxes that sit on the same visual row."""
-
     if not boxes:
         return []
     boxes = sorted(boxes, key=lambda b: (b[1], b[0]))
@@ -375,14 +341,6 @@ def _merge_boxes_px(
 
 
 def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
-    """Detect structural marks that can bound fields and questions."""
-
-    # Import lazily: cv2 (OpenCV) is a heavy import (~30-40ms cold, its own
-    # native extension) and this is the only function in the module that
-    # touches it. This module sits on the TUI startup chain (setup screen ->
-    # submission extractor -> ocr.extractor -> here), so importing cv2 at
-    # module scope would tax every TUI launch even though layout detection
-    # only runs during actual OCR extraction.
     import cv2
 
     gray = apply_grayscale(np.array(image))
@@ -402,8 +360,7 @@ def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
     primitives: list[LayoutPrimitive] = []
 
     h_px: list[tuple[int, int, int, int]] = []
-    # Use a broad pass for printed structure and an adaptive pass for faint
-    # header blanks that Otsu thresholding often erases.
+    # Use adaptive thresholding too; Otsu can erase faint header blanks.
     hline_passes = [
         (inv, max(32, page_w // 12), 0.10, 1.0),
         (
@@ -431,8 +388,6 @@ def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
         max_gap_px=max(12, page_w // 80),
         same_axis_px=max(6, page_h // 400),
     ):
-        # Page borders are strong lines, but letting them win would swamp the
-        # local field and question crop heuristics.
         if (x1 - x0) / page_w > 0.96 and (y0 < page_h * 0.04 or y1 > page_h * 0.96):
             continue
         primitives.append(
@@ -450,8 +405,6 @@ def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
         x, y, w, h = cv2.boundingRect(contour)
         if h / page_h < 0.06 or w / page_w > 0.025:
             continue
-        # Full-height side borders look structural but are not useful crop
-        # boundaries for answers or header fields.
         if h / page_h > 0.92 and (x < page_w * 0.04 or x + w > page_w * 0.96):
             continue
         primitives.append(
@@ -474,8 +427,7 @@ def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
         height_norm = h / page_h
         if width_norm < 0.10 or height_norm < 0.012:
             continue
-        # Large enclosing borders otherwise dominate the box medians used for
-        # question column inference.
+        # Enclosing page borders would skew the question-column median.
         if width_norm > 0.96 and height_norm > 0.90:
             continue
         rectangularity = area / max(1, w * h)
@@ -498,8 +450,6 @@ def _detect_layout_primitives(image: Image.Image) -> list[LayoutPrimitive]:
             continue
         if w / page_w < 0.006 and h / page_h < 0.006:
             continue
-        # Components are weak evidence kept for debug overlays and future
-        # geometry decisions; boxes and rules remain the primary crop signals.
         primitives.append(
             LayoutPrimitive(
                 "component",
@@ -518,16 +468,12 @@ def _find_question_anchors(
     page_w: int,
     page_h: int,
 ) -> list[_QuestionAnchor]:
-    """Find leading question-number anchors from grouped OCR lines."""
-
     anchors: list[_QuestionAnchor] = []
     for line in lines:
         if not line.words:
             continue
         line_x_norm = line.bbox_px[0] / page_w
         line_y_norm = line.bbox_px[1] / page_h
-        # Question starts are expected near the left content column, away from
-        # headers and footers where names, page numbers, and answer text collide.
         if line_x_norm > 0.45 or line_y_norm < 0.045 or line_y_norm > 0.975:
             continue
 
@@ -559,8 +505,7 @@ def _find_question_anchors(
 
         line_lower = line.text.lower()
         if line_lower.strip() in {f"{number} points", f"{number} pts"}:
-            # Rubric point labels often begin with digits but are not question
-            # anchors.
+            # Point labels can start with digits without being question anchors.
             continue
         anchors.append(
             _QuestionAnchor(
@@ -591,8 +536,6 @@ def _field_label_bbox(
     page_w: int,
     max_y_px: int | None,
 ) -> tuple[tuple[int, int, int, int], float] | None:
-    """Find the best OCR label box for a first-page student metadata field."""
-
     candidates: list[tuple[float, tuple[int, int, int, int]]] = []
     for line in lines:
         if max_y_px is not None and line.bbox_px[1] > max_y_px:
@@ -619,8 +562,6 @@ def _field_label_bbox(
                 continue
             label_words = list(line.words[idx : end_idx + 1])
             bbox = _union_px([word.bbox_px for word in label_words])
-            # Prefer top-left header labels because scanned templates may
-            # repeat "name" or "id" in instructions and answer text.
             y_bonus = max(0.0, 30.0 - (bbox[1] / 35.0))
             score = line.confidence + y_bonus - (bbox[0] / max(1, page_w)) * 10.0
             candidates.append((score, bbox))
@@ -635,8 +576,6 @@ def _candidate_underlines(
     page_w: int,
     page_h: int,
 ) -> list[tuple[int, int, int, int]]:
-    """Return structural rules and shallow boxes that can act as value blanks."""
-
     out: list[tuple[int, int, int, int]] = []
     for primitive in primitives:
         if primitive.kind not in {"hline", "box"}:
@@ -658,8 +597,6 @@ def _region_for_label(
     page_w: int,
     page_h: int,
 ) -> tuple[list[float], float]:
-    """Pair a label with the nearest value rule/box, or a same-line fallback."""
-
     lx0, ly0, lx1, ly1 = label_bbox
     label_cy = (ly0 + ly1) / 2
     underlines = _candidate_underlines(primitives, page_w, page_h)
@@ -691,8 +628,6 @@ def _region_for_label(
             92.0,
         )
 
-    # Some templates place values on the same line without a printed blank, so
-    # keep a conservative horizontal slice around the label.
     y_pad = max(20, int(page_h * 0.018))
     x0 = max(0, lx0 - int(page_w * 0.025))
     x1 = min(page_w, max(lx1 + int(page_w * 0.45), int(page_w * 0.62)))
@@ -710,8 +645,6 @@ def _region_for_orphan_value_mark(
     page_w: int,
     page_h: int,
 ) -> list[float]:
-    """Build a field crop around a value mark when the text label is missing."""
-
     vx0, vy0, vx1, vy1 = value_bbox
     context = (
         vx0 - int(page_w * 0.14),
@@ -731,10 +664,6 @@ def _add_sid_from_unused_header_mark(
     page_h: int,
     first_question_y_px: int | None,
 ) -> None:
-    """Add a low-confidence student ID field from an unused header underline."""
-
-    # Recover common headers where the student ID label is missed but its blank
-    # appears beside or just below the name field.
     if any(field.field_kind == "sid" for field in fields):
         return
 
@@ -793,10 +722,6 @@ def _add_fields_from_header_marks(
     page_h: int,
     first_question_y_px: int | None,
 ) -> None:
-    """Infer missing student fields from short header rules when OCR misses labels."""
-
-    # Header underlines are stable in many templates even when Tesseract misses
-    # the adjacent labels, so they provide a low-confidence fallback.
     if any(field.field_kind == "name" for field in fields) and any(
         field.field_kind == "sid" for field in fields
     ):
@@ -884,8 +809,6 @@ def _detect_fields(
     page_h: int,
     first_question_y_px: int | None,
 ) -> list[DetectedFieldRegion]:
-    """Detect first-page student metadata fields."""
-
     out: list[DetectedFieldRegion] = []
     for kind, field_id in [("name", "student_name"), ("sid", "student_id")]:
         label = _field_label_bbox(
@@ -942,13 +865,6 @@ def _detect_title_region(
     fields: list[DetectedFieldRegion],
     review_reasons: list[str] | None = None,
 ) -> DetectedTitleRegion | None:
-    """Detect the assignment title crop from first-page header geometry.
-
-    This finds where the title is; later VLM OCR reads what the title says.
-    Header scans can merge nearby title and student-field text, so candidate
-    lines are reduced to their title-like segment before scoring.
-    """
-
     search_bottom = (
         first_question_y_px
         if first_question_y_px is not None
@@ -960,7 +876,6 @@ def _detect_title_region(
     ]
 
     def fallback_region() -> DetectedTitleRegion:
-        """Return a conservative header crop when no title-like line is reliable."""
         if review_reasons is not None:
             review_reasons.append("title_region_fallback_header")
         bottom = max(
@@ -999,7 +914,6 @@ def _detect_title_region(
         return False
 
     def title_segment_from_line(line: PageTextLine) -> PageTextLine | None:
-        """Trim a mixed header OCR line down to the probable title segment."""
         words = list(line.words)
         if not words:
             return None
@@ -1043,7 +957,6 @@ def _detect_title_region(
         return min(distances)
 
     def title_cue_score(text: str) -> float:
-        """Score deterministic title hints without using OCR text as final output."""
         score = 0.0
         if _TITLE_COURSE_RE.search(text):
             score += 34.0
@@ -1068,8 +981,6 @@ def _detect_title_region(
         norms = [_normalize_token(word.text) for word in line.words]
         if any(_looks_like_name_label(n) or _looks_like_sid_label(n) for n in norms):
             continue
-        # Keep metadata labels and first-question prompts from being promoted to
-        # assignment titles.
         if re.match(r"^(?:q(?:uestion)?|problem)?\s*\d{1,3}[\.)]?\b", line.text, re.I):
             continue
         if len(re.findall(r"[A-Za-z0-9]", line.text)) < 3:
@@ -1080,7 +991,6 @@ def _detect_title_region(
         return fallback_region()
 
     def score(line: PageTextLine) -> float:
-        """Rank candidate title crops by stable header geometry and weak text cues."""
         x0, y0, x1, y1 = line.bbox_px
         width_norm = (x1 - x0) / max(1, page_w)
         height_norm = (y1 - y0) / max(1, page_h)
@@ -1099,8 +1009,6 @@ def _detect_title_region(
             )
             else 0.0
         )
-        # Instructions can be high-confidence and near the top of the page.
-        # Field proximity keeps header title rows ahead of instruction blocks.
         field_distance_bonus = (
             min(distance_to_nearest_field(line) / max(1, page_h), 0.08) * 95.0
         )
@@ -1167,8 +1075,6 @@ def _estimate_question_x_bounds(
     primitives_by_page: dict[int, list[LayoutPrimitive]],
     dims: dict[int, tuple[int, int]],
 ) -> tuple[float, float]:
-    """Infer the response column from boxes, then anchors, then page margins."""
-
     x0_values: list[float] = []
     x1_values: list[float] = []
     for page, primitives in primitives_by_page.items():
@@ -1182,8 +1088,6 @@ def _estimate_question_x_bounds(
             x0_values.append(x)
             x1_values.append(x + w)
     if x0_values and x1_values:
-        # Medians across printed boxes reduce jitter from per-page scan skew and
-        # occasional spurious rectangles.
         return max(0.02, float(median(x0_values)) - 0.01), min(
             0.98, float(median(x1_values)) + 0.01
         )
@@ -1199,8 +1103,6 @@ def _matched_question_box(
     page_w: int,
     page_h: int,
 ) -> list[float] | None:
-    """Find a structural box that starts near the question anchor."""
-
     ax0, ay0, ax1, ay1 = anchor.line_bbox_px
     anchor_y = ay0 / page_h
     candidates: list[tuple[float, list[float]]] = []
@@ -1218,14 +1120,10 @@ def _matched_question_box(
         candidates.append((abs(anchor_y - y) + h * 0.3 - w * 0.06, primitive.bbox_norm))
     if not candidates:
         return None
-    # A matched answer box is stronger evidence than anchor-only spacing for the
-    # vertical extent of the response region.
     return sorted(candidates, key=lambda item: item[0])[0][1]
 
 
 def _next_rendered_page(page_number: int, page_numbers: list[int]) -> int | None:
-    """Return the immediate rendered page after ``page_number``."""
-
     for candidate in page_numbers:
         if candidate > page_number:
             return candidate
@@ -1237,8 +1135,6 @@ def _next_page_top_boundary(
     anchors_by_page: dict[int, list[_QuestionAnchor]],
     dims: dict[int, tuple[int, int]],
 ) -> float:
-    """Find the deterministic bottom bound for a top-of-page continuation."""
-
     page_dims = dims.get(page_number)
     if page_dims is None:
         return _QUESTION_CONTINUATION_TOP_NORM
@@ -1263,8 +1159,6 @@ def _x_overlap_ratio(
     bx0: float,
     bx1: float,
 ) -> float:
-    """Compute horizontal overlap as a fraction of the smaller span."""
-
     overlap = max(0.0, min(ax1, bx1) - max(ax0, bx0))
     smaller_width = max(1e-6, min(ax1 - ax0, bx1 - bx0))
     return overlap / smaller_width
@@ -1277,8 +1171,6 @@ def _top_continuation_box(
     column_x1: float,
     boundary_y: float,
 ) -> list[float] | None:
-    """Select a printed answer box at the top of a continuation page."""
-
     candidates: list[list[float]] = []
     for primitive in primitives:
         if primitive.kind != "box":
@@ -1286,8 +1178,6 @@ def _top_continuation_box(
         x, y, w, h = primitive.bbox_norm
         if w < 0.28 or h < _QUESTION_CONTINUATION_MIN_HEIGHT_NORM:
             continue
-        # Continuations should begin near the top; lower boxes are likely new
-        # questions or unrelated page content.
         if y > _QUESTION_CONTINUATION_MAX_BOX_TOP_NORM:
             continue
         if y <= 0.055 and h >= 0.72:
@@ -1352,8 +1242,6 @@ def _continuation_segment_for_next_page(
     column_x1: float,
     review_reasons: list[str] | None,
 ) -> tuple[int, list[float]] | None:
-    """Find or synthesize the next-page crop segment for a spanning question."""
-
     page_dims = dims.get(next_page_number)
     if page_dims is None:
         return None
@@ -1373,8 +1261,6 @@ def _continuation_segment_for_next_page(
         return None
 
     if review_reasons is not None:
-        # A band fallback preserves likely answer content but must be surfaced
-        # for review because no structural box confirmed it.
         review_reasons.append(
             f"q{current_anchor.question_number}: continuation_fallback_band"
         )
@@ -1397,8 +1283,6 @@ def _detect_questions(
     primitives_by_page: dict[int, list[LayoutPrimitive]],
     review_reasons: list[str] | None = None,
 ) -> list[DetectedQuestionRegion]:
-    """Build question crops from anchors and structural boundaries."""
-
     if not anchors:
         return []
     dims = {
@@ -1485,10 +1369,6 @@ def scan_submission_layout(
     config: "OcrConfig",
     split_subquestions: bool = True,
 ) -> SubmissionLayout:
-    """Detect semantic regions for a rendered submission."""
-
-    # Review reasons record uncertain layout decisions while still allowing the
-    # extraction pipeline to produce useful artifacts.
     review_reasons: list[str] = []
     if not rendered_pages:
         return SubmissionLayout(
@@ -1589,8 +1469,6 @@ def save_layout_debug(
     question_crop_bboxes_by_page: dict[int, list[tuple[str, tuple[int, int, int, int]]]]
     | None = None,
 ) -> None:
-    """Write scanner decisions as JSON plus page overlays."""
-
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = asdict(layout)
@@ -1602,8 +1480,6 @@ def save_layout_debug(
         overlay = image.convert("RGB")
         draw = ImageDraw.Draw(overlay)
 
-        # Include both primitive evidence and final crops so debug images show
-        # why each heuristic accepted or rejected a region.
         for primitive in layout.primitives_by_page.get(page_number, []):
             x0, y0, x1, y1 = bbox_norm_to_px(primitive.bbox_norm, page_w, page_h)
             color = {
@@ -1614,21 +1490,18 @@ def save_layout_debug(
             }[primitive.kind]
             draw.rectangle((x0, y0, x1, y1), outline=color, width=2)
 
-        # Green outlines show accepted metadata field crops.
         for field in layout.fields:
             if field.page_number != page_number:
                 continue
             x0, y0, x1, y1 = bbox_norm_to_px(field.crop_bbox_norm, page_w, page_h)
             draw.rectangle((x0, y0, x1, y1), outline=(60, 180, 75), width=5)
 
-        # Purple outlines show the detected submission title crop.
         if layout.title_region and layout.title_region.page_number == page_number:
             x0, y0, x1, y1 = bbox_norm_to_px(
                 layout.title_region.crop_bbox_norm, page_w, page_h
             )
             draw.rectangle((x0, y0, x1, y1), outline=(180, 60, 180), width=5)
 
-        # Red outlines show final question response crops.
         if question_crop_bboxes_by_page is None:
             for question in layout.questions:
                 if question.page_number != page_number:

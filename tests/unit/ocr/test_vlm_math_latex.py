@@ -1,5 +1,3 @@
-"""The opt-in math→LaTeX transcription prompt and its threading."""
-
 from opengrader.core.ocr import ollama_vlm
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
@@ -68,5 +66,4 @@ def test_math_flag_threads_through_fill(monkeypatch, tmp_path):
     )
     assert seen["math_latex"] is True
     assert filled[0].response_text == r"$\frac{1}{2}$"
-    # VLM transcription stays unverified (no calibrated confidence).
     assert filled[0].response_confidence is None

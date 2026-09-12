@@ -1,11 +1,3 @@
-"""Modal score-curve editor, opened with c from the QA picker.
-
-Set an assignment-wide curve (flat bonus, scale, or square-root) and watch the
-class score distribution shift raw → curved before you commit it. Saving writes
-`.opengrader/curve.json`; the curve is a transparent, reversible overlay on the
-raw totals (Clear removes it). esc closes without saving.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -28,7 +20,6 @@ from opengrader.tui.formatting import format_curve_effect, format_curve_label
 from opengrader.tui.statistics import curve_distribution_chart_image
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
-# Radio order ↔ curve method.
 _METHODS: tuple[str, ...] = ("none", "bonus", "scale", "sqrt")
 _METHOD_HINTS: dict[str, str] = {
     "none": "No curve — raw totals are used as-is.",
@@ -39,11 +30,6 @@ _METHOD_HINTS: dict[str, str] = {
 
 
 class CurveScreen(ModalScreen["Curve | None"]):
-    """Edit the assignment curve with a live raw→curved distribution preview.
-
-    Dismisses with the `Curve` to save (Save / Clear), or `None` on cancel.
-    """
-
     DEFAULT_CSS = """
     CurveScreen {
         align: center middle;
@@ -227,7 +213,6 @@ class CurveScreen(ModalScreen["Curve | None"]):
     def on_mount(self) -> None:
         self._refresh_preview()
 
-    # --- reading the controls into a Curve --------------------------------
 
     def _selected_method(self) -> str:
         index = self.query_one("#curve-method", RadioSet).pressed_index
@@ -246,7 +231,6 @@ class CurveScreen(ModalScreen["Curve | None"]):
         cap = self.query_one("#curve-cap", Checkbox).value
         return Curve(method=method, value=value, cap_at_max=cap)
 
-    # --- live preview ------------------------------------------------------
 
     def _refresh_preview(self) -> None:
         curve = self._current_curve()
@@ -283,7 +267,6 @@ class CurveScreen(ModalScreen["Curve | None"]):
 
     @on(Button.Pressed, "#curve-solve")
     def _on_solve(self, event: Button.Pressed) -> None:
-        """Solve for the curve value that lands the class average on target."""
         event.stop()
         method = self._selected_method()
         if method not in ("bonus", "scale"):
@@ -319,13 +302,11 @@ class CurveScreen(ModalScreen["Curve | None"]):
             )
             return
 
-        # Writing the value fires Input.Changed → the preview refreshes itself.
         self.query_one("#curve-value", Input).value = f"{curve.value:g}"
         self.app.notify(
             f"Solved: {method} {curve.value:g} for a {statistic} of {target:g}%."
         )
 
-    # --- actions -----------------------------------------------------------
 
     @on(Button.Pressed, "#curve-save")
     def _on_save(self, event: Button.Pressed) -> None:

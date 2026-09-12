@@ -36,7 +36,7 @@ def test_add_and_read_round_trip(tmp_path: Path) -> None:
     assert request.request_id.startswith("rg-")
     assert request.status == "open"
     assert request.source == "instructor"
-    assert request.created_by  # actor filled in
+    assert request.created_by
 
     stored = read_regrade_requests(tmp_path)
     assert stored == [request]
@@ -52,7 +52,7 @@ def test_add_requires_student_id(tmp_path: Path) -> None:
         add_regrade_request(tmp_path, student_id="   ", reason="x")
     except ValueError:
         pass
-    else:  # pragma: no cover - assertion path
+    else:  # pragma: no cover
         raise AssertionError("expected ValueError for blank student id")
 
 
@@ -64,7 +64,6 @@ def test_resolve_marks_resolved_and_drops_from_open(tmp_path: Path) -> None:
     assert updated.resolution_note == "regraded +5"
     assert updated.resolved_by
     assert open_regrade_requests(tmp_path) == []
-    # The resolved record is still there in the full read.
     assert [r.status for r in read_regrade_requests(tmp_path)] == ["resolved"]
 
 
@@ -82,10 +81,8 @@ def test_resolve_unknown_id_returns_none(tmp_path: Path) -> None:
 
 
 def test_event_sourced_latest_line_wins(tmp_path: Path) -> None:
-    """Append-only: a resolve writes a fresh line; the latest state wins."""
     request = add_regrade_request(tmp_path, student_id="012345", reason="Q3")
     resolve_regrade_request(tmp_path, request.request_id, note="done")
-    # Two physical lines, one folded request.
     raw = resolve_regrades_path(tmp_path).read_text(encoding="utf-8")
     assert len([ln for ln in raw.splitlines() if ln.strip()]) == 2
     assert len(read_regrade_requests(tmp_path)) == 1
@@ -151,6 +148,5 @@ def test_build_review_flags_folds_in_open_regrades(tmp_path: Path) -> None:
     )
     reasons = {flag.reason for flag in flags}
     assert ReviewReason.OPEN_REGRADE_REQUEST in reasons
-    # Open regrade is high severity, so it sorts to the front.
     assert flags[0].reason is ReviewReason.OPEN_REGRADE_REQUEST
-    assert request.request_id  # sanity
+    assert request.request_id

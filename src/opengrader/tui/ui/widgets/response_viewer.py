@@ -60,10 +60,6 @@ class ResponseViewer(ScrollableContainer):
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
-        # In a terminal without pixel graphics the crop below is a coarse
-        # colour-block approximation -- unreadable for handwriting. Say so
-        # once, permanently, and point at the escape hatch, rather than
-        # leaving the grader to conclude the scan itself is bad.
         if not self._capability.pixel_accurate:
             yield Static(self._fallback_notice(), id="response-viewer-fallback")
 
@@ -80,33 +76,20 @@ class ResponseViewer(ScrollableContainer):
 
     @property
     def image_path(self) -> str:
-        """Path of the image currently on display."""
         return self._image_path
 
     def on_mount(self) -> None:
         self.set_image_path(self._image_path)
-        # Ensure scrollbars are calculated after initial mounting
         self.call_after_refresh(self.refresh, layout=True)
 
     @property
     def rotation(self) -> int:
-        """Clockwise display rotation in degrees (0/90/180/270)."""
         return self._image_widget.rotation if self._image_widget else 0
 
     def rotate(self, degrees: int) -> None:
-        """Turn the displayed image by ``degrees`` (negative = anticlockwise).
-
-        A view transform only: the crop on disk, the grade, and the persisted
-        transcription are all untouched. This is for the answer a student wrote
-        sideways in the box — turning the paper is what a human would do, and
-        the alternative is grading with your head tilted.
-        """
         if self._image_widget is None:
             return
         self._image_widget.rotation = (self._image_widget.rotation + degrees) % 360
-        # A quarter turn changes the widget's shape, so the container has to
-        # re-measure; and like a zoom-out it can free cells that terminal
-        # graphics would otherwise keep painted.
         self.call_after_refresh(self._refresh_after_image_change)
         self.scroll_home(animate=False)
 
@@ -115,26 +98,9 @@ class ResponseViewer(ScrollableContainer):
             self.rotate(-self._image_widget.rotation)
 
     def open_externally(self) -> str:
-        """Hand the displayed image to the OS image viewer.
-
-        Returns the opened file name; raises ``ExternalViewerError`` if the
-        image is missing or no viewer could be launched.
-
-        Honours the on-screen rotation, because ``o`` opens *what is displayed*
-        — on a terminal with no graphics protocol this hatch is the only way to
-        actually read the answer, so handing over the un-turned original would
-        defeat the rotation exactly where it matters most.
-        """
         return open_in_external_viewer(self._displayed_image_path())
 
     def _displayed_image_path(self) -> str:
-        """The image as shown: the source file, or a turned copy of it.
-
-        The copy is written once per orientation into a per-session temp
-        directory (the same approach as the grade screen's page renders) and
-        reused, so repeatedly toggling the viewer costs nothing and the source
-        crop is never modified.
-        """
         rotation = self.rotation
         if not rotation:
             return self._image_path
@@ -154,8 +120,6 @@ class ResponseViewer(ScrollableContainer):
                     )
                     turned.save(destination)
             except OSError:
-                # Unreadable or unwritable: fall back to the original rather
-                # than failing the one escape hatch the grader has left.
                 return self._image_path
         return str(destination)
 
@@ -200,14 +164,6 @@ class ResponseViewer(ScrollableContainer):
         self.scroll_home(animate=False)
 
     def _refresh_after_image_change(self) -> None:
-        """Relayout, then repaint the whole screen.
-
-        Terminal graphics outlive Textual's cell diffing: sixel/iTerm2 pixels
-        stay painted (they are written straight to the terminal, not tracked
-        as cells) and stale TGP placeholders can survive a partial repaint.
-        When the new image is smaller than the previous one, the freed cells
-        would keep showing the previous image unless every cell is re-emitted.
-        """
         self.refresh(layout=True)
         if self.is_attached:
             self.screen.refresh()
@@ -227,7 +183,7 @@ class ResponseViewer(ScrollableContainer):
                 max(self._image_widget.fit_width_fraction - 0.1, 0.1), 1
             )
             self.post_message(self.ZoomChanged(self._image_widget.fit_width_fraction))
-            # Shrinking leaves graphics remnants just like an image swap.
+            # Shrinking leaves terminal graphics remnants.
             self.call_after_refresh(self._refresh_after_image_change)
 
     def reset_zoom(self) -> None:

@@ -1,10 +1,3 @@
-"""The grade-check and grade-release CLIs.
-
-The verdict logic is tested in ``tests/unit/core/test_release.py``; what these
-cover is the part a user meets — the exit codes a script depends on, the
-refusals, and the fact that a preview writes nothing.
-"""
-
 from __future__ import annotations
 
 import json
@@ -53,15 +46,9 @@ def _regrade(folder: Path, points: str) -> None:
 
 
 def _ungrade(folder: Path) -> None:
-    """Leave q1 genuinely ungraded — no points *and* no rubric selection."""
     (folder / "sub-0001.submission.md").write_text(
         _submission("").replace("  - Rubric: Correct", "  - Rubric:")
     )
-
-
-# --------------------------------------------------------------------------- #
-# grade-check
-# --------------------------------------------------------------------------- #
 
 
 def test_grade_check_reports_ready(folder: Path, capsys):
@@ -102,11 +89,6 @@ def test_grade_check_writes_nothing(folder: Path, capsys):
 
 
 def test_grade_check_main_returns_none(folder: Path, capsys):
-    """The console entry point must not return, or the script exits 1.
-
-    A ``console_scripts`` wrapper runs ``sys.exit(main())``, so a returned
-    report would be printed as an error message on a successful run.
-    """
     assert grade_check_main(["--submissions", str(folder)]) is None
     capsys.readouterr()
 
@@ -119,11 +101,6 @@ def test_grade_check_names_unreadable_files_before_the_verdict(
     output = capsys.readouterr().out
 
     assert output.index("could not be read") < output.index("Ready to release.")
-
-
-# --------------------------------------------------------------------------- #
-# grade-release
-# --------------------------------------------------------------------------- #
 
 
 def test_create_previews_without_yes(folder: Path, capsys):
@@ -165,7 +142,7 @@ def test_force_records_over_a_blocking_cohort(folder: Path, capsys):
     output = capsys.readouterr().out
 
     assert len(read_releases(folder)) == 1
-    assert "--force" in output  # it says it was overridden
+    assert "--force" in output
 
 
 def test_a_release_writes_nothing_into_a_submission(folder: Path, capsys):
@@ -175,7 +152,6 @@ def test_a_release_writes_nothing_into_a_submission(folder: Path, capsys):
     capsys.readouterr()
 
     assert submission.read_bytes() == before
-    # Everything it wrote is inside the dot-dir.
     assert resolve_releases_dir(folder).exists()
 
 
@@ -235,7 +211,6 @@ def test_show_rejects_an_unknown_release(folder: Path, capsys):
 
 
 def test_a_release_never_blocks_a_later_grade_change(folder: Path, capsys):
-    """The feature's central promise, asserted rather than assumed."""
     from opengrader.core.submissions.student_file import (
         StudentSubmissionGradeUpdate,
         load_student_submission_markdown,

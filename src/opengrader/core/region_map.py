@@ -1,83 +1,3 @@
-"""Grade an assignment Opengrader did not generate — draw the boxes once.
-
-The rest of the pipeline is at its strongest when *it* produced the assignment:
-``qa-file generate-template`` writes a blank PDF whose text layer carries
-``N. (M points) …`` on every question, and ``submission-extractor
---blank-template`` reads those lines back to learn where each answer lives. An
-instructor who already has an assignment — a quiz written in Word, a problem
-set typeset in LaTeX, a final photocopied from a paper original with no text
-layer at all — has none of that, and until this module existed they had no way
-in.
-
-A **region map** is the way in. The instructor opens a blank copy of their own
-assignment, draws a box around each answer area once (or corrects the boxes
-this module proposes), and saves the result next to the PDF as
-``<assignment-stem>.regions.json``. From then on ``submission-extractor
---region-map`` crops every student's scan against those boxes. The assignment
-never needs a text layer, and the map is written once per assignment, not once
-per student.
-
-How it plugs in
----------------
-
-It does **not** add an extraction path. ``core/submissions/template.py`` defines
-:class:`AssignmentTemplate`, the single structural shape the scan-matching
-pipeline consumes, and :func:`region_map_to_blank_template` is simply a second
-producer of it. Everything downstream — cropping, OCR, the vision-model pass,
-``--llm-escalate``, ``--resume``, the grading TUI — runs unchanged and cannot
-drift, because there is only one of it.
-
-Decisions recorded here, not to be reversed
--------------------------------------------
-
-**A map is bound to one assignment file, and the binding is enforced on load.**
-The map stores the blank PDF's SHA-256 (``manifest.file_fingerprint`` — there is
-exactly one hasher in this codebase and this is not a second one), its page
-count and its page size. Applying a map to the wrong PDF, or to a re-export of
-the right one whose pagination shifted by a line, silently mis-crops *every*
-answer of *every* student: the run succeeds, the crops are of the wrong parts of
-the page, the transcriptions are plausible nonsense, and nothing anywhere says
-so. That is the single most expensive failure this feature could have, so a
-fingerprint mismatch is a **refusal with an explanation**, never a warning and
-never a best-effort guess. There is no safe guess to make: if the instructor
-re-exported the assignment, the boxes moved, and only they can say by how much.
-
-**Normalized ``[x, y, w, h]``, 1-based pages, everywhere.** Same convention as
-``pdf_utils.bbox_norm_to_px`` / ``crop_norm`` and ``QuestionSourceSegment``, so a
-map is DPI- and paper-size-independent and no coordinate is ever converted more
-than once.
-
-**Boxes are clamped on load, not rejected.** A file someone hand-edited (or a
-map written by a future version with a wider idea of a page) must never crash an
-overnight extraction of 200 scans. Clamping to the page turns a nonsense box
-into a small or empty one, which :func:`validate_region_map` then reports.
-Validation runs on the in-memory value, so a box the *editor* has dragged off
-the page is still flagged as such before it is ever saved.
-
-**Validation lives here, not in the UI.** Both ``region-map validate`` and the
-TUI editor render the same :class:`RegionMapFinding` list, so they can never
-disagree about whether a map is usable. Severity is the whole contract: an
-``error`` means the map would produce wrong output and saving is refused; a
-``warning`` is something an instructor may legitimately mean — question 7 left
-unmapped because it is extra credit is an ordinary Tuesday.
-
-**Continuations are first-class.** A map that cannot express "question 4's
-answer runs onto page 3" is a map an instructor abandons on their first
-two-page question. Continuation segments are cropped and stacked into the one
-response image the rest of the pipeline expects (``processor.
-_question_with_mapped_crop``).
-
-Format version policy
----------------------
-
-``version`` is an integer, currently :data:`REGION_MAP_VERSION`. A map written
-by an **older** version is upgraded on load: unknown-to-it fields simply take
-their defaults, which is why every field added after v1 must have one. A map
-written by a **newer** version is refused rather than partially understood —
-half-reading a format that has learned to express something new (rotated boxes,
-per-page scaling) is how a map silently loses the half it did not understand.
-"""
-
 from __future__ import annotations
 
 import json
@@ -93,78 +13,34 @@ from opengrader.core.submissions.manifest import file_fingerprint
 from opengrader.core.submissions.student_file import StudentSubmissionQuestion
 from opengrader.core.submissions.template import AssignmentTemplate, FieldLocation
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
+if TYPE_CHECKING:  # pragma: no cover
     from PIL import Image
 
     from opengrader.core.qa_file import QADocument
 
 
-# ==============================================================================
-# TUNABLES
-# ==============================================================================
-
-#: The format this module reads and writes. Bumping it is a promise that
-#: :func:`load_region_map` still understands every earlier integer.
 REGION_MAP_VERSION = 1
 
-#: Written into every file so a stray JSON opened by mistake is rejected by
-#: name rather than by a confusing missing-key error.
 REGION_MAP_FORMAT = "opengrader-region-map"
 
-#: What a region map is called next to the assignment it maps. A suffix rather than a
-#: sidecar directory, because the two files are only useful together and an
-#: instructor emailing "the assignment and its boxes" should be able to see both.
 REGION_MAP_SUFFIX = ".regions.json"
 
-#: DPI the proposal renders each page at before running layout detection. The
-#: detector reads printed question numbers and rules, not handwriting, so it
-#: needs far less resolution than the 300 DPI extraction crops — and this pass
-#: runs over every page of the assignment while an instructor waits.
 PROPOSAL_DPI = 200
 
-#: DPI for the preview/editor page renders. A US-Letter page at 150 DPI is
-#: ~1275x1650: enough to see whether a box contains the answer area, small
-#: enough that re-rendering while paging feels instant and a multi-page preview
-#: PDF stays a few megabytes rather than a few dozen.
 PREVIEW_DPI = 150
 
-#: How far outside the page a box may sit before it is reported. Rounding to
-#: four decimals (what every bbox here is stored at) can put an edge a
-#: ten-thousandth past 1.0, which is not a mistake anybody made.
+# Coordinates are stored to four decimal places.
 _OFF_PAGE_TOLERANCE = 0.002
 
-#: Fraction of the *smaller* of two boxes that must be covered by the other
-#: before the overlap is reported. Answer regions genuinely touch — a box drawn
-#: to the same margins as its neighbour shares an edge — so a small overlap is
-#: normal. A third of the smaller box inside the larger is not: that is two
-#: answers cropped into each other, which reaches the grader as question 4's
-#: crop containing half of question 5.
 _OVERLAP_REPORT_RATIO = 0.35
 
-#: Default size of a freshly added box, as a fraction of the page. Wide enough
-#: to hold a written answer and tall enough to grab, so "add a region" lands
-#: something visible that the instructor then drags into place rather than
-#: something they have to hunt for.
 NEW_REGION_SIZE = (0.80, 0.12)
 
-#: Left/right and top/bottom margins a uniform grid leaves. Matches the answer
-#: column the text-layer path uses (``_response_bbox_from_positions`` crops
-#: x 0.08..0.92), so a grid map and a generated-template map frame an answer the
-#: same way.
 GRID_MARGIN_X = 0.08
 GRID_MARGIN_Y = 0.10
 
-#: Colour of the emphasized (selected) region in a rendered preview. Distinct in
-#: hue from ``pdf_utils.HIGHLIGHT_RGB``'s warm orange so the two never read as
-#: the same box at a glance, and legible on white paper in a half-block
-#: terminal, where fine detail is lost but hue survives.
 EMPHASIS_RGB = (94, 160, 214)
 
-#: Severities, ordered. The contract: ``error`` blocks a save, everything else
-#: informs one. Mirrors the shape of ``core/submissions/scan_check.ScanIssue``
-#: while using this feature's vocabulary — "error" is what the editor and the
-#: CLI both talk about, and a map with a duplicate question id is not "high
-#: severity", it is wrong.
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 SEVERITY_INFO = "info"
@@ -173,41 +49,17 @@ _SEVERITY_RANK = {SEVERITY_ERROR: 0, SEVERITY_WARNING: 1, SEVERITY_INFO: 2}
 
 
 class RegionMapError(ValueError):
-    """A region map could not be read, or does not describe the given PDF.
-
-    A ``ValueError`` subclass so the CLIs' existing ``except (FileNotFoundError,
-    ValueError)`` handling around structural inputs treats it as the bad-input
-    error it is.
-    """
-
-
-# ==============================================================================
-# DATA
-# ==============================================================================
+    pass
 
 
 @dataclass(frozen=True)
 class RegionBox:
-    """One rectangle on one page of the blank assignment."""
-
-    page: int  # 1-based
-    bbox: tuple[float, float, float, float]  # normalized [x, y, w, h]
+    page: int  # 1-based.
+    bbox: tuple[float, float, float, float]  # Normalized [x, y, w, h].
 
 
 @dataclass(frozen=True)
 class MappedQuestion:
-    """One question's answer region, plus what grading needs to know about it.
-
-    ``continuations`` are further rectangles belonging to this same answer, in
-    reading order after the primary box — the "continued on the back" case.
-
-    ``confidence`` is provenance, not truth: it is the detector's own 0-1 score
-    when the box was proposed by :func:`propose_region_map`, and ``None`` once a
-    human drew or moved it. Kept so the editor can walk an instructor straight
-    to the boxes least likely to be right (its ``u`` key) instead of making them
-    check twenty confident ones to find the one bad guess.
-    """
-
     question_id: str
     number: int
     page: int
@@ -220,23 +72,15 @@ class MappedQuestion:
 
     @property
     def segments(self) -> tuple[RegionBox, ...]:
-        """Every rectangle of this answer, primary first."""
         return (RegionBox(self.page, self.bbox), *self.continuations)
 
 
 @dataclass(frozen=True)
 class RegionMap:
-    """The persisted answer to "where are the answers on this assignment?".
-
-    ``source_sha256``/``source_pages``/``source_page_size`` identify the exact
-    blank PDF the boxes were drawn on — see :func:`verify_region_map` for why
-    that identification is enforced rather than advisory.
-    """
-
     source_name: str
     source_sha256: str
     source_pages: int
-    source_page_size: tuple[float, float]  # PDF points (width, height) of page 1
+    source_page_size: tuple[float, float]  # Page 1 size in PDF points (width, height).
     assignment_title: str = ""
     name_field: RegionBox | None = None
     student_id_field: RegionBox | None = None
@@ -251,11 +95,6 @@ class RegionMap:
         return None
 
     def boxes_on_page(self, page: int) -> tuple[tuple[str, RegionBox], ...]:
-        """Every labelled rectangle on ``page``, in drawing order.
-
-        The one place that decides what a page's overlay shows, so the CLI
-        preview and the TUI editor cannot disagree about it.
-        """
         found: list[tuple[str, RegionBox]] = []
         for label, box in (
             ("Name", self.name_field),
@@ -275,13 +114,6 @@ class RegionMap:
 
 @dataclass(frozen=True)
 class RegionMapFinding:
-    """One thing wrong (or worth knowing) about a map.
-
-    ``kind`` is a stable machine-readable slug for tests and ``--json``;
-    ``message`` is what a human reads. ``question_id``/``page`` locate it when
-    they apply.
-    """
-
     kind: str
     severity: str
     message: str
@@ -295,15 +127,8 @@ class RegionMapFinding:
 
 @dataclass(frozen=True)
 class RegionMapVerification:
-    """Whether a map may be applied to a PDF, and if not, precisely why.
-
-    Structured rather than a bare bool because the caller has to *say* what is
-    wrong: "this map is for midterm-v1.pdf (4 pages), you pointed it at
-    midterm-v2.pdf (5 pages)" is actionable, and "invalid region map" is not.
-    """
-
     ok: bool
-    kind: str = "ok"  # "ok" | "missing_pdf" | "fingerprint" | "page_count"
+    kind: str = "ok"
     message: str = ""
 
     def __bool__(self) -> bool:
@@ -312,36 +137,16 @@ class RegionMapVerification:
 
 @dataclass(frozen=True)
 class RegionMapProposal:
-    """A draft map plus what the detector was unsure about.
-
-    ``review_reasons`` come straight from ``SubmissionLayout`` (missing question
-    markers, a name field it could not find, non-monotonic numbering). They are
-    the honest answer to "why does this proposal look thin?", and they are what
-    tells an instructor to start from a grid instead of correcting guesses.
-    """
-
     region_map: RegionMap
     review_reasons: tuple[str, ...] = ()
 
 
-# ==============================================================================
-# IDENTIFYING THE ASSIGNMENT
-# ==============================================================================
-
-
 def default_region_map_path(pdf_path: str | Path) -> Path:
-    """``assignment.pdf`` -> ``assignment.regions.json``, beside the assignment."""
     path = Path(pdf_path)
     return path.with_name(path.stem + REGION_MAP_SUFFIX)
 
 
 def _pdf_identity(pdf_path: str | Path) -> tuple[str, str, int, tuple[float, float]]:
-    """Read the identifying facts about a blank assignment PDF.
-
-    Deliberately does **not** touch the text layer: a region map exists exactly
-    so that an image-only scan of a paper assignment can be graded, and asking for
-    text here would refuse the very files this feature is for.
-    """
     import fitz
 
     path = Path(pdf_path)
@@ -359,14 +164,6 @@ def _pdf_identity(pdf_path: str | Path) -> tuple[str, str, int, tuple[float, flo
 def verify_region_map(
     region_map: RegionMap, pdf_path: str | Path
 ) -> RegionMapVerification:
-    """Is this map the one that was drawn on this PDF?
-
-    Checked in the order that produces the most useful message: a missing file
-    first, then the bytes, then the page count (which is what a fingerprint
-    mismatch usually *means* to a human — "you re-exported it and it grew a
-    page"). The fingerprint alone is authoritative; the page count is reported
-    separately only because it explains the mismatch in the instructor's terms.
-    """
     path = Path(pdf_path)
     if not path.exists():
         return RegionMapVerification(
@@ -403,21 +200,9 @@ def verify_region_map(
     return RegionMapVerification(True)
 
 
-# ==============================================================================
-# BUILDING A MAP
-# ==============================================================================
-
-
 def blank_region_map(
     pdf_path: str | Path, *, assignment_title: str = ""
 ) -> RegionMap:
-    """An empty map bound to ``pdf_path`` — the start-from-scratch path.
-
-    A first-class starting point, not a fallback: on an assignment whose layout the
-    detector cannot read at all, drawing four boxes by hand is faster than
-    correcting four wrong ones, and an editor that hides this behind a failure
-    is an editor nobody can start.
-    """
     name, digest, pages, size = _pdf_identity(pdf_path)
     return RegionMap(
         source_name=name,
@@ -438,25 +223,16 @@ def grid_region_map(
     start_number: int = 1,
     assignment_title: str = "",
 ) -> RegionMap:
-    """A map of evenly spaced boxes — the other honest starting point.
-
-    Plenty of real assignments *are* a grid: four equal answer spaces to a page, or
-    two columns of short-answer boxes. Laying that out arithmetically and
-    nudging a few edges beats drawing twenty rectangles, and it needs no
-    detection at all, so it works on the assignments detection cannot read.
-    """
     name, digest, page_count, size = _pdf_identity(pdf_path)
     target_pages = list(pages) if pages else list(range(1, page_count + 1))
     per_page = max(1, per_page)
     columns = max(1, columns)
-    rows = max(1, -(-per_page // columns))  # ceiling division
+    rows = max(1, -(-per_page // columns))
 
     usable_w = 1.0 - 2 * GRID_MARGIN_X
     usable_h = 1.0 - 2 * GRID_MARGIN_Y
     cell_w = usable_w / columns
     cell_h = usable_h / rows
-    # Breathing room between cells so two adjacent boxes never share an edge and
-    # trip the overlap check — and so an instructor can see where one ends.
     gap_x = cell_w * 0.04
     gap_y = cell_h * 0.06
 
@@ -499,26 +275,6 @@ def propose_region_map(
     assignment_title: str = "",
     split_subquestions: bool = False,
 ) -> RegionMapProposal:
-    """Detect a draft map so the instructor *corrects* boxes instead of drawing them.
-
-    Reuses ``core/ocr/layout.scan_submission_layout`` — the same detector the
-    no-text-layer extraction path already trusts — rather than growing a second
-    one. Its output is exactly the three things a map needs (question regions
-    with continuations, name/id fields, a title region), which is why this
-    function is a translation and not an algorithm.
-
-    Subquestion splitting is **off** by default here: on someone else's assignment a
-    detected sub-part is as likely to be a stray rule as a real (a) / (b), and a
-    map with phantom questions is worse to correct than one with too few.
-
-    A poor or empty proposal is an acceptable outcome on an unusual assignment —
-    ``review_reasons`` says so, and :func:`grid_region_map` and
-    :func:`blank_region_map` are the alternatives, not the consolation prizes.
-    """
-    # Imported here, not at module scope: `core.ocr.layout` pulls in OpenCV and
-    # pytesseract, which cost hundreds of milliseconds to import. `region-map
-    # validate` and `--region-map` extraction never propose anything, and the
-    # TUI editor should not pay for the detector until someone asks to detect.
     import fitz
 
     from opengrader.core.ocr import OcrConfig
@@ -594,17 +350,6 @@ def propose_region_map(
 def seed_region_map_from_qa(
     region_map: RegionMap, qa_document: "QADocument"
 ) -> RegionMap:
-    """Copy points, question types and prompts from an answer key onto a map.
-
-    The instructor's rubric already knows what question 4 is worth and whether
-    it is multiple choice; making them retype that into a geometry editor is
-    busywork with a chance of a typo. Matched by question id first (``q3`` to
-    ``q3``, which is what both sides call them), falling back to position for a
-    map whose ids were renumbered by hand — the ordering of both lists is the
-    question order, so the fallback is a real match rather than a guess.
-
-    Geometry is never touched: this fills in *what* each box is, never *where*.
-    """
     from opengrader.core.qa_file import possible_points_by_question, qa_question_type
 
     points = possible_points_by_question(qa_document)
@@ -612,17 +357,13 @@ def seed_region_map_from_qa(
     prompts: dict[str, str] = {}
     ordered_ids: list[str] = []
 
-    def record(question) -> None:  # noqa: ANN001 - QAQuestion | QASubquestion
+    def record(question) -> None:  # noqa: ANN001
         if question.id in types:
             return
         types[question.id] = qa_question_type(question)
         prompts[question.id] = question.prompt.strip()
         ordered_ids.append(question.id)
 
-    # The shared questions first, then each version's own, so a multi-version QA
-    # file seeds every id it knows while the common order stays the reading
-    # order. A parent with subquestions is not itself graded — its parts are —
-    # so the parts are what a map's boxes correspond to.
     version_lists = [qa_document.questions] + [
         qa_document.version_questions.get(version, [])
         for version in qa_document.versions
@@ -654,11 +395,6 @@ def seed_region_map_from_qa(
     return replace(region_map, questions=tuple(seeded))
 
 
-# ==============================================================================
-# PERSISTENCE
-# ==============================================================================
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -670,12 +406,6 @@ def _box_to_json(box: RegionBox | None) -> dict[str, Any] | None:
 
 
 def _box_from_json(raw: Any) -> RegionBox | None:
-    """Read one rectangle, clamping it onto the page. ``None`` when absent/junk.
-
-    Tolerant on purpose — see the module docstring on why a hand-edited file
-    must degrade rather than crash. A box that cannot be understood at all is
-    dropped, and the resulting "no name field" is reported by validation.
-    """
     if not isinstance(raw, Mapping):
         return None
     try:
@@ -687,7 +417,6 @@ def _box_from_json(raw: Any) -> RegionBox | None:
 
 
 def region_map_to_json(region_map: RegionMap) -> dict[str, Any]:
-    """The on-disk shape, as a plain dict (also what ``--json`` prints)."""
     return {
         "format": REGION_MAP_FORMAT,
         "version": region_map.version,
@@ -724,7 +453,6 @@ def region_map_to_json(region_map: RegionMap) -> dict[str, Any]:
 
 
 def region_map_from_json(data: Any, *, source: str = "<memory>") -> RegionMap:
-    """Rebuild a map from parsed JSON, clamping and refusing a future format."""
     if not isinstance(data, Mapping):
         raise RegionMapError(f"{source} is not a region map (expected a JSON object)")
     if str(data.get("format", "")) != REGION_MAP_FORMAT:
@@ -840,7 +568,6 @@ def _question_from_json(raw: Mapping[str, Any], index: int) -> MappedQuestion | 
 
 
 def save_region_map(region_map: RegionMap, path: str | Path) -> Path:
-    """Write the map as indented JSON (it is meant to be diffable by hand)."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -851,7 +578,6 @@ def save_region_map(region_map: RegionMap, path: str | Path) -> Path:
 
 
 def load_region_map(path: str | Path) -> RegionMap:
-    """Read a map from disk. Raises :class:`RegionMapError` on anything unusable."""
     source = Path(path)
     try:
         text = source.read_text(encoding="utf-8")
@@ -867,11 +593,6 @@ def load_region_map(path: str | Path) -> RegionMap:
 def load_verified_region_map(
     map_path: str | Path, pdf_path: str | Path | None = None
 ) -> RegionMap:
-    """Load a map and, when a PDF is named, refuse it unless it matches.
-
-    The one call site an extraction should use, so "loaded" and "checked against
-    the assignment" cannot come apart.
-    """
     region_map = load_region_map(map_path)
     if pdf_path is not None:
         verification = verify_region_map(region_map, pdf_path)
@@ -880,16 +601,10 @@ def load_verified_region_map(
     return region_map
 
 
-# ==============================================================================
-# VALIDATION
-# ==============================================================================
-
-
 def _overlap_ratio(
     first: tuple[float, float, float, float],
     second: tuple[float, float, float, float],
 ) -> float:
-    """Intersection area as a fraction of the smaller box's area."""
     ax0, ay0, aw, ah = first
     bx0, by0, bw, bh = second
     ix0, iy0 = max(ax0, bx0), max(ay0, by0)
@@ -904,17 +619,6 @@ def _overlap_ratio(
 def validate_region_map(
     region_map: RegionMap, *, page_count: int | None = None
 ) -> tuple[RegionMapFinding, ...]:
-    """Everything wrong with a map, worst first.
-
-    Runs on the in-memory value so the TUI editor can check a box the moment it
-    is dragged, before anything is written. ``page_count`` defaults to the page
-    count the map recorded for its assignment; pass the real PDF's when you have it.
-
-    Severity is the contract the editor enforces: an ``error`` means extraction
-    would produce wrong output (a box that crops nothing, two answers sharing an
-    id, a page that does not exist), and saving is refused. Everything else is
-    an observation an instructor is allowed to overrule.
-    """
     pages = page_count if page_count is not None else region_map.source_pages
     findings: list[RegionMapFinding] = []
 
@@ -1082,13 +786,6 @@ def _validate_box(
 
 
 def _validate_numbering(numbers: Sequence[int]) -> list[RegionMapFinding]:
-    """Report gaps and repeats in the question numbering.
-
-    A warning, never an error: an instructor mapping only the handwritten half
-    of a mixed assignment, or leaving the extra-credit question out, is doing
-    something ordinary. It is still worth saying, because the commonest cause is
-    a question everyone forgot to draw a box around.
-    """
     findings: list[RegionMapFinding] = []
     usable = sorted(number for number in numbers if number > 0)
     if not usable:
@@ -1128,13 +825,6 @@ def _validate_numbering(numbers: Sequence[int]) -> list[RegionMapFinding]:
 
 
 def _validate_overlaps(region_map: RegionMap) -> list[RegionMapFinding]:
-    """Report answer regions that substantially cover each other.
-
-    Almost always a real mistake: the grader is handed question 4's crop with
-    half of question 5's answer inside it, marks what they see, and the two
-    questions cross-contaminate. Cheap enough to check pairwise — an assignment has
-    tens of questions, not thousands.
-    """
     findings: list[RegionMapFinding] = []
     flattened: list[tuple[str, RegionBox]] = []
     for question in region_map.questions:
@@ -1170,26 +860,10 @@ def _validate_overlaps(region_map: RegionMap) -> list[RegionMapFinding]:
 def region_map_errors(
     findings: Iterable[RegionMapFinding],
 ) -> tuple[RegionMapFinding, ...]:
-    """Just the error-level findings — what blocks a save or fails a check."""
     return tuple(finding for finding in findings if finding.is_error)
 
 
-# ==============================================================================
-# THE SEAM: A REGION MAP IS AN ASSIGNMENT TEMPLATE
-# ==============================================================================
-
-
 def region_map_to_blank_template(region_map: RegionMap) -> AssignmentTemplate:
-    """Convert a region map into the structure extraction already consumes.
-
-    This function is the entire integration: after it, ``--region-map`` and
-    ``--blank-template`` are the same code path. ``exact_regions=True`` tells the
-    processor these rectangles are the answer areas themselves rather than
-    y-anchors to align against (see ``core/submissions/template.py``).
-
-    Questions come out in question-number order, which is the order the grading
-    TUI walks and the order a ``.submission.md`` lists them in.
-    """
     questions = tuple(
         StudentSubmissionQuestion(
             question_id=question.question_id,
@@ -1234,18 +908,7 @@ def region_map_to_blank_template(region_map: RegionMap) -> AssignmentTemplate:
     )
 
 
-# ==============================================================================
-# RENDERING — the same picture for the CLI preview and the TUI editor
-# ==============================================================================
-
-
-def _label_font(size: int):  # noqa: ANN202 - PIL font type is version-dependent
-    """A readable label font, degrading to PIL's bitmap default.
-
-    The bundled CMU face ships with Opengrader (it is what the generated
-    templates print in), so a preview looks the same on a machine with no fonts
-    installed. If it cannot be loaded the labels are still drawn, just smaller.
-    """
+def _label_font(size: int):  # noqa: ANN202
     from PIL import ImageFont
 
     try:
@@ -1267,25 +930,7 @@ def render_region_map_page(
     emphasis: tuple[float, float, float, float] | None = None,
     base: "tuple[Image.Image, int, int] | None" = None,
 ) -> "Image.Image":
-    """Render one page of the blank assignment with its mapped regions outlined.
-
-    The single most valuable thing this feature produces: it is how an
-    instructor checks a map *before* extracting 200 students against it. Shared
-    by ``region-map preview`` and the TUI editor precisely so that what the
-    editor shows and what the preview PDF shows can never differ.
-
-    ``emphasis`` outlines one box in a second colour — the editor's selection.
-    It is matched by geometry rather than by index so callers need not agree on
-    an ordering.
-
-    ``base`` supplies an already-rendered ``(image, width, height)`` for this
-    page. The interactive editor keeps one per page and passes it on every
-    keystroke: rasterizing a PDF page takes tens of milliseconds, and doing it
-    again for each arrow-key nudge is the difference between an editor that
-    feels direct and one that feels broken. The page is never mutated — every
-    overlay step composites onto a copy — so one cached render serves any number
-    of redraws.
-    """
+    """Matches emphasis by geometry; never mutates the supplied base image."""
     from PIL import ImageDraw
 
     from opengrader.core.pdf_utils import (
@@ -1311,9 +956,7 @@ def render_region_map_page(
 
     if emphasis is not None:
         x0, y0, x1, y1 = bbox_norm_to_px(emphasis, width, height)
-        # Drawn twice, one pixel apart, so the selection reads as a heavier
-        # outline even in a half-block terminal where a one-cell line is all the
-        # detail that survives.
+        # Thin outlines disappear in half-block terminal rendering.
         draw.rectangle([x0, y0, x1 - 1, y1 - 1], outline=EMPHASIS_RGB, width=line_width)
         draw.rectangle(
             [x0 + line_width, y0 + line_width, x1 - 1 - line_width, y1 - 1 - line_width],
@@ -1327,13 +970,11 @@ def render_region_map_page(
         colour = EMPHASIS_RGB if selected else (208, 135, 112)
         try:
             text_box = draw.textbbox((0, 0), label, font=font)
-        except Exception:  # pragma: no cover - ancient PIL without textbbox
+        except Exception:  # pragma: no cover
             text_box = (0, 0, 8 * len(label), 12)
         pad = line_width
         text_w = text_box[2] - text_box[0] + 2 * pad
         text_h = text_box[3] - text_box[1] + 2 * pad
-        # The chip sits above the box where there is room, and inside it at the
-        # top of the page, so a region at y=0 never has its label clipped away.
         chip_y = y0 - text_h if y0 - text_h >= 0 else y0
         draw.rectangle(
             [x0, chip_y, x0 + text_w, chip_y + text_h], fill=colour
@@ -1350,13 +991,6 @@ def write_region_map_preview(
     *,
     dpi: int = PREVIEW_DPI,
 ) -> tuple[Path, ...]:
-    """Write an outlined copy of the whole assignment — a PDF, or one PNG per page.
-
-    A ``.pdf`` output is one file the instructor can flick through (and print,
-    and email to a TA); any other extension writes ``<stem>-page-N.png``. The
-    PDF is assembled from the same rendered pages, so the two are identical
-    pictures in different wrappers.
-    """
     destination = Path(output)
     destination.parent.mkdir(parents=True, exist_ok=True)
 

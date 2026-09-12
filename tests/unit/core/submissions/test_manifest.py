@@ -1,5 +1,3 @@
-"""Tests for the extraction resume ledger (`core/submissions/manifest.py`)."""
-
 from pathlib import Path
 
 from opengrader.core.submissions.manifest import (
@@ -29,11 +27,6 @@ def _record(**overrides) -> ExtractionRecord:
     return ExtractionRecord(**base)  # type: ignore[arg-type]
 
 
-# --------------------------------------------------------------------------- #
-# Location & round-trip
-# --------------------------------------------------------------------------- #
-
-
 def test_manifest_lives_under_the_dot_opengrader_dir(tmp_path) -> None:
     path = resolve_manifest_path(tmp_path)
     assert path == tmp_path / ".opengrader" / "extraction-manifest.jsonl"
@@ -54,7 +47,6 @@ def test_record_round_trips_through_json() -> None:
         duration_seconds=1.2345,
     )
     restored = ExtractionRecord.from_json(original.to_json())
-    # duration is rounded on write, so compare against the rounded value.
     assert restored == ExtractionRecord(
         key=original.key,
         source=original.source,
@@ -66,11 +58,6 @@ def test_record_round_trips_through_json() -> None:
         completed_at="2026-08-01T00:00:00+00:00",
         duration_seconds=1.234,
     )
-
-
-# --------------------------------------------------------------------------- #
-# The append-only log
-# --------------------------------------------------------------------------- #
 
 
 def test_append_then_read_returns_the_record(tmp_path) -> None:
@@ -85,18 +72,16 @@ def test_missing_manifest_reads_as_empty(tmp_path) -> None:
 
 
 def test_later_line_supersedes_an_earlier_one(tmp_path) -> None:
-    """Re-extracting a PDF appends; the newest line is the current truth."""
     append_record(tmp_path, _record(source_sha256="old"))
     append_record(tmp_path, _record(source_sha256="new"))
     assert read_manifest(tmp_path)["submission-0001"].source_sha256 == "new"
 
 
 def test_truncated_final_line_does_not_break_the_ledger(tmp_path) -> None:
-    """A process killed mid-write can only damage the last line."""
     append_record(tmp_path, _record(key="submission-0001"))
     path = resolve_manifest_path(tmp_path)
     with path.open("a", encoding="utf-8") as handle:
-        handle.write('{"key":"submission-0002","source_sha')  # cut off mid-write
+        handle.write('{"key":"submission-0002","source_sha')
     assert set(read_manifest(tmp_path)) == {"submission-0001"}
 
 
@@ -105,11 +90,6 @@ def test_lines_without_a_key_are_skipped(tmp_path) -> None:
     path.parent.mkdir(parents=True)
     path.write_text('{"source":"x"}\n[]\n\n')
     assert read_manifest(tmp_path) == {}
-
-
-# --------------------------------------------------------------------------- #
-# Fingerprints
-# --------------------------------------------------------------------------- #
 
 
 def test_file_fingerprint_tracks_content_not_name(tmp_path) -> None:
@@ -135,13 +115,7 @@ def test_settings_fingerprint_changes_with_any_value() -> None:
 
 
 def test_settings_fingerprint_survives_unjsonable_values(tmp_path) -> None:
-    """A Path (or anything else odd) contributes rather than raising mid-run."""
     assert settings_fingerprint({"template": tmp_path / "blank.pdf"})
-
-
-# --------------------------------------------------------------------------- #
-# The reuse decision — the heart of --resume
-# --------------------------------------------------------------------------- #
 
 
 def test_no_record_is_never_reusable(tmp_path) -> None:
@@ -179,7 +153,6 @@ def test_deleted_output_is_not_reusable(tmp_path) -> None:
 
 
 def test_deleted_response_crop_is_not_reusable(tmp_path) -> None:
-    """Crops count as outputs, so a wiped responses/ folder forces a re-extract."""
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "x.submission.md").write_text("x")
     record = _record(outputs=("sub/x.submission.md", "sub/responses/q1.png"))
@@ -189,9 +162,6 @@ def test_deleted_response_crop_is_not_reusable(tmp_path) -> None:
 
 
 def test_edited_output_stays_reusable(tmp_path) -> None:
-    """The TUI rewrites .submission.md on every grade save. Invalidating on
-    content would make --resume re-extract graded work and destroy the grades,
-    so only existence is checked."""
     (tmp_path / "sub").mkdir()
     markdown = tmp_path / "sub" / "x.submission.md"
     markdown.write_text("original")
@@ -203,16 +173,10 @@ def test_edited_output_stays_reusable(tmp_path) -> None:
 
 
 def test_empty_fingerprints_are_never_reusable(tmp_path) -> None:
-    """An unreadable input hashes to "" — that must not match a "" on record."""
     record = _record(source_sha256="")
     assert not record_is_reusable(
         record, output_dir=tmp_path, source_sha256="", settings_id="sss"
     )
-
-
-# --------------------------------------------------------------------------- #
-# Output path normalization
-# --------------------------------------------------------------------------- #
 
 
 def test_outputs_are_stored_relative_to_the_output_dir(tmp_path) -> None:
@@ -239,11 +203,6 @@ def test_utc_timestamp_is_sortable_iso8601() -> None:
     assert stamp.endswith("+00:00") and stamp[4] == "-" and "T" in stamp
 
 
-# --------------------------------------------------------------------------- #
-# Two ledgers, one module
-# --------------------------------------------------------------------------- #
-
-
 def test_the_run_ledger_is_a_separate_file_in_the_same_dot_dir(tmp_path) -> None:
     path = resolve_manifest_path(tmp_path, filename=RUN_LEDGER_FILENAME)
     assert path == tmp_path / ".opengrader" / "run-ledger.jsonl"
@@ -251,17 +210,11 @@ def test_the_run_ledger_is_a_separate_file_in_the_same_dot_dir(tmp_path) -> None
 
 
 def test_the_two_ledgers_never_read_each_others_records(tmp_path) -> None:
-    """A shared file would hand each reader the other's keys to filter out."""
     append_record(tmp_path, _record(key="submission-0001"))
     append_record(tmp_path, _record(key="split"), filename=RUN_LEDGER_FILENAME)
 
     assert set(read_manifest(tmp_path)) == {"submission-0001"}
     assert set(read_manifest(tmp_path, filename=RUN_LEDGER_FILENAME)) == {"split"}
-
-
-# --------------------------------------------------------------------------- #
-# Fingerprinting an input that may be a directory
-# --------------------------------------------------------------------------- #
 
 
 def test_input_fingerprint_of_a_file_is_its_bytes(tmp_path) -> None:
@@ -278,14 +231,13 @@ def test_input_fingerprint_of_a_directory_covers_its_pdfs(tmp_path) -> None:
     before = input_fingerprint(folder)
 
     assert before
-    assert input_fingerprint(folder) == before  # stable across calls
+    assert input_fingerprint(folder) == before
 
     (folder / "c.pdf").write_bytes(b"%PDF c")
     assert input_fingerprint(folder) != before
 
 
 def test_input_fingerprint_ignores_non_pdfs_and_subdirectories(tmp_path) -> None:
-    """It must cover exactly the files the stage will read — no more."""
     folder = tmp_path / "split"
     (folder / "nested").mkdir(parents=True)
     (folder / "a.pdf").write_bytes(b"%PDF a")

@@ -1,27 +1,3 @@
-"""Modal item analysis, opened with s.
-
-A read-only pop-up that turns the graded batch inside out: instead of "how did
-the students do?", it asks "how did each *question* do?". For every question it
-shows the difficulty (how much of the available credit the cohort earned) and
-the separation (how well the question tells stronger students from weaker ones —
-the neutral name for the discrimination index), plus, for multiple-choice
-questions, how each answer choice was chosen and by whom.
-
-A difficulty/separation overview chart sits on top (Kitty-graphics terminals
-only; the per-item cards below carry the same numbers so the screen is fully
-usable without it). Every figure is a class aggregate — no student is named —
-so the view needs no anonymity gating. esc or s closes it.
-
-**Learning outcomes** live here too, behind ``o``, when the answer key carries
-``**Outcome**`` tags. They belong in this modal rather than one of their own
-because they answer the *other* half of the same question a reader already came
-here with: the item view asks "is this question doing its job?", the outcome
-view asks "did they learn the thing the question was for?" — same graded data,
-same read-only contract, and an instructor comparing them should not have to
-close one report to open another. The toggle is hidden entirely when nothing is
-tagged, so an ordinary assignment's modal is unchanged.
-"""
-
 from __future__ import annotations
 
 from typing import Callable
@@ -49,8 +25,6 @@ from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
 
 class ItemAnalysisScreen(ModalScreen[None]):
-    """Per-question difficulty, separation, and distractor breakdown."""
-
     DEFAULT_CSS = """
     ItemAnalysisScreen {
         align: center middle;
@@ -74,8 +48,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
         color: $text-muted;
     }
 
-    /* A hint, not data — muted and separated from the summary above it so it
-       reads as an aside rather than another figure. */
     #item-analysis-outcome-hint {
         width: 100%;
         height: auto;
@@ -144,8 +116,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
         Binding("o", "toggle_view", "Outcomes", show=False),
     ]
 
-    # The two things this modal can show. "questions" is the historical view and
-    # stays the default, so opening the modal is unchanged for everyone.
     VIEW_QUESTIONS = "questions"
     VIEW_OUTCOMES = "outcomes"
 
@@ -158,25 +128,11 @@ class ItemAnalysisScreen(ModalScreen[None]):
         outcome_report: OutcomeReport | None = None,
         outcome_builder: Callable[[str | None], OutcomeReport | None] | None = None,
     ) -> None:
-        """``report`` is the initial (all-sections) analysis shown first.
-
-        When the assignment was graded across sections, pass ``report_builder``
-        (``section -> report``) and the section names; the modal then offers a
-        per-section view cycled with ``f`` (scope ``None`` = all sections). Omit
-        both for a plain single-class report.
-
-        ``outcome_report`` (with ``outcome_builder`` for section scoping) adds
-        the learning-outcome view on ``o``. ``None`` means the answer key tags
-        no outcomes, and the toggle is then absent rather than empty — an
-        instructor who does not use outcomes should see no trace of them.
-        """
         self._report = report
         self._report_builder = report_builder
         self._outcome_report = outcome_report
         self._outcome_builder = outcome_builder
         self._view = self.VIEW_QUESTIONS
-        # Scope 0 is always "All sections"; the rest are individual sections. A
-        # lone scope (no sections, or no builder) disables the cycler.
         self._scopes: tuple[str | None, ...] = (
             (None, *sections) if report_builder and sections else (None,)
         )
@@ -189,13 +145,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
 
     @property
     def _has_outcomes(self) -> bool:
-        """Whether this answer key tags outcomes at all.
-
-        Keyed on the report *existing*, not on it having rows: an assignment
-        that tags outcomes but has nothing graded yet must still offer the view,
-        so the grader can see it is empty rather than concluding the feature is
-        missing.
-        """
         return self._outcome_report is not None
 
     def compose(self) -> ComposeResult:
@@ -216,8 +165,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
                 yield Button("Close", id="item-analysis-close", compact=True)
 
     def on_mount(self) -> None:
-        # The initial report is already the all-sections scope, so render it
-        # without rebuilding; the cycler rebuilds for other scopes.
         self._render_report(rebuild=False)
         self.query_one("#item-analysis-close", Button).focus()
 
@@ -242,9 +189,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
         cards.remove_children()
 
         if self._view == self.VIEW_OUTCOMES:
-            # The overview chart plots difficulty against separation — both
-            # per-question figures with no outcome equivalent — so it is hidden
-            # rather than left showing numbers the visible cards don't explain.
             self.query_one("#item-analysis-chart", SharpImage).display = False
             self._render_outcome_cards(cards)
             return
@@ -271,19 +215,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
             cards.mount(*[self._card_widget(item) for item in report.items])
 
     def _update_outcome_hint(self) -> None:
-        """Offer outcome tagging to the one person who is looking for it.
-
-        The `o` view is hidden entirely when an answer key tags nothing, which
-        keeps the modal clean for the majority who never use outcomes — but it
-        also means the instructor who *would* want per-outcome mastery has no
-        way to discover it exists. One muted line here closes that, at the only
-        moment it is relevant: someone reading item analysis is already asking
-        how their questions performed.
-
-        Deliberately silent when nothing is graded yet (the summary is already
-        telling them to go grade, and a second suggestion is noise) and, of
-        course, when outcomes are already tagged.
-        """
         hint = self.query_one("#item-analysis-outcome-hint", Static)
         show = not self._has_outcomes and bool(self._report.items)
         hint.display = show
@@ -308,12 +239,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
         cards.mount(*[self._outcome_card_widget(o) for o in report.outcomes])
 
     def _outcome_card_widget(self, outcome) -> Vertical:  # noqa: ANN001
-        """One outcome: who cleared the bar, then what measured it.
-
-        Coverage is a *sibling* line rather than a footnote because the mastery
-        rate cannot be read without it — an outcome resting on 2 of 100 points
-        is being claimed, not assessed.
-        """
         labels = [
             Label(format_outcome_mastery(outcome), classes="item-metric"),
             Label(format_outcome_coverage(outcome), classes="item-metric"),
@@ -356,8 +281,6 @@ class ItemAnalysisScreen(ModalScreen[None]):
         has_sections = len(self._scopes) > 1
         scope_note = f"[{self._scope_label()}]  " if has_sections else ""
         cycle_note = "  f cycles section." if has_sections else ""
-        # Advertised only when there is something to toggle to, so the hint
-        # never points at a view that isn't there.
         view_note = (
             "  o shows questions." if self._view == self.VIEW_OUTCOMES
             else ("  o shows outcomes." if self._has_outcomes else "")
@@ -389,18 +312,12 @@ class ItemAnalysisScreen(ModalScreen[None]):
         )
 
     def action_cycle_section(self) -> None:
-        """Advance to the next section scope (all sections → each section → …)."""
         if len(self._scopes) <= 1:
             return
         self._scope_index = (self._scope_index + 1) % len(self._scopes)
         self._render_report(rebuild=True)
 
     def action_toggle_view(self) -> None:
-        """Swap between the per-question and per-outcome views.
-
-        Inert when the answer key tags no outcomes — pressing ``o`` there must
-        do nothing rather than open an empty report.
-        """
         if not self._has_outcomes:
             return
         self._view = (

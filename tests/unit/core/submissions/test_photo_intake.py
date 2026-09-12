@@ -1,13 +1,3 @@
-"""Tests for phone-photo intake (core/submissions/photo_intake.py).
-
-The geometry tests build a synthetic "page" with a known marker position,
-perspective-warp it onto a larger background canvas at a known quad (the way
-a phone photo keystones a flat page), and check that rectification recovers
-the marker's *normalized* position — not just that some PDF got written.
-That is the real test of this feature: a plausible-looking rectification that
-is actually wrong would still produce a PDF.
-"""
-
 from __future__ import annotations
 
 import importlib.util
@@ -18,11 +8,8 @@ from PIL import Image
 
 from opengrader.core.submissions import photo_intake as pi
 
-# --------------------------------------------------------------------------- #
-# Synthetic photo builders
-# --------------------------------------------------------------------------- #
 
-PAGE_W, PAGE_H = 340, 440  # 8.5:11 aspect at 40 px/inch, matching "letter"
+PAGE_W, PAGE_H = 340, 440
 BG_W, BG_H = 900, 1200
 
 
@@ -33,22 +20,13 @@ def _blank_page(*, border: bool = True) -> np.ndarray:
     return page
 
 
-def cv2_rectangle(img, pt1, pt2, color, thickness):  # thin wrapper, avoids top-level cv2 import clutter
+def cv2_rectangle(img, pt1, pt2, color, thickness):
     import cv2
 
     cv2.rectangle(img, pt1, pt2, color, thickness)
 
 
 def _draw_marker(page: np.ndarray, norm_pos: tuple[float, float], *, size: int = 9) -> None:
-    """A small red *bar* (not a square) at a normalized (x, y) position.
-
-    Deliberately elongated rather than square: `find_fiducial_candidates`
-    accepts any sufficiently square, solid, plausibly-sized blob as a
-    registration-mark candidate, and a square marker of similar size to the
-    real fiducials would occasionally get treated as a fifth one. A bar fails
-    the aspect check outright, so the marker can never be mistaken for a
-    corner mark regardless of where it's placed on the page.
-    """
     x = int(norm_pos[0] * PAGE_W)
     y = int(norm_pos[1] * PAGE_H)
     half_h = max(2, size // 3)
@@ -56,7 +34,6 @@ def _draw_marker(page: np.ndarray, norm_pos: tuple[float, float], *, size: int =
 
 
 def _draw_fiducials(page: np.ndarray, *, side: int = 14, margin: int = 18) -> None:
-    """Four solid black squares near the corners, sized like omr's registration marks."""
     for (x0, y0) in (
         (margin, margin),
         (PAGE_W - margin - side, margin),
@@ -67,7 +44,6 @@ def _draw_fiducials(page: np.ndarray, *, side: int = 14, margin: int = 18) -> No
 
 
 def _composite(page: np.ndarray, quad_dst: np.ndarray, *, bg_size=(BG_W, BG_H)) -> np.ndarray:
-    """Perspective-warp ``page`` onto a noisy background at ``quad_dst``."""
     import cv2
 
     bg_w, bg_h = bg_size
@@ -91,7 +67,6 @@ def _composite(page: np.ndarray, quad_dst: np.ndarray, *, bg_size=(BG_W, BG_H)) 
 
 
 def _mild_quad() -> np.ndarray:
-    """A page quad occupying most of the frame with a modest keystone tilt."""
     return np.array(
         [[90, 120], [790, 60], [810, 1140], [70, 1100]],
         dtype=np.float32,
@@ -99,7 +74,6 @@ def _mild_quad() -> np.ndarray:
 
 
 def _marker_centroid_norm(image: Image.Image) -> tuple[float, float] | None:
-    """Normalized centroid of the reddish marker pixels in a rectified image."""
     array = np.asarray(image.convert("RGB")).astype(np.int16)
     red_mask = (
         (array[:, :, 0] > 150)
@@ -111,11 +85,6 @@ def _marker_centroid_norm(image: Image.Image) -> tuple[float, float] | None:
         return None
     height, width = array.shape[:2]
     return float(np.mean(xs)) / width, float(np.mean(ys)) / height
-
-
-# --------------------------------------------------------------------------- #
-# Geometry: fiducial path
-# --------------------------------------------------------------------------- #
 
 
 def test_fiducial_quad_perspective_correction_recovers_marker_position() -> None:
@@ -137,11 +106,6 @@ def test_fiducial_quad_perspective_correction_recovers_marker_position() -> None
     assert recovered[1] == pytest.approx(marker_pos[1], abs=0.035)
 
 
-# --------------------------------------------------------------------------- #
-# Geometry: document-edge path
-# --------------------------------------------------------------------------- #
-
-
 def test_document_edge_perspective_correction_recovers_marker_position() -> None:
     page = _blank_page(border=True)
     marker_pos = (0.25, 0.7)
@@ -161,10 +125,6 @@ def test_document_edge_perspective_correction_recovers_marker_position() -> None
 
 
 def test_fiducials_are_preferred_over_edge_detection() -> None:
-    # A page with fiducials still contrasts with the background enough for
-    # edge detection to find a quad too (see the fiducial test above, which
-    # has no explicit border and still gets one) — so both strategies apply
-    # here, and the more accurate one, fiducials, must win.
     page = _blank_page(border=False)
     _draw_fiducials(page)
     photo = _composite(page, _mild_quad())
@@ -173,11 +133,6 @@ def test_fiducials_are_preferred_over_edge_detection() -> None:
         Image.fromarray(photo), paper="letter", dpi_floor=50, allow_perspective=True
     )
     assert method == "fiducials"
-
-
-# --------------------------------------------------------------------------- #
-# Fallbacks
-# --------------------------------------------------------------------------- #
 
 
 def test_no_perspective_flag_forces_deskew_even_with_fiducials_present() -> None:
@@ -193,9 +148,6 @@ def test_no_perspective_flag_forces_deskew_even_with_fiducials_present() -> None
 
 
 def test_deskew_only_fallback_when_no_quad_is_found() -> None:
-    # No border, no fiducials, no background offset: nothing for either quad
-    # strategy to lock onto. Must not raise — it falls back to deskew and
-    # says why, per the module's fail-soft rule.
     blank = Image.fromarray(np.full((400, 300, 3), 255, dtype=np.uint8))
     rectified, method, note = pi.rectify_image(blank, paper="letter", allow_perspective=True)
     assert method == "deskew"
@@ -209,31 +161,19 @@ def test_unknown_paper_size_raises() -> None:
         pi.rectify_image(blank, paper="tabloid")
 
 
-# --------------------------------------------------------------------------- #
-# EXIF orientation
-# --------------------------------------------------------------------------- #
-
-
 def test_exif_orientation_is_honoured(tmp_path) -> None:  # noqa: ANN001
     raw = Image.new("RGB", (60, 40), "white")
     raw.paste((255, 0, 0), (0, 0, 10, 10))
     exif = raw.getexif()
-    exif[274] = 6  # "rotate 90 CW to view correctly"
+    exif[274] = 6
     path = tmp_path / "sideways.jpg"
     raw.save(path, exif=exif)
 
-    # Sanity check: without honouring EXIF, the file's raw pixel size is 60x40.
     with Image.open(path) as unrotated:
         assert unrotated.size == (60, 40)
 
     oriented = pi.load_oriented_image(path)
-    # Orientation 6 is a 90-degree rotation, so width and height swap.
     assert oriented.size == (40, 60)
-
-
-# --------------------------------------------------------------------------- #
-# Natural sort
-# --------------------------------------------------------------------------- #
 
 
 def test_natural_sort_orders_p2_before_p10() -> None:
@@ -247,11 +187,6 @@ def test_discover_images_uses_natural_sort(tmp_path) -> None:  # noqa: ANN001
         (tmp_path / name).write_bytes(b"not a real image, just a name test")
     ordered = pi.discover_images(tmp_path)
     assert [p.name for p in ordered] == ["p1.jpg", "p2.jpg", "p10.jpg"]
-
-
-# --------------------------------------------------------------------------- #
-# Grouping modes
-# --------------------------------------------------------------------------- #
 
 
 def _touch(path) -> None:  # noqa: ANN001
@@ -308,14 +243,9 @@ def test_ungrouped_fallback_when_no_convention_applies(tmp_path) -> None:  # noq
 def test_mixed_loose_files_and_subdirectories_falls_through(tmp_path) -> None:  # noqa: ANN001
     (tmp_path / "student_a").mkdir()
     _touch(tmp_path / "student_a" / "1.jpg")
-    _touch(tmp_path / "loose.jpg")  # ambiguous: not inside a subdirectory
+    _touch(tmp_path / "loose.jpg")
 
     assert pi.discover_student_subdirectories(tmp_path) is None
-
-
-# --------------------------------------------------------------------------- #
-# End-to-end: import_photos
-# --------------------------------------------------------------------------- #
 
 
 def _save_photo(path, marker_pos=(0.5, 0.5), *, fiducials: bool = True) -> None:  # noqa: ANN001
@@ -368,11 +298,6 @@ def test_import_photos_ungrouped_names_like_the_splitter(tmp_path) -> None:  # n
     assert names == ["submission-0001.pdf", "submission-0002.pdf"]
 
 
-# --------------------------------------------------------------------------- #
-# HEIC extra
-# --------------------------------------------------------------------------- #
-
-
 _PILLOW_HEIF_INSTALLED = importlib.util.find_spec("pillow_heif") is not None
 
 
@@ -392,28 +317,10 @@ def test_heic_without_pillow_heif_fails_naming_the_extra(tmp_path) -> None:  # n
     assert "uv sync --extra photos" in message
 
 
-# --------------------------------------------------------------------------- #
-# The background rim (regression)
-# --------------------------------------------------------------------------- #
-
-
 def test_rectified_page_carries_no_rim_of_background() -> None:
-    """The surface the photo was taken on must not survive into the page.
-
-    A detected page quad lies *on* the paper/background boundary, so warping it
-    as measured samples the desk into a thin frame around the rectified page.
-    That rim is easy to miss by eye and expensive twice over: `scan-check` reads
-    it as content clipped at all four margins — a medium finding on every single
-    imported photo, which is how a pre-flight check earns being ignored — and
-    `core/ocr/layout.py`'s primitive detector reads it as a page-sized box.
-    `_warp_quad` insets the quad by `QUAD_INSET_FRACTION` to prevent it.
-    """
-    # A borderless page: any dark pixel near an edge of the result came from the
-    # background, since the page itself carries ink only in its middle band.
     page = _blank_page(border=False)
     _draw_marker(page, (0.5, 0.5))
 
-    # A deliberately dark desk, so background pixels are unmistakable.
     photo = _composite(page, _mild_quad())
     rectified, method, _note = pi.rectify_image(
         Image.fromarray(photo), paper="letter", dpi_floor=50, allow_perspective=True
@@ -422,7 +329,7 @@ def test_rectified_page_carries_no_rim_of_background() -> None:
 
     grey = np.asarray(rectified.convert("L"))
     height, width = grey.shape
-    strip = max(2, min(height, width) // 100)  # the outermost ~1% of the page
+    strip = max(2, min(height, width) // 100)
     edges = {
         "top": grey[:strip, :],
         "bottom": grey[-strip:, :],

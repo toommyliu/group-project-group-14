@@ -65,17 +65,9 @@ from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
 
-# Shown next to the parallel-jobs field so the user has a real ceiling in mind
-# rather than guessing. Read once at import; core counts don't change at runtime.
 _CPU_COUNT = os.cpu_count() or 1
 
 
-# One glyph per stage outcome, for the "Run the whole pipeline" section's
-# per-stage log. Deliberately its own small dict rather than an import from
-# ``cli/run.py``'s ``_STATUS_GLYPH`` — that module is a terminal narrator this
-# screen must not call into (see the section's docstring), and the mapping
-# itself is stable enough that a second three-line copy costs less than a
-# cross-module dependency for four emoji.
 _PIPE_STATUS_GLYPH = {
     StageStatus.RAN: "✓",
     StageStatus.REUSED: "↺",
@@ -85,18 +77,10 @@ _PIPE_STATUS_GLYPH = {
 }
 
 
-# How far up from an assignment folder to look for a course file. Four levels
-# covers the layouts instructors actually use (`course/exams/midterm/subs/`)
-# without wandering into the home directory and picking up an unrelated course.
 _COURSE_SEARCH_DEPTH = 4
 
 
 def _find_course_file(start: Path) -> Path | None:
-    """Walk up from ``start`` looking for a ``course.toml``, or return None.
-
-    Best-effort convenience only — a miss just leaves the field empty, so an
-    unreadable directory is swallowed rather than surfaced.
-    """
     try:
         current = start.expanduser().resolve()
     except OSError:
@@ -115,20 +99,11 @@ def _find_course_file(start: Path) -> Path | None:
 
 
 class SetupScreen(Vertical):
-    """
-    A setup screen allowing users to configure and run processing scripts
-    before launching the grading TUI.
-    """
-
     DEFAULT_CSS = """
     SetupScreen #setup-container {
         align-horizontal: center;
         scrollbar-size: 1 1;
     }
-
-    /* Containers inside the scroll view must size to their content;
-       a Vertical's default 1fr height clips children and breaks the
-       scroll range. */
     SetupScreen #setup-content {
         width: 100%;
         max-width: 104;
@@ -136,7 +111,6 @@ class SetupScreen(Vertical):
         padding: 1 2 2 2;
     }
 
-    /* ── Hero header ─────────────────────────────────────────── */
     SetupScreen #setup-hero {
         height: auto;
         background: $boost;
@@ -169,7 +143,6 @@ class SetupScreen(Vertical):
         color: $text-muted;
     }
 
-    /* ── Cards ───────────────────────────────────────────────── */
     SetupScreen #launch-section {
         height: auto;
         border: round $accent;
@@ -200,15 +173,10 @@ class SetupScreen(Vertical):
         margin-top: 1;
     }
 
-    /* ── Buttons: flat, compact chips ────────────────────────── */
     SetupScreen .path-row .browse-button {
         margin-top: 1;
     }
 
-    /* ── Run the whole pipeline (step 0 of the numbered steps) ─── */
-    /* Same "bare Vertical defaults to 1fr and hides what follows it inside an
-       auto-sized Collapsible" trap documented below for the numbered steps —
-       this section is one of them now, and the rule is identical. */
     SetupScreen #pipe-progress {
         height: auto;
     }
@@ -217,13 +185,6 @@ class SetupScreen(Vertical):
         width: 24;
     }
 
-    /* ── Section headings ────────────────────────────────────────
-       One rule for every section rather than one per id. The page now has
-       three (Run the whole pipeline / Prepare an assignment / Helper tools)
-       and they must be visually identical — a section that styles itself
-       reads as a different *kind* of thing, which is exactly the impression
-       the pipeline card gave while it was a bare card above the first
-       heading. Ids are kept for querying; the class carries the look. */
     SetupScreen .section-heading {
         width: 100%;
         height: auto;
@@ -269,7 +230,6 @@ class SetupScreen(Vertical):
         padding: 0 1 1 1;
     }
 
-    /* ── Form rows ───────────────────────────────────────────── */
     SetupScreen .path-row {
         height: auto;
     }
@@ -288,21 +248,11 @@ class SetupScreen(Vertical):
         width: 24;
     }
 
-    /* Advanced disclosures whose contents appear on demand — Extract's
-       parallel-jobs and re-read blocks. Bare Verticals default to
-       height: 1fr and stretch to the bottom of the auto-sized Collapsible —
-       which hides whatever follows them (for the parallel-jobs block that was
-       the anonymity-lock checkbox and the Run Extractor button) — so size them
-       to their content. */
     SetupScreen #ext-parallel-options,
     SetupScreen #ext-refine-options {
         height: auto;
     }
 
-    /* Roster / section sub-form. Bare Verticals default to height: 1fr, which
-       stretches the whole area to the bottom of the card; size them to their
-       content. The RadioSet and the multi-section roster list get explicit
-       bounds so neither balloons. */
     SetupScreen #ext-roster-area,
     SetupScreen #ext-one-section,
     SetupScreen #ext-many-section,
@@ -336,7 +286,6 @@ class SetupScreen(Vertical):
     }
     """
 
-    # Path-taking inputs: input id -> (what the picker may confirm, dialog title).
     _PATH_FIELDS: dict[str, tuple[PathPickMode, str]] = {
         "split-input": ("file", "Choose the scanned submissions PDF"),
         "split-output": ("directory", "Choose the split output directory"),
@@ -345,8 +294,6 @@ class SetupScreen(Vertical):
         "ext-output": ("directory", "Choose the extraction output directory"),
         "ext-template-path": ("file", "Choose the blank template PDF"),
         "ext-id-path": ("file", "Choose the roster/ID file"),
-        # "any" rather than "directory": a single photo is a legitimate import
-        # (one student, one page), and the tool detects which it was given.
         "photo-input": ("any", "Choose the folder of photos (or one photo)"),
         "photo-output": ("directory", "Choose the directory for the per-student PDFs"),
         "region-pdf": ("file", "Choose the blank assignment PDF"),
@@ -364,10 +311,6 @@ class SetupScreen(Vertical):
         "backup-submissions": ("directory", "Choose the submissions directory"),
         "tui-qa-path": ("file", "Choose the QA markdown file"),
         "tui-sub-path": ("any", "Choose the submissions file or directory"),
-        # "Run the whole pipeline" section. "any" for the scan: a bulk-scan PDF
-        # and a directory of already-split PDFs are both legitimate inputs (see
-        # `PipelineRequest.input_is_split`), and the picker can't tell which the
-        # user means ahead of time.
         "pipe-scan": ("any", "Choose the scanned bundle PDF, or a folder of split PDFs"),
         "pipe-qa": ("file", "Choose the answer-key markdown file"),
         "pipe-out": ("directory", "Choose (or create) the class output folder"),
@@ -376,22 +319,12 @@ class SetupScreen(Vertical):
     }
 
     class LaunchRequested(Message):
-        """Emitted when the user wants to launch the TUI with specific paths."""
         def __init__(self, qa_path: str, submissions_path: str) -> None:
             super().__init__()
             self.qa_path = qa_path
             self.submissions_path = submissions_path
 
     class GradeWhileExtractingRequested(Message):
-        """Open the grading workspace on a folder this screen's own extraction
-        worker is still writing into.
-
-        A separate message from ``LaunchRequested`` (rather than the same one
-        with a flag) because the app's two handlers genuinely differ: this one
-        also has to start the fold-in poll and tell it, with certainty, that
-        extraction is live — see `TuiApp.on_setup_screen_grade_while_extracting_requested`.
-        """
-
         def __init__(self, qa_path: str, submissions_path: str) -> None:
             super().__init__()
             self.qa_path = qa_path
@@ -404,7 +337,6 @@ class SetupScreen(Vertical):
         *,
         hidden: bool = False,
     ) -> Horizontal:
-        """A path Input with a Browse button that opens the file picker."""
         classes = "path-row hidden" if hidden else "path-row"
         return Horizontal(
             Input(placeholder=placeholder, id=input_id, classes="path-input"),
@@ -415,7 +347,6 @@ class SetupScreen(Vertical):
 
     @staticmethod
     def _field_label(text: str, detail: str = "") -> Static:
-        """A label rendered above a form field, with an optional muted detail."""
         markup = f"[b]{text}[/b]"
         if detail:
             markup = f"{markup}  [dim]{detail}[/dim]"
@@ -423,57 +354,21 @@ class SetupScreen(Vertical):
 
     @staticmethod
     def _card_actions(*buttons: Button) -> Horizontal:
-        """Right-aligned action row at the bottom of a card.
-
-        Variadic so a card that wants two buttons side by side (Preview and
-        Run Pipeline, below) gets the same right-aligned row as every card
-        with one — every existing call site passes exactly one button and
-        keeps working unchanged.
-        """
         return Horizontal(*buttons, classes="card-actions")
 
     @staticmethod
     def _ai() -> ai_config.ResolvedAI:
-        """The AI settings as they stand right now, for whatever is about to run.
-
-        Read fresh on every use rather than cached at startup: the AI Setup
-        helper tool writes the file mid-session, and a step run afterwards must
-        use what the user just saved, not what was on disk when the app opened.
-        Reading a small JSON file is far cheaper than any run that consults it.
-
-        Almost nothing has to *pass* these values on: every CLI resolves the
-        same settings for its own argparse defaults (see ``core/ai_config``), so
-        the setup screen only reads them where it has to make a decision of its
-        own — whether to add ``--auto-ollama``, what to tell the environment
-        check to probe, and what to put in the pipeline's ``LlmOptions``.
-        """
         return ai_config.resolve()
 
     def _auto_ollama_argv(self) -> list[str]:
-        """``--auto-ollama``, but only when the user asked for that behaviour.
-
-        Split/Extract/Answer-key used to pass this unconditionally. It is now
-        the AI Setup screen's "Start the AI automatically when needed" setting,
-        because starting a server and downloading a multi-gigabyte model is
-        exactly the kind of thing someone on a metered connection wants to
-        decide once, for everything, rather than discover.
-        """
         return ["--auto-ollama"] if self._ai().auto_start else []
 
     def _jobs_argv(self) -> list[str] | None:
-        """``--jobs N``, or ``[]`` to let the extractor choose. ``None`` = invalid.
-
-        Same rule as every other disclosure here: with the box unchecked the
-        field is ignored entirely, so a number left behind in the hidden
-        input can never silently apply to a later run. The value is validated
-        here rather than in the background worker, where argparse rejecting it
-        would surface as a crash instead of a notification.
-        """
         if not self.query_one("#ext-parallel", Checkbox).value:
             return []
         jobs = self.query_one("#ext-jobs", Input).value.strip()
         if not jobs:
-            return []  # ticked but left blank still means "choose for me"
+            return []
         if not jobs.isdigit() or int(jobs) < 1:
             return None
         return ["--jobs", jobs]
@@ -514,14 +409,6 @@ class SetupScreen(Vertical):
                         Button("Launch Grading", variant="success", id="launch-button", compact=True)
                     )
 
-                # Its own section, above the numbered steps, and built from the
-                # same heading + caption + Collapsible parts they use. The
-                # earlier shape — a bare card sitting above the first heading —
-                # made it read as a different *kind* of thing, and folding it in
-                # as "step 0" of the list below buried the recommended path
-                # inside the list of alternatives to it. A section of its own
-                # says both true things at once: this is the way to run an
-                # assignment, and it is made of the steps underneath.
                 yield Static(
                     "[b]RUN THE WHOLE PIPELINE[/b]", id="pipeline-heading",
                     classes="section-heading",
@@ -541,9 +428,6 @@ class SetupScreen(Vertical):
                     id="section-pipeline",
                     collapsed=True,
                 ):
-                    # Deliberately not a restatement of the section caption
-                    # above: that says what the run does, this says what you
-                    # are left holding when it finishes.
                     yield Static(
                         "Fill in three paths and press Run. You end up with the "
                         "grading workspace open on the whole class, a split/ "
@@ -681,13 +565,7 @@ class SetupScreen(Vertical):
                         "(a cover page counts).",
                         classes="card-hint",
                     )
-                    # Each option is a short label with its explanation directly
-                    # underneath, matching the Extract step below. A Textual
-                    # Checkbox is hard-limited to one line (ToggleButton's
-                    # get_content_height returns 1, so no amount of CSS wraps
-                    # it), which means anything past the card's width is simply
-                    # lost — the label has to be scannable on its own and the
-                    # detail has to live in a Static that *can* wrap.
+                    # Checkbox labels cannot wrap.
                     yield Checkbox(
                         "Check the scan before splitting",
                         id="split-scan-check",
@@ -1003,10 +881,6 @@ class SetupScreen(Vertical):
                     classes="section-caption",
                 )
 
-                # First in the list on purpose: when something is wrong, this is
-                # the tool that says what — and someone whose scans extract to
-                # empty answers should not have to read past six other tools to
-                # find out their text recognition was never installed.
                 with Collapsible(
                     title="Check this computer — is everything installed?",
                     id="section-doctor",
@@ -1036,11 +910,6 @@ class SetupScreen(Vertical):
                         )
                     )
 
-                # Immediately after the environment check, and before anything
-                # that runs: the check is what tells you the AI is missing, and
-                # this is where you say which one to use. Every step that can
-                # use AI reads what is saved here, which is why none of them
-                # asks about models any more.
                 with Collapsible(
                     title="AI setup — choose the models, once, for everything",
                     id="section-ai",
@@ -1078,12 +947,6 @@ class SetupScreen(Vertical):
                         )
                     )
 
-                # Directly after the environment check because it comes *before*
-                # step 1 for a class with no scanner. It ends where Split ends —
-                # a folder of per-student PDFs — so nothing downstream ever
-                # learns the pages arrived as photos, which is why it belongs
-                # here as an optional on-ramp rather than as a numbered step
-                # every assignment has to walk past.
                 with Collapsible(
                     title="Import phone photos — per-student PDFs from a folder of photos",
                     id="section-photo-import",
@@ -1152,10 +1015,6 @@ class SetupScreen(Vertical):
                     with Vertical(id="photo-progress", classes="hidden"):
                         yield Static("", id="photo-progress-status", classes="card-hint")
 
-                # Next to photo import because they solve the same shape of
-                # problem — "my class doesn't work the way the pipeline assumes"
-                # — and an instructor arriving with their own assignment and
-                # photos needs both.
                 with Collapsible(
                     title="Draw answer regions — an assignment Opengrader didn't make",
                     id="section-region-map",
@@ -1265,11 +1124,6 @@ class SetupScreen(Vertical):
                             "Scramble the question order on every sheet",
                             id="tmpl-shuffle",
                         )
-                        # The sheet count only appears under scrambling because
-                        # that is the only time the sheets differ from each
-                        # other. Unscrambled, every sheet is identical and one
-                        # printed page plus a photocopier beats asking a
-                        # teacher for a number.
                         with Vertical(id="tmpl-copies-area", classes="hidden"):
                             yield self._field_label(
                                 "How many sheets",
@@ -1471,14 +1325,10 @@ class SetupScreen(Vertical):
                     )
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        """Toggle visibility of related path inputs when checkboxes are toggled."""
         if event.checkbox.id == "split-use-template":
             self.query_one("#split-template-path-row").set_class(not event.value, "hidden")
         elif event.checkbox.id == "ext-use-template":
             self.query_one("#ext-template-path-row").set_class(not event.value, "hidden")
-            # The extractor refuses both at once (they are two answers to "where
-            # are the boxes?"), so untick the other here rather than letting the
-            # run fail on a form that looked valid.
             if event.value:
                 self.query_one("#ext-use-region-map", Checkbox).value = False
         elif event.checkbox.id == "ext-use-region-map":
@@ -1488,9 +1338,6 @@ class SetupScreen(Vertical):
         elif event.checkbox.id == "ext-use-id":
             self.query_one("#ext-roster-area").set_class(not event.value, "hidden")
         elif event.checkbox.id in ("tmpl-qr", "tmpl-bubble-sheet", "tmpl-shuffle"):
-            # The roster row personalizes either kind of sheet, so it appears
-            # for whichever is on. A bubble sheet always carries its QR, so
-            # ticking it alone is enough to reach the roster.
             self._sync_template_options()
         elif event.checkbox.id == "ak-use-template":
             self.query_one("#ak-template-path-row").set_class(not event.value, "hidden")
@@ -1498,9 +1345,6 @@ class SetupScreen(Vertical):
             self.query_one("#ext-parallel-options").set_class(not event.value, "hidden")
         elif event.checkbox.id == "ext-refine":
             self.query_one("#ext-refine-options").set_class(not event.value, "hidden")
-            # The two answer different questions and the CLI refuses the pair, so
-            # untick the other rather than letting the run fail after the user has
-            # filled in every other field.
             if event.value:
                 self.query_one("#ext-resume", Checkbox).value = False
         elif event.checkbox.id == "ext-resume" and event.value:
@@ -1511,14 +1355,12 @@ class SetupScreen(Vertical):
             self.query_one("#pipe-template-row").set_class(not event.value, "hidden")
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        """Swap the roster inputs between one-section and multi-section modes."""
         if event.radio_set.id == "ext-roster-mode":
             one_section = event.pressed.id == "ext-mode-one"
             self.query_one("#ext-one-section").set_class(not one_section, "hidden")
             self.query_one("#ext-many-section").set_class(one_section, "hidden")
 
     def _open_path_picker(self, input_id: str) -> None:
-        """Open the modal file browser and fill the input with the result."""
         mode, title = self._PATH_FIELDS[input_id]
         input_widget = self.query_one(f"#{input_id}", Input)
 
@@ -1545,12 +1387,6 @@ class SetupScreen(Vertical):
         )
 
     def _append_roster_path(self) -> None:
-        """Pick a roster file and append it as a new line in the roster list.
-
-        Multi-section mode takes several rosters, so Browse *appends* (rather
-        than replacing an Input) — the grader can then type '=SectionName' after
-        any line to override the filename-derived section name.
-        """
         text_area = self.query_one("#ext-roster-list", TextArea)
 
         def _apply(path: Path | None) -> None:
@@ -1625,19 +1461,12 @@ class SetupScreen(Vertical):
             self._run_pipeline_preview()
 
     def _handoff_submissions(self, input_id: str) -> str:
-        """The folder a Helper Tool acts on: its own field, else the launch card.
-
-        Falling back to the launch card means the common case — share or back up
-        the class you are about to grade — needs no second path typed in, while
-        the field is still there for a folder this session never opened.
-        """
         own = self._clean_path(self.query_one(f"#{input_id}", Input).value)
         if own:
             return own
         return self._clean_path(self.query_one("#tui-sub-path", Input).value)
 
     def _open_grader_packet(self) -> None:
-        """Open the create-a-grader-copy modal, prefilled from the launch card."""
         submissions = self._handoff_submissions("handoff-submissions")
         if not submissions:
             self.app.notify(
@@ -1654,7 +1483,6 @@ class SetupScreen(Vertical):
         )
 
     def _open_merge(self) -> None:
-        """Open the merge-a-copy-back modal for the same folder."""
         submissions = self._handoff_submissions("handoff-submissions")
         if not submissions:
             self.app.notify(
@@ -1673,14 +1501,6 @@ class SetupScreen(Vertical):
         self.app.push_screen(BackupScreen(submissions_path=submissions))
 
     def _open_region_map(self) -> None:
-        """Open the region-map editor, and wire its result into Extract.
-
-        The map it saves is only useful as the Extract step's ``--region-map``,
-        so the path it hands back is written straight into that field and the
-        option ticked — the same closing-the-loop move the calibration tool
-        makes with the confidence it recommends. Without it the instructor has
-        to remember a filename the editor chose for them.
-        """
         pdf_path = self._clean_path(self.query_one("#region-pdf", Input).value)
         if not pdf_path:
             self.app.notify(
@@ -1691,7 +1511,7 @@ class SetupScreen(Vertical):
         existing = self._clean_path(self.query_one("#region-map-path", Input).value)
 
         def _apply(saved: Path | None) -> None:
-            if saved is None:  # cancelled — nothing was written
+            if saved is None:
                 return
             self.query_one("#region-map-path", Input).value = str(saved)
             self.query_one("#ext-region-map-path", Input).value = str(saved)
@@ -1703,13 +1523,6 @@ class SetupScreen(Vertical):
         )
 
     def _open_doctor(self) -> None:
-        """Open the environment check.
-
-        Needs no folder — it is about the machine, not about any class — but it
-        is pointed at the models saved in AI setup, so it reports on what this
-        user's pipeline would actually ask for rather than on the built-in
-        defaults.
-        """
         current = self._ai()
         self.app.push_screen(
             DoctorScreen(
@@ -1720,16 +1533,6 @@ class SetupScreen(Vertical):
         )
 
     def _ai_summary_text(self) -> str:
-        """One muted line naming what the AI is currently set to *do*.
-
-        Shown on the closed AI setup card so the answer to "which model am I
-        using, and for what?" needs no click — the question the four removed
-        per-section disclosures used to answer badly, by asking it again every
-        time. Naming a model is not enough on its own: a summary that named two
-        configured models while every feature toggle was off would say
-        something true and misleading at once, so each job states whether it is
-        even switched on before it says which model does it.
-        """
         current = self._ai()
         handwriting = (
             f"reads handwriting with {current.vision_model}"
@@ -1748,14 +1551,6 @@ class SetupScreen(Vertical):
         )
 
     def _ai_status_text(self, step: str) -> str:
-        """One muted line naming what the AI is set to do for one step.
-
-        Replaces that step's deleted AI checkbox: the checkbox is gone, but
-        the fact it used to state — is the AI in play here, and doing what —
-        must still be visible without opening AI setup. Reads `self._ai()`
-        fresh on every call for the same reason `_ai()` itself does: the
-        answer can change mid-session, the instant AI setup is saved.
-        """
         current = self._ai()
         change_here = "Change this in [b]AI setup[/b] under Helper Tools below."
 
@@ -1841,17 +1636,6 @@ class SetupScreen(Vertical):
         return f"{body} {change_here}"
 
     def _refresh_ai_displays(self) -> None:
-        """Refresh every place on this screen that states what the AI is set
-        to do, after AI setup — or an accepted calibration recommendation —
-        may have changed it.
-
-        One method rather than each caller updating its own subset: a saved
-        change can move any of read_handwriting/escalate_only/transcribe_math/
-        grade_written/require_calibration/min_confidence, and every one of
-        the six displays below reads at least one of them, so a caller that
-        only refreshed "the field it touched" would drift the moment a second
-        field started mattering to a display it didn't know about.
-        """
         self.query_one("#ai-current-summary", Static).update(self._ai_summary_text())
         self.query_one("#split-ai-status", Static).update(self._ai_status_text("split"))
         self.query_one("#ext-ai-status", Static).update(self._ai_status_text("ext"))
@@ -1860,26 +1644,14 @@ class SetupScreen(Vertical):
         self.query_one("#pipe-ai-status", Static).update(self._ai_status_text("pipe"))
 
     def _open_ai_settings(self) -> None:
-        """Open the one place the AI is configured, and refresh every display."""
-
         def _refresh(saved: ai_config.AISettings | None) -> None:
-            if saved is None:  # cancelled — nothing was written
+            if saved is None:
                 return
-            # Re-read rather than render `saved` directly: the displays state
-            # *resolved* values, and a blank field there means "the default",
-            # which only `resolve` knows how to fill in.
             self._refresh_ai_displays()
 
         self.app.push_screen(AISettingsScreen(), _refresh)
 
     def _open_course_grades(self) -> None:
-        """Open the course-gradebook modal, prefilled if a course file is nearby.
-
-        A ``course.toml`` sits *above* the assignment folders by design, so when
-        the launch card already names a submissions folder we walk up from it
-        looking for one. Finding it saves the instructor a Browse; not finding
-        it costs nothing, since the field is simply left empty.
-        """
         prefill = ""
         submissions = self._clean_path(self.query_one("#tui-sub-path", Input).value)
         if submissions:
@@ -1887,18 +1659,6 @@ class SetupScreen(Vertical):
         self.app.push_screen(CourseGradesScreen(course_path=prefill))
 
     def _open_llm_eval(self) -> None:
-        """Open the AI-grading calibration modal, prefilled from Auto-grade.
-
-        The paths come from the Auto-grade step above rather than from fields of
-        their own: this tool measures *that* step's model against work already
-        marked, and it is the same assignment either way.
-
-        An accepted recommendation is now **saved into the AI settings** rather
-        than typed into a form field. That is what closes the loop properly: the
-        threshold is a property of how far this model can be trusted, so it
-        should reach every later run — including one started from a terminal —
-        not just the Auto-grade box that happened to be on screen.
-        """
         solutions = self._clean_path(self.query_one("#grade-solutions", Input).value)
         submissions = self._clean_path(self.query_one("#grade-input", Input).value)
 
@@ -1908,11 +1668,6 @@ class SetupScreen(Vertical):
             settings = replace(
                 ai_config.load_settings(),
                 min_confidence=round(recommended, 2),
-                # Accepting a measurement is both the provenance fact
-                # `require_calibration` checks for (see `ResolvedAI.problems`)
-                # and an unambiguous statement that the user wants AI
-                # grading — nobody measures a confidence they don't intend
-                # to use.
                 min_confidence_measured=True,
                 grade_written=True,
             )
@@ -1924,9 +1679,6 @@ class SetupScreen(Vertical):
                     severity="error",
                 )
                 return
-            # The Auto-grade step no longer shows a checkbox or a confidence
-            # field at all — the visible confirmation is every AI display on
-            # this screen picking up the change, not a box ticking itself.
             self._refresh_ai_displays()
             self.app.notify(
                 f"Minimum confidence set to {recommended:.2f} — saved to AI "
@@ -1959,30 +1711,15 @@ class SetupScreen(Vertical):
         argv = ["--input", input_pdf, "--output", output_dir]
         if pages.strip():
             argv.extend(["--pages-per-submission", pages.strip()])
-        # If pages is blank and no template, the CLI auto-detects submission
-        # boundaries by the student Name/ID header — nothing to add here.
 
         if use_template and template:
             argv.extend(["--blank-template", template])
         if self.query_one("#split-scan-check", Checkbox).value:
-            # Default-on, and it fixes rather than only reports: a page the
-            # scanner fed in upside down produces an empty transcription and a
-            # zero with no error anywhere, and nothing downstream can undo it.
-            # --fix-order is the same bargain for a worse failure — a swapped
-            # sheet grades cleanly against the wrong question — and it is safe to
-            # pair with the default because it acts only on certain page numbers
-            # and does nothing at all on a scan that is already in order.
             argv.extend(["--fix-rotation", "--fix-order"])
         if self.query_one("#split-reorder", Checkbox).value:
-            # The unconditional pass, for the case --fix-order deliberately
-            # declines: page numbers legible enough to sort by, but only via OCR.
             argv.append("--reorder")
         if self.query_one("#split-extra-pages", Checkbox).value:
             argv.append("--extra-work-pages")
-        # No checkbox gating this any more, and no model or host flags: the
-        # splitter resolves whether/what to read from the saved AI settings
-        # itself (core/ai_config; see #split-ai-status above), so this only
-        # has to say whether to start the server for the user.
         argv.extend(self._auto_ollama_argv())
 
         self.query_one("#split-progress-status", Static).update("Splitting…")
@@ -1992,8 +1729,6 @@ class SetupScreen(Vertical):
 
     @work(thread=True, exclusive=True, group="splitter")
     def _splitter_worker(self, argv: list[str]) -> None:
-        """Run the splitter (and any reorder pass) off the UI thread so a long
-        vision-model reorder doesn't freeze the app."""
         app = self.app
 
         def on_status(message: str) -> None:
@@ -2001,7 +1736,7 @@ class SetupScreen(Vertical):
 
         try:
             run_splitter_cli(argv, status_callback=on_status)
-        except SystemExit as exc:  # the CLI calls sys.exit on fatal input errors
+        except SystemExit as exc:
             app.call_from_thread(self._split_finish, f"Splitter failed (exit {exc.code}).", True)
             return
         except Exception as exc:
@@ -2018,13 +1753,6 @@ class SetupScreen(Vertical):
         self.app.notify(message, severity="error" if is_error else "information")
 
     def _run_photo_import(self) -> None:
-        """Validate the photo-import form and hand it to the worker.
-
-        Calls `import_photos` rather than the `photo-import` CLI (the pattern
-        the pipeline steps above use) because the CLI's whole job past the core
-        call is printing a report to a terminal this screen doesn't have —
-        the structured report is what we actually want to summarize here.
-        """
         input_path = self._clean_path(self.query_one("#photo-input", Input).value)
         output_dir = self._clean_path(self.query_one("#photo-output", Input).value)
         if not input_path or not output_dir:
@@ -2033,9 +1761,6 @@ class SetupScreen(Vertical):
             )
             return
 
-        # Rejected here rather than passed through, because a bad value would
-        # otherwise surface as a grouping that silently mixed two students'
-        # pages into one PDF — a mistake nothing downstream can detect.
         pages_raw = self.query_one("#photo-pages", Input).value.strip()
         pages_per_photo_set: int | None = None
         if pages_raw:
@@ -2076,12 +1801,6 @@ class SetupScreen(Vertical):
         paper: str,
         perspective: bool,
     ) -> None:
-        """Rectify and bind the photos off the UI thread.
-
-        A phone photo is several megapixels and every one of them gets warped
-        and re-encoded, so a class-sized folder is comfortably minutes of work —
-        long enough that running it inline would look like the app had hung.
-        """
         app = self.app
 
         def on_status(message: str) -> None:
@@ -2097,9 +1816,6 @@ class SetupScreen(Vertical):
                 progress_callback=on_status,
             )
         except PhotoIntakeError as exc:
-            # The tool's own diagnostics — "no images found here", "HEIC photos
-            # need this install" — are written to be read by the user, so they
-            # are shown verbatim rather than wrapped in a generic failure.
             app.call_from_thread(self._photo_finish, str(exc), True, None)
             return
         except Exception as exc:
@@ -2111,12 +1827,6 @@ class SetupScreen(Vertical):
 
     @staticmethod
     def _photo_summary(report: PhotoIntakeReport) -> str:
-        """One sentence naming what was written and what was not.
-
-        Unreadable photos are called out by count even though the import
-        succeeded: they are the one outcome where a student silently ends up
-        with a missing page, so "12 submissions" alone would be a half-truth.
-        """
         count = len(report.submissions)
         noun = "submission" if count == 1 else "submissions"
         message = f"Imported {count} {noun} to {report.output_dir}."
@@ -2136,21 +1846,11 @@ class SetupScreen(Vertical):
         self.query_one("#photo-progress").add_class("hidden")
         self.app.notify(message, severity="error" if is_error else "information")
         if report is not None and report.submissions:
-            # Point Extract at what we just made, so the next step is one click
-            # rather than a re-typed path. Only when that field is still empty:
-            # a path already sitting there is the user's, not ours to replace.
             extractor_input = self.query_one("#ext-input", Input)
             if not extractor_input.value.strip():
                 extractor_input.value = str(report.output_dir)
 
     def _roster_argv(self) -> list[str]:
-        """Build the --id-file/--section args from the roster sub-form.
-
-        One-section mode → a single ``--id-file roster.tsv=SectionName`` (or bare
-        ``--section`` when no roster is given but a name is). Multi-section mode →
-        one ``--id-file`` per non-blank line of the roster list. Empty inputs
-        yield no args (matches the prior "roster is optional" behavior).
-        """
         multi = self.query_one("#ext-mode-many", RadioButton).value
         if multi:
             raw = self.query_one("#ext-roster-list", TextArea).text
@@ -2184,8 +1884,6 @@ class SetupScreen(Vertical):
             if template:
                 argv.extend(["--blank-template", template])
 
-        # Never both: the extractor rejects the pair outright, and the two
-        # checkboxes untick each other above, so at most one of these fires.
         if self.query_one("#ext-use-region-map", Checkbox).value:
             region_map = self._clean_path(
                 self.query_one("#ext-region-map-path", Input).value
@@ -2202,11 +1900,6 @@ class SetupScreen(Vertical):
         if self.query_one("#ext-use-id", Checkbox).value:
             argv.extend(self._roster_argv())
 
-        # No --llm-responses / --llm-escalate / --llm-math: whether to
-        # transcribe with the AI, whether to escalate only what OCR read
-        # badly, and whether to read maths as LaTeX are all the saved AI
-        # settings now, and the extractor resolves every one of them for
-        # itself — see #ext-ai-status above.
 
         jobs_argv = self._jobs_argv()
         if jobs_argv is None:
@@ -2223,9 +1916,6 @@ class SetupScreen(Vertical):
 
         if self.query_one("#ext-refine", Checkbox).value:
             argv.append("--refine")
-            # Unchecked, the DPI field is ignored entirely — the same rule the
-            # Ollama-advanced and parallel-jobs disclosures follow, so a value
-            # left behind in a hidden input can never apply to a later run.
             refine_dpi = self.query_one("#ext-refine-dpi", Input).value.strip()
             if refine_dpi:
                 if not refine_dpi.isdigit() or int(refine_dpi) < 1:
@@ -2237,25 +1927,16 @@ class SetupScreen(Vertical):
                     return
                 argv.extend(["--refine-dpi", refine_dpi])
 
-        # Whether to start the AI for the user is the one AI question this step
-        # still asks — and it asks it of the saved settings, not of the form.
         argv.extend(self._auto_ollama_argv())
 
         lock_anon = self.query_one("#ext-lock-anon", Checkbox).value
 
-        # Reset and reveal the progress area, then run off the UI thread so the
-        # app stays responsive during the (potentially long) vision pass.
         self._ext_total = 0
         bar = self.query_one("#ext-progress-bar", ProgressBar)
         bar.update(total=None, progress=0)
         self.query_one("#ext-progress-status", Static).update("Starting…")
         self.query_one("#ext-progress").remove_class("hidden")
         self.query_one("#run-extractor", Button).disabled = True
-        # This screen is the one place that can say with certainty extraction
-        # is live (it just started the worker below) rather than guess from
-        # manifest recency — `_open_grade_while_extracting` reads this flag
-        # and the app-level poll passes it straight to `ExtractionWatcher` as
-        # `known_active`. See `core/submissions/watch.py`.
         self.extraction_in_progress = True
 
         self._extractor_worker(argv, output_dir, lock_anon)
@@ -2264,8 +1945,6 @@ class SetupScreen(Vertical):
     def _extractor_worker(
         self, argv: list[str], output_dir: str, lock_anon: bool
     ) -> None:
-        """Run the extractor in a background thread, marshalling progress and
-        completion back onto the UI thread."""
         app = self.app
 
         def on_file_start(_pdf_name: str, count: int) -> None:
@@ -2281,10 +1960,8 @@ class SetupScreen(Vertical):
         try:
             run_extractor_cli(argv, progress=progress, status_callback=on_status)
             if lock_anon:
-                # Mark the freshly created folder anonymous-locked so graders who
-                # open it inherit the lock rather than opting in.
                 write_policy(output_dir, GradingPolicy(mode="multi", anonymity_locked=True))
-        except Exception as exc:  # surface any failure to the user
+        except Exception as exc:
             app.call_from_thread(self._ext_finish, f"Extractor error: {exc}", True)
             return
         app.call_from_thread(self._ext_finish, "Extraction complete.", False)
@@ -2305,24 +1982,10 @@ class SetupScreen(Vertical):
     def _ext_finish(self, message: str, is_error: bool) -> None:
         self.query_one("#run-extractor", Button).disabled = False
         self.query_one("#ext-progress").add_class("hidden")
-        # The worker this screen launched is done, one way or the other — the
-        # certainty `_open_grade_while_extracting`/the app poll relied on no
-        # longer holds, so it must flip immediately rather than let a grading
-        # workspace opened moments ago keep believing extraction is live for
-        # another `_ACTIVE_RECENCY_SECONDS` of guesswork.
         self.extraction_in_progress = False
         self.app.notify(message, severity="error" if is_error else "information")
 
     def _open_grade_while_extracting(self) -> None:
-        """Open the grading workspace on the folder this screen is extracting
-        into, without waiting for the batch to finish.
-
-        The headline path for this feature: extracting a whole class takes
-        minutes, grading takes hours, and the first submission is gradeable
-        the instant it lands. The answer key path is read from the launch
-        card above rather than a field of its own — the common case is
-        grading the assignment this same session just prepared.
-        """
         qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
         output_dir = self._clean_path(self.query_one("#ext-output", Input).value)
         if not qa_path:
@@ -2338,22 +2001,8 @@ class SetupScreen(Vertical):
             return
         self.post_message(self.GradeWhileExtractingRequested(qa_path, output_dir))
 
-    # ------------------------------------------------------------------ #
-    # "Run the whole pipeline" — the one-shot front end over
-    # core/pipeline.py's `run_pipeline`/`plan_pipeline`. See that module's
-    # docstring for the stage order and the ledger; this section only builds
-    # a `PipelineRequest` from the form, runs it off the UI thread, and
-    # narrates the `PipelineProgress` callbacks the same way the numbered
-    # steps narrate their own CLIs.
-    # ------------------------------------------------------------------ #
 
     def _build_pipeline_request(self) -> PipelineRequest | None:
-        """Read the form into a `PipelineRequest`, or notify and return None.
-
-        Validation lives here rather than in the worker so a bad field reads
-        as an immediate notification instead of a background-thread crash —
-        the same reasoning `_run_extractor`'s `_jobs_argv` gives.
-        """
         scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
         out = self._clean_path(self.query_one("#pipe-out", Input).value)
         if not scan or not out:
@@ -2403,13 +2052,6 @@ class SetupScreen(Vertical):
                 return None
             pages = int(pages_str)
 
-        # No checkbox any more: whether the AI helps at all, for which of the
-        # two jobs, and the host/auto-start to use are all the saved AI
-        # settings — read once here so the same values drive `LlmOptions`
-        # below and `#pipe-ai-status` above. The model names stay blank
-        # (`LlmOptions`' own default): each provider's own client already
-        # resolves the configured model from this same settings file, so
-        # naming them again here would be a second channel for one answer.
         current = self._ai()
         llm = LlmOptions(
             read_handwriting=current.read_handwriting,
@@ -2426,21 +2068,11 @@ class SetupScreen(Vertical):
             blank_template=template,
             pages_per_submission=pages,
             llm=llm,
-            # Whether auto-grade runs once extraction finishes is likewise a
-            # saved AI setting now, not a checkbox on this card.
             auto_grade=current.auto_grade,
-            # The one extra checkbox this section has beyond the design's core
-            # fields — see `core/pipeline.py`'s scan-check stage: a
-            # high-severity finding blocks the run outright, and `force` is the
-            # only way past that from inside the TUI. Without it a blocked
-            # instructor would have no move except leaving this screen to run
-            # `opengrader-run --force` from a terminal.
             force=self.query_one("#pipe-force", Checkbox).value,
         )
 
     def _run_pipeline_preview(self) -> None:
-        """`plan_pipeline` in a worker, and nothing else — this is the TUI's
-        `--dry-run`: it reads the ledger and the input, and writes nothing."""
         request = self._build_pipeline_request()
         if request is None:
             return
@@ -2451,12 +2083,10 @@ class SetupScreen(Vertical):
 
     @work(thread=True, exclusive=True, group="pipeline-preview")
     def _pipeline_preview_worker(self, request: PipelineRequest) -> None:
-        """`plan_pipeline` off the UI thread — it fingerprints every input file,
-        which on a large scan is worth not blocking the app for."""
         app = self.app
         try:
             plans = plan_pipeline(request)
-        except Exception as exc:  # surface any failure to the user
+        except Exception as exc:
             app.call_from_thread(
                 self._pipe_preview_finish, None, request.output_dir, str(exc)
             )
@@ -2494,17 +2124,12 @@ class SetupScreen(Vertical):
         asap = self.query_one("#pipe-grade-asap", Checkbox).value
         qa_path = str(request.qa_file) if request.qa_file is not None else ""
         if asap and not qa_path:
-            # The checkbox asked for something this run cannot do (opening the
-            # workspace needs an answer key, early or late) — say so rather
-            # than quietly falling back to "wait for the end", which would
-            # look identical to the checkbox having been unticked.
             self.app.notify(
                 "No answer key set — grading will open once the whole run "
                 "finishes instead of as submissions arrive. Add an answer "
                 "key above to grade sooner.",
             )
 
-        # Reset and reveal the progress area, same shape as `_run_extractor`'s.
         self._pipe_log_lines: list[str] = []
         self._pipe_total = 0
         self.query_one("#pipe-preview-output").add_class("hidden")
@@ -2515,11 +2140,6 @@ class SetupScreen(Vertical):
         self.query_one("#pipe-progress").remove_class("hidden")
         self.query_one("#pipe-run", Button).disabled = True
         self.query_one("#pipe-preview", Button).disabled = True
-        # This screen is the one place that can say with certainty extraction
-        # might still be running (it is about to start the whole pipeline,
-        # which always reaches the extract stage before auto-grade) — see
-        # `_run_extractor`'s identical flag and `_ext_finish`'s comment on why
-        # it has to flip back the instant the worker ends, not on a timer.
         self.extraction_in_progress = True
 
         self._pipeline_worker(request, asap, qa_path)
@@ -2528,21 +2148,9 @@ class SetupScreen(Vertical):
     def _pipeline_worker(
         self, request: PipelineRequest, asap: bool, qa_path: str
     ) -> None:
-        """Run the pipeline in a background thread, marshalling every UI
-        update — and the early-launch decision — back onto the UI thread."""
         app = self.app
-        # Mutable across the closures below without `nonlocal` plumbing per
-        # callback; `stage` tracks which stage is currently running (so the
-        # early-launch check only fires during extraction) and
-        # `launched_early` guards against posting the open-workspace message
-        # twice, which would reset a workspace the user is already grading in.
         state = {"stage": "", "launched_early": False}
 
-        # Built only when an early launch is actually possible — polling reads
-        # the extraction manifest (see core/submissions/watch.py), the same
-        # after-the-fact-only signal the "Grade what's ready" button and the
-        # background fold-in poll already trust, so a submission is never
-        # handed to the grader mid-write.
         watcher = ExtractionWatcher(request.submissions_dir) if asap and qa_path else None
 
         def maybe_launch_early() -> None:
@@ -2568,10 +2176,6 @@ class SetupScreen(Vertical):
 
         def on_file_start(name: str, count: int) -> None:
             app.call_from_thread(self._pipe_file_start, name, count)
-            # A new submission file starting is the natural checkpoint for
-            # "has the previous one finished?" — polling here rather than on
-            # every `on_response` keeps this to one manifest stat() per file
-            # instead of one per transcribed answer.
             maybe_launch_early()
 
         def on_response(name: str, item: str) -> None:
@@ -2587,11 +2191,7 @@ class SetupScreen(Vertical):
 
         try:
             report = run_pipeline(request, progress=progress)
-        except Exception as exc:  # run_pipeline itself only re-raises
-            # KeyboardInterrupt or SystemExit escaping a stage — everything
-            # else already comes back as a FAILED StageOutcome inside the
-            # report (see `run_pipeline`'s docstring: "a failed run still
-            # returns its report").
+        except Exception as exc:
             app.call_from_thread(self._pipe_finish_error, f"Pipeline error: {exc}")
             return
 
@@ -2621,13 +2221,6 @@ class SetupScreen(Vertical):
         self.query_one("#pipe-progress-status", Static).update(f"{name} · {item}")
 
     def _pipe_launch_early(self, qa_path: str, submissions_path: str) -> None:
-        """The launch-policy checkbox's "on" behaviour: open the workspace the
-        moment the extract stage has produced anything gradeable.
-
-        Posts the same message the numbered Extract step's "Grade what's
-        ready →" button posts, so `TuiApp` handles both identically — see
-        `on_setup_screen_grade_while_extracting_requested`.
-        """
         self.app.notify(
             "Submissions are ready — opening the grading workspace while the "
             "rest of the pipeline keeps running in the background."
@@ -2637,11 +2230,6 @@ class SetupScreen(Vertical):
     def _pipe_reset_buttons(self) -> None:
         self.query_one("#pipe-run", Button).disabled = False
         self.query_one("#pipe-preview", Button).disabled = False
-        # The worker this screen launched is done — ran to completion, failed,
-        # or blocked, it does not matter which — so the certainty backing
-        # `extraction_in_progress` no longer holds. See `_ext_finish`'s
-        # identical comment for why this has to happen the instant the worker
-        # ends rather than be inferred later from the manifest.
         self.extraction_in_progress = False
 
     def _pipe_finish_error(self, message: str) -> None:
@@ -2657,10 +2245,6 @@ class SetupScreen(Vertical):
             (o for o in report.stages if o.status is StageStatus.BLOCKED), None
         )
         if blocked is not None:
-            # A BLOCKED outcome must never open the grading workspace — that is
-            # the whole point of the scan pre-flight. Surface the one-line
-            # message and the full multi-line detail (already appended to the
-            # stage log by `_pipe_stage_finish`) and name both ways forward.
             self.query_one("#pipe-progress-status", Static).update(
                 f"Stopped: {blocked.message}"
             )
@@ -2681,10 +2265,6 @@ class SetupScreen(Vertical):
             return
 
         if launched_early:
-            # The workspace is already open and the user may already be
-            # grading in it — posting LaunchRequested now would reset that
-            # workflow state out from under them, so this run's completion is
-            # just a notification, not a second launch.
             self.app.notify(
                 f"Pipeline finished — {report.submission_count} submission(s) "
                 f"in {report.submissions_dir}."
@@ -2700,9 +2280,6 @@ class SetupScreen(Vertical):
             return
 
         if report.ready_to_grade:
-            # No answer key was ever given, so there is nothing to launch with
-            # — `LaunchRequested` needs one exactly as much as the early path
-            # did. The submissions themselves are real and worth pointing at.
             self.app.notify(
                 f"{report.submission_count} submission(s) ready in "
                 f"{report.submissions_dir}. Add an answer key above, or open "
@@ -2730,10 +2307,6 @@ class SetupScreen(Vertical):
             template = self._clean_path(self.query_one("#ak-template-path", Input).value)
             if template:
                 argv.extend(["--blank-template", template])
-        # No checkbox gating this any more: whether a scanned answer key is
-        # read with the handwriting model is the saved AI setting (see
-        # #ak-ai-status above), so this only has to say whether to start the
-        # server for the user.
         argv.extend(self._auto_ollama_argv())
 
         self._ak_total = 0
@@ -2746,7 +2319,6 @@ class SetupScreen(Vertical):
 
     @work(thread=True, exclusive=True, group="answer-key")
     def _answer_key_worker(self, argv: list[str]) -> None:
-        """Build the answer key off the UI thread (PDF + vision model can be slow)."""
         app = self.app
 
         def on_status(message: str) -> None:
@@ -2795,46 +2367,20 @@ class SetupScreen(Vertical):
 
         argv = ["--solutions", solutions, "--input", input_dir]
 
-        # No --llm: whether to grade written answers with the AI, which
-        # model does it, and the confidence gate all come from the saved AI
-        # settings now (see #grade-ai-status above), which is also where the
-        # CLI reads its own argparse default from — so this screen never
-        # builds that flag itself.
 
-        # Reset and reveal the progress area, then grade off the UI thread: LLM
-        # grading is a network call per free response, so it must not block.
         self._grade_prefix = ""
         bar = self.query_one("#autograde-progress-bar", ProgressBar)
         bar.update(total=None, progress=0)
         self.query_one("#autograde-progress-status", Static).update("Starting…")
         self.query_one("#autograde-progress").remove_class("hidden")
         self.query_one("#run-grading", Button).disabled = True
-        # The Ollama pre-flight probe still has to fire exactly when a model
-        # will actually be asked to grade — that is `grade_written`, read
-        # fresh here now that no checkbox carries the answer.
         self._grading_worker(argv, probe_llm=self._ai().grade_written)
 
     @work(thread=True, exclusive=True, group="grading")
     def _grading_worker(self, argv: list[str], *, probe_llm: bool = False) -> None:
-        """Run auto-grading in a background thread, marshalling progress and
-        completion back onto the UI thread."""
         app = self.app
 
         if probe_llm:
-            # Fast path: if the server is already up and the model present, run
-            # straight away. Otherwise ask the CLI to auto-start the server and
-            # pull the model — but only if the user asked for that, the same
-            # rule the Split/Extract/Answer-key steps now follow.
-            #
-            # **This probe belongs on the worker, not on the UI thread.** It is
-            # an HTTP call carrying the configured timeout (120 s by default),
-            # and since AI setup lets a user type any host, a typo'd or
-            # firewalled one no longer refuses the connection instantly — it
-            # black-holes the request and the whole TUI freezes for the full
-            # timeout with no progress bar and no way to cancel. Everything the
-            # decision needs (`grade_written`, read above; the settings file,
-            # read here) is safe to reach from a thread, so there was never a
-            # reason for it to run before the worker started.
             try:
                 ensure_model_available(ai_config.text_config())
             except OllamaError:
@@ -2854,7 +2400,7 @@ class SetupScreen(Vertical):
         )
         try:
             run_grading_cli(argv, progress=progress, status_callback=on_status)
-        except SystemExit as exc:  # the CLI calls sys.exit on fatal input errors
+        except SystemExit as exc:
             app.call_from_thread(
                 self._grade_finish, f"Grading failed (exit {exc.code}).", True
             )
@@ -2866,7 +2412,6 @@ class SetupScreen(Vertical):
 
     def _grade_file_start(self, file_name: str, index: int, total: int) -> None:
         bar = self.query_one("#autograde-progress-bar", ProgressBar)
-        # index is 1-based; index-1 files are done before this one starts.
         bar.update(total=total, progress=index - 1)
         self._grade_prefix = f"{index}/{total} · {file_name}"
         self.query_one("#autograde-progress-status", Static).update(
@@ -2883,7 +2428,6 @@ class SetupScreen(Vertical):
         self.query_one("#autograde-progress-status", Static).update(text)
 
     def _grade_set_status(self, message: str) -> None:
-        """Show a CLI status line (server start / model pull) before grading."""
         self.query_one("#autograde-progress-status", Static).update(message.strip())
 
     def _grade_finish(self, message: str, is_error: bool) -> None:
@@ -2896,17 +2440,11 @@ class SetupScreen(Vertical):
         self.app.notify(message, severity="error" if is_error else "information")
 
     def _sync_template_options(self) -> None:
-        """Reveal the roster row and the bubble-sheet explanation as needed."""
         bubble = self.query_one("#tmpl-bubble-sheet", Checkbox).value
         qr = self.query_one("#tmpl-qr", Checkbox).value
         self.query_one("#tmpl-bubble-note").set_class(not bubble, "hidden")
         self.query_one("#tmpl-roster-area").set_class(not (qr or bubble), "hidden")
-        # Copy count and scrambling are bubble-sheet only: a written template
-        # is read back by aligning every scan to one blank layout, so a
-        # per-sheet question order could never be recovered.
         self.query_one("#tmpl-batch-area").set_class(not bubble, "hidden")
-        # ...and the count sits under scrambling, since that is the only case
-        # where the sheets are not interchangeable.
         shuffle = self.query_one("#tmpl-shuffle", Checkbox).value
         self.query_one("#tmpl-copies-area").set_class(
             not (bubble and shuffle), "hidden"
@@ -2932,26 +2470,16 @@ class SetupScreen(Vertical):
         bubble = self.query_one("#tmpl-bubble-sheet", Checkbox).value
         if bubble:
             argv.append("--bubble-sheet")
-        # The roster row is only reachable under QR or bubble-sheet; guard
-        # against a stale value from a hidden input if both were toggled off.
         roster = (
             self._clean_path(self.query_one("#tmpl-roster", Input).value)
             if (bubble or self.query_one("#tmpl-qr", Checkbox).value)
             else ""
         )
         if roster:
-            # Personalized batch — implies QR for either kind of sheet.
             argv.extend(["--roster", roster])
         elif self.query_one("#tmpl-qr", Checkbox).value and not bubble:
-            # A bubble sheet always carries its QR, so the flag is redundant there.
             argv.append("--qr")
 
-        # Copy count / scrambling, both bubble-sheet only. Same rule as every
-        # other disclosure here: with the section hidden its fields are ignored
-        # entirely, so a number left behind cannot silently apply.
-        # Scrambling, and the sheet count that only exists under it. Same rule
-        # as every other disclosure here: with the section hidden its fields
-        # are ignored entirely, so a number left behind cannot silently apply.
         shuffle = bubble and self.query_one("#tmpl-shuffle", Checkbox).value
         if shuffle:
             raw_copies = self.query_one("#tmpl-copies", Input).value.strip()
@@ -2969,8 +2497,6 @@ class SetupScreen(Vertical):
                     return
                 argv.extend(["--copies", str(copies)])
             elif raw_copies and roster:
-                # Both would decide how many sheets to print; say so rather
-                # than silently picking one.
                 self.app.notify(
                     "Give a roster or a number of sheets, not both.",
                     severity="error",
@@ -2985,11 +2511,6 @@ class SetupScreen(Vertical):
                 return
             argv.append("--shuffle")
 
-        # The CLI reports questions it could not put on a bubble sheet on
-        # stdout, which nothing in the TUI would otherwise show. That warning
-        # is the one genuinely dangerous thing here: an instructor who prints a
-        # sheet missing the essay question only finds out after the exam has
-        # been sat. Capture it and put it in front of them.
         captured = io.StringIO()
         try:
             with contextlib.redirect_stdout(captured):
@@ -3017,16 +2538,10 @@ class SetupScreen(Vertical):
             self.app.notify(f"{kind} written to {output_pdf}")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Reflect a folder's saved policy when its path is entered by hand."""
         if event.input.id == "policy-submissions":
             self._sync_policy_checkbox()
 
     def _sync_policy_checkbox(self) -> None:
-        """Set the lock checkbox from the folder's current on-disk policy.
-
-        Keeps the teacher from silently flipping a folder's state: selecting a
-        folder shows what it's already set to before they apply a change.
-        """
         submissions = self._clean_path(
             self.query_one("#policy-submissions", Input).value
         )
@@ -3051,10 +2566,6 @@ class SetupScreen(Vertical):
 
         locked = self.query_one("#policy-lock-anon", Checkbox).value
         shuffle = self.query_one("#policy-shuffle", Checkbox).value
-        # Every field the policy file holds is written here, from a form that
-        # was filled in from the file on disk. A `GradingPolicy` built from a
-        # subset would quietly reset whatever it left out — applying an
-        # anonymity change would turn randomized order back off.
         policy = GradingPolicy(
             mode="multi" if locked else "solo",
             anonymity_locked=locked,
@@ -3076,11 +2587,8 @@ class SetupScreen(Vertical):
         self.app.notify(f"Grading policy set: {state}.")
 
     def _clean_path(self, path_str: str) -> str:
-        """Normalize path strings by removing quotes and resolving shell-style escapes."""
         p = path_str.strip()
         if not p:
             return ""
-        # Strip both single and double quotes often included when copying paths
         p = p.strip("'\"")
-        # Handle shell-style escaped spaces and expand home directory
         return str(Path(p.replace("\\ ", " ")).expanduser())

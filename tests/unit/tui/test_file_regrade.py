@@ -1,5 +1,3 @@
-"""Tests for the file-a-regrade flow: provider methods + the modal screen."""
-
 import asyncio
 from pathlib import Path
 
@@ -18,11 +16,6 @@ from opengrader.tui.ui.screens import FileRegradeResult, FileRegradeScreen
 from opengrader.tui.ui.screens.file_regrade_screen import _MANUAL_STUDENT
 
 from .fakes import DEFAULT_IMAGE_PATH
-
-
-# --------------------------------------------------------------------------- #
-# Provider methods
-# --------------------------------------------------------------------------- #
 
 
 def _write_qa(path: Path) -> None:
@@ -86,7 +79,7 @@ def test_file_regrade_whole_assignment(tmp_path: Path) -> None:
     provider = _provider(tmp_path)
     provider.file_regrade(student_id="222", reason="Totals are off")
     requests = open_regrade_requests(provider.submissions_path)
-    assert requests[0].question_id == ""  # whole-assignment dispute
+    assert requests[0].question_id == ""
 
 
 def test_regrade_student_choices_are_id_label_pairs_sorted_by_name(tmp_path: Path) -> None:
@@ -110,10 +103,6 @@ def test_student_identity_for_item(tmp_path: Path) -> None:
     assert provider.student_identity_for_item("s99") is None
     assert provider.student_identity_for_item(None) is None
 
-
-# --------------------------------------------------------------------------- #
-# The modal screen
-# --------------------------------------------------------------------------- #
 
 _STUDENTS = [("111", "Tommy Liu · 111"), ("222", "Andy Cortes · 222")]
 _QUESTIONS = [("q1", "Question 1"), ("q2", "Question 2")]
@@ -160,7 +149,6 @@ def test_screen_qa_picker_manual_entry_and_whole_assignment() -> None:
         async with app.run_test(size=(120, 44)) as pilot:
             await pilot.pause()
             screen = app.screen
-            # Defaults: first student, whole assignment, manual box hidden.
             assert "hidden" in screen.query_one("#file-regrade-manual-row").classes
             screen.query_one("#file-regrade-student", Select).value = _MANUAL_STUDENT
             await pilot.pause()
@@ -184,7 +172,6 @@ def test_screen_empty_reason_is_refused() -> None:
         )
         async with app.run_test(size=(120, 44)) as pilot:
             await pilot.pause()
-            # A prefilled student but no reason → submit is refused (stays open).
             await pilot.click("#file-regrade-submit")
             await pilot.pause()
             assert app.result == "unset"
@@ -202,7 +189,6 @@ def test_screen_manual_student_without_id_is_refused() -> None:
             screen.query_one("#file-regrade-student", Select).value = _MANUAL_STUDENT
             screen.query_one("#file-regrade-reason", Input).value = "Has a reason"
             await pilot.pause()
-            # Manual selected but the id box is empty → refused.
             await pilot.click("#file-regrade-submit")
             await pilot.pause()
             assert app.result == "unset"
@@ -217,12 +203,10 @@ def test_f_key_is_teacher_gated_and_files_a_request(tmp_path: Path) -> None:
     async def run() -> None:
         async with app.run_test(size=(140, 44)) as pilot:
             await pilot.pause()
-            # Anonymous by default: Shift+F does nothing.
             await pilot.press("F")
             await pilot.pause()
             assert not isinstance(app.screen, FileRegradeScreen)
 
-            # Teacher mode → Shift+F opens the dialog.
             await pilot.press("t")
             await pilot.pause()
             await pilot.press("F")

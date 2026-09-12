@@ -108,7 +108,6 @@ def test_generate_template_pdf_renders_numeric_answer_hint(tmp_path: Path) -> No
     generate_template_pdf(output, "A", questions, "Numeric Quiz")
 
     text = _extract_pdf_text(output)
-    # Numeric questions print a units hint; True/False renders its two options.
     assert "Answer in mL" in text
     assert "True" in text
     assert "False" in text

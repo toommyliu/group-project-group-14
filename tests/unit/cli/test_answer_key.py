@@ -12,9 +12,6 @@ from opengrader.core import ai_config
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.qa_file.pdf_answer_key import _load_blank_template_layout
 
-# --------------------------------------------------------------------------- #
-# text2qti (.md/.txt) and .docx dispatch
-# --------------------------------------------------------------------------- #
 
 TEXT2QTI = """Quiz title: CS146 Quiz 1
 Quiz description: A short quiz.
@@ -51,7 +48,7 @@ def test_docx_input_produces_qa(tmp_path: Path) -> None:
     run_cli(["--input", str(src), "--output", str(out), "--title", "Override"])
 
     doc = parse_qa_markdown(out.read_text())
-    assert doc.title == "Override"  # title override wins over the "Quiz title:"
+    assert doc.title == "Override"
     assert len(doc.questions) == 2
 
 
@@ -73,10 +70,6 @@ def test_text_input_with_no_questions_errors(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         run_cli(["--input", str(src), "--output", str(tmp_path / "out.md")])
 
-
-# --------------------------------------------------------------------------- #
-# PDF dispatch (text-layer + blank-template alignment)
-# --------------------------------------------------------------------------- #
 
 ANSWER_KEY_LINES = [
     "1. (5 points) What is 2 + 2?",
@@ -123,8 +116,6 @@ def test_pdf_text_layer_extraction_produces_valid_qa(answer_key_pdf: Path, tmp_p
 
 def test_pdf_blank_template_extraction_produces_valid_qa(answer_key_pdf: Path, tmp_path: Path) -> None:
     output_path = tmp_path / "solutions.md"
-    # Using the answer key as its own blank template exercises the full
-    # template-alignment path with zero expected offsets.
     run_cli(
         [
             "--input", str(answer_key_pdf),
@@ -133,12 +124,6 @@ def test_pdf_blank_template_extraction_produces_valid_qa(answer_key_pdf: Path, t
         ]
     )
     _assert_valid_solutions_markdown(output_path)
-
-
-# --------------------------------------------------------------------------- #
-# --llm-read-scans: whether a scanned/image PDF is also read with the vision
-# model, and its AI Setup default.
-# --------------------------------------------------------------------------- #
 
 
 def _stub_extract(monkeypatch) -> dict:
@@ -176,11 +161,6 @@ def test_no_llm_read_scans_leaves_ollama_config_none(
 def test_llm_read_scans_defaults_on_from_ai_setup(
     answer_key_pdf: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    """With the setting on, the pre-existing "should I even try Ollama" check
-    (auto-ollama, or a non-default model/host) still decides whether a config
-    is actually built; --llm-read-scans only gates whether that check runs at
-    all. A non-default model is enough to exercise it here.
-    """
     ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
     import opengrader.core.ocr.ollama_vlm as ollama_vlm_module
 

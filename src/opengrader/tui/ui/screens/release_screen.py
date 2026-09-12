@@ -1,24 +1,3 @@
-"""Hand this assignment back, and see what has moved since you last did.
-
-The last thing that happens to a graded assignment, and — until this existed —
-the only step with no support at all: an instructor decided "I think I'm done"
-from memory, exported, and had no record of what any student was actually shown.
-
-The modal is two views over one cohort, because they are two halves of one
-question and an instructor asks them a minute apart:
-
-* **Readiness** (the default) — what stands between this cohort and being
-  handed back, worst first, from `core/release.build_readiness_report`.
-* **What changed** (``d``) — every grade that has moved since the last release,
-  which is the answer to "my grade is different from the one you gave me".
-
-Releasing is deliberately gated but never forbidden: the button refuses while
-something is blocking until "release anyway" is ticked, the same shape as the
-`grade-release create --force` flag. And a release **writes no grade** — it
-records what the students were handed, so nothing here can disturb a grading
-session in progress.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -45,19 +24,10 @@ from opengrader.tui.formatting import (
 VIEW_READINESS = "readiness"
 VIEW_CHANGES = "changes"
 
-# Beyond this many rows the list stops being read and starts being scrolled
-# past; the CLI (`grade-release diff`) prints all of them for anyone who needs
-# the full list.
 MAX_LISTED_CHANGES = 40
 
 
 class ReleaseScreen(ModalScreen[str | None]):
-    """Readiness + release, and what has changed since the last one.
-
-    Dismisses with the new release's id when one was recorded, else ``None`` —
-    so the app can say what happened without re-reading the folder to find out.
-    """
-
     DEFAULT_CSS = """
     ReleaseScreen {
         align: center middle;
@@ -116,9 +86,6 @@ class ReleaseScreen(ModalScreen[str | None]):
         margin-top: 1;
         color: $text-muted;
     }
-
-    /* Explicit auto height: a bare Vertical defaults to 1fr and would stretch
-       to fill the dialog, pushing the buttons off-screen. */
     #release-controls {
         width: 100%;
         height: auto;
@@ -170,19 +137,11 @@ class ReleaseScreen(ModalScreen[str | None]):
         self._comparison = comparison
         self._releases = releases or []
         self._teacher_mode = teacher_mode
-        # Injected rather than reached for through the app, so the screen tests
-        # without a provider — the same shape `CommentLibraryScreen` uses.
-        # Named `_release_callback`, **not** `_on_release`: Textual dispatches an
-        # ``@on`` handler by looking the method up on the instance, so an
-        # attribute sharing a handler's name silently replaces it and the button
-        # calls the callback with a Button.Pressed event instead of a label.
+        # Naming this _on_release would collide with the decorated handler Textual resolves by name.
         self._release_callback = on_release
         self._view = VIEW_READINESS
         self._released_id: str | None = None
 
-    # ------------------------------------------------------------------ #
-    # Layout
-    # ------------------------------------------------------------------ #
 
     def compose(self) -> ComposeResult:
         with Vertical(id="release-dialog") as dialog:
@@ -235,9 +194,6 @@ class ReleaseScreen(ModalScreen[str | None]):
             f"({self._previous.release_id}){label}[/dim]"
         )
 
-    # ------------------------------------------------------------------ #
-    # Views
-    # ------------------------------------------------------------------ #
 
     def _render_body(self) -> None:
         body = self.query_one("#release-body", VerticalScroll)
@@ -298,8 +254,6 @@ class ReleaseScreen(ModalScreen[str | None]):
             )
         )
 
-        # Caveats before the lists, following grade-restore's rule that "nothing
-        # changed" must never be read as "everything is accounted for".
         if comparison.missing_students:
             body.mount(
                 Static(
@@ -352,17 +306,8 @@ class ReleaseScreen(ModalScreen[str | None]):
                     )
                 )
 
-    # ------------------------------------------------------------------ #
-    # Actions
-    # ------------------------------------------------------------------ #
 
     def _can_release(self) -> bool:
-        """Blocking issues disable the button until the override is ticked.
-
-        A gate, not a wall: an instructor genuinely does sometimes hand back a
-        partly graded assignment, and a check that could not be overridden
-        would be worked around instead of read.
-        """
         if not self._report.blocking:
             return True
         if not self.is_mounted:
@@ -407,7 +352,7 @@ class ReleaseScreen(ModalScreen[str | None]):
         label = self.query_one("#release-label", Input).value.strip()
         try:
             release = self._release_callback(label)
-        except Exception as exc:  # noqa: BLE001 — surfaced, never raised at a grader
+        except Exception as exc:  # noqa: BLE001
             self.app.notify(f"Could not record the release: {exc}", severity="error")
             return
         self._released_id = getattr(release, "release_id", None)

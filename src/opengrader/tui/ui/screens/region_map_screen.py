@@ -1,49 +1,3 @@
-"""Draw the answer regions on your own assignment, from inside the TUI.
-
-``region-map propose`` gets an instructor a draft and ``region-map preview``
-shows them whether it is right. This screen is the part in between: the place
-they *fix* it. It opens a blank copy of their assignment, draws the current
-regions on it, and lets them move, resize, add, delete and describe boxes until
-the picture matches the paper — then writes ``<assignment>.regions.json`` and
-hands the path back.
-
-**The keyboard is the primary interface, not a fallback.** Opengrader runs in
-terminals with no pixel graphics at all (see ``tui/terminal_graphics.py``: Kitty,
-iTerm2, Sixel, and a half-block renderer for everything else, plus the ``o``
-hatch that opens a page in the desktop viewer). A drag-only box editor would be
-unusable for a real share of users, so *every* operation has a key and mouse
-drag is strictly additive. Nothing here may become mouse-only.
-
-Layout of the controls, and why:
-
-* **j / k** walk the selection forward and back through every region on the
-  assignment, matching the repo-wide meaning of those keys. Selection is over
-  *segments*, not questions, so a continuation is nudged exactly like a primary
-  box and needs no separate mode.
-* **arrows** move the selected box; **shift+arrows** resize it by its right and
-  bottom edges. Two motions reach every rectangle, and both are single
-  keystrokes that repeat when held.
-* **page up / page down** turn the page (a page is not "forward" in the same
-  sense a selection is, and stealing j/k for it would leave the selection —
-  which is edited far more often — with the worse keys).
-* The **metadata panel** on the right edits the selected question's number,
-  points, type and prompt as plain widgets. A modal inside a modal to type a
-  number would be worse than the problem it solves.
-
-Redraw cost is deliberate: the rendered PDF page is cached per page number and
-only the overlay is re-composited per edit (``render_region_map_page(base=…)``).
-Re-rasterizing the page on every arrow key made the editor feel broken, which is
-also why the page renders at ``PREVIEW_DPI`` rather than extraction DPI.
-
-Saving is refused while any **error**-level finding stands, and allowed with
-warnings — an instructor deliberately leaving question 7 unmapped because it is
-extra credit is doing something ordinary, while a duplicate question id would
-silently overwrite a crop. The findings themselves come from
-``core/region_map.validate_region_map``, the same call ``region-map validate``
-makes, so the editor and the CLI can never disagree about whether a map is
-usable.
-"""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -84,18 +38,10 @@ from opengrader.core.region_map import (
 from opengrader.core.pdf_utils import clamp_bbox_norm, render_pdf_page
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 
-# One nudge, as a fraction of the page. 0.005 is ~4pt on US Letter — fine enough
-# to line a box up with a printed rule, coarse enough that crossing the page
-# takes a held key rather than a career.
 NUDGE_STEP = 0.005
 
-# The smallest box the editor will shrink to. A zero-area region is an
-# error-level finding, so the editor stops just before creating one rather than
-# letting a held key produce something it then refuses to save.
 MIN_REGION_SIZE = 0.01
 
-# How many findings the panel lists before summarizing. Enough to see the shape
-# of the problem without pushing the page image off the screen.
 _MAX_LISTED_FINDINGS = 6
 
 _TYPE_OPTIONS = [
@@ -109,26 +55,7 @@ _SEVERITY_GLYPH = {"error": "●", "warning": "◐", "info": "○"}
 
 
 class RegionCanvas(Widget):
-    """The page image, with click-drag box drawing where the terminal allows it.
-
-    A container that *composes* a :class:`SharpImage` rather than subclassing
-    it. Two reasons, and both are load-bearing:
-
-    * ``SharpImage`` derives from ``textual_image``'s widget, whose
-      ``__init_subclass__`` demands a ``Renderable=`` class keyword — it is a
-      leaf widget by construction, not a base to extend.
-    * ``SharpImage`` already composes a child of its own for the Sixel/iTerm2
-      protocols (``inline_graphics.InlineGraphicsPane``), so wrapping is the
-      only way to add behaviour that works on *every* graphics backend rather
-      than just the Rich-renderable ones.
-
-    The drag itself is an *enhancement*: every box it can draw is also
-    reachable with ``a`` plus the arrow keys, because a terminal with no
-    graphics protocol has no meaningful pixels to drag over. The mapping from
-    cells to normalized coordinates is approximate for the same reason — a cell
-    is several pixels — which is fine, since a dragged box is a starting point
-    the arrows then refine.
-    """
+    """SharpImage cannot be subclassed without renderer-specific arguments."""
 
     DEFAULT_CSS = """
     RegionCanvas {
@@ -137,9 +64,6 @@ class RegionCanvas(Widget):
     }
     """
 
-    # Focusable so it can *hold* focus: the metadata Inputs are the only other
-    # focusable widgets here, and a screen that opens with a text field focused
-    # would swallow every single-letter command into it.
     can_focus = True
 
     class BoxDrawn(Message):
@@ -166,7 +90,7 @@ class RegionCanvas(Widget):
         yield self._image_widget
 
     @property
-    def image(self):  # noqa: ANN201 - mirrors SharpImage's own loose typing
+    def image(self):  # noqa: ANN201
         return self._image_widget.image
 
     @image.setter
@@ -174,15 +98,9 @@ class RegionCanvas(Widget):
         self._image_widget.image = value
 
     def _normalized(self, screen_x: int, screen_y: int) -> tuple[float, float]:
-        """Screen coordinates to a fraction of the displayed page.
-
-        Measured against the *image* child's region, not this container's, so a
-        page that does not fill the pane (a portrait sheet in a wide pane) still
-        maps a click to the right part of the paper.
-        """
         try:
             region = self._image_widget.region
-        except Exception:  # pragma: no cover - not laid out yet
+        except Exception:  # pragma: no cover
             return (0.0, 0.0)
         width = max(1, region.width)
         height = max(1, region.height)
@@ -223,22 +141,12 @@ class RegionCanvas(Widget):
         self._drag_origin = None
         self.release_mouse()
         self.post_message(self.BoxDragging(None))
-        # A click that did not travel is a click, not a box: creating a sliver
-        # region every time someone taps the page would be maddening.
         if bbox[2] >= MIN_REGION_SIZE and bbox[3] >= MIN_REGION_SIZE:
             self.post_message(self.BoxDrawn(bbox))
         event.stop()
 
 
 class RegionMapScreen(ModalScreen["Path | None"]):
-    """Edit the answer regions of a blank assignment and save them as a region map.
-
-    Dismisses with the path the map was written to, or ``None`` if cancelled.
-    Self-contained: it takes a PDF path and an optional existing map path and
-    needs nothing from the app around it, so it can be pushed from anywhere (and
-    driven headless by Textual's pilot).
-    """
-
     DEFAULT_CSS = """
     RegionMapScreen {
         align: center middle;
@@ -355,21 +263,12 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._selection = 0
         self._status = ""
         self._draft: tuple[float, float, float, float] | None = None
-        # Rendered pages, keyed by page number. The whole reason an arrow-key
-        # nudge repaints in a few milliseconds instead of re-rasterizing a PDF.
         self._page_cache: dict[int, tuple[object, int, int]] = {}
         self._map = self._initial_map()
         super().__init__()
 
-    # ── loading ────────────────────────────────────────────────────────────
 
     def _initial_map(self) -> RegionMap:
-        """The map to start from: an existing one, or an empty one for this assignment.
-
-        A map that does not belong to this PDF is *not* silently adopted — its
-        boxes describe a different page. It is reported and dropped, leaving an
-        empty map for this assignment, which is the only honest starting point.
-        """
         if self._map_path is not None and self._map_path.exists():
             try:
                 candidate = load_region_map(self._map_path)
@@ -391,16 +290,8 @@ class RegionMapScreen(ModalScreen["Path | None"]):
                 source_page_size=(612.0, 792.0),
             )
 
-    # ── targets: the flat list the selection walks ─────────────────────────
 
     def _targets(self) -> list[tuple[str, int, int, RegionBox]]:
-        """Every editable box: ``(kind, question index, segment index, box)``.
-
-        ``kind`` is ``"name"``, ``"student_id"`` or ``"question"``. Flattening
-        identity fields and question segments into one cursor means j/k, the
-        arrows and delete all behave identically wherever the cursor is, which
-        is one rule to learn instead of three.
-        """
         targets: list[tuple[str, int, int, RegionBox]] = []
         if self._map.name_field is not None:
             targets.append(("name", -1, 0, self._map.name_field))
@@ -442,7 +333,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         )
         return f"{question.question_id}{part} — {geometry}{confidence}"
 
-    # ── composition ────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
         with Vertical(id="region-dialog") as dialog:
@@ -482,27 +372,20 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self.query_one("#region-page", RegionCanvas).focus()
         self._refresh()
 
-    # ── redraw ─────────────────────────────────────────────────────────────
 
     def _base_page(self) -> tuple[object, int, int] | None:
-        """The rendered page, from cache when possible.
-
-        Rendering is the expensive part of a redraw by two orders of magnitude,
-        and the page under the boxes never changes while the editor is open.
-        """
         cached = self._page_cache.get(self._page)
         if cached is not None:
             return cached
         try:
             rendered = render_pdf_page(str(self._pdf_path), self._page, dpi=self._dpi)
-        except Exception as exc:  # noqa: BLE001 - a bad page must not kill the editor
+        except Exception as exc:  # noqa: BLE001
             self._status = f"Could not render page {self._page}: {exc}"
             return None
         self._page_cache[self._page] = rendered
         return rendered
 
     def _refresh(self) -> None:
-        """Repaint the page, the selection line, the panel and the findings."""
         target = self._selected()
         emphasis = self._draft if self._draft is not None else (
             target[3].bbox if target is not None and target[3].page == self._page else None
@@ -534,12 +417,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._refresh_findings()
 
     def _sync_metadata_panel(self) -> None:
-        """Show the selected question's metadata without echoing back an edit.
-
-        Writing to an ``Input`` fires ``Input.Changed``, which is also how the
-        panel *applies* an edit; without the guard, selecting a region would
-        write its own values back over themselves in a loop.
-        """
         question = self._selected_question()
         self._syncing = True
         try:
@@ -575,7 +452,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
             lines.append(f"…and {len(findings) - _MAX_LISTED_FINDINGS} more.")
         panel.update("\n".join(lines))
 
-    # ── mutation helpers ───────────────────────────────────────────────────
 
     def _replace_selected_box(self, bbox: tuple[float, float, float, float]) -> None:
         target = self._selected()
@@ -595,9 +471,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
                 continuations = list(question.continuations)
                 continuations[s_index - 1] = moved
                 updated = replace(question, continuations=tuple(continuations))
-            # A box that a human moved is no longer the detector's guess, so its
-            # confidence stops being reported — leading the editor with "least
-            # confident first" would otherwise keep offering corrected boxes.
             updated = replace(updated, confidence=None)
             questions = list(self._map.questions)
             questions[q_index] = updated
@@ -610,7 +483,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
             number += 1
         return number
 
-    # ── actions: navigation ────────────────────────────────────────────────
 
     def action_select_next(self) -> None:
         targets = self._targets()
@@ -627,11 +499,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._follow_selection()
 
     def _follow_selection(self) -> None:
-        """Turn to the page the newly selected box is on, then repaint.
-
-        Selecting something invisible would be a cursor that vanishes; the page
-        follows the selection rather than the other way round.
-        """
         target = self._selected()
         if target is not None:
             self._page = target[3].page
@@ -639,15 +506,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._refresh()
 
     def action_select_least_confident(self) -> None:
-        """Jump to the detected box the detector was least sure of.
-
-        Correcting a proposal is not a linear job: a run of confidently detected
-        questions needs a glance, and the one the detector scored at 40% needs
-        the work. This walks straight to it, and to the next-worst after that,
-        so an instructor spends their attention where it changes the outcome.
-        Boxes a human has already moved carry no confidence and are skipped —
-        they have been reviewed by definition.
-        """
         ranked = sorted(
             (
                 (question.confidence, index)
@@ -662,7 +520,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
             return
         current = self._selected()
         current_index = current[1] if current is not None and current[0] == "question" else -1
-        # Advance past the current one so repeated presses walk up the list.
         for _confidence, index in ranked:
             if index != current_index:
                 self._select_box_of(index, 0)
@@ -681,7 +538,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
             self._status = ""
             self._refresh()
 
-    # ── actions: geometry ──────────────────────────────────────────────────
 
     def action_nudge(self, direction: str) -> None:
         target = self._selected()
@@ -690,8 +546,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         x, y, w, h = target[3].bbox
         dx = NUDGE_STEP * (1 if direction == "right" else -1 if direction == "left" else 0)
         dy = NUDGE_STEP * (1 if direction == "down" else -1 if direction == "up" else 0)
-        # Clamp the *origin* against the box's own size, so pushing a box at the
-        # edge slides it flush instead of quietly shrinking it.
         self._replace_selected_box(
             (
                 max(0.0, min(1.0 - w, x + dx)),
@@ -716,10 +570,8 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._replace_selected_box((x, y, w, h))
         self._refresh()
 
-    # ── actions: structure ─────────────────────────────────────────────────
 
     def action_add_region(self) -> None:
-        """Add an answer region to the current page, centred and selected."""
         width, height = NEW_REGION_SIZE
         number = self._next_question_number()
         question = MappedQuestion(
@@ -734,7 +586,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._refresh()
 
     def action_add_continuation(self) -> None:
-        """Continue the selected question's answer onto the current page."""
         target = self._selected()
         if target is None or target[0] != "question":
             self._status = "Select an answer region first, then press c."
@@ -787,11 +638,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._refresh()
 
     def action_add_identity_field(self) -> None:
-        """Add whichever identity field is still missing, on this page.
-
-        One key rather than two, because there are only ever two of them and the
-        order they are wanted in is always the same.
-        """
         box = RegionBox(self._page, (0.10, 0.05, 0.45, 0.06))
         if self._map.name_field is None:
             self._map = replace(self._map, name_field=box)
@@ -806,12 +652,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._refresh()
 
     def action_fill_grid(self) -> None:
-        """Replace the map with an evenly spaced grid — the from-scratch path.
-
-        First-class rather than a fallback: plenty of assignments *are* four equal
-        answer boxes to a page, and on one the detector cannot read at all this
-        is the fastest route to a usable map.
-        """
         try:
             self._map = grid_region_map(
                 self._pdf_path,
@@ -835,12 +675,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self.query_one("#region-number", Input).focus()
 
     def action_open_externally(self) -> None:
-        """Open the current page in the desktop viewer — the no-graphics hatch.
-
-        The same escape valve the grade screen offers: in a terminal that cannot
-        draw images, this is how an instructor actually sees where the boxes
-        landed while editing them.
-        """
         import tempfile
 
         from opengrader.tui.external_viewer import (
@@ -868,7 +702,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
             self._status = str(exc)
         self._refresh()
 
-    # ── metadata panel ─────────────────────────────────────────────────────
 
     _syncing = False
 
@@ -892,9 +725,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         if not raw.isdigit():
             return
         number = int(raw)
-        # The id follows the number for the default `q<N>` ids, because those
-        # two disagreeing is how a crop ends up filed under the wrong rubric
-        # entry. A hand-written id (`q3a`) is left alone.
         question = self._selected_question()
         changes: dict[str, object] = {"number": number}
         if question is not None and question.question_id == f"q{question.number}":
@@ -929,7 +759,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
             return
         self._update_selected_question(question_type=event.value)
 
-    # ── mouse ──────────────────────────────────────────────────────────────
 
     @on(RegionCanvas.BoxDragging)
     def _on_box_dragging(self, event: RegionCanvas.BoxDragging) -> None:
@@ -953,17 +782,8 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self._status = f"Drew {question.question_id} on page {self._page}."
         self._refresh()
 
-    # ── save / cancel ──────────────────────────────────────────────────────
 
     def action_save(self) -> None:
-        """Write the map, unless a finding says it would crop the wrong thing.
-
-        Warnings pass: an unmapped extra-credit question, or a box that runs to
-        the paper's edge, are things an instructor may well mean. Errors do not:
-        a duplicate id overwrites another question's crop and an empty box
-        produces nothing at all, and neither is recoverable after 200 scans have
-        been extracted against them.
-        """
         errors = region_map_errors(validate_region_map(self._map))
         if errors:
             self._status = (
@@ -982,12 +802,6 @@ class RegionMapScreen(ModalScreen["Path | None"]):
         self.dismiss(written)
 
     def action_cancel(self) -> None:
-        """Leave without saving — unless escape was meant for a text field.
-
-        Textual's ``Input`` does not consume escape, so without this the key that
-        gets a user out of a half-typed point value would throw away every box
-        they had drawn.
-        """
         focused = self.focused
         if isinstance(focused, Input):
             self.query_one("#region-page", RegionCanvas).focus()

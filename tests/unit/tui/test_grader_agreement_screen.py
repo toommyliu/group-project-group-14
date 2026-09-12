@@ -1,11 +1,3 @@
-"""The inter-grader agreement modal and the formatting behind it.
-
-The assertions worth having are about *honesty of presentation*: a figure that
-could not be measured must not render as zero, a headline count must not
-silently disagree with the rows under it, and a report that cannot compare two
-graders has to say so rather than showing residuals that look like a comparison.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -36,11 +28,7 @@ def _report(answers, **kwargs):
     return build_grader_agreement_report(answers, **kwargs)
 
 
-# ── formatting ────────────────────────────────────────────────────────────
-
-
 def test_overview_explains_a_headline_that_exceeds_the_counted_rows():
-    """Otherwise the totals look like a bug rather than a property of the data."""
     report = _report(
         [_answer("alice", "s1", 9.0), _answer("bob", "s2", 0.0, possible=0.0)]
     )
@@ -73,7 +61,6 @@ def test_overview_is_safe_with_nothing_graded():
 
 
 def test_an_unmeasurable_drift_renders_as_a_dash_not_a_zero():
-    """A zero would read as 'measured, and steady' — the one thing it isn't."""
     report = _report([_answer("alice", "s1", 9.0)])
 
     text = format_grader_stats(report.graders[0])
@@ -117,12 +104,7 @@ def test_identical_grading_reports_no_systematic_difference():
     )
 
 
-# ── the modal ─────────────────────────────────────────────────────────────
-
-
 class _Host(App):
-    """Minimal host app so the modal can be pushed in isolation."""
-
     def __init__(self, report) -> None:
         self._report = report
         super().__init__()
@@ -140,7 +122,6 @@ def _rendered(screen) -> str:
 
 
 def _shared(actor: str, student: str, points: float) -> GradedAnswer:
-    """A decision that also carries an answer key, for same-answer overlap."""
     return GradedAnswer(
         actor=actor,
         student_key=student,
@@ -171,7 +152,6 @@ def test_the_modal_lists_every_grader_and_their_pair() -> None:
 
 
 def test_the_modal_prefers_the_stronger_overlap_basis() -> None:
-    """Same-answer overlap is a superset, so showing both states it twice."""
     answers = []
     for index in range(3):
         answers.append(_shared("alice", f"s{index}", 9.0))
@@ -192,7 +172,6 @@ def test_the_modal_prefers_the_stronger_overlap_basis() -> None:
 
 
 def test_the_modal_falls_back_to_same_answer_overlap() -> None:
-    """A divided cohort shares no student, but does share answers."""
     answers = []
     for index in range(3):
         answers.append(_shared("alice", f"a{index}", 9.0))

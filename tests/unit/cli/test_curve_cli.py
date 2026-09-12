@@ -50,7 +50,6 @@ def test_curve_set_persists_and_previews(tmp_path: Path, capsys) -> None:
     assert read_curve(subs) == Curve("sqrt", 0.0, cap_at_max=True)
     out = capsys.readouterr().out
     assert "square-root curve" in out
-    # sqrt raises both 36→60 and 49→70; mean 42.5 → 65
     assert "65" in out
 
 
@@ -68,7 +67,7 @@ def test_curve_set_bonus_requires_value(tmp_path: Path, capsys) -> None:
 def test_curve_suggest_previews_without_applying(tmp_path: Path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
-    _seed(subs)  # raw scores 36 and 49 out of 100 → mean 42.5%
+    _seed(subs)
 
     run_cli(
         [
@@ -78,9 +77,8 @@ def test_curve_suggest_previews_without_applying(tmp_path: Path, capsys) -> None
     )
 
     out = capsys.readouterr().out
-    assert "Suggested curve: bonus: +17.5 points" in out  # +17.5 lifts 42.5→60
+    assert "Suggested curve: bonus: +17.5 points" in out
     assert "preview only" in out
-    # Preview only: nothing written.
     assert read_curve(subs) == Curve()
 
 
@@ -98,7 +96,7 @@ def test_curve_suggest_apply_persists(tmp_path: Path) -> None:
 
     curve = read_curve(subs)
     assert curve.method == "scale"
-    assert curve.value == pytest.approx(2.0, abs=1e-2)  # 42.5% × 2 = 85%
+    assert curve.value == pytest.approx(2.0, abs=1e-2)
 
 
 def test_curve_suggest_requires_a_target(tmp_path: Path, capsys) -> None:
@@ -115,7 +113,7 @@ def test_curve_suggest_requires_a_target(tmp_path: Path, capsys) -> None:
 def test_curve_suggest_unreachable_target_errors(tmp_path: Path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
-    _write(subs / "z.submission.md", "s0", 0.0)  # a zero-scorer
+    _write(subs / "z.submission.md", "s0", 0.0)
     _write(subs / "a.submission.md", "s1", 50.0)
 
     with pytest.raises(SystemExit) as exc:

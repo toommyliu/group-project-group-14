@@ -1,12 +1,3 @@
-"""Tests for the objective answer-pattern view inside the similarity modal (`o`).
-
-What must be right: the toggle exists only when the provider could build the
-objective report at all, it swaps both the body and the summary, the pair's
-supporting numbers reach the screen, selecting a student routes to the rarest
-shared wrong answer, and "nothing was analyzable" never renders as a clean bill
-of health.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -133,12 +124,7 @@ def _body_text(screen) -> str:  # noqa: ANN001
     return "\n".join(parts)
 
 
-# ── the toggle only exists when the objective report does ───────────────────
-
-
 def test_without_a_pattern_report_the_toggle_is_absent_and_inert() -> None:
-    """A provider with no answer key offers no second view rather than an empty one."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         before = _summary(screen)
         await pilot.press("o")
@@ -188,9 +174,6 @@ def test_o_swaps_the_view_and_swaps_back() -> None:
     assert "similar-answer cluster" in back_summary
 
 
-# ── what the objective view has to put on screen ────────────────────────────
-
-
 def test_the_pair_carries_its_supporting_numbers() -> None:
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
@@ -204,14 +187,11 @@ def test_the_pair_carries_its_supporting_numbers() -> None:
     assert "2 shared (1.8 expected)" in text
     assert "z = 5.6" in text
     assert "Harpp-Hogan index 1.50" in text
-    # The rarest agreement leads, with what made it rare.
     assert "Question 7" in text
     assert "8% of wrong pairs agree here" in text
 
 
 def test_scope_is_stated_and_survives_finding_nothing() -> None:
-    """The pair count is what says whether "nothing found" is reassuring."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
         await pilot.pause()
@@ -259,8 +239,6 @@ def test_the_view_is_anonymity_aware() -> None:
 
 
 def test_selecting_a_student_routes_to_the_rarest_shared_answer() -> None:
-    """A pattern spans many questions, so the anchor is the one worth reading first."""
-
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.press("o")
         await pilot.pause()
@@ -319,5 +297,5 @@ def test_an_unmappable_student_renders_inert() -> None:
     rows, text = _run(
         lambda: SimilarityScreen([], teacher_mode=True, patterns=_view(orphan)), body
     )
-    assert rows == 1  # only the mappable half is actionable
+    assert rows == 1
     assert "can't open" in text

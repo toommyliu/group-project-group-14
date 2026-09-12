@@ -1,5 +1,3 @@
-"""The release modal (shift+L): readiness, the gate, and what changed."""
-
 from __future__ import annotations
 
 import asyncio
@@ -84,7 +82,6 @@ def test_a_ready_cohort_can_be_released_immediately() -> None:
         async with _Host(screen).run_test(size=(130, 44)) as pilot:
             await pilot.pause()
             assert not screen.query_one("#release-confirm", Button).disabled
-            # Nothing to override, so the override is not even offered.
             assert screen.query_one("#release-force", Checkbox).has_class("hidden")
             assert "nothing needs attention" in _body_text(screen).lower()
 
@@ -103,7 +100,6 @@ def test_blocking_issues_gate_the_button_until_the_override_is_ticked() -> None:
 
             await pilot.click("#release-force")
             await pilot.pause()
-            # A gate, not a wall.
             assert not screen.query_one("#release-confirm", Button).disabled
 
     _run(run())
@@ -135,11 +131,6 @@ def test_releasing_passes_the_label_and_dismisses_with_the_new_id() -> None:
 
 
 def test_the_release_callback_is_not_shadowed_by_the_button_handler() -> None:
-    """Regression: an attribute named like an ``@on`` handler replaces it.
-
-    ``self._on_release = callback`` made Textual dispatch the callback itself on
-    Button.Pressed, so the button silently did nothing.
-    """
     screen = ReleaseScreen(build_readiness_report([_doc()]), on_release=lambda _: None)
     assert callable(screen._on_release_pressed)
     assert screen._on_release_pressed.__self__ is screen
@@ -156,7 +147,6 @@ def test_a_failing_release_is_surfaced_not_raised() -> None:
             await pilot.pause()
             await pilot.click("#release-confirm")
             await pilot.pause()
-            # Still open, nothing dismissed — the grader can try again.
             assert app.screen is screen
             assert app.result == "unset"
 

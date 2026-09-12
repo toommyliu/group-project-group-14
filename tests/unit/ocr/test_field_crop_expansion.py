@@ -7,7 +7,6 @@ def test_label_to_field_bbox_returns_wide_horizontal_slice() -> None:
     page_w = 2200
     page_h = 3400
     label_bbox = (140, 220, 360, 300)
-    # Value box to the right of the label.
     boxes_norm = [[0.22, 0.064, 0.58, 0.032]]
 
     x0, y0, x1, y1 = extractor._label_to_field_bbox_px(
@@ -146,7 +145,6 @@ def test_trim_question_region_preserves_answer_written_after_prompt() -> None:
     image = Image.new("RGB", (1000, 220), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
 
-    # Prompt-like content near the top, followed by a short same-line answer.
     for x0, x1 in [(40, 120), (135, 220), (235, 330), (345, 430), (445, 540)]:
         draw.rectangle((x0, 50, x1, 72), fill=(90, 90, 90))
     draw.line(
@@ -182,8 +180,6 @@ def test_question_final_crop_bbox_tracks_expansion_and_trim() -> None:
     draw = ImageDraw.Draw(image)
     raw_bbox = [0.3, 0.3, 0.5, 0.3]
 
-    # Content just left of the raw layout box must be considered because
-    # extraction expands the crop before trimming.
     draw.rectangle((290, 360, 360, 420), fill=(110, 110, 110))
     draw.rectangle((330, 330, 520, 365), fill=(90, 90, 90))
 
@@ -205,11 +201,8 @@ def test_trim_question_region_ignores_long_border_lines() -> None:
     image = Image.new("RGB", (1400, 900), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
 
-    # Prompt-like content near the top.
     draw.rectangle((120, 60, 1180, 92), fill=(90, 90, 90))
-    # Handwritten answer content.
     draw.rectangle((360, 210, 520, 310), fill=(120, 120, 120))
-    # Full-width border lines that should not dominate trimming.
     draw.line((0, 840, 1399, 840), fill=(80, 80, 80), width=6)
     draw.line((8, 0, 8, 899), fill=(80, 80, 80), width=4)
     draw.line((1390, 0, 1390, 899), fill=(80, 80, 80), width=4)

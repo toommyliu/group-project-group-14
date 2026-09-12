@@ -1,9 +1,3 @@
-"""Tests for the LLM grading evaluation harness engine.
-
-The engine is pure and the transport is injected, so everything here runs with
-no Ollama server: a "model" is a function returning a canned JSON string.
-"""
-
 from __future__ import annotations
 
 import json
@@ -28,7 +22,6 @@ from opengrader.core.grading.solutions import solution_entries_for_submission
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.submissions import parse_student_submission_markdown
 
-# ── fixtures ─────────────────────────────────────────────────────────────────
 
 RUBRIC = (
     RubricChoice("Correct", 0.0, "correct", "exclusive"),
@@ -95,8 +88,6 @@ def _model_saying(labels: list[str], confidence: float):  # noqa: ANN202
     )
     return lambda _prompt: payload
 
-
-# ── case selection: measure exactly what production grades ───────────────────
 
 QA = """---
 title: Quiz
@@ -175,11 +166,6 @@ def _targets_for_with_floor(blocks: str, *, floor: float):  # noqa: ANN202
 
 
 def test_weak_transcription_is_excluded_and_counted_separately() -> None:
-    # Production refuses to grade this, so the harness must not measure a model
-    # against it — a threshold is only valid for the population production
-    # actually grades. Counted apart from `blank` because the two say different
-    # things: blank means nothing was found, this means what was found is not
-    # trusted, and a large number here is a scan-quality problem.
     targets, tally = _targets_for(
         _question_block(
             "q1",
@@ -235,7 +221,6 @@ def test_a_human_graded_free_response_is_a_case() -> None:
 
 
 def test_objective_answers_are_excluded_because_a_model_never_sees_them() -> None:
-    """Counting rule-graded answers would inflate every rate in the report."""
     targets, tally = _targets_for(
         _question_block(
             "q3", question_type="Multiple Choice", response="A", points="1", possible="1"
@@ -264,8 +249,6 @@ def test_an_ungraded_answer_has_no_ground_truth_and_is_reported_as_such() -> Non
 
 
 def test_an_already_ai_graded_answer_is_excluded_as_circular() -> None:
-    """Scoring a model against its own earlier verdict measures repeatability
-    and would print it as accuracy."""
     targets, tally = _targets_for(
         _question_block(
             "q1",
@@ -299,24 +282,19 @@ def test_skip_tallies_add_up() -> None:
     assert combined.total == 7
 
 
-# ── one measurement ──────────────────────────────────────────────────────────
-
-
 def test_evaluate_target_records_what_the_model_said() -> None:
     case = evaluate_target(
         _target(human_points=2.0),
         model="llama3.1",
         generate=_model_saying(["Partial"], 0.8),
     )
-    assert case.llm_points == 2.0  # 4 possible, Partial is -2
+    assert case.llm_points == 2.0
     assert case.llm_rubric == ("Partial",)
     assert case.llm_confidence == 0.8
     assert case.outcome() == "agree"
 
 
 def test_a_model_that_returns_junk_is_no_suggestion_not_a_disagreement() -> None:
-    """In production that answer is simply left for a human, so counting it as a
-    wrong grade would understate the model."""
     case = evaluate_target(
         _target(), model="llama3.1", generate=lambda _p: "I cannot do that."
     )
@@ -343,21 +321,17 @@ def test_points_tolerance_widens_what_counts_as_agreement() -> None:
 
 
 def test_rubric_comparison_is_none_when_the_human_recorded_no_rubric() -> None:
-    """No selection to compare against is different from disagreeing."""
     assert _case(human_rubric=()).rubric_matches is None
     assert _case(llm_rubric=("Partial",)).rubric_matches is False
     assert _case().rubric_matches is True
-
-
-# ── aggregation ──────────────────────────────────────────────────────────────
 
 
 def test_summarize_counts_direction_error_and_bias() -> None:
     stats = summarize(
         [
             _case(human_points=4.0, llm_points=4.0),
-            _case(human_points=2.0, llm_points=4.0),  # +2 generous
-            _case(human_points=4.0, llm_points=3.0),  # -1 harsh
+            _case(human_points=2.0, llm_points=4.0),
+            _case(human_points=4.0, llm_points=3.0),
         ]
     )
     assert (stats.cases, stats.scored, stats.agreements) == (3, 3, 1)
@@ -388,7 +362,6 @@ def test_confidence_buckets_group_scored_cases_and_drop_empty_ones() -> None:
     labels = [bucket.label for bucket in buckets]
     assert labels == ["0.40-0.50", "0.90-1.00"]
     assert buckets[1].stats.scored == 2
-    # The no-suggestion case has no confidence and so belongs to no bucket.
     assert sum(bucket.stats.cases for bucket in buckets) == 3
 
 
@@ -409,9 +382,6 @@ def test_question_type_breakdown_orders_by_sample_size() -> None:
     assert groups[0][1].cases == 2
 
 
-# ── the threshold curve ──────────────────────────────────────────────────────
-
-
 def test_threshold_curve_reports_coverage_and_agreement_at_each_cutoff() -> None:
     cases = [
         _case(confidence=0.95, human_points=4.0, llm_points=4.0),
@@ -429,7 +399,7 @@ def test_threshold_curve_reports_coverage_and_agreement_at_each_cutoff() -> None
     at_high = rows[0.85]
     assert at_high.applied == 2
     assert at_high.agreement_rate == 1.0
-    assert at_high.deferred == 1  # the low-confidence answer goes to a human
+    assert at_high.deferred == 1
 
 
 def test_a_no_suggestion_case_is_never_applied_at_any_threshold() -> None:
@@ -439,8 +409,6 @@ def test_a_no_suggestion_case_is_never_applied_at_any_threshold() -> None:
 
 
 def test_recommendation_picks_the_loosest_cutoff_that_holds_up() -> None:
-    # Everything at 0.8+ agrees; the answers just below it are all wrong, so
-    # 0.80 is exactly the loosest cutoff that still clears the target.
     cases = [_case(confidence=0.8 + i * 0.01) for i in range(8)] + [
         _case(confidence=0.75, human_points=4.0, llm_points=0.0) for _ in range(8)
     ]
@@ -453,12 +421,8 @@ def test_recommendation_picks_the_loosest_cutoff_that_holds_up() -> None:
 
 
 def test_a_lucky_low_cutoff_under_a_bad_stretch_is_not_recommended() -> None:
-    """Agreement is not monotonic in the threshold, so "lowest that hits the
-    target" would recommend a dip beneath a stretch that fails."""
     cases = (
-        # 0.95+: five answers, all wrong -> the strictest sample fails.
         [_case(confidence=0.96, human_points=4.0, llm_points=0.0) for _ in range(5)]
-        # 0.5-0.6: fifteen answers, all right -> would look great in isolation.
         + [_case(confidence=0.55) for _ in range(15)]
     )
     recommendation = recommend_threshold(
@@ -469,7 +433,6 @@ def test_a_lucky_low_cutoff_under_a_bad_stretch_is_not_recommended() -> None:
 
 
 def test_a_threshold_with_too_small_a_sample_cannot_be_recommended() -> None:
-    """3/3 correct is a 100% agreement rate and is not evidence."""
     recommendation = recommend_threshold(
         threshold_curve([_case(confidence=0.99) for _ in range(3)], step=0.05),
         target_agreement=0.9,
@@ -486,11 +449,8 @@ def test_a_model_that_never_reaches_the_target_is_reported_with_its_best() -> No
         threshold_curve(cases, step=0.05), target_agreement=0.9, min_sample=5
     )
     assert recommendation.threshold is None
-    assert recommendation.row is not None  # the best row is still shown
+    assert recommendation.row is not None
     assert recommendation.row.agreement_rate == 0.5
-
-
-# ── the report ───────────────────────────────────────────────────────────────
 
 
 def test_report_separates_models_and_names_the_best_by_coverage() -> None:
@@ -503,7 +463,6 @@ def test_report_separates_models_and_names_the_best_by_coverage() -> None:
 
     report = build_llm_eval_report(good + strict, min_sample=5)
     assert [evaluation.model for evaluation in report.models] == ["good", "strict"]
-    # "good" clears the target from 0.0 up, so it grades everything.
     assert report.best_model is not None
     assert report.best_model.model == "good"
     assert report.best_model.recommendation.row.coverage == 1.0
@@ -522,7 +481,7 @@ def test_worst_disagreements_lead_with_the_biggest_point_gap() -> None:
         [
             _case(question_id="q1", human_points=4.0, llm_points=3.0),
             _case(question_id="q2", human_points=0.0, llm_points=4.0),
-            _case(question_id="q3"),  # agrees; not a disagreement
+            _case(question_id="q3"),
         ],
         disagreement_samples=5,
     )
@@ -530,12 +489,7 @@ def test_worst_disagreements_lead_with_the_biggest_point_gap() -> None:
     assert [case.target.question_id for case in worst] == ["q2", "q1"]
 
 
-# ── spreading a limited sample (--limit) ─────────────────────────────────────
-
-
 def test_a_limit_takes_from_every_student_not_just_the_first() -> None:
-    """Targets arrive grouped per student, so a prefix would measure the model
-    on the first few students only — a biased sample for any limit."""
     targets = [
         _target(student_id=f"s{s}", question_id=f"q{q}")
         for s in range(1, 6)
@@ -544,7 +498,6 @@ def test_a_limit_takes_from_every_student_not_just_the_first() -> None:
     picked = spread_targets(targets, 5)
 
     assert len(picked) == 5
-    # One answer from each of the five students, rather than five from s1.
     assert {t.student_id for t in picked} == {"s1", "s2", "s3", "s4", "s5"}
 
 
@@ -557,13 +510,11 @@ def test_a_limit_rotates_through_questions_as_it_goes_round_again() -> None:
     picked = spread_targets(targets, 6)
 
     assert len(picked) == 6
-    # Everyone twice, and the second pass takes each student's second answer.
     assert sorted(t.student_id for t in picked) == ["s1", "s1", "s2", "s2", "s3", "s3"]
     assert {t.question_id for t in picked} == {"q1", "q2"}
 
 
 def test_a_limit_spreads_across_pooled_cohorts() -> None:
-    """The worst case for a prefix: everything from folder one, none from two."""
     targets = [
         replace(_target(student_id=f"s{s}"), class_label=class_label)
         for class_label in ("2026-spring", "2025-fall")
@@ -576,7 +527,6 @@ def test_a_limit_spreads_across_pooled_cohorts() -> None:
 
 
 def test_the_same_student_id_in_two_cohorts_is_two_people() -> None:
-    """Two classes both numbering from s1 must not collapse into one person."""
     targets = [
         replace(_target(student_id="s1", question_id=f"q{q}"), class_label=class_label)
         for class_label in ("a", "b")
@@ -600,16 +550,12 @@ def test_a_limit_of_zero_or_less_evaluates_nothing() -> None:
 
 
 def test_spreading_is_deterministic() -> None:
-    """Two runs must measure the same answers or their rates aren't comparable."""
     targets = [
         _target(student_id=f"s{s}", question_id=f"q{q}")
         for s in range(1, 8)
         for q in range(1, 4)
     ]
     assert spread_targets(targets, 9) == spread_targets(targets, 9)
-
-
-# ── class labelling ─────────────────────────────────────────────────────────
 
 
 def test_targets_carry_the_cohort_they_came_from() -> None:
@@ -622,7 +568,6 @@ def test_targets_carry_the_cohort_they_came_from() -> None:
 
 
 def test_a_single_cohort_run_carries_no_label() -> None:
-    """One folder means every row would show the same redundant label."""
     targets, _ = _targets_for(
         _question_block("q1", question_type="Free Response", response="a", points="3")
     )

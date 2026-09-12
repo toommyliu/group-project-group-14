@@ -1,51 +1,3 @@
-"""Grader packets — a redacted, self-contained copy of a cohort to hand out.
-
-`core/claims.py` divides the pile between graders who all open **one** folder.
-That assumption breaks the moment a TA takes the work home: they copy the
-folder to a laptop or a USB stick, grade for an evening, and hand back a
-directory that has drifted from the teacher's. Nothing in the app could
-reconcile the two — the optimistic mtime guard (`core/concurrency.py`) is
-designed to *refuse* exactly that situation, and refusing is the only thing it
-can do.
-
-A **packet** is the artifact that makes the round trip well-defined. It is a
-copy of the cohort that is:
-
-* **Redacted** — every student's name *and* id are replaced by an opaque
-  per-packet **alias**, and the scans (which have a name written across the top
-  of every sheet) are left behind entirely. This is `core/anonymize.py`'s
-  data-minimization argument taken to its conclusion: Layer 2 keeps ids so the
-  teacher can re-join, and here the alias plays that role instead, so there is
-  nothing in the grader's copy to de-anonymize.
-* **Self-contained** — the answer key, each answer's transcription, and each
-  answer's image crop, so the TA runs the ordinary TUI against it and grades
-  exactly as they would at home in the real folder.
-* **Baselined** — the manifest records the value of every answer *at the moment
-  the packet was created*. That one field is what turns the merge back
-  (`merge.py`) into a real three-way merge instead of a guess about who edited
-  what.
-
-**Why not QR codes for the identity link?** A QR code exists to carry data
-across a boundary whose only channel is an image — paper through a scanner,
-which is what `core/qr_codes.py` is for. Both ends of a packet are files on a
-disk, so encoding the alias into pixels and reading it back with OpenCV would be
-slower, lossier, and impossible to diff, for no gain. What the packet *does*
-borrow is the design of the personalized-QR exam: the sheet prints an anonymous
-id and never the name, and the teacher keeps the id→name master key. Here the
-alias is that anonymous id and the **handoff key** is that master key — written
-into the *teacher's* folder, never into the packet, because a copy that contains
-its own key is not redacted at all.
-
-Two artifacts, deliberately separate:
-
-* ``<packet>/.opengrader/packet.json`` — travels with the packet. Aliases and
-  the baseline only; no real name or id appears anywhere in it.
-* ``<source>/.opengrader/handoff/<packet-id>.json`` — stays with the teacher.
-  The alias → real identity map, and the only thing that can undo the redaction.
-  Losing it means the returned packet can no longer be merged, the same trade
-  `core/anonymize.write_name_map` already makes for the name map.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -84,16 +36,11 @@ from opengrader.core.submissions.student_file import (
     set_student_identity_markdown,
 )
 
-# Layout inside a packet. ``submissions/`` is a plain cohort folder so the TUI
-# opens it with no packet-specific code: `uv run tui --qa-file … --submissions …`.
 PACKET_SUBMISSIONS_DIRNAME = "submissions"
 PACKET_DOTDIR = ".opengrader"
 PACKET_MANIFEST_FILENAME = "packet.json"
-# Teacher-side, in the *source* folder: one key file per packet handed out.
 HANDOFF_SUBDIR = "handoff"
 
-# Bumped only on an incompatible manifest grammar change, so a packet from an
-# older version is rejected with a sentence rather than mis-read as empty.
 PACKET_FORMAT = 1
 
 _ALIAS_PREFIX = "og-"
@@ -102,28 +49,20 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 class PacketError(ValueError):
-    """A packet could not be built or read."""
+    pass
 
 
 @dataclass(frozen=True)
 class PacketMember:
-    """One student's place in a packet, from the teacher's side of the map."""
-
     alias: str
-    student_key: str  # the journal key (`core/history.student_key`) this is really
+    student_key: str
     student_id: str
     student_name: str
-    source_relative_path: str  # where the submission lives in the source folder
+    source_relative_path: str
 
 
 @dataclass(frozen=True)
 class HandoffKey:
-    """The teacher-side alias → identity map for one packet handed out.
-
-    Kept out of the packet on purpose. Everything needed to *grade* is in the
-    packet; everything needed to *know who you graded* is only here.
-    """
-
     packet_id: str
     created_at: str
     created_by: str
@@ -136,14 +75,12 @@ class HandoffKey:
 
 @dataclass(frozen=True)
 class PacketManifest:
-    """The packet's own manifest — aliases and the baseline, no identities."""
-
     packet_id: str
     created_at: str
     assignment_title: str
     redacted: bool
     aliases: tuple[str, ...] = ()
-    # (alias, question_id) -> the value each aspect held when the packet was cut.
+    # (alias, question_id) -> aspect values when the packet was created.
     baseline: Mapping[tuple[str, str], CellState] | None = None
 
     def baseline_cells(self) -> Mapping[tuple[str, str], CellState]:
@@ -152,8 +89,6 @@ class PacketManifest:
 
 @dataclass(frozen=True)
 class PacketResult:
-    """What `build_packet` wrote, for the CLI/TUI to report."""
-
     packet_path: Path
     manifest_path: Path
     key_path: Path
@@ -161,9 +96,6 @@ class PacketResult:
     key: HandoffKey
     qa_file_path: Path | None = None
     copied_crops: int = 0
-    # Crops that could not travel (referenced from outside the submission's own
-    # folder). Reported rather than dropped: that question can still be graded
-    # from its transcription, but the grader should know the image is missing.
     skipped_crops: tuple[str, ...] = ()
 
     @property
@@ -172,7 +104,6 @@ class PacketResult:
 
 
 def slugify_packet_name(text: str, *, fallback: str = "packet") -> str:
-    """Filesystem-friendly packet id: lowercase, hyphen-separated."""
     slug = _SLUG_RE.sub("-", text.strip().lower()).strip("-")
     return slug or fallback
 
@@ -183,12 +114,6 @@ def default_packet_id(
     grader: str = "",
     today: datetime | None = None,
 ) -> str:
-    """``<assignment>-for-<grader>`` (or ``-<date>``) — a name a human can file.
-
-    The grader's name is preferred over a date because the thing a teacher needs
-    to find later is "the copy Alice has", and two packets cut on the same day
-    for two TAs must not collide.
-    """
     title = ""
     for document in documents:
         if document.assignment_title.strip():
@@ -201,15 +126,6 @@ def default_packet_id(
 
 
 def mint_alias(packet_id: str, student_key: str, *, taken: Iterable[str] = ()) -> str:
-    """A stable, opaque alias for one student inside one packet.
-
-    Derived by hash rather than by counter so re-cutting the same packet for the
-    same cohort produces the *same* aliases — a teacher who loses a packet can
-    reissue it and the returned copy still merges. Collisions (astronomically
-    unlikely at 8 hex characters, but a wrong grade is not a rounding error) are
-    resolved by a deterministic probe, the same approach
-    `core/roster.assign_student_ids` uses for minted student ids.
-    """
     reserved = set(taken)
     attempt = 0
     while True:
@@ -220,12 +136,6 @@ def mint_alias(packet_id: str, student_key: str, *, taken: Iterable[str] = ()) -
         attempt += 1
 
 
-# --------------------------------------------------------------------------
-# Manifest / key serialization. Pure: strings in, strings out, so the whole
-# format round-trips in a unit test with no folder to build.
-# --------------------------------------------------------------------------
-
-
 def _aspect_to_json(aspect: Aspect, value: AspectValue) -> dict[str, object]:
     if aspect == "grade":
         return {"points": value.points, "rubric": list(value.rubric)}
@@ -233,12 +143,6 @@ def _aspect_to_json(aspect: Aspect, value: AspectValue) -> dict[str, object]:
 
 
 def _aspect_from_json(aspect: Aspect, payload: Mapping[str, object]) -> AspectValue:
-    """Read one baseline aspect back, coercing defensively.
-
-    The manifest is a file on a disk that travelled; a malformed field degrades
-    to the empty value, which the merge then treats as "no baseline known" for
-    that aspect rather than as a confident wrong answer.
-    """
     if aspect == "grade":
         raw_points = payload.get("points")
         try:
@@ -257,7 +161,6 @@ def _aspect_from_json(aspect: Aspect, payload: Mapping[str, object]) -> AspectVa
 
 
 def render_packet_manifest(manifest: PacketManifest) -> str:
-    """Serialize a packet manifest to JSON text."""
     baseline: dict[str, dict[str, dict[str, object]]] = {}
     for (alias, question_id), cell in sorted(manifest.baseline_cells().items()):
         by_aspect = {
@@ -279,7 +182,6 @@ def render_packet_manifest(manifest: PacketManifest) -> str:
 
 
 def parse_packet_manifest(text: str) -> PacketManifest:
-    """Read a packet manifest, raising `PacketError` on anything unusable."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -328,7 +230,6 @@ def parse_packet_manifest(text: str) -> PacketManifest:
 
 
 def render_handoff_key(key: HandoffKey) -> str:
-    """Serialize the teacher-side alias → identity map to JSON text."""
     payload = {
         "key_format": PACKET_FORMAT,
         "packet_id": key.packet_id,
@@ -349,13 +250,6 @@ def render_handoff_key(key: HandoffKey) -> str:
 
 
 def parse_handoff_key(text: str) -> HandoffKey:
-    """Read a handoff key.
-
-    Fails loudly on a malformed file rather than degrading to "no aliases":
-    silently treating a corrupt key as absent would make the merge fall back to
-    matching aliases against real ids, match nothing, and report a returned
-    packet as having no changes at all.
-    """
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -388,20 +282,7 @@ def parse_handoff_key(text: str) -> HandoffKey:
     )
 
 
-# --------------------------------------------------------------------------
-# Everything below touches the filesystem. Keep new logic above this line so it
-# stays unit-testable without a cohort on disk (the split `restore.py` uses).
-# --------------------------------------------------------------------------
-
-
 def default_packet_output_dir(submissions_path: str | Path) -> Path:
-    """Where grader copies go unless the user says otherwise.
-
-    ``<assignment>/grader-copies/`` — a sibling of the submissions folder, not a
-    child of it. Beside it is discoverable (an instructor finds it without being
-    told) while staying clear of the cohort itself, so a packet is never swept
-    into an integrity snapshot, a backup, or a later packet of the same folder.
-    """
     base = Path(submissions_path)
     if base.is_file():
         base = base.parent
@@ -409,7 +290,6 @@ def default_packet_output_dir(submissions_path: str | Path) -> Path:
 
 
 def resolve_handoff_dir(submissions_path: str | Path) -> Path:
-    """The teacher-side ``.opengrader/handoff`` dir for a submissions folder."""
     base = Path(submissions_path)
     if base.is_file():
         base = base.parent
@@ -417,17 +297,10 @@ def resolve_handoff_dir(submissions_path: str | Path) -> Path:
 
 
 def resolve_manifest_path(packet_path: str | Path) -> Path:
-    """The manifest inside a packet directory."""
     return Path(packet_path) / PACKET_DOTDIR / PACKET_MANIFEST_FILENAME
 
 
 def read_packet_manifest(packet_path: str | Path) -> PacketManifest | None:
-    """Read a packet's manifest, or ``None`` when the folder is not a packet.
-
-    ``None`` is a real answer, not a failure: merging two hand-made copies of a
-    folder is supported, and there the merge falls back to the incoming
-    journal for its baseline.
-    """
     path = resolve_manifest_path(packet_path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -437,16 +310,10 @@ def read_packet_manifest(packet_path: str | Path) -> PacketManifest | None:
 
 
 def read_handoff_key(path: str | Path) -> HandoffKey:
-    """Read a handoff key file written by `build_packet`."""
     return parse_handoff_key(Path(path).read_text(encoding="utf-8"))
 
 
 def list_handoff_keys(submissions_path: str | Path) -> list[HandoffKey]:
-    """Every packet cut from this folder, newest first.
-
-    Unreadable key files are skipped rather than raising — one corrupt record
-    must not hide the other five packets a teacher is trying to account for.
-    """
     directory = resolve_handoff_dir(submissions_path)
     if not directory.is_dir():
         return []
@@ -461,7 +328,6 @@ def list_handoff_keys(submissions_path: str | Path) -> list[HandoffKey]:
 
 
 def _unique_dir(parent: Path, name: str) -> Path:
-    """``parent/name``, suffixed if that folder is already spoken for."""
     candidate = parent / name
     counter = 2
     while candidate.exists():
@@ -475,18 +341,6 @@ def _copy_referenced_crops(
     source_dir: Path,
     dest_dir: Path,
 ) -> tuple[int, list[str]]:
-    """Copy exactly the crop images this submission references.
-
-    Copying the whole per-student folder would be simpler and wrong: it also
-    sweeps up the scanned PDF and the annotated copy, both of which have the
-    student's name written on them. Walking the references instead means the
-    packet contains the answer boxes and nothing else, and it works for both
-    the flat and the one-level-down layouts the provider accepts.
-
-    A crop referenced from *outside* the submission's own folder is skipped and
-    named: rewriting the reference would mean re-rendering the markdown, and
-    that question is still gradable from its transcription.
-    """
     copied = 0
     skipped: list[str] = []
     for question in document.questions:
@@ -509,17 +363,6 @@ def _copy_referenced_crops(
 
 
 def _redact_submission_text(text: str, *, alias: str, redacted: bool) -> str:
-    """Rewrite one submission's identity fields for the packet.
-
-    ``set_student_identity_markdown`` is reused rather than a full re-render for
-    the reason `core/anonymize.py` documents: a surgical frontmatter rewrite
-    leaves every question block byte-identical, so the packet's answers are the
-    teacher's answers and a later diff of the two is meaningful.
-
-    The name is blanked and the id becomes the alias; the references to the scan
-    and to the handwritten name/id crops are blanked because none of those files
-    travel — and because their *paths* can carry a name on their own.
-    """
     if not redacted:
         return text
     updated = set_student_identity_markdown(text, student_id=alias, student_name="")
@@ -539,21 +382,6 @@ def build_packet(
     now: datetime | None = None,
     student_keys: Iterable[str] | None = None,
 ) -> PacketResult:
-    """Create a grader packet from a cohort, plus the teacher-side key.
-
-    ``include_pdfs`` is refused together with ``redact`` rather than silently
-    ignored: the scans are the one artifact that carries the student's
-    handwritten name on every sheet, so copying them into a folder whose whole
-    purpose is that names are absent would quietly undo the feature.
-
-    ``student_keys`` restricts the packet to a subset of the cohort (by
-    :func:`~opengrader.core.history.restore.student_key`); ``None`` packs
-    everyone, which is what a handoff wants. The subset exists for calibration
-    (:mod:`opengrader.core.handoff.calibration`), where the same small sample
-    goes to every grader — and a key naming nobody is an error rather than an
-    empty packet, since silently handing a TA nothing to grade is indis-
-    tinguishable from the tool being broken.
-    """
     if include_pdfs and redact:
         raise PacketError(
             "a redacted packet cannot include the scanned PDFs — the student "
@@ -605,24 +433,16 @@ def build_packet(
     for path, document in documents:
         key = document_student_key(document)
         if not key:
-            # No id and no name: there is nothing stable to alias, and merging
-            # such a submission back could only guess which one it was.
             raise PacketError(
                 f"{path.name} has neither a student id nor a name — resolve it "
                 "in the review queue before handing out a packet, or the "
                 "returned copy cannot be matched to it"
             )
-        # The alias is whatever the packet's own files are keyed by, so that the
-        # baseline and the returned copy speak the same language: a minted code
-        # when redacting (the file's student_id becomes it), and the real
-        # journal key when not (the file is untouched, so that is still its key).
         alias = mint_alias(resolved_id, key, taken=aliases_taken) if redact else key
         aliases_taken.add(alias)
         if not assignment_title and document.assignment_title.strip():
             assignment_title = document.assignment_title.strip()
 
-        # The folder name is cosmetic and separate from the alias: an
-        # un-redacted key can be ``name:tommy liu``, which is not a filename.
         folder_name = alias if redact else slugify_packet_name(
             path.parent.name if path.parent != source_root else path.name,
             fallback="submission",
@@ -659,9 +479,6 @@ def build_packet(
             )
         )
 
-    # The baseline is built from the *documents as they are now*, keyed by
-    # alias — that is what the returned copy will be compared against, so it
-    # must be recorded in the packet's own vocabulary.
     alias_by_key = {member.student_key: member.alias for member in members}
     baseline: dict[tuple[str, str], CellState] = {}
     for (key, question_id), cell in current_cells_from_documents(
@@ -720,12 +537,6 @@ def build_packet(
 def _packet_readme(
     manifest: PacketManifest, qa_file: Path | None, student_count: int
 ) -> str:
-    """The note the grader opens first — how to grade this, and what is missing.
-
-    It states the two things a TA cannot work out from the folder: the exact
-    command that opens it, and that the scans were deliberately left behind (so
-    a missing whole-page view reads as a decision, not a broken install).
-    """
     qa_name = qa_file.name if qa_file is not None else "<your answer key>.md"
     title = manifest.assignment_title or "this assignment"
     lines = [
@@ -761,30 +572,10 @@ def _packet_readme(
     return "\n".join(lines) + "\n"
 
 
-# --------------------------------------------------------------------------- #
-# Sealing: a packet as one encrypted file
-# --------------------------------------------------------------------------- #
-#
-# Redaction is the packet's ordinary protection — aliases instead of names, the
-# scans left behind — and it is enough for the ordinary case. It is not enough
-# for the two cases where a packet carries real identity: `--no-redact` (a plain
-# working copy for a co-instructor) and `--with-pdfs`. Sealing covers those, and
-# covers the redacted case too against the everyday risk that has nothing to do
-# with the packet's contents: a folder emailed to the wrong address, or a USB
-# stick left in a taxi.
-#
-# Deliberately a *separate step* from `build_packet` rather than an option on
-# it. `core/handoff/calibration.py` builds a packet and then edits the folder
-# (blanking the grades), so a build that sometimes returned an archive instead
-# of a directory would silently break it — and a calibration packet that could
-# not be blanked would anchor every grader to the first one's marks.
-
-# A sealed packet is a zip inside the standard encrypted container.
 SEALED_PACKET_SUFFIX = f".zip{ENCRYPTED_SUFFIX}"
 
 
 def default_sealed_packet_path(packet_path: str | Path) -> Path:
-    """Where a sealed packet is written: the folder's own name plus the suffix."""
     folder = Path(packet_path)
     return folder.parent / f"{folder.name}{SEALED_PACKET_SUFFIX}"
 
@@ -796,13 +587,6 @@ def seal_packet(
     destination: str | Path | None = None,
     remove_source: bool = True,
 ) -> Path:
-    """Pack a packet folder into one encrypted file and return its path.
-
-    ``remove_source`` defaults to True, and that default is the point: leaving
-    the plaintext folder beside the sealed file would mean the thing that
-    actually gets copied onto a stick is whichever one the user happens to
-    grab — and half the time that is the unprotected one.
-    """
     folder = Path(packet_path)
     if not folder.is_dir():
         raise PacketError(f"{folder} is not a packet folder")
@@ -815,8 +599,6 @@ def seal_packet(
         with zipfile.ZipFile(staged, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(folder.rglob("*")):
                 if path.is_file():
-                    # Stored relative to the packet folder, so unsealing
-                    # reproduces exactly the layout the TUI expects.
                     archive.write(path, arcname=str(path.relative_to(folder)))
         try:
             encrypt_file(staged, target, passphrase)
@@ -831,7 +613,6 @@ def seal_packet(
 def unseal_packet(
     archive_path: str | Path, destination: str | Path, passphrase: str
 ) -> Path:
-    """Unpack a sealed packet into ``destination`` (which must not exist)."""
     source = Path(archive_path)
     target = Path(destination)
     if target.exists():
@@ -851,10 +632,6 @@ def unseal_packet(
         target.mkdir(parents=True)
         with zipfile.ZipFile(plain) as archive:
             for name in archive.namelist():
-                # Resolve every member against the destination and refuse
-                # anything that lands outside it. A zip can name "../../x", and
-                # an archive is exactly the kind of file that arrives from
-                # somebody else.
                 extracted = (target / name).resolve()
                 if not str(extracted).startswith(str(target.resolve())):
                     raise PacketError(
@@ -866,20 +643,12 @@ def unseal_packet(
 
 
 def is_sealed_packet(path: str | Path) -> bool:
-    """True when this path is a sealed packet file rather than a folder."""
     candidate = Path(path)
     return candidate.is_file() and is_encrypted(candidate)
 
 
 @contextlib.contextmanager
 def opened_packet(path: str | Path, passphrase: str = "") -> Iterator[Path]:
-    """Yield a packet *folder*, unsealing a sealed packet into a temp dir first.
-
-    Every reader of a returned packet goes through here, so the merge never has
-    to know whether the grader sent back a folder or a sealed file. The
-    unsealed copy is removed on the way out — a merge that leaves a decrypted
-    packet behind has undone the encryption it just honoured.
-    """
     source = Path(path)
     if not is_sealed_packet(source):
         if passphrase:

@@ -11,27 +11,13 @@ from opengrader.core.llm.ollama_transport import parse_json_object as _parse_jso
 
 from .constants import SUBSCRIPT_TRANSLATION
 
-# https://docs.ollama.com/api/introduction
-# TODO: https://pydantic.dev/docs/ai/overview/ if we ever support multiple providers
-#
-# The HTTP transport (request building, JSON-object salvage) is shared with
-# core/llm/ollama_client.py via core/llm/ollama_transport.py. This module
-# keeps its own config, error type, and model-availability caching — vision
-# extraction and text grading have different failure modes and must not be
-# coupled.
-
 
 @dataclass(frozen=True)
 class OllamaVisionConfig:
     model: str = "qwen2.5vl:7b"
     host: str = ollama_transport.DEFAULT_HOST
     timeout_seconds: float = ollama_transport.DEFAULT_TIMEOUT_SECONDS
-    # Keeps the model resident between crops. On a cold-ish machine, reloading
-    # the vision model between every field/question crop can dominate total
-    # extraction time far more than generation itself does.
     keep_alive: str = ollama_transport.DEFAULT_KEEP_ALIVE
-    # General-purpose cap for the short, single-field JSON replies below.
-    # extract_question_prompt_and_answer overrides this — see its call site.
     num_predict: int = 256
 
 
@@ -131,10 +117,6 @@ def _generate_with_image(
     )
 
 
-# Shared by extract_field_text and extract_page_number: both ask for a single
-# string value. Ollama's `format` constrains the reply to structurally valid
-# JSON; parse_json_object (via _parse_json_from_response) is still called
-# afterward as the fallback for whatever slips through the schema anyway.
 _VALUE_TEXT_SCHEMA = {
     "type": "object",
     "properties": {"value": {"type": "string"}},
@@ -173,7 +155,6 @@ def extract_field_text(
         prompt=prompt,
         config=config,
         response_format=_VALUE_TEXT_SCHEMA,
-        # A name or ID is a few words/digits at most.
         num_predict=128,
     )
     parsed = _parse_json_from_response(raw)
@@ -236,7 +217,6 @@ def extract_title_metadata(
         prompt=prompt,
         config=config,
         response_format=_TITLE_METADATA_SCHEMA,
-        # Four short fields (course code, title, version, raw title).
         num_predict=256,
     )
     parsed = _parse_json_from_response(raw)
@@ -268,12 +248,7 @@ def extract_title_metadata(
     )
 
 
-# ``answer`` is declared first on purpose. The schema makes both fields
-# mandatory, so the printed question text now competes for the same num_predict
-# budget as the handwriting — and of the two, only the answer is load-bearing
-# (the extractor discards the prompt; `create-answer-key` is the only caller
-# that reads it). Constrained decoding emits properties in schema order, so if a
-# reply ever does run into the cap, what gets cut is the field nobody grades on.
+# Answer comes first so handwriting gets the token budget before the prompt.
 _QUESTION_PROMPT_AND_ANSWER_SCHEMA = {
     "type": "object",
     "properties": {
@@ -301,9 +276,6 @@ def extract_question_prompt_and_answer(
         "If no handwritten answer is visible, return an empty answer string. "
     )
     if math_latex:
-        # Opt-in: transcribe handwritten mathematics as LaTeX so fractions,
-        # exponents, roots, integrals, matrices, etc. survive as structured math
-        # instead of being flattened into ambiguous plain text.
         prompt += (
             "If the handwritten answer contains mathematical notation (fractions, "
             "exponents, subscripts, roots, integrals, summations, matrices, Greek "
@@ -324,12 +296,6 @@ def extract_question_prompt_and_answer(
         prompt=prompt,
         config=config,
         response_format=_QUESTION_PROMPT_AND_ANSWER_SCHEMA,
-        # The only call that produces long output, and it now produces two long
-        # fields: the schema requires the printed question text alongside the
-        # handwriting. Capped generously — truncating a real transcription
-        # corrupts a student's answer before anyone grades it, which is far
-        # worse than a slow call, so this exists to stop a genuine runaway
-        # (a model looping on messy handwriting), not to bound ordinary answers.
         num_predict=2048,
     )
     parsed = _parse_json_from_response(raw)
@@ -359,7 +325,6 @@ def extract_page_number(
         prompt=prompt,
         config=config,
         response_format=_VALUE_TEXT_SCHEMA,
-        # A page number is a handful of digits.
         num_predict=128,
     )
     parsed = _parse_json_from_response(raw)
@@ -385,13 +350,6 @@ def page_has_identity_field(
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> bool:
-    """Ask the vision model whether a page is a submission's first/cover page.
-
-    A first page carries a student **Name** and/or **Student ID** field or
-    label. Used as the fallback signal for boundary detection when a scan is too
-    poor for Tesseract to read the header. Returns False on any parsing failure
-    (the caller then treats the page as a continuation, the safe default).
-    """
     prompt = (
         "You are inspecting one scanned assignment page. Does this page contain "
         "a student Name field/label or a Student ID (student number) field/label "
@@ -404,7 +362,6 @@ def page_has_identity_field(
         prompt=prompt,
         config=config,
         response_format=_FIRST_PAGE_SCHEMA,
-        # A single boolean.
         num_predict=128,
     )
     parsed = _parse_json_from_response(raw)

@@ -39,8 +39,6 @@ class StatusBar(Horizontal):
         super().__init__(id=id)
 
     def compose(self) -> ComposeResult:
-        # The bindings live inside a horizontal scroller so a long hotkey list
-        # can be scrolled into view rather than clipped on a narrow terminal.
         with HorizontalScroll(id="status-bar-bindings-scroll"):
             yield Static("", id="status-bar-bindings")
         yield Static("", id="status-bar-search-prompt", classes="status-bar-search")

@@ -13,9 +13,7 @@ from opengrader.core.pdf_utils import safe_image_to_data
 CHOICE_LABEL_MIN_Y_NORM = 0.12
 CHOICE_LABEL_MAX_X_NORM = 0.35
 
-# Max horizontal drift for labels to count as the same choice column.
 CHOICE_LABEL_COLUMN_TOLERANCE_NORM = 0.08
-# Minimum vertical separation between adjacent visible choices.
 CHOICE_LABEL_MIN_ROW_GAP_NORM = 0.015
 
 _CHOICE_LABEL_RE = re.compile(r"^([A-Za-z])[\).:]?$")
@@ -119,12 +117,10 @@ def _iter_choice_label_candidates(
 
 
 def _label_index(label: str) -> int:
-    """Return a zero-based alphabet index for an uppercase choice label."""
     return ord(label) - ord("A")
 
 
 def _labels_are_vertically_ordered(labels: list[tuple[str, int, int]]) -> bool:
-    """Return whether choice labels increase alphabetically down the page."""
     previous_idx = -1
     previous_top = -1
     for label, top, _left in labels:
@@ -139,7 +135,6 @@ def _labels_are_vertically_ordered(labels: list[tuple[str, int, int]]) -> bool:
 def _has_plausible_row_spacing(
     labels: list[tuple[str, int, int]], *, image_height: int
 ) -> bool:
-    """Whether visible labels have roughly regular vertical spacing."""
     if len(labels) < 3:
         return True
 
@@ -163,7 +158,6 @@ def _has_plausible_row_spacing(
 def _dedupe_choice_labels_by_position(
     labels: list[tuple[str, int, int]],
 ) -> list[tuple[str, int, int]]:
-    """Keep the first visual occurrence for each OCR label."""
     first_by_label: dict[str, tuple[str, int, int]] = {}
     for label, top, left in sorted(labels, key=lambda item: (item[1], item[2])):
         first_by_label.setdefault(label, (label, top, left))
@@ -173,7 +167,6 @@ def _dedupe_choice_labels_by_position(
 def _choice_sequence_is_strong(
     labels: list[tuple[str, int, int]], *, image_height: int
 ) -> bool:
-    """Whether one aligned column strongly resembles answer choices."""
     labels = _dedupe_choice_labels_by_position(labels)
     if len(labels) < 2:
         return False
@@ -189,15 +182,11 @@ def _choice_sequence_is_strong(
     missing_count = (last - first + 1) - visible_count
 
     if first == 0:
-        # Exact A/B is enough. If OCR misses one interior label, require a
-        # longer visible sequence so a random pair like A/C does not win.
         if missing_count == 0 and visible_count >= 2:
             return True
         return missing_count == 1 and visible_count >= 3
 
     if first == 1:
-        # A selected or cropped first option can hide A, but B/C/D still forms
-        # a strong consecutive, aligned choice list.
         return missing_count == 0 and visible_count >= 3
 
     return False
@@ -209,7 +198,6 @@ def _has_strong_choice_sequence(
     image_width: int,
     image_height: int,
 ) -> bool:
-    """Search OCR candidates for one plausible answer-choice label column."""
     if len(candidates) < 2 or image_width <= 0 or image_height <= 0:
         return False
 
@@ -231,7 +219,6 @@ _TRUE_FALSE_WORD_RE = re.compile(r"^(true|false)$")
 
 
 def _normalize_word_token(token: str) -> str | None:
-    """Return a lowercased True/False word token, ignoring choice punctuation."""
     cleaned = re.sub(r"[^A-Za-z]", "", token).lower()
     match = _TRUE_FALSE_WORD_RE.fullmatch(cleaned)
     return match.group(1) if match is not None else None
@@ -243,15 +230,6 @@ def _has_true_false_pair(
     lang: str,
     config: str,
 ) -> bool:
-    """Whether the crop shows a stacked ``True`` / ``False`` option pair.
-
-    A True/False question is a constrained multiple choice, but when it is
-    rendered without letter labels (just the two words) the choice-label
-    detector misses it. This conservative fallback requires *both* words, in the
-    left answer region, with ``True`` stacked above ``False`` and roughly
-    left-aligned — the layout of a two-option question — so a free-response
-    answer that merely mentions "true" or "false" is not misclassified.
-    """
     if image.width <= 0 or image.height <= 0:
         return False
 
@@ -293,7 +271,6 @@ def classify_question_image(
     lang: str = "eng",
     config: str = "--psm 6",
 ) -> QuestionType:
-    """Classify a question crop conservatively from visible answer-choice labels."""
     candidates = _iter_choice_label_candidates(image, lang=lang, config=config)
     if candidates and _has_strong_choice_sequence(
         candidates, image_width=image.width, image_height=image.height

@@ -1,36 +1,3 @@
-"""Regrade-request tracking — turn a grade dispute into a first-class item.
-
-Once graded assignments are returned (annotated PDFs), a student may contest a
-grade: "I think Q3 was marked wrong because…". Today that lives in the
-instructor's inbox — untracked, invisible to whoever is grading, and with no
-route back to the disputed question. This module makes a dispute a *tracked*
-record that flows into the existing needs-review triage
-(`core/submissions/review.py`) and routes a grader straight to the question.
-
-Design decisions (mirroring `core/history/journal.py` and `core/policy.py`):
-
-* **Location** — ``<submissions>/.opengrader/regrades.jsonl``. Co-located with
-  the assignment data so requests travel when the folder is copied/moved,
-  namespaced in the ``.opengrader`` dot-dir so they read as tool metadata and
-  stay out of submission discovery.
-* **Append-only, event-sourced JSONL** — one self-contained record per line.
-  A *status change* (resolve/deny) is a fresh line for the same ``request_id``;
-  :func:`read_regrade_requests` folds the log so the latest line per id wins.
-  Append (never read-modify-write) avoids the races a mutable blob would invite,
-  so a future web intake process and a grader's TUI can both write safely.
-* **Front-end agnostic** — all dispute logic lives here, in pure ``core``, exactly
-  like ``policy.py``/``curve.py``. The TUI and CLI are thin callers; a future web
-  layer imports the same functions. Every record carries a ``source`` (``"instructor"``
-  today, room for ``"student_portal"`` later) and a stable ``request_id`` so a web
-  form is just another writer of the same log.
-* **Absent/malformed = empty** — a missing or corrupt file resolves to no
-  requests rather than raising, so it never blocks grading; a truncated line is
-  skipped, not fatal.
-
-A regrade request is a *prompt to a human*, never an automated grade change —
-the same philosophy as the consistency/similarity audits.
-"""
-
 from __future__ import annotations
 
 import json
@@ -57,19 +24,11 @@ def _now_iso() -> str:
 
 
 def _new_request_id() -> str:
-    """A short, stable, collision-free id (e.g. ``rg-1a2b3c4d``)."""
     return f"rg-{uuid.uuid4().hex[:8]}"
 
 
 @dataclass(frozen=True)
 class RegradeRequest:
-    """One tracked grade dispute.
-
-    ``question_id`` is empty for a whole-assignment dispute (the reviewer is
-    routed to the student's first question). ``status`` is the current state;
-    ``resolved_*`` fields are populated only once it leaves ``"open"``.
-    """
-
     request_id: str
     student_id: str
     reason: str
@@ -116,7 +75,6 @@ class RegradeRequest:
 
 
 def resolve_regrades_path(submissions_path: str | Path) -> Path:
-    """Return the ``.opengrader/regrades.jsonl`` path for a file or dir."""
     base = Path(submissions_path)
     if base.is_file():
         base = base.parent
@@ -132,13 +90,6 @@ def _append_record(submissions_path: str | Path, record: RegradeRequest) -> Path
 
 
 def read_regrade_requests(submissions_path: str | Path) -> list[RegradeRequest]:
-    """Return the current state of every request, oldest creation first.
-
-    The file is an append-only event log: a resolve/deny writes a fresh line for
-    the same ``request_id``. This folds it so the latest line per id wins (by
-    ``updated_at``, tie-broken by file order), and malformed lines are skipped so
-    one truncated write never makes the whole log unreadable.
-    """
     path = resolve_regrades_path(submissions_path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -157,8 +108,6 @@ def read_regrade_requests(submissions_path: str | Path) -> list[RegradeRequest]:
         if not record.request_id:
             continue
         existing = latest.get(record.request_id)
-        # Later file position wins on an equal/absent timestamp; a strictly
-        # newer updated_at always wins.
         if existing is None or record.updated_at >= existing.updated_at:
             latest[record.request_id] = record
 
@@ -168,7 +117,6 @@ def read_regrade_requests(submissions_path: str | Path) -> list[RegradeRequest]:
 def open_regrade_requests(
     submissions_path: str | Path,
 ) -> list[RegradeRequest]:
-    """Just the still-open requests (what triage cares about)."""
     return [r for r in read_regrade_requests(submissions_path) if r.is_open]
 
 
@@ -181,13 +129,6 @@ def add_regrade_request(
     source: RegradeSource = "instructor",
     actor: str | None = None,
 ) -> RegradeRequest:
-    """File a new dispute and return the stored record.
-
-    ``student_id`` identifies whose grade is contested; ``question_id`` is the
-    disputed question (empty for a whole-assignment dispute). ``reason`` is the
-    student's stated argument. ``source`` distinguishes an instructor-entered
-    request from a future student-portal one.
-    """
     student_id = student_id.strip()
     if not student_id:
         raise ValueError("a regrade request needs a student_id")
@@ -240,7 +181,6 @@ def resolve_regrade_request(
     note: str = "",
     actor: str | None = None,
 ) -> RegradeRequest | None:
-    """Mark a request resolved (the grade was reviewed/adjusted). ``None`` if unknown."""
     return _close_request(
         submissions_path, request_id, status="resolved", note=note, actor=actor
     )
@@ -253,7 +193,6 @@ def deny_regrade_request(
     note: str = "",
     actor: str | None = None,
 ) -> RegradeRequest | None:
-    """Mark a request denied (grade stands). ``None`` if the id is unknown."""
     return _close_request(
         submissions_path, request_id, status="denied", note=note, actor=actor
     )

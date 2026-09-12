@@ -1,35 +1,3 @@
-"""Modal answer-integrity audit, opened with p.
-
-A pop-up that answers one question — did two students hand in the same work? —
-over the two halves of an exam it has to be asked differently on:
-
-* **Free responses** (the default view): clusters of near-identical answers,
-  near-verbatim (high) first, with pairwise similarity percentages and each
-  student's answer snippet. Backed by ``core/submissions/similarity.py``.
-* **Objective answers** (``o``): pairs whose *incorrect* multiple-choice answers
-  agree far more often than the class's own spread of wrong answers can explain.
-  Backed by ``core/submissions/answer_patterns.py``.
-
-The second view lives here rather than in a modal of its own for the same reason
-the learning-outcome view lives inside item analysis: it is the other half of the
-question the reader already came with, over the same cohort, with the same
-read-only contract. A text diff genuinely cannot audit a bubble sheet — every
-honest pair in the class is "100% alike" on "B" — so without this view an exam
-answered entirely on paper circles has no integrity check at all, which is
-exactly the gap it exists to close.
-
-Each student is an actionable row in both views: selecting one (click, or focus +
-enter) jumps straight to that student's question on the grade screen, mirroring
-how the consistency audit and needs-review queue route to
-`GradeController.open_review_target`. For a pattern pair — which spans many
-questions rather than anchoring to one — that target is the rarest shared wrong
-answer, the one most worth looking at first.
-
-It re-reads nothing and changes nothing on its own. Anonymity-aware: names show
-only in teacher mode — the audit is a flag for a human to inspect, never an
-accusation. esc or p closes it.
-"""
-
 from __future__ import annotations
 
 from textual import events, on
@@ -59,20 +27,10 @@ from opengrader.tui.formatting import (
     format_similarity_pair,
 )
 
-# How many of a pair's shared wrong answers to list. A wholesale copier shares
-# twenty, and the rarest few are what make the case — the rest just pushes the
-# next pair off the screen.
 _MAX_SHARED_ROWS = 6
 
 
 class _SimilarityMemberRow(Static):
-    """A clickable/focusable student row; selecting it opens that student.
-
-    Only built for navigable members (those mapped to a loaded submission), so
-    posting a target is always meaningful. Shared by both views — the objective
-    view's rows differ only in what they say, not in how they behave.
-    """
-
     can_focus = True
 
     def __init__(self, member, question_id: str, label) -> None:
@@ -90,9 +48,6 @@ class _SimilarityMemberRow(Static):
         self._select()
 
     def on_key(self, event: events.Key) -> None:
-        # The focused row is first in the bubble path, so intercepting the nav
-        # keys here (and stopping them) keeps the enclosing VerticalScroll from
-        # hijacking up/down to scroll instead of moving between students.
         if event.key in ("enter", "space"):
             event.stop()
             self._select()
@@ -105,12 +60,6 @@ class _SimilarityMemberRow(Static):
 
 
 class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
-    """Two integrity views over one cohort: free-response text, objective patterns.
-
-    Dismisses with ``(student_item_id, question_id)`` when a student row is
-    selected, or ``None`` on close.
-    """
-
     DEFAULT_CSS = """
     SimilarityScreen {
         align: center middle;
@@ -212,8 +161,6 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
     VIEW_OBJECTIVE = "objective"
 
     class MemberSelected(Message):
-        """Posted when a student row is chosen, to open them on the grade screen."""
-
         def __init__(self, student_item_id: str, question_id: str) -> None:
             self.student_item_id = student_item_id
             self.question_id = question_id
@@ -228,11 +175,6 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
     ) -> None:
         self._items = items
         self._teacher_mode = teacher_mode
-        # ``None`` means the caller could not build the objective half at all
-        # (a provider without an answer key). That is different from "built it
-        # and it had nothing to analyze", which the view itself reports — so the
-        # toggle is absent in the first case and present in the second, the same
-        # distinction the item-analysis modal draws for outcomes.
         self._patterns = patterns
         self._view = self.VIEW_RESPONSES
         super().__init__()
@@ -245,9 +187,6 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
         with Vertical(id="similarity-dialog") as dialog:
             dialog.border_title = "▸ Answer Similarity"
             yield Static(self._summary_text(), id="similarity-summary")
-            # Left empty here and filled by `_render_view` on mount: the body is
-            # rebuilt whole every time `o` swaps views, and having one code path
-            # build it is what keeps the two views from drifting apart.
             yield VerticalScroll(id="similarity-body")
             with Horizontal(id="similarity-buttons"):
                 yield Button("Close", id="similarity-close", compact=True)
@@ -256,10 +195,6 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
         self._render_view()
 
     def _focus_first_row(self) -> None:
-        # Land on the first actionable student so enter works immediately; fall
-        # back to the close button when there's nothing to act on (an empty
-        # audit — e.g. nothing graded yet — has no member rows, and Textual's
-        # `.first()` raises on an empty query, so iterate instead).
         rows = list(self.query(_SimilarityMemberRow))
         if rows:
             rows[0].focus()
@@ -267,12 +202,6 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
             self.query_one("#similarity-close", Button).focus()
 
     def focus_relative_member(self, current: _SimilarityMemberRow, delta: int) -> None:
-        """Move focus to the next/previous student row (arrow / j·k keys).
-
-        Walks the actionable rows in document order — so headers and pair lines
-        are skipped for free — and clamps at the ends (no wrap), the same as the
-        app's other lists. Scrolls the new row into view.
-        """
         rows = list(self.query(_SimilarityMemberRow))
         if current not in rows:
             return
@@ -282,10 +211,8 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
             row.focus()
             row.scroll_visible()
 
-    # --- Views -------------------------------------------------------------
 
     def _render_view(self) -> None:
-        """Rebuild the summary line and the body for the current view."""
         self.query_one("#similarity-summary", Static).update(self._summary_text())
         dialog = self.query_one("#similarity-dialog", Vertical)
         dialog.border_title = (
@@ -313,13 +240,11 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
 
     def _objective_widgets(self) -> list[Widget]:
         view = self._patterns
-        assert view is not None  # the toggle is inert without it
+        assert view is not None
         widgets: list[Widget] = [
             Static(format_answer_pattern_scope(view), classes="pattern-scope")
         ]
         if not view.analyzed:
-            # Deliberately not "✓": nothing was checked, and saying so is the
-            # whole point of showing the scope line above the verdict.
             widgets.append(
                 Label(
                     "Nothing to compare — this exam has no rule-graded question "
@@ -391,7 +316,6 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
         question_id: str,
         label,
     ) -> Widget:
-        """A focusable row for a navigable member, a dimmed Label otherwise."""
         if member.is_navigable:
             return _SimilarityMemberRow(member, question_id, label)
         return Label(label, classes="similarity-member-inert")
@@ -433,15 +357,8 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
         parts.append("esc closes")
         return " · ".join(parts) + "."
 
-    # --- Actions -----------------------------------------------------------
 
     def action_toggle_view(self) -> None:
-        """Swap between the free-response clusters and the objective patterns.
-
-        Inert when the caller supplied no objective report — the same stance the
-        item-analysis modal takes for an untagged answer key: an absent view is
-        better than an empty one that looks broken.
-        """
         if not self._has_patterns:
             return
         self._view = (

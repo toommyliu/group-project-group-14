@@ -1,3 +1,5 @@
+"""Export grades and feedback to Canvas."""
+
 from __future__ import annotations
 
 import shutil

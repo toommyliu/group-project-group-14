@@ -1,11 +1,3 @@
-"""Calibration sets: the same sample, to every grader, blind.
-
-The load-bearing assertions here are the ones about what a grader can *see*: a
-packet that shows someone else's marks, or that shares an alias with another
-grader's copy, would anchor exactly the independent judgement a norming session
-exists to measure.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -64,7 +56,6 @@ student_score: ""
 
 @pytest.fixture()
 def cohort(tmp_path: Path) -> Path:
-    """A six-student cohort, ungraded, each with a response crop."""
     root = tmp_path / "subs"
     for index in range(1, 7):
         student = root / f"sub-{index:04d}"
@@ -80,9 +71,6 @@ def _packets_dir(tmp_path: Path) -> Path:
     return tmp_path / "calibration-packets"
 
 
-# ── sampling ──────────────────────────────────────────────────────────────
-
-
 def test_a_sample_is_reproducible_from_its_seed():
     keys = [f"student-{index}" for index in range(50)]
 
@@ -94,7 +82,6 @@ def test_a_sample_is_reproducible_from_its_seed():
 
 
 def test_a_sample_does_not_depend_on_the_order_submissions_were_listed():
-    """Re-cutting a lost packet must give the grader the same students back."""
     keys = [f"student-{index}" for index in range(50)]
 
     assert sample_student_keys(keys, size=8, seed=7) == sample_student_keys(
@@ -115,9 +102,6 @@ def test_an_empty_or_zero_sample_is_an_error():
         sample_student_keys(["a"], size=0, seed=1)
 
 
-# ── cutting a set ─────────────────────────────────────────────────────────
-
-
 def test_every_grader_gets_a_packet_holding_the_same_students(
     cohort: Path, tmp_path: Path
 ):
@@ -132,8 +116,6 @@ def test_every_grader_gets_a_packet_holding_the_same_students(
 
     assert len(result.packets) == 3
     assert result.calibration_set.sample_size == 3
-    # Same students in every packet — agreement can only be measured on
-    # identical work.
     student_keys = {
         tuple(sorted(member.student_key for member in packet.key.members))
         for packet in result.packets
@@ -145,7 +127,6 @@ def test_every_grader_gets_a_packet_holding_the_same_students(
 def test_each_grader_sees_different_aliases_for_the_same_student(
     cohort: Path, tmp_path: Path
 ):
-    """Two TAs comparing notes over a shared code is the anchoring to avoid."""
     result = build_calibration_set(
         cohort, ["alice", "bob"], _packets_dir(tmp_path), sample_size=3, seed=42, now=_STAMP
     )
@@ -178,8 +159,6 @@ def test_a_packet_carries_no_student_name_or_id(cohort: Path, tmp_path: Path):
 def test_a_calibration_packet_is_always_handed_over_ungraded(
     cohort: Path, tmp_path: Path
 ):
-    """The first number a grader sees is the number they agree with."""
-    # Grade the whole cohort first, so the source is *not* a blank slate.
     for path in sorted(cohort.glob("*/*.submission.md")):
         update_student_submission_file(
             path,
@@ -206,7 +185,6 @@ def test_a_calibration_packet_is_always_handed_over_ungraded(
                 assert question.analysis == ""
             assert "an existing comment" not in path.read_text(encoding="utf-8")
 
-    # The teacher's own folder is untouched.
     for path in sorted(cohort.glob("*/*.submission.md")):
         document = load_student_submission_markdown(path)
         assert document.questions[0].points_awarded == 7.0
@@ -247,9 +225,6 @@ def test_reusing_a_set_name_is_refused_rather_than_overwriting(
         )
 
 
-# ── the record ────────────────────────────────────────────────────────────
-
-
 def test_a_set_record_round_trips(cohort: Path, tmp_path: Path):
     result = build_calibration_set(
         cohort, ["alice", "bob"], _packets_dir(tmp_path), sample_size=3, seed=9, now=_STAMP
@@ -274,7 +249,6 @@ def test_sets_are_listed_and_found_by_id(cohort: Path, tmp_path: Path):
     assert [record.set_id for record in list_calibration_sets(cohort)] == ["first"]
     assert find_calibration_set(cohort, "first") is not None
     assert find_calibration_set(cohort, "nope") is None
-    # No id asks for the most recent session.
     assert find_calibration_set(cohort).set_id == "first"
 
 
@@ -284,15 +258,10 @@ def test_an_unreadable_record_is_skipped_not_raised(cohort: Path, tmp_path: Path
     )
     (resolve_calibration_dir(cohort) / "damaged.json").write_text("{not json")
 
-    # One damaged file must not hide the sessions that are fine.
     assert len(list_calibration_sets(cohort)) == 1
 
 
-# ── collecting the round trip ─────────────────────────────────────────────
-
-
 def _grade_packet(packet_path: Path, points: float) -> None:
-    """Mark every answer in a returned packet, as a grader would in the TUI."""
     root = packet_path / PACKET_SUBMISSIONS_DIRNAME
     for path in sorted(root.glob("*/*.submission.md")):
         document = load_student_submission_markdown(path)
@@ -323,7 +292,6 @@ def test_returned_packets_are_de_aliased_back_to_real_students(
     assert collection.missing == ()
     sampled = set(result.calibration_set.student_keys)
     for grading in collection.gradings:
-        # Keyed by the teacher's student keys, not the packet's aliases.
         assert set(grading.documents) == sampled
         assert grading.untranslated == ()
         assert grading.graded_answers == 3
@@ -341,7 +309,6 @@ def test_an_ungraded_or_missing_packet_is_reported_not_silently_empty(
         now=_STAMP,
     )
     _grade_packet(result.packets[0].packet_path, 8.0)
-    # bob has not started; carol's packet is gone entirely.
     import shutil
 
     shutil.rmtree(result.packets[2].packet_path)
@@ -357,7 +324,6 @@ def test_an_ungraded_or_missing_packet_is_reported_not_silently_empty(
 def test_a_returned_packet_without_its_key_is_reported_loudly(
     cohort: Path, tmp_path: Path
 ):
-    """With no key every alias fails to match, which must not read as 'did nothing'."""
     result = build_calibration_set(
         cohort, ["alice", "bob"], _packets_dir(tmp_path), sample_size=2, seed=42, now=_STAMP
     )
@@ -390,7 +356,6 @@ def test_a_packet_handed_back_somewhere_else_can_be_pointed_at(
 def test_the_whole_norming_round_trip_measures_disagreement(
     cohort: Path, tmp_path: Path
 ):
-    """Cut, grade differently, collect, and read the leniency out the far end."""
     result = build_calibration_set(
         cohort, ["alice", "bob"], _packets_dir(tmp_path), sample_size=4, seed=42, now=_STAMP
     )

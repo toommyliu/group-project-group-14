@@ -1,5 +1,3 @@
-"""Tests for the `course-grades` CLI."""
-
 from __future__ import annotations
 
 import json
@@ -79,12 +77,10 @@ def test_it_prints_weighted_grades_and_letters(course: Path, capsys) -> None:  #
     out = capsys.readouterr().out
     assert "CS 146" in out
     assert "Ana" in out and "Ben" in out
-    # Ana: 0.25*90 + 0.75*90 = 90
     assert "90.0%" in out
 
 
 def test_the_at_risk_list_appears_without_being_asked(course: Path, capsys) -> None:  # noqa: ANN001
-    """A list of struggling students behind an extra flag goes unread."""
     course_grades.run_cli(["--course", str(course)])
     out = capsys.readouterr().out
     assert "At risk" in out
@@ -116,7 +112,7 @@ def test_csv_has_one_column_per_assignment(course: Path, tmp_path: Path) -> None
     course_grades.run_cli(["--course", str(course), "--csv", str(output)])
     rows = output.read_text().splitlines()
     assert rows[0] == "student_id,student_name,Quiz %,Final %,course %,letter,missing"
-    assert len(rows) == 3  # header + two students
+    assert len(rows) == 3
 
 
 def test_json_carries_students_outcomes_and_at_risk(course: Path, capsys) -> None:  # noqa: ANN001
@@ -161,4 +157,4 @@ def test_a_broken_assignment_is_warned_about_not_fatal(course: Path, capsys) -> 
     course_grades.run_cli(["--course", str(course)])
     captured = capsys.readouterr()
     assert "Missing" in captured.err
-    assert "CS 146" in captured.out  # the report still printed
+    assert "CS 146" in captured.out

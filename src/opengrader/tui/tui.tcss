@@ -1,9 +1,7 @@
-# https://textual.textualize.io/guide/design/#base-colors
 $accent: #81A1C1;
 $background: #181818;
 $foreground: #E4E4E4EB;
 
-/* ── Shared chrome ─────────────────────────────────────────── */
 Breadcrumb {
     width: 100%;
     height: 1;
@@ -121,8 +119,6 @@ Checkbox:focus {
     background: transparent;
 }
 
-/* Grading log: same muted card chrome as the lists on the left. It never
-   takes focus, so it never gets the accent "-pane-active" treatment. */
 #grading-log {
     height: 11;
     margin-top: 1;
@@ -144,8 +140,7 @@ Checkbox:focus {
     text-style: none;
 }
 
-/* Log rows are clickable (they reopen that grade); hover is the affordance.
-   !important outweighs IndexedListView's transparent-hover default. */
+
 #grading-log IndexedListView > ListItem.grading-log-entry.-hovered {
     background: #344352 !important;
 }
@@ -182,15 +177,14 @@ Checkbox:focus {
     width: 1fr;
     height: 1;
     background: #26313a;
-    /* Scrollable horizontally, but the scrollbar is hidden (size 0) so the bar
-       stays a single row — scroll via shift+wheel / trackpad swipe. */
+
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-size: 0 0;
 }
 
 #status-bar-bindings {
-    /* Auto width so the line can exceed the viewport and become scrollable. */
+
     width: auto;
     height: 1;
     padding: 0 1;

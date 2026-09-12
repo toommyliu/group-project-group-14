@@ -1,29 +1,4 @@
-"""Measure the pipeline's transcription accuracy against graders' corrections.
-
-Everything downstream of extraction trusts ``Response text``: the grader reads
-it instead of the scan, the LLM grader is given nothing else, auto-grading
-matches on it, and answer grouping decides who wrote the same thing by it. The
-confidence floors that guard all of that (`review.DEFAULT_OCR_CONFIDENCE_FLOOR`,
-`submission-extractor --escalate-confidence`) were reasonable numbers, and until
-now nobody had measured them.
-
-The evidence was already being collected. Every time a grader fixes a misread
-answer with the grade screen's ``x`` editor, the audit journal records what the
-machine read — with its confidence and its reader — beside what the human says
-it should have been. This tool reads that log back:
-
-    uv run transcribe-eval --input out/student-submissions/
-    uv run transcribe-eval --input fall-2025/subs/ --input spring-2026/subs/
-    uv run transcribe-eval --input out/student-submissions/ --json
-
-``--input`` repeats to pool cohorts, which is sound here in a way it is not for
-`llm-eval`: this measures a *reader against handwriting*, not a model against a
-rubric, so two different exams read by the same Tesseract are more evidence
-about the same question rather than two questions averaged together.
-
-**Strictly read-only** — no grade, transcription, annotation or journal entry is
-ever written; a test asserts it. Engine: `core/analytics/transcription_eval.py`.
-"""
+"""Compare machine transcriptions with human corrections."""
 
 from __future__ import annotations
 
@@ -70,11 +45,6 @@ what it measures:
 
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        # Deliberately no `prog=`: argparse then names whatever was
-        # actually invoked — the standalone `transcribe-eval` script, or
-        # `opengrader transcribe-eval` when the front-door command dispatched
-        # here (cli/main.py patches sys.argv[0] for exactly this). A
-        # hardcoded name would tell a user to fix a command they never ran.
         description=(
             "Measure OCR/vision-model transcription accuracy from the "
             "corrections graders have already made."
@@ -157,13 +127,6 @@ def _build_parser() -> ArgumentParser:
 
 
 def cohort_labels(roots: list[Path]) -> dict[Path, str]:
-    """Name each pooled folder by the shortest unique tail of its path.
-
-    The expected layout is one folder per term, each holding an identically
-    named ``student-submissions/``, so a bare basename would label every cohort
-    the same and tell the reader nothing. A single cohort needs no label at all
-    and gets an empty one, which keeps ordinary single-folder output clean.
-    """
     if len(roots) < 2:
         return {root: "" for root in roots}
 
@@ -183,16 +146,6 @@ def cohort_labels(roots: list[Path]) -> dict[Path, str]:
 def _load_cohorts(
     inputs: list[str], *, ignore_actors: list[str]
 ) -> tuple[list[TranscriptionSample], CoverageStats, SampleTally, list[str]]:
-    """Collect samples per folder, then pool them.
-
-    **Per folder** because student ids are only unique within a cohort: two
-    terms of the same course both number from s1, and collecting them together
-    would merge two different people's corrections into one sample and discard
-    the second without saying so.
-
-    De-duplicates repeated roots by resolved path — naming a folder twice would
-    double its weight in every rate below.
-    """
     problems: list[str] = []
     roots: list[Path] = []
     seen: set[Path] = set()
@@ -234,8 +187,6 @@ def _load_cohorts(
             try:
                 documents.append(load_student_submission_markdown(path))
             except (OSError, ValueError) as exc:
-                # One unreadable submission costs its coverage contribution, not
-                # the whole measurement.
                 problems.append(f"{path.name}: {exc}")
 
         samples.extend(cohort_samples)
@@ -276,8 +227,6 @@ def _print_human(report: TranscriptionEvalReport, *, worst: int) -> None:
         )
         return
 
-    # Coverage first, deliberately: every rate below is conditional on it, and a
-    # reader who meets the rates first will read them as if they were not.
     coverage = report.coverage
     if coverage.answers_with_text:
         print(
@@ -394,8 +343,6 @@ def _as_json(report: TranscriptionEvalReport) -> dict:
         "overall": stats_json(report.overall),
         "by_source": [stats_json(stats) for stats in report.by_source],
         "by_confidence": [stats_json(stats) for stats in report.by_confidence],
-        # The full, uncollapsed curve: the human table collapses identical rows
-        # for readability, and a script should not have to undo that.
         "floor_curve": [
             {
                 "floor": point.floor,
@@ -443,20 +390,11 @@ def _as_json(report: TranscriptionEvalReport) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point. Returns an exit code; see `run_cli` for the report itself."""
     report = run_cli(argv)
     return 0 if report is not None else 1
 
 
 def run_cli(argv: list[str] | None = None) -> TranscriptionEvalReport | None:
-    """Build and print the report, returning it so a caller can read the number.
-
-    Returns the report rather than an exit code for the same reason `llm-eval`
-    and `grade-check` do — a TUI front end should read the recommended floor as
-    data instead of scraping stdout. The ``console_scripts`` entry point is
-    :func:`main`, which discards it: a wrapper that returned an object would
-    print its repr and exit 1.
-    """
     args = _build_parser().parse_args(argv)
 
     if not 0.0 < args.target_catch <= 1.0:
@@ -469,8 +407,6 @@ def run_cli(argv: list[str] | None = None) -> TranscriptionEvalReport | None:
     samples, coverage, tally, problems = _load_cohorts(
         args.input, ignore_actors=args.ignore_actor
     )
-    # Caveats before the numbers, following `grade-restore`'s rule that "no
-    # findings" must never read as "everything was accounted for".
     for problem in problems:
         print(f"warning: {problem}", file=sys.stderr)
 

@@ -1,27 +1,3 @@
-"""Reusable comment library modal, opened with l on the grade screen.
-
-Rubric grading's biggest time sink is retyping the same feedback ("See Lecture
-5", "Off-by-one in loop bound") on paper after paper. This pop-up is the
-pick-and-insert front end for the saved-snippet store (`core/comments.py`):
-
-* a numbered list of saved phrases — press the digit (or click, or enter on the
-  highlight) to drop that phrase straight into the answer's comment box and
-  close;
-* a **scope toggle** (``g``) between two orderings: *Global* (most-used
-  anywhere first — stable, so the hotkeys don't move as you change questions)
-  and *This question* (the phrases you use most on this question first). Global
-  is the default; the choice is remembered for the session;
-* an input to save a new phrase, and a one-click "save the comment you're
-  writing" button, so the library grows as you grade;
-* ``d`` / delete removes the highlighted phrase.
-
-Only *inserting* dismisses the modal (that's the one-keystroke path the feature
-exists for). Saving and deleting mutate the library in place and persist through
-an injected callback, keeping the modal open so you can queue up several edits.
-The store is a plain per-folder JSON file — no identities, no grade truth — so
-the view needs no anonymity gating. esc or l closes it.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -36,18 +12,13 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 from opengrader.core.comments import CommentLibrary, CommentSnippet
 from opengrader.tui.formatting import format_comment_snippet_row
 
-# Only the first nine rows get a digit hotkey; the rest are reached by
-# arrow keys or a click (digits past 9 aren't single keypresses anyway).
 _MAX_DIGIT_HOTKEYS = 9
 
-# Ordering scopes, as stored on the app and echoed on the toggle button.
 SCOPE_GLOBAL = "global"
 SCOPE_QUESTION = "question"
 
 
 class _SnippetItem(ListItem):
-    """A single saved-snippet row, carrying its text for selection/deletion."""
-
     def __init__(
         self, snippet: CommentSnippet, *, hotkey: int | None, uses: int
     ) -> None:
@@ -59,8 +30,6 @@ class _SnippetItem(ListItem):
 
 
 class CommentLibraryScreen(ModalScreen["str | None"]):
-    """Pick-and-insert saved feedback snippets; dismiss with the chosen text."""
-
     DEFAULT_CSS = """
     CommentLibraryScreen {
         align: center middle;
@@ -146,8 +115,6 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
         self._library = library
         self._on_change = on_change
         self._current_comment = current_comment.strip()
-        # Per-question ordering only makes sense with a question in hand; without
-        # one the toggle is hidden and the view stays global.
         self._question_id = (question_id or "").strip()
         self._question_label = question_label.strip()
         self._on_scope_change = on_scope_change
@@ -199,7 +166,6 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
     def on_mount(self) -> None:
         self._refresh_list()
 
-    # ---- rendering ----------------------------------------------------
 
     def _ordered_snippets(self) -> tuple[CommentSnippet, ...]:
         return self._library.ordered(self._effective_question_id())
@@ -211,8 +177,6 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
         ordered = self._ordered_snippets()
         for index, snippet in enumerate(ordered):
             hotkey = index + 1 if index < _MAX_DIGIT_HOTKEYS else None
-            # The badge shows the count that drives the current ordering: this
-            # question's uses in per-question view, the global total otherwise.
             uses = snippet.uses_on(qid) if qid else snippet.uses
             list_view.append(_SnippetItem(snippet, hotkey=hotkey, uses=uses))
         has_snippets = bool(ordered)
@@ -244,9 +208,7 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
         )
 
     def action_toggle_scope(self) -> None:
-        # A focused Input already swallows a printable "g" before it reaches this
-        # binding, so no focus guard is needed (and guarding would wrongly block
-        # a click on the toggle button while the new-snippet box has focus).
+        # Input consumes printable g; a focus guard here would also block button clicks.
         if not self._can_scope_per_question:
             return
         self._scope = (
@@ -264,7 +226,6 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
         event.stop()
         self.action_toggle_scope()
 
-    # ---- mutation -----------------------------------------------------
 
     def _persist(self, library: CommentLibrary) -> None:
         self._library = library
@@ -274,7 +235,7 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
     def _add_snippet(self, text: str) -> None:
         updated = self._library.with_snippet(text)
         if updated is self._library:
-            return  # blank or duplicate — nothing to do
+            return
         self._persist(updated)
         self._refresh_list()
 
@@ -292,12 +253,8 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
         item = list_view.highlighted_child
         return item if isinstance(item, _SnippetItem) else None
 
-    # ---- insertion (the dismiss path) ---------------------------------
 
     def _insert(self, snippet: CommentSnippet) -> None:
-        # Bump both the global total and (when we know it) this question's bucket
-        # so the phrase climbs both orderings, then persist before handing the
-        # text back to the grade screen to drop in.
         self._persist(
             self._library.record_use(snippet.text, self._question_id or None)
         )
@@ -310,11 +267,8 @@ class CommentLibraryScreen(ModalScreen["str | None"]):
             return True
         return False
 
-    # ---- events -------------------------------------------------------
 
     def on_key(self, event) -> None:
-        # Digit inserts the Nth snippet — but only when we're not typing into
-        # the new-snippet box (where the digit is literal text).
         if isinstance(self.focused, Input):
             return
         if len(event.key) == 1 and event.key.isdigit() and event.key != "0":

@@ -1,5 +1,3 @@
-"""Opengrader QR payload encode/decode + generate→read round-trip."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -26,7 +24,6 @@ def test_encode_generic_payload_omits_id():
 
 def test_encode_strips_unsafe_delimiters():
     code = OpengraderCode(student_id="1;2=3 4", version="A")
-    # ';', '=', and whitespace are stripped so they can't corrupt the grammar.
     assert encode_payload(code) == "OG1;id=1234;v=A"
 
 

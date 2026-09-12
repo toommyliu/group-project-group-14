@@ -1,10 +1,3 @@
-"""The claim CLI: dividing a real cohort between graders.
-
-The engine is covered in ``tests/unit/core/test_claims.py``; what matters here
-is the shell around it — reading the actual cohort off disk, the range syntax a
-teacher types, and refusing rather than silently double-booking.
-"""
-
 from pathlib import Path
 
 import pytest
@@ -58,7 +51,6 @@ student_score: ""
 
 @pytest.fixture
 def cohort(tmp_path: Path) -> Path:
-    """Four questions, six students — divides evenly two, three or four ways."""
     submissions = tmp_path / "student-submissions"
     submissions.mkdir()
     for index in range(1, 7):
@@ -72,11 +64,6 @@ def _actors(submissions: Path) -> list[str]:
     return [claim.actor for claim in read_claims(submissions)]
 
 
-# --------------------------------------------------------------------------- #
-# divide
-# --------------------------------------------------------------------------- #
-
-
 def test_divide_by_question_writes_one_claim_each(cohort, capsys) -> None:
     cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
 
@@ -84,7 +71,6 @@ def test_divide_by_question_writes_one_claim_each(cohort, capsys) -> None:
     assert [claim.actor for claim in claims] == ["alice", "bob"]
     assert claims[0].work.question_ids == ("q1", "q2")
     assert claims[1].work.question_ids == ("q3", "q4")
-    # Whole-cohort slices: neither names students, so both cover everyone.
     assert claims[0].work.student_ids == ()
     assert "q1-q2" in capsys.readouterr().out
 
@@ -119,8 +105,6 @@ def test_divide_refuses_to_double_book(cohort, capsys) -> None:
 
     assert exit_info.value.code == 2
     assert "zoe" in capsys.readouterr().err
-    # Only the pre-existing claim survives; a partial division is not written
-    # past the point of failure.
     assert _actors(cohort) == ["zoe"]
 
 
@@ -134,14 +118,9 @@ def test_more_graders_than_questions_leaves_nobody_holding_everything(
         ]
     )
     claims = read_claims(cohort)
-    assert len(claims) == 4  # four questions, so four graders get work
+    assert len(claims) == 4
     assert all(not claim.work.is_everything for claim in claims)
     assert "only 4 of 6 graders" in capsys.readouterr().err
-
-
-# --------------------------------------------------------------------------- #
-# add
-# --------------------------------------------------------------------------- #
 
 
 def test_add_expands_a_question_range(cohort) -> None:
@@ -167,8 +146,6 @@ def test_add_accepts_a_question_list(cohort) -> None:
 
 
 def test_student_range_is_positional_but_stored_as_ids(cohort) -> None:
-    # "the first three students" is how a teacher divides a pile; the claim
-    # records who they actually are so it survives a re-extraction.
     cli.run_cli(
         [
             "add", "--submissions", str(cohort),
@@ -236,11 +213,6 @@ def test_add_reports_the_conflicting_holder(cohort, capsys) -> None:
     assert _actors(cohort) == ["alice"]
 
 
-# --------------------------------------------------------------------------- #
-# list / status / release / complete
-# --------------------------------------------------------------------------- #
-
-
 def test_list_shows_active_claims_only_by_default(cohort, capsys) -> None:
     cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
     capsys.readouterr()
@@ -268,7 +240,7 @@ def test_status_reports_full_coverage(cohort, capsys) -> None:
     cli.run_cli(["status", "--submissions", str(cohort)])
 
     out = capsys.readouterr().out
-    assert "24/24 answers claimed" in out  # 4 questions x 6 students
+    assert "24/24 answers claimed" in out
     assert "claimed exactly once" in out
 
 
@@ -291,7 +263,7 @@ def test_status_flags_a_deliberate_overlap(cohort, capsys) -> None:
     assert exit_info.value.code == 2
     out = capsys.readouterr().out
     assert "double-booked" in out
-    assert "6 answer(s)" in out  # q1 for all six students
+    assert "6 answer(s)" in out
 
 
 def test_status_json_carries_the_numbers(cohort, capsys) -> None:
@@ -316,7 +288,6 @@ def test_release_frees_the_work_for_someone_else(cohort, capsys) -> None:
     cli.run_cli(["release", claim.claim_id, "--submissions", str(cohort)])
     capsys.readouterr()
 
-    # No longer a conflict for bob.
     cli.run_cli(
         ["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "bob"]
     )
