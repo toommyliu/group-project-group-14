@@ -616,13 +616,22 @@ def test_a_merge_reloads_the_session_so_the_next_save_still_works(
             merge.dismiss(merge._merged)
             await _settle(pilot, lambda: not isinstance(app.screen, MergeScreen))
 
-            path = sorted(cohort.glob("*/*.submission.md"))[0]
-            from opengrader.core.concurrency import file_mtime_ns
-
             provider = app.data_provider
-            loaded = [s for s in provider._submissions if s.path == path]
-            assert loaded, "submission should still be loaded"
-            assert loaded[0].mtime_ns == file_mtime_ns(path)
+            questions = {
+                question.question_id: question
+                for question in provider.build_question_seeds(student_item_id="s1")
+            }
+            assert questions["q1"].points_awarded == 5.0
+
+            provider.save_question_grade(
+                student_item_id="s1",
+                question_id="q2",
+                possible_points=questions["q2"].points,
+                points_awarded=questions["q2"].points,
+                rubric_labels=("Correct",),
+            )
+            assert _points(cohort, "q2") == questions["q2"].points
+            assert _points(cohort, "q1") == 5.0
 
     asyncio.run(run())
 

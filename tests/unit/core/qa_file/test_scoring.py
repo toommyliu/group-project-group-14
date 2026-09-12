@@ -1,3 +1,5 @@
+from opengrader.core.grading.scoring import score_rubric_selection
+from opengrader.core.qa_file import QARubricFlatOption
 from opengrader.core.qa_file.scoring import (
     awarded_points_for_rubric_selection,
     rubric_scoring_mode,
@@ -43,3 +45,13 @@ def test_bonus_points_are_added_after_clamping() -> None:
         )
         == 12
     )
+    options = [
+        QARubricFlatOption("Correct", 0, "correct", "exclusive"),
+        QARubricFlatOption("Missing step", -3, "partial", "checklist"),
+        QARubricFlatOption("Incorrect", -10, "incorrect", "exclusive"),
+        QARubricFlatOption("Bonus", 2, "bonus", "checklist"),
+    ]
+    assert score_rubric_selection(10, options, [options[1], options[3]]) == 9
+    assert score_rubric_selection(10, options, [options[3]]) == 12
+    assert score_rubric_selection(10, options, [options[2]]) == 0
+    assert score_rubric_selection(10, options, []) is None

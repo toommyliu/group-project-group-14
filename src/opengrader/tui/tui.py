@@ -280,7 +280,6 @@ class TuiApp(App):
             self._load_grading_queue()
             self.switch_to(PAGE_QA_PICKER)
             self._start_extraction_watch(event.submissions_path, known_active=None)
-            self.notify("TUI Loaded Successfully")
         except Exception as e:
             self.notify(f"Error loading files: {e}", severity="error")
 

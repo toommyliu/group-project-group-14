@@ -1,23 +1,13 @@
 from dataclasses import dataclass, field
 
+from opengrader.core.qa_file import QARubricFlatOption as RubricOption
 from opengrader.core.qa_file.scoring import (
-    RubricOptionKind,
-    RubricSelectionMode,
     score_adjustment_for_rubric_selection,
     ungraded_score_adjustment,
 )
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 from opengrader.core.submissions.page_context import PageContextEntry
 from opengrader.core.submissions.transcription import SOURCE_HUMAN
-
-
-@dataclass(frozen=True)
-class RubricOption:
-    label: str
-    points_delta: float
-    kind: RubricOptionKind
-    selection_mode: RubricSelectionMode
-    default_comment: str | None = None
 
 
 @dataclass

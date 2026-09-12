@@ -10,9 +10,9 @@ from opengrader.core.grading import (
     override_ai_analysis,
     parse_ai_analysis,
 )
+from opengrader.core.grading.scoring import score_rubric_selection
 from opengrader.core.history import current_actor
 from opengrader.core.policy import read_policy
-from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
 from opengrader.core.submissions import (
     AnswerGroup,
     GroupableResponse,
@@ -1346,16 +1346,10 @@ class GradeController:
 
     @staticmethod
     def _points_for_selection(question: QuestionGrade) -> float | None:
-        selected_options = question.selected_options()
-        if not selected_options:
-            return None
-        standard_selected = [o for o in selected_options if o.kind != "bonus"]
-        bonus_selected = [o for o in selected_options if o.kind == "bonus"]
-        return awarded_points_for_rubric_selection(
+        return score_rubric_selection(
             question.points or 0.0,
-            [o.points_delta for o in standard_selected],
-            [o.points_delta for o in question.rubric_options if o.kind != "bonus"],
-            bonus_points_values=[o.points_delta for o in bonus_selected],
+            question.rubric_options,
+            question.selected_options(),
         )
 
     def _persist_current_grade(self, *, revert: GradeRevert | None = None) -> str:
@@ -1844,14 +1838,10 @@ class GradeController:
         options_by_label = {option.label: option for option in seed.rubric_options}
         if not all(label in options_by_label for label in rubric_labels):
             return None
-        selected = [options_by_label[label] for label in rubric_labels]
-        standard_selected = [o for o in selected if o.kind != "bonus"]
-        bonus_selected = [o for o in selected if o.kind == "bonus"]
-        return awarded_points_for_rubric_selection(
+        return score_rubric_selection(
             seed.points or 0.0,
-            [o.points_delta for o in standard_selected],
-            [o.points_delta for o in seed.rubric_options if o.kind != "bonus"],
-            bonus_points_values=[o.points_delta for o in bonus_selected],
+            seed.rubric_options,
+            [options_by_label[label] for label in rubric_labels],
         )
 
     def suggested_merges_for_question(self, question_id: str) -> list[SuggestedGroup]:

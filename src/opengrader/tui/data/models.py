@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
+from opengrader.core.qa_file import QARubricFlatOption as RubricOptionSeed
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 from opengrader.core.submissions.answer_patterns import PatternKind, PatternSeverity
 from opengrader.core.submissions.consistency import ConsistencyKind, ConsistencySeverity
@@ -193,15 +193,6 @@ class RegradeReportItem:
     @property
     def is_navigable(self) -> bool:
         return bool(self.student_item_id)
-
-
-@dataclass(frozen=True)
-class RubricOptionSeed:
-    label: str
-    points_delta: float
-    kind: RubricOptionKind
-    selection_mode: RubricSelectionMode
-    default_comment: str | None = None
 
 
 @dataclass(frozen=True)
