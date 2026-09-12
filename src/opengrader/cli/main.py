@@ -60,6 +60,12 @@ class Subcommand:
 
 COMMANDS: tuple[Subcommand, ...] = (
     Subcommand(
+        name="serve",
+        target="opengrader.cli.serve:main",
+        summary="serve prepared grading files through a read-only localhost API",
+        section=SECTION_START,
+    ),
+    Subcommand(
         name="run",
         target="opengrader.cli.run:main",
         summary="the whole pre-grading pipeline in one resumable command",
