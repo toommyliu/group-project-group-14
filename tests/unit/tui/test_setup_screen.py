@@ -1968,6 +1968,242 @@ def test_pipeline_request_llm_options_follow_the_two_ai_jobs_independently(
     assert request.llm.enabled is True
 
 
+_PIPE_QA_TEXT = """---
+title: Quiz
+---
+
+- (10 points) What is 2 + 2?
+  - **Correct**
+    - 4
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+
+
+def _pipe_class_folder(tmp_path):  # noqa: ANN001, ANN202
+    folder = tmp_path / "class"
+    folder.mkdir()
+    (folder / "scans.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "qa.md").write_text(_PIPE_QA_TEXT, encoding="utf-8")
+    (folder / "roster.tsv").write_text("1\tAda\n", encoding="utf-8")
+    (folder / "blank-template.pdf").write_bytes(b"%PDF-1.4\n")
+    return folder
+
+
+def test_scanning_the_class_folder_fills_the_pipeline_fields(tmp_path) -> None:  # noqa: ANN001
+    folder = _pipe_class_folder(tmp_path)
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._scan_class_folder()
+            await pilot.pause()
+            return {
+                "scan": app.query_one("#pipe-scan", Input).value,
+                "qa": app.query_one("#pipe-qa", Input).value,
+                "roster": app.query_one("#pipe-roster", Input).value,
+                "use_roster": app.query_one("#pipe-use-roster", Checkbox).value,
+                "template": app.query_one("#pipe-template", Input).value,
+                "use_template": app.query_one("#pipe-use-template", Checkbox).value,
+                "roster_row_hidden": app.query_one("#pipe-roster-row").has_class("hidden"),
+                "summary_hidden": app.query_one("#pipe-folder-summary").has_class("hidden"),
+            }
+
+    seen = asyncio.run(run())
+    assert seen["scan"] == str(folder / "scans.pdf")
+    assert seen["qa"] == str(folder / "qa.md")
+    assert seen["roster"] == str(folder / "roster.tsv")
+    assert seen["use_roster"] is True
+    assert seen["roster_row_hidden"] is False
+    assert seen["template"] == str(folder / "blank-template.pdf")
+    assert seen["use_template"] is True
+    assert seen["summary_hidden"] is False
+
+
+def test_a_rescan_keeps_what_the_user_typed_but_replaces_what_it_filled(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    first = _pipe_class_folder(tmp_path)
+    second = tmp_path / "other"
+    second.mkdir()
+    (second / "scan.pdf").write_bytes(b"%PDF-1.4\n")
+    typed_key = tmp_path / "my-key.md"
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(first)
+            screen._scan_class_folder()
+            app.query_one("#pipe-qa", Input).value = str(typed_key)
+            app.query_one("#pipe-out", Input).value = str(second)
+            screen._scan_class_folder()
+            await pilot.pause()
+            return (
+                app.query_one("#pipe-scan", Input).value,
+                app.query_one("#pipe-qa", Input).value,
+                app.query_one("#pipe-roster", Input).value,
+                app.query_one("#pipe-use-roster", Checkbox).value,
+            )
+
+    scan, qa, roster, use_roster = asyncio.run(run())
+    assert scan == str(second / "scan.pdf")
+    assert qa == str(typed_key)
+    assert roster == ""
+    assert use_roster is False
+
+
+def test_run_with_only_a_class_folder_scans_it_first(tmp_path) -> None:  # noqa: ANN001
+    folder = _pipe_class_folder(tmp_path)
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            return screen._build_pipeline_request()
+
+    request = asyncio.run(run())
+    assert request is not None
+    assert request.scan == folder / "scans.pdf"
+    assert request.qa_file == folder / "qa.md"
+    assert request.roster == folder / "roster.tsv"
+    assert request.blank_template == folder / "blank-template.pdf"
+    assert request.output_dir == folder
+
+
+def _capture_launches(screen, posted) -> None:  # noqa: ANN001
+    # Only the launch is intercepted; Textual's own messages must still flow.
+    original = screen.post_message
+
+    def spy(message):  # noqa: ANN001, ANN202
+        if isinstance(message, SetupScreen.LaunchRequested):
+            posted.append(message)
+            return True
+        return original(message)
+
+    screen.post_message = spy  # type: ignore[method-assign]
+
+
+def _grading_folder(tmp_path, *, with_submissions=True):  # noqa: ANN001, ANN202
+    folder = tmp_path / "graded"
+    folder.mkdir()
+    (folder / "qa.md").write_text(_PIPE_QA_TEXT, encoding="utf-8")
+    if with_submissions:
+        student = folder / "submissions" / "submission-0001"
+        student.mkdir(parents=True)
+        (student / "submission-0001.submission.md").write_text("---\n---\n")
+    return folder
+
+
+def test_the_launch_card_leads_with_one_class_folder_field() -> None:
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            card = app.query_one("#launch-section")
+            inputs = [widget.id for widget in card.query(Input)]
+            return inputs, app.query_one("#launch-files", Collapsible).collapsed
+
+    inputs, collapsed = asyncio.run(run())
+    assert inputs[0] == "tui-class-folder"
+    assert inputs[1:] == ["tui-qa-path", "tui-sub-path"]
+    assert collapsed is True
+
+
+def test_scanning_the_launch_folder_fills_the_answer_key_and_submissions(tmp_path) -> None:  # noqa: ANN001
+    folder = _grading_folder(tmp_path)
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#tui-class-folder", Input).value = str(folder)
+            screen._scan_launch_folder()
+            await pilot.pause()
+            return (
+                app.query_one("#tui-qa-path", Input).value,
+                app.query_one("#tui-sub-path", Input).value,
+                app.query_one("#tui-folder-summary").has_class("hidden"),
+                app.query_one("#launch-files", Collapsible).collapsed,
+            )
+
+    qa, subs, summary_hidden, collapsed = asyncio.run(run())
+    assert qa == str(folder / "qa.md")
+    assert subs == str(folder / "submissions")
+    assert summary_hidden is False
+    assert collapsed is True
+
+
+def test_launch_with_only_a_class_folder_opens_what_it_finds(tmp_path) -> None:  # noqa: ANN001
+    folder = _grading_folder(tmp_path)
+    posted: list[object] = []
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            _capture_launches(screen, posted)
+            app.query_one("#tui-class-folder", Input).value = str(folder)
+            screen._launch_grading()
+
+    asyncio.run(run())
+    launches = [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
+    assert len(launches) == 1
+    assert launches[0].qa_path == str(folder / "qa.md")
+    assert launches[0].submissions_path == str(folder / "submissions")
+
+
+def test_launch_shows_the_detected_files_when_something_is_missing(tmp_path) -> None:  # noqa: ANN001
+    folder = _grading_folder(tmp_path, with_submissions=False)
+    posted: list[object] = []
+    notices: list[str] = []
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            _capture_launches(screen, posted)
+            app.notify = lambda message, **_: notices.append(str(message))  # type: ignore[method-assign]
+            app.query_one("#tui-class-folder", Input).value = str(folder)
+            screen._launch_grading()
+            await pilot.pause()
+            return app.query_one("#launch-files", Collapsible).collapsed
+
+    collapsed = asyncio.run(run())
+    assert collapsed is False
+    assert not [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
+    assert notices and "required" in notices[-1]
+
+
+def test_typed_launch_paths_still_launch_without_a_folder() -> None:
+    posted: list[object] = []
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            _capture_launches(screen, posted)
+            app.query_one("#tui-qa-path", Input).value = "/tmp/qa.md"
+            app.query_one("#tui-sub-path", Input).value = "/tmp/subs"
+            screen._launch_grading()
+
+    asyncio.run(run())
+    launches = [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
+    assert [(m.qa_path, m.submissions_path) for m in launches] == [("/tmp/qa.md", "/tmp/subs")]
+
+
 def test_pipeline_blocked_report_does_not_open_the_grading_workspace(monkeypatch) -> None:
     from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
 

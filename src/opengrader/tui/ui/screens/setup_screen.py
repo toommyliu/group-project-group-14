@@ -55,6 +55,12 @@ from opengrader.cli.automated_grading import (
     run_cli as run_grading_cli,
 )
 from opengrader.cli.qa_file import run_cli as run_qa_file_cli
+from opengrader.core.class_folder import (
+    GRADING_ROLES,
+    ClassFolderScan,
+    describe_class_folder,
+    scan_class_folder,
+)
 from opengrader.core.course import COURSE_FILENAME
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
 from opengrader.tui.ui.screens.backup_screen import BackupScreen
@@ -309,11 +315,12 @@ class SetupScreen(Vertical):
         "policy-submissions": ("directory", "Choose the submissions directory"),
         "handoff-submissions": ("directory", "Choose the submissions directory"),
         "backup-submissions": ("directory", "Choose the submissions directory"),
+        "tui-class-folder": ("directory", "Choose the class folder"),
         "tui-qa-path": ("file", "Choose the QA markdown file"),
         "tui-sub-path": ("any", "Choose the submissions file or directory"),
         "pipe-scan": ("any", "Choose the scanned bundle PDF, or a folder of split PDFs"),
         "pipe-qa": ("file", "Choose the answer-key markdown file"),
-        "pipe-out": ("directory", "Choose (or create) the class output folder"),
+        "pipe-out": ("directory", "Choose the class folder"),
         "pipe-roster": ("file", "Choose the roster/ID file (.tsv)"),
         "pipe-template": ("file", "Choose the blank template PDF"),
     }
@@ -395,16 +402,36 @@ class SetupScreen(Vertical):
                 with Vertical(id="launch-section") as launch_card:
                     launch_card.border_title = "▸ Start grading"
                     yield Static(
-                        "Open a prepared assignment in the grading workspace. "
-                        "New scans? Prepare them below first.",
+                        "Choose a class folder (or a grader packet) — its answer "
+                        "key and submissions are found for you. New scans? Run "
+                        "the pipeline below first.",
                         classes="card-hint",
                     )
-                    yield self._field_label("Answer key", "QA markdown file, e.g. solutions.md")
-                    yield self._path_row("Path to QA markdown file…", "tui-qa-path")
                     yield self._field_label(
-                        "Submissions", "directory containing .submission.md files"
+                        "Class folder", "holds the answer key and the graded submissions"
                     )
-                    yield self._path_row("Path to submissions directory…", "tui-sub-path")
+                    yield self._path_row("Path to the class folder…", "tui-class-folder")
+                    yield Static(
+                        "",
+                        id="tui-folder-summary",
+                        classes="card-hint hidden",
+                        markup=False,
+                    )
+                    with Collapsible(
+                        title="Answer key and submissions — filled in from the folder",
+                        id="launch-files",
+                        collapsed=True,
+                    ):
+                        yield self._field_label(
+                            "Answer key", "QA markdown file, e.g. solutions.md"
+                        )
+                        yield self._path_row("Path to QA markdown file…", "tui-qa-path")
+                        yield self._field_label(
+                            "Submissions", "directory containing .submission.md files"
+                        )
+                        yield self._path_row(
+                            "Path to submissions directory…", "tui-sub-path"
+                        )
                     yield self._card_actions(
                         Button("Launch Grading", variant="success", id="launch-button", compact=True)
                     )
@@ -429,12 +456,27 @@ class SetupScreen(Vertical):
                     collapsed=True,
                 ):
                     yield Static(
-                        "Fill in three paths and press Run. You end up with the "
-                        "grading workspace open on the whole class, a split/ "
-                        "and submissions/ folder you can re-open any time, and "
-                        "a record of the run itself. Preview shows the plan "
-                        "without writing anything.",
+                        "Choose the class folder and press Scan: the scanned "
+                        "bundle, answer key, roster and blank template inside "
+                        "it are filled in below, and split/, submissions/ and "
+                        "the run record are built there too. Check what it "
+                        "found, change anything it got wrong, then press Run. "
+                        "Preview shows the plan without writing anything.",
                         classes="card-hint",
+                    )
+                    yield self._field_label(
+                        "Class folder",
+                        "holds the scan, answer key and roster; results are built here",
+                    )
+                    yield self._path_row("Path to the class folder…", "pipe-out")
+                    yield self._card_actions(
+                        Button("Scan folder", id="pipe-scan-folder", compact=True)
+                    )
+                    yield Static(
+                        "",
+                        id="pipe-folder-summary",
+                        classes="card-hint hidden",
+                        markup=False,
                     )
                     yield self._field_label(
                         "Scanned bundle",
@@ -448,13 +490,6 @@ class SetupScreen(Vertical):
                         "optional — without it, the run stops after extraction",
                     )
                     yield self._path_row("Path to QA markdown file…", "pipe-qa")
-                    yield self._field_label(
-                        "Class folder",
-                        "builds split/, submissions/ and the run record here",
-                    )
-                    yield self._path_row(
-                        "Where to build this class's work…", "pipe-out"
-                    )
 
                     yield Checkbox(
                         "Match student names against a roster", id="pipe-use-roster"
@@ -1380,6 +1415,10 @@ class SetupScreen(Vertical):
             input_widget.cursor_position = len(input_widget.value)
             if input_id == "policy-submissions":
                 self._sync_policy_checkbox()
+            elif input_id == "pipe-out":
+                self._scan_class_folder()
+            elif input_id == "tui-class-folder":
+                self._scan_launch_folder()
 
         self.app.push_screen(
             PathPickerScreen(title=title, mode=mode, start_path=start_path),
@@ -1415,14 +1454,7 @@ class SetupScreen(Vertical):
                 self._open_path_picker(input_id)
                 return
         if event.button.id == "launch-button":
-            qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
-            sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
-            
-            if not qa_path or not sub_path:
-                self.app.notify("Both QA path and Submissions path are required to launch.", severity="error")
-                return
-            
-            self.post_message(self.LaunchRequested(qa_path, sub_path))
+            self._launch_grading()
         elif event.button.id == "run-splitter":
             self._run_splitter()
         elif event.button.id == "run-extractor":
@@ -1459,6 +1491,8 @@ class SetupScreen(Vertical):
             self._run_pipeline()
         elif event.button.id == "pipe-preview":
             self._run_pipeline_preview()
+        elif event.button.id == "pipe-scan-folder":
+            self._scan_class_folder()
 
     def _handoff_submissions(self, input_id: str) -> str:
         own = self._clean_path(self.query_one(f"#{input_id}", Input).value)
@@ -2002,9 +2036,98 @@ class SetupScreen(Vertical):
         self.post_message(self.GradeWhileExtractingRequested(qa_path, output_dir))
 
 
+    def _scan_class_folder(self) -> ClassFolderScan | None:
+        folder = self._clean_path(self.query_one("#pipe-out", Input).value)
+        if not folder or not Path(folder).is_dir():
+            self.app.notify(
+                "Choose an existing class folder to scan.", severity="error"
+            )
+            return None
+        try:
+            found = scan_class_folder(folder)
+        except OSError as exc:
+            self.app.notify(f"Could not read {folder}: {exc}", severity="error")
+            return None
+
+        self._autofill("pipe-scan", found.scan)
+        self._autofill("pipe-qa", found.qa_file)
+        self._autofill("pipe-roster", found.roster, checkbox_id="pipe-use-roster")
+        self._autofill(
+            "pipe-template", found.blank_template, checkbox_id="pipe-use-template"
+        )
+
+        summary = self.query_one("#pipe-folder-summary", Static)
+        summary.update("\n".join(describe_class_folder(found)))
+        summary.remove_class("hidden")
+        return found
+
+    def _scan_launch_folder(self) -> ClassFolderScan | None:
+        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        if not folder or not Path(folder).is_dir():
+            self.app.notify(
+                "Choose an existing class folder to open.", severity="error"
+            )
+            return None
+        try:
+            found = scan_class_folder(folder)
+        except OSError as exc:
+            self.app.notify(f"Could not read {folder}: {exc}", severity="error")
+            return None
+
+        self._autofill("tui-qa-path", found.qa_file)
+        self._autofill("tui-sub-path", found.submissions)
+
+        summary = self.query_one("#tui-folder-summary", Static)
+        summary.update(
+            "\n".join(
+                describe_class_folder(found, GRADING_ROLES, include_notes=False)
+            )
+        )
+        summary.remove_class("hidden")
+        if found.qa_file is None or found.submissions is None:
+            self.query_one("#launch-files", Collapsible).collapsed = False
+        return found
+
+    def _launch_grading(self) -> None:
+        qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
+        sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
+        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        if (not qa_path or not sub_path) and folder and Path(folder).is_dir():
+            self._scan_launch_folder()
+            qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
+            sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
+
+        if not qa_path or not sub_path:
+            self.query_one("#launch-files", Collapsible).collapsed = False
+            self.app.notify(
+                "Both QA path and Submissions path are required to launch.",
+                severity="error",
+            )
+            return
+        self.post_message(self.LaunchRequested(qa_path, sub_path))
+
+    def _autofill(
+        self, input_id: str, path: Path | None, *, checkbox_id: str | None = None
+    ) -> None:
+        # A path the user typed survives a re-scan; one a scan filled is replaced.
+        autofilled: dict[str, str] = getattr(self, "_autofilled", {})
+        self._autofilled = autofilled
+        widget = self.query_one(f"#{input_id}", Input)
+        current = widget.value.strip()
+        if current and current != autofilled.get(input_id):
+            return
+        value = str(path) if path is not None else ""
+        widget.value = value
+        autofilled[input_id] = value
+        if checkbox_id is not None:
+            self.query_one(f"#{checkbox_id}", Checkbox).value = bool(value)
+
     def _build_pipeline_request(self) -> PipelineRequest | None:
         scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
         out = self._clean_path(self.query_one("#pipe-out", Input).value)
+        if not scan and out and Path(out).is_dir():
+            self._scan_class_folder()
+            scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
         if not scan or not out:
             self.app.notify(
                 "The scanned bundle and the class folder are both required.",
@@ -2540,6 +2663,10 @@ class SetupScreen(Vertical):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "policy-submissions":
             self._sync_policy_checkbox()
+        elif event.input.id == "pipe-out":
+            self._scan_class_folder()
+        elif event.input.id == "tui-class-folder":
+            self._scan_launch_folder()
 
     def _sync_policy_checkbox(self) -> None:
         submissions = self._clean_path(

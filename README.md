@@ -144,8 +144,15 @@ tools below. One command checks the scan, splits it, reads every answer,
 auto-grades what it can, and opens the grading app on the result:
 
 ```bash
-uv run opengrader-run --scan scans/all-submissions.pdf --qa qa.md --out cohort/
+uv run opengrader-run cs146-quiz1/
 ```
+
+Point it at the class folder: the scanned bundle, the answer key, a roster
+(`ID<TAB>NAME`) and a blank template (a PDF named `*template*` or `*blank*`)
+are found inside it, and the results are built there too. If two files could
+both be the scan or the answer key it stops and names them. Any flag overrides
+what it found, and the explicit form still works:
+`uv run opengrader-run --scan scans/all-submissions.pdf --qa qa.md --out cohort/`.
 
 Interrupted? Re-scanned a page? Changed your mind? **Run the exact same command
 again.** Every step that is still valid is reused rather than repeated, so a
@@ -153,8 +160,8 @@ second run on an unchanged class takes seconds, and the summary at the end says
 which steps were reused. Add `--dry-run` to see what it would do without doing
 any of it. If you would rather not use a terminal, the setup screen has the same
 thing in its own section, "RUN THE WHOLE PIPELINE", directly under Start
-grading — open "Run every step — one scan in, graded work out" and fill in the
-same three paths.
+grading — open "Run every step — one scan in, graded work out", choose the
+class folder and press Scan folder.
 
 <details>
 <summary>Available Scripts</summary>
@@ -163,7 +170,7 @@ Every script below runs standalone (`uv run <name> ...`) or through the front
 door (`uv run opengrader <name> ...`) — same code, same flags, either
 spelling.
 
-- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
+- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it a class folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
 - `tui`: Launch the TUI. Optionally pass `--qa-file` and `--submissions` together to load real files.
 - `tui-dev`: Launch the TUI with Textual devtools enabled.
 - `qa-file`: Work with QA markdown files.

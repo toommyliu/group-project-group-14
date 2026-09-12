@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import hmac
 import json
 import re
+import secrets
 import shutil
 import tempfile
 import zipfile
@@ -45,6 +47,7 @@ PACKET_FORMAT = 1
 
 _ALIAS_PREFIX = "og-"
 _ALIAS_HEX_CHARS = 8
+_ALIAS_SECRET_BYTES = 32
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -68,6 +71,7 @@ class HandoffKey:
     created_by: str
     packet_path: str
     members: tuple[PacketMember, ...] = ()
+    alias_secret: str = ""
 
     def by_alias(self) -> dict[str, PacketMember]:
         return {member.alias: member for member in self.members}
@@ -125,12 +129,28 @@ def default_packet_id(
     return f"{base}-for-{suffix}" if suffix else f"{base}-{stamp}"
 
 
-def mint_alias(packet_id: str, student_key: str, *, taken: Iterable[str] = ()) -> str:
+def new_alias_secret() -> str:
+    return secrets.token_hex(_ALIAS_SECRET_BYTES)
+
+
+def mint_alias(
+    packet_id: str,
+    student_key: str,
+    *,
+    secret: str,
+    taken: Iterable[str] = (),
+) -> str:
+    # Keyed: the packet id travels inside the packet and student ids are few
+    # enough to try every one, so an unkeyed hash reverses against a roster.
+    if not secret:
+        raise PacketError("an alias needs the packet's secret")
+    key = secret.encode("utf-8")
     reserved = set(taken)
     attempt = 0
     while True:
-        seed = f"{packet_id}\x00{student_key}\x00{attempt}".encode("utf-8")
-        candidate = _ALIAS_PREFIX + hashlib.sha256(seed).hexdigest()[:_ALIAS_HEX_CHARS]
+        message = f"{packet_id}\x00{student_key}\x00{attempt}".encode("utf-8")
+        digest = hmac.new(key, message, hashlib.sha256).hexdigest()
+        candidate = _ALIAS_PREFIX + digest[:_ALIAS_HEX_CHARS]
         if candidate not in reserved:
             return candidate
         attempt += 1
@@ -236,6 +256,7 @@ def render_handoff_key(key: HandoffKey) -> str:
         "created_at": key.created_at,
         "created_by": key.created_by,
         "packet_path": key.packet_path,
+        "alias_secret": key.alias_secret,
         "aliases": {
             member.alias: {
                 "student_key": member.student_key,
@@ -279,6 +300,7 @@ def parse_handoff_key(text: str) -> HandoffKey:
         created_by=str(data.get("created_by", "")),
         packet_path=str(data.get("packet_path", "")),
         members=tuple(sorted(members, key=lambda member: member.alias)),
+        alias_secret=str(data.get("alias_secret", "")),
     )
 
 
@@ -421,9 +443,17 @@ def build_packet(
             f"{packet_root} already exists — choose another name, or delete it "
             "first (overwriting a packet would discard grading it may hold)"
         )
+    key_path = resolve_handoff_dir(source) / f"{resolved_id}.json"
+    if key_path.exists():
+        raise PacketError(
+            f"a packet named {resolved_id} was already handed out from this "
+            f"folder — choose another name (its key, {key_path}, is the only "
+            "way to merge that copy back)"
+        )
     packet_submissions = packet_root / PACKET_SUBMISSIONS_DIRNAME
     packet_submissions.mkdir(parents=True)
 
+    alias_secret = new_alias_secret() if redact else ""
     members: list[PacketMember] = []
     aliases_taken: set[str] = set()
     copied_crops = 0
@@ -438,7 +468,11 @@ def build_packet(
                 "in the review queue before handing out a packet, or the "
                 "returned copy cannot be matched to it"
             )
-        alias = mint_alias(resolved_id, key, taken=aliases_taken) if redact else key
+        alias = (
+            mint_alias(resolved_id, key, secret=alias_secret, taken=aliases_taken)
+            if redact
+            else key
+        )
         aliases_taken.add(alias)
         if not assignment_title and document.assignment_title.strip():
             assignment_title = document.assignment_title.strip()
@@ -512,10 +546,9 @@ def build_packet(
         created_by=actor or current_actor(),
         packet_path=str(packet_root.resolve()),
         members=tuple(members),
+        alias_secret=alias_secret,
     )
-    key_dir = resolve_handoff_dir(source)
-    key_dir.mkdir(parents=True, exist_ok=True)
-    key_path = key_dir / f"{resolved_id}.json"
+    key_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.write_text(render_handoff_key(key_record), encoding="utf-8")
 
     (packet_root / "README.txt").write_text(

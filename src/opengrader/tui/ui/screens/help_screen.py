@@ -376,10 +376,13 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
     (
         "All of it, one command",
         "Steps 1, 2 and 4 in a single command, then the app opens on the "
-        "result: 'opengrader-run --scan bundle.pdf --qa qa.md --out class/'. "
-        "On the start-up screen it has a section of its own, RUN THE WHOLE "
-        "PIPELINE, directly under Start grading — open 'Run every step — one "
-        "scan in, graded work out' and fill in the same three paths. "
+        "result: 'opengrader-run class/' finds the scan, answer key, roster "
+        "and blank template inside the class folder and builds there "
+        "('--scan bundle.pdf --qa qa.md --out class/' still works, and any "
+        "flag overrides what the folder offered). On the start-up screen it "
+        "has a section of its own, RUN THE WHOLE PIPELINE, directly under "
+        "Start grading — open 'Run every step — one scan in, graded work out', "
+        "choose the class folder and press Scan folder to fill in the rest. "
         "It checks the scan, splits it, extracts every submission and "
         "auto-grades what it can, and you never have to hand the output of one "
         "step to the next. --scan also takes a folder of already-split "

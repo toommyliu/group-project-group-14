@@ -7,6 +7,8 @@ import pytest
 from opengrader.cli.grade_merge import run_cli
 from opengrader.core.handoff.packet import (
     default_packet_output_dir,
+    read_handoff_key,
+    read_packet_manifest,
     resolve_handoff_dir,
     seal_packet,
     unseal_packet,
@@ -102,6 +104,26 @@ def _pack(cohort: Path, out: Path, name: str = "p1") -> Path:
     return out / name
 
 
+def _grade_packet(
+    cohort: Path,
+    packet: Path,
+    actor: str,
+    question_id: str,
+    points: float,
+    *,
+    index: int = 0,
+) -> None:
+    # Keyed aliases share no order with the master; find the student via the key.
+    master = sorted(cohort.glob("*/*.submission.md"))[index]
+    student_id = load_student_submission_markdown(master).student_id
+    packet_id = read_packet_manifest(packet).packet_id
+    key = read_handoff_key(resolve_handoff_dir(cohort) / f"{packet_id}.json")
+    alias = next(m.alias for m in key.members if m.student_id == student_id)
+    paths = sorted((packet / "submissions").glob("*/*.submission.md"))
+    position = next(i for i, path in enumerate(paths) if path.parent.name == alias)
+    _grade(packet / "submissions", actor, question_id, points, index=position)
+
+
 def test_pack_reports_the_folder_and_the_key_separately(
     cohort: Path, tmp_path: Path, capsys
 ) -> None:
@@ -137,7 +159,7 @@ def test_list_shows_the_packets_handed_out(cohort: Path, tmp_path: Path, capsys)
 
 def test_preview_writes_nothing(cohort: Path, tmp_path: Path, capsys) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     before = sorted(p.read_bytes() for p in cohort.glob("*/*.submission.md"))
 
     capsys.readouterr()
@@ -151,7 +173,7 @@ def test_preview_writes_nothing(cohort: Path, tmp_path: Path, capsys) -> None:
 
 def test_apply_takes_their_work_and_keeps_ours(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     _grade(cohort, "prof", "q2", 4.0)
 
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
@@ -162,7 +184,7 @@ def test_apply_takes_their_work_and_keeps_ours(cohort: Path, tmp_path: Path) -> 
 
 def test_apply_without_yes_is_a_preview(cohort: Path, tmp_path: Path, capsys) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     capsys.readouterr()
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet)])
     assert "Re-run with --yes" in capsys.readouterr().out
@@ -171,7 +193,7 @@ def test_apply_without_yes_is_a_preview(cohort: Path, tmp_path: Path, capsys) ->
 
 def test_a_conflict_is_left_alone_by_default(cohort: Path, tmp_path: Path, capsys) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 2.0)
+    _grade_packet(cohort, packet, "alice", "q1", 2.0)
     _grade(cohort, "prof", "q1", 5.0)
 
     capsys.readouterr()
@@ -182,7 +204,7 @@ def test_a_conflict_is_left_alone_by_default(cohort: Path, tmp_path: Path, capsy
 
 def test_conflicts_theirs_takes_the_incoming_answer(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 2.0)
+    _grade_packet(cohort, packet, "alice", "q1", 2.0)
     _grade(cohort, "prof", "q1", 5.0)
 
     run_cli(
@@ -204,7 +226,7 @@ def test_the_merge_is_journalled_under_an_actor_naming_the_packet(
     cohort: Path, tmp_path: Path
 ) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
 
     actors = {entry.actor for entry in read_journal(resolve_history_dir(cohort))}
@@ -217,7 +239,7 @@ def test_a_merge_can_be_undone_with_one_grade_restore_command(
     from opengrader.cli.grade_restore import run_cli as run_restore_cli
 
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
     assert _points(cohort, "q1") == 5.0
 
@@ -236,7 +258,7 @@ def test_a_merge_can_be_undone_with_one_grade_restore_command(
 
 def test_history_import_is_off_by_default(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     run_cli(["apply", "--submissions", str(cohort), "--incoming", str(packet), "--yes"])
     assert "alice" not in {e.actor for e in read_journal(resolve_history_dir(cohort))}
 
@@ -245,7 +267,7 @@ def test_history_import_de_aliases_and_names_the_extra_undo_actor(
     cohort: Path, tmp_path: Path, capsys
 ) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     capsys.readouterr()
     run_cli(
         [
@@ -269,7 +291,7 @@ def test_history_import_de_aliases_and_names_the_extra_undo_actor(
 
 def test_importing_twice_does_not_double_the_entries(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     argv = [
         "apply",
         "--submissions",
@@ -290,7 +312,7 @@ def test_a_redacted_packet_without_its_key_is_refused(
     cohort: Path, tmp_path: Path, capsys
 ) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     (resolve_handoff_dir(cohort) / "p1.json").unlink()
 
     with pytest.raises(SystemExit) as exit_info:
@@ -301,7 +323,7 @@ def test_a_redacted_packet_without_its_key_is_refused(
 
 def test_a_moved_key_can_be_named_explicitly(cohort: Path, tmp_path: Path, capsys) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     moved = tmp_path / "elsewhere.json"
     original = resolve_handoff_dir(cohort) / "p1.json"
     moved.write_text(original.read_text())
@@ -348,7 +370,8 @@ def test_a_submission_only_they_have_is_reported_not_invented(
     (stray / "og-stranger.submission.md").write_text(
         SUBMISSION.format(name="", sid="og-stranger")
     )
-    _grade(packet / "submissions", "alice", "q1", 5.0, index=2)
+    # og-stranger sorts after every hex alias, so it is always the third folder.
+    _grade(packet / "submissions", actor="alice", question_id="q1", points=5.0, index=2)
 
     capsys.readouterr()
     run_cli(["preview", "--submissions", str(cohort), "--incoming", str(packet)])
@@ -361,7 +384,7 @@ def test_preview_json_is_machine_readable(cohort: Path, tmp_path: Path, capsys) 
     import json
 
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     capsys.readouterr()
     run_cli(
         ["preview", "--submissions", str(cohort), "--incoming", str(packet), "--json"]
@@ -424,7 +447,7 @@ def test_a_sealed_packet_merges_back(
     sealed = tmp_path / "out" / "p1.zip.enc"
 
     opened = unseal_packet(sealed, tmp_path / "alice", "correct horse")
-    _grade(opened / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, opened, "alice", "q1", 5.0)
     returned = seal_packet(opened, "correct horse", destination=tmp_path / "back.zip.enc")
 
     run_cli(

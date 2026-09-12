@@ -23,12 +23,22 @@ from opengrader.core.pipeline import (
 
 EPILOG = """
 examples:
+  uv run opengrader-run cs146-quiz1/                    # finds the scan, answer key, roster, template
+  uv run opengrader-run cs146-quiz1/ --qa other-key.md  # any flag overrides what was found
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --pages-per-submission 6
   uv run opengrader-run --scan split/ --qa qa.md --out cohort/          # already-split PDFs
   uv run opengrader-run --scan scans/bundle.pdf --out cohort/ --dry-run # show the plan, do nothing
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm --auto-ollama
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
+
+class folder:
+  Give a folder instead of --scan/--out and its inputs are found for you: a
+  markdown answer key that parses, a tab-separated roster, a PDF named
+  *template* or *blank*, and the remaining PDF as the scan (or a subfolder of
+  PDFs when there is no bundle). Two files that could both be the scan or the
+  answer key stop the run and are named; two rosters or templates are left
+  out with a warning. The folder doubles as --out.
 
 resuming:
   Re-run the same command. Nothing is repeated that does not need to be, and the
@@ -124,17 +134,33 @@ def _build_parser() -> ArgumentParser:
         formatter_class=RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "folder",
+        nargs="?",
+        default=None,
+        metavar="CLASS_FOLDER",
+        help=(
+            "A class folder holding the scan and, optionally, the answer key, "
+            "roster and blank template — each is found automatically, and any "
+            "flag below overrides what was found. Also the --out folder unless "
+            "--out is given."
+        ),
+    )
+    parser.add_argument(
         "--scan",
-        required=True,
+        default=None,
         help=(
             "The bulk scan PDF, or a directory of already-split per-student "
-            "PDFs (in which case the split stage is skipped)."
+            "PDFs (in which case the split stage is skipped). Required without "
+            "a class folder."
         ),
     )
     parser.add_argument(
         "--out",
-        required=True,
-        help="Cohort folder to build: split/, submissions/ and the run ledger.",
+        default=None,
+        help=(
+            "Cohort folder to build: split/, submissions/ and the run ledger. "
+            "Required without a class folder."
+        ),
     )
     parser.add_argument(
         "--qa",
@@ -389,8 +415,81 @@ def exit_code(report: PipelineReport) -> int:
     return 0 if report.ok else 1
 
 
+_FOLDER_ROLE_FLAGS = (
+    ("scan", "scan", "--scan"),
+    ("qa", "qa", "--qa"),
+    ("roster", "roster", "--roster"),
+    ("template", "blank_template", "--blank-template"),
+)
+
+# Guessing either of these wrong grades the wrong thing; a missing roster or
+# template only makes the run less precise, and the summary says so.
+_BLOCKING_ROLES = frozenset({"scan", "qa"})
+
+
+def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
+    if args.folder is None:
+        if not args.scan or not args.out:
+            parser.error("give a class folder, or both --scan and --out")
+        return
+
+    from opengrader.core.class_folder import (
+        ROLE_LABELS,
+        describe_class_folder,
+        scan_class_folder,
+    )
+
+    try:
+        found = scan_class_folder(args.folder)
+    except NotADirectoryError as exc:
+        parser.error(str(exc))
+
+    stream.write(f"Class folder {found.folder}\n")
+    for line in describe_class_folder(found):
+        stream.write(f"  {line}\n")
+
+    blocking: list[str] = []
+    for role, dest, flag in _FOLDER_ROLE_FLAGS:
+        given = getattr(args, dest)
+        if given:
+            stream.write(f"  = {ROLE_LABELS[role]:<15} {given} (from {flag})\n")
+            continue
+        ambiguity = found.ambiguity(role)
+        if ambiguity is not None:
+            if role in _BLOCKING_ROLES:
+                names = ", ".join(str(path) for path in ambiguity.candidates)
+                blocking.append(f"{flag} (one of: {names})")
+            else:
+                stream.write(
+                    f"  ! {ROLE_LABELS[role]} not used — pass {flag} to choose one\n"
+                )
+            continue
+        path = found.found(role)
+        if path is not None:
+            setattr(args, dest, str(path))
+    stream.write("\n")
+    stream.flush()
+
+    if blocking:
+        parser.error(
+            "more than one file in the class folder fits — choose with "
+            + "; ".join(blocking)
+        )
+    if not args.scan:
+        parser.error(
+            f"no scanned bundle or folder of split PDFs found in {found.folder} "
+            "— pass --scan"
+        )
+    if not args.out:
+        args.out = str(found.folder)
+
+
 def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    _resolve_class_folder(
+        parser, args, stream=sys.stderr if args.as_json else sys.stdout
+    )
     request = _build_request(args)
 
     if args.dry_run:

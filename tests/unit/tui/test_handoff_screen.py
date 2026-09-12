@@ -74,8 +74,10 @@ def cohort(tmp_path: Path) -> Path:
     return root
 
 
-def _grade(folder: Path, actor: str, question_id: str, points: float) -> None:
-    path = sorted(folder.glob("*/*.submission.md"))[0]
+def _grade(
+    folder: Path, actor: str, question_id: str, points: float, *, index: int = 0
+) -> None:
+    path = sorted(folder.glob("*/*.submission.md"))[index]
     document = load_student_submission_markdown(path)
     before = next(q for q in document.questions if q.question_id == question_id)
     update_student_submission_file(
@@ -98,6 +100,26 @@ def _grade(folder: Path, actor: str, question_id: str, points: float) -> None:
         ),
         new=journal_payload("grade", AspectValue(points=points, rubric=("Correct",))),
     )
+
+
+def _grade_packet(
+    cohort: Path, packet: Path, actor: str, question_id: str, points: float
+) -> None:
+    from opengrader.core.handoff.packet import (
+        read_handoff_key,
+        read_packet_manifest,
+        resolve_handoff_dir,
+    )
+
+    # Keyed aliases share no order with the master; find the student via the key.
+    master = sorted(cohort.glob("*/*.submission.md"))[0]
+    student_id = load_student_submission_markdown(master).student_id
+    packet_id = read_packet_manifest(packet).packet_id
+    key = read_handoff_key(resolve_handoff_dir(cohort) / f"{packet_id}.json")
+    alias = next(m.alias for m in key.members if m.student_id == student_id)
+    paths = sorted((packet / "submissions").glob("*/*.submission.md"))
+    position = next(i for i, path in enumerate(paths) if path.parent.name == alias)
+    _grade(packet / "submissions", actor, question_id, points, index=position)
 
 
 def _points(folder: Path, question_id: str) -> float | None:
@@ -191,8 +213,8 @@ def test_preview_lists_changes_and_conflicts_and_writes_nothing(
     cohort: Path, tmp_path: Path
 ) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
-    _grade(packet / "submissions", "alice", "q2", 2.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q2", 2.0)
     _grade(cohort, "prof", "q2", 4.0)
 
     async def run() -> None:
@@ -219,7 +241,7 @@ def test_a_conflict_row_defaults_to_keeping_ours_and_is_focused(
     cohort: Path, tmp_path: Path
 ) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 2.0)
+    _grade_packet(cohort, packet, "alice", "q1", 2.0)
     _grade(cohort, "prof", "q1", 5.0)
 
     async def run() -> None:
@@ -242,8 +264,8 @@ def test_t_and_o_set_one_conflict_and_apply_honours_it(
     cohort: Path, tmp_path: Path
 ) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 2.0)
-    _grade(packet / "submissions", "alice", "q2", 1.0)
+    _grade_packet(cohort, packet, "alice", "q1", 2.0)
+    _grade_packet(cohort, packet, "alice", "q2", 1.0)
     _grade(cohort, "prof", "q1", 5.0)
     _grade(cohort, "prof", "q2", 4.0)
 
@@ -276,8 +298,8 @@ def test_t_and_o_set_one_conflict_and_apply_honours_it(
 
 def test_j_and_k_move_between_conflict_rows(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 2.0)
-    _grade(packet / "submissions", "alice", "q2", 1.0)
+    _grade_packet(cohort, packet, "alice", "q1", 2.0)
+    _grade_packet(cohort, packet, "alice", "q2", 1.0)
     _grade(cohort, "prof", "q1", 5.0)
     _grade(cohort, "prof", "q2", 4.0)
 
@@ -303,8 +325,8 @@ def test_j_and_k_move_between_conflict_rows(cohort: Path, tmp_path: Path) -> Non
 
 def test_take_theirs_for_all_sets_every_row(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 2.0)
-    _grade(packet / "submissions", "alice", "q2", 1.0)
+    _grade_packet(cohort, packet, "alice", "q1", 2.0)
+    _grade_packet(cohort, packet, "alice", "q2", 1.0)
     _grade(cohort, "prof", "q1", 5.0)
     _grade(cohort, "prof", "q2", 4.0)
 
@@ -329,7 +351,7 @@ def test_take_theirs_for_all_sets_every_row(cohort: Path, tmp_path: Path) -> Non
 
 def test_apply_is_disabled_until_a_preview_has_run(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
 
     async def run() -> None:
         screen = MergeScreen(submissions_path=str(cohort))
@@ -352,7 +374,7 @@ def test_apply_is_disabled_until_a_preview_has_run(cohort: Path, tmp_path: Path)
 
 def test_the_merge_is_journalled_so_it_can_be_undone(cohort: Path, tmp_path: Path) -> None:
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
 
     async def run() -> None:
         screen = MergeScreen(submissions_path=str(cohort))
@@ -390,7 +412,7 @@ def test_a_missing_handoff_key_is_reported_not_read_as_no_changes(
     from opengrader.core.handoff.packet import resolve_handoff_dir
 
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     (resolve_handoff_dir(cohort) / "p1.json").unlink()
 
     async def run() -> None:
@@ -599,7 +621,7 @@ def test_a_merge_reloads_the_session_so_the_next_save_still_works(
 ) -> None:
     qa, cohort = sample_session
     packet = _pack(cohort, tmp_path / "out")
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
 
     async def run() -> None:
         app = _launch(cohort, qa)
@@ -715,7 +737,7 @@ def test_the_merge_dialog_previews_a_sealed_copy(cohort: Path, tmp_path: Path) -
     from opengrader.core.handoff.packet import build_packet, seal_packet
 
     packet = build_packet(cohort, tmp_path / "out", packet_id="p1").packet_path
-    _grade(packet / "submissions", "alice", "q1", 5.0)
+    _grade_packet(cohort, packet, "alice", "q1", 5.0)
     sealed = seal_packet(packet, "correct horse")
 
     async def run() -> None:

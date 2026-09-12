@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -68,26 +69,32 @@ def cohort(tmp_path: Path) -> Path:
     return root
 
 
-def test_an_alias_is_stable_for_the_same_packet_and_student() -> None:
-    assert mint_alias("p1", "123") == mint_alias("p1", "123")
+def test_an_alias_is_stable_for_the_same_packet_student_and_secret() -> None:
+    assert mint_alias("p1", "123", secret="s") == mint_alias("p1", "123", secret="s")
 
 
-def test_aliases_differ_across_packets_and_students() -> None:
-    assert mint_alias("p1", "123") != mint_alias("p2", "123")
-    assert mint_alias("p1", "123") != mint_alias("p1", "456")
+def test_aliases_differ_across_packets_students_and_secrets() -> None:
+    assert mint_alias("p1", "123", secret="s") != mint_alias("p2", "123", secret="s")
+    assert mint_alias("p1", "123", secret="s") != mint_alias("p1", "456", secret="s")
+    assert mint_alias("p1", "123", secret="s") != mint_alias("p1", "123", secret="t")
 
 
 def test_a_taken_alias_is_probed_past_deterministically() -> None:
-    first = mint_alias("p1", "123")
-    second = mint_alias("p1", "123", taken=[first])
+    first = mint_alias("p1", "123", secret="s")
+    second = mint_alias("p1", "123", secret="s", taken=[first])
     assert second != first
-    assert second == mint_alias("p1", "123", taken=[first])
+    assert second == mint_alias("p1", "123", secret="s", taken=[first])
 
 
 def test_an_alias_carries_no_trace_of_the_student() -> None:
-    alias = mint_alias("quiz1", "123456789")
+    alias = mint_alias("quiz1", "123456789", secret="s")
     assert "123456789" not in alias
     assert alias.startswith("og-")
+
+
+def test_an_alias_without_a_secret_is_refused() -> None:
+    with pytest.raises(PacketError, match="secret"):
+        mint_alias("p1", "123", secret="")
 
 
 def test_default_packet_id_prefers_the_grader_over_a_date() -> None:
@@ -154,9 +161,19 @@ def test_a_handoff_key_round_trips() -> None:
                 source_relative_path="sub-0001/sub-0001.submission.md",
             ),
         ),
+        alias_secret="ab" * 32,
     )
     restored = parse_handoff_key(render_handoff_key(key))
     assert restored.by_alias()["og-aaaa"].student_name == "Ada Lovelace"
+    assert restored.alias_secret == "ab" * 32
+
+
+def test_a_key_written_before_aliases_were_keyed_still_reads() -> None:
+    restored = parse_handoff_key(
+        '{"packet_id": "p1", "aliases": {"og-aaaa": {"student_key": "1"}}}'
+    )
+    assert restored.alias_secret == ""
+    assert restored.by_alias()["og-aaaa"].student_key == "1"
 
 
 def test_a_corrupt_handoff_key_fails_loudly() -> None:
@@ -164,6 +181,52 @@ def test_a_corrupt_handoff_key_fails_loudly() -> None:
         parse_handoff_key("{not json")
     with pytest.raises(PacketError, match="no alias map"):
         parse_handoff_key('{"packet_id": "p1"}')
+
+
+def test_a_packet_alias_cannot_be_recomputed_from_a_roster(
+    cohort: Path, tmp_path: Path
+) -> None:
+    result = build_packet(cohort, tmp_path / "out", packet_id="p1")
+    alias = result.key.members[0].alias
+    packet_id = read_packet_manifest(result.packet_path).packet_id
+
+    # Everything the grader holds (packet id + a roster id) no longer yields it.
+    seed = f"{packet_id}\x00123456789\x000".encode("utf-8")
+    assert alias != "og-" + hashlib.sha256(seed).hexdigest()[:8]
+    assert alias == mint_alias("p1", "123456789", secret=result.key.alias_secret)
+
+
+def test_the_alias_secret_stays_with_the_teacher(cohort: Path, tmp_path: Path) -> None:
+    result = build_packet(cohort, tmp_path / "out", packet_id="p1")
+    secret = result.key.alias_secret
+    assert len(secret) == 64
+
+    blob = b"".join(
+        path.read_bytes() for path in result.packet_path.rglob("*") if path.is_file()
+    )
+    assert secret.encode("utf-8") not in blob
+    assert read_handoff_key(result.key_path).alias_secret == secret
+
+
+def test_each_packet_gets_its_own_secret(cohort: Path, tmp_path: Path) -> None:
+    first = build_packet(cohort, tmp_path / "out", packet_id="p1")
+    second = build_packet(cohort, tmp_path / "out", packet_id="p2")
+    assert first.key.alias_secret != second.key.alias_secret
+
+
+def test_an_unredacted_copy_has_no_secret(cohort: Path, tmp_path: Path) -> None:
+    result = build_packet(cohort, tmp_path / "out", packet_id="p1", redact=False)
+    assert result.key.alias_secret == ""
+
+
+def test_reusing_a_packet_name_refuses_rather_than_orphaning_the_first_copy(
+    cohort: Path, tmp_path: Path
+) -> None:
+    first = build_packet(cohort, tmp_path / "a", packet_id="p1")
+    with pytest.raises(PacketError, match="already handed out"):
+        build_packet(cohort, tmp_path / "b", packet_id="p1")
+    assert read_handoff_key(first.key_path).alias_secret == first.key.alias_secret
+    assert not (tmp_path / "b" / "p1").exists()
 
 
 def test_a_packet_contains_no_trace_of_the_student(cohort: Path, tmp_path: Path) -> None:

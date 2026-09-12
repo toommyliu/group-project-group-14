@@ -441,3 +441,130 @@ def test_json_stdout_is_not_polluted_by_the_inner_clis(tmp_path, monkeypatch, ca
     captured = capsys.readouterr()
     assert json.loads(captured.out)["ok"] is True
     assert "Found 2 submission PDF(s)" in captured.err
+
+
+_QA_TEXT = """---
+title: Quiz
+---
+
+- (10 points) What is 2 + 2?
+  - **Correct**
+    - 4
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-5)
+    - Incorrect (-10)
+"""
+
+
+def _class_folder(tmp_path: Path) -> Path:
+    folder = tmp_path / "cs146-quiz1"
+    folder.mkdir()
+    (folder / "scans.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "qa.md").write_text(_QA_TEXT, encoding="utf-8")
+    (folder / "roster.tsv").write_text("1\tAda\n", encoding="utf-8")
+    (folder / "blank-template.pdf").write_bytes(b"%PDF-1.4\n")
+    return folder
+
+
+def test_without_a_class_folder_scan_and_out_are_still_required(
+    tmp_path, captured, capsys
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        run_module.run_cli(["--scan", str(tmp_path / "bundle.pdf"), "--no-tui"])
+    assert raised.value.code == 2
+    assert "class folder" in capsys.readouterr().err
+    assert "request" not in captured
+
+
+def test_a_class_folder_fills_every_input_and_is_the_output(
+    tmp_path, captured, capsys
+) -> None:
+    folder = _class_folder(tmp_path)
+    run_module.run_cli([str(folder), "--no-tui"])
+
+    request = captured["request"]
+    assert request.scan == folder / "scans.pdf"
+    assert request.qa_file == folder / "qa.md"
+    assert request.roster == folder / "roster.tsv"
+    assert request.blank_template == folder / "blank-template.pdf"
+    assert request.output_dir == folder
+    out = capsys.readouterr().out
+    assert f"Class folder {folder}" in out
+    assert "✓ answer key" in out
+
+
+def test_a_flag_overrides_what_the_folder_offered(tmp_path, captured, capsys) -> None:
+    folder = _class_folder(tmp_path)
+    other_key = tmp_path / "other-key.md"
+    run_module.run_cli(
+        [str(folder), "--qa", str(other_key), "--out", str(tmp_path / "elsewhere"), "--no-tui"]
+    )
+
+    request = captured["request"]
+    assert request.qa_file == other_key
+    assert request.scan == folder / "scans.pdf"
+    assert request.output_dir == tmp_path / "elsewhere"
+    assert "(from --qa)" in capsys.readouterr().out
+
+
+def test_two_possible_scans_stop_the_run_and_name_both(tmp_path, captured, capsys) -> None:
+    folder = tmp_path / "class"
+    folder.mkdir()
+    (folder / "period1.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
+
+    with pytest.raises(SystemExit) as raised:
+        run_module.run_cli([str(folder), "--no-tui"])
+    assert raised.value.code == 2
+    err = capsys.readouterr().err
+    assert "--scan" in err and "period1.pdf" in err and "period2.pdf" in err
+    assert "request" not in captured
+
+
+def test_an_explicit_scan_settles_an_ambiguous_folder(tmp_path, captured) -> None:
+    folder = tmp_path / "class"
+    folder.mkdir()
+    (folder / "period1.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
+
+    run_module.run_cli([str(folder), "--scan", str(folder / "period2.pdf"), "--no-tui"])
+    assert captured["request"].scan == folder / "period2.pdf"
+
+
+def test_two_templates_are_left_out_with_a_warning_not_a_stop(
+    tmp_path, captured, capsys
+) -> None:
+    folder = tmp_path / "class"
+    folder.mkdir()
+    (folder / "scan.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "template-vA.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "template-vB.pdf").write_bytes(b"%PDF-1.4\n")
+
+    run_module.run_cli([str(folder), "--no-tui"])
+    assert captured["request"].blank_template is None
+    assert "blank template not used — pass --blank-template" in capsys.readouterr().out
+
+
+def test_a_folder_with_no_scan_says_so(tmp_path, captured, capsys) -> None:
+    folder = tmp_path / "empty"
+    folder.mkdir()
+
+    with pytest.raises(SystemExit) as raised:
+        run_module.run_cli([str(folder), "--no-tui"])
+    assert raised.value.code == 2
+    assert "no scanned bundle" in capsys.readouterr().err
+
+
+def test_a_class_folder_that_does_not_exist_is_a_usage_error(tmp_path, captured) -> None:
+    with pytest.raises(SystemExit) as raised:
+        run_module.run_cli([str(tmp_path / "nope"), "--no-tui"])
+    assert raised.value.code == 2
+
+
+def test_json_keeps_the_folder_summary_off_stdout(tmp_path, captured, capsys) -> None:
+    folder = _class_folder(tmp_path)
+    run_module.run_cli([str(folder), "--json"])
+    streams = capsys.readouterr()
+    assert json.loads(streams.out)["ok"] is True
+    assert "Class folder" in streams.err

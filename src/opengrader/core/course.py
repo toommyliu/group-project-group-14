@@ -512,7 +512,7 @@ _GENERIC_SUBMISSION_DIR_NAMES = {
     "out",
 }
 
-_LIKELY_SOLUTION_NAMES = (
+LIKELY_SOLUTION_NAMES = (
     "solutions.md",
     "solution.md",
     "answer-key.md",
@@ -547,7 +547,7 @@ def find_solutions_near(submissions: Path) -> Path | None:
                 continue
         except OSError:
             continue
-        for candidate in _LIKELY_SOLUTION_NAMES:
+        for candidate in LIKELY_SOLUTION_NAMES:
             path = directory / candidate
             if path.is_file():
                 return path
