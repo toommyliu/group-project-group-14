@@ -2,17 +2,13 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypeVar
 
-from opengrader.core.pdf.annotations import (
-    sync_feedback_summary_page,
-    sync_question_comment_annotation,
-    sync_total_score_annotation,
-)
-from opengrader.core.pdf.feedback import build_feedback_summary
+from opengrader.core.grading.files import FileGradingSession
 from opengrader.core.export import default_bundle_name
 from opengrader.core.comments import CommentLibrary, read_comments, write_comments
 from opengrader.core.claims import (
@@ -26,12 +22,10 @@ from opengrader.core.claims import (
 from opengrader.core.curve import Curve, read_curve, write_curve
 from opengrader.core.concurrency import check_unmodified, file_mtime_ns
 from opengrader.core.history import (
-    AspectValue,
     GradeJournal,
     GradeJournalEntry,
     current_actor,
     journal_fingerprint,
-    journal_payload,
     read_journal,
     resolve_history_dir,
 )
@@ -62,7 +56,6 @@ from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
     StudentSubmissionQuestion,
-    load_student_submission_markdown,
     set_student_identity_file,
     update_student_submission_file,
 )
@@ -152,12 +145,9 @@ class _QuestionContext:
 
 @dataclass(frozen=True)
 class _LoadedSubmission:
-    path: Path
-    document: StudentSubmissionDocument
-    questions_by_id: dict[str, StudentSubmissionQuestion]
+    grading: FileGradingSession
     qa_version: str | None
     question_contexts: list[_QuestionContext]
-    mtime_ns: int | None = None
 
 
 @dataclass(frozen=True)
@@ -185,10 +175,10 @@ class SubmissionFilesProvider:
         self._submissions_path = Path(submissions_path).expanduser().resolve()
         self._qa_doc = load_qa_markdown(self._qa_path)
         self._qa_mtime_ns = file_mtime_ns(self._qa_path)
-        self._submissions = self._load_submissions(self._submissions_path)
-        self._validate_question_sets()
         self._history_dir = resolve_history_dir(self._submissions_path)
         self._journal = GradeJournal(self._history_dir)
+        self._submissions = self._load_submissions(self._submissions_path)
+        self._validate_question_sets()
         self._generation = 0
         self._report_cache: dict[object, object] = {}
         self._report_cache_fingerprint: tuple[object, ...] | None = None
@@ -203,12 +193,12 @@ class SubmissionFilesProvider:
 
     @property
     def course_label(self) -> str:
-        course_code = self._submissions[0].document.course_code
+        course_code = self._submissions[0].grading.document.course_code
         return course_code or "Course"
 
     @property
     def assignment_label(self) -> str:
-        title = self._qa_doc.title or self._submissions[0].document.assignment_title
+        title = self._qa_doc.title or self._submissions[0].grading.document.assignment_title
         return title or "Assignment"
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]:
@@ -216,7 +206,7 @@ class SubmissionFilesProvider:
             return []
 
         base_labels = [
-            submission.document.student_name.strip() or submission.path.stem
+            submission.grading.document.student_name.strip() or submission.grading.path.stem
             for submission in self._submissions
         ]
         duplicate_labels = {
@@ -228,7 +218,7 @@ class SubmissionFilesProvider:
             zip(self._submissions, base_labels, strict=True)
         ):
             label = base_label or f"Student {index + 1}"
-            student_id = submission.document.student_id.strip()
+            student_id = submission.grading.document.student_id.strip()
             if label in duplicate_labels and student_id:
                 label = f"{label} ({student_id})"
             students.append(
@@ -250,7 +240,7 @@ class SubmissionFilesProvider:
         _ = (assignment_id, assignment_title)
         submission = self._submission_for_student_item(student_item_id)
 
-        source_pdf_path = self._source_pdf_path(submission)
+        source_pdf_path = submission.grading.source_pdf_path
         has_source_pdf = source_pdf_path.exists()
         extra_pages = (
             self._extra_pages_for(submission, source_pdf_path) if has_source_pdf else ()
@@ -266,7 +256,7 @@ class SubmissionFilesProvider:
         seeds: list[QuestionSeed] = []
 
         for i, context in enumerate(submission.question_contexts):
-            response = submission.questions_by_id.get(context.question_id)
+            response = submission.grading.questions_by_id.get(context.question_id)
             image_path = self._image_path_for_response(response)
             page_context = (
                 build_page_context(
@@ -299,8 +289,8 @@ class SubmissionFilesProvider:
                         or response is None
                         else response.question_type
                     ),
-                    source_pdf_name=Path(submission.document.source_pdf).name
-                    if submission.document.source_pdf
+                    source_pdf_name=Path(submission.grading.document.source_pdf).name
+                    if submission.grading.document.source_pdf
                     else "",
                     response_confidence=(
                         response.response_confidence if response is not None else None
@@ -321,15 +311,24 @@ class SubmissionFilesProvider:
         source_pdf_path: Path,
     ) -> tuple[int, ...]:
         total_pages = get_pdf_page_count(source_pdf_path)
-        pages = submission.document.extra_pages
+        pages = submission.grading.document.extra_pages
         if not pages:
             segments = tuple(
                 segment
-                for question in submission.document.questions
+                for question in submission.grading.document.questions
                 for segment in question.source_segments
             )
             pages = infer_extra_pages(total_pages, segments)
         return tuple(page for page in pages if 1 <= page <= total_pages)
+
+    @contextmanager
+    def _edit_submission(self, student_item_id: str) -> Iterator[FileGradingSession]:
+        grading = self._submission_for_student_item(student_item_id).grading
+        try:
+            yield grading
+        finally:
+            # A PDF failure can happen after the submission was already saved.
+            self._bump_generation()
 
     def save_question_grade(
         self,
@@ -341,33 +340,14 @@ class SubmissionFilesProvider:
         rubric_labels: tuple[str, ...],
         analysis: str | None = None,
     ) -> None:
-        submission = self._submission_for_student_item(student_item_id)
-        old_question = submission.questions_by_id.get(question_id)
-        update_student_submission_file(
-            submission.path,
-            StudentSubmissionGradeUpdate(
+        with self._edit_submission(student_item_id) as grading:
+            grading.save_grade(
                 question_id=question_id,
                 possible_points=possible_points,
                 points_awarded=points_awarded,
                 rubric_labels=rubric_labels,
                 analysis=analysis,
-            ),
-            expected_mtime_ns=submission.mtime_ns,
-        )
-        self._reload_submission(student_item_id)
-        self._sync_pdf_annotations_best_effort(student_item_id, question_id)
-        self._journal_event(
-            kind="grade",
-            submission=submission,
-            question_id=question_id,
-            summary=_format_grade_summary(points_awarded, possible_points, rubric_labels),
-            old={
-                "points": None if old_question is None else old_question.points_awarded,
-                "rubric": [] if old_question is None else list(old_question.rubric_labels),
-            },
-            new={"points": points_awarded, "rubric": list(rubric_labels)},
-        )
-
+            )
 
     def stage_question_analysis(
         self,
@@ -376,16 +356,8 @@ class SubmissionFilesProvider:
         question_id: str,
         analysis: str,
     ) -> None:
-        submission = self._submission_for_student_item(student_item_id)
-        update_student_submission_file(
-            submission.path,
-            StudentSubmissionGradeUpdate(
-                question_id=question_id,
-                analysis=analysis,
-            ),
-            expected_mtime_ns=submission.mtime_ns,
-        )
-        self._reload_submission(student_item_id)
+        with self._edit_submission(student_item_id) as grading:
+            grading.stage_comment(question_id=question_id, analysis=analysis)
 
     def commit_question_analysis(
         self,
@@ -395,22 +367,12 @@ class SubmissionFilesProvider:
         analysis: str,
         previous_analysis: str,
     ) -> None:
-        """previous_analysis must be the baseline before any staged edits."""
-        self._bump_generation()
-        self._journal_event(
-            kind="comment",
-            submission=self._submission_for_student_item(student_item_id),
-            question_id=question_id,
-            summary=_excerpt_comment(analysis),
-            old={"analysis": previous_analysis},
-            new={"analysis": analysis},
-        )
-        try:
-            self._sync_pdf_annotations(
-                student_item_id, question_id, comment_override=analysis
+        with self._edit_submission(student_item_id) as grading:
+            grading.commit_comment(
+                question_id=question_id,
+                analysis=analysis,
+                previous_analysis=previous_analysis,
             )
-        except FileNotFoundError:
-            pass
 
     def save_question_analysis(
         self,
@@ -419,20 +381,8 @@ class SubmissionFilesProvider:
         question_id: str,
         analysis: str,
     ) -> None:
-        submission = self._submission_for_student_item(student_item_id)
-        old_question = submission.questions_by_id.get(question_id)
-        previous_analysis = "" if old_question is None else old_question.analysis
-        self.stage_question_analysis(
-            student_item_id=student_item_id,
-            question_id=question_id,
-            analysis=analysis,
-        )
-        self.commit_question_analysis(
-            student_item_id=student_item_id,
-            question_id=question_id,
-            analysis=analysis,
-            previous_analysis=previous_analysis,
-        )
+        with self._edit_submission(student_item_id) as grading:
+            grading.save_comment(question_id=question_id, analysis=analysis)
 
     def save_question_transcription(
         self,
@@ -443,42 +393,13 @@ class SubmissionFilesProvider:
         response_confidence: float | None = 100.0,
         response_source: str | None = SOURCE_HUMAN,
     ) -> None:
-        """None clears confidence or reader here, unlike StudentSubmissionGradeUpdate."""
-        submission = self._submission_for_student_item(student_item_id)
-        old_question = submission.questions_by_id.get(question_id)
-        update_student_submission_file(
-            submission.path,
-            StudentSubmissionGradeUpdate(
+        with self._edit_submission(student_item_id) as grading:
+            grading.save_transcription(
                 question_id=question_id,
                 response_text=response_text,
                 response_confidence=response_confidence,
-                clear_response_confidence=response_confidence is None,
                 response_source=response_source,
-                clear_response_source=response_source is None,
-            ),
-            expected_mtime_ns=submission.mtime_ns,
-        )
-        self._reload_submission(student_item_id)
-        old_value = AspectValue(
-            text="" if old_question is None else old_question.response_text,
-            confidence=None if old_question is None else old_question.response_confidence,
-            source=None if old_question is None else old_question.response_source,
-        )
-        self._journal_event(
-            kind="transcription",
-            submission=submission,
-            question_id=question_id,
-            summary=_excerpt_comment(response_text),
-            old=journal_payload("transcription", old_value),
-            new=journal_payload(
-                "transcription",
-                AspectValue(
-                    text=response_text,
-                    confidence=response_confidence,
-                    source=response_source,
-                ),
-            ),
-        )
+            )
 
     def save_question_comment_annotation(
         self,
@@ -487,80 +408,9 @@ class SubmissionFilesProvider:
         question_id: str,
         comment: str,
     ) -> Path:
-        return self._sync_pdf_annotations(student_item_id, question_id, comment_override=comment)
-
-    def _sync_pdf_annotations_best_effort(
-        self,
-        student_item_id: str,
-        question_id: str,
-    ) -> None:
-        try:
-            self._sync_pdf_annotations(student_item_id, question_id)
-        except FileNotFoundError:
-            pass
-
-    def _sync_pdf_annotations(
-        self,
-        student_item_id: str,
-        question_id: str,
-        *,
-        comment_override: str | None = None,
-    ) -> Path:
-        submission = self._submission_for_student_item(student_item_id)
-        response = submission.questions_by_id.get(question_id)
-        if response is None:
-            raise ValueError(f"question not found in submission: {question_id}")
-        if comment_override is not None and not response.source_segments:
-            raise ValueError(
-                "Question source metadata missing; regenerate submission files to enable PDF annotations."
-            )
-
-        source_pdf_path = self._source_pdf_path(submission)
-        annotated_pdf_path = submission.path.parent / "annotated-pdfs" / f"{source_pdf_path.stem}.annotated.pdf"
-
-        total_awarded = sum(q.points_awarded for q in submission.document.questions if q.points_awarded is not None)
-        total_possible = sum(q.possible_points for q in submission.document.questions if q.possible_points is not None)
-        wrote = sync_total_score_annotation(
-            source_pdf_path=source_pdf_path,
-            annotated_pdf_path=annotated_pdf_path,
-            total_points=total_awarded,
-            possible_points=total_possible,
-        )
-
-        if response.source_segments:
-            wrote |= sync_question_comment_annotation(
-                source_pdf_path=source_pdf_path,
-                annotated_pdf_path=annotated_pdf_path,
-                question_id=question_id,
-                comment=comment_override if comment_override is not None else (response.analysis or ""),
-                points_awarded=response.points_awarded,
-                possible_points=response.possible_points,
-                source_segments=response.source_segments,
-            )
-
-        try:
-            self._sync_feedback_summary_page(
-                submission, source_pdf_path, annotated_pdf_path, force=wrote
-            )
-        except Exception:
-            pass
-        return annotated_pdf_path
-
-    def _sync_feedback_summary_page(
-        self,
-        submission: _LoadedSubmission,
-        source_pdf_path: Path,
-        annotated_pdf_path: Path,
-        *,
-        force: bool = False,
-    ) -> None:
-        sync_feedback_summary_page(
-            source_pdf_path=source_pdf_path,
-            annotated_pdf_path=annotated_pdf_path,
-            summary=build_feedback_summary(
-                submission.document, curve=read_curve(self._submissions_path)
-            ),
-            force=force,
+        grading = self._submission_for_student_item(student_item_id).grading
+        return grading.sync_pdf_annotations(
+            question_id, comment_override=comment
         )
 
     def save_rubric_options(
@@ -643,8 +493,8 @@ class SubmissionFilesProvider:
         old: dict[str, object],
         new: dict[str, object],
     ) -> None:
-        student_id = "" if submission is None else submission.document.student_id
-        student_name = "" if submission is None else submission.document.student_name
+        student_id = "" if submission is None else submission.grading.document.student_id
+        student_name = "" if submission is None else submission.grading.document.student_name
         try:
             self._journal.append(
                 kind=kind,  # type: ignore[arg-type]
@@ -663,7 +513,7 @@ class SubmissionFilesProvider:
         return (
             self._generation,
             tuple(
-                (submission.path, submission.mtime_ns)
+                (submission.grading.path, submission.grading.mtime_ns)
                 for submission in self._submissions
             ),
             self._qa_mtime_ns,
@@ -695,7 +545,7 @@ class SubmissionFilesProvider:
         item_id_by_norm_id: dict[str, str] = {}
         for index, submission in enumerate(self._submissions):
             item_id = f"s{index + 1}"
-            document = submission.document
+            document = submission.grading.document
             norm_id = document.student_id.strip().casefold()
             if norm_id:
                 item_id_by_norm_id.setdefault(norm_id, item_id)
@@ -721,7 +571,7 @@ class SubmissionFilesProvider:
                     )
                 )
 
-        documents = [submission.document for submission in self._submissions]
+        documents = [submission.grading.document for submission in self._submissions]
         cohort_flags = [
             *flag_regrade_requests(
                 open_regrade_requests(self._submissions_path), documents
@@ -764,13 +614,13 @@ class SubmissionFilesProvider:
         student_name: str | None = None,
     ) -> None:
         submission = self._submission_for_student_item(student_item_id)
-        old_id = submission.document.student_id
-        old_name = submission.document.student_name
+        old_id = submission.grading.document.student_id
+        old_name = submission.grading.document.student_name
         set_student_identity_file(
-            submission.path,
+            submission.grading.path,
             student_id=student_id,
             student_name=student_name,
-            expected_mtime_ns=submission.mtime_ns,
+            expected_mtime_ns=submission.grading.mtime_ns,
         )
         self._reload_submission(student_item_id)
         resolved_name = student_name if student_name is not None else old_name
@@ -794,7 +644,7 @@ class SubmissionFilesProvider:
         name_by_norm_id: dict[str, str] = {}
         pdf_by_norm_id: dict[str, str] = {}
         for index, submission in enumerate(self._submissions):
-            document = submission.document
+            document = submission.grading.document
             norm_id = document.student_id.strip().casefold()
             if norm_id and norm_id not in item_id_by_norm_id:
                 item_id_by_norm_id[norm_id] = f"s{index + 1}"
@@ -849,7 +699,7 @@ class SubmissionFilesProvider:
     def regrade_student_choices(self) -> list[tuple[str, str]]:
         seen: dict[str, str] = {}
         for submission in self._submissions:
-            document = submission.document
+            document = submission.grading.document
             student_id = document.student_id.strip()
             if not student_id or student_id in seen:
                 continue
@@ -860,7 +710,7 @@ class SubmissionFilesProvider:
     def regrade_question_choices(self) -> list[tuple[str, str]]:
         seen: dict[str, str] = {}
         for submission in self._submissions:
-            for question in submission.document.questions:
+            for question in submission.grading.document.questions:
                 seen.setdefault(
                     question.question_id,
                     humanize_question_label(question.question_id),
@@ -878,7 +728,7 @@ class SubmissionFilesProvider:
         index = int(digits) - 1
         if not (0 <= index < len(self._submissions)):
             return None
-        document = self._submissions[index].document
+        document = self._submissions[index].grading.document
         return document.student_id.strip(), document.student_name.strip()
 
     def read_grade_history(self) -> list[GradeJournalEntry]:
@@ -888,13 +738,13 @@ class SubmissionFilesProvider:
         return build_grading_session_report(self.read_grade_history())
 
     def build_grader_agreement_report(self) -> GraderAgreementReport:
-        documents = [submission.document for submission in self._submissions]
+        documents = [submission.grading.document for submission in self._submissions]
         adaptation = answers_from_journal(self.read_grade_history(), documents)
         return build_grader_agreement_report(adaptation.answers)
 
     def default_bundle_name(self) -> str:
         return default_bundle_name(
-            [submission.document for submission in self._submissions]
+            [submission.grading.document for submission in self._submissions]
         )
 
 
@@ -908,7 +758,7 @@ class SubmissionFilesProvider:
         question_ids: dict[str, None] = {}
         student_ids: list[str] = []
         for submission in self._submissions:
-            document = submission.document
+            document = submission.grading.document
             for question in document.questions:
                 question_ids.setdefault(question.question_id, None)
             student_id = document.student_id.strip()
@@ -941,7 +791,7 @@ class SubmissionFilesProvider:
     def curve_score_distribution(self) -> list[tuple[float, float | None]]:
         distribution: list[tuple[float, float | None]] = []
         for submission in self._submissions:
-            questions = submission.document.questions
+            questions = submission.grading.document.questions
             raw_total = sum(
                 q.points_awarded for q in questions if q.points_awarded is not None
             )
@@ -953,7 +803,7 @@ class SubmissionFilesProvider:
 
 
     def build_readiness_report(self) -> ReadinessReport:
-        documents = [submission.document for submission in self._submissions]
+        documents = [submission.grading.document for submission in self._submissions]
         return build_readiness_report(
             documents,
             review_flags=build_review_flags(
@@ -975,7 +825,7 @@ class SubmissionFilesProvider:
 
     def create_release(self, *, label: str = "") -> GradeRelease:
         release = build_release(
-            [submission.document for submission in self._submissions],
+            [submission.grading.document for submission in self._submissions],
             curve=self.read_curve(),
             label=label,
             actor=self.grader_actor(),
@@ -986,7 +836,7 @@ class SubmissionFilesProvider:
     def compare_to_release(self, release: GradeRelease) -> ReleaseComparison:
         return compare_release(
             release,
-            [submission.document for submission in self._submissions],
+            [submission.grading.document for submission in self._submissions],
             curve=self.read_curve(),
         )
 
@@ -998,7 +848,7 @@ class SubmissionFilesProvider:
 
     def available_sections(self) -> list[str]:
         sections = {
-            (submission.document.section or "").strip()
+            (submission.grading.document.section or "").strip()
             for submission in self._submissions
         }
         sections.discard("")
@@ -1018,16 +868,16 @@ class SubmissionFilesProvider:
             submissions = [
                 submission
                 for submission in submissions
-                if (submission.document.section or "").strip() == section
+                if (submission.grading.document.section or "").strip() == section
             ]
         possible_by_item: dict[tuple[str, str | None], float] = {}
         for submission in submissions:
-            version = submission.document.assignment_version
+            version = submission.grading.document.assignment_version
             for context in submission.question_contexts:
                 possible_by_item.setdefault((context.question_id, version), context.points)
                 possible_by_item.setdefault((context.question_id, None), context.points)
         return build_item_analysis(
-            [submission.document for submission in submissions],
+            [submission.grading.document for submission in submissions],
             possible_points_by_question=possible_by_item,
         )
 
@@ -1048,10 +898,10 @@ class SubmissionFilesProvider:
             submissions = [
                 submission
                 for submission in submissions
-                if (submission.document.section or "").strip() == section
+                if (submission.grading.document.section or "").strip() == section
             ]
         return build_outcome_report(
-            [submission.document for submission in submissions],
+            [submission.grading.document for submission in submissions],
             tags,
             possible_points_by_question=possible_points_by_question(self._qa_doc),
         )
@@ -1062,7 +912,7 @@ class SubmissionFilesProvider:
     def _build_consistency_report(self) -> list[ConsistencyReportItem]:
         item_id_by_source_pdf = self._item_id_by_source_pdf()
         flags = build_consistency_flags(
-            [submission.document for submission in self._submissions]
+            [submission.grading.document for submission in self._submissions]
         )
         return [self._to_consistency_item(flag, item_id_by_source_pdf) for flag in flags]
 
@@ -1103,14 +953,14 @@ class SubmissionFilesProvider:
     def _build_similarity_report(self) -> list[SimilarityReportItem]:
         item_id_by_source_pdf = self._item_id_by_source_pdf()
         flags = build_similarity_flags(
-            [submission.document for submission in self._submissions]
+            [submission.grading.document for submission in self._submissions]
         )
         return [self._to_similarity_item(flag, item_id_by_source_pdf) for flag in flags]
 
     def _item_id_by_source_pdf(self) -> dict[str, str]:
         item_id_by_source_pdf: dict[str, str] = {}
         for index, submission in enumerate(self._submissions):
-            source_pdf = submission.document.source_pdf
+            source_pdf = submission.grading.document.source_pdf
             if source_pdf:
                 item_id_by_source_pdf.setdefault(source_pdf, f"s{index + 1}")
         return item_id_by_source_pdf
@@ -1154,7 +1004,7 @@ class SubmissionFilesProvider:
     def _build_answer_pattern_report(self) -> AnswerPatternReportView:
         item_id_by_source_pdf = self._item_id_by_source_pdf()
         report = build_answer_pattern_report_for_documents(
-            [submission.document for submission in self._submissions],
+            [submission.grading.document for submission in self._submissions],
             self._qa_doc,
         )
         return AnswerPatternReportView(
@@ -1239,7 +1089,7 @@ class SubmissionFilesProvider:
         """keys are completed manifest keys, not paths. Missing files are skipped."""
         added: list[str] = []
         skipped: list[str] = []
-        loaded_paths = {submission.path for submission in self._submissions}
+        loaded_paths = {submission.grading.path for submission in self._submissions}
         expected_question_ids = (
             [ctx.question_id for ctx in self._submissions[0].question_contexts]
             if self._submissions
@@ -1255,7 +1105,7 @@ class SubmissionFilesProvider:
                 skipped.append(key)
                 continue
 
-            label = loaded.document.student_name.strip() or key
+            label = loaded.grading.document.student_name.strip() or key
             actual_question_ids = [ctx.question_id for ctx in loaded.question_contexts]
             if (
                 expected_question_ids is not None
@@ -1265,7 +1115,7 @@ class SubmissionFilesProvider:
                 continue
 
             self._submissions.append(loaded)
-            loaded_paths.add(loaded.path)
+            loaded_paths.add(loaded.grading.path)
             if expected_question_ids is None:
                 expected_question_ids = actual_question_ids
             added.append(label)
@@ -1275,20 +1125,19 @@ class SubmissionFilesProvider:
         return IncrementalLoadResult(added=tuple(added), skipped=tuple(skipped))
 
     def _load_submission(self, submission_path: Path) -> _LoadedSubmission:
-        document = load_student_submission_markdown(submission_path)
+        grading = FileGradingSession(
+            submission_path,
+            submissions_path=self._submissions_path,
+            journal=self._journal,
+        )
         qa_version, qa_questions = self._questions_for_submission(
-            document,
+            grading.document,
             submission_path,
         )
         return _LoadedSubmission(
-            path=submission_path,
-            document=document,
-            questions_by_id={
-                question.question_id: question for question in document.questions
-            },
+            grading=grading,
             qa_version=qa_version,
             question_contexts=self._flatten_question_contexts(qa_questions),
-            mtime_ns=file_mtime_ns(submission_path),
         )
 
     def reload_all(self) -> None:
@@ -1299,15 +1148,8 @@ class SubmissionFilesProvider:
     def _reload_submission(self, student_item_id: str) -> None:
         existing = self._submission_for_student_item(student_item_id)
         index = self._submissions.index(existing)
-        self._submissions[index] = self._load_submission(existing.path)
+        self._submissions[index] = self._load_submission(existing.grading.path)
         self._bump_generation()
-
-    @staticmethod
-    def _source_pdf_path(submission: _LoadedSubmission) -> Path:
-        source = Path(submission.document.source_pdf).expanduser()
-        if not source.is_absolute():
-            source = submission.path.parent / source
-        return source.resolve()
 
     def _question_context_for_submission(
         self,
@@ -1434,7 +1276,7 @@ class SubmissionFilesProvider:
 
             version = submission.qa_version or "unversioned"
             raise ValueError(
-                f"{submission.path} version {version} has question IDs {actual}; "
+                f"{submission.grading.path} version {version} has question IDs {actual}; "
                 f"expected {expected}"
             )
 
@@ -1562,7 +1404,7 @@ class SubmissionFilesProvider:
         for submission in self._submissions:
             if submission.qa_version != qa_version:
                 continue
-            response = submission.questions_by_id.get(question_id)
+            response = submission.grading.questions_by_id.get(question_id)
             if response is None:
                 continue
             if deleted_labels.intersection(response.rubric_labels):
@@ -1601,7 +1443,7 @@ class SubmissionFilesProvider:
         for submission in self._submissions:
             if submission.qa_version != qa_version:
                 continue
-            response = submission.questions_by_id.get(question_id)
+            response = submission.grading.questions_by_id.get(question_id)
             if response is None:
                 continue
             if not set(response.rubric_labels).intersection(label_changes):
@@ -1625,14 +1467,14 @@ class SubmissionFilesProvider:
             )
 
             update_student_submission_file(
-                submission.path,
+                submission.grading.path,
                 StudentSubmissionGradeUpdate(
                     question_id=question_id,
                     possible_points=context.points,
                     points_awarded=new_points,
                     rubric_labels=new_labels,
                 ),
-                expected_mtime_ns=submission.mtime_ns,
+                expected_mtime_ns=submission.grading.mtime_ns,
             )
             propagated_count += 1
         return propagated_count
@@ -1667,31 +1509,3 @@ class SubmissionFilesProvider:
             )
             for option in flatten_rubric_options(items)
         ]
-
-
-def _format_points(value: float | None) -> str:
-    if value is None:
-        return "—"
-    return f"{value:g}"
-
-
-def _format_grade_summary(
-    points_awarded: float | None,
-    possible_points: float,
-    rubric_labels: tuple[str, ...],
-) -> str:
-    if points_awarded is None and not rubric_labels:
-        return "Grade cleared"
-    summary = f"{_format_points(points_awarded)}/{_format_points(possible_points)} pts"
-    if rubric_labels:
-        summary += f" · {', '.join(rubric_labels)}"
-    return summary
-
-
-def _excerpt_comment(analysis: str, *, limit: int = 60) -> str:
-    collapsed = " ".join(analysis.split())
-    if not collapsed:
-        return "Comment cleared"
-    if len(collapsed) <= limit:
-        return f"“{collapsed}”"
-    return f"“{collapsed[: limit - 1].rstrip()}…”"

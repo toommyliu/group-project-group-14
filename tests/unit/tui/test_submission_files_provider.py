@@ -1,4 +1,5 @@
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import shutil
 
@@ -6,6 +7,7 @@ import fitz
 import pytest
 
 from opengrader.core.concurrency import ConcurrentModificationError, file_mtime_ns
+from opengrader.core.grading.files import FileGradingSession
 from opengrader.core.qa_file import (
     QARubricFlatOption,
     flatten_rubric_options,
@@ -1841,14 +1843,14 @@ def test_load_new_submissions_leaves_existing_recorded_mtimes_untouched(
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
-    original_mtime = provider._submissions[0].mtime_ns
+    original_mtime = provider._submissions[0].grading.mtime_ns
     original_object = provider._submissions[0]
 
     _write_nested_submission(submissions_path, "student-2", name="Student 2")
     provider.load_new_submissions(["student-2"])
 
     assert provider._submissions[0] is original_object
-    assert provider._submissions[0].mtime_ns == original_mtime
+    assert provider._submissions[0].grading.mtime_ns == original_mtime
 
     provider.save_question_grade(
         student_item_id="s1",
@@ -2040,8 +2042,9 @@ def test_similarity_report_is_memoized_until_a_save(
     assert len(calls) == 2, "a grade save must invalidate the cached report"
 
 
+@pytest.mark.parametrize("pdf_failure", [False, True])
 def test_item_analysis_report_is_memoized_until_a_save(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pdf_failure: bool
 ) -> None:
     qa_path = tmp_path / "qa.md"
     _write_simple_qa(qa_path)
@@ -2065,15 +2068,24 @@ def test_item_analysis_report_is_memoized_until_a_save(
 
     assert first == second
     assert len(calls) == 1
+    assert first.items[0].difficulty == 0.5
 
-    provider.save_question_grade(
-        student_item_id="s1",
-        question_id="q1",
-        possible_points=10,
-        points_awarded=5,
-        rubric_labels=(),
-    )
-    provider.build_item_analysis_report()
+    if pdf_failure:
+        def broken_pdf(*args: object, **kwargs: object) -> Path:
+            raise OSError("PDF is read-only")
+
+        monkeypatch.setattr(FileGradingSession, "sync_pdf_annotations", broken_pdf)
+
+    with pytest.raises(OSError) if pdf_failure else nullcontext():
+        provider.save_question_grade(
+            student_item_id="s1",
+            question_id="q1",
+            possible_points=10,
+            points_awarded=5,
+            rubric_labels=(),
+        )
+    updated = provider.build_item_analysis_report()
+    assert updated.items[0].difficulty == 0.25
     assert len(calls) == 2
 
 
