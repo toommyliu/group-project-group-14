@@ -50,11 +50,8 @@ export function AssignmentPreview(props: Props) {
   const versionId = useId();
   return (
     <section className="min-w-0 space-y-4" aria-label="Assignment preview">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">
-          {preview?.document.title || 'Preview'}
-        </h2>
-        {versions.length > 1 && (
+      {versions.length > 1 && (
+        <div className="flex justify-end">
           <div className="flex items-center gap-2">
             <Label htmlFor={versionId}>Version</Label>
             <Select
@@ -76,8 +73,8 @@ export function AssignmentPreview(props: Props) {
               </SelectContent>
             </Select>
           </div>
-        )}
-      </div>
+        </div>
+      )}
       <Tabs defaultValue="pdf">
         <TabsList aria-label="Preview view">
           <TabsTrigger value="pdf">PDF preview</TabsTrigger>

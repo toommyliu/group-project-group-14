@@ -10,7 +10,7 @@ export function AppHeader() {
   });
   return (
     <header className="border-b">
-      <div className="mx-auto flex min-h-20 max-w-[90rem] items-center gap-3 px-4 sm:gap-6 sm:px-8 lg:px-14">
+      <div className="mx-auto flex min-h-16 max-w-[90rem] items-center gap-3 px-4 sm:gap-6 sm:px-8 lg:px-14">
         <Link
           to="/"
           className="flex min-h-11 shrink-0 items-center text-base font-semibold"
@@ -44,7 +44,7 @@ export function AppHeader() {
                   <ChevronRight className="size-4 text-muted-foreground" />
                 </li>
                 <li
-                  className="min-w-0 truncate"
+                  className="min-w-0 max-w-64 truncate sm:max-w-96"
                   aria-current="page"
                   title={assignment.title}
                 >

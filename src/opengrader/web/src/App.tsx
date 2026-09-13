@@ -14,7 +14,7 @@ export function App({ children }: PropsWithChildren) {
     <div className="min-h-svh text-sm leading-normal antialiased">
       <AppHeader />
       <main
-        className="mx-auto min-h-[calc(100svh-5rem)] max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14"
+        className="mx-auto min-h-[calc(100svh-4rem)] max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14"
         id="content"
         ref={main}
         tabIndex={-1}
