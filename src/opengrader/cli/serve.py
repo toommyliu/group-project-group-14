@@ -1,4 +1,4 @@
-"""Launch the read-only localhost grading API and web app."""
+"""Launch the localhost grading API and web app."""
 
 from argparse import ArgumentParser
 

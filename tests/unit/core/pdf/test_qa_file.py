@@ -882,3 +882,39 @@ def test_rubric_without_comments_is_unaffected() -> None:
     options = flatten_rubric_options(document.questions[0].rubric)
     assert all(option.default_comment is None for option in options)
     assert "**Comment**" not in render_qa_markdown(document)
+
+
+def test_source_lines_distinguish_duplicate_prompts_and_survive_crlf():
+    content = """---
+title: Line locations
+instructions: |
+  This frontmatter contains a bullet.
+  - (2 points) Repeated prompt.
+---
+
+## Version A
+
+- (2 points) Repeated prompt.
+  - (1 point) Repeated prompt.
+    - **Correct**
+      - An answer.
+  - (1 point) Repeated prompt.
+    - **Correct**
+      - Another answer.
+
+## Version B
+
+- (2 points) Repeated prompt.
+  - **Correct**
+    - A different answer.
+""".replace("\n", "\r\n")
+    document = parse_qa_markdown(content)
+    first = document.version_questions["A"][0]
+    second = document.version_questions["B"][0]
+    assert first.source_line == 10
+    assert [part.source_line for part in first.subquestions] == [11, 14]
+    assert second.source_line == 20
+    # Source locations must not change semantic equality after canonical rendering.
+    rendered = render_qa_markdown(document)
+    assert "source_line" not in rendered
+    assert parse_qa_markdown(rendered) == document
