@@ -12,9 +12,22 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--port", type=int, default=8000, help="Local port, default 8000."
     )
+    parser.add_argument(
+        "--dev", action="store_true", help="Start Vite with hot reload and the API."
+    )
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
+    if args.dev:
+        if args.port == 0:
+            parser.error("--dev requires a fixed, nonzero API port")
+        from opengrader.server.dev import run_dev
+
+        try:
+            code = run_dev(args.port)
+        except (OSError, ValueError) as exc:
+            parser.exit(2, f"error: {exc}\n")
+        parser.exit(code)
 
     import uvicorn
 
