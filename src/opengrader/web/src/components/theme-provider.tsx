@@ -1,13 +1,13 @@
 /* oxlint-disable react/only-export-components */
 import * as React from 'react';
+import type { Preferences } from '@/lib/preferences';
+import { usePreference } from '@/hooks/use-preference';
 
-type Theme = 'dark' | 'light' | 'system';
+type Theme = Preferences['theme'];
 type ResolvedTheme = 'dark' | 'light';
 
 type ThemeProviderProps = {
   children: React.ReactNode;
-  defaultTheme?: Theme;
-  storageKey?: string;
   disableTransitionOnChange?: boolean;
 };
 
@@ -17,19 +17,10 @@ type ThemeProviderState = {
 };
 
 const COLOR_SCHEME_QUERY = '(prefers-color-scheme: dark)';
-const THEME_VALUES: Theme[] = ['dark', 'light', 'system'];
 
 const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
 >(undefined);
-
-function isTheme(value: string | null): value is Theme {
-  if (value === null) {
-    return false;
-  }
-
-  return THEME_VALUES.includes(value as Theme);
-}
 
 function getSystemTheme(): ResolvedTheme {
   if (window.matchMedia(COLOR_SCHEME_QUERY).matches) {
@@ -79,27 +70,10 @@ function isEditableTarget(target: EventTarget | null) {
 
 export function ThemeProvider({
   children,
-  defaultTheme = 'system',
-  storageKey = 'theme',
   disableTransitionOnChange = true,
   ...props
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = React.useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(storageKey);
-    if (isTheme(storedTheme)) {
-      return storedTheme;
-    }
-
-    return defaultTheme;
-  });
-
-  const setTheme = React.useCallback(
-    (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme);
-      setThemeState(nextTheme);
-    },
-    [storageKey]
-  );
+  const [theme, setTheme] = usePreference('theme');
 
   const applyTheme = React.useCallback(
     (nextTheme: Theme) => {
@@ -158,7 +132,7 @@ export function ThemeProvider({
         return;
       }
 
-      setThemeState((currentTheme) => {
+      setTheme((currentTheme) => {
         const nextTheme =
           currentTheme === 'dark'
             ? 'light'
@@ -168,7 +142,6 @@ export function ThemeProvider({
                 ? 'light'
                 : 'dark';
 
-        localStorage.setItem(storageKey, nextTheme);
         return nextTheme;
       });
     };
@@ -178,32 +151,7 @@ export function ThemeProvider({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [storageKey]);
-
-  React.useEffect(() => {
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage) {
-        return;
-      }
-
-      if (event.key !== storageKey) {
-        return;
-      }
-
-      if (isTheme(event.newValue)) {
-        setThemeState(event.newValue);
-        return;
-      }
-
-      setThemeState(defaultTheme);
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, [defaultTheme, storageKey]);
+  }, [setTheme]);
 
   const value = React.useMemo(
     () => ({
