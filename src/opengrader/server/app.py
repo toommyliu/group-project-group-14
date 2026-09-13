@@ -1,9 +1,15 @@
+import logging
+import shutil
+
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from threading import RLock
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from PIL import Image
 
@@ -14,11 +20,12 @@ from opengrader.core.grading.questions import (
     questions_for_submission,
     rubric_options,
 )
-from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
 from opengrader.core.question_types import QuestionType
 from opengrader.core.submissions import load_student_submission_markdown
+from opengrader.server.assignment_qa import AssignmentInput, QAPreview, preview_qa
 from opengrader.server.web import add_web_routes
+from opengrader.server.assignment_pdf import AssignmentPDFInput, PDF_RESPONSES, assignment_pdf_response
 
 
 class RubricOption(BaseModel):
@@ -41,6 +48,10 @@ class Question(BaseModel):
 class Assignment(BaseModel):
     id: str
     title: str
+
+
+class AssignmentUpdate(AssignmentInput):
+    expected_qa_markdown: str
 
 
 class Submission(BaseModel):
@@ -84,6 +95,7 @@ def _question(context: QuestionContext) -> Question:
 @dataclass
 class LoadedAssignment:
     summary: Assignment
+    qa: QAPreview
     questions: dict[int, list[Question]]
     answers: dict[tuple[int, str], Answer]
     submissions: list[Submission]
@@ -95,10 +107,9 @@ def load_assignment(
 ) -> LoadedAssignment:
     """Read an assignment once; HTTP requests use the loaded snapshot."""
     qa_file = qa_file.expanduser().resolve()
-    qa = load_qa_markdown(qa_file)
+    preview = preview_qa(qa_file.read_text(encoding="utf-8"))
+    qa = preview.document
     paths = discover_submission_paths(submissions.expanduser().resolve())
-    if not paths:
-        raise ValueError(f"no *.submission.md files found in {submissions}")
 
     questions_by_submission: dict[int, list[Question]] = {}
     answers: dict[tuple[int, str], Answer] = {}
@@ -114,8 +125,6 @@ def load_assignment(
                 _question(c) for c in flatten_question_contexts(qa_questions)
             ]
         questions = questions_by_version[version]
-        if not questions:
-            raise ValueError(f"no grading questions found in {qa_file}")
         questions_by_submission[submission_id] = questions
         summaries.append(Submission(id=submission_id, version=version))
         responses = {q.question_id: q for q in document.questions}
@@ -159,7 +168,8 @@ def load_assignment(
             )
 
     return LoadedAssignment(
-        summary=Assignment(id=assignment_id, title=qa.title or assignment_id),
+        summary=Assignment(id=assignment_id, title=qa.title or "Untitled assignment"),
+        qa=preview,
         questions=questions_by_submission,
         answers=answers,
         submissions=summaries,
@@ -186,16 +196,132 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
             ) from exc
 
     app = FastAPI(title="Opengrader", version="0.0.1")
+    registry_lock = RLock()
 
     def assignment_for(assignment_id: str) -> LoadedAssignment:
-        assignment = assignments.get(assignment_id)
+        with registry_lock:
+            assignment = assignments.get(assignment_id)
         if assignment is None:
             raise HTTPException(404, "Assignment not found")
         return assignment
 
     @app.get("/assignments")
     def list_assignments() -> list[Assignment]:
-        return [assignment.summary for assignment in assignments.values()]
+        with registry_lock:
+            return [assignment.summary for assignment in assignments.values()]
+
+    def validated_preview(request: AssignmentInput) -> QAPreview:
+        try:
+            return preview_qa(request.qa_markdown)
+        except ValueError as exc:
+            raise HTTPException(
+                422,
+                detail=[{
+                    "loc": ["body", "qa_markdown"],
+                    "msg": str(exc),
+                    "type": "value_error",
+                }],
+            ) from exc
+
+    @app.post("/assignments/preview")
+    def preview_assignment(request: AssignmentInput) -> QAPreview:
+        return validated_preview(request)
+
+    @app.post("/assignments/preview/pdf", response_class=Response, responses=PDF_RESPONSES)
+    def preview_assignment_pdf(request: AssignmentPDFInput) -> Response:
+        return assignment_pdf_response(validated_preview(request).document, request.version)
+
+    @app.post("/assignments", status_code=201)
+    def create_assignment(request: AssignmentInput) -> Assignment:
+        """Publish complete assignment files before adding the in-memory snapshot."""
+        preview = validated_preview(request)
+        assignment_id = str(uuid4())
+        summary = Assignment(
+            id=assignment_id, title=preview.document.title or "Untitled assignment"
+        )
+        loaded = LoadedAssignment(
+            summary=summary, qa=preview, questions={}, answers={}, submissions=[], images={}
+        )
+        destination = assignments_dir / assignment_id
+        try:
+            with TemporaryDirectory(prefix=".create-", dir=assignments_dir) as staging:
+                directory = Path(staging)
+                (directory / "qa.md").write_bytes(request.qa_markdown.encode("utf-8"))
+                (directory / "submissions").mkdir()
+                # Publish complete files before exposing the assignment to requests.
+                with registry_lock:
+                    if destination.exists():
+                        raise FileExistsError("Assignment ID already exists")
+                    directory.rename(destination)
+                    assignments[assignment_id] = loaded
+        except OSError as exc:
+            raise HTTPException(
+                500, "Could not save assignment. Check server storage and try again."
+            ) from exc
+        return summary
+
+    def editable_assignment(assignment_id: str) -> LoadedAssignment:
+        assignment = assignment_for(assignment_id)
+        submissions = assignments_dir / assignment_id / "submissions"
+        # Check disk as well as the snapshot, including files added through the CLI.
+        if assignment.submissions or any(submissions.iterdir()):
+            raise HTTPException(409, "Assignments with submissions cannot be edited or deleted.")
+        return assignment
+
+    @app.get("/assignments/{assignment_id}/source")
+    def get_assignment_source(assignment_id: str) -> AssignmentInput:
+        with registry_lock:
+            assignment_for(assignment_id)
+            try:
+                content = (assignments_dir / assignment_id / "qa.md").read_bytes().decode("utf-8")
+            except OSError as exc:
+                raise HTTPException(500, "Could not read assignment source.") from exc
+            return AssignmentInput(qa_markdown=content)
+
+    @app.put("/assignments/{assignment_id}")
+    def update_assignment(assignment_id: str, request: AssignmentUpdate) -> Assignment:
+        preview = validated_preview(request)
+        with registry_lock:
+            try:
+                editable_assignment(assignment_id)
+                destination = assignments_dir / assignment_id / "qa.md"
+                if destination.read_bytes() != request.expected_qa_markdown.encode("utf-8"):
+                    raise HTTPException(409, "This assignment changed since you opened it. Reopen it before saving.")
+                summary = Assignment(id=assignment_id, title=preview.document.title or "Untitled assignment")
+                loaded = LoadedAssignment(summary=summary, qa=preview, questions={}, answers={}, submissions=[], images={})
+                with TemporaryDirectory(prefix=".update-", dir=assignments_dir) as staging:
+                    source = Path(staging) / "qa.md"
+                    source.write_bytes(request.qa_markdown.encode("utf-8"))
+                    source.replace(destination)
+                assignments[assignment_id] = loaded
+            except OSError as exc:
+                raise HTTPException(500, "Could not save assignment. Check server storage and try again.") from exc
+        return summary
+
+    @app.delete("/assignments/{assignment_id}", status_code=204)
+    def delete_assignment(assignment_id: str) -> Response:
+        with registry_lock:
+            try:
+                editable_assignment(assignment_id)
+                deleted = assignments_dir / f".deleted-{uuid4()}"
+                (assignments_dir / assignment_id).rename(deleted)
+                del assignments[assignment_id]
+            except OSError as exc:
+                raise HTTPException(500, "Could not delete assignment. Check server storage and try again.") from exc
+        # Once unpublished, cleanup failure must not report the deletion as failed.
+        try:
+            shutil.rmtree(deleted)
+        except OSError:
+            logging.getLogger(__name__).exception("Could not clean deleted assignment %s", deleted)
+        return Response(status_code=204)
+
+    @app.get("/assignments/{assignment_id}/qa")
+    def get_assignment_qa(assignment_id: str) -> QAPreview:
+        return assignment_for(assignment_id).qa
+
+    @app.get("/assignments/{assignment_id}/pdf", response_class=Response, responses=PDF_RESPONSES)
+    def get_assignment_pdf(assignment_id: str, version: str | None = None) -> Response:
+        return assignment_pdf_response(assignment_for(assignment_id).qa.document, version)
 
     @app.get("/assignments/{assignment_id}/submissions")
     def list_submissions(assignment_id: str) -> list[Submission]:

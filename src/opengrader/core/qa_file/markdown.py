@@ -120,6 +120,8 @@ class QASubquestion:
     rubric: list[QARubricItem] = field(default_factory=list)
     image_markdown: str | None = None
     outcomes: tuple[str, ...] = ()
+    # One-based source line; excluded from semantic equality and QA rendering.
+    source_line: int | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass
@@ -135,6 +137,8 @@ class QAQuestion:
     image_markdown: str | None = None
     subquestions: list[QASubquestion] = field(default_factory=list)
     outcomes: tuple[str, ...] = ()
+    # One-based source line; excluded from semantic equality and QA rendering.
+    source_line: int | None = field(default=None, compare=False, repr=False)
 
     @property
     def graded_outcomes(self) -> tuple[str, ...]:
@@ -967,6 +971,7 @@ def _parse_subquestion_item(
     )
 
     return QASubquestion(
+        source_line=item.line_no,
         id=subquestion_id,
         prompt=prompt,
         points=points,
@@ -1064,6 +1069,7 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
     _validate_rubric_points(rubric, points=points, context=f"question {qid!r}")
 
     return QAQuestion(
+        source_line=item.line_no,
         id=qid,
         prompt=prompt,
         points=points,
