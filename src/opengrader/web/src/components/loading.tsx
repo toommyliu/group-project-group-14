@@ -1,3 +1,4 @@
+import { LoaderCircle } from 'lucide-react';
 import { PageHeading } from './page-heading';
 import { Skeleton } from './ui/skeleton';
 
@@ -66,5 +67,28 @@ export function AssignmentLoading() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Reserve the icon's space so loading does not shift nearby controls. */
+export function LoadingIndicator({
+  loading,
+  label,
+}: {
+  loading: boolean;
+  label: string;
+}) {
+  return (
+    <span className="inline-flex size-4 shrink-0" role="status">
+      {loading && (
+        <>
+          <LoaderCircle
+            className="size-4 motion-safe:animate-spin"
+            aria-hidden="true"
+          />
+          <span className="sr-only">{label}</span>
+        </>
+      )}
+    </span>
   );
 }
