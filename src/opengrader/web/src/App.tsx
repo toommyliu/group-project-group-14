@@ -1,21 +1,47 @@
-import { Button } from '@/components/ui/button';
+import { useEffect, useRef, type PropsWithChildren } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { AssignmentLoading, AssignmentsLoading } from '@/components/loading';
+import { AppHeader } from '@/components/app-header';
 
-export function App() {
+export function App({ children }: PropsWithChildren) {
+  const initialPath = useRouterState({
+    select: (state) =>
+      state.matches.length === 0 ? state.location.pathname : null,
+  });
+  const main = useRef<HTMLElement>(null);
+  const pathname = useRouterState({
+    select: (state) => state.resolvedLocation?.pathname,
+  });
+  const previousPath = useRef(pathname);
+  useEffect(() => {
+    if (previousPath.current !== pathname)
+      main.current?.focus({ preventScroll: true });
+    previousPath.current = pathname;
+  }, [pathname]);
+
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
-      </div>
+    <div className="min-h-svh text-sm leading-normal antialiased">
+      <a
+        className="absolute start-4 -top-24 z-10 bg-background p-3 focus:top-4"
+        href="#content"
+      >
+        Skip to content
+      </a>
+      <AppHeader />
+      <main
+        className="mx-auto min-h-[calc(100svh-5rem)] max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14"
+        id="content"
+        ref={main}
+        tabIndex={-1}
+      >
+        {children}
+        {initialPath !== null &&
+          (initialPath.startsWith('/grade/') ? (
+            <AssignmentLoading />
+          ) : (
+            <AssignmentsLoading />
+          ))}
+      </main>
     </div>
   );
 }
-
-export default App;

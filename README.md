@@ -103,6 +103,10 @@ The icon opens a terminal window and launches the TUI, quietly installing/repair
 
 ## Usage Guide
 
+The new read-only [web grading viewer](src/opengrader/web/README.md) browses
+prepared assignments through `opengrader serve`. Its setup guide covers building
+the web app, placing assignments in the server workspace, and local development.
+
 Every tool lives behind one front door:
 ```bash
 uv run opengrader <command> [arguments]

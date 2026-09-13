@@ -139,6 +139,7 @@ export function ThemeProvider({
     };
   }, [theme, applyTheme]);
 
+  // TODO: migrate
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) {
