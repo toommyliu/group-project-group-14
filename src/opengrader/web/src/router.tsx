@@ -7,7 +7,11 @@ import {
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import { App } from './App';
-import { assignmentsQuery } from './api/queries';
+import {
+  assignmentsQuery,
+  assignmentSourceQuery,
+  submissionsQuery,
+} from './api/queries';
 import {
   loadAssignment,
   validateGradingSearch,
@@ -26,6 +30,31 @@ export const indexRoute = createRoute({
     context.queryClient.ensureQueryData(assignmentsQuery),
   component: lazyRouteComponent(() => import('./routes/assignments-page')),
   pendingComponent: AssignmentsLoading,
+  errorComponent: RouteError,
+});
+
+export const newAssignmentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/new-assignment',
+  component: lazyRouteComponent(() => import('./routes/new-assignment-page')),
+  errorComponent: RouteError,
+});
+
+export const editAssignmentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/edit-assignment/$assignmentId',
+  loader: async ({ context, params }) => {
+    const submissions = await context.queryClient.fetchQuery(
+      submissionsQuery(params.assignmentId)
+    );
+    if (submissions.length)
+      throw new Error('Assignments with submissions cannot be edited.');
+    return context.queryClient.fetchQuery(
+      assignmentSourceQuery(params.assignmentId)
+    );
+  },
+  component: lazyRouteComponent(() => import('./routes/edit-assignment-page')),
+  pendingComponent: AssignmentLoading,
   errorComponent: RouteError,
 });
 
@@ -53,7 +82,12 @@ export const assignmentRoute = createRoute({
 
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
-    routeTree: rootRoute.addChildren([indexRoute, assignmentRoute]),
+    routeTree: rootRoute.addChildren([
+      indexRoute,
+      newAssignmentRoute,
+      editAssignmentRoute,
+      assignmentRoute,
+    ]),
     context: { queryClient },
     InnerWrap: App,
     defaultPreload: 'intent',

@@ -2,13 +2,22 @@ import { useRouterState } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
 import { validateGradingSearch } from '@/routes/assignment-data';
 import { assignmentRoute } from '@/router';
+import { AssignmentActions } from './assignment-actions';
+import { AssignmentPreview } from './assignment-preview';
 import { AnswerView } from './answer-view';
 import { PageHeading } from './page-heading';
 import { Button } from './ui/button';
 
 export default function AssignmentView() {
-  const { assignment, submissions, submission, questions, question, answer } =
-    assignmentRoute.useLoaderData();
+  const {
+    assignment,
+    submissions,
+    submission,
+    questions,
+    question,
+    answer,
+    qa,
+  } = assignmentRoute.useLoaderData();
   const navigate = assignmentRoute.useNavigate();
   const pendingSelection = useRouterState({
     select: (state) =>
@@ -37,8 +46,15 @@ export default function AssignmentView() {
     <>
       <PageHeading
         title={assignment.title}
-        description="Review student responses and existing grades."
+        description={
+          submission
+            ? 'Review student responses and existing grades.'
+            : 'Review the answer key for this assignment.'
+        }
       />
+      {submissions.length === 0 && (
+        <AssignmentActions assignment={assignment} />
+      )}
       {submission ? (
         <>
           <div className="flex flex-wrap items-end gap-6 border-b pb-6">
@@ -147,9 +163,18 @@ export default function AssignmentView() {
           </div>
         </>
       ) : (
-        <p className="min-h-80 py-8 text-muted-foreground">
-          No submissions available for this assignment.
-        </p>
+        <div className="space-y-8">
+          <p className="border-t pt-6 text-muted-foreground">
+            No submissions yet.
+          </p>
+          {qa && (
+            <AssignmentPreview
+              key={assignment.id}
+              assignmentId={assignment.id}
+              preview={qa}
+            />
+          )}
+        </div>
       )}
     </>
   );

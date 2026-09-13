@@ -13,6 +13,8 @@ def add_web_routes(app: FastAPI, dist: Path) -> None:
         app.mount("/assets", StaticFiles(directory=assets), name="web-assets")
 
     @app.get("/grade/{assignment_id}", include_in_schema=False, response_model=None)
+    @app.get("/edit-assignment/{assignment_id}", include_in_schema=False, response_model=None)
+    @app.get("/new-assignment", include_in_schema=False, response_model=None)
     @app.get("/", include_in_schema=False, response_model=None)
     def index() -> FileResponse | HTMLResponse:
         if not (dist / "index.html").is_file():
