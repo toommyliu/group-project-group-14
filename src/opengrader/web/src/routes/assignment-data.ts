@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import {
   answerQuery,
+  assignmentQAQuery,
   ApiError,
   assignmentsQuery,
   questionsQuery,
@@ -58,5 +59,17 @@ export async function loadAssignment(
       if (!(error instanceof ApiError && error.status === 404)) throw error;
     }
   }
-  return { assignment, submissions, submission, questions, question, answer };
+  const qa =
+    submissions.length === 0
+      ? await client.ensureQueryData(assignmentQAQuery(assignmentId))
+      : null;
+  return {
+    assignment,
+    submissions,
+    submission,
+    questions,
+    question,
+    answer,
+    qa,
+  };
 }
