@@ -5,6 +5,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from PIL import Image
 
 from opengrader.core.export.gradebook import discover_submission_paths
 from opengrader.core.grading.questions import (
@@ -17,6 +18,7 @@ from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
 from opengrader.core.question_types import QuestionType
 from opengrader.core.submissions import load_student_submission_markdown
+from opengrader.server.web import add_web_routes
 
 
 class RubricOption(BaseModel):
@@ -52,6 +54,8 @@ class Answer(BaseModel):
     question: Question
     response_text: str
     response_image_url: str | None
+    response_image_width: int | None
+    response_image_height: int | None
     points_awarded: float | None
     rubric_labels: tuple[str, ...]
     analysis: str
@@ -101,6 +105,7 @@ def load_assignment(
     summaries: list[Submission] = []
     images: dict[tuple[int, str], Path] = {}
     questions_by_version: dict[str | None, list[Question]] = {}
+    image_sizes: dict[Path, tuple[int, int] | None] = {}
     for submission_id, path in enumerate(paths, start=1):
         document = load_student_submission_markdown(path)
         version, qa_questions = questions_for_submission(qa, document)
@@ -119,6 +124,7 @@ def load_assignment(
             if response is None:
                 continue
             image_url = None
+            image_size = None
             if response.response_image_path:
                 image = Path(response.response_image_path).resolve()
                 # Serve only crops inside this assignment, never a referenced arbitrary file.
@@ -127,6 +133,13 @@ def load_assignment(
                     and image.is_file()
                     and image.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
                 ):
+                    if image not in image_sizes:
+                        try:
+                            with Image.open(image) as crop:
+                                image_sizes[image] = crop.size
+                        except (OSError, ValueError):
+                            image_sizes[image] = None
+                    image_size = image_sizes[image]
                     images[submission_id, question.id] = image
                     image_url = (
                         f"/assignments/{quote(assignment_id, safe='')}/submissions/{submission_id}"
@@ -138,6 +151,8 @@ def load_assignment(
                 question=question,
                 response_text=response.response_text,
                 response_image_url=image_url,
+                response_image_width=image_size[0] if image_size else None,
+                response_image_height=image_size[1] if image_size else None,
                 points_awarded=response.points_awarded,
                 rubric_labels=response.rubric_labels,
                 analysis=response.analysis,
@@ -152,7 +167,7 @@ def load_assignment(
     )
 
 
-def create_app(data_home: Path) -> FastAPI:
+def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
     assignments_dir = data_home / "assignments"
     assignments_dir.mkdir(parents=True, exist_ok=True)
     assignments: dict[str, LoadedAssignment] = {}
@@ -214,4 +229,8 @@ def create_app(data_home: Path) -> FastAPI:
             raise HTTPException(404, "Answer image not found")
         return FileResponse(image)
 
+    add_web_routes(
+        app,
+        web_dist if web_dist is not None else Path(__file__).parent.parent / "web" / "dist",
+    )
     return app
