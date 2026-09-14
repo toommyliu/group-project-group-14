@@ -22,7 +22,7 @@ export function PdfActionButton({
       <Button
         variant="outline"
         size="sm"
-        className="h-8 text-xs"
+        className="h-8 text-xs focus-visible:z-10"
         disabled={!url}
         nativeButton={!url}
         render={
