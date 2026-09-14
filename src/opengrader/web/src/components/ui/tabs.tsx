@@ -31,6 +31,10 @@ export function TabsContent({
   ...props
 }: TabsPrimitive.Panel.Props) {
   return (
-    <TabsPrimitive.Panel className={cn('min-w-0 pt-4', className)} {...props} />
+    <TabsPrimitive.Panel
+      className={cn('min-w-0 pt-4', className)}
+      tabIndex={-1}
+      {...props}
+    />
   );
 }
