@@ -2,22 +2,13 @@ import { useRouterState } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
 import { validateGradingSearch } from '@/routes/assignment-data';
 import { assignmentRoute } from '@/router';
-import { AssignmentActions } from './assignment-actions';
-import { AssignmentPreview } from './assignment-preview';
 import { AnswerView } from './answer-view';
 import { PageHeading } from './page-heading';
 import { Button } from './ui/button';
 
 export default function AssignmentView() {
-  const {
-    assignment,
-    submissions,
-    submission,
-    questions,
-    question,
-    answer,
-    qa,
-  } = assignmentRoute.useLoaderData();
+  const { submissions, submission, questions, question, answer } =
+    assignmentRoute.useLoaderData();
   const navigate = assignmentRoute.useNavigate();
   const pendingSelection = useRouterState({
     select: (state) =>
@@ -33,7 +24,9 @@ export default function AssignmentView() {
     pendingSelection !== undefined &&
     !loadingSubmission &&
     (pendingSelection.question ?? questions[0]?.id) !== question?.id;
-  const index = submission ? submissions.indexOf(submission) : -1;
+  const index = submissions.findIndex((item) => item.id === submission?.id);
+  const previous = index > 0 ? submissions[index - 1] : undefined;
+  const next = index >= 0 ? submissions[index + 1] : undefined;
 
   function selectSubmission(id: number) {
     void navigate({
@@ -44,17 +37,7 @@ export default function AssignmentView() {
 
   return (
     <>
-      <PageHeading
-        title={assignment.title}
-        description={
-          submission
-            ? 'Review student responses and existing grades.'
-            : 'Review the answer key for this assignment.'
-        }
-      />
-      {submissions.length === 0 && (
-        <AssignmentActions assignment={assignment} />
-      )}
+      <PageHeading title="Submissions" />
       {submission ? (
         <>
           <div className="flex flex-wrap items-end gap-6 border-b pb-6">
@@ -133,15 +116,15 @@ export default function AssignmentView() {
               </span>
               <Button
                 variant="outline"
-                disabled={index === 0}
-                onClick={() => selectSubmission(submissions[index - 1].id)}
+                disabled={!previous}
+                onClick={() => previous && selectSubmission(previous.id)}
               >
                 <ChevronLeft aria-hidden="true" /> Previous
               </Button>
               <Button
                 variant="outline"
-                disabled={index === submissions.length - 1}
-                onClick={() => selectSubmission(submissions[index + 1].id)}
+                disabled={!next}
+                onClick={() => next && selectSubmission(next.id)}
               >
                 Next <ChevronRight aria-hidden="true" />
               </Button>
@@ -167,13 +150,6 @@ export default function AssignmentView() {
           <p className="border-t pt-6 text-muted-foreground">
             No submissions yet.
           </p>
-          {qa && (
-            <AssignmentPreview
-              key={assignment.id}
-              assignmentId={assignment.id}
-              preview={qa}
-            />
-          )}
         </div>
       )}
     </>

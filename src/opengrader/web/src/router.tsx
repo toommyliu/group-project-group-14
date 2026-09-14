@@ -10,8 +10,10 @@ import { App } from './App';
 import {
   assignmentsQuery,
   assignmentSourceQuery,
+  assignmentQAQuery,
   submissionsQuery,
 } from './api/queries';
+import { scansQuery } from './api/scans';
 import {
   loadAssignment,
   validateGradingSearch,
@@ -44,9 +46,15 @@ export const editAssignmentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/edit-assignment/$assignmentId',
   loader: async ({ context, params }) => {
-    const submissions = await context.queryClient.fetchQuery(
-      submissionsQuery(params.assignmentId)
-    );
+    const [submissions, scans] = await Promise.all([
+      context.queryClient.fetchQuery({
+        ...submissionsQuery(params.assignmentId),
+        staleTime: 0,
+      }),
+      context.queryClient.fetchQuery(scansQuery(params.assignmentId)),
+    ]);
+    if (scans.batches.length)
+      throw new Error('Assignments with uploaded scans cannot be edited.');
     if (submissions.length)
       throw new Error('Assignments with submissions cannot be edited.');
     return context.queryClient.fetchQuery(
@@ -80,6 +88,60 @@ export const assignmentRoute = createRoute({
   notFoundComponent: RouteNotFound,
 });
 
+export const scansRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/scans/$assignmentId',
+  loader: async ({ context, params }) => {
+    const [assignments, scans, qa] = await Promise.all([
+      context.queryClient.ensureQueryData(assignmentsQuery),
+      context.queryClient.fetchQuery(scansQuery(params.assignmentId)),
+      context.queryClient.ensureQueryData(
+        assignmentQAQuery(params.assignmentId)
+      ),
+    ]);
+    const assignment = assignments.find(
+      (item) => item.id === params.assignmentId
+    );
+    if (!assignment) throw notFound();
+    return {
+      assignment,
+      scans,
+      versions: Object.keys(qa.document.version_questions ?? {}),
+    };
+  },
+  component: lazyRouteComponent(() => import('./routes/scans-page')),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+});
+
+export const overviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assignment/$assignmentId',
+  loader: async ({ context, params }) => {
+    const [assignments, qa, scans, submissions] = await Promise.all([
+      context.queryClient.ensureQueryData(assignmentsQuery),
+      context.queryClient.ensureQueryData(
+        assignmentQAQuery(params.assignmentId)
+      ),
+      context.queryClient.fetchQuery(scansQuery(params.assignmentId)),
+      context.queryClient.fetchQuery({
+        ...submissionsQuery(params.assignmentId),
+        staleTime: 0,
+      }),
+    ]);
+    const assignment = assignments.find(
+      (item) => item.id === params.assignmentId
+    );
+    if (!assignment) throw notFound();
+    return { assignment, qa, scans, submissions };
+  },
+  component: lazyRouteComponent(
+    () => import('./routes/assignment-overview-page')
+  ),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+});
+
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree: rootRoute.addChildren([
@@ -87,6 +149,8 @@ export function createAppRouter(queryClient: QueryClient) {
       newAssignmentRoute,
       editAssignmentRoute,
       assignmentRoute,
+      scansRoute,
+      overviewRoute,
     ]),
     context: { queryClient },
     InnerWrap: App,

@@ -154,7 +154,7 @@ export function AssignmentEditor({
         exact: true,
       });
       await router.navigate({
-        to: '/grade/$assignmentId',
+        to: '/assignment/$assignmentId',
         params: { assignmentId: assignment.id },
       });
     } catch {
@@ -212,7 +212,7 @@ export function AssignmentEditor({
         {error && <p role="alert">{error}</p>}
         {saved && (
           <Link
-            to="/grade/$assignmentId"
+            to="/assignment/$assignmentId"
             params={{ assignmentId: saved.id }}
             className="underline"
           >
@@ -254,7 +254,7 @@ export function AssignmentEditor({
                 </div>
                 <span
                   role="status"
-                  className="block wrap-break-word text-sm text-muted-foreground empty:hidden"
+                  className="block text-sm wrap-break-word text-muted-foreground empty:hidden"
                   title={uploadedFileName || undefined}
                 >
                   {reading

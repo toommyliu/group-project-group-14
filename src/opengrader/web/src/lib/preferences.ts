@@ -1,8 +1,12 @@
 export type Preferences = {
   editorWidth: number;
+  sidebarWidth: number;
+  sidebarExpanded: boolean;
   pdfAction: 'download' | 'open';
   theme: 'dark' | 'light' | 'system';
 };
+
+export const sidebarWidthBounds = { min: 224, max: 400, default: 256 } as const;
 
 type Definition<T> = {
   storageKey: string;
@@ -12,6 +16,26 @@ type Definition<T> = {
 };
 
 const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
+  sidebarExpanded: {
+    storageKey: 'opengrader.sidebar-expanded',
+    defaultValue: true,
+    parse: (value) =>
+      value === 'true' ? true : value === 'false' ? false : undefined,
+    serialize: String,
+  },
+  sidebarWidth: {
+    storageKey: 'opengrader.sidebar-width',
+    defaultValue: sidebarWidthBounds.default,
+    parse: (value) => {
+      const width = Number(value);
+      return Number.isFinite(width) &&
+        width >= sidebarWidthBounds.min &&
+        width <= sidebarWidthBounds.max
+        ? width
+        : undefined;
+    },
+    serialize: String,
+  },
   editorWidth: {
     storageKey: 'opengrader.assignment-editor-width',
     defaultValue: 50,
