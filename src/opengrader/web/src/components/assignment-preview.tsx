@@ -135,7 +135,7 @@ export function AssignmentPreview(props: Props) {
         </TabsContent>
         <TabsContent
           value="guide"
-          className="max-h-[70svh] overflow-y-auto pe-2"
+          className="custom-scrollbar max-h-[70svh] overflow-y-auto pe-2"
         >
           {valid && preview ? (
             <QAPreviewView preview={preview} versionOverride={version} />

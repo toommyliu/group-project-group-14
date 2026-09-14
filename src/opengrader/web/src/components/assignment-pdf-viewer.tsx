@@ -189,7 +189,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
         )}
         <div
           ref={container}
-          className="min-h-0 flex-1 overflow-auto"
+          className="custom-scrollbar min-h-0 flex-1 overflow-auto"
           tabIndex={0}
           role="region"
           aria-label="Assignment PDF page"
