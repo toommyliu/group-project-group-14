@@ -1,12 +1,13 @@
 import { errorMessage } from '@/lib/error-message';
 import { useRef, useState } from 'react';
 import { Link, useRouter } from '@tanstack/react-router';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, CircleAlert } from 'lucide-react';
 import {
   assignmentsQuery,
   deleteAssignment,
   type Assignment,
 } from '@/api/queries';
+import { Alert, AlertDescription } from './ui/alert';
 import { Button } from './ui/button';
 import {
   AlertDialog,
@@ -108,27 +109,28 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete assignment?</AlertDialogTitle>
             <AlertDialogDescription className="w-full min-w-0 text-pretty">
-              <span className="inline-flex min-w-0 max-w-full align-bottom">
+              <span className="inline-flex max-w-full min-w-0 align-bottom">
                 <span className="shrink-0 whitespace-nowrap">
                   This permanently deletes "
                 </span>
 
-                <span
-                  className="min-w-0 truncate"
-                  title={assignment.title}
-                >
+                <span className="min-w-0 truncate" title={assignment.title}>
                   {assignment.title}
                 </span>
 
                 <span className="shrink-0">"</span>
-              </span>{" "}
+              </span>{' '}
               and its QA file. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
+            <Alert
+              variant="destructive"
+              className="items-center [&>svg]:row-span-1"
+            >
+              <CircleAlert aria-hidden="true" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           <AlertDialogFooter>
             <AlertDialogCancel ref={cancelRef} disabled={busy}>
@@ -145,11 +147,6 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {!confirmOpen && error && (
-        <p className="mt-2" role="alert">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
