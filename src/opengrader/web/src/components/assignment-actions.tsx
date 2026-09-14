@@ -63,7 +63,7 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
   }
 
   return (
-    <div className="mb-6 space-y-2">
+    <div className="mb-6">
       <DropdownMenu>
         <DropdownMenuTrigger
           ref={triggerRef}
@@ -145,7 +145,11 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {!confirmOpen && error && <p role="alert">{error}</p>}
+      {!confirmOpen && error && (
+        <p className="mt-2" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
