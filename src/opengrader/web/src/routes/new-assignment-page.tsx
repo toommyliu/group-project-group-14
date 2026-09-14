@@ -254,7 +254,8 @@ export function AssignmentEditor({
                 </div>
                 <span
                   role="status"
-                  className="block truncate text-sm text-muted-foreground empty:hidden"
+                  className="block wrap-break-word text-sm text-muted-foreground empty:hidden"
+                  title={uploadedFileName || undefined}
                 >
                   {reading
                     ? 'Reading file…'

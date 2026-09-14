@@ -107,9 +107,22 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
         <AlertDialogContent initialFocus={cancelRef} finalFocus={triggerRef}>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete assignment?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently deletes "{assignment.title}" and its QA file.
-              This cannot be undone.
+            <AlertDialogDescription className="w-full min-w-0 text-pretty">
+              <span className="inline-flex min-w-0 max-w-full align-bottom">
+                <span className="shrink-0 whitespace-nowrap">
+                  This permanently deletes "
+                </span>
+
+                <span
+                  className="min-w-0 truncate"
+                  title={assignment.title}
+                >
+                  {assignment.title}
+                </span>
+
+                <span className="shrink-0">"</span>
+              </span>{" "}
+              and its QA file. This cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (

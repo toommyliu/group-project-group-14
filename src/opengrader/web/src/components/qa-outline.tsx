@@ -33,7 +33,7 @@ function QuestionLinks({
             }}
           >
             <span className="shrink-0 font-medium">{question.id}</span>
-            <span className="truncate font-normal">
+            <span className="min-w-0 flex-1 whitespace-normal wrap-break-word font-normal">
               {question.prompt.replace(/\s+/g, ' ')}
             </span>
           </Button>

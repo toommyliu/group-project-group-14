@@ -13,7 +13,6 @@ const queryClient = new QueryClient({
       staleTime: 60_000,
       retry: 1,
       refetchOnWindowFocus: false,
-      // A localhost server is usable even when the browser reports no internet.
       networkMode: 'always',
     },
   },
@@ -23,10 +22,10 @@ const router = createAppRouter(queryClient);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </ThemeProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </ThemeProvider>
   </StrictMode>
 );

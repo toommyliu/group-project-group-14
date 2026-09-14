@@ -56,7 +56,9 @@ function QuestionContent({ question }: { question: Question | Subquestion }) {
           {question.choices.map((choice) => (
             <li key={choice.label} className="flex flex-wrap gap-2">
               <span>{choice.label}.</span>
-              <GradingText>{choice.text}</GradingText>
+                <div className="min-w-0 flex-1">
+                  <GradingText>{choice.text}</GradingText>
+                </div>
               {correct.includes(choice.label) && (
                 <span className="font-medium">Correct answer</span>
               )}
@@ -120,14 +122,17 @@ export function QAPreviewView({
       : document.questions;
   const versionId = useId();
   return (
-    <div className="min-w-0 space-y-6 break-words">
+    <div className="min-w-0 space-y-6 wrap-break-word">
       {warnings.map((warning) => (
         <p key={warning} className="border-s-2 ps-3">
           {warning}
         </p>
       ))}
       <div className="space-y-3">
-        <h2 className="text-xl font-semibold">
+        <h2
+          className="truncate text-xl font-semibold"
+          title={document.title || 'Untitled assignment'}
+        >
           {document.title || 'Untitled assignment'}
         </h2>
         {document.instructions && (
