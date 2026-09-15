@@ -1,10 +1,14 @@
-import { overviewRoute } from '@/router';
+import type { overviewRoute } from '@/router';
 import { AssignmentActions } from '@/components/assignment-actions';
 import { AssignmentPreview } from '@/components/assignment-preview';
 import { PageHeading } from '@/components/page-heading';
 
-export default function AssignmentOverviewPage() {
-  const { assignment, qa, scans, submissions } = overviewRoute.useLoaderData();
+export default function AssignmentOverviewPage({
+  data,
+}: {
+  data: typeof overviewRoute.types.loaderData;
+}) {
+  const { assignment, qa, scans, submissions } = data;
   return (
     <>
       <PageHeading

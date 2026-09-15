@@ -1,6 +1,4 @@
 import { useState, type CSSProperties, type PropsWithChildren } from 'react';
-import { useRouterState } from '@tanstack/react-router';
-import { AssignmentLoading, AssignmentsLoading } from '@/components/loading';
 import { AppHeader } from '@/components/app-header';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { AppSidebar } from '@/components/app-sidebar';
@@ -34,35 +32,6 @@ export function App({ children }: PropsWithChildren) {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const sidebarWidth = dragWidth ?? savedSidebarWidth;
   const { assignment } = useAssignmentNavigation();
-  const initialPath = useRouterState({
-    select: (state) =>
-      state.matches.length === 0 ? state.location.pathname : null,
-  });
-  if (!assignment)
-    return (
-      <div className="min-h-svh text-sm leading-normal antialiased">
-        <a
-          href="#content"
-          className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[100] focus:bg-background focus:p-3 focus:outline-2"
-        >
-          Skip to content
-        </a>
-        <AppHeader />
-        <main
-          className="mx-auto min-h-[calc(100svh-4rem)] max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14"
-          id="content"
-          tabIndex={-1}
-        >
-          {children}
-          {initialPath !== null &&
-            (initialPath === '/' ? (
-              <AssignmentsLoading />
-            ) : (
-              <AssignmentLoading />
-            ))}
-        </main>
-      </div>
-    );
   return (
     <TooltipProvider>
       <SidebarProvider
@@ -73,7 +42,7 @@ export function App({ children }: PropsWithChildren) {
             '--sidebar-width': `${sidebarWidth}px`,
           } as CSSProperties
         }
-        className="text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none"
+        className={`${assignment ? '' : 'block'} text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none`}
       >
         <a
           href="#content"
@@ -81,28 +50,34 @@ export function App({ children }: PropsWithChildren) {
         >
           Skip to content
         </a>
-        <AppSidebar
-          width={sidebarWidth}
-          onWidthChange={setDragWidth}
-          onResizeEnd={(width) => {
-            saveSidebarWidth(width);
-            setDragWidth(null);
-          }}
-        />
-        <SidebarInset className="min-w-0">
+        {assignment ? (
+          <AppSidebar
+            width={sidebarWidth}
+            onWidthChange={setDragWidth}
+            onResizeEnd={(width) => {
+              saveSidebarWidth(width);
+              setDragWidth(null);
+            }}
+          />
+        ) : (
+          <AppHeader />
+        )}
+        <SidebarInset
+          className={
+            assignment ? 'min-w-0' : 'min-h-[calc(100svh-4rem)] min-w-0'
+          }
+        >
           <div
-            className="mx-auto w-full max-w-[90rem] px-4 pt-4 pb-16 focus:outline-none sm:px-8 md:pt-8"
+            className={
+              assignment
+                ? 'mx-auto w-full max-w-[90rem] px-4 pt-4 pb-16 focus:outline-none sm:px-8 md:pt-8'
+                : 'mx-auto w-full max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14'
+            }
             id="content"
             tabIndex={-1}
           >
-            <MobileSidebarTrigger />
+            {assignment && <MobileSidebarTrigger />}
             {children}
-            {initialPath !== null &&
-              (initialPath === '/' ? (
-                <AssignmentsLoading />
-              ) : (
-                <AssignmentLoading />
-              ))}
           </div>
         </SidebarInset>
       </SidebarProvider>

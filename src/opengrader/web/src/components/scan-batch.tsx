@@ -295,9 +295,11 @@ export function ScanBatchCard({
                 </p>
                 {group.submission_id !== null ? (
                   <Link
-                    to="/grade/$assignmentId"
-                    params={{ assignmentId }}
-                    search={{ submission: group.submission_id }}
+                    to="/submissions"
+                    search={{
+                      assignment: assignmentId,
+                      submission: group.submission_id,
+                    }}
                     className={buttonVariants({
                       variant: 'outline',
                       className: 'mt-3',

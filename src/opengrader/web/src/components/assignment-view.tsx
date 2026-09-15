@@ -6,13 +6,19 @@ import { AnswerView } from './answer-view';
 import { PageHeading } from './page-heading';
 import { Button } from './ui/button';
 
-export default function AssignmentView() {
+export default function AssignmentView({
+  data,
+}: {
+  data: typeof assignmentRoute.types.loaderData;
+}) {
   const { assignment, submissions, submission, questions, question, answer } =
-    assignmentRoute.useLoaderData();
+    data;
   const navigate = assignmentRoute.useNavigate();
   const pendingSelection = useRouterState({
     select: (state) =>
       state.isLoading &&
+      state.location.pathname === '/submissions' &&
+      state.location.search.assignment === assignment.id &&
       state.location.pathname === state.resolvedLocation?.pathname
         ? validateGradingSearch(state.location.search)
         : undefined,
@@ -30,7 +36,11 @@ export default function AssignmentView() {
 
   function selectSubmission(id: number) {
     void navigate({
-      search: { submission: id, question: question?.id },
+      search: {
+        assignment: assignment.id,
+        submission: id,
+        question: question?.id,
+      },
       resetScroll: false,
     });
   }
@@ -95,6 +105,7 @@ export default function AssignmentView() {
                   onChange={(event) =>
                     void navigate({
                       search: {
+                        assignment: assignment.id,
                         submission: submission.id,
                         question: event.target.value,
                       },

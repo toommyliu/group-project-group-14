@@ -5,11 +5,11 @@ import { assignmentsQuery } from '@/api/queries';
 export function useAssignmentNavigation() {
   const location = useRouterState({
     select: (state) => {
-      const match = state.matches.find((item) => 'assignmentId' in item.params);
+      const match = state.matches.find((item) => 'assignment' in item.search);
       return {
         assignmentId:
-          match && 'assignmentId' in match.params
-            ? match.params.assignmentId
+          match && 'assignment' in match.search
+            ? match.search.assignment
             : undefined,
         pathname: state.location.pathname,
       };

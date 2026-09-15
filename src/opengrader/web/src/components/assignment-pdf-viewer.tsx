@@ -30,7 +30,8 @@ const zoomOptions = [
 
 export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
   const [document, setDocument] = useState<PDFDocumentProxy>();
-  const [pageNumber, setPageNumber] = useState(1);
+  const [selectedPage, setPageNumber] = useState(1);
+  const pageNumber = Math.min(selectedPage, document?.numPages ?? selectedPage);
   const [zoom, setZoom] = useState(0);
   const [width, setWidth] = useState(0);
   const [error, setError] = useState('');
@@ -73,7 +74,13 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
   }, []);
 
   useEffect(() => {
-    if (!document || !canvas.current || width <= 0) return;
+    if (
+      !document ||
+      document.loadingTask.destroyed ||
+      !canvas.current ||
+      width <= 0
+    )
+      return;
     let active = true;
     let task: RenderTask | undefined;
     const element = canvas.current;
@@ -117,6 +124,9 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
     return () => {
       active = false;
       task?.cancel();
+      // Release the canvas backing store when Activity hides the viewer.
+      element.width = 0;
+      element.height = 0;
     };
   }, [document, pageNumber, zoom, width]);
 
@@ -136,7 +146,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
               title="Previous page"
               className="size-8 min-h-8 p-0"
               disabled={!document || pageNumber === 1}
-              onClick={() => setPageNumber((page) => page - 1)}
+              onClick={() => setPageNumber(pageNumber - 1)}
             >
               <ChevronLeft aria-hidden="true" />
             </Button>
@@ -152,7 +162,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
               title="Next page"
               className="size-8 min-h-8 p-0"
               disabled={!document || pageNumber === document.numPages}
-              onClick={() => setPageNumber((page) => page + 1)}
+              onClick={() => setPageNumber(pageNumber + 1)}
             >
               <ChevronRight aria-hidden="true" />
             </Button>
@@ -203,12 +213,10 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
           />
         </div>
       </div>
-      {text && (
-        <details>
-          <summary className="min-h-11 cursor-pointer py-3">Page text</summary>
-          <p className="break-words whitespace-pre-wrap">{text}</p>
-        </details>
-      )}
+      <details hidden={!text}>
+        <summary className="min-h-11 cursor-pointer py-3">Page text</summary>
+        <p className="break-words whitespace-pre-wrap">{text}</p>
+      </details>
     </div>
   );
 }
