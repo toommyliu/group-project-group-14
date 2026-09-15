@@ -195,10 +195,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assignments/{assignment_id}/scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Scans */
+        get: operations["list_scans_assignments__assignment_id__scans_get"];
+        put?: never;
+        /** Upload Scan */
+        post: operations["upload_scan_assignments__assignment_id__scans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Analyze Scan */
+        post: operations["analyze_scan_assignments__assignment_id__scans__batch_id__analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Review Scan */
+        put: operations["review_scan_assignments__assignment_id__scans__batch_id__review_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Process Scan */
+        post: operations["process_scan_assignments__assignment_id__scans__batch_id__process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scan Pdf */
+        get: operations["scan_pdf_assignments__assignment_id__scans__batch_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove Scan */
+        post: operations["remove_scan_assignments__assignment_id__scans__batch_id__remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Scan */
+        delete: operations["delete_scan_assignments__assignment_id__scans__batch_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Scan */
+        post: operations["restore_scan_assignments__assignment_id__scans__batch_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/scans/{batch_id}/pages/{page_number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scan Page */
+        get: operations["scan_page_assignments__assignment_id__scans__batch_id__pages__page_number__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnalyzeScan */
+        AnalyzeScan: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Mode
+             * @default automatic
+             * @enum {string}
+             */
+            mode: "automatic" | "fixed" | "individual";
+            /** Pages Per Submission */
+            pages_per_submission?: number | null;
+        };
         /** Answer */
         Answer: {
             /** Submission Id */
@@ -251,6 +418,49 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** PageSelection */
+        "PageSelection-Input": {
+            /** Number */
+            number: number;
+            /**
+             * Rotation
+             * @default 0
+             * @enum {integer}
+             */
+            rotation: 0 | 90 | 180 | 270;
+        };
+        /** PageSelection */
+        "PageSelection-Output": {
+            /** Number */
+            number: number;
+            /**
+             * Rotation
+             * @default 0
+             * @enum {integer}
+             */
+            rotation: 0 | 90 | 180 | 270;
+        };
+        /** ProcessScan */
+        ProcessScan: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Acknowledge Findings
+             * @default false
+             */
+            acknowledge_findings: boolean;
+            /**
+             * Auto Grade
+             * @default false
+             */
+            auto_grade: boolean;
+            /** Assignment Version */
+            assignment_version?: string | null;
+            /** Group Versions */
+            group_versions?: {
+                [key: string]: string | null;
+            };
         };
         /** QAChoice */
         QAChoice: {
@@ -384,6 +594,15 @@ export interface components {
             /** Rubric */
             rubric: components["schemas"]["RubricOption"][];
         };
+        /** ReviewScan */
+        ReviewScan: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Groups */
+            groups: components["schemas"]["PageSelection-Input"][][];
+            /** Excluded Pages */
+            excluded_pages?: number[];
+        };
         /** RubricOption */
         RubricOption: {
             /** Label */
@@ -402,6 +621,106 @@ export interface components {
             selection_mode: "exclusive" | "checklist";
             /** Default Comment */
             default_comment: string | null;
+        };
+        /** ScanBatch */
+        ScanBatch: {
+            /** Id */
+            id: string;
+            /** Filename */
+            filename: string;
+            /** Sha256 */
+            sha256: string;
+            /** Page Count */
+            page_count: number;
+            /** Created At */
+            created_at: string;
+            /**
+             * Status
+             * @default uploaded
+             * @enum {string}
+             */
+            status: "uploaded" | "checking" | "review" | "queued" | "processing" | "ready" | "failed" | "removed";
+            /**
+             * Revision
+             * @default 1
+             */
+            revision: number;
+            /**
+             * Mode
+             * @default automatic
+             * @enum {string}
+             */
+            mode: "automatic" | "fixed" | "individual";
+            /** Pages Per Submission */
+            pages_per_submission: number | null;
+            /** Groups */
+            groups: components["schemas"]["ScanGroup"][];
+            /** Excluded Pages */
+            excluded_pages: number[];
+            /** Findings */
+            findings: components["schemas"]["ScanFinding"][];
+            /**
+             * Message
+             * @default Choose how to separate this scan.
+             */
+            message: string;
+            /**
+             * Started
+             * @default false
+             */
+            started: boolean;
+            /**
+             * Auto Grade
+             * @default false
+             */
+            auto_grade: boolean;
+            /** Assignment Version */
+            assignment_version: string | null;
+        };
+        /** ScanFinding */
+        ScanFinding: {
+            /** Page */
+            page: number | null;
+            /** Severity */
+            severity: string;
+            /** Detail */
+            detail: string;
+        };
+        /** ScanGroup */
+        ScanGroup: {
+            /** Key */
+            key: string;
+            /** Pages */
+            pages: components["schemas"]["PageSelection-Output"][];
+            /** Submission Id */
+            submission_id: number | null;
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /** Assignment Version */
+            assignment_version: string | null;
+        };
+        /** ScanList */
+        ScanList: {
+            /** Batches */
+            batches: components["schemas"]["ScanBatch"][];
+            /**
+             * Max File Bytes
+             * @default 262144000
+             */
+            max_file_bytes: number;
+            /**
+             * Max Pages
+             * @default 3000
+             */
+            max_pages: number;
+        };
+        /** ScanRevision */
+        ScanRevision: {
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** Submission */
         Submission: {
@@ -815,6 +1134,353 @@ export interface operations {
                 assignment_id: string;
                 submission_id: number;
                 question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scans_assignments__assignment_id__scans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_scan_assignments__assignment_id__scans_post: {
+        parameters: {
+            query: {
+                filename: string;
+            };
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanBatch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_scan_assignments__assignment_id__scans__batch_id__analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeScan"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanBatch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_scan_assignments__assignment_id__scans__batch_id__review_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewScan"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanBatch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    process_scan_assignments__assignment_id__scans__batch_id__process_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProcessScan"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanBatch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_pdf_assignments__assignment_id__scans__batch_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_scan_assignments__assignment_id__scans__batch_id__remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanRevision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanBatch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_scan_assignments__assignment_id__scans__batch_id__delete: {
+        parameters: {
+            query: {
+                expected_revision: number;
+            };
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_scan_assignments__assignment_id__scans__batch_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanRevision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScanBatch"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_page_assignments__assignment_id__scans__batch_id__pages__page_number__get: {
+        parameters: {
+            query?: {
+                large?: boolean;
+            };
+            header?: never;
+            path: {
+                assignment_id: string;
+                batch_id: string;
+                page_number: number;
             };
             cookie?: never;
         };
