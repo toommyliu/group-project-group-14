@@ -1,5 +1,5 @@
 import { LoadingIndicator } from './loading';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   GlobalWorkerOptions,
   getDocument,
@@ -42,6 +42,20 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
   const [text, setText] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
   const container = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(
+    new Map<number, { left: number; top: number }>()
+  );
+
+  function goToPage(nextPage: number) {
+    const element = container.current;
+    if (element && renderedPage !== undefined) {
+      scrollPositions.current.set(renderedPage, {
+        left: element.scrollLeft,
+        top: element.scrollTop,
+      });
+    }
+    setPageNumber(nextPage);
+  }
 
   useEffect(() => {
     let active = true;
@@ -100,6 +114,15 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
     },
     []
   );
+
+  useLayoutEffect(() => {
+    if (renderedPage === undefined) return;
+    const element = container.current;
+    if (!element) return;
+    const position = scrollPositions.current.get(renderedPage);
+    element.scrollLeft = position?.left ?? 0;
+    element.scrollTop = position?.top ?? 0;
+  }, [renderedPage]);
 
   useEffect(() => {
     if (
@@ -179,7 +202,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
               title="Previous page"
               className="size-8 min-h-8 p-0"
               disabled={!document || pageNumber === 1}
-              onClick={() => setPageNumber(pageNumber - 1)}
+              onClick={() => goToPage(pageNumber - 1)}
             >
               <ChevronLeft aria-hidden="true" />
             </Button>
@@ -195,7 +218,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
               title="Next page"
               className="size-8 min-h-8 p-0"
               disabled={!document || pageNumber === document.numPages}
-              onClick={() => setPageNumber(pageNumber + 1)}
+              onClick={() => goToPage(pageNumber + 1)}
             >
               <ChevronRight aria-hidden="true" />
             </Button>
