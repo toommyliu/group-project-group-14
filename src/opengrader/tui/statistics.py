@@ -79,6 +79,8 @@ def selected_option_indices_for_seed(seed: QuestionSeed) -> set[int]:
 
 
 def seed_is_graded(seed: QuestionSeed) -> bool:
+    if not seed.selected_rubric_labels and seed.points_awarded is not None:
+        return True
     return bool(selected_option_indices_for_seed(seed))
 
 

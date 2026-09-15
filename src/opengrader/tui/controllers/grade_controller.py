@@ -1346,6 +1346,8 @@ class GradeController:
 
     @staticmethod
     def _points_for_selection(question: QuestionGrade) -> float | None:
+        if not question.selected_option_indices:
+            return question.points_awarded
         return score_rubric_selection(
             question.points or 0.0,
             question.rubric_options,
@@ -2201,7 +2203,11 @@ class GradeController:
                 prompt=seed.prompt,
                 expected_answers=list(seed.expected_answers),
                 response_text=seed.response_text,
-                points_awarded=seed.points_awarded,
+                points_awarded=(
+                    seed.points_awarded
+                    if not seed.selected_rubric_labels or GradeController._selected_option_indices(seed)
+                    else None
+                ),
                 selected_option_indices=GradeController._selected_option_indices(seed),
                 comment=seed.analysis,
                 question_type=seed.question_type,

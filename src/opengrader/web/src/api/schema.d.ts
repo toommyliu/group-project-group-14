@@ -187,7 +187,8 @@ export interface paths {
         };
         /** Get Answer */
         get: operations["get_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get"];
-        put?: never;
+        /** Save Answer */
+        put: operations["save_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -472,6 +473,8 @@ export interface components {
         };
         /** Answer */
         Answer: {
+            /** Revision */
+            revision: string;
             /** Submission Id */
             submission_id: number;
             /** Version */
@@ -539,6 +542,29 @@ export interface components {
             versions?: components["schemas"]["VersionEdit"][] | null;
             /** Question Orders */
             question_orders?: components["schemas"]["QuestionOrder"][] | null;
+        };
+        /** GradeEdit */
+        GradeEdit: {
+            /** Expected Revision */
+            expected_revision: string;
+            /** Rubric Labels */
+            rubric_labels: string[];
+            /** Analysis */
+            analysis: string;
+            /**
+             * Score Mode
+             * @default rubric
+             * @enum {string}
+             */
+            score_mode: "rubric" | "manual";
+            /** Points Awarded */
+            points_awarded?: number | null;
+        };
+        /** GradeSaveResult */
+        GradeSaveResult: {
+            answer: components["schemas"]["Answer"];
+            /** Warning */
+            warning?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -912,6 +938,10 @@ export interface components {
             id: number;
             /** Version */
             version: string | null;
+            /** Question Scores */
+            question_scores: {
+                [key: string]: number | null;
+            };
         };
         /** TerminalCatalog */
         TerminalCatalog: {
@@ -1410,6 +1440,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Answer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                submission_id: number;
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GradeEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GradeSaveResult"];
                 };
             };
             /** @description Validation Error */

@@ -62,7 +62,7 @@ class FileGradingSession:
         rubric_labels: tuple[str, ...],
         analysis: str | None = None,
     ) -> None:
-        """Save a grade, then refresh its PDF and append the grade history."""
+        """Persist grade and feedback, record their history, then refresh the PDF."""
         old_question = self.questions_by_id.get(question_id)
         self._update(
             StudentSubmissionGradeUpdate(
@@ -73,10 +73,6 @@ class FileGradingSession:
                 analysis=analysis,
             )
         )
-        try:
-            self.sync_pdf_annotations(question_id)
-        except FileNotFoundError:
-            pass
         self._journal_event(
             kind="grade",
             question_id=question_id,
@@ -87,6 +83,18 @@ class FileGradingSession:
             },
             new={"points": points_awarded, "rubric": list(rubric_labels)},
         )
+
+        previous_analysis = "" if old_question is None else old_question.analysis
+        if analysis is not None and analysis != previous_analysis:
+            self._journal_event(
+                kind="comment", question_id=question_id, summary=_excerpt_comment(analysis),
+                old={"analysis": previous_analysis}, new={"analysis": analysis},
+            )
+        # History must survive a failure while refreshing the derived PDF.
+        try:
+            self.sync_pdf_annotations(question_id)
+        except FileNotFoundError:
+            pass
 
     def stage_comment(self, *, question_id: str, analysis: str) -> None:
         """Persist draft text without rewriting the PDF or adding a history entry."""

@@ -6,6 +6,7 @@ from opengrader.tui.statistics import (
     question_statistics_chart_image,
     render_question_statistics,
     score_from_seed,
+    seed_is_graded,
 )
 
 
@@ -68,6 +69,9 @@ def test_compute_question_statistics_for_saved_scores() -> None:
 
 
 def test_score_from_seed_prefers_numeric_points_awarded() -> None:
+    assert seed_is_graded(_seed(points_awarded=8.0))
+    assert seed_is_graded(_seed(points_awarded=0.0))
+    assert not seed_is_graded(_seed())
     assert score_from_seed(
         _seed(points_awarded=8.0, selected_rubric_labels=("Incorrect",))
     ) == 8.0

@@ -52,6 +52,8 @@ class QuestionGrade:
         selected = self.selected_options()
         selected_base = [o.points_delta for o in selected if o.kind != "bonus"]
         selected_bonus = [o.points_delta for o in selected if o.kind == "bonus"]
+        if not selected and self.points_awarded is not None:
+            return self.points_awarded - self.points
         if not selected:
             return ungraded_score_adjustment(self.points, base_values)
         if not selected_base:
@@ -67,7 +69,7 @@ class QuestionGrade:
 
     @property
     def status(self) -> str:
-        if not self.selected_option_indices:
+        if not self.selected_option_indices and self.points_awarded is None:
             return "ungraded"
         return "graded"
 
@@ -106,7 +108,7 @@ class StudentGradingRun:
 
     @property
     def graded_count(self) -> int:
-        return sum(1 for question in self.questions if question.selected_option_indices)
+        return sum(1 for question in self.questions if question.status == "graded")
 
     @property
     def total_questions(self) -> int:
@@ -142,6 +144,8 @@ class StudentGradingRun:
             return
         if option_index < 0 or option_index >= len(question.rubric_options):
             return
+        # Choosing a rubric replaces any score entered without a rubric on the web.
+        question.points_awarded = None
         options = question.rubric_options
         option = options[option_index]
 
