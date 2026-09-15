@@ -113,7 +113,7 @@ export function AppSidebar({
                       return (
                         <SidebarMenuItem key={to}>
                           <SidebarMenuButton
-                            className="min-h-11 px-4 text-sm transition-none group-data-[collapsible=icon]:h-11! group-data-[collapsible=icon]:w-12! group-data-[collapsible=icon]:px-4!"
+                            className="min-h-11 px-4 text-sm transition-none group-data-[collapsible=icon]:h-11! group-data-[collapsible=icon]:w-12! group-data-[collapsible=icon]:px-4! focus-visible:ring-2 focus-visible:ring-inset"
                             tooltip={title}
                             aria-label={title}
                             isActive={active}
