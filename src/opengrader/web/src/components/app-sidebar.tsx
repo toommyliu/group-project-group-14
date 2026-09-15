@@ -57,7 +57,7 @@ export function AppSidebar({
         collapsible="icon"
         aria-label="Assignment navigation"
       >
-        <SidebarHeader className="h-13.5 shrink-0 flex-row items-center gap-0 overflow-hidden px-2 pt-2.5 pb-0">
+        <SidebarHeader className="h-14 shrink-0 flex-row items-center gap-0 overflow-hidden border-b border-sidebar-border px-2">
           <SidebarTrigger
             className="h-11 w-12 shrink-0 active:translate-y-0!"
             aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
@@ -73,17 +73,17 @@ export function AppSidebar({
             Opengrader
           </Link>
         </SidebarHeader>
-        <SidebarContent className="overflow-x-hidden">
+        <SidebarContent className="overflow-x-hidden pt-2">
           {assignment && (
-            <nav aria-label={assignment.title} className="mt-4 w-full">
+            <nav aria-label={assignment.title} className="w-full">
               <SidebarGroup className="px-2 py-0">
-                <p
+                <div
                   title={assignment.title}
-                  className="mb-1 truncate px-4 py-2 text-xs font-medium text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden"
+                  className="flex h-6 shrink-0 items-center px-4 text-xs font-medium text-sidebar-foreground/70 select-none group-data-[collapsible=icon]:invisible"
                 >
-                  {assignment.title}
-                </p>
-                <SidebarGroupContent>
+                  <span className="truncate">{assignment.title}</span>
+                </div>
+                <SidebarGroupContent className="mt-1">
                   <SidebarMenu>
                     {destinations.map(({ to, prefix, title, icon: Icon }) => {
                       const active =

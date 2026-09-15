@@ -110,7 +110,7 @@ export default function ScansPage() {
   );
   return (
     <>
-      <PageHeading title="Manage scans" />
+      <PageHeading title="Manage scans" description={assignment.title} />
       <div
         className={`mb-8 rounded-lg border border-dashed p-6 ${dragging ? 'bg-muted' : ''}`}
         onDragOver={(event) => {

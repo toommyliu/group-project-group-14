@@ -8,7 +8,8 @@ export default function AssignmentOverviewPage() {
   return (
     <>
       <PageHeading
-        title={assignment.title}
+        title="Overview"
+        description={assignment.title}
         actions={
           <AssignmentActions
             assignment={assignment}

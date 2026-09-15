@@ -7,7 +7,7 @@ import { PageHeading } from './page-heading';
 import { Button } from './ui/button';
 
 export default function AssignmentView() {
-  const { submissions, submission, questions, question, answer } =
+  const { assignment, submissions, submission, questions, question, answer } =
     assignmentRoute.useLoaderData();
   const navigate = assignmentRoute.useNavigate();
   const pendingSelection = useRouterState({
@@ -37,7 +37,7 @@ export default function AssignmentView() {
 
   return (
     <>
-      <PageHeading title="Submissions" />
+      <PageHeading title="Submissions" description={assignment.title} />
       {submission ? (
         <>
           <div className="flex flex-wrap items-end gap-6 border-b pb-6">
