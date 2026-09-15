@@ -31,4 +31,3 @@ pnpm --dir src/opengrader/web generate:api
 pnpm --dir src/opengrader/web check:api
 pnpm --dir src/opengrader/web build
 ```
-
