@@ -20,6 +20,8 @@ import {
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
+const resizeDebounceMs = 120;
+
 const zoomOptions = [
   { value: 0, label: 'Fit width' },
   ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((value) => ({
@@ -36,6 +38,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
   const [width, setWidth] = useState(0);
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
+  const [renderedPage, setRenderedPage] = useState<number>();
   const [text, setText] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -66,12 +69,37 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
   useEffect(() => {
     const element = container.current;
     if (!element) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setWidth(entry.contentRect.width)
-    );
+    let measured = false;
+    let timer: number | undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      const nextWidth = entry.contentRect.width;
+      if (!measured) {
+        measured = true;
+        setWidth(nextWidth);
+        return;
+      }
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        setWidth((current) => (current === nextWidth ? current : nextWidth));
+      }, resizeDebounceMs);
+    });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, []);
+
+  useEffect(
+    () => () => {
+      const element = canvas.current;
+      if (!element) return;
+      element.width = 0;
+      element.height = 0;
+    },
+    []
+  );
 
   useEffect(() => {
     if (
@@ -84,6 +112,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
     let active = true;
     let task: RenderTask | undefined;
     const element = canvas.current;
+    const nextCanvas = window.document.createElement('canvas');
     setRendering(true);
     setError('');
     setText('');
@@ -94,16 +123,23 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
       const scale = zoom || Math.max(0.1, (width - 24) / natural.width);
       const viewport = page.getViewport({ scale });
       const density = Math.min(window.devicePixelRatio || 1, 2);
-      element.width = Math.ceil(viewport.width * density);
-      element.height = Math.ceil(viewport.height * density);
-      element.style.width = `${viewport.width}px`;
-      element.style.height = `${viewport.height}px`;
+      nextCanvas.width = Math.ceil(viewport.width * density);
+      nextCanvas.height = Math.ceil(viewport.height * density);
       task = page.render({
-        canvas: element,
+        canvas: nextCanvas,
         viewport,
         transform: [density, 0, 0, density, 0, 0],
       });
       await task.promise;
+      if (!active) return;
+      element.width = nextCanvas.width;
+      element.height = nextCanvas.height;
+      element.style.width = `${viewport.width}px`;
+      element.style.height = `${viewport.height}px`;
+      const context = element.getContext('2d');
+      if (!context) throw new Error('Could not create PDF canvas context');
+      context.drawImage(nextCanvas, 0, 0);
+      setRenderedPage(pageNumber);
       const content = await page.getTextContent();
       if (active) {
         setText(
@@ -124,9 +160,6 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
     return () => {
       active = false;
       task?.cancel();
-      // Release the canvas backing store when Activity hides the viewer.
-      element.width = 0;
-      element.height = 0;
     };
   }, [document, pageNumber, zoom, width]);
 
@@ -209,7 +242,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
             ref={canvas}
             role="img"
             aria-label={`Assignment PDF page ${pageNumber}`}
-            className={`mx-auto my-3 bg-white outline outline-black/10 ${rendering || error ? 'invisible' : ''}`}
+            className={`mx-auto my-3 bg-white outline outline-black/10 ${(renderedPage !== pageNumber && rendering) || error ? 'invisible' : ''}`}
           />
         </div>
       </div>
