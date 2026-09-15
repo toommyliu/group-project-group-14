@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -13,9 +14,40 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_FILE = ROOT / "THIRD_PARTY_LICENSES"
+WEB_DIR = ROOT / "src" / "opengrader" / "web"
+WEB_NODE_MODULES = WEB_DIR / "node_modules"
 CMU_FONT_FILES = (
     ROOT / "assets" / "fonts" / "cmu" / "cmunrm.ttf",
     ROOT / "assets" / "fonts" / "cmu" / "cmunbx.ttf",
+)
+T3_CODE_REVISION = "2c19283afed1e3b69a9af33360980527aeb37494"
+T3_CODE_FILES = (
+    ROOT / "src" / "opengrader" / "web" / "src" / "terminal" / "ghostty" / "core.ts",
+    ROOT / "src" / "opengrader" / "web" / "src" / "terminal" / "ghostty" / "renderer.ts",
+    ROOT / "src" / "opengrader" / "web" / "src" / "terminal" / "ghostty" / "surface.ts",
+)
+GHOSTTY_REVISION_FILE = (
+    ROOT
+    / "src"
+    / "opengrader"
+    / "web"
+    / "src"
+    / "terminal"
+    / "ghostty"
+    / "vendor"
+    / "VERSION"
+)
+GHOSTTY_WASM_FILE = GHOSTTY_REVISION_FILE.with_name("ghostty-vt.wasm")
+NERD_FONT_FILE = (
+    ROOT
+    / "src"
+    / "opengrader"
+    / "web"
+    / "src"
+    / "terminal"
+    / "ghostty"
+    / "fonts"
+    / "SymbolsNerdFontMono-Regular.woff2"
 )
 NOTICE_SEPARATOR = "------"
 RUNTIME_PRUNES = ("pytest",)
@@ -132,12 +164,114 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 """
+T3_CODE_NOTICE = f"""
+** T3 Code browser terminal adapter; revision {T3_CODE_REVISION} (MIT) -- https://github.com/pingdotgg/t3code/tree/{T3_CODE_REVISION}/apps/web/src/terminal/ghostty
+
+MIT License
+
+Copyright (c) 2026 T3 Tools Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+GHOSTTY_NOTICE_TEMPLATE = """
+** libghostty-vt; revision {revision} (MIT) -- https://github.com/ghostty-org/ghostty/tree/{revision}
+
+MIT License
+
+Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+NERD_FONT_NOTICE = """
+** Symbols Nerd Font Mono (MIT) -- https://github.com/ryanoasis/nerd-fonts
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Ryan L McIntyre
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+REMARK_MATH_LICENSE = """
+(The MIT License)
+
+Copyright (c) 2017 Junyoung Choi <fluke8259@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+NPM_LICENSE_OVERRIDES = {
+    ("rehype-katex", "7.0.1"): REMARK_MATH_LICENSE,
+    ("remark-math", "6.0.0"): REMARK_MATH_LICENSE,
+}
 
 
-def _run(command: list[str]) -> str:
+def _run(command: list[str], *, cwd: Path = ROOT) -> str:
     result = subprocess.run(
         command,
-        cwd=ROOT,
+        cwd=cwd,
         check=True,
         text=True,
         stdout=subprocess.PIPE,
@@ -147,7 +281,8 @@ def _run(command: list[str]) -> str:
 
 
 def _normalize_text(value: str) -> str:
-    return value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return "\n".join(line.rstrip() for line in normalized.splitlines())
 
 
 def _runtime_packages() -> list[str]:
@@ -194,6 +329,98 @@ def _python_license_records(packages: list[str]) -> list[dict[str, Any]]:
     return sorted(records, key=lambda record: record["Name"].casefold())
 
 
+def _package_url(metadata: dict[str, Any]) -> str:
+    homepage = metadata.get("homepage")
+    if isinstance(homepage, str):
+        return homepage
+
+    repository = metadata.get("repository")
+    if isinstance(repository, str):
+        return repository.removeprefix("git+")
+    if isinstance(repository, dict):
+        url = repository.get("url")
+        if isinstance(url, str):
+            return url.removeprefix("git+")
+
+    return f"https://www.npmjs.com/package/{metadata['name']}"
+
+
+def _npm_license_text(
+    package_dir: Path, package_name: str, package_version: str
+) -> str:
+    notice_files = sorted(
+        (
+            path
+            for path in package_dir.iterdir()
+            if path.is_file()
+            and path.name.casefold().startswith(
+                ("license", "licence", "copying", "notice")
+            )
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+    if notice_files:
+        texts = [
+            "\n".join(
+                line.rstrip()
+                for line in _normalize_text(
+                    path.read_text(encoding="utf-8", errors="replace")
+                ).splitlines()
+            )
+            for path in notice_files
+        ]
+        return "\n\n".join(text for text in texts if text)
+
+    override = NPM_LICENSE_OVERRIDES.get((package_name, package_version))
+    if override:
+        return _normalize_text(override)
+
+    raise RuntimeError(
+        f"npm package {package_name!r} has no license or notice file; "
+        "add a reviewed NPM_LICENSE_OVERRIDES entry"
+    )
+
+
+def _npm_license_records() -> list[dict[str, Any]]:
+    if not WEB_NODE_MODULES.exists():
+        raise RuntimeError(
+            "web dependencies are not installed; run "
+            "`pnpm --dir src/opengrader/web install --frozen-lockfile`"
+        )
+    if shutil.which("pnpm") is None:
+        raise RuntimeError("pnpm is required to collect web dependency licenses")
+
+    output = _run(
+        ["pnpm", "licenses", "list", "--prod", "--no-optional", "--json"],
+        cwd=WEB_DIR,
+    )
+    records: dict[tuple[str, str], dict[str, Any]] = {}
+    for license_group in json.loads(output).values():
+        for package in license_group:
+            for raw_path in package["paths"]:
+                package_dir = Path(raw_path)
+                metadata = json.loads(
+                    (package_dir / "package.json").read_text(encoding="utf-8")
+                )
+                name = metadata["name"]
+                version = metadata["version"]
+                key = (name, version)
+                if key in records:
+                    continue
+                records[key] = {
+                    "Name": name,
+                    "Version": version,
+                    "License": metadata.get("license", package["license"]),
+                    "URL": _package_url(metadata),
+                    "LicenseText": _npm_license_text(package_dir, name, version),
+                }
+
+    return sorted(
+        records.values(),
+        key=lambda record: (record["Name"].casefold(), record["Version"]),
+    )
+
+
 def _format_package_notice(record: dict[str, Any]) -> str:
     name = record.get("Name", "UNKNOWN")
     version = record.get("Version", "UNKNOWN")
@@ -210,10 +437,25 @@ def _format_package_notice(record: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_npm_package_notice(record: dict[str, Any]) -> str:
+    notice = _format_package_notice(record)
+    return notice.replace("** ", "** npm: ", 1)
+
+
 def _bundled_asset_notices() -> list[str]:
+    notices = []
     if any(font.exists() for font in CMU_FONT_FILES):
-        return [_normalize_text(CMU_NOTICE)]
-    return []
+        notices.append(_normalize_text(CMU_NOTICE))
+    if any(source.exists() for source in T3_CODE_FILES):
+        notices.append(_normalize_text(T3_CODE_NOTICE))
+    if GHOSTTY_WASM_FILE.exists() and GHOSTTY_REVISION_FILE.exists():
+        revision = GHOSTTY_REVISION_FILE.read_text(encoding="utf-8").strip()
+        notices.append(
+            _normalize_text(GHOSTTY_NOTICE_TEMPLATE.format(revision=revision))
+        )
+    if NERD_FONT_FILE.exists():
+        notices.append(_normalize_text(NERD_FONT_NOTICE))
+    return notices
 
 
 def generate() -> str:
@@ -221,9 +463,12 @@ def generate() -> str:
         _format_package_notice(record)
         for record in _python_license_records(_runtime_packages())
     ]
+    npm_package_notices = [
+        _format_npm_package_notice(record) for record in _npm_license_records()
+    ]
     bundled_asset_notices = _bundled_asset_notices()
 
-    notices = [*package_notices, *bundled_asset_notices]
+    notices = [*package_notices, *npm_package_notices, *bundled_asset_notices]
     content = f"{HEADER}\n\n"
     content += f"\n\n{NOTICE_SEPARATOR}\n\n".join(notices)
     content += f"\n\n{NOTICE_SEPARATOR}\n"

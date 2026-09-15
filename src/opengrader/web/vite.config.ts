@@ -1,4 +1,5 @@
 import path from 'path';
+import { readFileSync } from 'node:fs';
 import tailwindcss from '@tailwindcss/vite';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import babel from '@rolldown/plugin-babel';
@@ -17,6 +18,19 @@ export default defineConfig({
     },
   },
   plugins: [
+    {
+      name: 'third-party-notices',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'assets/THIRD_PARTY_LICENSES.txt',
+          source: readFileSync(
+            path.resolve(import.meta.dirname, '../../../THIRD_PARTY_LICENSES'),
+            'utf8'
+          ),
+        });
+      },
+    },
     react(),
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
