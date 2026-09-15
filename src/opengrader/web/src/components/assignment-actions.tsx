@@ -42,7 +42,7 @@ export function AssignmentActions({
     setBusy(true);
     setError('');
     try {
-      await deleteAssignment(assignment.id);
+      await deleteAssignment(assignment.id, true);
     } catch (cause) {
       setError(errorMessage(cause, 'Could not delete assignment. Try again.'));
       pending.current = false;
@@ -125,8 +125,9 @@ export function AssignmentActions({
                 <span className="shrink-0">"</span>
               </span>{' '}
               and all of its scans, submissions, grades, and QA files. Any
-              running processing will stop after its current step. This cannot
-              be undone.
+              running terminal sessions will stop immediately. Any running
+              processing will stop after its current step. This cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (

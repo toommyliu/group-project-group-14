@@ -212,6 +212,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/terminals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Terminals */
+        get: operations["list_terminals_api_terminals_get"];
+        put?: never;
+        /** Create Terminal */
+        post: operations["create_terminal_api_terminals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/terminals/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reorder Terminals */
+        put: operations["reorder_terminals_api_terminals_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/terminals/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Terminal */
+        delete: operations["remove_terminal_api_terminals__session_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename Terminal */
+        patch: operations["rename_terminal_api_terminals__session_id__patch"];
+        trace?: never;
+    };
+    "/api/terminals/{session_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Terminal */
+        post: operations["start_terminal_api_terminals__session_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/terminals/{session_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Terminal */
+        post: operations["stop_terminal_api_terminals__session_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments/{assignment_id}/scans": {
         parameters: {
             query?: never;
@@ -430,6 +517,17 @@ export interface components {
             qa_markdown: string;
             /** Expected Qa Markdown */
             expected_qa_markdown: string;
+        };
+        /** CreateTerminal */
+        CreateTerminal: {
+            /** Assignment Id */
+            assignment_id: string;
+            /**
+             * Kind
+             * @default shell
+             * @constant
+             */
+            kind: "shell";
         };
         /** DocumentEdit */
         DocumentEdit: {
@@ -668,6 +766,18 @@ export interface components {
             /** Parent Source Line */
             parent_source_line?: number | null;
         };
+        /** RenameTerminal */
+        RenameTerminal: {
+            /** Title */
+            title: string;
+        };
+        /** ReorderTerminals */
+        ReorderTerminals: {
+            /** Assignment Id */
+            assignment_id: string;
+            /** Ids */
+            ids: string[];
+        };
         /** ReviewScan */
         ReviewScan: {
             /** Expected Revision */
@@ -802,6 +912,59 @@ export interface components {
             id: number;
             /** Version */
             version: string | null;
+        };
+        /** TerminalCatalog */
+        TerminalCatalog: {
+            /** Sessions */
+            sessions: components["schemas"]["TerminalRecord"][];
+            /** Max Sessions */
+            max_sessions: number;
+        };
+        /** TerminalRecord */
+        TerminalRecord: {
+            /** Id */
+            id: string;
+            /** Assignment Id */
+            assignment_id: string;
+            /**
+             * Kind
+             * @default shell
+             * @constant
+             */
+            kind: "shell";
+            /**
+             * Position
+             * @default 0
+             */
+            position: number;
+            /** Title */
+            title: string;
+            /** Cwd */
+            cwd: string;
+            /**
+             * Status
+             * @default stopped
+             * @enum {string}
+             */
+            status: "running" | "stopped";
+            /**
+             * Message
+             * @default Ready to start.
+             */
+            message: string;
+        };
+        /** TerminalSize */
+        TerminalSize: {
+            /**
+             * Cols
+             * @default 100
+             */
+            cols: number;
+            /**
+             * Rows
+             * @default 30
+             */
+            rows: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -1070,7 +1233,9 @@ export interface operations {
     };
     delete_assignment_assignments__assignment_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                stop_terminal_sessions?: boolean;
+            };
             header?: never;
             path: {
                 assignment_id: string;
@@ -1278,6 +1443,233 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_terminals_api_terminals_get: {
+        parameters: {
+            query: {
+                assignment_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalCatalog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_terminal_api_terminals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTerminal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_terminals_api_terminals_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderTerminals"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_terminal_api_terminals__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_terminal_api_terminals__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameTerminal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_terminal_api_terminals__session_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalSize"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_terminal_api_terminals__session_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
                 };
             };
             /** @description Validation Error */

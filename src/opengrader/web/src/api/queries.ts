@@ -225,9 +225,15 @@ export async function updateAssignment(
   );
 }
 
-export async function deleteAssignment(assignmentId: string) {
+export async function deleteAssignment(
+  assignmentId: string,
+  stopTerminalSessions: boolean
+) {
   const result = await client.DELETE('/assignments/{assignment_id}', {
-    params: { path: { assignment_id: assignmentId } },
+    params: {
+      path: { assignment_id: assignmentId },
+      query: { stop_terminal_sessions: stopTerminalSessions },
+    },
   });
   if (!result.response.ok) mutationData(result);
 }

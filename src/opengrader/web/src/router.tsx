@@ -151,6 +151,24 @@ export const overviewRoute = createRoute({
   errorComponent: RouteError,
 });
 
+export const terminalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/terminals',
+  validateSearch: validateAssignmentSearch,
+  loaderDeps: ({ search }) => search,
+  remountDeps: ({ search }) => search.assignment,
+  loader: async ({ context, deps }) => {
+    const assignments =
+      await context.queryClient.ensureQueryData(assignmentsQuery);
+    const assignment = assignments.find((item) => item.id === deps.assignment);
+    if (!assignment) throw notFound();
+    return { assignment };
+  },
+  component: lazyRouteComponent(() => import('./routes/terminals-page')),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+});
+
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree: rootRoute.addChildren([
@@ -160,6 +178,7 @@ export function createAppRouter(queryClient: QueryClient) {
       assignmentRoute,
       scansRoute,
       overviewRoute,
+      terminalsRoute,
     ]),
     context: { queryClient },
     defaultPreload: 'intent',
