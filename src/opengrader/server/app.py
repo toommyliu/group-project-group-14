@@ -2,7 +2,7 @@ import logging
 import shutil
 from contextlib import asynccontextmanager
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import RLock
@@ -29,6 +29,8 @@ from opengrader.server.assignment_qa import (
     AssignmentInput, QAPreview, VisualEditInput, VisualEditResult,
     edit_assignment_draft, preview_qa,
 )
+from opengrader.server.terminals.manager import TerminalManager
+from opengrader.server.terminals.routes import add_terminal_routes
 from opengrader.server.web import add_web_routes
 from opengrader.server.assignment_pdf import AssignmentPDFInput, PDF_RESPONSES, assignment_pdf_response
 from opengrader.server.scan_store import ScanStore
@@ -109,12 +111,13 @@ class LoadedAssignment:
     answers: dict[tuple[int, str], Answer]
     submissions: list[Submission]
     images: dict[tuple[int, str], Path]
+    sources: dict[int, tuple[Path, int]] = field(default_factory=dict)
 
 
 def load_assignment(
     assignment_id: str, qa_file: Path, submissions: Path, *, paths: list[Path] | None = None
 ) -> LoadedAssignment:
-    """Read an assignment once; HTTP requests use the loaded snapshot."""
+    """Load the assignment, or refresh a subset of submissions after external edits."""
     qa_file = qa_file.expanduser().resolve()
     preview = preview_qa(qa_file.read_text(encoding="utf-8"))
     qa = preview.document
@@ -126,10 +129,12 @@ def load_assignment(
     answers: dict[tuple[int, str], Answer] = {}
     summaries: list[Submission] = []
     images: dict[tuple[int, str], Path] = {}
+    sources: dict[int, tuple[Path, int]] = {}
     questions_by_version: dict[str | None, list[Question]] = {}
     image_sizes: dict[Path, tuple[int, int] | None] = {}
     for path in paths:
         submission_id = ids[path.relative_to(submissions).as_posix()]
+        sources[submission_id] = (path, path.stat().st_mtime_ns)
         document = load_student_submission_markdown(path)
         version, qa_questions = questions_for_submission(qa, document)
         if version not in questions_by_version:
@@ -186,6 +191,7 @@ def load_assignment(
         answers=answers,
         submissions=sorted(summaries, key=lambda submission: submission.id),
         images=images,
+        sources=sources,
     )
 
 
@@ -207,10 +213,16 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
                 f"Cannot open assignment {directory.name!r}: {exc}"
             ) from exc
 
+    terminals = TerminalManager(data_home)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        yield
-        await run_in_threadpool(scan_jobs.close)
+        terminals.start_maintenance()
+        try:
+            yield
+        finally:
+            await terminals.close()
+            await run_in_threadpool(scan_jobs.close)
 
     app = FastAPI(title="Opengrader", version="0.0.1", lifespan=lifespan)
     registry_lock = RLock()
@@ -225,13 +237,15 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
         assignments[assignment_id] = LoadedAssignment(
             summary=current.summary, qa=current.qa,
             questions=current.questions | added.questions,
-            answers=current.answers | added.answers,
+            answers={key: value for key, value in current.answers.items() if key[0] not in added.sources} | added.answers,
             submissions=sorted(summaries.values(), key=lambda submission: submission.id),
-            images=current.images | added.images,
+            images={key: value for key, value in current.images.items() if key[0] not in added.sources} | added.images,
+            sources=current.sources | added.sources,
         )
 
     scan_jobs = ScanJobs(scan_store, registry_lock, refresh_assignment)
     app.state.scan_jobs = scan_jobs
+    app.state.terminals = terminals
 
     def assignment_for(assignment_id: str) -> LoadedAssignment:
         with registry_lock:
@@ -345,7 +359,29 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
         return summary
 
     @app.delete("/assignments/{assignment_id}", status_code=204)
-    def delete_assignment(assignment_id: str) -> Response:
+    async def delete_assignment(
+        assignment_id: str, stop_terminal_sessions: bool = False
+    ) -> Response:
+        async with terminals.lock:
+            running = [
+                session
+                for session in terminals.sessions.values()
+                if session.record.assignment_id == assignment_id
+                and session.process is not None
+            ]
+            if running and not stop_terminal_sessions:
+                raise HTTPException(
+                    409,
+                    "Confirm that this assignment's terminal sessions may be stopped before deleting it.",
+                )
+            for session in running:
+                await terminals._stop(
+                    session,
+                    "Stopped when assignment deletion was confirmed.",
+                )
+            return await run_in_threadpool(delete_assignment_files, assignment_id)
+
+    def delete_assignment_files(assignment_id: str) -> Response:
         with registry_lock:
             assignment_for(assignment_id)
             futures = scan_jobs.stop_assignment(assignment_id)
@@ -375,6 +411,20 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
             logging.getLogger(__name__).exception("Could not clean deleted assignment %s", deleted)
         return Response(status_code=204)
 
+    def fresh_submission(assignment_id: str, submission_id: int) -> LoadedAssignment:
+        """Refresh only the requested submission when a terminal or CLI saved it."""
+        with registry_lock:
+            current = assignment_for(assignment_id)
+            source = current.sources.get(submission_id)
+            if source is not None:
+                path, mtime = source
+                try:
+                    if path.stat().st_mtime_ns != mtime:
+                        refresh_assignment(assignment_id, path)
+                except (OSError, ValueError) as exc:
+                    raise HTTPException(409, "The submission could not be reloaded. Check the grading file and retry.") from exc
+            return assignments[assignment_id]
+
     @app.get("/assignments/{assignment_id}/qa")
     def get_assignment_qa(assignment_id: str) -> QAPreview:
         return assignment_for(assignment_id).qa
@@ -390,7 +440,7 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
     @app.get("/assignments/{assignment_id}/questions")
     def list_questions(assignment_id: str, submission_id: int = 1) -> list[Question]:
         """List the selected submission's answer-key version; default to the first."""
-        questions = assignment_for(assignment_id).questions.get(submission_id)
+        questions = fresh_submission(assignment_id, submission_id).questions.get(submission_id)
         if questions is None:
             raise HTTPException(404, "Submission not found")
         return questions
@@ -399,7 +449,7 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
         "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}"
     )
     def get_answer(assignment_id: str, submission_id: int, question_id: str) -> Answer:
-        answer = assignment_for(assignment_id).answers.get((submission_id, question_id))
+        answer = fresh_submission(assignment_id, submission_id).answers.get((submission_id, question_id))
         if answer is None:
             raise HTTPException(404, "Answer not found")
         return answer
@@ -410,7 +460,7 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
     def get_answer_image(
         assignment_id: str, submission_id: int, question_id: str
     ) -> FileResponse:
-        image = assignment_for(assignment_id).images.get((submission_id, question_id))
+        image = fresh_submission(assignment_id, submission_id).images.get((submission_id, question_id))
         if image is None or not image.is_file():
             raise HTTPException(404, "Answer image not found")
         return FileResponse(image)
@@ -426,8 +476,10 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
             answers={key: value for key, value in current.answers.items() if key[0] not in removed},
             submissions=[item for item in current.submissions if item.id not in removed],
             images={key: value for key, value in current.images.items() if key[0] not in removed},
+            sources={key: value for key, value in current.sources.items() if key not in removed},
         )
 
+    add_terminal_routes(app, terminals, assignment_for)
     add_scan_routes(app, scan_store, scan_jobs, registry_lock, assignment_for, discard_scan_submissions)
     add_web_routes(
         app,
