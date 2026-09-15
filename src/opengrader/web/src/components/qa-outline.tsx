@@ -1,141 +1,325 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { ListTree } from 'lucide-react';
-import type { QAPreview } from '@/api/queries';
-import { Button } from './ui/button';
+import { Tooltip } from '@base-ui/react/tooltip';
+import {
+  CheckCheck,
+  ChevronDown,
+  ChevronUp,
+  CircleDot,
+  ListTree,
+  Text,
+  Layers,
+} from 'lucide-react';
+import { useWideAssignmentLayout } from '@/hooks/use-wide-assignment-layout';
+import type { OutlineEntry } from '@/lib/assignment-outline';
 
-type Question = QAPreview['document']['questions'][number];
-
-function QuestionLinks({
-  questions,
-  disabled,
-  editorId,
-  onSelect,
-}: {
-  questions: Question[];
+type OutlineProps = {
+  entries: OutlineEntry[];
+  activeKey: string | null;
+  outdated: boolean;
   disabled: boolean;
   editorId: string;
-  onSelect: (line: number) => void;
-}) {
+  onSelect: (entry: OutlineEntry) => void;
+};
+
+const icons = {
+  'Question group': Layers,
+  'Written answer': Text,
+  'Multiple choice': CircleDot,
+  'Multiple answer': CheckCheck,
+};
+
+function EntryPreview({ entry }: { entry: OutlineEntry }) {
+  const Icon = icons[entry.kind];
   return (
-    <ol className="min-w-0">
-      {questions.map((question) => (
-        <li key={question.id} className="min-w-0">
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={disabled || question.source_line == null}
-            aria-controls={editorId}
-            className="flex w-full min-w-0 justify-start gap-3 text-start"
-            title={question.prompt}
-            onClick={() => {
-              if (question.source_line != null) onSelect(question.source_line);
-            }}
-          >
-            <span className="shrink-0 font-medium">{question.id}</span>
-            <span className="min-w-0 flex-1 whitespace-normal wrap-break-word font-normal">
-              {question.prompt.replace(/\s+/g, ' ')}
-            </span>
-          </Button>
-          {!!question.subquestions?.length && (
-            <div className="min-w-0 ps-4">
-              <QuestionLinks
-                questions={question.subquestions}
-                disabled={disabled}
-                editorId={editorId}
-                onSelect={onSelect}
-              />
-            </div>
-          )}
-        </li>
-      ))}
-    </ol>
+    <>
+      <span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <Icon
+            className="size-3.5 shrink-0"
+            strokeWidth={1.5}
+            aria-hidden="true"
+          />
+          <span>{entry.kind}</span>
+        </span>
+        <span className="max-w-full wrap-anywhere tabular-nums">
+          {entry.points} pt
+        </span>
+      </span>
+      <span className="mt-1 line-clamp-3 text-sm leading-relaxed wrap-anywhere">
+        {entry.prompt}
+      </span>
+    </>
   );
 }
 
-export function QAOutline({
-  preview,
+/** Keep the current question at the edge and reveal numbered destinations on demand. */
+export function QAOutlineRail({
+  entries,
+  activeKey,
   outdated,
   disabled,
-  onSelect,
   editorId,
-}: {
-  preview: QAPreview | undefined;
-  outdated: boolean;
-  disabled: boolean;
-  onSelect: (line: number) => void;
-  editorId: string;
-}) {
+  onSelect,
+}: OutlineProps) {
+  const wide = useWideAssignmentLayout();
   const [open, setOpen] = useState(false);
-  const selectedLine = useRef<number | null>(null);
-  function selectQuestion(line: number) {
-    selectedLine.current = line;
-    setOpen(false);
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const selected = useRef<OutlineEntry | null>(null);
+  const list = useRef<HTMLElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  function expand() {
+    clearTimeout(closeTimer.current);
+    setFocusedKey(null);
+    setOpen(true);
   }
-  const document = preview?.document;
-  const versions = document?.versions ?? [];
+  function collapseSoon() {
+    if (!wide) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      if (
+        !popup.current?.contains(document.activeElement) ||
+        !document.activeElement?.matches(':focus-visible')
+      )
+        setOpen(false);
+    }, 150);
+  }
+  const [scroll, setScroll] = useState({ up: false, down: false });
+  const tabStop =
+    entries.find((entry) => entry.key === focusedKey)?.key ??
+    entries.find((entry) => entry.key === activeKey)?.key ??
+    entries[0]?.key;
+  const activeEntry =
+    entries.find((entry) => entry.key === activeKey) ?? entries[0];
+
+  const updateScroll = useCallback(() => {
+    const element = list.current;
+    if (!element) return;
+    const up = element.scrollTop > 1;
+    const down =
+      element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+    setScroll((previous) =>
+      previous.up === up && previous.down === down ? previous : { up, down }
+    );
+  }, []);
+  const attachList = useCallback(
+    (element: HTMLElement | null) => {
+      list.current = element;
+      if (!element) return;
+      const target = element.querySelector('[aria-current="location"]');
+      target?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      const observer = new ResizeObserver(updateScroll);
+      observer.observe(element);
+      return () => observer.disconnect();
+    },
+    [updateScroll]
+  );
+
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
-        render={
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-8 gap-2 px-2.5 py-1 text-xs"
-          />
-        }
-        disabled={disabled || !document}
+        onPointerEnter={(event) => {
+          if (!wide || event.pointerType !== 'mouse' || disabled || outdated)
+            return;
+          setHoveredKey(activeEntry?.key ?? null);
+          expand();
+        }}
+        onPointerLeave={collapseSoon}
+        render={<button type="button" />}
+        disabled={disabled || outdated}
+        aria-label="Outline"
+        className="flex min-h-11 items-center justify-center px-2.5 py-3 text-xs text-muted-foreground select-none hover:text-foreground focus-visible:-outline-offset-2 disabled:opacity-40 min-[65rem]:w-9 min-[65rem]:px-0"
       >
-        <ListTree className="size-4" aria-hidden="true" />
-        Outline{document && outdated ? ' · Outdated' : ''}
+        <span
+          aria-hidden="true"
+          className={`flex min-w-0 flex-1 items-center gap-2 min-[65rem]:flex-col min-[65rem]:gap-1 min-[65rem]:px-1.5 ${open ? 'min-[65rem]:invisible' : ''}`}
+        >
+          <ListTree className="size-4" strokeWidth={1.5} />
+          <span className="min-[65rem]:hidden">Outline</span>
+          <span className="hidden max-w-full truncate text-xs font-medium tabular-nums min-[65rem]:block">
+            {activeEntry?.number}
+          </span>
+        </span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner
-          side="bottom"
-          align="end"
-          sideOffset={8}
-          className="z-50"
+          side={wide ? 'right' : 'bottom'}
+          align={wide ? 'center' : 'end'}
+          sideOffset={wide ? -36 : 8}
+          className="z-40"
         >
           <Popover.Popup
-            aria-label="QA outline"
-            className="w-80 max-w-[calc(100vw-2rem)] overflow-hidden border bg-popover p-1 text-popover-foreground shadow-md"
+            ref={popup}
+            onPointerEnter={() => clearTimeout(closeTimer.current)}
+            onPointerLeave={collapseSoon}
+            aria-label="Question navigation"
+            className="w-72 max-w-[calc(100vw-2rem)] rounded-xl bg-popover p-2 shadow-lg ring-1 ring-border select-none min-[65rem]:w-auto min-[65rem]:rounded-none min-[65rem]:bg-transparent min-[65rem]:px-0 min-[65rem]:py-1 min-[65rem]:shadow-none min-[65rem]:ring-0"
+            initialFocus={(type) =>
+              type === 'keyboard'
+                ? (list.current?.querySelector<HTMLElement>(
+                    'button[tabindex="0"]'
+                  ) ?? true)
+                : false
+            }
             finalFocus={() => {
-              const line = selectedLine.current;
-              selectedLine.current = null;
-              if (line === null) return true;
-              // Jump after dismissal so focus restoration cannot pull the cursor out of the editor.
-              onSelect(line);
+              const entry = selected.current;
+              selected.current = null;
+              if (!entry) return true;
+              onSelect(entry);
               return false;
             }}
           >
-            {document && (
-              <nav
-                aria-label="QA outline"
-                className="max-h-[min(24rem,var(--available-height))] min-w-0 overflow-y-auto overscroll-contain"
+            {wide && (scroll.up || scroll.down) && (
+              <button
+                type="button"
+                aria-label="Scroll to earlier questions"
+                disabled={!scroll.up}
+                className="flex h-8 w-full items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-25"
+                onClick={() =>
+                  list.current?.scrollBy({
+                    top: -list.current.clientHeight * 0.75,
+                    behavior: 'instant',
+                  })
+                }
               >
-                {versions.length ? (
-                  versions.map((version) => (
-                    <div key={version} className="min-w-0">
-                      <h3 className="sticky top-0 z-10 bg-popover px-3 py-2 font-semibold">
-                        Version {version}
-                      </h3>
-                      <QuestionLinks
-                        questions={document.version_questions?.[version] ?? []}
-                        disabled={disabled || outdated}
-                        editorId={editorId}
-                        onSelect={selectQuestion}
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <QuestionLinks
-                    questions={document.questions}
-                    disabled={disabled || outdated}
-                    editorId={editorId}
-                    onSelect={selectQuestion}
-                  />
-                )}
-              </nav>
+                <ChevronUp className="size-4" aria-hidden="true" />
+              </button>
+            )}
+            <nav
+              ref={attachList}
+              aria-label="Quick question navigation"
+              className={`max-h-[min(16rem,40svh,calc(var(--available-height)-5rem))] overflow-y-auto overscroll-contain ${wide ? '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'custom-scrollbar'}`}
+              onScroll={updateScroll}
+              onKeyDown={(event) => {
+                if (
+                  !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+                )
+                  return;
+                const buttons = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                    'button:not(:disabled)'
+                  )
+                );
+                const index = buttons.findIndex(
+                  (button) => button === event.target
+                );
+                if (index < 0) return;
+                event.preventDefault();
+                const next =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? buttons.length - 1
+                      : (index +
+                          (event.key === 'ArrowDown' ? 1 : -1) +
+                          buttons.length) %
+                        buttons.length;
+                buttons[next]?.focus({ preventScroll: true });
+                buttons[next]?.scrollIntoView({
+                  block: 'nearest',
+                  behavior: 'instant',
+                });
+              }}
+            >
+              <Tooltip.Provider delay={0}>
+                {entries.map((entry) => (
+                  <Tooltip.Root
+                    key={entry.key}
+                    open={hoveredKey === entry.key}
+                    onOpenChange={(next) =>
+                      setHoveredKey((current) =>
+                        next
+                          ? entry.key
+                          : current === entry.key
+                            ? null
+                            : current
+                      )
+                    }
+                  >
+                    <Tooltip.Trigger
+                      render={<button type="button" />}
+                      tabIndex={entry.key === tabStop ? 0 : -1}
+                      data-outline-key={entry.key}
+                      onPointerEnter={() => setHoveredKey(entry.key)}
+                      onFocus={() => {
+                        setFocusedKey(entry.key);
+                        setHoveredKey(entry.key);
+                      }}
+                      aria-label={`Question ${entry.number}: ${entry.prompt}`}
+                      aria-controls={editorId}
+                      aria-current={
+                        entry.key === activeKey ? 'location' : undefined
+                      }
+                      disabled={disabled || outdated || entry.line === null}
+                      className="group flex min-h-8 w-full items-start gap-3 px-2 py-2 text-start text-muted-foreground hover:text-foreground focus-visible:-outline-offset-2 disabled:opacity-40 aria-current:text-foreground min-[65rem]:w-9 min-[65rem]:items-center min-[65rem]:gap-0 min-[65rem]:px-1.5 min-[65rem]:py-0"
+                      onClick={() => {
+                        selected.current = entry;
+                        setOpen(false);
+                      }}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="w-10 min-w-0 shrink-0 truncate py-1 text-xs tabular-nums group-hover:font-semibold group-aria-current:font-semibold group-aria-current:underline group-aria-current:decoration-2 group-aria-current:underline-offset-4 min-[65rem]:w-auto min-[65rem]:flex-1 min-[65rem]:text-center"
+                      >
+                        {entry.number}
+                      </span>
+                      <span className="min-w-0 flex-1 text-foreground min-[65rem]:hidden">
+                        <EntryPreview entry={entry} />
+                      </span>
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Positioner
+                        side="right"
+                        align="center"
+                        sideOffset={10}
+                        className="z-50"
+                      >
+                        <Tooltip.Popup
+                          onPointerEnter={() =>
+                            clearTimeout(closeTimer.current)
+                          }
+                          onPointerLeave={collapseSoon}
+                          className="custom-scrollbar hidden max-h-(--available-height) w-72 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl bg-popover p-4 text-popover-foreground shadow-lg ring-1 ring-border min-[65rem]:block"
+                        >
+                          <span className="mb-2 block text-sm font-semibold">
+                            {entry.versionLabel && (
+                              <span
+                                className="mb-1 line-clamp-2 text-xs font-normal wrap-anywhere text-muted-foreground"
+                                title={`Version ${entry.versionLabel}`}
+                              >
+                                Version {entry.versionLabel}
+                              </span>
+                            )}
+                            <span className="block wrap-anywhere">
+                              Question {entry.number}
+                            </span>
+                          </span>
+                          <EntryPreview entry={entry} />
+                        </Tooltip.Popup>
+                      </Tooltip.Positioner>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>
+                ))}
+              </Tooltip.Provider>
+            </nav>
+            {wide && (scroll.up || scroll.down) && (
+              <button
+                type="button"
+                aria-label="Scroll to later questions"
+                disabled={!scroll.down}
+                className="flex h-8 w-full items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-25"
+                onClick={() =>
+                  list.current?.scrollBy({
+                    top: list.current.clientHeight * 0.75,
+                    behavior: 'instant',
+                  })
+                }
+              >
+                <ChevronDown className="size-4" aria-hidden="true" />
+              </button>
             )}
           </Popover.Popup>
         </Popover.Positioner>

@@ -1,19 +1,12 @@
+import { useWideAssignmentLayout } from '@/hooks/use-wide-assignment-layout';
 import { usePreference } from '@/hooks/use-preference';
 import { useGroupRef } from 'react-resizable-panels';
-import { useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from './ui/resizable';
-
-const wideQuery = '(min-width: 65rem)';
-
-function subscribe(callback: () => void) {
-  const query = window.matchMedia(wideQuery);
-  query.addEventListener('change', callback);
-  return () => query.removeEventListener('change', callback);
-}
 
 export function AssignmentPanes({
   editor,
@@ -22,10 +15,7 @@ export function AssignmentPanes({
   editor: ReactNode;
   preview: ReactNode;
 }) {
-  const wide = useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia(wideQuery).matches
-  );
+  const wide = useWideAssignmentLayout();
   const [width, setWidth] = usePreference('editorWidth');
   const groupRef = useGroupRef();
   const pointerResize = useRef(false);
@@ -38,12 +28,13 @@ export function AssignmentPanes({
       </div>
     );
 
+  // The editor toolbar sticks to the page viewport, so its panel wrappers must not scroll.
   return (
     <ResizablePanelGroup
       groupRef={groupRef}
       orientation="horizontal"
       defaultLayout={{ editor: width, preview: 100 - width }}
-      className="items-stretch"
+      className="items-stretch overflow-visible!"
       onLayoutChange={(next) => {
         if (
           pointerResize.current &&
@@ -64,7 +55,11 @@ export function AssignmentPanes({
         setWidth(value.editor);
       }}
     >
-      <ResizablePanel id="editor" minSize="25%" className="min-w-0 pe-4">
+      <ResizablePanel
+        id="editor"
+        minSize="25%"
+        className="min-w-0 overflow-visible! pe-4"
+      >
         {editor}
       </ResizablePanel>
       <ResizableHandle
