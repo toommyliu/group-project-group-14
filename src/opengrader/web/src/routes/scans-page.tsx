@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Upload } from 'lucide-react';
-import { scansRoute } from '@/router';
+import type { scansRoute } from '@/router';
 import { scansQuery, uploadScan } from '@/api/scans';
 import { PageHeading } from '@/components/page-heading';
 import { ScanBatchCard } from '@/components/scan-batch';
@@ -17,8 +17,12 @@ type Transfer = {
   error: string;
 };
 
-export default function ScansPage() {
-  const { assignment, versions } = scansRoute.useLoaderData();
+export default function ScansPage({
+  data,
+}: {
+  data: typeof scansRoute.types.loaderData;
+}) {
+  const { assignment, versions } = data;
   const query = useQuery(scansQuery(assignment.id));
   const client = useQueryClient();
   const input = useRef<HTMLInputElement>(null);

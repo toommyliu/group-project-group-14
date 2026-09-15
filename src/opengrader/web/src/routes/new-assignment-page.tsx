@@ -198,8 +198,8 @@ export function AssignmentEditor({
         exact: true,
       });
       await router.navigate({
-        to: '/assignment/$assignmentId',
-        params: { assignmentId: assignment.id },
+        to: '/assignment',
+        search: { assignment: assignment.id },
       });
     } catch {
       setError(
@@ -295,8 +295,8 @@ export function AssignmentEditor({
         {error && <p role="alert">{error}</p>}
         {saved && (
           <Link
-            to="/assignment/$assignmentId"
-            params={{ assignmentId: saved.id }}
+            to="/assignment"
+            search={{ assignment: saved.id }}
             className="underline"
           >
             Open {saved.title}

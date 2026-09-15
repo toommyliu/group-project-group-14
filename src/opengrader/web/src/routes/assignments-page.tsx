@@ -1,9 +1,4 @@
-import {
-  Link,
-  useRouter,
-  useRouterState,
-  useMatchRoute,
-} from '@tanstack/react-router';
+import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { ArrowRight, LoaderCircle } from 'lucide-react';
 import { assignmentsQuery } from '@/api/queries';
 import { indexRoute } from '@/router';
@@ -13,10 +8,12 @@ import { Button, buttonVariants } from '@/components/ui/button';
 export default function AssignmentsPage() {
   const assignments = indexRoute.useLoaderData();
   const router = useRouter();
-  const matchRoute = useMatchRoute();
-  const loading = useRouterState({ select: (state) => state.isLoading });
-  const pendingAssignment =
-    loading && matchRoute({ to: '/assignment/$assignmentId', pending: true });
+  const pendingAssignment = useRouterState({
+    select: (state) =>
+      state.isLoading && state.location.pathname === '/assignment'
+        ? state.location.search.assignment
+        : undefined,
+  });
   return (
     <>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -35,8 +32,8 @@ export default function AssignmentsPage() {
           {assignments.map((assignment) => (
             <li key={assignment.id}>
               <Link
-                to="/assignment/$assignmentId"
-                params={{ assignmentId: assignment.id }}
+                to="/assignment"
+                search={{ assignment: assignment.id }}
                 className="group flex min-h-14 items-center justify-between gap-4 border-b py-2 hover:bg-muted/40 motion-safe:transition-colors motion-safe:duration-150"
               >
                 <span className="min-w-0 break-words">
@@ -51,8 +48,7 @@ export default function AssignmentsPage() {
                   className="me-3 flex size-4 shrink-0 items-center text-muted-foreground group-hover:text-foreground"
                   role="status"
                 >
-                  {pendingAssignment &&
-                  pendingAssignment.assignmentId === assignment.id ? (
+                  {pendingAssignment && pendingAssignment === assignment.id ? (
                     <>
                       <LoaderCircle
                         className="size-4 motion-safe:animate-spin"

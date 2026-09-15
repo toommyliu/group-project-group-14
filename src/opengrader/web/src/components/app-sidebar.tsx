@@ -1,3 +1,5 @@
+import { useContext } from 'react';
+import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link } from '@tanstack/react-router';
 import { BookOpen, Files, ScanLine } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
@@ -27,25 +29,37 @@ export function AppSidebar({
   onResizeEnd: (width: number) => void;
 }) {
   const { assignment, pathname } = useAssignmentNavigation();
+  const pages = useContext(WorkspacePages);
+  const gradingPage = pages.find(
+    (page) =>
+      page.path === '/submissions' && page.data.assignment.id === assignment?.id
+  );
+  const gradingSelection =
+    gradingPage?.path === '/submissions'
+      ? {
+          submission: gradingPage.data.submission?.id,
+          question: gradingPage.data.question?.id,
+        }
+      : {};
   const { setOpenMobile, isMobile, open, openMobile } = useSidebar();
   const expanded = isMobile ? openMobile : open;
   const close = () => setOpenMobile(false);
   const destinations = [
     {
-      to: '/assignment/$assignmentId',
-      prefix: '/assignment/',
+      to: '/assignment',
+      prefix: '/assignment',
       title: 'Overview',
       icon: BookOpen,
     },
     {
-      to: '/scans/$assignmentId',
-      prefix: '/scans/',
+      to: '/scans',
+      prefix: '/scans',
       title: 'Scans',
       icon: ScanLine,
     },
     {
-      to: '/grade/$assignmentId',
-      prefix: '/grade/',
+      to: '/submissions',
+      prefix: '/submissions',
       title: 'Submissions',
       icon: Files,
     },
@@ -87,9 +101,9 @@ export function AppSidebar({
                   <SidebarMenu>
                     {destinations.map(({ to, prefix, title, icon: Icon }) => {
                       const active =
-                        pathname.startsWith(prefix) ||
+                        pathname === prefix ||
                         (title === 'Overview' &&
-                          pathname.startsWith('/edit-assignment/'));
+                          pathname === '/edit-assignment');
                       return (
                         <SidebarMenuItem key={to}>
                           <SidebarMenuButton
@@ -100,7 +114,12 @@ export function AppSidebar({
                             render={
                               <Link
                                 to={to}
-                                params={{ assignmentId: assignment.id }}
+                                search={{
+                                  ...(to === '/submissions'
+                                    ? gradingSelection
+                                    : {}),
+                                  assignment: assignment.id,
+                                }}
                                 onClick={close}
                               />
                             }

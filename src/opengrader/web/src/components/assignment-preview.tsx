@@ -141,7 +141,7 @@ export function AssignmentPreview(props: Props) {
           )}
           {pdf && url && (
             <Suspense fallback={<p role="status">Loading PDF viewer…</p>}>
-              <AssignmentPdfViewer key={url} blob={pdf.blob} />
+              <AssignmentPdfViewer key={pdf.version} blob={pdf.blob} />
             </Suspense>
           )}
         </TabsContent>

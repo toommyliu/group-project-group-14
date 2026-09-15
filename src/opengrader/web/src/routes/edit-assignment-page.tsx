@@ -2,7 +2,7 @@ import { editAssignmentRoute } from '@/router';
 import { AssignmentEditor } from './new-assignment-page';
 
 export default function EditAssignmentPage() {
-  const { assignmentId } = editAssignmentRoute.useParams();
+  const { assignment: assignmentId } = editAssignmentRoute.useSearch();
   const { qa_markdown } = editAssignmentRoute.useLoaderData();
   return (
     <AssignmentEditor

@@ -78,8 +78,8 @@ export function AssignmentActions({
           </Button>
         ) : (
           <Link
-            to="/edit-assignment/$assignmentId"
-            params={{ assignmentId: assignment.id }}
+            to="/edit-assignment"
+            search={{ assignment: assignment.id }}
             className={buttonVariants({ variant: 'outline' })}
           >
             Edit assignment
