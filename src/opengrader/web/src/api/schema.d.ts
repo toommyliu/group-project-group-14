@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assignments/preview/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Edit Assignment Preview */
+        post: operations["edit_assignment_preview_assignments_preview_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments/preview/pdf": {
         parameters: {
             query?: never;
@@ -414,6 +431,17 @@ export interface components {
             /** Expected Qa Markdown */
             expected_qa_markdown: string;
         };
+        /** DocumentEdit */
+        DocumentEdit: {
+            /** Title */
+            title: string;
+            /** Instructions */
+            instructions: string;
+            /** Versions */
+            versions?: components["schemas"]["VersionEdit"][] | null;
+            /** Question Orders */
+            question_orders?: components["schemas"]["QuestionOrder"][] | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -517,7 +545,7 @@ export interface components {
              */
             correct_choice_labels: string[];
             /** Rubric */
-            rubric?: components["schemas"]["QARubricItem"][];
+            rubric?: components["schemas"]["QARubricItem-Output"][];
             /** Image Markdown */
             image_markdown?: string | null;
             /** Subquestions */
@@ -531,7 +559,7 @@ export interface components {
             source_line?: number | null;
         };
         /** QARubricItem */
-        QARubricItem: {
+        "QARubricItem-Input": {
             /** Label */
             label: string;
             /** Points Delta */
@@ -539,7 +567,20 @@ export interface components {
             /** Notes */
             notes?: string[];
             /** Subitems */
-            subitems?: components["schemas"]["QARubricItem"][];
+            subitems?: components["schemas"]["QARubricItem-Input"][];
+            /** Default Comment */
+            default_comment?: string | null;
+        };
+        /** QARubricItem */
+        "QARubricItem-Output": {
+            /** Label */
+            label: string;
+            /** Points Delta */
+            points_delta?: number | null;
+            /** Notes */
+            notes?: string[];
+            /** Subitems */
+            subitems?: components["schemas"]["QARubricItem-Output"][];
             /** Default Comment */
             default_comment?: string | null;
         };
@@ -565,7 +606,7 @@ export interface components {
              */
             correct_choice_labels: string[];
             /** Rubric */
-            rubric?: components["schemas"]["QARubricItem"][];
+            rubric?: components["schemas"]["QARubricItem-Output"][];
             /** Image Markdown */
             image_markdown?: string | null;
             /**
@@ -593,6 +634,39 @@ export interface components {
             expected_answers: string[];
             /** Rubric */
             rubric: components["schemas"]["RubricOption"][];
+        };
+        /** QuestionEdit */
+        QuestionEdit: {
+            /** Source Line */
+            source_line: number;
+            /** Prompt */
+            prompt: string;
+            /** Points */
+            points: number;
+            /** Answers */
+            answers: string[];
+            /** Rubric */
+            rubric: components["schemas"]["QARubricItem-Input"][];
+            /** Choices */
+            choices?: components["schemas"]["QAChoice"][] | null;
+            /** Correct Choice Labels */
+            correct_choice_labels?: string[] | null;
+            /** Version */
+            version?: string | null;
+            /**
+             * Remove
+             * @default false
+             */
+            remove: boolean;
+        };
+        /** QuestionOrder */
+        QuestionOrder: {
+            /** Version */
+            version: string;
+            /** Source Lines */
+            source_lines: number[];
+            /** Parent Source Line */
+            parent_source_line?: number | null;
         };
         /** ReviewScan */
         ReviewScan: {
@@ -742,6 +816,31 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VersionEdit */
+        VersionEdit: {
+            /** Key */
+            key: string;
+            /** Original Label */
+            original_label: string | null;
+            /** Label */
+            label: string;
+        };
+        /** VisualEditInput */
+        VisualEditInput: {
+            /** Qa Markdown */
+            qa_markdown: string;
+            /** Edits */
+            edits: components["schemas"]["QuestionEdit"][];
+            metadata?: components["schemas"]["DocumentEdit"] | null;
+        };
+        /** VisualEditResult */
+        VisualEditResult: {
+            /** Qa Markdown */
+            qa_markdown: string;
+            preview: components["schemas"]["QAPreview"] | null;
+            /** Validation Error */
+            validation_error: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -824,6 +923,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QAPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_assignment_preview_assignments_preview_edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VisualEditInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualEditResult"];
                 };
             };
             /** @description Validation Error */
