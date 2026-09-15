@@ -158,13 +158,27 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+}
+
 @layer utilities {
   .custom-scrollbar {
     scrollbar-color: color-mix(
       in oklch,
       var(--muted-foreground) 70%,
       transparent
-    ) transparent;
+      )
+      transparent;
     scrollbar-width: thin;
   }
 
