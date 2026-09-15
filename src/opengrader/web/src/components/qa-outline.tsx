@@ -19,6 +19,7 @@ type OutlineProps = {
   outdated: boolean;
   disabled: boolean;
   editorId: string;
+  canSelect?: (entry: OutlineEntry) => boolean;
   onSelect: (entry: OutlineEntry) => void;
 };
 
@@ -60,6 +61,7 @@ export function QAOutlineRail({
   outdated,
   disabled,
   editorId,
+  canSelect = (entry) => entry.line !== null,
   onSelect,
 }: OutlineProps) {
   const wide = useWideAssignmentLayout();
@@ -253,7 +255,7 @@ export function QAOutlineRail({
                       aria-current={
                         entry.key === activeKey ? 'location' : undefined
                       }
-                      disabled={disabled || outdated || entry.line === null}
+                      disabled={disabled || outdated || !canSelect(entry)}
                       className="group flex min-h-8 w-full items-start gap-3 px-2 py-2 text-start text-muted-foreground hover:text-foreground focus-visible:-outline-offset-2 disabled:opacity-40 aria-current:text-foreground min-[65rem]:w-9 min-[65rem]:items-center min-[65rem]:gap-0 min-[65rem]:px-1.5 min-[65rem]:py-0"
                       onClick={() => {
                         selected.current = entry;
