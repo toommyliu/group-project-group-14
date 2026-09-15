@@ -96,6 +96,23 @@ export function answerQuery(
 }
 
 export type QAPreview = components['schemas']['QAPreview'];
+export type QuestionEdit = components['schemas']['QuestionEdit'];
+export type VisualEditResult = components['schemas']['VisualEditResult'];
+export type DocumentEdit = components['schemas']['DocumentEdit'];
+
+export async function editAssignmentDraft(
+  qaMarkdown: string,
+  edits: QuestionEdit[],
+  metadata: DocumentEdit,
+  signal: AbortSignal
+) {
+  return mutationData(
+    await client.POST('/assignments/preview/edit', {
+      body: { qa_markdown: qaMarkdown, edits, metadata },
+      signal,
+    })
+  );
+}
 
 export function assignmentQAQuery(assignmentId: string) {
   return queryOptions({

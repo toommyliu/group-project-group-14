@@ -49,18 +49,25 @@ export function AssignmentPreview(props: Props) {
   const currentPdf = valid && current;
   const versionId = useId();
   return (
-    <section className="min-w-0 space-y-4" aria-label="Assignment preview">
+    <section
+      className="@container min-w-0 space-y-4"
+      aria-label="Assignment preview"
+    >
       <Tabs defaultValue="pdf">
         <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <TabsList
-            aria-label="Preview view"
-            className="min-w-[min(100%,16rem)] flex-[1_1_16rem]"
-          >
-            <TabsTrigger value="pdf">PDF preview</TabsTrigger>
-            <TabsTrigger value="guide">Grading guide</TabsTrigger>
-          </TabsList>
+          {props.assignmentId !== undefined ? (
+            <TabsList
+              aria-label="Preview view"
+              className="min-w-[min(100%,16rem)] flex-[1_1_16rem]"
+            >
+              <TabsTrigger value="pdf">PDF preview</TabsTrigger>
+              <TabsTrigger value="guide">Grading guide</TabsTrigger>
+            </TabsList>
+          ) : (
+            <h2 className="text-lg font-semibold">PDF preview</h2>
+          )}
           {versions.length > 1 && (
-            <div className="ms-auto flex shrink-0 items-center gap-2 pb-1 max-[40rem]:ms-0 max-[40rem]:w-full max-[40rem]:justify-start">
+            <div className="ms-auto flex shrink-0 items-center gap-2 pb-1 @max-[24rem]:ms-0 @max-[24rem]:w-full @max-[24rem]:flex-col @max-[24rem]:items-start @max-[24rem]:justify-start">
               <Label htmlFor={versionId}>Version</Label>
               <Select
                 value={version}
@@ -89,29 +96,31 @@ export function AssignmentPreview(props: Props) {
           className="space-y-4 data-hidden:hidden"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={!valid || blocked || busy}
-              onClick={() => void update()}
-            >
-              {busy && (
-                <LoaderCircle
-                  className="motion-safe:animate-spin"
-                  aria-hidden="true"
-                />
-              )}
-              Update PDF
-            </Button>
-            <PdfActionButton
-              url={currentPdf ? url : undefined}
-              filename={`assignment-${version.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`}
-            />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={!valid || blocked || busy}
+                onClick={() => void update()}
+              >
+                {busy && (
+                  <LoaderCircle
+                    className="motion-safe:animate-spin"
+                    aria-hidden="true"
+                  />
+                )}
+                Update PDF
+              </Button>
+              <PdfActionButton
+                url={currentPdf ? url : undefined}
+                filename={`assignment-${version.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`}
+              />
+            </div>
             <p
               role="status"
-              className="ms-auto text-end text-xs text-muted-foreground max-[40rem]:ms-0 max-[40rem]:text-start"
+              className="ms-auto max-w-full min-w-0 text-end text-xs break-words text-muted-foreground @max-[24rem]:ms-0 @max-[24rem]:w-full @max-[24rem]:text-start"
             >
               {busy
                 ? 'Generating…'
@@ -136,18 +145,20 @@ export function AssignmentPreview(props: Props) {
             </Suspense>
           )}
         </TabsContent>
-        <TabsContent
-          value="guide"
-          className="custom-scrollbar max-h-[70svh] overflow-y-auto pe-2"
-        >
-          {valid && preview ? (
-            <QAPreviewView preview={preview} versionOverride={version} />
-          ) : (
-            <p className="py-4 text-muted-foreground">
-              The grading guide will update when the QA markdown is valid.
-            </p>
-          )}
-        </TabsContent>
+        {props.assignmentId !== undefined && (
+          <TabsContent
+            value="guide"
+            className="custom-scrollbar max-h-[70svh] overflow-y-auto pe-2"
+          >
+            {valid && preview ? (
+              <QAPreviewView preview={preview} versionOverride={version} />
+            ) : (
+              <p className="py-4 text-muted-foreground">
+                The grading guide will update when the QA markdown is valid.
+              </p>
+            )}
+          </TabsContent>
+        )}
       </Tabs>
     </section>
   );

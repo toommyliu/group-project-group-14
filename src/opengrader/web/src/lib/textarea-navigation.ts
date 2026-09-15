@@ -12,10 +12,11 @@ export function sourceLineOffset(value: string, line: number): number | null {
   return null;
 }
 
-/** Measure wrapped text only on navigation, without changing the editor's value. */
-export function jumpToSourceLine(editor: HTMLTextAreaElement, line: number) {
-  const offset = sourceLineOffset(editor.value, line);
-  if (offset === null) return;
+/** Measure source positions with the textarea's wrapping, font, and padding. */
+export function measureSourceLines(
+  editor: HTMLTextAreaElement,
+  lines: number[]
+) {
   const style = getComputedStyle(editor);
   const mirror = document.createElement('div');
   Object.assign(mirror.style, {
@@ -42,19 +43,44 @@ export function jumpToSourceLine(editor: HTMLTextAreaElement, line: number) {
     overflowWrap: 'break-word',
     wordBreak: style.wordBreak,
   });
-  mirror.textContent = editor.value.slice(0, offset);
-  const marker = document.createElement('span');
-  marker.textContent = '\u200b';
-  mirror.append(marker);
+  let previous = 0;
+  let previousLine = 1;
+  const markers = lines.flatMap((line) => {
+    const relative = sourceLineOffset(
+      editor.value.slice(previous),
+      line - previousLine + 1
+    );
+    if (relative === null) return [];
+    const offset = previous + relative;
+    mirror.append(
+      document.createTextNode(editor.value.slice(previous, offset))
+    );
+    const marker = document.createElement('span');
+    marker.textContent = '\u200b';
+    mirror.append(marker);
+    previous = offset;
+    previousLine = line;
+    return [{ line, offset, marker }];
+  });
   document.body.append(mirror);
   try {
-    const top =
-      marker.getBoundingClientRect().top - mirror.getBoundingClientRect().top;
-    editor.focus({ preventScroll: true });
-    editor.setSelectionRange(offset, offset);
-    editor.scrollTop = Math.max(0, top - editor.clientHeight / 3);
-    editor.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    const top = mirror.getBoundingClientRect().top;
+    return markers.map(({ line, offset, marker }) => ({
+      line,
+      offset,
+      top: marker.getBoundingClientRect().top - top,
+    }));
   } finally {
     mirror.remove();
   }
+}
+
+/** Jump without changing the editor's value or scrolling the page unnecessarily. */
+export function jumpToSourceLine(editor: HTMLTextAreaElement, line: number) {
+  const position = measureSourceLines(editor, [line])[0];
+  if (!position) return;
+  editor.focus({ preventScroll: true });
+  editor.setSelectionRange(position.offset, position.offset);
+  editor.scrollTop = Math.max(0, position.top - editor.clientHeight / 3);
+  editor.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 }
