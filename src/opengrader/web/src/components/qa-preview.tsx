@@ -1,6 +1,10 @@
 import { useId, useState } from 'react';
 import type { components } from '@/api/schema';
 import type { QAPreview } from '@/api/queries';
+import {
+  questionOutlineKey,
+  questionOutlineTargetId,
+} from '@/lib/assignment-outline';
 import { Label } from './ui/label';
 import { GradingText } from './grading-text';
 
@@ -38,17 +42,54 @@ function RubricTree({ items }: { items: RubricItem[] }) {
   );
 }
 
-function QuestionContent({ question }: { question: Question | Subquestion }) {
+function QuestionContent({
+  question,
+  version,
+  depth,
+  onQuestionSelect,
+}: {
+  question: Question | Subquestion;
+  version: string;
+  depth: number;
+  onQuestionSelect: (key: string) => void;
+}) {
+  const outlineKey = questionOutlineKey(version, question);
+  const questionLabel = `Question ${question.id}`;
+  const pointsLabel = `${question.points} points`;
   const correct = question.correct_choice_labels?.length
     ? question.correct_choice_labels
     : question.correct_choice_label
       ? [question.correct_choice_label]
       : [];
   return (
-    <div className="min-w-0 space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="font-semibold">Question {question.id}</p>
-        <span className="tabular-nums">{question.points} points</span>
+    <div
+      id={questionOutlineTargetId(outlineKey)}
+      tabIndex={-1}
+      className="min-w-0 space-y-4 focus-visible:outline-2 focus-visible:-outline-offset-2"
+    >
+      <div
+        className="sticky top-11 flex min-h-11 min-w-0 items-center gap-3 overflow-hidden border-b bg-background px-2 min-[65rem]:top-0"
+        style={{
+          zIndex: 10 + depth,
+          marginInlineStart: `calc(-0.5rem - ${depth}rem)`,
+          width: `calc(100% + 1rem + ${depth}rem)`,
+        }}
+      >
+        <button
+          type="button"
+          aria-label={`Scroll to start of ${questionLabel}`}
+          title={`${questionLabel}. Scroll to question start.`}
+          className="flex min-h-11 min-w-0 flex-1 items-center text-start font-semibold underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:-outline-offset-2"
+          onClick={() => onQuestionSelect(outlineKey)}
+        >
+          <span className="block min-w-0 truncate">{questionLabel}</span>
+        </button>
+        <span
+          className="max-w-[40%] shrink-0 truncate text-end tabular-nums"
+          title={pointsLabel}
+        >
+          {pointsLabel}
+        </span>
       </div>
       <GradingText>{question.prompt}</GradingText>
       {!!question.choices?.length && (
@@ -97,7 +138,13 @@ function QuestionContent({ question }: { question: Question | Subquestion }) {
       {'subquestions' in question && !!question.subquestions?.length && (
         <div className="space-y-6 border-s ps-4">
           {question.subquestions.map((subquestion) => (
-            <QuestionContent key={subquestion.id} question={subquestion} />
+            <QuestionContent
+              key={subquestion.id}
+              question={subquestion}
+              version={version}
+              depth={depth + 1}
+              onQuestionSelect={onQuestionSelect}
+            />
           ))}
         </div>
       )}
@@ -108,9 +155,11 @@ function QuestionContent({ question }: { question: Question | Subquestion }) {
 export function QAPreviewView({
   preview,
   versionOverride,
+  onQuestionSelect,
 }: {
   preview: QAPreview;
   versionOverride?: string;
+  onQuestionSelect: (key: string) => void;
 }) {
   const { document, warnings } = preview;
   const [selectedVersion, setSelectedVersion] = useState('');
@@ -160,7 +209,12 @@ export function QAPreviewView({
       <ol className="space-y-8">
         {questions.map((question) => (
           <li key={question.id} className="border-t pt-6">
-            <QuestionContent question={question} />
+            <QuestionContent
+              question={question}
+              version={version ?? ''}
+              depth={0}
+              onQuestionSelect={onQuestionSelect}
+            />
           </li>
         ))}
       </ol>

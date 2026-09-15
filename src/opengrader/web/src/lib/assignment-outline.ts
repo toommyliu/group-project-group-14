@@ -24,6 +24,14 @@ export type OutlineEntry = {
   line: number | null;
 };
 
+export function questionOutlineKey(version: string, question: Question) {
+  return JSON.stringify([version, question.source_line ?? question.id]);
+}
+
+export function questionOutlineTargetId(key: string) {
+  return `qa-question-${encodeURIComponent(key)}`;
+}
+
 export function previewOutlineGroups(
   document: QAPreview['document']
 ): OutlineGroup[] {
@@ -48,10 +56,7 @@ export function questionOutlineEntries(groups: OutlineGroup[]): OutlineEntry[] {
         const number = `${prefix}${index + 1}`;
         return [
           {
-            key: JSON.stringify([
-              group.key,
-              question.source_line ?? question.id,
-            ]),
+            key: questionOutlineKey(group.key, question),
             version: group.key,
             versionLabel: group.label,
             number,
