@@ -25,7 +25,10 @@ from opengrader.core.grading.questions import (
 from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
 from opengrader.core.question_types import QuestionType
 from opengrader.core.submissions import load_student_submission_markdown
-from opengrader.server.assignment_qa import AssignmentInput, QAPreview, preview_qa
+from opengrader.server.assignment_qa import (
+    AssignmentInput, QAPreview, VisualEditInput, VisualEditResult,
+    edit_assignment_draft, preview_qa,
+)
 from opengrader.server.web import add_web_routes
 from opengrader.server.assignment_pdf import AssignmentPDFInput, PDF_RESPONSES, assignment_pdf_response
 from opengrader.server.scan_store import ScanStore
@@ -260,6 +263,13 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
     @app.post("/assignments/preview")
     def preview_assignment(request: AssignmentInput) -> QAPreview:
         return validated_preview(request)
+
+    @app.post("/assignments/preview/edit")
+    def edit_assignment_preview(request: VisualEditInput) -> VisualEditResult:
+        try:
+            return edit_assignment_draft(request)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
 
     @app.post("/assignments/preview/pdf", response_class=Response, responses=PDF_RESPONSES)
     def preview_assignment_pdf(request: AssignmentPDFInput) -> Response:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -874,6 +875,15 @@ def _validate_rubric_points(
     deltas = _rubric_effective_deltas(standard_rubric, context=context)
     if not deltas:
         return
+
+    for item in standard_rubric:
+        for criterion in [item, *item.subitems]:
+            value = criterion.points_delta
+            if value is not None and (not math.isfinite(value) or abs(value) > points):
+                raise ValueError(
+                    f"{context} rubric item {criterion.label!r} must stay within "
+                    f"-{points:g} to +{points:g} points"
+                )
 
     mode = rubric_scoring_mode(deltas)
     _validate_correct_and_incorrect_shortcuts(

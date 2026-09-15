@@ -6,7 +6,7 @@ import { GradingText } from './grading-text';
 
 type Question = components['schemas']['QAQuestion'];
 type Subquestion = components['schemas']['QASubquestion'];
-type RubricItem = components['schemas']['QARubricItem'];
+type RubricItem = NonNullable<Question['rubric']>[number];
 
 function RubricTree({ items }: { items: RubricItem[] }) {
   return (
