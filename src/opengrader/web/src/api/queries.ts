@@ -7,7 +7,7 @@ export type Answer = components['schemas']['Answer'];
 export type Question = components['schemas']['Question'];
 export type Submission = components['schemas']['Submission'];
 
-const client = createClient<paths>({
+export const client = createClient<paths>({
   baseUrl: window.location.origin,
   fetch: (request) => globalThis.fetch(request),
 });
@@ -28,8 +28,8 @@ function readData<T>({ data, response }: { data?: T; response: Response }): T {
 
 export const assignmentsQuery = queryOptions({
   queryKey: ['assignments'],
-  queryFn: async ({ signal }) =>
-    readData(await client.GET('/assignments', { signal })),
+  // Navigation and route loaders share this request across observer unmounts.
+  queryFn: async () => readData(await client.GET('/assignments')),
 });
 
 export function submissionsQuery(assignmentId: string) {
@@ -110,7 +110,7 @@ export function assignmentQAQuery(assignmentId: string) {
   });
 }
 
-function mutationData<T>({
+export function mutationData<T>({
   data,
   error,
   response,

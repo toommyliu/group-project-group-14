@@ -16,17 +16,16 @@ export default function AssignmentsPage() {
   const matchRoute = useMatchRoute();
   const loading = useRouterState({ select: (state) => state.isLoading });
   const pendingAssignment =
-    loading && matchRoute({ to: '/grade/$assignmentId', pending: true });
+    loading && matchRoute({ to: '/assignment/$assignmentId', pending: true });
   return (
     <>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <PageHeading
-          className="mb-0 flex-1"
-          title="Assignments"
-        />
+        <PageHeading className="mb-0 flex-1" title="Assignments" />
         <Link
           to="/new-assignment"
-          className={buttonVariants({ className: 'shrink-0 self-start sm:self-auto' })}
+          className={buttonVariants({
+            className: 'shrink-0 self-start sm:self-auto',
+          })}
         >
           Create assignment
         </Link>
@@ -36,7 +35,7 @@ export default function AssignmentsPage() {
           {assignments.map((assignment) => (
             <li key={assignment.id}>
               <Link
-                to="/grade/$assignmentId"
+                to="/assignment/$assignmentId"
                 params={{ assignmentId: assignment.id }}
                 className="group flex min-h-14 items-center justify-between gap-4 border-b py-2 hover:bg-muted/40 motion-safe:transition-colors motion-safe:duration-150"
               >

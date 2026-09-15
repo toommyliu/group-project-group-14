@@ -1,14 +1,14 @@
 import { errorMessage } from '@/lib/error-message';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Link, useRouter } from '@tanstack/react-router';
-import { ChevronDown, CircleAlert } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import {
   assignmentsQuery,
   deleteAssignment,
   type Assignment,
 } from '@/api/queries';
 import { Alert, AlertDescription } from './ui/alert';
-import { Button } from './ui/button';
+import { Button, buttonVariants } from './ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,14 +19,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
 
-export function AssignmentActions({ assignment }: { assignment: Assignment }) {
+export function AssignmentActions({
+  assignment,
+  editUnavailableReason,
+}: {
+  assignment: Assignment;
+  editUnavailableReason?: string;
+}) {
+  const reasonId = useId();
   const router = useRouter();
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -64,41 +65,44 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
   }
 
   return (
-    <div className="mb-6">
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          ref={triggerRef}
-          disabled={busy}
-          render={<Button type="button" variant="outline" />}
-        >
-          {busy ? 'Deleting…' : 'Assignment actions'}
-          <ChevronDown aria-hidden="true" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          className="w-48"
-          finalFocus={confirmOpen ? false : undefined}
-        >
-          <DropdownMenuItem
-            render={
-              <Link
-                to="/edit-assignment/$assignmentId"
-                params={{ assignmentId: assignment.id }}
-              />
-            }
+    <div className="max-w-full">
+      <div className="flex flex-wrap items-center gap-2">
+        {editUnavailableReason || busy ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled
+            aria-describedby={editUnavailableReason ? reasonId : undefined}
           >
             Edit assignment
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => {
-              setError('');
-              setConfirmOpen(true);
-            }}
+          </Button>
+        ) : (
+          <Link
+            to="/edit-assignment/$assignmentId"
+            params={{ assignmentId: assignment.id }}
+            className={buttonVariants({ variant: 'outline' })}
           >
-            Delete assignment
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            Edit assignment
+          </Link>
+        )}
+        <Button
+          ref={triggerRef}
+          type="button"
+          variant="destructive"
+          disabled={busy}
+          onClick={() => {
+            setError('');
+            setConfirmOpen(true);
+          }}
+        >
+          {busy ? 'Deleting…' : 'Delete assignment'}
+        </Button>
+      </div>
+      {editUnavailableReason && (
+        <span id={reasonId} className="sr-only">
+          {editUnavailableReason}
+        </span>
+      )}
       <AlertDialog
         open={confirmOpen}
         onOpenChange={(open) => {
@@ -120,7 +124,9 @@ export function AssignmentActions({ assignment }: { assignment: Assignment }) {
 
                 <span className="shrink-0">"</span>
               </span>{' '}
-              and its QA file. This cannot be undone.
+              and all of its scans, submissions, grades, and QA files. Any
+              running processing will stop after its current step. This cannot
+              be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (

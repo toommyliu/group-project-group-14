@@ -50,36 +50,39 @@ export function AssignmentPreview(props: Props) {
   const versionId = useId();
   return (
     <section className="min-w-0 space-y-4" aria-label="Assignment preview">
-      {versions.length > 1 && (
-        <div className="flex justify-end">
-          <div className="flex items-center gap-2">
-            <Label htmlFor={versionId}>Version</Label>
-            <Select
-              value={version}
-              disabled={blocked || !valid}
-              onValueChange={(value) => {
-                if (value) setSelectedVersion(value);
-              }}
-            >
-              <SelectTrigger id={versionId} className="max-w-full min-w-20">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end" alignItemWithTrigger={false}>
-                {versions.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {item}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      )}
       <Tabs defaultValue="pdf">
-        <TabsList aria-label="Preview view">
-          <TabsTrigger value="pdf">PDF preview</TabsTrigger>
-          <TabsTrigger value="guide">Grading guide</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <TabsList
+            aria-label="Preview view"
+            className="min-w-[min(100%,16rem)] flex-[1_1_16rem]"
+          >
+            <TabsTrigger value="pdf">PDF preview</TabsTrigger>
+            <TabsTrigger value="guide">Grading guide</TabsTrigger>
+          </TabsList>
+          {versions.length > 1 && (
+            <div className="ms-auto flex shrink-0 items-center gap-2 pb-1 max-[40rem]:ms-0 max-[40rem]:w-full max-[40rem]:justify-start">
+              <Label htmlFor={versionId}>Version</Label>
+              <Select
+                value={version}
+                disabled={blocked || !valid}
+                onValueChange={(value) => {
+                  if (value) setSelectedVersion(value);
+                }}
+              >
+                <SelectTrigger id={versionId} className="max-w-full min-w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end" alignItemWithTrigger={false}>
+                  {versions.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
         <TabsContent
           value="pdf"
           keepMounted
@@ -108,7 +111,7 @@ export function AssignmentPreview(props: Props) {
             />
             <p
               role="status"
-              className="ms-auto text-end text-xs text-muted-foreground"
+              className="ms-auto text-end text-xs text-muted-foreground max-[40rem]:ms-0 max-[40rem]:text-start"
             >
               {busy
                 ? 'Generating…'

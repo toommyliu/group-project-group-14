@@ -2,8 +2,6 @@ import { LoaderCircle } from 'lucide-react';
 import { PageHeading } from './page-heading';
 import { Skeleton } from './ui/skeleton';
 
-// Loading skeletons.
-
 export function AssignmentsLoading() {
   return (
     <div aria-busy="true" aria-label="Loading assignments">
@@ -29,10 +27,7 @@ export function AssignmentsLoading() {
 export function AssignmentLoading() {
   return (
     <div aria-busy="true" aria-label="Loading assignment">
-      <PageHeading
-        title={<Skeleton className="h-9 w-72 max-w-full" />}
-        description="Review student responses and existing grades."
-      />
+      <PageHeading title={<Skeleton className="h-9 w-72 max-w-full" />} />
       <div
         className="flex flex-wrap items-end gap-6 border-b pb-6"
         aria-hidden="true"
