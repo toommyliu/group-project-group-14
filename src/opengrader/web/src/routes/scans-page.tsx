@@ -114,101 +114,108 @@ export default function ScansPage({
   );
   return (
     <>
-      <PageHeading title="Manage scans" description={assignment.title} />
-      <div
-        className={`mb-8 rounded-lg border border-dashed p-6 ${dragging ? 'bg-muted' : ''}`}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          void upload(Array.from(event.dataTransfer.files));
-        }}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-5">
-          <div className="max-w-2xl space-y-2">
-            <h2 className="text-base font-medium">
-              Upload scanned submissions
-            </h2>
-            <p className="text-muted-foreground">
-              Drop one or more PDFs here. Each file can contain a whole stack or
-              one student's work. Each scan is split separately.
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Original scans are preserved. Uploading the same PDF again reuses
-              its existing batch.
-            </p>
-          </div>
-          <Button disabled={active} onClick={() => input.current?.click()}>
-            <Upload aria-hidden="true" />
-            {active ? 'Uploading…' : 'Select PDF files'}
-          </Button>
-          <input
-            ref={input}
-            type="file"
-            accept=".pdf,application/pdf"
-            multiple
-            className="hidden"
-            aria-label="Upload PDF scans"
-            onChange={(event) => {
-              void upload(Array.from(event.target.files ?? []));
-              event.target.value = '';
-            }}
+      <div className="@container">
+        <div className="mb-8 flex flex-col gap-6 @min-[40rem]:flex-row @min-[40rem]:items-start">
+          <PageHeading
+            className="mb-0 min-w-0 flex-1"
+            title="Manage scans"
+            description={assignment.title}
           />
+          <div
+            className={`w-full shrink-0 rounded-lg border border-dashed p-4 @min-[40rem]:w-64 ${dragging ? 'bg-muted' : ''}`}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              void upload(Array.from(event.dataTransfer.files));
+            }}
+          >
+            <div className="space-y-1">
+              <h2 className="text-sm font-medium">Upload scans</h2>
+              <p className="text-sm text-muted-foreground">
+                Drop PDFs here or select files.
+              </p>
+            </div>
+            <Button
+              className="mt-3 w-full"
+              disabled={active}
+              onClick={() => input.current?.click()}
+            >
+              <Upload aria-hidden="true" />
+              {active ? 'Uploading…' : 'Select PDF files'}
+            </Button>
+            <input
+              ref={input}
+              type="file"
+              accept=".pdf,application/pdf"
+              multiple
+              className="hidden"
+              aria-label="Upload PDF scans"
+              onChange={(event) => {
+                void upload(Array.from(event.target.files ?? []));
+                event.target.value = '';
+              }}
+            />
+            {transfers.length > 0 && (
+              <ul className="mt-4 space-y-3" aria-live="polite">
+                {transfers.map((item) => (
+                  <li key={item.id} className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="min-w-0 break-all">
+                        {item.file.name}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {item.status === 'done'
+                          ? 'Uploaded'
+                          : item.status === 'uploading'
+                            ? item.percent === 100
+                              ? 'Checking PDF…'
+                              : `${item.percent}% uploaded`
+                            : item.status === 'waiting'
+                              ? 'Waiting'
+                              : 'Upload failed'}
+                      </span>
+                      {item.status === 'failed' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={active}
+                          onClick={() => {
+                            setTransfers((previous) =>
+                              previous.filter(
+                                (transfer) => transfer.id !== item.id
+                              )
+                            );
+                            void upload([item.file]);
+                          }}
+                        >
+                          Retry upload
+                        </Button>
+                      )}
+                    </div>
+                    {item.error && (
+                      <Alert variant="destructive" className="mt-2">
+                        <AlertDescription>{item.error}</AlertDescription>
+                      </Alert>
+                    )}
+                    {item.status === 'uploading' && (
+                      <progress
+                        className="mt-2 h-2 w-full"
+                        max={100}
+                        value={item.percent}
+                        aria-label={`Uploading ${item.file.name}`}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-        {transfers.length > 0 && (
-          <ul className="mt-5 space-y-3" aria-live="polite">
-            {transfers.map((item) => (
-              <li key={item.id} className="min-w-0">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="min-w-0 break-all">{item.file.name}</span>
-                  <span className="text-muted-foreground">
-                    {item.status === 'done'
-                      ? 'Uploaded'
-                      : item.status === 'uploading'
-                        ? item.percent === 100
-                          ? 'Checking PDF…'
-                          : `${item.percent}% uploaded`
-                        : item.status === 'waiting'
-                          ? 'Waiting'
-                          : 'Upload failed'}
-                  </span>
-                  {item.status === 'failed' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={active}
-                      onClick={() => {
-                        setTransfers((previous) =>
-                          previous.filter((transfer) => transfer.id !== item.id)
-                        );
-                        void upload([item.file]);
-                      }}
-                    >
-                      Retry upload
-                    </Button>
-                  )}
-                </div>
-                {item.error && (
-                  <Alert variant="destructive" className="mt-2">
-                    <AlertDescription>{item.error}</AlertDescription>
-                  </Alert>
-                )}
-                {item.status === 'uploading' && (
-                  <progress
-                    className="mt-2 h-2 w-full"
-                    max={100}
-                    value={item.percent}
-                    aria-label={`Uploading ${item.file.name}`}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
       {(query.isError || refreshError) && (
         <Alert
