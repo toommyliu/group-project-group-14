@@ -54,11 +54,14 @@ function QuestionContent({ question }: { question: Question | Subquestion }) {
       {!!question.choices?.length && (
         <ul className="space-y-2">
           {question.choices.map((choice) => (
-            <li key={choice.label} className="flex flex-wrap gap-2">
+            <li
+              key={choice.label}
+              className="flex flex-wrap items-baseline gap-2"
+            >
               <span>{choice.label}.</span>
-                <div className="min-w-0 flex-1">
-                  <GradingText>{choice.text}</GradingText>
-                </div>
+              <div className="min-w-0 flex-1">
+                <GradingText>{choice.text}</GradingText>
+              </div>
               {correct.includes(choice.label) && (
                 <span className="font-medium">Correct answer</span>
               )}
