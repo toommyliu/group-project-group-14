@@ -52,9 +52,10 @@ export async function loadAssignment(
   let answer = null;
   if (submission && question) {
     try {
-      answer = await client.ensureQueryData(
-        answerQuery(assignmentId, submission.id, question.id)
-      );
+      answer = await client.fetchQuery({
+        ...answerQuery(assignmentId, submission.id, question.id),
+        staleTime: 0,
+      });
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) throw error;
     }

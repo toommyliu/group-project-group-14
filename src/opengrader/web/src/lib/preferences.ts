@@ -1,4 +1,5 @@
 export type Preferences = {
+  gradingShortcuts: boolean;
   editorWidth: number;
   sidebarWidth: number;
   sidebarExpanded: boolean;
@@ -16,6 +17,13 @@ type Definition<T> = {
 };
 
 const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
+  gradingShortcuts: {
+    storageKey: 'opengrader.grading-shortcuts',
+    defaultValue: true,
+    parse: (value) =>
+      value === 'true' ? true : value === 'false' ? false : undefined,
+    serialize: String,
+  },
   sidebarExpanded: {
     storageKey: 'opengrader.sidebar-expanded',
     defaultValue: true,

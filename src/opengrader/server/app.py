@@ -15,6 +15,11 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from PIL import Image
 
+from opengrader.core.concurrency import ConcurrentModificationError
+from opengrader.core.grading.files import FileGradingSession
+from opengrader.core.history import GradeJournal, resolve_history_dir
+from opengrader.server.grading import GradeEdit, grade_points
+
 from opengrader.core.export.gradebook import discover_submission_paths
 from opengrader.core.grading.questions import (
     QuestionContext,
@@ -68,9 +73,11 @@ class AssignmentUpdate(AssignmentInput):
 class Submission(BaseModel):
     id: int
     version: str | None
+    question_scores: dict[str, float | None]
 
 
 class Answer(BaseModel):
+    revision: str
     submission_id: int
     version: str | None
     question: Question
@@ -81,6 +88,11 @@ class Answer(BaseModel):
     points_awarded: float | None
     rubric_labels: tuple[str, ...]
     analysis: str
+
+
+class GradeSaveResult(BaseModel):
+    answer: Answer
+    warning: str | None = None
 
 
 def _question(context: QuestionContext) -> Question:
@@ -143,8 +155,11 @@ def load_assignment(
             ]
         questions = questions_by_version[version]
         questions_by_submission[submission_id] = questions
-        summaries.append(Submission(id=submission_id, version=version))
         responses = {q.question_id: q for q in document.questions}
+        summaries.append(Submission(
+            id=submission_id, version=version,
+            question_scores={q.id: responses[q.id].points_awarded for q in questions if q.id in responses},
+        ))
         for question in questions:
             response = responses.get(question.id)
             if response is None:
@@ -172,6 +187,7 @@ def load_assignment(
                         f"/answers/{question.id}/image"
                     )
             answers[submission_id, question.id] = Answer(
+                revision=str(sources[submission_id][1]),
                 submission_id=submission_id,
                 version=version,
                 question=question,
@@ -435,7 +451,11 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
 
     @app.get("/assignments/{assignment_id}/submissions")
     def list_submissions(assignment_id: str) -> list[Submission]:
-        return assignment_for(assignment_id).submissions
+        with registry_lock:
+            current = assignment_for(assignment_id)
+            for submission in current.submissions:
+                fresh_submission(assignment_id, submission.id)
+            return assignments[assignment_id].submissions
 
     @app.get("/assignments/{assignment_id}/questions")
     def list_questions(assignment_id: str, submission_id: int = 1) -> list[Question]:
@@ -453,6 +473,46 @@ def create_app(data_home: Path, *, web_dist: Path | None = None) -> FastAPI:
         if answer is None:
             raise HTTPException(404, "Answer not found")
         return answer
+
+    @app.put(
+        "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}"
+    )
+    def save_answer(
+        assignment_id: str, submission_id: int, question_id: str, edit: GradeEdit
+    ) -> GradeSaveResult:
+        with registry_lock:
+            current = fresh_submission(assignment_id, submission_id)
+            answer = current.answers.get((submission_id, question_id))
+            if answer is None:
+                raise HTTPException(404, "Answer not found")
+            if answer.revision != edit.expected_revision:
+                raise HTTPException(409, "This submission changed since you opened it. Reload the saved answer before editing again.")
+            try:
+                points = grade_points(answer.question, edit)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            path = current.sources[submission_id][0]
+            root = assignments_dir / assignment_id / "submissions"
+            warning = None
+            try:
+                session = FileGradingSession(path, submissions_path=root, journal=GradeJournal(resolve_history_dir(root)))
+                if str(session.mtime_ns) != edit.expected_revision:
+                    raise ConcurrentModificationError(path)
+                session.save_grade(
+                    question_id=question_id, possible_points=answer.question.possible_points,
+                    points_awarded=points, rubric_labels=tuple(edit.rubric_labels), analysis=edit.analysis,
+                )
+            except ConcurrentModificationError as exc:
+                raise HTTPException(409, "This submission changed. Reload the saved answer before editing again.") from exc
+            except Exception as exc:
+                logging.getLogger(__name__).exception("Grade save or PDF refresh failed")
+                # PDF generation can fail after the grade is durably written.
+                fresh = fresh_submission(assignment_id, submission_id).answers[(submission_id, question_id)]
+                if fresh.revision == edit.expected_revision or (fresh.points_awarded, fresh.rubric_labels, fresh.analysis) != (points, tuple(edit.rubric_labels), edit.analysis):
+                    raise HTTPException(500, "Could not save the grade. Check server storage and retry.") from exc
+                warning = "Grade saved, but the feedback PDF could not be updated. Check the source PDF before exporting."
+            refresh_assignment(assignment_id, path)
+            return GradeSaveResult(answer=assignments[assignment_id].answers[(submission_id, question_id)], warning=warning)
 
     @app.get(
         "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}/image"

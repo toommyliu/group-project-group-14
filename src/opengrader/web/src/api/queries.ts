@@ -237,3 +237,28 @@ export async function deleteAssignment(
   });
   if (!result.response.ok) mutationData(result);
 }
+
+export type GradeEdit = components['schemas']['GradeEdit'];
+
+export async function saveAnswer(
+  assignmentId: string,
+  submissionId: number,
+  questionId: string,
+  body: GradeEdit
+) {
+  return mutationData(
+    await client.PUT(
+      '/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}',
+      {
+        params: {
+          path: {
+            assignment_id: assignmentId,
+            submission_id: submissionId,
+            question_id: questionId,
+          },
+        },
+        body,
+      }
+    )
+  );
+}
