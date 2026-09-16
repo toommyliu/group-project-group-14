@@ -18,7 +18,7 @@ import { Input } from './ui/input';
 import { ScanReview } from './scan-review';
 import { ScanActions } from './scan-actions';
 import { Label } from './ui/label';
-import { Alert, AlertDescription } from './ui/alert';
+import { ErrorAlert } from '@/components/error-alert';
 import {
   Select,
   SelectContent,
@@ -161,11 +161,7 @@ export function ScanBatchCard({
       <p className="mt-3 text-sm text-muted-foreground" role="status">
         {batch.message}
       </p>
-      {error && (
-        <Alert variant="destructive" className="mt-3">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {error && <ErrorAlert className="mt-3" error={error} />}
       <div hidden={!open} id={`scan-${batch.id}`} className="mt-6 space-y-6">
         {!batch.started && batch.status !== 'removed' && (
           <form

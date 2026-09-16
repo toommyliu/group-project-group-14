@@ -1,14 +1,19 @@
-import { Link, useRouter } from '@tanstack/react-router';
+import { errorMessage } from '@/lib/error-message';
+import {
+  Link,
+  useRouter,
+  type ErrorComponentProps,
+} from '@tanstack/react-router';
 import { PageHeading } from './page-heading';
 import { Button } from './ui/button';
 
-export function RouteError() {
+export function RouteError({ error }: ErrorComponentProps) {
   const router = useRouter();
   return (
     <>
       <PageHeading
         title="Unable to load this page"
-        description="Check your connection and try again."
+        description={errorMessage(error)}
       />
       <div
         className="flex min-h-80 items-start gap-4 border-t py-6"

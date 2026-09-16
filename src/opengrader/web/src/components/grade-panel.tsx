@@ -1,3 +1,4 @@
+import { ErrorAlert } from '@/components/error-alert';
 import { Check, RotateCcw } from 'lucide-react';
 import type { Answer, Question } from '@/api/queries';
 import { useGradeEditor } from '@/hooks/use-grade-editor';
@@ -227,11 +228,7 @@ export function GradePanel({
           }
         />
       </div>
-      {error && !draft.manual && (
-        <p role="alert" className="mt-2 text-sm">
-          {error}
-        </p>
-      )}
+      {error && !draft.manual && <ErrorAlert className="mt-2" error={error} />}
       <GradeRecoveryDialog
         mode={
           reloadOpen ? 'reload' : blocker.status === 'blocked' ? 'leave' : null

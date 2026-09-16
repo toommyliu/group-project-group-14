@@ -1,30 +1,11 @@
 import { queryOptions } from '@tanstack/react-query';
-import createClient from 'openapi-fetch';
-import type { components, paths } from './schema';
+import { ApiError, client, readData } from './client';
+import type { components } from './schema';
 
 export type Assignment = components['schemas']['Assignment'];
 export type Answer = components['schemas']['Answer'];
 export type Question = components['schemas']['Question'];
 export type Submission = components['schemas']['Submission'];
-
-export const client = createClient<paths>({
-  baseUrl: window.location.origin,
-  fetch: (request) => globalThis.fetch(request),
-});
-
-export class ApiError extends Error {
-  readonly status: number;
-
-  constructor(status: number) {
-    super(`Request failed with status ${status}`);
-    this.status = status;
-  }
-}
-
-function readData<T>({ data, response }: { data?: T; response: Response }): T {
-  if (!response.ok || data === undefined) throw new ApiError(response.status);
-  return data;
-}
 
 export const assignmentsQuery = queryOptions({
   queryKey: ['assignments'],
@@ -106,7 +87,7 @@ export async function editAssignmentDraft(
   metadata: DocumentEdit,
   signal: AbortSignal
 ) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/preview/edit', {
       body: { qa_markdown: qaMarkdown, edits, metadata },
       signal,
@@ -127,32 +108,11 @@ export function assignmentQAQuery(assignmentId: string) {
   });
 }
 
-export function mutationData<T>({
-  data,
-  error,
-  response,
-}: {
-  data?: T;
-  error?: { detail?: string | components['schemas']['ValidationError'][] };
-  response: Response;
-}): T {
-  if (!response.ok) {
-    const detail = error?.detail;
-    const message = Array.isArray(detail)
-      ? detail.map((issue) => issue.msg).join('\n')
-      : detail;
-    throw new Error(
-      message || `Request failed with status ${response.status}. Try again.`
-    );
-  }
-  return readData({ data, response });
-}
-
 export async function previewAssignment(
   qaMarkdown: string,
   signal: AbortSignal
 ) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/preview', {
       body: { qa_markdown: qaMarkdown },
       signal,
@@ -161,7 +121,7 @@ export async function previewAssignment(
 }
 
 export async function createAssignment(qaMarkdown: string) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments', {
       body: { qa_markdown: qaMarkdown },
     })
@@ -173,7 +133,7 @@ export async function previewAssignmentPdf(
   version: string,
   signal: AbortSignal
 ) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/preview/pdf', {
       body: { qa_markdown: qaMarkdown, version },
       signal,
@@ -187,7 +147,7 @@ export async function savedAssignmentPdf(
   version: string,
   signal: AbortSignal
 ) {
-  return mutationData(
+  return readData(
     await client.GET('/assignments/{assignment_id}/pdf', {
       params: { path: { assignment_id: assignmentId }, query: { version } },
       signal,
@@ -200,7 +160,7 @@ export function assignmentSourceQuery(assignmentId: string) {
   return queryOptions({
     queryKey: ['assignments', assignmentId, 'source'],
     queryFn: async ({ signal }) =>
-      mutationData(
+      readData(
         await client.GET('/assignments/{assignment_id}/source', {
           params: { path: { assignment_id: assignmentId } },
           signal,
@@ -214,7 +174,7 @@ export async function updateAssignment(
   qaMarkdown: string,
   expectedQaMarkdown: string
 ) {
-  return mutationData(
+  return readData(
     await client.PUT('/assignments/{assignment_id}', {
       params: { path: { assignment_id: assignmentId } },
       body: {
@@ -229,13 +189,12 @@ export async function deleteAssignment(
   assignmentId: string,
   stopTerminalSessions: boolean
 ) {
-  const result = await client.DELETE('/assignments/{assignment_id}', {
+  await client.DELETE('/assignments/{assignment_id}', {
     params: {
       path: { assignment_id: assignmentId },
       query: { stop_terminal_sessions: stopTerminalSessions },
     },
   });
-  if (!result.response.ok) mutationData(result);
 }
 
 export type GradeEdit = components['schemas']['GradeEdit'];
@@ -246,7 +205,7 @@ export async function saveAnswer(
   questionId: string,
   body: GradeEdit
 ) {
-  return mutationData(
+  return readData(
     await client.PUT(
       '/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}',
       {

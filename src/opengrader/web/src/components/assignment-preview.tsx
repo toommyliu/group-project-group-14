@@ -1,3 +1,4 @@
+import { ErrorAlert } from '@/components/error-alert';
 import {
   lazy,
   Suspense,
@@ -187,7 +188,7 @@ export function AssignmentPreview(props: Props) {
                       : 'Up to date'}
             </p>
           </div>
-          {error && <p role="alert">{error}</p>}
+          {error && <ErrorAlert error={error} />}
           {!!preview?.warnings.length && (
             <p className="border-s-2 ps-3">
               Referenced images are not included in the generated PDF.

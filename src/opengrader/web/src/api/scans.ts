@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { components } from './schema';
-import { client, mutationData } from './queries';
+import { ApiError, client, readData } from './client';
 
 export type ScanBatch = components['schemas']['ScanBatch'];
 export type ScanPage = ScanBatch['groups'][number]['pages'][number];
@@ -14,7 +14,7 @@ export function scansQuery(assignmentId: string) {
     staleTime: 0,
     // The destination loader shares this request when the scans page unmounts.
     queryFn: async () =>
-      mutationData(
+      readData(
         await client.GET('/assignments/{assignment_id}/scans', {
           params: { path: { assignment_id: assignmentId } },
         })
@@ -61,15 +61,7 @@ export function uploadScan(
       );
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) return resolve();
-      const body: unknown = request.response;
-      const message =
-        body &&
-        typeof body === 'object' &&
-        'detail' in body &&
-        typeof body.detail === 'string'
-          ? body.detail
-          : 'Could not upload this PDF. Try again.';
-      reject(new Error(message));
+      reject(new ApiError(request.status, request.response));
     };
     request.send(file);
   });
@@ -81,7 +73,7 @@ export async function analyzeScan(
   mode: ScanMode,
   pages: number | null
 ) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/{assignment_id}/scans/{batch_id}/analyze', {
       params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
       body: {
@@ -99,7 +91,7 @@ export async function reviewScan(
   groups: ScanPage[][],
   excluded: number[]
 ) {
-  return mutationData(
+  return readData(
     await client.PUT('/assignments/{assignment_id}/scans/{batch_id}/review', {
       params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
       body: {
@@ -119,7 +111,7 @@ export async function processScan(
   version: string,
   groupVersions: Record<string, string | null> = {}
 ) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/{assignment_id}/scans/{batch_id}/process', {
       params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
       body: {
@@ -134,7 +126,7 @@ export async function processScan(
 }
 
 export async function removeScan(assignmentId: string, batch: ScanBatch) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/{assignment_id}/scans/{batch_id}/remove', {
       params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
       body: { expected_revision: batch.revision },
@@ -143,7 +135,7 @@ export async function removeScan(assignmentId: string, batch: ScanBatch) {
 }
 
 export async function restoreScan(assignmentId: string, batch: ScanBatch) {
-  return mutationData(
+  return readData(
     await client.POST('/assignments/{assignment_id}/scans/{batch_id}/restore', {
       params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
       body: { expected_revision: batch.revision },
@@ -152,14 +144,10 @@ export async function restoreScan(assignmentId: string, batch: ScanBatch) {
 }
 
 export async function deleteScan(assignmentId: string, batch: ScanBatch) {
-  const result = await client.DELETE(
-    '/assignments/{assignment_id}/scans/{batch_id}',
-    {
-      params: {
-        path: { assignment_id: assignmentId, batch_id: batch.id },
-        query: { expected_revision: batch.revision },
-      },
-    }
-  );
-  if (!result.response.ok) mutationData(result);
+  await client.DELETE('/assignments/{assignment_id}/scans/{batch_id}', {
+    params: {
+      path: { assignment_id: assignmentId, batch_id: batch.id },
+      query: { expected_revision: batch.revision },
+    },
+  });
 }

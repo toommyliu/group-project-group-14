@@ -7,7 +7,7 @@ import { PageHeading } from '@/components/page-heading';
 import { ScanBatchCard } from '@/components/scan-batch';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/lib/error-message';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ErrorAlert } from '@/components/error-alert';
 
 type Transfer = {
   id: string;
@@ -198,9 +198,7 @@ export default function ScansPage({
                       )}
                     </div>
                     {item.error && (
-                      <Alert variant="destructive" className="mt-2">
-                        <AlertDescription>{item.error}</AlertDescription>
-                      </Alert>
+                      <ErrorAlert className="mt-2" error={item.error} />
                     )}
                     {item.status === 'uploading' && (
                       <progress
@@ -218,17 +216,15 @@ export default function ScansPage({
         </div>
       </div>
       {(query.isError || refreshError) && (
-        <Alert
-          variant="destructive"
-          className="mb-5 flex flex-wrap items-center gap-3"
+        <ErrorAlert
+          className="mb-5"
+          title="Could not refresh scan status"
+          error={refreshError || query.error}
         >
-          <AlertDescription>
-            {refreshError || 'Could not refresh scan status.'}
-          </AlertDescription>
           <Button variant="outline" onClick={() => void query.refetch()}>
             Reload scans
           </Button>
-        </Alert>
+        </ErrorAlert>
       )}
       {batches.length ? (
         <div className="border-t">
