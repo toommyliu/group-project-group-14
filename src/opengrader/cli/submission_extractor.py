@@ -463,11 +463,11 @@ def run_cli(
         metavar="PDF",
         default=None,
         help=(
-            "Path to a blank version of the assignment template PDF (same layout as the "
-            "scans, real text layer required). When given, its question "
-            "prompts/points/bboxes and name/ID field bboxes populate every "
-            "scan's .submission.md, and the scans no longer need a text "
-            "layer themselves. This mode does not use OCR layout detection."
+            "Path to the exact blank assignment PDF that students received "
+            "(same printed content and layout; real text layer required). It "
+            "supplies question/name/ID regions and is aligned to each scan so "
+            "printed ink can be removed. The scans themselves need no text "
+            "layer. This mode does not use OCR layout detection."
         ),
     )
     parser.add_argument(
@@ -490,8 +490,8 @@ def run_cli(
         help=(
             "The blank assignment the region map was drawn on. Given, the map is "
             "verified against it before a single scan is read; the map already "
-            "carries that file's fingerprint, so this only makes the check "
-            "explicit."
+            "carries that file's fingerprint. The blank is also aligned to "
+            "each scan to separate printed text from student ink."
         ),
     )
     parser.add_argument(
@@ -640,10 +640,11 @@ def run_cli(
         default=ai.read_handwriting,
         help=(
             "With --blank-template, also transcribe each question's response "
-            "crop into Response text using the Ollama vision model (Tesseract "
-            "fallback). Without it, template mode saves crops but leaves "
-            "Response text empty. Ignored for text-layer PDFs, whose typed "
-            "answers are read straight from the text layer. "
+            "from the isolated student-ink image using the Ollama vision model "
+            "(Tesseract fallback). Without it, template mode still saves the "
+            "ink image and every detected fragment but leaves Response text "
+            "empty. Ignored for text-layer PDFs, whose typed answers are read "
+            "straight from the text layer. "
             "(default: %(default)s, from AI Setup)"
         ),
     )
@@ -929,7 +930,30 @@ def run_cli(
             )
             sys.exit(1)
 
-        blank_assignment_template = region_map_to_blank_template(region_map)
+        if args.region_map_input:
+            region_map_reference = Path(args.region_map_input)
+        else:
+            candidate = Path(args.region_map).parent / region_map.source_name
+            region_map_reference = candidate if candidate.exists() else None
+            if region_map_reference is not None:
+                try:
+                    region_map = load_verified_region_map(
+                        Path(args.region_map), region_map_reference
+                    )
+                except RegionMapError as exc:
+                    print(f"error: {exc}", file=sys.stderr)
+                    sys.exit(1)
+
+        blank_assignment_template = region_map_to_blank_template(
+            region_map,
+            reference_pdf_path=region_map_reference,
+        )
+        if region_map_reference is None:
+            print(
+                "note: the mapped blank PDF was not found beside the region map. "
+                "Pass --region-map-input to separate printed text from student ink.",
+                file=sys.stderr,
+            )
 
     bubble_sheet_layout = None
     if args.bubble_sheet:

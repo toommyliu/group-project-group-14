@@ -863,7 +863,11 @@ def region_map_errors(
     return tuple(finding for finding in findings if finding.is_error)
 
 
-def region_map_to_blank_template(region_map: RegionMap) -> AssignmentTemplate:
+def region_map_to_blank_template(
+    region_map: RegionMap,
+    *,
+    reference_pdf_path: str | Path | None = None,
+) -> AssignmentTemplate:
     questions = tuple(
         StudentSubmissionQuestion(
             question_id=question.question_id,
@@ -905,6 +909,11 @@ def region_map_to_blank_template(region_map: RegionMap) -> AssignmentTemplate:
         questions=questions,
         total_pages=region_map.source_pages,
         exact_regions=True,
+        reference_pdf_path=(
+            str(Path(reference_pdf_path).resolve())
+            if reference_pdf_path is not None
+            else None
+        ),
     )
 
 

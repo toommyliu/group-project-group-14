@@ -20,3 +20,5 @@ class AssignmentTemplate:
     total_pages: int
     # False means question-start anchors; True means complete answer regions.
     exact_regions: bool = False
+    # The blank page pixels are required to separate printed and student ink.
+    reference_pdf_path: str | None = None

@@ -10,6 +10,7 @@ from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
     OllamaVisionError,
     extract_field_text,
+    extract_handwriting_only,
     extract_question_prompt_and_answer,
     extract_title_metadata,
     page_has_identity_field,
@@ -103,6 +104,23 @@ def test_extract_question_prompt_and_answer_uses_generous_transcription_cap(
     }
     assert list(body["format"]["properties"]) == ["answer", "prompt"]
     assert body["options"]["num_predict"] == 2048
+
+
+def test_handwriting_only_prompt_excludes_printed_remnants(monkeypatch, image_path):
+    captured = _capture_request_body(monkeypatch, '{"text": "oddly spaced word"}')
+
+    assert (
+        extract_handwriting_only(
+            image_path=image_path,
+            config=OllamaVisionConfig(),
+        )
+        == "oddly spaced word"
+    )
+
+    body = captured["body"]
+    assert body["format"]["required"] == ["text"]
+    assert "oddly spaced" in body["prompt"]
+    assert "printed remnants" in body["prompt"]
 
 
 def test_page_has_identity_field_sends_boolean_schema(monkeypatch, image_path):

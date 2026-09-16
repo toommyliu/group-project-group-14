@@ -1,14 +1,19 @@
+from dataclasses import replace
 from pathlib import Path
 
 import opengrader.core.submissions.processor as processor
 from opengrader.core.submissions.processor import (
     ExtractionProgress,
+    _extract_blank_template_questions,
     _extract_questions_from_text,
     _fill_responses_with_vlm,
     _split_prompt_and_response,
     _TextLine,
 )
-from opengrader.core.submissions.student_file import StudentSubmissionQuestion
+from opengrader.core.submissions.student_file import (
+    StudentInkFragment,
+    StudentSubmissionQuestion,
+)
 
 
 def _line(text: str) -> _TextLine:
@@ -59,6 +64,22 @@ def test_text_layer_captures_typed_response() -> None:
     assert by_id["q1"].response_text == "4"
     assert by_id["q1"].possible_points == 5.0
     assert by_id["q2"].response_text == "7"
+
+
+def test_blank_template_expands_lettered_subquestions_without_print_leakage() -> None:
+    lines = [
+        _TextLine(1, 612, 792, 50, 100, 560, 120, "4. (10 pts) Plain question"),
+        _TextLine(1, 612, 792, 50, 250, 560, 270, "5. (20 pts) Answer both parts"),
+        _TextLine(1, 612, 792, 55, 300, 560, 320, "a) (8 pts) First part"),
+        _TextLine(1, 612, 792, 55, 430, 560, 450, "b) (12 pts) Second part"),
+    ]
+
+    questions = _extract_blank_template_questions(lines)
+
+    assert [question.question_id for question in questions] == ["q4", "q5a", "q5b"]
+    assert [question.response_text for question in questions] == ["", "", ""]
+    assert questions[1].prompt == "First part"
+    assert questions[1].source_segments[0].bbox_norm[3] > 0.1
 
 
 def _question(qid: str, image: str | None, text: str = "") -> StudentSubmissionQuestion:
@@ -121,6 +142,61 @@ def test_vlm_fill_skips_already_filled_and_imageless(monkeypatch, tmp_path: Path
     assert filled[0].response_text == "already graded text"
     assert filled[1].response_text == ""
     assert ticks == []
+
+
+def test_verified_blank_ink_never_calls_a_model(monkeypatch, tmp_path: Path) -> None:
+    def unexpected_call(**_kwargs):
+        raise AssertionError("a blank ink layer must not reach a model")
+
+    monkeypatch.setattr(processor, "extract_handwriting_only", unexpected_call)
+    question = _question("q1", "responses/q1.png")
+    question = replace(
+        question,
+        ink_image_path="responses/q1.ink.png",
+        ink_fragments=(),
+    )
+
+    filled = _fill_responses_with_vlm(
+        [question],
+        tmp_path,
+        object(),
+        pdf_name="s.pdf",
+        progress=ExtractionProgress(),
+        progress_callback=lambda _message: None,
+    )
+
+    assert filled[0].response_text == ""
+    assert filled[0].response_source is None
+
+
+def test_ink_layer_uses_the_handwriting_only_prompt(monkeypatch, tmp_path: Path) -> None:
+    calls: list[Path] = []
+
+    def fake_handwriting(*, image_path, config, math_latex=False):
+        calls.append(Path(image_path))
+        return "isolated answer"
+
+    monkeypatch.setattr(processor, "extract_handwriting_only", fake_handwriting)
+    question = replace(
+        _question("q1", "responses/q1.png"),
+        ink_image_path="responses/q1.ink.png",
+        ink_fragments=(
+            StudentInkFragment(page_number=1, bbox_norm=(0.2, 0.3, 0.1, 0.1)),
+        ),
+    )
+
+    filled = _fill_responses_with_vlm(
+        [question],
+        tmp_path,
+        object(),
+        pdf_name="s.pdf",
+        progress=ExtractionProgress(),
+        progress_callback=lambda _message: None,
+    )
+
+    assert calls == [tmp_path / "responses/q1.ink.png"]
+    assert filled[0].response_text == "isolated answer"
+    assert filled[0].ink_fragments[0].text == "isolated answer"
 
 
 def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:

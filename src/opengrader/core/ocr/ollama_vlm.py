@@ -258,6 +258,12 @@ _QUESTION_PROMPT_AND_ANSWER_SCHEMA = {
     "required": ["answer", "prompt"],
 }
 
+_HANDWRITING_SCHEMA = {
+    "type": "object",
+    "properties": {"text": {"type": "string"}},
+    "required": ["text"],
+}
+
 
 def extract_question_prompt_and_answer(
     *,
@@ -306,6 +312,43 @@ def extract_question_prompt_and_answer(
     answer = str(parsed.get("answer", "")).strip()
     question_prompt = re.sub(r"\s+", " ", question_prompt)
     return question_prompt, answer
+
+
+def extract_handwriting_only(
+    *,
+    image_path: str | Path,
+    config: OllamaVisionConfig,
+    math_latex: bool = False,
+) -> str:
+    """Transcribe a crop that has already had all printed template ink removed."""
+
+    prompt = (
+        "This is a student-ink isolation layer from a printed form. Transcribe every "
+        "handwritten textual mark literally, including isolated or oddly spaced words. "
+        "Template mismatch can leave fragments of crisp typeset form text or page "
+        "numbers; ignore those printed remnants. Preserve line breaks and do not infer, "
+        "solve, correct, or complete anything. Use [unclear] for handwriting you cannot "
+        "read and [mark] for a visible handwritten non-text mark. Return an empty string "
+        "only when no student-added ink is visible. "
+    )
+    if math_latex:
+        prompt += (
+            "Write visible mathematical notation as LaTeX inside $...$ or $$...$$, "
+            "without changing ordinary prose. "
+        )
+    prompt += 'Return strict JSON only with this shape: {"text": "..."}.'
+
+    raw = _generate_with_image(
+        image_path=image_path,
+        prompt=prompt,
+        config=config,
+        response_format=_HANDWRITING_SCHEMA,
+        num_predict=1024,
+    )
+    parsed = _parse_json_from_response(raw)
+    if parsed is None or not isinstance(parsed.get("text"), str):
+        return raw.strip()
+    return str(parsed["text"]).strip()
 
 
 def extract_page_number(

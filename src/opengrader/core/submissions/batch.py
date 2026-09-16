@@ -133,6 +133,8 @@ def document_outputs(
     for question in document.questions:
         if question.response_image_path:
             candidates.append(submission_dir / question.response_image_path)
+        if question.ink_image_path:
+            candidates.append(submission_dir / question.ink_image_path)
     return relative_outputs(output_dir, candidates)
 
 
