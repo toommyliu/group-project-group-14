@@ -21,6 +21,7 @@ from opengrader.core.pdf_utils import (
     SCAN_QUESTION_LINE_RE,
     SCAN_QUESTION_MAX_X_NORM,
     calculate_page_offsets,
+    bbox_norm_to_px,
     crop_norm,
     render_page_to_image,
     safe_image_to_data,
@@ -28,8 +29,10 @@ from opengrader.core.pdf_utils import (
 )
 from .student_file import (
     IdentityCandidate,
+    StudentInkFragment,
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
+    parse_assignment_metadata_from_title,
     render_student_submission_markdown,
 )
 from .template import AssignmentTemplate, FieldLocation
@@ -55,7 +58,16 @@ from opengrader.core.ocr.math_ocr import (
 from opengrader.core.ocr.ollama_vlm import (
     OllamaVisionConfig,
     extract_field_text,
+    extract_handwriting_only,
     extract_question_prompt_and_answer,
+)
+from opengrader.core.ocr.ink_extraction import (
+    RegisteredTemplatePage,
+    StudentInk,
+    TemplateRegistrationError,
+    crop_student_ink,
+    isolate_student_ink,
+    register_template_page,
 )
 
 
@@ -126,6 +138,12 @@ class _ScanLayout:
     id_label: _ScanLabelBox | None
     # Per-page OCR lines (y_top, x0, x1), sorted by y_top.
     line_boxes_by_page: dict[int, list[tuple[float, float, float]]]
+
+
+@dataclass(frozen=True)
+class _RegisteredInkPage:
+    ink: StudentInk
+    registration: RegisteredTemplatePage
 
 
 @dataclass(frozen=True)
@@ -1018,6 +1036,111 @@ def _ocr_image_digits(image_path: Path) -> str:
             best = digits
     return best
 
+def _template_response_field(
+    label: _TextLine,
+    *,
+    next_top: float | None,
+) -> FieldLocation:
+    line_height = max(1.0, label.y1 - label.y0)
+    x0 = min(label.page_w * 0.92, label.x1 + label.page_w * 0.01)
+    y0 = max(0.0, label.y0 - line_height * 1.8)
+    fallback_bottom = label.y1 + line_height * 3.0
+    y1 = (
+        min(fallback_bottom, next_top - line_height * 1.5)
+        if next_top
+        else fallback_bottom
+    )
+    y1 = max(y1, label.y1 + line_height)
+    return FieldLocation(
+        page=label.page,
+        bbox=(
+            round(x0 / label.page_w, 4),
+            round(y0 / label.page_h, 4),
+            round(max(0.0, label.page_w * 0.92 - x0) / label.page_w, 4),
+            round(max(0.0, y1 - y0) / label.page_h, 4),
+        ),
+    )
+
+
+_TEMPLATE_SUBQUESTION_RE = re.compile(
+    r"^\s*([a-z])\s*[\).]\s*" + POINTS_SPEC + r"\s*(.*)$",
+    re.IGNORECASE,
+)
+
+
+def _extract_blank_template_questions(
+    lines: list[_TextLine],
+) -> tuple[StudentSubmissionQuestion, ...]:
+    candidates: list[tuple[int, str, _TextLine, float, str]] = []
+    current_parent: int | None = None
+    for line in lines:
+        top_level = QUESTION_PREFIX_RE.match(line.text)
+        if top_level is not None:
+            number_text, points_text, prompt = top_level.groups()
+            current_parent = int(number_text)
+            candidates.append(
+                (current_parent, "", line, float(points_text), prompt.strip())
+            )
+            continue
+        subquestion = _TEMPLATE_SUBQUESTION_RE.match(line.text)
+        if subquestion is None or current_parent is None:
+            continue
+        suffix, points_text, prompt = subquestion.groups()
+        candidates.append(
+            (
+                current_parent,
+                suffix.lower(),
+                line,
+                float(points_text),
+                prompt.strip(),
+            )
+        )
+
+    parents_with_parts = {
+        number for number, suffix, _line, _points, _prompt in candidates if suffix
+    }
+    questions: list[StudentSubmissionQuestion] = []
+    for index, (number, suffix, line, points, prompt) in enumerate(candidates):
+        if not suffix and number in parents_with_parts:
+            continue
+        next_line = next(
+            (
+                candidate[2]
+                for candidate in candidates[index + 1 :]
+                if candidate[2].page == line.page
+                and candidate[2].y0 > line.y0
+            ),
+            None,
+        )
+        y_top = max(0.0, line.y0 / line.page_h - 0.003)
+        y_bottom = (
+            min(0.975, next_line.y0 / line.page_h - 0.005)
+            if next_line is not None
+            else 0.975
+        )
+        questions.append(
+            StudentSubmissionQuestion(
+                question_id=f"q{number}{suffix}",
+                prompt=prompt,
+                possible_points=points,
+                response_image_path=None,
+                response_text="",
+                source_segments=(
+                    QuestionSourceSegment(
+                        page_number=line.page,
+                        bbox_norm=(
+                            0.08,
+                            round(y_top, 4),
+                            0.84,
+                            round(max(0.005, y_bottom - y_top), 4),
+                        ),
+                    ),
+                ),
+            )
+        )
+    return tuple(questions)
+
+
 def _load_blank_assignment_template(pdf_path: Path) -> AssignmentTemplate:
     lines = _read_pdf_lines(pdf_path)
     _ensure_text_layer(lines, pdf_path)
@@ -1027,20 +1150,55 @@ def _load_blank_assignment_template(pdf_path: Path) -> AssignmentTemplate:
     with fitz.open(str(pdf_path)) as doc:
         total_pages = len(doc)
 
-    name_field = None
-    id_field = None
+    name_label: _TextLine | None = None
+    id_label: _TextLine | None = None
     for line in lines:
         if _NAME_LABEL_RE.match(line.text):
-            name_field = FieldLocation(line.page, _norm_bbox(line))
+            name_label = line
         elif _ID_LABEL_RE.match(line.text):
-            id_field = FieldLocation(line.page, _norm_bbox(line))
+            id_label = line
+
+    name_next_top = (
+        id_label.y0
+        if name_label is not None
+        and id_label is not None
+        and id_label.page == name_label.page
+        and id_label.y0 > name_label.y0
+        else None
+    )
+    id_next_top = None
+    if id_label is not None:
+        id_next_top = next(
+            (
+                line.y0
+                for line in sorted(lines, key=lambda candidate: candidate.y0)
+                if line.page == id_label.page
+                and line.y0 > id_label.y0
+                and re.match(r"^\s*\d+\s*\.", line.text) is not None
+            ),
+            None,
+        )
+    name_field = (
+        _template_response_field(name_label, next_top=name_next_top)
+        if name_label is not None
+        else None
+    )
+    id_field = (
+        _template_response_field(id_label, next_top=id_next_top)
+        if id_label is not None
+        else None
+    )
+
+    blank_questions = _extract_blank_template_questions(lines)
 
     return AssignmentTemplate(
         assignment_title=_assignment_title_from_lines(lines),
         name_field=name_field,
         student_id_field=id_field,
-        questions=tuple(_extract_questions_from_text(lines)),
+        questions=blank_questions,
         total_pages=total_pages,
+        exact_regions=True,
+        reference_pdf_path=str(pdf_path.resolve()),
     )
 
 def _select_field(
@@ -1072,6 +1230,187 @@ def _save_field_crop(
     filename = f"{prefix}.png"
     crop.save(output_dir / filename)
     return str(Path(output_dir.name) / filename)
+
+
+def _registered_ink_pages(
+    rendered_pages: dict[int, Image.Image],
+    template: AssignmentTemplate,
+    *,
+    dpi: int,
+    progress_callback: Callable[[str], None],
+) -> dict[int, _RegisteredInkPage]:
+    if not template.reference_pdf_path:
+        return {}
+
+    reference_path = Path(template.reference_pdf_path)
+    if not reference_path.exists():
+        progress_callback(
+            f"  Warning: blank template not found at {reference_path}; "
+            "student ink cannot be separated from printed text."
+        )
+        return {}
+
+    reference_pages = _render_scan_all_pages(reference_path, dpi=dpi)
+    isolated: dict[int, _RegisteredInkPage] = {}
+    for page_number, scan_page in rendered_pages.items():
+        reference_page = reference_pages.get(page_number)
+        if reference_page is None:
+            continue
+        try:
+            registered = register_template_page(scan_page, reference_page)
+        except TemplateRegistrationError as exc:
+            progress_callback(
+                f"  Warning: page {page_number} could not be aligned to the blank "
+                f"template ({exc}); keeping its original crops."
+            )
+            continue
+        page_ink = isolate_student_ink(
+            scan_page,
+            registered.aligned_template,
+            dpi=dpi,
+        )
+        isolated[page_number] = _RegisteredInkPage(
+            ink=page_ink,
+            registration=registered,
+        )
+        progress_callback(
+            f"  Page {page_number}: isolated student ink "
+            f"({registered.metrics.inliers} alignment inliers, "
+            f"{registered.metrics.median_error_px:.1f}px median error)."
+        )
+        if (
+            page_ink.unmatched_ink_ratio is not None
+            and page_ink.unmatched_ink_ratio > 0.40
+        ):
+            progress_callback(
+                f"  Warning: page {page_number} contains much more unmatched ink "
+                "than the blank template. The printed form may differ; printed "
+                "remnants will stay visible for review."
+            )
+    return isolated
+
+
+def _map_template_field(
+    field: FieldLocation,
+    page: _RegisteredInkPage,
+) -> FieldLocation:
+    return FieldLocation(
+        page=field.page,
+        bbox=_map_template_bbox(field.bbox, page),
+    )
+
+
+def _map_template_bbox(
+    bbox: tuple[float, float, float, float],
+    page: _RegisteredInkPage,
+) -> tuple[float, float, float, float]:
+    template_width, template_height = page.registration.template_size
+    x, y, width, height = bbox
+    corners = np.array(
+        [
+            [x * template_width, y * template_height, 1.0],
+            [(x + width) * template_width, y * template_height, 1.0],
+            [x * template_width, (y + height) * template_height, 1.0],
+            [
+                (x + width) * template_width,
+                (y + height) * template_height,
+                1.0,
+            ],
+        ],
+        dtype=np.float64,
+    )
+    projected = (page.registration.homography @ corners.T).T
+    projected_xy = projected[:, :2] / projected[:, 2:3]
+    scan_width, scan_height = page.ink.image.size
+    x0 = max(0.0, float(projected_xy[:, 0].min()) / scan_width)
+    y0 = max(0.0, float(projected_xy[:, 1].min()) / scan_height)
+    x1 = min(1.0, float(projected_xy[:, 0].max()) / scan_width)
+    y1 = min(1.0, float(projected_xy[:, 1].max()) / scan_height)
+    return (x0, y0, max(0.0, x1 - x0), max(0.0, y1 - y0))
+
+
+def _student_ink_field_crop(
+    ink_pages: dict[int, _RegisteredInkPage],
+    field: FieldLocation,
+    output_dir: Path,
+    prefix: str,
+    *,
+    dpi: int,
+) -> tuple[str, StudentInk] | None:
+    registered_page = ink_pages.get(field.page)
+    if registered_page is None:
+        return None
+    page = registered_page.ink
+    mapped_field = _map_template_field(field, registered_page)
+    box = bbox_norm_to_px(mapped_field.bbox, page.image.width, page.image.height)
+    crop = crop_student_ink(page, box, dpi=dpi)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{prefix}.png"
+    crop.image.save(output_dir / filename)
+    return str(Path(output_dir.name) / filename), crop
+
+
+def _question_with_student_ink(
+    question: StudentSubmissionQuestion,
+    ink_pages: dict[int, _RegisteredInkPage],
+    responses_dir: Path,
+    *,
+    dpi: int,
+    template_coordinates: bool = False,
+) -> StudentSubmissionQuestion:
+    crops: list[StudentInk] = []
+    fragments: list[StudentInkFragment] = []
+    for segment in question.source_segments:
+        registered_page = ink_pages.get(segment.page_number)
+        if registered_page is None:
+            continue
+        page = registered_page.ink
+        crop_bbox = (
+            _map_template_bbox(segment.bbox_norm, registered_page)
+            if template_coordinates
+            else segment.bbox_norm
+        )
+        box = bbox_norm_to_px(
+            crop_bbox,
+            page.image.width,
+            page.image.height,
+        )
+        crop = crop_student_ink(page, box, dpi=dpi)
+        crops.append(crop)
+        segment_x, segment_y, segment_width, segment_height = crop_bbox
+        for fragment in crop.fragments:
+            x, y, width, height = fragment.bbox_px
+            fragments.append(
+                StudentInkFragment(
+                    page_number=segment.page_number,
+                    bbox_norm=(
+                        segment_x + (x / crop.image.width) * segment_width,
+                        segment_y + (y / crop.image.height) * segment_height,
+                        (width / crop.image.width) * segment_width,
+                        (height / crop.image.height) * segment_height,
+                    ),
+                )
+            )
+
+    if not crops:
+        return question
+
+    width = max(crop.image.width for crop in crops)
+    height = sum(crop.image.height for crop in crops)
+    stitched = Image.new("RGB", (width, height), color=(255, 255, 255))
+    y_offset = 0
+    for crop in crops:
+        stitched.paste(crop.image, (0, y_offset))
+        y_offset += crop.image.height
+
+    responses_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{question.question_id}.ink.png"
+    stitched.save(responses_dir / filename)
+    return replace(
+        question,
+        ink_image_path=str(Path(responses_dir.name) / filename),
+        ink_fragments=tuple(fragments),
+    )
 
 def _scan_offset_by_page(
     template: AssignmentTemplate,
@@ -1215,8 +1554,11 @@ def _fill_responses_with_vlm(
         response_text = question.response_text
         response_confidence = question.response_confidence
         response_source = question.response_source
-        if not response_text and question.response_image_path:
-            crop_path = submission_dir / question.response_image_path
+        ink_fragments = question.ink_fragments
+        transcription_path = question.ink_image_path or question.response_image_path
+        ink_is_blank = question.ink_image_path is not None and not ink_fragments
+        if not response_text and transcription_path and not ink_is_blank:
+            crop_path = submission_dir / transcription_path
             reading = _transcribe_crop(
                 crop_path,
                 question_id=question.question_id,
@@ -1225,8 +1567,18 @@ def _fill_responses_with_vlm(
                 math_latex=math_latex,
                 math_transcriber=math_transcriber,
                 escalate_floor=escalate_floor,
+                handwriting_only=question.ink_image_path is not None,
             )
             response_text, response_confidence, response_source = reading
+            if len(ink_fragments) == 1:
+                ink_fragments = (
+                    replace(
+                        ink_fragments[0],
+                        text=response_text,
+                        confidence=response_confidence,
+                        source=response_source,
+                    ),
+                )
             progress.response(pdf_name, question.question_id)
         filled.append(
             replace(
@@ -1234,6 +1586,7 @@ def _fill_responses_with_vlm(
                 response_text=response_text,
                 response_confidence=response_confidence,
                 response_source=response_source,
+                ink_fragments=ink_fragments,
             )
         )
     return filled
@@ -1248,6 +1601,7 @@ def _transcribe_crop(
     math_latex: bool = False,
     math_transcriber: "MathTranscriber | None" = None,
     escalate_floor: float | None = None,
+    handwriting_only: bool = False,
 ) -> tuple[str, float | None, str | None]:
     def _read_with_ocr() -> tuple[str, float | None, str | None]:
         text, confidence = _ocr_image_with_confidence(crop_path, psm=6)
@@ -1267,16 +1621,36 @@ def _transcribe_crop(
             return None
         progress_callback(f"Transcribing {question_id} with Ollama VLM...")
         try:
-            _prompt, answer = extract_question_prompt_and_answer(
-                image_path=crop_path,
-                config=ollama_config,
-                math_latex=math_latex,
-            )
+            if handwriting_only:
+                answer = extract_handwriting_only(
+                    image_path=crop_path,
+                    config=ollama_config,
+                    math_latex=math_latex,
+                )
+            else:
+                if math_latex:
+                    _prompt, answer = extract_question_prompt_and_answer(
+                        image_path=crop_path,
+                        config=ollama_config,
+                        math_latex=True,
+                    )
+                else:
+                    _prompt, answer = extract_question_prompt_and_answer(
+                        image_path=crop_path,
+                        config=ollama_config,
+                    )
         except Exception as exc:
             progress_callback(f"  Warning: Ollama VLM failed for {question_id}: {exc}")
             return None
         text = answer or ""
-        return (text, None, SOURCE_VISION_MODEL) if text else None
+        if not text.strip():
+            return None
+        confidence = (
+            0.0
+            if handwriting_only and "[unclear]" in text.casefold()
+            else None
+        )
+        return (text, confidence, SOURCE_VISION_MODEL)
 
     if escalate_floor is not None:
         ocr_reading = _read_with_ocr()
@@ -1320,6 +1694,12 @@ def _build_document_from_assignment_template(
 ]:
     progress = progress or ExtractionProgress()
     rendered_pages = _render_scan_all_pages(pdf_path, dpi=dpi)
+    ink_pages = _registered_ink_pages(
+        rendered_pages,
+        template,
+        dpi=dpi,
+        progress_callback=progress_callback,
+    )
 
     field_crops_dir = submission_dir / "identifiers"
     responses_dir = submission_dir / "responses"
@@ -1332,38 +1712,70 @@ def _build_document_from_assignment_template(
         scan_layout = _detect_scan_layout(
             rendered_pages, max_page=template.total_pages
         )
-        name_field = _select_field(
-            label=scan_layout.name_label,
-            right_boundary=scan_layout.id_label,
-            template_field=template.name_field,
-            line_boxes_by_page=scan_layout.line_boxes_by_page,
-            rendered_pages=rendered_pages,
-        )
-        id_field = _select_field(
-            label=scan_layout.id_label,
-            right_boundary=None,
-            template_field=template.student_id_field,
-            line_boxes_by_page=scan_layout.line_boxes_by_page,
-            rendered_pages=rendered_pages,
-            tight_top=True,
-        )
+        if ink_pages:
+            name_field = template.name_field
+            id_field = template.student_id_field
+        else:
+            name_field = _select_field(
+                label=scan_layout.name_label,
+                right_boundary=scan_layout.id_label,
+                template_field=template.name_field,
+                line_boxes_by_page=scan_layout.line_boxes_by_page,
+                rendered_pages=rendered_pages,
+            )
+            id_field = _select_field(
+                label=scan_layout.id_label,
+                right_boundary=None,
+                template_field=template.student_id_field,
+                line_boxes_by_page=scan_layout.line_boxes_by_page,
+                rendered_pages=rendered_pages,
+                tight_top=True,
+            )
 
     name_image: str | None = None
+    name_ink: StudentInk | None = None
     if name_field is not None:
-        page_image = rendered_pages.get(name_field.page)
-        if page_image is not None:
-            name_image = _save_field_crop(page_image, name_field, field_crops_dir, "name")
+        isolated = _student_ink_field_crop(
+            ink_pages,
+            name_field,
+            field_crops_dir,
+            "name",
+            dpi=dpi,
+        )
+        if isolated is not None:
+            name_image, name_ink = isolated
+        else:
+            page_image = rendered_pages.get(name_field.page)
+            if page_image is not None:
+                name_image = _save_field_crop(
+                    page_image, name_field, field_crops_dir, "name"
+                )
 
     id_image: str | None = None
+    id_ink: StudentInk | None = None
     if id_field is not None:
-        page_image = rendered_pages.get(id_field.page)
-        if page_image is not None:
-            id_image = _save_field_crop(page_image, id_field, field_crops_dir, "id")
+        isolated = _student_ink_field_crop(
+            ink_pages,
+            id_field,
+            field_crops_dir,
+            "id",
+            dpi=dpi,
+        )
+        if isolated is not None:
+            id_image, id_ink = isolated
+        else:
+            page_image = rendered_pages.get(id_field.page)
+            if page_image is not None:
+                id_image = _save_field_crop(
+                    page_image, id_field, field_crops_dir, "id"
+                )
+
+    template_questions = list(template.questions)
 
     if scan_layout is None:
         questions = [
             _question_with_mapped_crop(question, rendered_pages, responses_dir)
-            for question in template.questions
+            for question in template_questions
         ]
     else:
         page_offsets = _scan_offset_by_page(template, scan_layout)
@@ -1376,11 +1788,31 @@ def _build_document_from_assignment_template(
                 rendered_pages,
                 responses_dir,
             )
-            for question in template.questions
+            for question in template_questions
+        ]
+
+    if ink_pages:
+        questions = [
+            _question_with_student_ink(
+                question,
+                ink_pages,
+                responses_dir,
+                dpi=dpi,
+                template_coordinates=template.exact_regions,
+            )
+            for question in questions
         ]
 
     if llm_responses and ollama_config is not None:
-        crop_count = sum(1 for q in questions if q.response_image_path)
+        crop_count = sum(
+            1
+            for question in questions
+            if (question.ink_image_path or question.response_image_path)
+            and not (
+                question.ink_image_path is not None
+                and not question.ink_fragments
+            )
+        )
         progress.file_start(pdf_path.name, crop_count)
         questions = _fill_responses_with_vlm(
             questions,
@@ -1394,16 +1826,55 @@ def _build_document_from_assignment_template(
             escalate_floor=escalate_floor,
         )
 
+    student_name = ""
+    name_confidence: float | None = None
+    if name_image and (name_ink is None or name_ink.has_ink):
+        name_path = submission_dir / name_image
+        if ollama_config is not None:
+            try:
+                student_name = extract_field_text(
+                    image_path=name_path,
+                    field_kind="name",
+                    config=ollama_config,
+                )
+            except Exception as exc:
+                progress_callback(f"  Warning: could not read student name: {exc}")
+        if not student_name:
+            student_name, name_confidence = _ocr_field_with_confidence(
+                name_path, digits=False
+            )
+
+    student_id = ""
+    id_confidence: float | None = None
+    if id_image and (id_ink is None or id_ink.has_ink):
+        id_path = submission_dir / id_image
+        if ollama_config is not None:
+            try:
+                student_id = extract_field_text(
+                    image_path=id_path,
+                    field_kind="sid",
+                    config=ollama_config,
+                )
+            except Exception as exc:
+                progress_callback(f"  Warning: could not read student ID: {exc}")
+        if not student_id:
+            student_id, id_confidence = _ocr_field_with_confidence(
+                id_path, digits=True
+            )
+
+    title_metadata = parse_assignment_metadata_from_title(template.assignment_title)
     document = StudentSubmissionDocument(
-        student_name="",
-        student_id="",
-        course_code=None,
-        assignment_title=template.assignment_title,
-        assignment_version=None,
+        student_name=student_name,
+        student_id=student_id,
+        course_code=title_metadata.course_code,
+        assignment_title=title_metadata.assignment_title,
+        assignment_version=title_metadata.assignment_version,
         source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
         name_image_path=name_image,
         id_image_path=id_image,
+        name_confidence=name_confidence,
+        id_confidence=id_confidence,
         questions=questions,
     )
     return document, name_field, id_field, name_image, id_image

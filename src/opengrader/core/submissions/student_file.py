@@ -87,6 +87,15 @@ class AssignmentTitleMetadata:
 
 
 @dataclass(frozen=True)
+class StudentInkFragment:
+    page_number: int
+    bbox_norm: tuple[float, float, float, float]
+    text: str = ""
+    confidence: float | None = None
+    source: str | None = None
+
+
+@dataclass(frozen=True)
 class StudentSubmissionQuestion:
     question_id: str
     prompt: str
@@ -98,6 +107,8 @@ class StudentSubmissionQuestion:
     analysis: str = ""
     question_type: QuestionType = FREE_RESPONSE
     source_segments: tuple[QuestionSourceSegment, ...] = ()
+    ink_image_path: str | None = None
+    ink_fragments: tuple[StudentInkFragment, ...] = ()
     # 0-100; None means unverified, including model output.
     response_confidence: float | None = None
     response_source: str | None = None
@@ -401,6 +412,69 @@ def _format_source_segments(
     return json.dumps(payload, separators=(",", ":"))
 
 
+def _parse_ink_fragments(raw: str | None) -> tuple[StudentInkFragment, ...]:
+    text = (raw or "").strip()
+    if not text:
+        return ()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("ink fragments must be JSON") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("ink fragments must be a JSON list")
+
+    fragments: list[StudentInkFragment] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("ink fragment entries must be objects")
+        page = item.get("page")
+        bbox = item.get("bbox")
+        if not isinstance(page, int) or page < 1:
+            raise ValueError("ink fragment page must be a positive integer")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            raise ValueError("ink fragment bbox must contain four numbers")
+        try:
+            x, y, width, height = (float(value) for value in bbox)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ink fragment bbox must contain numbers") from exc
+        confidence_raw = item.get("confidence")
+        try:
+            confidence = (
+                None if confidence_raw is None else float(confidence_raw)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("ink fragment confidence must be a number") from exc
+        source_raw = item.get("source")
+        fragments.append(
+            StudentInkFragment(
+                page_number=page,
+                bbox_norm=(x, y, width, height),
+                text=str(item.get("text", "")),
+                confidence=confidence,
+                source=str(source_raw) if source_raw else None,
+            )
+        )
+    return tuple(fragments)
+
+
+def _format_ink_fragments(fragments: tuple[StudentInkFragment, ...]) -> str:
+    if not fragments:
+        return ""
+    payload: list[dict[str, object]] = []
+    for fragment in fragments:
+        item: dict[str, object] = {
+            "page": fragment.page_number,
+            "bbox": [round(value, 4) for value in fragment.bbox_norm],
+            "text": fragment.text,
+        }
+        if fragment.confidence is not None:
+            item["confidence"] = round(fragment.confidence, 1)
+        if fragment.source:
+            item["source"] = fragment.source
+        payload.append(item)
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+
 def _format_submission_points(value: float | None) -> str:
     if value is None:
         return ""
@@ -562,6 +636,13 @@ def parse_student_submission_markdown(
                 question_type=_parse_question_type(fields.values.get("Question type")),
                 source_segments=_parse_source_segments(
                     fields.values.get("Source segments")
+                ),
+                ink_image_path=_parse_response_image_path(
+                    fields.values.get("Ink image"),
+                    base_path,
+                ),
+                ink_fragments=_parse_ink_fragments(
+                    fields.values.get("Ink fragments")
                 ),
                 response_confidence=_parse_optional_float(fields.values.get("Confidence")),
                 response_source=_parse_reading_source(fields.values.get("Read by")),
@@ -1681,9 +1762,17 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
             )
         else:
             lines.append("  - Response image: ")
+        if question.ink_image_path:
+            lines.append(
+                f"  - Ink image: ![{question.question_id} student ink]({question.ink_image_path})"
+            )
         lines.append(
             f"  - Source segments: {_format_source_segments(question.source_segments)}"
         )
+        if question.ink_fragments:
+            lines.append(
+                f"  - Ink fragments: {_format_ink_fragments(question.ink_fragments)}"
+            )
         if question.response_source:
             lines.append(f"  - Read by: {question.response_source}")
         if question.response_confidence is not None:
