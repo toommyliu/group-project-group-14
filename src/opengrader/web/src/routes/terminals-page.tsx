@@ -26,7 +26,7 @@ import { TerminalTabs } from '@/components/terminal-tabs';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { RemoteTerminal } from '@/components/remote-terminal';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ErrorAlert } from '@/components/error-alert';
 import {
   Empty,
   EmptyContent,
@@ -57,6 +57,10 @@ export default function TerminalsPage() {
   const selectedFailed =
     selected?.status === 'stopped' &&
     selected.message.startsWith('Could not start:');
+  const selectedFailureMessage = selectedFailed
+    ? selected.message.slice('Could not start:'.length).trim() ||
+      'Check the server setup, then try again.'
+    : null;
   const [renamingId, setRenamingId] = useState<string | null>(null);
   function beginRename(id: string) {
     if (action.isPending) return;
@@ -109,22 +113,27 @@ export default function TerminalsPage() {
     );
   }
   const limitReached = !catalog || sessions.length >= catalog.max_sessions;
+  const hasError = !confirmation && Boolean(error || action.error);
   return (
     <>
-      <PageHeading title="Terminals" description={assignmentData.title} />
+      <PageHeading
+        title="Terminals"
+        description={assignmentData.title}
+        className={hasError ? 'mb-6' : undefined}
+      />
+      {hasError && (
+        <ErrorAlert
+          className="mb-6"
+          title={
+            action.error ? 'Terminal action failed' : 'Could not load terminals'
+          }
+          error={action.error ?? error}
+        />
+      )}
       <section
         className="flex h-[calc(100svh-10rem)] min-h-96 flex-col overflow-hidden border"
         aria-label="Terminal sessions"
       >
-        {!confirmation && (error || action.error) && (
-          <Alert variant="destructive" className="border-x-0 border-t-0 px-4">
-            <CircleAlert aria-hidden="true" />
-            <AlertTitle>Terminal action failed</AlertTitle>
-            <AlertDescription>
-              {(action.error ?? error)?.message} Try again.
-            </AlertDescription>
-          </Alert>
-        )}
         <Tabs
           value={selected?.id ?? null}
           onValueChange={(value) => {
@@ -187,7 +196,7 @@ export default function TerminalsPage() {
                     </EmptyTitle>
                     <EmptyDescription>
                       {selectedFailed
-                        ? selected.message
+                        ? selectedFailureMessage
                         : 'Working directory and scrollback are saved.'}
                     </EmptyDescription>
                   </EmptyHeader>
@@ -254,11 +263,14 @@ export default function TerminalsPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             {action.error && (
-              <Alert variant="destructive">
-                <CircleAlert aria-hidden="true" />
-                <AlertTitle>Unable to continue</AlertTitle>
-                <AlertDescription>{action.error.message}</AlertDescription>
-              </Alert>
+              <ErrorAlert
+                title={
+                  confirmation?.kind === 'stop'
+                    ? 'Could not stop session'
+                    : 'Could not close terminal'
+                }
+                error={action.error}
+              />
             )}
             <AlertDialogFooter>
               <AlertDialogCancel ref={cancelRef} disabled={action.isPending}>

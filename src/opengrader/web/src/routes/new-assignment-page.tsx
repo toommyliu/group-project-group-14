@@ -1,3 +1,4 @@
+import { ErrorAlert } from '@/components/error-alert';
 import { errorMessage } from '@/lib/error-message';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useSelector } from '@tanstack/react-form';
@@ -292,7 +293,7 @@ export function AssignmentEditor({
             <span role="status">Saving assignment. Keep this page open.</span>
           )}
         </div>
-        {error && <p role="alert">{error}</p>}
+        {error && <ErrorAlert error={error} />}
         {saved && (
           <Link
             to="/assignment"
@@ -415,9 +416,7 @@ export function AssignmentEditor({
                         </div>
                       )}
                       {outline && current && result.error && (
-                        <p role="alert" className="mt-4">
-                          {result.error}
-                        </p>
+                        <ErrorAlert className="mt-4" error={result.error} />
                       )}
                       {visualPending && (
                         <p
