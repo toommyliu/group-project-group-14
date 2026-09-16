@@ -1,0 +1,647 @@
+{
+  "schema_version": 1,
+  "source_of_truth": "scanned_pdf",
+  "label_count": {
+    "assignments": 3,
+    "submissions": 5,
+    "question_responses": 41
+  },
+  "assignments": [
+    {
+      "assignment_key": "cmpe30-quiz2",
+      "question_source": "samples/cmpe30-quiz2/qa.md",
+      "metadata": {
+        "printed_title": "CMPE 30 Quiz 2_5a (100 points)",
+        "course_code": "CMPE 30",
+        "assignment_title": "Quiz 2",
+        "assignment_version": "A",
+        "notes": "The 5a form marker is printed as a subscript. The trailing a identifies version A; it is not part of the assignment title."
+      },
+      "questions": [
+        {
+          "id": "q1",
+          "qa_question_number": "1",
+          "pages": [
+            1
+          ],
+          "possible_points": 50
+        },
+        {
+          "id": "q2",
+          "qa_question_number": "2",
+          "pages": [
+            1
+          ],
+          "possible_points": 25
+        },
+        {
+          "id": "q3",
+          "qa_question_number": "3",
+          "pages": [
+            2
+          ],
+          "possible_points": 25
+        }
+      ],
+      "submissions": [
+        {
+          "source_pdf": "samples/cmpe30-quiz2/split-submissions/submission-0001.pdf",
+          "generated_submission": "samples/cmpe30-quiz2/student-submissions/submission-0001/submission-0001.submission.md",
+          "page_count": 2,
+          "student": {
+            "name": "Tommy Andy",
+            "id": "123456789"
+          },
+          "required_field_crops": [
+            {
+              "field": "title",
+              "page": 1,
+              "must_contain": "CMPE 30 Quiz 2_5a (100 points)"
+            },
+            {
+              "field": "name",
+              "page": 1,
+              "must_contain": "Tommy Andy"
+            },
+            {
+              "field": "id",
+              "page": 1,
+              "must_contain": "123456789"
+            }
+          ],
+          "responses": {
+            "q1": {
+              "mode": "blank",
+              "text": "",
+              "notes": "The small dark remnants in the generated ink crop are not student writing."
+            },
+            "q2": {
+              "mode": "exact",
+              "text": "this is a test program\npublic static void main() {\nSystem.out.println(\"hello\");\n}"
+            },
+            "q3": {
+              "mode": "exact",
+              "text": "int letter = 0;\nletter = 5-4-3-2-1;\nreturn 'A';\n}"
+            }
+          },
+          "source_sha256": "ed7f5ec78ab8e8d12f82566c732ddd21079bad81da3867fcbf4a87d9817bb47c"
+        }
+      ]
+    },
+    {
+      "assignment_key": "cmpe142-midterm2",
+      "question_source": "samples/cmpe142-midterm2/template-vB.pdf",
+      "metadata": {
+        "printed_title": "SP26 CMPE 142 Exam 2B_j",
+        "course_code": "CMPE 142",
+        "assignment_title": "Exam 2",
+        "assignment_version": "B",
+        "notes": "The j form marker is printed as a subscript after B. B is the assignment version; SP26 is the term."
+      },
+      "questions": [
+        {
+          "id": "q1",
+          "pages": [
+            1
+          ],
+          "possible_points": 50,
+          "prompt": "Minimum score. You don't have to do anything for this question."
+        },
+        {
+          "id": "q2",
+          "pages": [
+            1
+          ],
+          "possible_points": 1,
+          "prompt": "If the 16-bit number 0x95B3 is stored big-endian, what will be the first byte in HEX at the address where it is stored? Include the 0x prefix and no leading zeros. Use uppercase letters."
+        },
+        {
+          "id": "q3",
+          "pages": [
+            1
+          ],
+          "possible_points": 1,
+          "prompt": "If the 16-bit number 0xB395 is stored little-endian, what will be the first byte in HEX at the address where it is stored? Include the 0x prefix and no leading zeros. Use uppercase letters."
+        },
+        {
+          "id": "q4",
+          "pages": [
+            1,
+            2
+          ],
+          "possible_points": 2,
+          "prompt": "The following function clears bit n, where bit 0 is the least significant bit, in a 64-bit page table entry. Write the code to replace XXXX. Do not use any spaces."
+        },
+        {
+          "id": "q5",
+          "pages": [
+            2
+          ],
+          "possible_points": 2,
+          "prompt": "What does each level of the Multi-Level Feedback Queue (MLFQ) correspond to?"
+        },
+        {
+          "id": "q6",
+          "pages": [
+            2
+          ],
+          "possible_points": 2,
+          "prompt": "In MLFQ, rule 5 says: After some time period S, move all the jobs in the system to the topmost queue. What problem does rule 5 prevent? One word, all lowercase."
+        },
+        {
+          "id": "q7",
+          "pages": [
+            2
+          ],
+          "possible_points": 2,
+          "prompt": "Given a writable MAP_SHARED mmap of /tmp/file, write a line of code that will cause a dirty page for /tmp/file."
+        },
+        {
+          "id": "q8",
+          "pages": [
+            2
+          ],
+          "possible_points": 2,
+          "prompt": "On a Linux machine with 4G of RAM and 1G of swap, what happens when the shown program calls malloc for twenty 1G blocks without touching the allocated memory?"
+        }
+      ],
+      "submissions": [
+        {
+          "source_pdf": "samples/cmpe142-midterm2/split-submissions/submission-0001.pdf",
+          "generated_submission": "samples/cmpe142-midterm2/student-submissions/submission-0001/submission-0001.submission.md",
+          "page_count": 2,
+          "student": {
+            "name": "Ben Davis",
+            "id": "13579110"
+          },
+          "required_field_crops": [
+            {
+              "field": "title",
+              "page": 1,
+              "must_contain": "SP26 CMPE 142 Exam 2B_j"
+            },
+            {
+              "field": "name",
+              "page": 1,
+              "must_contain": "Ben Davis"
+            },
+            {
+              "field": "id",
+              "page": 1,
+              "must_contain": "13579110"
+            }
+          ],
+          "responses": {
+            "q1": {
+              "mode": "blank",
+              "text": "",
+              "notes": "The printed minimum-score question is not a student response."
+            },
+            "q2": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q3": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q4": {
+              "mode": "exact",
+              "text": "no",
+              "notes": "The response is at the top of page 2, so the response crop spans pages 1 and 2."
+            },
+            "q5": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q6": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q7": {
+              "mode": "exact",
+              "text": "public static void main"
+            },
+            "q8": {
+              "mode": "exact",
+              "text": "Swap"
+            }
+          },
+          "source_sha256": "f7e19adf3aebdc47581956c2b70553333fa66f042babaed1e2c520e92be1d761"
+        },
+        {
+          "source_pdf": "samples/cmpe142-midterm2/split-submissions/submission-0002.pdf",
+          "generated_submission": "samples/cmpe142-midterm2/student-submissions/submission-0002/submission-0002.submission.md",
+          "page_count": 2,
+          "student": {
+            "name": "Thao Bau",
+            "id": "123456789"
+          },
+          "required_field_crops": [
+            {
+              "field": "title",
+              "page": 1,
+              "must_contain": "SP26 CMPE 142 Exam 2B_j"
+            },
+            {
+              "field": "name",
+              "page": 1,
+              "must_contain": "Thao Bau"
+            },
+            {
+              "field": "id",
+              "page": 1,
+              "must_contain": "123456789"
+            }
+          ],
+          "responses": {
+            "q1": {
+              "mode": "blank",
+              "text": "",
+              "notes": "The printed minimum-score question is not a student response."
+            },
+            "q2": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q3": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q4": {
+              "mode": "exact",
+              "text": "maybe",
+              "notes": "The response is at the top of page 2, so the response crop spans pages 1 and 2."
+            },
+            "q5": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q6": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q7": {
+              "mode": "exact",
+              "text": "/tmp/file"
+            },
+            "q8": {
+              "mode": "exact",
+              "text": "no"
+            }
+          },
+          "source_sha256": "1f543463e6bef2b876c5c305b666f9d397244772bcec618c3fa3de3b92a8d558"
+        }
+      ]
+    },
+    {
+      "assignment_key": "cs146-quiz1",
+      "question_source": "samples/cs146-quiz1/qa.md",
+      "metadata": {
+        "printed_title_pattern": "CS146: Quiz 1 ({version})",
+        "course_code": "CS146",
+        "assignment_title": "Quiz 1",
+        "assignment_versions": [
+          "A",
+          "B"
+        ]
+      },
+      "questions_by_version": {
+        "A": [
+          {
+            "id": "q1",
+            "qa_question_number": "1",
+            "pages": [
+              1
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q2",
+            "qa_question_number": "2",
+            "pages": [
+              1
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q3",
+            "qa_question_number": "3",
+            "pages": [
+              1
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q4",
+            "qa_question_number": "4",
+            "pages": [
+              2
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q5a",
+            "qa_question_number": "5a",
+            "pages": [
+              2
+            ],
+            "possible_points": 8
+          },
+          {
+            "id": "q5b",
+            "qa_question_number": "5b",
+            "pages": [
+              2
+            ],
+            "possible_points": 9
+          },
+          {
+            "id": "q5c",
+            "qa_question_number": "5c",
+            "pages": [
+              2
+            ],
+            "possible_points": 8
+          },
+          {
+            "id": "q6a",
+            "qa_question_number": "6a",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          },
+          {
+            "id": "q6b",
+            "qa_question_number": "6b",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          },
+          {
+            "id": "q6c",
+            "qa_question_number": "6c",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          },
+          {
+            "id": "q6d",
+            "qa_question_number": "6d",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          }
+        ],
+        "B": [
+          {
+            "id": "q1",
+            "qa_question_number": "1",
+            "pages": [
+              1
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q2",
+            "qa_question_number": "2",
+            "pages": [
+              1
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q3",
+            "qa_question_number": "3",
+            "pages": [
+              1
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q4",
+            "qa_question_number": "4",
+            "pages": [
+              2
+            ],
+            "possible_points": 10
+          },
+          {
+            "id": "q5a",
+            "qa_question_number": "5a",
+            "pages": [
+              2
+            ],
+            "possible_points": 8
+          },
+          {
+            "id": "q5b",
+            "qa_question_number": "5b",
+            "pages": [
+              2
+            ],
+            "possible_points": 9
+          },
+          {
+            "id": "q5c",
+            "qa_question_number": "5c",
+            "pages": [
+              2
+            ],
+            "possible_points": 8
+          },
+          {
+            "id": "q6a",
+            "qa_question_number": "6a",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          },
+          {
+            "id": "q6b",
+            "qa_question_number": "6b",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          },
+          {
+            "id": "q6c",
+            "qa_question_number": "6c",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          },
+          {
+            "id": "q6d",
+            "qa_question_number": "6d",
+            "pages": [
+              3
+            ],
+            "possible_points": 5
+          }
+        ]
+      },
+      "submissions": [
+        {
+          "source_pdf": "samples/cs146-quiz1/split-submissions/submission-0001.pdf",
+          "generated_submission": "samples/cs146-quiz1/student-submissions/submission-0001/submission-0001.submission.md",
+          "page_count": 3,
+          "assignment_version": "A",
+          "student": {
+            "name": "Tommy Liu",
+            "id": "123456789"
+          },
+          "required_field_crops": [
+            {
+              "field": "title",
+              "page": 1,
+              "must_contain": "CS146: Quiz 1 (A)"
+            },
+            {
+              "field": "name",
+              "page": 1,
+              "must_contain": "Tommy Liu"
+            },
+            {
+              "field": "id",
+              "page": 1,
+              "must_contain": "123456789"
+            }
+          ],
+          "responses": {
+            "q1": {
+              "mode": "exact",
+              "text": "no yes\nmaybe maybe\nso"
+            },
+            "q2": {
+              "mode": "exact",
+              "text": "testing"
+            },
+            "q3": {
+              "mode": "exact",
+              "text": "B",
+              "notes": "The student circled option B, whose printed value is 1. The selection label is the transcription."
+            },
+            "q4": {
+              "mode": "exact",
+              "text": "none of these are even numbers maybe so"
+            },
+            "q5a": {
+              "mode": "exact",
+              "text": "none to\nmaybe\nuse"
+            },
+            "q5b": {
+              "mode": "exact",
+              "text": "yes sir"
+            },
+            "q5c": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q6a": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q6b": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q6c": {
+              "mode": "exact",
+              "text": "maybe"
+            },
+            "q6d": {
+              "mode": "exact",
+              "text": "so"
+            }
+          },
+          "notes": "Relabeled from the current scanned PDF. Dispersed writing is read top-to-bottom, then left-to-right within a row.",
+          "source_sha256": "caacd268c18b685941df46f386ccfbf52d2a23576d6c194a05b8b0e19517c5ca"
+        },
+        {
+          "source_pdf": "samples/cs146-quiz1/split-submissions/submission-0002.pdf",
+          "generated_submission": "samples/cs146-quiz1/student-submissions/submission-0002/submission-0002.submission.md",
+          "page_count": 3,
+          "assignment_version": "B",
+          "student": {
+            "name": "Bill Gates",
+            "id": "987654321"
+          },
+          "required_field_crops": [
+            {
+              "field": "title",
+              "page": 1,
+              "must_contain": "CS146: Quiz 1 (B)"
+            },
+            {
+              "field": "name",
+              "page": 1,
+              "must_contain": "Bill Gates"
+            },
+            {
+              "field": "id",
+              "page": 1,
+              "must_contain": "987654321"
+            }
+          ],
+          "responses": {
+            "q1": {
+              "mode": "exact",
+              "text": "no yes\nmaybe"
+            },
+            "q2": {
+              "mode": "exact",
+              "text": "B",
+              "notes": "The student circled option B, whose printed value is pwd."
+            },
+            "q3": {
+              "mode": "exact",
+              "text": "no\nyes"
+            },
+            "q4": {
+              "mode": "exact",
+              "text": "no\nyes\nno\nyes\nno"
+            },
+            "q5a": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q5b": {
+              "mode": "exact",
+              "text": "no"
+            },
+            "q5c": {
+              "mode": "exact",
+              "text": "yes no\nmaybe no\nno yes"
+            },
+            "q6a": {
+              "mode": "exact",
+              "text": "no\nno\nno\nno no"
+            },
+            "q6b": {
+              "mode": "exact",
+              "text": "yes"
+            },
+            "q6c": {
+              "mode": "exact",
+              "text": "yes maybe\nso"
+            },
+            "q6d": {
+              "mode": "exact",
+              "text": "no\nyes yes\nno"
+            }
+          },
+          "notes": "Relabeled from the current scanned PDF. Dispersed writing is read top-to-bottom, then left-to-right within a row. Identity for submission 0002 confirmed by Tommy.",
+          "source_sha256": "2eaec97a0e65c2f74a8cf4d6447141509ac3d911598f302281035eb3f7274d76"
+        }
+      ]
+    }
+  ]
+}

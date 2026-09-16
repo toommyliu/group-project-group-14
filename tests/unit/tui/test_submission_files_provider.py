@@ -179,7 +179,7 @@ def test_submission_files_provider_loads_flat_and_nested_submission_files(
 
 def test_submission_files_provider_loads_students_and_questions() -> None:
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path="samples/cs146-quiz1/student-submissions",
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -223,7 +223,7 @@ def test_submission_files_provider_loads_students_and_questions() -> None:
 
 def test_submission_files_provider_returns_student_specific_response_images() -> None:
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path="samples/cs146-quiz1/student-submissions",
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -341,7 +341,7 @@ def test_submission_files_provider_save_question_grade_updates_selected_file(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -375,7 +375,7 @@ def test_save_question_transcription_persists_text_and_marks_verified(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -399,7 +399,7 @@ def test_save_question_transcription_persists_text_and_marks_verified(
 def test_comment_library_round_trips_through_the_provider(tmp_path: Path) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -411,7 +411,7 @@ def test_comment_library_round_trips_through_the_provider(tmp_path: Path) -> Non
 
     assert (submissions_path / ".opengrader" / "comments.json").exists()
     reloaded = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -423,7 +423,7 @@ def test_comment_library_round_trips_through_the_provider(tmp_path: Path) -> Non
 def test_regrade_requests_flow_through_the_provider(tmp_path: Path) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -458,7 +458,7 @@ def test_regrade_requests_flow_through_the_provider(tmp_path: Path) -> None:
 def test_regrade_unmatched_student_still_listed_but_not_navigable(tmp_path: Path) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -475,7 +475,7 @@ def test_saving_a_grade_writes_an_accountability_journal_entry(
     monkeypatch.setenv("OPENGRADER_GRADER", "prof_kim")
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -510,7 +510,7 @@ def test_saving_a_grade_writes_an_accountability_journal_entry(
 def test_build_review_items_binds_flags_to_nav_ids(tmp_path: Path) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -563,7 +563,7 @@ def test_build_review_items_carries_source_pdf_and_candidates(tmp_path: Path) ->
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -585,7 +585,7 @@ def test_assign_student_identity_persists_id_and_clears_candidates(
     sub_path = submissions_path / "submission-0001" / "submission-0001.submission.md"
     _write_ambiguous_submission(sub_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -614,7 +614,7 @@ def test_assign_student_identity_writes_journal_entry(
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -634,7 +634,7 @@ def test_read_grade_history_returns_journal_entries(
     monkeypatch.setenv("OPENGRADER_GRADER", "ta_bob")
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -657,7 +657,7 @@ def test_journal_write_failure_never_blocks_a_grade(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -701,7 +701,7 @@ def test_submission_files_provider_detects_external_submission_change(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -728,7 +728,7 @@ def test_submission_files_provider_save_succeeds_after_reload(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -758,7 +758,7 @@ def test_submission_files_provider_save_question_analysis_preserves_grade(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -1286,7 +1286,7 @@ def test_build_consistency_report_flags_same_answer_different_grade(
     )
 
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-single.md",
+        qa_file_path="samples/cmpe195a-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -1652,7 +1652,7 @@ def test_answer_pattern_report_carries_its_own_scope(tmp_path) -> None:
 
 def test_answer_pattern_report_needs_no_answer_key_argument() -> None:
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path="samples/cs146-quiz1/student-submissions",
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -1671,7 +1671,7 @@ def test_a_correction_records_the_reading_it_replaced_as_ground_truth(
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -1710,7 +1710,7 @@ def test_undoing_a_correction_restores_the_whole_reading(tmp_path: Path) -> None
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -1747,7 +1747,7 @@ def test_review_items_include_grades_awarded_before_a_rubric_edit(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -2019,7 +2019,7 @@ def test_similarity_report_is_memoized_until_a_save(
         points=50,
     )
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-single.md",
+        qa_file_path="samples/cmpe195a-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -2157,7 +2157,7 @@ def test_outcome_mastery_section_argument_is_not_confused_with_unscoped(
 def test_filing_a_regrade_invalidates_the_review_queue(tmp_path: Path) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -2201,7 +2201,7 @@ def test_reload_all_invalidates_the_similarity_report(
         points=50,
     )
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-single.md",
+        qa_file_path="samples/cmpe195a-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
@@ -2228,7 +2228,7 @@ def test_review_queue_notices_another_process_writing_the_journal(
 ) -> None:
     submissions_path = _copy_sample_submissions(tmp_path)
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/qa-multi.md",
+        qa_file_path="samples/cs146-quiz1/qa.md",
         submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )

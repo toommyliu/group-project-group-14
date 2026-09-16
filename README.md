@@ -199,13 +199,13 @@ spelling.
 
 Validate a QA markdown file:
 ```bash
-uv run qa-file validate --qa-file samples/qa-single.md
+uv run qa-file validate --qa-file samples/cmpe195a-quiz1/qa.md
 ```
 
 Generate a template PDF from a QA markdown file:
 ```bash
 uv run qa-file generate-template \
-  --qa-file samples/qa-single.md \
+  --qa-file samples/cmpe195a-quiz1/qa.md \
   --output-pdf out/template-single.pdf
 ```
 
@@ -266,7 +266,7 @@ Useful `submission-extractor` options:
 Convert an answer key PDF into a QA markdown draft:
 ```bash
 uv run create-answer-key \
-  --input samples/exam2b-2-answers.pdf \
+  --input samples/cmpe142-midterm2/answer-key-vB.pdf \
   --output out/qa.md \
   --title "Midterm 1 Solutions"
 ```
@@ -322,8 +322,8 @@ ollama serve
 Terminal 2: process the submissions with the model:
 ```bash
 uv run submission-extractor \
-  --input samples/cs146-midterm1/split-submissions \
-  --output samples/cs146-midterm1/student-submissions \
+  --input samples/cs146-quiz1/split-submissions \
+  --output samples/cs146-quiz1/student-submissions \
   --ollama-model qwen2.5vl:7b
 ```
 

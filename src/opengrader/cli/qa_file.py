@@ -21,11 +21,11 @@ from opengrader.core.roster import load_roster_students
 
 EPILOG = """
 examples:
-  uv run qa-file validate --qa-file samples/qa-single.md
-  uv run qa-file validate --qa-file samples/qa-multiple-choice.md
-  uv run qa-file generate-template --qa-file samples/qa-single.md --output-pdf out/template-single.pdf
-  uv run qa-file generate-template --qa-file samples/qa-multiple-choice.md --output-pdf out/template-mc.pdf
-  uv run qa-file generate-template --qa-file samples/qa-multi.md --output-pdf out/template-multi.pdf --all-versions
+  uv run qa-file validate --qa-file samples/cmpe195a-quiz1/qa.md
+  uv run qa-file validate --qa-file samples/cmpe195a-quiz2-multiple-choice/qa.md
+  uv run qa-file generate-template --qa-file samples/cmpe195a-quiz1/qa.md --output-pdf out/template-single.pdf
+  uv run qa-file generate-template --qa-file samples/cmpe195a-quiz2-multiple-choice/qa.md --output-pdf out/template-mc.pdf
+  uv run qa-file generate-template --qa-file samples/cs146-quiz1/qa.md --output-pdf out/template-multi.pdf --all-versions
 """
 
 

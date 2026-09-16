@@ -239,7 +239,7 @@ def test_app_loads_file_backed_grading_queue() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -276,7 +276,7 @@ def test_grade_screen_shows_source_pdf_name_for_file_backed_runs() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -315,7 +315,7 @@ def test_student_pane_id_tab_displays_submitted_ids() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -474,7 +474,7 @@ def test_student_filter_matches_submitted_ids() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -535,7 +535,7 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -581,7 +581,7 @@ def test_comment_library_inserts_snippet_into_comment_box(tmp_path) -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(submissions),
         )
 
@@ -619,7 +619,7 @@ def test_transcription_editor_opens_with_x_and_saves_correction(tmp_path) -> Non
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(submissions),
         )
 
@@ -679,7 +679,7 @@ def test_comment_library_scope_toggle_reorders_by_question(tmp_path) -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(submissions),
         )
 
@@ -721,7 +721,7 @@ def test_comment_library_saves_a_new_snippet_from_the_modal(tmp_path) -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(submissions),
         )
 
@@ -752,7 +752,7 @@ def test_grade_sidebar_width_is_bounded_when_resized() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1076,7 +1076,7 @@ def test_grade_rubric_editor_exposes_partial_credit_subitems() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1123,7 +1123,7 @@ def test_grade_rubric_editor_rejects_mixed_positive_and_negative_scoring() -> No
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1323,7 +1323,7 @@ def test_rubric_editor_enter_on_add_button_adds_subitem() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1364,7 +1364,7 @@ def test_rubric_editor_tab_is_trapped_inside_editor() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1396,7 +1396,7 @@ def test_rubric_editor_input_supports_word_shortcuts_inside_focus_trap() -> None
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1434,7 +1434,7 @@ def test_rubric_editor_validation_error_keeps_focus_trap() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1476,7 +1476,7 @@ def test_rubric_editor_blocks_grade_shortcuts_while_editing() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1538,7 +1538,7 @@ def test_returning_from_question_pane_restores_question_focus() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -1580,7 +1580,7 @@ def test_returning_from_student_pane_restores_student_focus() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path="samples/cs146-quiz1/student-submissions",
         )
 
@@ -2351,7 +2351,7 @@ def test_review_hotkey_opens_modal_and_row_jumps_to_grade(tmp_path) -> None:
         subs = _copy_quiz_fixture(tmp_path)
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(subs),
         )
         async with app.run_test() as pilot:
@@ -2377,7 +2377,7 @@ def test_history_hotkey_opens_modal_after_a_graded_change(tmp_path) -> None:
         subs = _copy_quiz_fixture(tmp_path)
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(subs),
         )
         async with app.run_test() as pilot:
@@ -2535,7 +2535,7 @@ def test_a_submission_that_finishes_later_folds_into_an_open_session(tmp_path) -
         folder, arrive = _partially_extracted_folder(tmp_path)
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(folder),
         )
         async with app.run_test(size=(140, 45)) as pilot:
@@ -2559,7 +2559,7 @@ def test_the_fold_in_watch_starts_on_a_folder_opened_directly(tmp_path) -> None:
         folder, _arrive = _partially_extracted_folder(tmp_path)
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(folder),
         )
         async with app.run_test(size=(140, 45)) as pilot:
@@ -2579,7 +2579,7 @@ def test_grade_while_extracting_opens_the_workspace_with_certainty(tmp_path) -> 
             await pilot.pause()
             app.post_message(
                 SetupScreen.GradeWhileExtractingRequested(
-                    "samples/qa-multi.md", str(folder)
+                    "samples/cs146-quiz1/qa.md", str(folder)
                 )
             )
             await pilot.pause()
@@ -2601,7 +2601,7 @@ def test_the_watch_stops_once_the_extractor_worker_reports_done(tmp_path) -> Non
         folder, arrive = _partially_extracted_folder(tmp_path)
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/qa-multi.md",
+            qa_file_path="samples/cs146-quiz1/qa.md",
             submissions_path=str(folder),
         )
         async with app.run_test(size=(140, 45)) as pilot:

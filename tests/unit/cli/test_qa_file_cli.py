@@ -24,7 +24,11 @@ def _extract_pdf_text(path: Path) -> str:
 
 @pytest.mark.parametrize(
     "sample_name",
-    ["qa-single.md", "qa-multi.md", "qa-multiple-choice.md"],
+    [
+        "cmpe195a-quiz1/qa.md",
+        "cs146-quiz1/qa.md",
+        "cmpe195a-quiz2-multiple-choice/qa.md",
+    ],
 )
 def test_validate_accepts_sample_qa_files(
     monkeypatch: pytest.MonkeyPatch,
@@ -42,12 +46,12 @@ def test_validate_accepts_sample_qa_files(
     ("sample_name", "output_name", "expected_text"),
     [
         (
-            "qa-single.md",
+            "cmpe195a-quiz1/qa.md",
             "qa-single.pdf",
             ["Quiz 1: Shell/Linux Commands", "What is the capital of France?"],
         ),
         (
-            "qa-multiple-choice.md",
+            "cmpe195a-quiz2-multiple-choice/qa.md",
             "qa-multiple-choice.pdf",
             ["Which data structure uses FIFO ordering?", "A)", "Queue"],
         ),
@@ -87,7 +91,7 @@ def test_generate_template_accepts_all_versions_sample_qa_file(
         monkeypatch,
         "generate-template",
         "--qa-file",
-        str(SAMPLES_DIR / "qa-multi.md"),
+        str(SAMPLES_DIR / "cs146-quiz1/qa.md"),
         "--output-pdf",
         str(output_path),
         "--all-versions",
@@ -115,7 +119,7 @@ def test_generate_bubble_sheet_writes_a_sheet_and_names_what_it_skipped(
         monkeypatch,
         "generate-template",
         "--qa-file",
-        str(SAMPLES_DIR / "qa-multiple-choice.md"),
+        str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf",
         str(output_path),
         "--bubble-sheet",
@@ -136,7 +140,7 @@ def test_generate_bubble_sheet_refuses_a_qa_file_with_no_multiple_choice(
             monkeypatch,
             "generate-template",
             "--qa-file",
-            str(SAMPLES_DIR / "qa-single.md"),
+            str(SAMPLES_DIR / "cmpe195a-quiz1/qa.md"),
             "--output-pdf",
             str(tmp_path / "sheet.pdf"),
             "--bubble-sheet",
@@ -156,7 +160,7 @@ def test_generate_bubble_sheet_with_a_roster_makes_one_sheet_per_student(
         monkeypatch,
         "generate-template",
         "--qa-file",
-        str(SAMPLES_DIR / "qa-multiple-choice.md"),
+        str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf",
         str(output_path),
         "--bubble-sheet",
@@ -180,7 +184,7 @@ def test_copies_prints_that_many_sheets(
     _run_cli(
         monkeypatch,
         "generate-template",
-        "--qa-file", str(SAMPLES_DIR / "qa-multiple-choice.md"),
+        "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf", str(output_path),
         "--bubble-sheet",
         "--copies", "4",
@@ -199,7 +203,7 @@ def test_shuffle_gives_each_sheet_its_own_order_and_form_code(
     _run_cli(
         monkeypatch,
         "generate-template",
-        "--qa-file", str(SAMPLES_DIR / "qa-multiple-choice.md"),
+        "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf", str(output_path),
         "--bubble-sheet",
         "--copies", "6",
@@ -225,7 +229,7 @@ def test_shuffle_without_a_batch_is_refused(
         _run_cli(
             monkeypatch,
             "generate-template",
-            "--qa-file", str(SAMPLES_DIR / "qa-multiple-choice.md"),
+            "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
             "--output-pdf", str(tmp_path / "x.pdf"),
             "--bubble-sheet",
             "--shuffle",
@@ -241,7 +245,7 @@ def test_a_roster_and_copies_together_are_refused(
         _run_cli(
             monkeypatch,
             "generate-template",
-            "--qa-file", str(SAMPLES_DIR / "qa-multiple-choice.md"),
+            "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
             "--output-pdf", str(tmp_path / "x.pdf"),
             "--bubble-sheet",
             "--roster", str(roster),
@@ -256,7 +260,7 @@ def test_shuffling_a_written_template_is_refused_with_the_reason(
         _run_cli(
             monkeypatch,
             "generate-template",
-            "--qa-file", str(SAMPLES_DIR / "qa-single.md"),
+            "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz1/qa.md"),
             "--output-pdf", str(tmp_path / "x.pdf"),
             "--shuffle",
             "--copies", "3",

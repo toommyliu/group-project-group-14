@@ -420,7 +420,7 @@ def test_section_flag_with_multiple_rosters_errors(monkeypatch, tmp_path) -> Non
 
 
 _SAMPLES = Path(__file__).resolve().parents[3] / "samples"
-_MC_QA = _SAMPLES / "qa-multiple-choice.md"
+_MC_QA = _SAMPLES / "cmpe195a-quiz2-multiple-choice/qa.md"
 
 
 def _fill_bubble_sheet(source_pdf: Path, layout, marks: dict, dest: Path) -> None:  # noqa: ANN001
@@ -529,7 +529,7 @@ def test_bubble_sheet_mode_rejects_a_qa_file_with_no_multiple_choice(
     with pytest.raises(SystemExit) as exit_info:
         run_cli([
             "--input", str(scans), "--output", str(tmp_path / "out"),
-            "--bubble-sheet", str(_SAMPLES / "qa-single.md"),
+            "--bubble-sheet", str(_SAMPLES / "cmpe195a-quiz1/qa.md"),
         ])
     assert exit_info.value.code == 1
     assert "no multiple-choice questions" in capsys.readouterr().err

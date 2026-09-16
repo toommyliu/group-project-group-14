@@ -536,7 +536,10 @@ def sample_session(tmp_path: Path) -> tuple[Path, Path]:
 
     repo = Path(__file__).resolve().parents[3]
     shutil.copytree(repo / "samples" / "cs146-quiz1", tmp_path / "cs146-quiz1")
-    shutil.copy(repo / "samples" / "qa-multi.md", tmp_path / "qa-multi.md")
+    shutil.copy(
+        repo / "samples" / "cs146-quiz1" / "qa.md",
+        tmp_path / "qa-multi.md",
+    )
     return (
         tmp_path / "qa-multi.md",
         tmp_path / "cs146-quiz1" / "student-submissions",

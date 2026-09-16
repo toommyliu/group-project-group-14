@@ -26,7 +26,7 @@ while IFS= read -r split_dir; do
   fi
   shopt -u dotglob
 
-  uv run submission-file \
+  uv run submission-extractor \
     --input "$split_dir" \
     --output "$output_dir" \
     --ollama-timeout 60 \

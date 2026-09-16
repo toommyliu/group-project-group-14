@@ -526,7 +526,7 @@ def test_end_to_end_on_the_cs146_sample(tmp_path, monkeypatch) -> None:
     cohort = tmp_path / "cohort"
     shutil.copytree(_SAMPLES / "cs146-quiz1" / "student-submissions", cohort / "submissions")
     qa = tmp_path / "qa-multi.md"
-    shutil.copy(_SAMPLES / "qa-multi.md", qa)
+    shutil.copy(_SAMPLES / "cs146-quiz1" / "qa.md", qa)
 
     extract_calls: list[list[str]] = []
     monkeypatch.setattr(
