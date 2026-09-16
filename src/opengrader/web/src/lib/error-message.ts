@@ -1,6 +1,7 @@
 export function errorMessage(
   error: unknown,
-  fallback = 'Request failed. Try again.'
+  fallback = 'An unexpected error occurred.'
 ) {
-  return error instanceof Error ? error.message : fallback;
+  const message = error instanceof Error ? error.message : error;
+  return typeof message === 'string' && message.trim() ? message : fallback;
 }

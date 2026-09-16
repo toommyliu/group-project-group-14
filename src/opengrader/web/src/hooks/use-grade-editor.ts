@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/error-message';
 import { usePreference } from '@/hooks/use-preference';
 import { useEffect, useRef, useState } from 'react';
 import { useBlocker } from '@tanstack/react-router';
@@ -165,11 +166,7 @@ export function useGradeEditor({
           cache(result.answer);
           warning = result.warning ?? warning;
         } catch (cause) {
-          fail(
-            cause instanceof Error
-              ? cause.message
-              : 'Could not save. Try again.'
-          );
+          fail(errorMessage(cause, 'Could not save. Try again.'));
           return false;
         }
       }
@@ -237,8 +234,8 @@ export function useGradeEditor({
       cache(fresh);
       fail('');
       setMessage('Saved answer reloaded.');
-    } catch {
-      fail('Could not reload the answer. Try again.');
+    } catch (cause) {
+      fail(errorMessage(cause, 'Could not reload the answer. Try again.'));
     } finally {
       setReloading(false);
     }
@@ -264,12 +261,10 @@ export function useGradeEditor({
 
   useHotkeys(
     [
-      ...question.rubric
-        .slice(0, 9)
-        .map((_, index) => ({
-          hotkey: { key: String(index + 1) },
-          callback: () => choose(index),
-        })),
+      ...question.rubric.slice(0, 9).map((_, index) => ({
+        hotkey: { key: String(index + 1) },
+        callback: () => choose(index),
+      })),
       {
         hotkey: 'C',
         callback: () => feedback.current?.focus(),

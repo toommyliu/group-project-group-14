@@ -10,7 +10,7 @@ import {
 } from '@/api/scans';
 import { errorMessage } from '@/lib/error-message';
 import { Button } from './ui/button';
-import { Alert, AlertDescription } from './ui/alert';
+import { ErrorAlert } from '@/components/error-alert';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -131,11 +131,7 @@ export function ScanActions({
           </p>
         </DropdownMenuContent>
       </DropdownMenu>
-      {error && !confirmOpen && (
-        <Alert variant="destructive" className="mt-2">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      {error && !confirmOpen && <ErrorAlert className="mt-2" error={error} />}
       <AlertDialog
         open={confirmOpen}
         onOpenChange={(open) => {
@@ -151,11 +147,7 @@ export function ScanActions({
               undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
+          {error && <ErrorAlert error={error} />}
           <AlertDialogFooter>
             <AlertDialogCancel ref={cancel} disabled={working}>
               Cancel

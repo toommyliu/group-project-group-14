@@ -1,3 +1,4 @@
+import { ErrorAlert } from '@/components/error-alert';
 import {
   useEffect,
   useImperativeHandle,
@@ -344,8 +345,8 @@ export function VisualAssignmentEditor({
         }}
       />
       {failure && (
-        <div role="alert" className="space-y-2">
-          <p>{failure} Your visual edits are still here.</p>
+        <ErrorAlert error={failure}>
+          <p>Your visual edits are still here.</p>
           <Button
             type="button"
             variant="outline"
@@ -356,7 +357,7 @@ export function VisualAssignmentEditor({
           >
             Retry updating draft
           </Button>
-        </div>
+        </ErrorAlert>
       )}
       {/* Keep each version mounted so changing versions preserves unfinished field edits. */}
       {groups.map(({ key, questions }) => (

@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/error-message';
 import { useEffect, useRef, useState } from 'react';
 import { terminalInputPackets } from '@/terminal/protocol';
 import { GhosttyTerminalSurface } from '@/terminal/ghostty/surface';
@@ -119,11 +120,7 @@ export function RemoteTerminal({ id }: { id: string }) {
       })
       .catch((error: unknown) => {
         if (!disposed)
-          setMessage(
-            error instanceof Error
-              ? error.message
-              : 'Could not load the terminal.'
-          );
+          setMessage(errorMessage(error, 'Could not load the terminal.'));
       });
     return () => {
       disposed = true;

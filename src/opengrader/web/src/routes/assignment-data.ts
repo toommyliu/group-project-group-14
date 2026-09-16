@@ -1,8 +1,8 @@
+import { ApiError } from '@/api/client';
 import type { QueryClient } from '@tanstack/react-query';
 import {
   answerQuery,
   assignmentQAQuery,
-  ApiError,
   assignmentsQuery,
   questionsQuery,
   submissionsQuery,

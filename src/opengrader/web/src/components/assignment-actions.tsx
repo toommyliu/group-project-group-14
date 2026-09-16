@@ -1,13 +1,12 @@
 import { errorMessage } from '@/lib/error-message';
 import { useId, useRef, useState } from 'react';
 import { Link, useRouter } from '@tanstack/react-router';
-import { CircleAlert } from 'lucide-react';
 import {
   assignmentsQuery,
   deleteAssignment,
   type Assignment,
 } from '@/api/queries';
-import { Alert, AlertDescription } from './ui/alert';
+import { ErrorAlert } from '@/components/error-alert';
 import { Button, buttonVariants } from './ui/button';
 import {
   AlertDialog,
@@ -131,13 +130,10 @@ export function AssignmentActions({
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && (
-            <Alert
-              variant="destructive"
+            <ErrorAlert
               className="items-center [&>svg]:row-span-1"
-            >
-              <CircleAlert aria-hidden="true" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+              error={error}
+            />
           )}
           <AlertDialogFooter>
             <AlertDialogCancel ref={cancelRef} disabled={busy}>
