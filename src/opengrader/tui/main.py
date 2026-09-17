@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 import os
+from pathlib import Path
 
 from opengrader.tui.terminal_graphics import (
     ENV_OVERRIDE,
@@ -26,10 +27,14 @@ def _enable_textual_feature(feature: str) -> None:
 
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(description="Launch the Opengrader TUI.")
-    parser.add_argument("--qa-file", help="Path to a QA markdown file.")
     parser.add_argument(
-        "--submissions",
-        help="Path to a .submission.md file or directory containing submission files.",
+        "--workspace",
+        type=Path,
+        help="Workspace directory. Defaults to the current workspace.",
+    )
+    parser.add_argument(
+        "--assignment",
+        help="Assignment ID. Defaults to the most recently created assignment.",
     )
     parser.add_argument(
         "--graphics",
@@ -67,19 +72,44 @@ def run_app(argv: list[str] | None = None) -> None:
         parser.exit(0, graphics_report(capability) + "\n")
         return
 
-    if bool(args.qa_file) != bool(args.submissions):
-        parser.error("--qa-file and --submissions must be provided together")
+    from pydantic import TypeAdapter
+    from opengrader.core.workspace.store import discover_workspace
+    from opengrader.core.workspace.models import Assignment
+    from opengrader.server.workspace.client import WorkspaceClient, ensure_service
+    from opengrader.tui.data.workspace_provider import WorkspaceProvider
+    from opengrader.tui.workspace_home import WorkspaceHome
 
     try:
-        if args.qa_file:
-            TuiApp(
-                qa_file_path=args.qa_file,
-                submissions_path=args.submissions,
-            ).run()
-            return
-
-        TuiApp().run()
-    except (OSError, ValueError) as exc:
+        root = args.workspace or discover_workspace(Path.cwd()) or Path.cwd()
+        client = WorkspaceClient(ensure_service(root))
+        assignments = TypeAdapter(list[Assignment]).validate_json(
+            client.request("GET", "/assignments")
+        )
+        selected = args.assignment
+        if selected is None and assignments:
+            selected = assignments[-1].id
+        while True:
+            if selected is None:
+                selected = WorkspaceHome(client).run()
+                if selected is None:
+                    return
+                assignments = TypeAdapter(list[Assignment]).validate_json(
+                    client.request("GET", "/assignments")
+                )
+            assignment = next(
+                (item for item in assignments if item.id == selected), None
+            )
+            if assignment is None:
+                raise ValueError("Assignment not found in this workspace.")
+            provider = WorkspaceProvider(client, assignment)
+            try:
+                result = TuiApp(data_provider=provider).run()
+            finally:
+                provider.close()
+            if result != "switch_assignment":
+                return
+            selected = None
+    except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(2, f"error: {exc}\n")
 
 

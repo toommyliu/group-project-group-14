@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,12 @@ def captured(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(run_module, "run_pipeline", fake_run)
-    monkeypatch.setattr(run_module, "_open_tui", lambda report: seen.__setitem__("tui", report))
+
+    def publish(report, root):
+        seen["publication"] = report, root
+        return replace(report, workspace=root or tmp_path, assignment_id="assignment")
+
+    monkeypatch.setattr(run_module, "_publish_results", publish)
     return seen
 
 
@@ -69,7 +75,7 @@ def _argv(tmp_path, *extra: str) -> list[str]:
 
 
 def test_the_required_pair_is_scan_and_out(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     request = captured["request"]
     assert request.scan == tmp_path / "bundle.pdf"
     assert request.output_dir == tmp_path / "cohort"
@@ -81,7 +87,6 @@ def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
     run_module.run_cli(
         _argv(
             tmp_path,
-            "--no-tui",
             "--qa", str(tmp_path / "qa.md"),
             "--roster", str(tmp_path / "roster.tsv"),
             "--blank-template", str(tmp_path / "blank.pdf"),
@@ -115,7 +120,7 @@ def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
 
 
 def test_no_auto_grade_turns_the_stage_off(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui", "--no-auto-grade"))
+    run_module.run_cli(_argv(tmp_path, "--no-auto-grade"))
     assert captured["request"].auto_grade is False
 
 
@@ -123,7 +128,7 @@ def test_llm_absent_follows_the_two_settings_independently(tmp_path, captured) -
     ai_config.save_settings(
         ai_config.AISettings(read_handwriting=True, grade_written=False)
     )
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     llm = captured["request"].llm
     assert llm.read_handwriting is True
     assert llm.grade_written is False
@@ -133,7 +138,7 @@ def test_llm_absent_follows_the_two_settings_the_other_way(tmp_path, captured) -
     ai_config.save_settings(
         ai_config.AISettings(read_handwriting=False, grade_written=True)
     )
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     llm = captured["request"].llm
     assert llm.read_handwriting is False
     assert llm.grade_written is True
@@ -143,7 +148,7 @@ def test_llm_flag_is_a_blunt_override_for_both(tmp_path, captured) -> None:
     ai_config.save_settings(
         ai_config.AISettings(read_handwriting=False, grade_written=False)
     )
-    run_module.run_cli(_argv(tmp_path, "--no-tui", "--llm"))
+    run_module.run_cli(_argv(tmp_path, "--llm"))
     llm = captured["request"].llm
     assert llm.read_handwriting is True
     assert llm.grade_written is True
@@ -155,7 +160,7 @@ def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
     ai_config.save_settings(
         ai_config.AISettings(read_handwriting=True, grade_written=True)
     )
-    run_module.run_cli(_argv(tmp_path, "--no-tui", "--no-llm"))
+    run_module.run_cli(_argv(tmp_path, "--no-llm"))
     llm = captured["request"].llm
     assert llm.read_handwriting is False
     assert llm.grade_written is False
@@ -163,34 +168,34 @@ def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
 
 def test_auto_grade_defaults_on_from_ai_setup(tmp_path, captured) -> None:
     ai_config.save_settings(ai_config.AISettings(auto_grade=True))
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     assert captured["request"].auto_grade is True
 
 
 def test_auto_grade_defaults_off_from_ai_setup(tmp_path, captured) -> None:
     ai_config.save_settings(ai_config.AISettings(auto_grade=False))
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     assert captured["request"].auto_grade is False
 
 
 def test_no_auto_grade_still_works_with_ai_setup_on(tmp_path, captured) -> None:
     ai_config.save_settings(ai_config.AISettings(auto_grade=True))
-    run_module.run_cli(_argv(tmp_path, "--no-tui", "--no-auto-grade"))
+    run_module.run_cli(_argv(tmp_path, "--no-auto-grade"))
     assert captured["request"].auto_grade is False
 
 
 def test_auto_ollama_defaults_from_ai_setup(tmp_path, captured) -> None:
     ai_config.save_settings(ai_config.AISettings(auto_start=False))
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     assert captured["request"].llm.auto_ollama is False
 
     ai_config.save_settings(ai_config.AISettings(auto_start=True))
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     assert captured["request"].llm.auto_ollama is True
 
 
 def test_absent_paths_stay_none_rather_than_becoming_dot(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     request = captured["request"]
     assert request.qa_file is None
     assert request.roster is None
@@ -199,7 +204,7 @@ def test_absent_paths_stay_none_rather_than_becoming_dot(tmp_path, captured) -> 
 
 
 def test_the_summary_names_every_stage_and_what_it_did(tmp_path, captured, capsys) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     out = capsys.readouterr().out
     assert "Summary" in out
     for stage in (STAGE_SCAN_CHECK, STAGE_SPLIT, STAGE_EXTRACT, STAGE_AUTO_GRADE):
@@ -210,23 +215,67 @@ def test_the_summary_names_every_stage_and_what_it_did(tmp_path, captured, capsy
 def test_the_reused_line_is_concrete_about_what_resume_saved(
     tmp_path, captured, capsys
 ) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     assert "reused 42 split PDF(s) from the previous run" in capsys.readouterr().out
 
 
 def test_a_finished_run_prints_how_to_open_it(tmp_path, captured, capsys) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    workspace = tmp_path / "grading workspace"
+    run_module.run_cli(
+        _argv(tmp_path, "--qa", str(tmp_path / "qa.md"), "--workspace", str(workspace))
+    )
     out = capsys.readouterr().out
     assert "2 submission(s) ready" in out
-    assert "uv run tui --qa-file" in out
+    assert "uv run opengrader tui --workspace" in out
+    assert "--assignment assignment" in out
+    assert captured["publication"][1] == workspace
 
 
-def test_stages_the_run_never_reached_are_named_as_such(tmp_path, captured, capsys) -> None:
+@pytest.mark.parametrize("status", [StageStatus.BLOCKED, StageStatus.FAILED])
+def test_failed_pipeline_does_not_publish_leftover_outputs(tmp_path, captured, status):
+    captured["report"] = _report(tmp_path, _outcome(STAGE_EXTRACT, status))
+    run_module.run_cli(_argv(tmp_path, "--qa", str(tmp_path / "qa.md")))
+    assert "publication" not in captured
+
+
+def test_run_without_answer_key_explains_how_to_publish(tmp_path, captured, capsys):
+    run_module.run_cli(_argv(tmp_path))
+    assert "publication" not in captured
+    assert "--qa" in capsys.readouterr().out
+
+
+def test_publication_failure_exits_nonzero_and_preserves_outputs(
+    tmp_path, monkeypatch, capsys
+):
+    from opengrader.server.workspace.client import ServiceError
+
+    report = _report(tmp_path, _outcome(STAGE_EXTRACT, StageStatus.RAN))
+    report.qa_file.write_text("- (2 points) Question\n")
+    monkeypatch.setattr(run_module, "run_pipeline", lambda *args, **kwargs: report)
+
+    def unavailable(root):
+        raise ServiceError(0, "Service unavailable")
+
+    monkeypatch.setattr(
+        "opengrader.server.workspace.client.ensure_service", unavailable
+    )
+    assert run_module.main(_argv(tmp_path, "--qa", str(report.qa_file), "--json")) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is False
+    assert result["stages"][-1]["stage"] == "publish"
+    assert result["stages"][-1]["status"] == "failed"
+    assert result["assignment_id"] is None
+    assert report.submission_count == 2
+
+
+def test_stages_the_run_never_reached_are_named_as_such(
+    tmp_path, captured, capsys
+) -> None:
     captured["report"] = _report(
         tmp_path,
         _outcome(STAGE_SCAN_CHECK, StageStatus.FAILED, "no PDF found"),
     )
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     out = capsys.readouterr().out
     assert "not reached" in out
     assert "split, extract, auto-grade" in out
@@ -237,14 +286,14 @@ def test_a_blocked_run_says_how_to_proceed(tmp_path, captured, capsys) -> None:
         tmp_path,
         _outcome(STAGE_SCAN_CHECK, StageStatus.BLOCKED, "2 high-severity finding(s)"),
     )
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     out = capsys.readouterr().out
     assert "--force" in out
     assert "before anything was graded" in out
 
 
 def test_progress_callbacks_are_wired_up(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-tui"))
+    run_module.run_cli(_argv(tmp_path))
     progress = captured["progress"]
     assert progress is not None
     assert progress.on_stage_start is not None
@@ -253,34 +302,40 @@ def test_progress_callbacks_are_wired_up(tmp_path, captured) -> None:
 
 
 def test_a_clean_run_exits_zero(tmp_path, captured) -> None:
-    assert run_module.main(_argv(tmp_path, "--no-tui")) == 0
+    assert run_module.main(_argv(tmp_path)) == 0
 
 
 def test_a_failed_stage_exits_one(tmp_path, captured) -> None:
     captured["report"] = _report(
         tmp_path, _outcome(STAGE_SPLIT, StageStatus.FAILED, "exited with status 1")
     )
-    assert run_module.main(_argv(tmp_path, "--no-tui")) == 1
+    assert run_module.main(_argv(tmp_path)) == 1
 
 
 def test_a_blocked_run_exits_two(tmp_path, captured) -> None:
     captured["report"] = _report(
         tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.BLOCKED, "high-severity")
     )
-    assert run_module.main(_argv(tmp_path, "--no-tui")) == 2
+    assert run_module.main(_argv(tmp_path)) == 2
 
 
 def test_main_returns_an_int_and_never_the_report(tmp_path, captured) -> None:
-    assert isinstance(run_module.main(_argv(tmp_path, "--no-tui")), int)
-    assert isinstance(run_module.run_cli(_argv(tmp_path, "--no-tui")), PipelineReport)
+    assert isinstance(run_module.main(_argv(tmp_path)), int)
+    assert isinstance(run_module.run_cli(_argv(tmp_path)), PipelineReport)
 
 
-def test_dry_run_prints_the_plan_and_touches_nothing(tmp_path, monkeypatch, capsys) -> None:
+def test_dry_run_prints_the_plan_and_touches_nothing(
+    tmp_path, monkeypatch, capsys
+) -> None:
     def explode(*_args, **_kwargs):  # pragma: no cover
         raise AssertionError("--dry-run ran the pipeline")
 
     monkeypatch.setattr(run_module, "run_pipeline", explode)
-    assert run_module.main(_argv(tmp_path, "--dry-run", "--qa", str(tmp_path / "qa.md"))) == 0
+    monkeypatch.setattr(run_module, "_publish_results", explode)
+    assert (
+        run_module.main(_argv(tmp_path, "--dry-run", "--qa", str(tmp_path / "qa.md")))
+        == 0
+    )
 
     out = capsys.readouterr().out
     assert "Plan" in out
@@ -293,10 +348,8 @@ def test_dry_run_returns_no_report(tmp_path) -> None:
     assert run_module.run_cli(_argv(tmp_path, "--dry-run")) is None
 
 
-def test_json_is_machine_readable_and_never_opens_the_tui(
-    tmp_path, captured, capsys
-) -> None:
-    run_module.run_cli(_argv(tmp_path, "--json", "--tui"))
+def test_json_is_machine_readable(tmp_path, captured, capsys) -> None:
+    run_module.run_cli(_argv(tmp_path, "--json"))
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert payload["submission_count"] == 2
@@ -308,69 +361,20 @@ def test_json_is_machine_readable_and_never_opens_the_tui(
         STAGE_AUTO_GRADE,
     ]
     assert payload["stages"][1]["status"] == "reused"
-    assert "tui" not in captured
-
-
-def test_the_tui_opens_by_default_on_a_terminal(tmp_path, captured, monkeypatch) -> None:
-    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
-    run_module.run_cli(_argv(tmp_path))
-    assert "tui" in captured
-
-
-def test_the_tui_stays_shut_when_stdout_is_not_a_terminal(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path))
-    assert "tui" not in captured
-
-
-def test_a_blocked_run_does_not_open_the_tui(tmp_path, captured, monkeypatch) -> None:
-    monkeypatch.setattr("sys.stdout.isatty", lambda: True, raising=False)
-    captured["report"] = _report(
-        tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.BLOCKED, "high-severity")
-    )
-    run_module.run_cli(_argv(tmp_path))
-    assert "tui" not in captured
-
-
-def test_the_tui_is_launched_through_its_own_entry_point(tmp_path, monkeypatch) -> None:
-    from opengrader.tui import main as tui_main
-
-    launched: list[list[str]] = []
-    monkeypatch.setattr(tui_main, "run_app", lambda argv: launched.append(list(argv)))
-
-    report = _report(
-        tmp_path, _outcome(STAGE_EXTRACT, StageStatus.RAN, "2 submission(s) ready")
-    )
-    run_module._open_tui(report)
-    assert launched == [
-        [
-            "--qa-file",
-            str(tmp_path / "qa.md"),
-            "--submissions",
-            str(tmp_path / "cohort" / "submissions"),
-        ]
-    ]
-
-
-def test_without_an_answer_key_the_tui_is_not_launched_on_nothing(tmp_path, monkeypatch) -> None:
-    from opengrader.tui import main as tui_main
-
-    launched: list[list[str]] = []
-    monkeypatch.setattr(tui_main, "run_app", lambda argv: launched.append(list(argv)))
-
-    report = PipelineReport(
-        stages=(_outcome(STAGE_EXTRACT, StageStatus.RAN),),
-        submissions_dir=_cohort(tmp_path),
-        qa_file=None,
-    )
-    run_module._open_tui(report)
-    assert launched == []
 
 
 def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
     import fitz
+    from fastapi.testclient import TestClient
 
     from opengrader.core.submissions import scan_check as scan_check_module
-    from opengrader.core.submissions.scan_check import PageScanFeatures, build_scan_report
+    from opengrader.core.submissions.scan_check import (
+        PageScanFeatures,
+        build_scan_report,
+    )
+    from opengrader.core.workspace.store import Workspace
+    from opengrader.server.workspace.app import create_app
+    from opengrader.server.workspace.client import ServiceConnection, WorkspaceClient
 
     scans = tmp_path / "scans"
     scans.mkdir()
@@ -390,14 +394,55 @@ def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
 
     def fake_extract(argv, **_kwargs):
         submissions.mkdir(parents=True, exist_ok=True)
-        (submissions / "submission-0001.submission.md").write_text("# x\n", encoding="utf-8")
+        (submissions / "submission-0001.submission.md").write_text(
+            "---\nstudent_name: Student\nstudent_id: '123'\n"
+            f"source_pdf: {scans / 'submission-0001.pdf'}\n---\n"
+            "- q1:\n  - Response text: 4\n  - Possible points: 2\n",
+            encoding="utf-8",
+        )
 
     monkeypatch.setattr(submission_extractor, "run_cli", fake_extract)
     monkeypatch.setattr(automated_grading, "run_cli", lambda *a, **k: None)
 
-    code = run_module.main(
-        ["--scan", str(scans), "--out", str(tmp_path / "cohort"), "--no-tui", "--json"]
+    qa = tmp_path / "qa.md"
+    qa.write_text("- (2 points) Two plus two?\n  - **Answer**\n    - 4\n")
+    workspace = Workspace.create(tmp_path / "workspace")
+    connection = ServiceConnection(
+        root=str(workspace.root),
+        url="http://testserver",
+        pid=0,
+        workspace_id=workspace.info().id,
     )
+
+    def attach(root):
+        assert root == workspace.root
+        return connection
+
+    monkeypatch.setattr("opengrader.server.workspace.client.ensure_service", attach)
+    with TestClient(create_app(workspace.root, process_jobs=False)) as client:
+
+        def request(self, method, path, body=None, **kwargs):
+            response = client.request(
+                method, path, json=body.model_dump() if body else None
+            )
+            response.raise_for_status()
+            return response.content
+
+        monkeypatch.setattr(WorkspaceClient, "request", request)
+        code = run_module.main(
+            [
+                "--scan",
+                str(scans),
+                "--out",
+                str(tmp_path / "cohort"),
+                "--qa",
+                str(qa),
+                "--no-auto-grade",
+                "--workspace",
+                str(workspace.root),
+                "--json",
+            ]
+        )
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
@@ -407,15 +452,30 @@ def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
         STAGE_SPLIT: "skipped",
         STAGE_EXTRACT: "ran",
         STAGE_AUTO_GRADE: "skipped",
+        "publish": "ran",
     }
+    assert payload["workspace"] == str(workspace.root)
+    assignment = payload["assignment_id"]
+    assert workspace.assignments()[0].id == assignment
+    assert workspace.answer(assignment, 1, "q1").response_text == "4"
+    document = workspace.document(assignment, 1)
+    assert (
+        workspace.asset(document.source_pdf).read_bytes()
+        == (scans / "submission-0001.pdf").read_bytes()
+    )
     assert (tmp_path / "cohort" / ".opengrader" / "run-ledger.jsonl").exists()
 
 
-def test_json_stdout_is_not_polluted_by_the_inner_clis(tmp_path, monkeypatch, capsys) -> None:
+def test_json_stdout_is_not_polluted_by_the_inner_clis(
+    tmp_path, monkeypatch, capsys
+) -> None:
     import fitz
 
     from opengrader.core.submissions import scan_check as scan_check_module
-    from opengrader.core.submissions.scan_check import PageScanFeatures, build_scan_report
+    from opengrader.core.submissions.scan_check import (
+        PageScanFeatures,
+        build_scan_report,
+    )
 
     scans = tmp_path / "scans"
     scans.mkdir()
@@ -435,9 +495,7 @@ def test_json_stdout_is_not_polluted_by_the_inner_clis(tmp_path, monkeypatch, ca
 
     monkeypatch.setattr(submission_extractor, "run_cli", chatty_extract)
 
-    run_module.main(
-        ["--scan", str(scans), "--out", str(tmp_path / "cohort"), "--no-tui", "--json"]
-    )
+    run_module.main(["--scan", str(scans), "--out", str(tmp_path / "cohort"), "--json"])
     captured = capsys.readouterr()
     assert json.loads(captured.out)["ok"] is True
     assert "Found 2 submission PDF(s)" in captured.err
@@ -471,7 +529,7 @@ def test_without_a_class_folder_scan_and_out_are_still_required(
     tmp_path, captured, capsys
 ) -> None:
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli(["--scan", str(tmp_path / "bundle.pdf"), "--no-tui"])
+        run_module.run_cli(["--scan", str(tmp_path / "bundle.pdf")])
     assert raised.value.code == 2
     assert "class folder" in capsys.readouterr().err
     assert "request" not in captured
@@ -481,7 +539,7 @@ def test_a_class_folder_fills_every_input_and_is_the_output(
     tmp_path, captured, capsys
 ) -> None:
     folder = _class_folder(tmp_path)
-    run_module.run_cli([str(folder), "--no-tui"])
+    run_module.run_cli([str(folder)])
 
     request = captured["request"]
     assert request.scan == folder / "scans.pdf"
@@ -498,7 +556,7 @@ def test_a_flag_overrides_what_the_folder_offered(tmp_path, captured, capsys) ->
     folder = _class_folder(tmp_path)
     other_key = tmp_path / "other-key.md"
     run_module.run_cli(
-        [str(folder), "--qa", str(other_key), "--out", str(tmp_path / "elsewhere"), "--no-tui"]
+        [str(folder), "--qa", str(other_key), "--out", str(tmp_path / "elsewhere")]
     )
 
     request = captured["request"]
@@ -515,7 +573,7 @@ def test_two_possible_scans_stop_the_run_and_name_both(tmp_path, captured, capsy
     (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
 
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(folder), "--no-tui"])
+        run_module.run_cli([str(folder)])
     assert raised.value.code == 2
     err = capsys.readouterr().err
     assert "--scan" in err and "period1.pdf" in err and "period2.pdf" in err
@@ -528,7 +586,7 @@ def test_an_explicit_scan_settles_an_ambiguous_folder(tmp_path, captured) -> Non
     (folder / "period1.pdf").write_bytes(b"%PDF-1.4\n")
     (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
 
-    run_module.run_cli([str(folder), "--scan", str(folder / "period2.pdf"), "--no-tui"])
+    run_module.run_cli([str(folder), "--scan", str(folder / "period2.pdf")])
     assert captured["request"].scan == folder / "period2.pdf"
 
 
@@ -541,7 +599,7 @@ def test_two_templates_are_left_out_with_a_warning_not_a_stop(
     (folder / "template-vA.pdf").write_bytes(b"%PDF-1.4\n")
     (folder / "template-vB.pdf").write_bytes(b"%PDF-1.4\n")
 
-    run_module.run_cli([str(folder), "--no-tui"])
+    run_module.run_cli([str(folder)])
     assert captured["request"].blank_template is None
     assert "blank template not used — pass --blank-template" in capsys.readouterr().out
 
@@ -551,14 +609,14 @@ def test_a_folder_with_no_scan_says_so(tmp_path, captured, capsys) -> None:
     folder.mkdir()
 
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(folder), "--no-tui"])
+        run_module.run_cli([str(folder)])
     assert raised.value.code == 2
     assert "no scanned bundle" in capsys.readouterr().err
 
 
 def test_a_class_folder_that_does_not_exist_is_a_usage_error(tmp_path, captured) -> None:
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(tmp_path / "nope"), "--no-tui"])
+        run_module.run_cli([str(tmp_path / "nope")])
     assert raised.value.code == 2
 
 

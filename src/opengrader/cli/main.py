@@ -59,10 +59,12 @@ class Subcommand:
 
 
 COMMANDS: tuple[Subcommand, ...] = (
+    Subcommand(name="web", target="opengrader.cli.web:open_web", summary="open this workspace in a browser", section=SECTION_START),
+    Subcommand(name="stop", target="opengrader.cli.web:stop", summary="stop this workspace's service", section=SECTION_META),
     Subcommand(
         name="serve",
         target="opengrader.cli.serve:main",
-        summary="serve prepared grading files through a read-only localhost API",
+        summary="run the workspace service in this terminal",
         section=SECTION_START,
     ),
     Subcommand(
@@ -413,7 +415,7 @@ _EPILOG = f"""\
 Examples:
   {PROGRAM_NAME} doctor                       is this machine ready?
   {PROGRAM_NAME} run --scan scans/all.pdf --qa qa.md --out class/
-  {PROGRAM_NAME} tui --qa-file qa.md --submissions class/submissions/
+  {PROGRAM_NAME} tui --workspace class/
   {PROGRAM_NAME} split --input scans/all.pdf --output split/ --pages-per-submission 6
   {PROGRAM_NAME} help submission-extractor    that tool's own options
 
@@ -425,17 +427,23 @@ as before; this is one door onto the same tools, not a replacement for them.
 
 @click.group(
     cls=OpengraderCLI,
+    invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
     epilog=_EPILOG,
 )
 @click.version_option(version=_version(), prog_name=PROGRAM_NAME)
-def cli() -> None:
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """Opengrader — grade paper exams on your own machine.
 
     Start with `opengrader doctor` to check the machine, then
     `opengrader run` to take a stack of scans all the way to gradeable work,
     then `opengrader tui` to grade it.
     """
+
+    if ctx.invoked_subcommand is None:
+        from opengrader.tui.main import run_app
+        run_app([])
 
 
 @cli.command("help", short_help="show help for one command")

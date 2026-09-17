@@ -389,7 +389,9 @@ class FakeGradeScreen:
     presented_question_id: str | None = None
     rubric_callback: object | None = None
 
-    def bind_run(self, run, breadcrumb_labels: list[str]) -> None:
+    def bind_run(
+        self, run, breadcrumb_labels: list[str], *, preserve_view: bool = False
+    ) -> None:
         self.bound_student_name = run.student_name
         self.bound_labels = breadcrumb_labels
 
@@ -431,6 +433,7 @@ class FakeQAPickerScreen:
         assignment_name: str,
         student_question_statuses: dict[tuple[str, str], str] | None = None,
         question_statistics: dict[str, QuestionStatistics] | None = None,
+        preserve_view: bool = False,
     ) -> None:
         _ = (breadcrumb_labels, assignment_name, student_question_statuses)
         self.bound_questions = questions
@@ -479,6 +482,9 @@ class FakeQAPickerScreen:
 
 
 class FakeApp:
+    def show_grade_conflict(self) -> None:
+        pass
+
     def __init__(self) -> None:
         self.grade_screen = FakeGradeScreen()
         self.qa_screen = FakeQAPickerScreen()
@@ -812,7 +818,7 @@ def test_rubric_selection_persists_grade_when_provider_supports_it() -> None:
             "rubric_labels": ("Incorrect",),
         }
     ]
-    assert app.grade_screen.status == "Saved grade to submission file."
+    assert app.grade_screen.status == "Grade saved."
     assert state.qa_student_status[("1", "1", "Q1", "s1")] == "graded"
     assert app.grade_screen.progress == "Progress: 1 / 2 students"
 
@@ -879,7 +885,7 @@ def test_comment_update_persists_analysis_when_provider_supports_it() -> None:
     ]
 
 
-def test_comment_update_reports_annotation_errors() -> None:
+def test_failed_comment_commit_keeps_pending_work_for_retry() -> None:
     app = FakeApp()
     state = TuiWorkflowState()
     state.selection.course_id = 1
@@ -899,8 +905,14 @@ def test_comment_update_reports_annotation_errors() -> None:
 
     assert provider.saved_annotations == []
     assert app.grade_screen.status == (
-        "Could not annotate PDF: Question source metadata missing"
+        "Could not save feedback: Question source metadata missing"
     )
+
+    assert len(state.grading_log) == 0
+    provider.annotation_error = None
+    assert controller.commit_pending_comment() == ""
+    assert len(provider.saved_annotations) == 1
+    assert len(state.grading_log) == 1
 
 
 class CommentSeedFakeDataProvider(PersistentFakeDataProvider):

@@ -117,6 +117,21 @@ def compute_question_statistics(
 ) -> QuestionStatistics:
     possible_points = _possible_points(seeds)
     scores = [score for seed in seeds if (score := score_from_seed(seed)) is not None]
+    return statistics_from_scores(
+        question_id,
+        scores,
+        possible_points=possible_points,
+        total_submissions=total_submissions,
+    )
+
+
+def statistics_from_scores(
+    question_id: str,
+    scores: list[float],
+    *,
+    possible_points: float,
+    total_submissions: int,
+) -> QuestionStatistics:
     graded_count = len(scores)
     ungraded_count = max(0, total_submissions - graded_count)
 

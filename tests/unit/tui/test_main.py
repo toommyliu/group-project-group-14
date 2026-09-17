@@ -1,8 +1,12 @@
+import json
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from opengrader.core.workspace.store import Workspace
+from opengrader.server.workspace.client import exclusive_lock
 from opengrader.tui.main import _enable_textual_feature, run_app, run_app_dev
 
 
@@ -14,28 +18,100 @@ def test_enable_textual_feature_merges_and_deduplicates(monkeypatch) -> None:
     assert os.environ["TEXTUAL"] == "debug,devtools"
 
 
-def test_run_app_launches_tui_app() -> None:
+@pytest.fixture
+def service(monkeypatch, tmp_path):
+    from opengrader.server.workspace.client import ServiceConnection, WorkspaceClient
+
+    workspace = Workspace.create(tmp_path)
+    workspace.create_assignment(
+        "---\ntitle: Older exam\n---\n- (2 points) First question\n"
+    )
+    workspace.create_assignment(
+        "---\ntitle: Newer exam\n---\n- (2 points) Second question\n"
+    )
+    connection = ServiceConnection(
+        root=str(tmp_path),
+        url="http://localhost",
+        pid=0,
+        workspace_id=workspace.info().id,
+    )
+    monkeypatch.setattr(
+        "opengrader.server.workspace.client.ensure_service", lambda root: connection
+    )
+
+    def request(self, method, path, **kwargs):
+        if path == "/api/workspace":
+            return workspace.info().model_dump_json().encode()
+        assert method == "GET" and path == "/assignments"
+        return json.dumps(
+            [item.model_dump() for item in workspace.assignments()]
+        ).encode()
+
+    monkeypatch.setattr(WorkspaceClient, "request", request)
+    return connection
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_run_app_opens_latest_assignment_unless_explicit(service, explicit) -> None:
+    assignments = Workspace(Path(service.root)).assignments()
+    expected = assignments[0] if explicit else assignments[-1]
+    args = ["--assignment", expected.id] if explicit else []
     with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
+        run_app(args)
+    provider = app_cls.call_args.kwargs["data_provider"]
+    assert provider.client.connection == service
+    assert provider.assignment == expected
+    app_cls.return_value.run.assert_called_once_with()
+    with exclusive_lock(provider.journal.path.with_suffix(".lock")):
+        pass
+
+
+def test_switch_assignment_releases_session_and_loads_new_selection(service) -> None:
+    workspace = Workspace(Path(service.root))
+    oldest, latest = workspace.assignments()
+    workspace.delete_assignment(oldest.id)
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
+    ):
+        app_cls.return_value.run.side_effect = ["switch_assignment", None]
+
+        def choose_assignment():
+            provider = app_cls.call_args.kwargs["data_provider"]
+            with exclusive_lock(provider.journal.path.with_suffix(".lock")):
+                pass
+            assert home_cls.call_args.args[0] is provider.client
+            # Setup can create an assignment while the chooser is open.
+            return workspace.create_assignment(
+                "---\ntitle: Another exam\n---\n- (3 points) Third question\n"
+            ).id
+
+        home_cls.return_value.run.side_effect = choose_assignment
         run_app([])
 
-    app_cls.assert_called_once_with()
-    app_cls.return_value.run.assert_called_once_with()
+    providers = [call.kwargs["data_provider"] for call in app_cls.call_args_list]
+    assert [provider.assignment.id for provider in providers] == [
+        latest.id,
+        workspace.assignments()[-1].id,
+    ]
+    home_cls.return_value.run.assert_called_once_with()
+    with exclusive_lock(providers[-1].journal.path.with_suffix(".lock")):
+        pass
 
 
-def test_run_app_passes_file_backed_paths() -> None:
-    with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
-        run_app(["--qa-file", "qa.md", "--submissions", "submissions"])
-
-    app_cls.assert_called_once_with(
-        qa_file_path="qa.md",
-        submissions_path="submissions",
-    )
-    app_cls.return_value.run.assert_called_once_with()
-
-
-def test_run_app_requires_qa_and_submissions_together() -> None:
-    with pytest.raises(SystemExit):
-        run_app(["--qa-file", "qa.md"])
+def test_empty_workspace_opens_home_and_can_quit(service) -> None:
+    workspace = Workspace(Path(service.root))
+    for assignment in workspace.assignments():
+        workspace.delete_assignment(assignment.id)
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.return_value = None
+        run_app([])
+    home_cls.return_value.run.assert_called_once_with()
+    app_cls.assert_not_called()
 
 
 def test_run_app_dev_enables_devtools_before_launch(monkeypatch) -> None:
@@ -59,7 +135,9 @@ def test_check_graphics_reports_and_exits_without_launching(monkeypatch) -> None
     app_cls.assert_not_called()
 
 
-def test_graphics_override_is_applied_before_the_app_starts(monkeypatch) -> None:
+def test_graphics_override_is_applied_before_the_app_starts(
+    monkeypatch, service
+) -> None:
     from opengrader.tui import terminal_graphics
 
     monkeypatch.delenv("OPENGRADER_GRAPHICS", raising=False)

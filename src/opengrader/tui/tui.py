@@ -1,11 +1,15 @@
 from collections.abc import Callable
 from pathlib import Path
+import logging
+import time
+from typing import Literal
 
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Input, TextArea
 
 from opengrader.core.claims import ClaimConflictError
 from opengrader.core.policy import read_policy
+from opengrader.core.workspace.models import WorkspaceEvent
 from opengrader.core.submissions.watch import ExtractionWatcher
 from opengrader.tui.controllers import GradeController, InputController
 from opengrader.tui.controllers.input_controller import (
@@ -14,7 +18,6 @@ from opengrader.tui.controllers.input_controller import (
     command_survives_text_focus,
 )
 from opengrader.tui.data import Provider
-from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.formatting import format_question_label
 from opengrader.tui.state import (
@@ -58,9 +61,10 @@ from opengrader.tui.ui.widgets.grading_log_pane import GradingLogPane
 _EXTRACTION_POLL_SECONDS = 3.0
 
 _EXTRACTION_GIVE_UP_SECONDS = 600.0
+logger = logging.getLogger(__name__)
 
 
-class TuiApp(App):
+class TuiApp(App[Literal["switch_assignment"]]):
     CSS_PATH = Path(__file__).parent / "tui.tcss"
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = InputController.all_bindings()  # pyright: ignore[reportAssignmentType]
@@ -99,19 +103,14 @@ class TuiApp(App):
         self,
         *,
         default_image_path: str | None = None,
-        data_provider: Provider | None = None,
-        qa_file_path: str | Path | None = None,
-        submissions_path: str | Path | None = None,
+        data_provider: Provider,
     ) -> None:
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
         self.workflow_state = TuiWorkflowState()
-        self.data_provider = data_provider or self._build_data_provider(
-            qa_file_path=qa_file_path,
-            submissions_path=submissions_path,
-        )
-        if isinstance(self.data_provider, StubDataProvider):
-            self.workflow_state.current_page = PAGE_SETUP
+        self.data_provider = data_provider
+        self._workspace_events: dict[tuple[str, int, str], WorkspaceEvent] = {}
+        self._workspace_retry_at = 0.0
         self.grade_controller = GradeController(
             self,
             self.workflow_state,
@@ -121,9 +120,8 @@ class TuiApp(App):
         self._register_input_handlers()
 
     def compose(self) -> ComposeResult:
-        initial_page = PAGE_SETUP if isinstance(self.data_provider, StubDataProvider) else PAGE_QA_PICKER
+        initial_page = PAGE_QA_PICKER
         with ContentSwitcher(initial=initial_page, id="workspace-switcher"):
-            yield SetupScreen(id=PAGE_SETUP)
             yield QAPickerScreen(id=PAGE_QA_PICKER)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield StatusBar(id="app-status-bar")
@@ -136,6 +134,22 @@ class TuiApp(App):
             submissions_path = getattr(self.data_provider, "submissions_path", None)
             if submissions_path is not None:
                 self._start_extraction_watch(submissions_path, known_active=None)
+        from opengrader.tui.data.workspace_provider import WorkspaceProvider
+
+        if isinstance(self.data_provider, WorkspaceProvider):
+            provider = self.data_provider
+
+            def changed(event: WorkspaceEvent) -> None:
+                if (
+                    event.assignment_id == provider.assignment.id
+                    and event.kind != "feedback"
+                ):
+                    self.call_from_thread(self._workspace_changed, event)
+
+            self._stop_workspace_events = provider.client.observe(
+                provider.cursor, changed
+            )
+            self.set_interval(0.1, self._refresh_workspace)
         self.refresh_bindings()
         self._announce_graphics_capability()
 
@@ -260,58 +274,6 @@ class TuiApp(App):
     ) -> None:
         self.grade_controller.return_to_qa_picker()
 
-    def on_setup_screen_launch_requested(self, event: SetupScreen.LaunchRequested) -> None:
-        try:
-            self.workflow_state = TuiWorkflowState()
-
-            self.data_provider = SubmissionFilesProvider(
-                qa_file_path=event.qa_path,
-                submissions_path=event.submissions_path,
-                default_image_path=self.default_image_path,
-            )
-            self.grade_controller = GradeController(
-                self, self.workflow_state, self.data_provider
-            )
-
-            self.input_controller = InputController(self.workflow_state)
-            self._register_input_handlers()
-
-            self._apply_grading_policy()
-            self._load_grading_queue()
-            self.switch_to(PAGE_QA_PICKER)
-            self._start_extraction_watch(event.submissions_path, known_active=None)
-        except Exception as e:
-            self.notify(f"Error loading files: {e}", severity="error")
-
-    def on_setup_screen_grade_while_extracting_requested(
-        self, event: SetupScreen.GradeWhileExtractingRequested
-    ) -> None:
-        try:
-            self.workflow_state = TuiWorkflowState()
-            self.data_provider = SubmissionFilesProvider(
-                qa_file_path=event.qa_path,
-                submissions_path=event.submissions_path,
-                default_image_path=self.default_image_path,
-            )
-            self.grade_controller = GradeController(
-                self, self.workflow_state, self.data_provider
-            )
-            self.input_controller = InputController(self.workflow_state)
-            self._register_input_handlers()
-            self._apply_grading_policy()
-            self._load_grading_queue()
-            self.switch_to(PAGE_QA_PICKER)
-            self._start_extraction_watch(
-                event.submissions_path,
-                known_active=self._setup_screen_extraction_active,
-            )
-            self.notify(
-                "Grading workspace opened — extraction is still running in "
-                "the background. Submissions will appear as they finish."
-            )
-        except Exception as e:
-            self.notify(f"Error loading files: {e}", severity="error")
-
     def _setup_screen_extraction_active(self) -> bool:
         try:
             return self.get_setup_screen().extraction_in_progress
@@ -392,6 +354,9 @@ class TuiApp(App):
 
     def _register_input_handlers(self) -> None:
         self.input_controller.register(InputCommand.APP_QUIT, self.exit)
+        self.input_controller.register(
+            InputCommand.SWITCH_ASSIGNMENT, self._switch_assignment
+        )
         self.input_controller.register(InputCommand.APP_HELP, self._show_help)
         self.input_controller.register(InputCommand.APP_BACK, self._handle_back)
         self.input_controller.register(InputCommand.QA_FILTER, self._handle_qa_filter)
@@ -1038,6 +1003,11 @@ class TuiApp(App):
         else:
             grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
 
+    def _switch_assignment(self) -> None:
+        if self.grade_controller.commit_pending_comment():
+            return
+        self.exit("switch_assignment")
+
     def _input_command_available(self, command: InputCommand | str) -> bool:
         if isinstance(self.focused, Input):
             if not command_survives_text_focus(
@@ -1094,20 +1064,6 @@ class TuiApp(App):
             key = "esc"
         return StatusBarBinding(key=key, description=binding.description)
 
-    def _build_data_provider(
-        self,
-        *,
-        qa_file_path: str | Path | None,
-        submissions_path: str | Path | None,
-    ) -> Provider:
-        if qa_file_path is not None and submissions_path is not None:
-            return SubmissionFilesProvider(
-                qa_file_path=qa_file_path,
-                submissions_path=submissions_path,
-                default_image_path=self.default_image_path,
-            )
-        return StubDataProvider(self.default_image_path)
-
     def _load_work_claims(self) -> None:
         state = self.workflow_state
         try:
@@ -1116,7 +1072,71 @@ class TuiApp(App):
         except Exception:
             state.active_claims = ()
 
+    def on_unmount(self) -> None:
+        stop = getattr(self, "_stop_workspace_events", None)
+        if stop:
+            stop()
+
+    def _workspace_changed(self, event: WorkspaceEvent) -> None:
+        self._workspace_events[(event.kind, event.submission_id, event.question_id)] = (
+            event
+        )
+
+    def _refresh_workspace(self) -> None:
+        from opengrader.tui.data.workspace_provider import WorkspaceProvider
+
+        if (
+            not self._workspace_events
+            or len(self.screen_stack) > 1
+            or self.get_grade_screen().rubric_edit_active()
+            or self.get_grade_screen().transcription_editor_active()
+            or time.monotonic() < self._workspace_retry_at
+        ):
+            return
+        provider = self.data_provider
+        if not isinstance(provider, WorkspaceProvider):
+            return
+        pending = list(self._workspace_events.values())
+        try:
+            provider.invalidate_summaries()
+            self.grade_controller.refresh_workspace(pending)
+        except Exception as exc:
+            logger.exception("Could not refresh the workspace")
+            if not self._workspace_retry_at:
+                self.notify(
+                    f"Could not refresh the workspace: {exc}. Retrying.",
+                    severity="error",
+                )
+            self._workspace_retry_at = time.monotonic() + 1
+            return
+        self._workspace_events.clear()
+        self._workspace_retry_at = 0.0
+
+    def show_grade_conflict(self) -> None:
+        from opengrader.tui.data.workspace_provider import WorkspaceProvider
+        from opengrader.tui.ui.screens.grade_conflict_screen import GradeConflictScreen
+
+        provider = self.data_provider
+        if not isinstance(provider, WorkspaceProvider) or provider.conflict is None:
+            return
+        key, current = provider.conflict
+
+        def resolve(keep_draft: bool | None) -> None:
+            if keep_draft is None:
+                return
+            try:
+                provider.resolve_conflict(keep_draft=keep_draft)
+                self.grade_controller.reset_after_recovery()
+            except Exception as exc:
+                self.notify(str(exc), severity="error", timeout=20)
+                self.show_grade_conflict()
+
+        self.push_screen(GradeConflictScreen(provider.journal.value.answers[key], current), resolve)
+
     def _show_claims(self) -> None:
+        if not callable(getattr(self.data_provider, "cohort_ids", None)):
+            self.notify("Work claims are not available yet.")
+            return
         questions, students = self.data_provider.cohort_ids()
         screen = ClaimScreen(
             claims=list(self.data_provider.read_work_claims()),

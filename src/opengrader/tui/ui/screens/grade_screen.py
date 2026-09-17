@@ -556,7 +556,15 @@ class GradeScreen(Vertical):
         self._zoom_at_limit = False
         self._update_zoom_label()
 
-    def bind_run(self, run: StudentGradingRun, breadcrumb_labels: list[str]) -> None:
+    def bind_run(
+        self,
+        run: StudentGradingRun,
+        breadcrumb_labels: list[str],
+        *,
+        preserve_view: bool = False,
+    ) -> None:
+        previous_comment = self._current_grade.comment if self._current_grade else ""
+        rubric_index = self.query_one("#rubric-list", ListView).index
         self._redact_identity = bool(getattr(run, "redact_identity", False))
         self.query_one("#grade-breadcrumb", Breadcrumb).set_path(breadcrumb_labels)
         self.query_one("#grade-student-name", Label).update(
@@ -624,11 +632,19 @@ class GradeScreen(Vertical):
             self._update_rubric_list_visibility()
         else:
             self._sync_rubric_options(current)
-            self._restore_rubric_focus()
+            if preserve_view:
+                if rubric_index is not None and rubric_index < self._rubric_count:
+                    self.query_one("#rubric-list", ListView).index = rubric_index
+            else:
+                self._restore_rubric_focus()
 
         comment_input = self.query_one("#question-comment", Input)
-        if comment_input.value != current.comment and self.app.focused is not comment_input:
-            comment_input.value = current.comment
+        if comment_input.value != current.comment and (
+            self.app.focused is not comment_input
+            or comment_input.value == previous_comment
+        ):
+            with comment_input.prevent(Input.Changed):
+                comment_input.value = current.comment
 
     def _update_confidence_chip(self, current) -> None:
         label = self.query_one("#question-confidence", Label)

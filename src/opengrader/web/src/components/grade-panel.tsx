@@ -9,6 +9,16 @@ import { Kbd } from './ui/kbd';
 import { Textarea } from './ui/textarea';
 import { Input } from './ui/input';
 import { GradeRecoveryDialog } from './grade-recovery-dialog';
+import { FeedbackStatus } from './feedback-status';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+} from './ui/alert-dialog';
 
 export function GradePanel({
   assignmentId,
@@ -26,6 +36,12 @@ export function GradePanel({
   const {
     saved,
     draft,
+    recovered,
+    recover,
+    conflict,
+    resolveConflict,
+    dismissConflict,
+    persist,
     saving,
     feedback,
     scoreInput,
@@ -77,6 +93,21 @@ export function GradePanel({
           </span>
         </p>
       </div>
+      {recovered.length > 0 && (
+        <div className="mb-4 grid gap-2">
+          <p>Unsaved work is available from an earlier page or another tab.</p>
+          {recovered.map(({ key, value }, index) => (
+            <Button
+              key={key}
+              variant="outline"
+              disabled={busy || saving || dirty}
+              onClick={() => recover(value)}
+            >
+              Recover draft {index + 1}
+            </Button>
+          ))}
+        </div>
+      )}
       <fieldset disabled={busy} className="grid gap-2">
         <legend className="sr-only">Rubric choices</legend>
         {question.rubric.map((option, index) => {
@@ -229,6 +260,76 @@ export function GradePanel({
         />
       </div>
       {error && !draft.manual && <ErrorAlert className="mt-2" error={error} />}
+      {error && (
+        <div className="mt-3 flex gap-2">
+          <Button disabled={busy || saving} onClick={() => void persist()}>
+            Retry save
+          </Button>
+          <Button
+            variant="outline"
+            disabled={busy || saving}
+            onClick={requestReload}
+          >
+            Reload saved answer
+          </Button>
+        </div>
+      )}
+      <AlertDialog
+        open={conflict !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) dismissConflict();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This answer changed</AlertDialogTitle>
+            <AlertDialogDescription>
+              Compare the saved answer with your changes before choosing which
+              to keep.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-4 text-sm">
+            <div>
+              <p className="font-medium">
+                Saved answer: {conflict?.points_awarded ?? 'Ungraded'}
+              </p>
+              <p>{conflict?.rubric_labels.join(', ')}</p>
+              <p className="max-h-40 overflow-auto whitespace-pre-wrap">
+                {conflict?.analysis}
+              </p>
+            </div>
+            <div>
+              <p className="font-medium">Your changes: {score ?? 'Ungraded'}</p>
+              <p>{draft.labels.join(', ')}</p>
+              <p className="max-h-40 overflow-auto whitespace-pre-wrap">
+                {draft.analysis}
+              </p>
+            </div>
+          </div>
+          <AlertDialogFooter className="flex-wrap">
+            <AlertDialogCancel disabled={saving}>
+              Keep editing
+            </AlertDialogCancel>
+            <Button
+              variant="outline"
+              disabled={saving}
+              onClick={() => void resolveConflict(false)}
+            >
+              Use saved answer
+            </Button>
+            <Button
+              disabled={saving}
+              onClick={() => void resolveConflict(true)}
+            >
+              Save my changes
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <FeedbackStatus
+        assignmentId={assignmentId}
+        submissionId={answer.submission_id}
+      />
       <GradeRecoveryDialog
         mode={
           reloadOpen ? 'reload' : blocker.status === 'blocked' ? 'leave' : null

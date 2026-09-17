@@ -19,7 +19,9 @@ def _stop(process: subprocess.Popen, *, timeout: float = 5) -> None:
         if os.name == "nt":
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
             )
         else:
             process.terminate()
@@ -30,10 +32,14 @@ def _stop(process: subprocess.Popen, *, timeout: float = 5) -> None:
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         logger.warning(
-            "Process %s did not stop within %gs; forcing shutdown.", process.pid, timeout,
+            "Process %s did not stop within %gs; forcing shutdown.",
+            process.pid,
+            timeout,
         )
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False)
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False
+            )
             process.kill()
     finally:
         if os.name == "posix":
@@ -50,7 +56,8 @@ def _python_snapshot(source: Path) -> dict[Path, tuple[int, int, int]]:
     snapshot = {}
     for directory, directories, files in source.walk():
         directories[:] = [
-            name for name in directories
+            name
+            for name in directories
             if name not in {"web", "__pycache__"} and not name.startswith(".")
         ]
         for name in files:
@@ -65,23 +72,35 @@ def _python_snapshot(source: Path) -> dict[Path, tuple[int, int, int]]:
     return snapshot
 
 
-def _start_api(port: int) -> subprocess.Popen:
+def _start_api(port: int, workspace: Path | None = None) -> subprocess.Popen:
     return subprocess.Popen(
-        [sys.executable, "-m", "opengrader.cli.serve", "--port", str(port)],
+        [
+            sys.executable,
+            "-m",
+            "opengrader.cli.serve",
+            "--port",
+            str(port),
+            *(["--workspace", str(workspace)] if workspace else []),
+        ],
         start_new_session=os.name == "posix",
     )
 
 
 def _start_vite(node: str, web: Path, port: int) -> subprocess.Popen:
     return subprocess.Popen(
-        [node, str(web / "node_modules" / "vite" / "bin" / "vite.js"), "--host", "127.0.0.1"],
+        [
+            node,
+            str(web / "node_modules" / "vite" / "bin" / "vite.js"),
+            "--host",
+            "127.0.0.1",
+        ],
         cwd=web,
         env={**os.environ, "OPENGRADER_API_URL": f"http://127.0.0.1:{port}"},
         start_new_session=os.name == "posix",
     )
 
 
-def run_dev(port: int) -> int:
+def run_dev(port: int, *, workspace: Path | None = None) -> int:
     """Restart both servers on Python edits; Vite handles frontend-only changes."""
     source = Path(__file__).resolve().parents[1]
     web = source / "web"
@@ -104,12 +123,14 @@ def run_dev(port: int) -> int:
 
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
-        api = _start_api(port)
+        api = _start_api(port, workspace)
         frontend = _start_vite(node, web, port)
         while True:
             code = frontend.poll()
             if code is not None:
-                logger.error("Vite exited with status %s; stopping development servers.", code)
+                logger.error(
+                    "Vite exited with status %s; stopping development servers.", code
+                )
                 return code if code > 0 else 1
             if api is not None:
                 code = api.poll()
@@ -117,7 +138,8 @@ def run_dev(port: int) -> int:
                     _stop(api)
                     api = None
                     logger.error(
-                        "API exited with status %s; waiting for a Python edit to restart.", code,
+                        "API exited with status %s; waiting for a Python edit to restart.",
+                        code,
                     )
             updated = _python_snapshot(source)
             if updated != snapshot:
@@ -131,7 +153,7 @@ def run_dev(port: int) -> int:
                     _stop(api)
                     api = None
                 changed_at = None
-                api = _start_api(port)
+                api = _start_api(port, workspace)
                 frontend = _start_vite(node, web, port)
             time.sleep(0.5)
     except KeyboardInterrupt:

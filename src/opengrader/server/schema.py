@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from opengrader.server.app import create_app
+from opengrader.server.workspace.app import create_app
 
 
 def main() -> None:

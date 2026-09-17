@@ -16,7 +16,6 @@ from opengrader.core.submissions.splitter import plan_submission_ranges
 from opengrader.server.scan_models import PageSelection, ScanBatch, ScanFinding, ScanGroup
 from opengrader.core.submissions.intake import SubmissionIntake
 from opengrader.server.scan_store import ScanStore
-from opengrader.server.submission_ids import submission_ids
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ class ScanCancelled(Exception):
 
 
 class ScanJobs:
-    def __init__(self, store: ScanStore, lock: RLock, refresh: Callable[[str, Path], None]):
+    def __init__(self, store: ScanStore, lock: RLock, refresh: Callable[[str, Path], int]):
         self.store = store
         self.lock = lock
         self.refresh = refresh
@@ -173,9 +172,7 @@ class ScanJobs:
                             staging.rename(destination)
                 with self.lock:
                     self.check_running(assignment_id)
-                    ids = submission_ids(assignment / "submissions", [markdown])
-                    self.refresh(assignment_id, markdown)
-                    group.submission_id = ids[markdown.relative_to(assignment / "submissions").as_posix()]
+                    group.submission_id = self.refresh(assignment_id, markdown)
             except ScanCancelled:
                 raise
             except (Exception, SystemExit) as exc:

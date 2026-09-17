@@ -11,6 +11,7 @@ from textual.widgets import Button, Static
 
 _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("q", "Quit Opengrader."),
+    ("F2", "Save pending feedback and choose an assignment in this workspace."),
     (
         "t",
         "Toggle teacher mode. Grading is anonymous by default — students "

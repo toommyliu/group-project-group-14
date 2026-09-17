@@ -4,8 +4,6 @@ from typing import Protocol
 
 from opengrader.tui.data.models import (
     QuestionSeed,
-    RubricEditResult,
-    RubricOptionSeed,
     StudentSummary,
 )
 
@@ -20,12 +18,3 @@ class Provider(Protocol):
         assignment_title: str | None = None,
         student_item_id: str | None = None,
     ) -> list[QuestionSeed]: ...
-
-    def save_rubric_options(
-        self,
-        *,
-        student_item_id: str,
-        question_id: str,
-        options: list[RubricOptionSeed],
-        original_options: list[RubricOptionSeed],
-    ) -> RubricEditResult: ...

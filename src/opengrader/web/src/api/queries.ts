@@ -7,6 +7,22 @@ export type Answer = components['schemas']['Answer'];
 export type Question = components['schemas']['Question'];
 export type Submission = components['schemas']['Submission'];
 
+export const feedbackJobsQuery = queryOptions({
+  queryKey: ['feedback-jobs'],
+  queryFn: async () => readData(await client.GET('/api/jobs')),
+});
+
+export async function retryFeedback(
+  assignmentId: string,
+  submissionId: number
+) {
+  await client.POST('/api/jobs/{assignment_id}/{submission_id}/retry', {
+    params: {
+      path: { assignment_id: assignmentId, submission_id: submissionId },
+    },
+  });
+}
+
 export const assignmentsQuery = queryOptions({
   queryKey: ['assignments'],
   // Navigation and route loaders share this request across observer unmounts.

@@ -11,7 +11,7 @@ from pypdf import PdfReader
 
 from opengrader.core.submissions.scan_plan import ScanPage, validate_scan_plan, write_scan_submission
 from opengrader.core.submissions.scan_check import build_scan_report, PageScanFeatures
-from opengrader.server.app import create_app
+from opengrader.server.workspace.app import create_app
 from opengrader.server.scan_store import ScanStore
 
 
@@ -151,7 +151,7 @@ def test_delete_scan_erases_files_and_unlocks_empty_assignment(workspace, remove
     assert client.delete(url, params={"expected_revision": batch["revision"] - 1}).status_code == 409
     assert client.get(url + "/pdf").content == content
     assert client.delete(url, params={"expected_revision": batch["revision"]}).status_code == 204
-    assert not ScanStore(root / "assignments").directory(assignment_id, batch["id"]).exists()
+    assert not ScanStore(root / ".opengrader" / "assignments").directory(assignment_id, batch["id"]).exists()
     assert client.get(url + "/pdf").status_code == 404
     assert client.get(f"/assignments/{assignment_id}/scans").json()["batches"] == []
     assert client.put(f"/assignments/{assignment_id}", json={"qa_markdown": QA, "expected_qa_markdown": QA}).status_code == 200
@@ -179,7 +179,7 @@ def test_failed_scan_deletion_includes_published_files_even_without_recorded_ids
     assert batch["started"]
     assert all(group["submission_id"] is None for group in batch["groups"])
     if published:
-        destination = root / "assignments" / assignment_id / "submissions" / f"scan-{batch['id']}-{batch['groups'][0]['key']}"
+        destination = root / ".opengrader" / "assignments" / assignment_id / "submissions" / f"scan-{batch['id']}-{batch['groups'][0]['key']}"
         destination.mkdir()
         (destination / "work.submission.md").write_text("Student work")
     response = client.delete(url, params={"expected_revision": batch["revision"]})
@@ -208,8 +208,16 @@ def test_partial_failure_retry_preserves_published_work_and_ids(workspace, monke
     failed = current(client, assignment_id, batch)
     assert failed["status"] == "failed"
     assert failed["groups"][0]["submission_id"] == 1
-    first = next((root / "assignments" / assignment_id / "submissions").glob("*/*.submission.md"))
-    first.write_text(first.read_text() + "  - Points: 1\n")
+    first = next((root / ".opengrader" / "assignments" / assignment_id / "submissions").glob("*/*.submission.md"))
+    answer_url = f"/assignments/{assignment_id}/submissions/1/answers/q1"
+    answer = client.get(answer_url).json()
+    from uuid import uuid4
+    saved = client.put(answer_url, json={
+        "request_id": str(uuid4()), "expected_revision": answer["revision"],
+        "expected_context_revision": answer["context_revision"], "rubric_labels": [],
+        "score_mode": "manual", "points_awarded": 1, "analysis": "Reviewed",
+    })
+    assert saved.status_code == 200
     before = first.read_bytes()
     assert client.post(url + "/process", json={"expected_revision": failed["revision"], "acknowledge_findings": True}).status_code == 202
     drain(app)
@@ -282,7 +290,7 @@ def test_delete_rolls_back_submissions_if_scan_cannot_be_unpublished(workspace, 
     assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
     drain(app)
     batch = current(client, assignment_id, batch)
-    directory = ScanStore(root / "assignments").directory(assignment_id, batch["id"])
+    directory = ScanStore(root / ".opengrader" / "assignments").directory(assignment_id, batch["id"])
     rename = Path.rename
     def fail_scan_rename(path, target):
         if path == directory:
@@ -291,14 +299,14 @@ def test_delete_rolls_back_submissions_if_scan_cannot_be_unpublished(workspace, 
     monkeypatch.setattr(Path, "rename", fail_scan_rename)
     assert client.delete(url, params={"expected_revision": batch["revision"]}).status_code == 500
     assert client.get(url + "/pdf").status_code == 200
-    assert len(list((root / "assignments" / assignment_id / "submissions").glob("*/*.submission.md"))) == 2
+    assert len(list((root / ".opengrader" / "assignments" / assignment_id / "submissions").glob("*/*.submission.md"))) == 2
     assert len(client.get(f"/assignments/{assignment_id}/submissions").json()) == 2
 
 
 def test_restart_marks_interrupted_work_retryable(workspace):
     client, _, assignment_id, root = workspace
     batch = upload(client, assignment_id)
-    store = ScanStore(root / "assignments")
+    store = ScanStore(root / ".opengrader" / "assignments")
     record = store.get(assignment_id, batch["id"])
     record.status = "checking"
     store.save(assignment_id, record)
@@ -316,9 +324,17 @@ def test_delete_assignment_removes_scans_submissions_and_grades_only_for_that_as
     batch = analyze(client, app, assignment_id, upload(client, assignment_id, content))
     assert client.post(batch_url(assignment_id, batch) + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
     drain(app)
-    directory = root / "assignments" / assignment_id
+    directory = root / ".opengrader" / "assignments" / assignment_id
     first = next((directory / "submissions").glob("*/*.submission.md"))
-    first.write_text(first.read_text() + "  - Points: 1\n")
+    answer_url = f"/assignments/{assignment_id}/submissions/1/answers/q1"
+    answer = client.get(answer_url).json()
+    from uuid import uuid4
+    saved = client.put(answer_url, json={
+        "request_id": str(uuid4()), "expected_revision": answer["revision"],
+        "expected_context_revision": answer["context_revision"], "rubric_labels": [],
+        "score_mode": "manual", "points_awarded": 1, "analysis": "Reviewed",
+    })
+    assert saved.status_code == 200
     other = client.post("/assignments", json={"qa_markdown": QA}).json()["id"]
     other_batch = upload(client, other, content)
     assert client.put(f"/assignments/{assignment_id}", json={"qa_markdown": QA, "expected_qa_markdown": QA}).status_code == 409
@@ -370,7 +386,7 @@ def test_delete_assignment_stops_active_and_queued_work_before_removing_files(wo
         assert deletion.result(timeout=5).status_code == 204
     drain(app)
     assert len(calls) == 1
-    assert not (root / "assignments" / assignment_id).exists()
+    assert not (root / ".opengrader" / "assignments" / assignment_id).exists()
     assert client.get(f"/assignments/{assignment_id}/submissions").status_code == 404
 
 
@@ -382,7 +398,7 @@ def test_upload_limits_and_invalid_pdf_leave_no_visible_batch(workspace, monkeyp
     monkeypatch.setattr(scans, "MAX_SCAN_BYTES", 10)
     assert client.post(f"/assignments/{assignment_id}/scans?filename=big.pdf", content=pdf_bytes()).status_code == 413
     assert client.get(f"/assignments/{assignment_id}/scans").json()["batches"] == []
-    assert not list((root / "assignments").glob(".upload-*"))
+    assert not list((root / ".opengrader" / "assignments").glob(".upload-*"))
 
 
 def test_materialized_plan_preserves_source_and_page_ownership(tmp_path):
