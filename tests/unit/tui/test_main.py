@@ -114,6 +114,36 @@ def test_empty_workspace_opens_home_and_can_quit(service) -> None:
     app_cls.assert_not_called()
 
 
+def test_empty_workspace_processes_its_folder_then_opens_assignment(service) -> None:
+    from opengrader.tui.workspace_home import PROCESS_WORKSPACE
+
+    workspace = Workspace(Path(service.root))
+    for assignment in workspace.assignments():
+        workspace.delete_assignment(assignment.id)
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
+        patch("opengrader.cli.run.run_cli") as run_cli,
+    ):
+        home_cls.return_value.run.return_value = PROCESS_WORKSPACE
+
+        def publish(_argv):
+            workspace.create_assignment(
+                "---\ntitle: First exam\n---\n- (2 points) First question\n"
+            )
+
+        run_cli.side_effect = publish
+        run_app(["--workspace", service.root])
+
+    run_cli.assert_called_once_with(
+        [service.root, "--workspace", service.root]
+    )
+    home_cls.return_value.run.assert_called_once_with()
+    provider = app_cls.call_args.kwargs["data_provider"]
+    assert provider.assignment.title == "First exam"
+
+
 def test_run_app_dev_enables_devtools_before_launch(monkeypatch) -> None:
     monkeypatch.delenv("TEXTUAL", raising=False)
 

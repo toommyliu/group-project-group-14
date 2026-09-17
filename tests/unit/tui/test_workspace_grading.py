@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import pytest
-from textual.widgets import Input, ListView
+from textual.widgets import Button, Input, ListView, Static
 
 from opengrader.core.grading.edits import GradeEdit
 from opengrader.core.submissions import load_student_submission_markdown
@@ -23,7 +23,7 @@ from opengrader.server.workspace.client import (
 from opengrader.tui.data.workspace_provider import WorkspaceProvider
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens.grade_conflict_screen import GradeConflictScreen
-from opengrader.tui.workspace_home import WorkspaceHome
+from opengrader.tui.workspace_home import PROCESS_WORKSPACE, WorkspaceHome
 
 
 @pytest.fixture
@@ -169,6 +169,31 @@ def test_picker_can_switch_and_home_can_select_its_only_assignment(grading_works
         assert home.return_value == assignment.id
 
     asyncio.run(choose())
+
+
+def test_empty_workspace_can_process_its_folder(grading_workspace):
+    store, assignment, provider, _ = grading_workspace
+    store.delete_assignment(assignment.id)
+
+    async def set_up():
+        home = WorkspaceHome(provider.client)
+        async with home.run_test(size=(100, 35)) as pilot:
+            await pilot.pause()
+
+            assert home.query_one("#assignment-picker").display is False
+            assert home.query_one("#empty-workspace").display is True
+            command = str(home.query_one("#cli-command", Static).content)
+            assert command.startswith("opengrader run ")
+            assert "uv run" not in command
+            assert command.count(str(store.root)) == 2
+
+            process = home.query_one("#process-folder", Button)
+            assert str(process.label) == "Process this folder"
+            await pilot.click("#process-folder")
+
+        assert home.return_value == PROCESS_WORKSPACE
+
+    asyncio.run(set_up())
 
 
 def save_remote_grade(

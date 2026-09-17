@@ -77,7 +77,11 @@ def run_app(argv: list[str] | None = None) -> None:
     from opengrader.core.workspace.models import Assignment
     from opengrader.server.workspace.client import WorkspaceClient, ensure_service
     from opengrader.tui.data.workspace_provider import WorkspaceProvider
-    from opengrader.tui.workspace_home import WorkspaceHome
+    from opengrader.tui.workspace_home import (
+        PROCESS_WORKSPACE,
+        WorkspaceHome,
+        process_workspace_argv,
+    )
 
     try:
         root = args.workspace or discover_workspace(Path.cwd()) or Path.cwd()
@@ -93,6 +97,15 @@ def run_app(argv: list[str] | None = None) -> None:
                 selected = WorkspaceHome(client).run()
                 if selected is None:
                     return
+                if selected == PROCESS_WORKSPACE:
+                    from opengrader.cli.run import run_cli
+
+                    run_cli(process_workspace_argv(str(root)))
+                    assignments = TypeAdapter(list[Assignment]).validate_json(
+                        client.request("GET", "/assignments")
+                    )
+                    selected = assignments[-1].id if assignments else None
+                    continue
                 assignments = TypeAdapter(list[Assignment]).validate_json(
                     client.request("GET", "/assignments")
                 )
