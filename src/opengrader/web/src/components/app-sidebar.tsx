@@ -63,12 +63,12 @@ export function AppSidebar({
       title: 'Submissions',
       icon: Files,
     },
-    {
-      to: '/terminals',
-      prefix: '/terminals',
-      title: 'Terminals',
-      icon: TerminalSquare,
-    },
+    // {
+    //   to: '/terminals',
+    //   prefix: '/terminals',
+    //   title: 'Terminals',
+    //   icon: TerminalSquare,
+    // },
   ] as const;
   return (
     <>
