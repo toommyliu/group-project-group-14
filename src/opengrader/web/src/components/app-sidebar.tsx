@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link } from '@tanstack/react-router';
-import { BookOpen, Files, ScanLine, TerminalSquare } from 'lucide-react';
+import { BookOpen, Files, ScanLine } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { ModeToggle } from './mode-toggle';
 import { SidebarResizeHandle } from './sidebar-resize-handle';

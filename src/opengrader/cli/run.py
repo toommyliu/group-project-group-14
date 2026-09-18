@@ -6,7 +6,9 @@ import json
 import sys
 from argparse import ArgumentParser, BooleanOptionalAction, RawDescriptionHelpFormatter
 from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
+import shlex
 
 from opengrader.core import ai_config
 from opengrader.core.pipeline import (
@@ -46,8 +48,11 @@ resuming:
 
 what it builds under --out:
   split/                       per-student PDFs (skipped when --scan is a directory)
-  submissions/                 the *.submission.md folder the TUI opens
+  submissions/                 the *.submission.md folder for file utilities
   .opengrader/run-ledger.jsonl the stage ledger that makes a re-run resumable
+
+With an answer key, completed results are published to the current workspace.
+Use --workspace to choose another workspace. Re-runs preserve saved grades.
 """
 
 _STATUS_LABEL = {
@@ -161,6 +166,11 @@ def _build_parser() -> ArgumentParser:
             "Cohort folder to build: split/, submissions/ and the run ledger. "
             "Required without a class folder."
         ),
+    )
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        help="Workspace to receive processed submissions. Defaults to the current workspace.",
     )
     parser.add_argument(
         "--qa",
@@ -291,16 +301,7 @@ def _build_parser() -> ArgumentParser:
         "--json",
         action="store_true",
         dest="as_json",
-        help="Print the report as JSON instead of prose. Implies --no-tui.",
-    )
-    parser.add_argument(
-        "--tui",
-        action=BooleanOptionalAction,
-        default=None,
-        help=(
-            "Open the TUI on the finished cohort (default: on when stdout is a "
-            "terminal). --no-tui is for scripts and CI."
-        ),
+        help="Print the report as JSON instead of prose.",
     )
     return parser
 
@@ -365,9 +366,7 @@ def _print_summary(report: PipelineReport) -> None:
             f"{report.submissions_dir}"
         )
 
-    blocked = next(
-        (o for o in report.stages if o.status is StageStatus.BLOCKED), None
-    )
+    blocked = next((o for o in report.stages if o.status is StageStatus.BLOCKED), None)
     if blocked is not None:
         print(
             "\nStopped before anything was graded. Fix the scan and re-run, or "
@@ -378,14 +377,26 @@ def _print_summary(report: PipelineReport) -> None:
         print("\nThe run stopped early; the stages above are what landed.")
         return
     if report.ready_to_grade:
-        print("Open it with:")
-        if report.qa_file is not None:
+        if report.assignment_id is not None and report.workspace is not None:
             print(
-                f"  uv run tui --qa-file {report.qa_file} "
-                f"--submissions {report.submissions_dir}"
+                "Open for grading: "
+                + shlex.join(
+                    [
+                        "uv",
+                        "run",
+                        "opengrader",
+                        "tui",
+                        "--workspace",
+                        str(report.workspace),
+                        "--assignment",
+                        report.assignment_id,
+                    ]
+                )
             )
         else:
-            print(f"  uv run tui   # then point it at {report.submissions_dir}")
+            print(
+                "Add --qa <answer-key.md> and re-run to make these submissions available for grading in the workspace."
+            )
 
 
 def _report_to_dict(report: PipelineReport) -> dict[str, object]:
@@ -395,6 +406,8 @@ def _report_to_dict(report: PipelineReport) -> dict[str, object]:
         "submission_count": report.submission_count,
         "submissions_dir": str(report.submissions_dir),
         "qa_file": str(report.qa_file) if report.qa_file is not None else None,
+        "workspace": str(report.workspace) if report.workspace is not None else None,
+        "assignment_id": report.assignment_id,
         "stages": [
             {
                 "stage": outcome.stage,
@@ -484,6 +497,43 @@ def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
         args.out = str(found.folder)
 
 
+def _publish_results(report: PipelineReport, root: Path | None) -> PipelineReport:
+    from opengrader.core.workspace.models import PipelineOutput, PipelinePublication
+    from opengrader.core.workspace.store import discover_workspace
+    from opengrader.server.workspace.client import WorkspaceClient, ensure_service
+
+    try:
+        if report.qa_file is None:
+            raise ValueError("An answer key is required to publish submissions.")
+        output = PipelineOutput(
+            qa_markdown=report.qa_file.read_text(encoding="utf-8"),
+            submissions_dir=str(report.submissions_dir.resolve()),
+        )
+        root = (root or discover_workspace(Path.cwd()) or Path.cwd()).resolve()
+        client = WorkspaceClient(ensure_service(root))
+        result = PipelinePublication.model_validate_json(
+            client.request("POST", "/api/pipeline-results", output, timeout=300)
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        outcome = StageOutcome(
+            stage="publish",
+            status=StageStatus.FAILED,
+            message=f"Could not publish results: {exc}. Re-run the same command to retry.",
+        )
+        return replace(report, stages=(*report.stages, outcome))
+    outcome = StageOutcome(
+        stage="publish",
+        status=StageStatus.RAN,
+        message=f"{result.submission_count} submission(s) available in {result.assignment.title}.",
+    )
+    return replace(
+        report,
+        stages=(*report.stages, outcome),
+        workspace=root,
+        assignment_id=result.assignment.id,
+    )
+
+
 def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -503,31 +553,16 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
     else:
         report = run_pipeline(request, progress=narrator.as_progress())
 
+    if report.ok and report.ready_to_grade and request.qa_file is not None:
+        narrator.status("Publishing results to the workspace.")
+        report = _publish_results(report, args.workspace)
+
     if args.as_json:
         print(json.dumps(_report_to_dict(report), indent=2))
     else:
         _print_summary(report)
 
-    open_tui = args.tui if args.tui is not None else sys.stdout.isatty()
-    if open_tui and not args.as_json and report.ok and report.ready_to_grade:
-        _open_tui(report)
-
     return report
-
-
-def _open_tui(report: PipelineReport) -> None:
-    if report.qa_file is None:
-        return
-    from opengrader.tui.main import run_app
-
-    run_app(
-        [
-            "--qa-file",
-            str(report.qa_file),
-            "--submissions",
-            str(report.submissions_dir),
-        ]
-    )
 
 
 def main(argv: list[str] | None = None) -> int:

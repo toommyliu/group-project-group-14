@@ -1,5 +1,39 @@
 // Generated from FastAPI. Run pnpm generate:api to update.
 export interface paths {
+    "/api/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Workspace */
+        get: operations["get_workspace_api_workspace_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shutdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Shutdown */
+        post: operations["shutdown_api_shutdown_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments": {
         parameters: {
             query?: never;
@@ -7,14 +41,28 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Assignments */
-        get: operations["list_assignments_assignments_get"];
+        /** Assignments */
+        get: operations["assignments_assignments_get"];
         put?: never;
-        /**
-         * Create Assignment
-         * @description Publish complete assignment files before adding the in-memory snapshot.
-         */
+        /** Create Assignment */
         post: operations["create_assignment_assignments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipeline-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pipeline Results */
+        post: operations["pipeline_results_api_pipeline_results_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30,8 +78,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Preview Assignment */
-        post: operations["preview_assignment_assignments_preview_post"];
+        /** Preview */
+        post: operations["preview_assignments_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -47,8 +95,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Edit Assignment Preview */
-        post: operations["edit_assignment_preview_assignments_preview_edit_post"];
+        /** Edit Preview */
+        post: operations["edit_preview_assignments_preview_edit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -64,25 +112,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Preview Assignment Pdf */
-        post: operations["preview_assignment_pdf_assignments_preview_pdf_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/assignments/{assignment_id}/source": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Assignment Source */
-        get: operations["get_assignment_source_assignments__assignment_id__source_get"];
-        put?: never;
-        post?: never;
+        /** Preview Pdf */
+        post: operations["preview_pdf_assignments_preview_pdf_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -107,6 +138,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assignments/{assignment_id}/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Source */
+        get: operations["source_assignments__assignment_id__source_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments/{assignment_id}/qa": {
         parameters: {
             query?: never;
@@ -114,8 +162,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Assignment Qa */
-        get: operations["get_assignment_qa_assignments__assignment_id__qa_get"];
+        /** Qa */
+        get: operations["qa_assignments__assignment_id__qa_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -131,8 +179,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Assignment Pdf */
-        get: operations["get_assignment_pdf_assignments__assignment_id__pdf_get"];
+        /** Pdf */
+        get: operations["pdf_assignments__assignment_id__pdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -148,8 +196,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Submissions */
-        get: operations["list_submissions_assignments__assignment_id__submissions_get"];
+        /** Submissions */
+        get: operations["submissions_assignments__assignment_id__submissions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -165,11 +213,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Questions
-         * @description List the selected submission's answer-key version; default to the first.
-         */
-        get: operations["list_questions_assignments__assignment_id__questions_get"];
+        /** Questions */
+        get: operations["questions_assignments__assignment_id__questions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/submissions/{submission_id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Answers */
+        get: operations["answers_assignments__assignment_id__submissions__submission_id__answers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/{assignment_id}/submissions/{submission_id}/document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document */
+        get: operations["document_assignments__assignment_id__submissions__submission_id__document_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -185,10 +264,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Answer */
-        get: operations["get_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get"];
-        /** Save Answer */
-        put: operations["save_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__put"];
+        /** Answer */
+        get: operations["answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get"];
+        /** Save */
+        put: operations["save_assignments__assignment_id__submissions__submission_id__answers__question_id__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -196,15 +275,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}/image": {
+    "/api/assets/{name}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Answer Image */
-        get: operations["get_answer_image_assignments__assignment_id__submissions__submission_id__answers__question_id__image_get"];
+        /** Asset */
+        get: operations["asset_api_assets__name__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -213,34 +292,16 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/terminals": {
+    "/api/jobs": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Terminals */
-        get: operations["list_terminals_api_terminals_get"];
+        /** Job Status */
+        get: operations["job_status_api_jobs_get"];
         put?: never;
-        /** Create Terminal */
-        post: operations["create_terminal_api_terminals_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/terminals/order": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Reorder Terminals */
-        put: operations["reorder_terminals_api_terminals_order_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -248,25 +309,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/terminals/{session_id}": {
+    "/assignments/{assignment_id}/submissions/{submission_id}/feedback": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Feedback */
+        get: operations["feedback_assignments__assignment_id__submissions__submission_id__feedback_get"];
         put?: never;
         post?: never;
-        /** Remove Terminal */
-        delete: operations["remove_terminal_api_terminals__session_id__delete"];
+        delete?: never;
         options?: never;
         head?: never;
-        /** Rename Terminal */
-        patch: operations["rename_terminal_api_terminals__session_id__patch"];
+        patch?: never;
         trace?: never;
     };
-    "/api/terminals/{session_id}/start": {
+    "/api/jobs/{assignment_id}/{submission_id}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -275,25 +335,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start Terminal */
-        post: operations["start_terminal_api_terminals__session_id__start_post"];
+        /** Retry */
+        post: operations["retry_api_jobs__assignment_id___submission_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/terminals/{session_id}/stop": {
+    "/api/events": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Events */
+        get: operations["events_api_events_get"];
         put?: never;
-        /** Stop Terminal */
-        post: operations["stop_terminal_api_terminals__session_id__stop_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -454,6 +514,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/terminals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Terminals */
+        get: operations["list_terminals_api_terminals_get"];
+        put?: never;
+        /** Create Terminal */
+        post: operations["create_terminal_api_terminals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/terminals/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reorder Terminals */
+        put: operations["reorder_terminals_api_terminals_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/terminals/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Terminal */
+        delete: operations["remove_terminal_api_terminals__session_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename Terminal */
+        patch: operations["rename_terminal_api_terminals__session_id__patch"];
+        trace?: never;
+    };
+    "/api/terminals/{session_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Terminal */
+        post: operations["start_terminal_api_terminals__session_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/terminals/{session_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Terminal */
+        post: operations["stop_terminal_api_terminals__session_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -473,6 +620,10 @@ export interface components {
         };
         /** Answer */
         Answer: {
+            /** Workspace Id */
+            workspace_id: string;
+            /** Context Revision */
+            context_revision: string;
             /** Revision */
             revision: string;
             /** Submission Id */
@@ -488,6 +639,11 @@ export interface components {
             response_image_width: number | null;
             /** Response Image Height */
             response_image_height: number | null;
+            /**
+             * Score Mode
+             * @enum {string}
+             */
+            score_mode: "rubric" | "manual";
             /** Points Awarded */
             points_awarded: number | null;
             /** Rubric Labels */
@@ -543,8 +699,33 @@ export interface components {
             /** Question Orders */
             question_orders?: components["schemas"]["QuestionOrder"][] | null;
         };
+        /** FeedbackJob */
+        FeedbackJob: {
+            /** Assignment Id */
+            assignment_id: string;
+            /** Submission Id */
+            submission_id: number;
+            /** Generation */
+            generation: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "ready" | "failed";
+            /** Error */
+            error: string;
+            /** Artifact */
+            artifact: string | null;
+        };
         /** GradeEdit */
         GradeEdit: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Expected Context Revision */
+            expected_context_revision: string;
             /** Expected Revision */
             expected_revision: string;
             /** Rubric Labels */
@@ -563,8 +744,6 @@ export interface components {
         /** GradeSaveResult */
         GradeSaveResult: {
             answer: components["schemas"]["Answer"];
-            /** Warning */
-            warning?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -592,6 +771,19 @@ export interface components {
              * @enum {integer}
              */
             rotation: 0 | 90 | 180 | 270;
+        };
+        /** PipelineOutput */
+        PipelineOutput: {
+            /** Qa Markdown */
+            qa_markdown: string;
+            /** Submissions Dir */
+            submissions_dir: string;
+        };
+        /** PipelinePublication */
+        PipelinePublication: {
+            assignment: components["schemas"]["Assignment"];
+            /** Submission Count */
+            submission_count: number;
         };
         /** ProcessScan */
         ProcessScan: {
@@ -934,6 +1126,16 @@ export interface components {
         };
         /** Submission */
         Submission: {
+            /**
+             * Student Name
+             * @default
+             */
+            student_name: string;
+            /**
+             * Student Id
+             * @default
+             */
+            student_id: string;
             /** Id */
             id: number;
             /** Version */
@@ -1034,6 +1236,15 @@ export interface components {
             /** Validation Error */
             validation_error: string | null;
         };
+        /** WorkspaceInfo */
+        WorkspaceInfo: {
+            /** Id */
+            id: string;
+            /** Actor */
+            actor: string;
+            /** Event Cursor */
+            event_cursor: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -1043,7 +1254,45 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_assignments_assignments_get: {
+    get_workspace_api_workspace_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInfo"];
+                };
+            };
+        };
+    };
+    shutdown_api_shutdown_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    assignments_assignments_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1096,7 +1345,40 @@ export interface operations {
             };
         };
     };
-    preview_assignment_assignments_preview_post: {
+    pipeline_results_api_pipeline_results_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineOutput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinePublication"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_assignments_preview_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1129,7 +1411,7 @@ export interface operations {
             };
         };
     };
-    edit_assignment_preview_assignments_preview_edit_post: {
+    edit_preview_assignments_preview_edit_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1162,7 +1444,7 @@ export interface operations {
             };
         };
     };
-    preview_assignment_pdf_assignments_preview_pdf_post: {
+    preview_pdf_assignments_preview_pdf_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1182,37 +1464,6 @@ export interface operations {
                 };
                 content: {
                     "application/pdf": string;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_assignment_source_assignments__assignment_id__source_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                assignment_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AssignmentInput"];
                 };
             };
             /** @description Validation Error */
@@ -1292,7 +1543,38 @@ export interface operations {
             };
         };
     };
-    get_assignment_qa_assignments__assignment_id__qa_get: {
+    source_assignments__assignment_id__source_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentInput"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    qa_assignments__assignment_id__qa_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1323,7 +1605,7 @@ export interface operations {
             };
         };
     };
-    get_assignment_pdf_assignments__assignment_id__pdf_get: {
+    pdf_assignments__assignment_id__pdf_get: {
         parameters: {
             query?: {
                 version?: string | null;
@@ -1342,7 +1624,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/pdf": string;
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1356,7 +1638,7 @@ export interface operations {
             };
         };
     };
-    list_submissions_assignments__assignment_id__submissions_get: {
+    submissions_assignments__assignment_id__submissions_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1387,7 +1669,7 @@ export interface operations {
             };
         };
     };
-    list_questions_assignments__assignment_id__questions_get: {
+    questions_assignments__assignment_id__questions_get: {
         parameters: {
             query?: {
                 submission_id?: number;
@@ -1420,7 +1702,71 @@ export interface operations {
             };
         };
     };
-    get_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get: {
+    answers_assignments__assignment_id__submissions__submission_id__answers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Answer"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_assignments__assignment_id__submissions__submission_id__document_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1453,7 +1799,7 @@ export interface operations {
             };
         };
     };
-    save_answer_assignments__assignment_id__submissions__submission_id__answers__question_id__put: {
+    save_assignments__assignment_id__submissions__submission_id__answers__question_id__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -1490,14 +1836,12 @@ export interface operations {
             };
         };
     };
-    get_answer_image_assignments__assignment_id__submissions__submission_id__answers__question_id__image_get: {
+    asset_api_assets__name__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                assignment_id: string;
-                submission_id: number;
-                question_id: string;
+                name: string;
             };
             cookie?: never;
         };
@@ -1523,11 +1867,9 @@ export interface operations {
             };
         };
     };
-    list_terminals_api_terminals_get: {
+    job_status_api_jobs_get: {
         parameters: {
-            query: {
-                assignment_id: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -1540,65 +1882,22 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TerminalCatalog"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["FeedbackJob"][];
                 };
             };
         };
     };
-    create_terminal_api_terminals_post: {
+    feedback_assignments__assignment_id__submissions__submission_id__feedback_get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                assignment_id: string;
+                submission_id: number;
+            };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateTerminal"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRecord"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reorder_terminals_api_terminals_order_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReorderTerminals"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -1606,7 +1905,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TerminalRecord"][];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1620,12 +1919,13 @@ export interface operations {
             };
         };
     };
-    remove_terminal_api_terminals__session_id__delete: {
+    retry_api_jobs__assignment_id___submission_id__retry_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                session_id: string;
+                assignment_id: string;
+                submission_id: number;
             };
             cookie?: never;
         };
@@ -1649,83 +1949,13 @@ export interface operations {
             };
         };
     };
-    rename_terminal_api_terminals__session_id__patch: {
+    events_api_events_get: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: number;
+            };
             header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RenameTerminal"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRecord"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    start_terminal_api_terminals__session_id__start_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TerminalSize"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRecord"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    stop_terminal_api_terminals__session_id__stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1736,7 +1966,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TerminalRecord"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -2084,6 +2314,233 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_terminals_api_terminals_get: {
+        parameters: {
+            query: {
+                assignment_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalCatalog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_terminal_api_terminals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTerminal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_terminals_api_terminals_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderTerminals"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_terminal_api_terminals__session_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_terminal_api_terminals__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameTerminal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_terminal_api_terminals__session_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalSize"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_terminal_api_terminals__session_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRecord"];
                 };
             };
             /** @description Validation Error */

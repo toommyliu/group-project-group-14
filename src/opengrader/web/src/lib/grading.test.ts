@@ -67,10 +67,34 @@ it('distinguishes ungraded from zero and adds bonuses after clamping', () => {
 
 it('wraps the ungraded queue, skipping zero scores, missing responses, and the current submission', () => {
   const submissions: Submission[] = [
-    { id: 1, version: null, question_scores: { q1: null } },
-    { id: 2, version: 'B', question_scores: {} },
-    { id: 3, version: null, question_scores: { q1: 0 } },
-    { id: 4, version: null, question_scores: { q1: null } },
+    {
+      student_name: '',
+      student_id: '',
+      id: 1,
+      version: null,
+      question_scores: { q1: null },
+    },
+    {
+      student_name: '',
+      student_id: '',
+      id: 2,
+      version: 'B',
+      question_scores: {},
+    },
+    {
+      student_name: '',
+      student_id: '',
+      id: 3,
+      version: null,
+      question_scores: { q1: 0 },
+    },
+    {
+      student_name: '',
+      student_id: '',
+      id: 4,
+      version: null,
+      question_scores: { q1: null },
+    },
   ];
   expect(nextUngraded(submissions, 1, 'q1')?.id).toBe(4);
   expect(nextUngraded(submissions, 4, 'q1')?.id).toBe(1);

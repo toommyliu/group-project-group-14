@@ -1,3 +1,4 @@
+import { observeWorkspace } from '@/api/events';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -18,14 +19,26 @@ const queryClient = new QueryClient({
   },
 });
 
-const router = createAppRouter(queryClient);
+async function start() {
+  const stop = await observeWorkspace(queryClient);
+  import.meta.hot?.dispose(stop);
+  const router = createAppRouter(queryClient);
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </ThemeProvider>
+    </StrictMode>
+  );
+}
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </ThemeProvider>
-  </StrictMode>
-);
+void start().catch((error: unknown) => {
+  const root = document.getElementById('root');
+  if (root)
+    root.textContent =
+      error instanceof Error
+        ? error.message
+        : 'Could not connect. Reload this page to retry.';
+});

@@ -140,7 +140,13 @@ class QAPickerScreen(Vertical):
         assignment_name: str,
         student_question_statuses: dict[tuple[str, str], str] | None = None,
         question_statistics: dict[str, QuestionStatistics] | None = None,
+        preserve_view: bool = False,
     ) -> None:
+        selected_question = self.selected_question() if preserve_view else None
+        selected_student = self.selected_student() if preserve_view else None
+        question_filter, student_filter = self._question_filter, self._student_filter
+        filter_target = self._filter_target_id
+        tab = self._student_pane().active_tab_index
         self._items = list(questions)
         self._all_items = list(questions)
         self._all_students = list(students)
@@ -176,6 +182,33 @@ class QAPickerScreen(Vertical):
             self._sync_statistics_chart(None)
         if students:
             self._set_student_index(0)
+        if preserve_view:
+            student_pane.action_pane_activate_tab(tab)
+            if question_filter:
+                self._apply_question_filter(question_filter)
+            if student_filter:
+                self._apply_student_filter(student_filter)
+            self._filter_target_id = filter_target
+            if selected_question is not None:
+                index = next(
+                    (
+                        i
+                        for i, item in enumerate(self._items)
+                        if item.item_id == selected_question.item_id
+                    ),
+                    0,
+                )
+                self.move_to_index(index)
+            if selected_student is not None:
+                index = next(
+                    (
+                        i
+                        for i, item in enumerate(self._students)
+                        if item.item_id == selected_student.item_id
+                    ),
+                    0,
+                )
+                self.move_student_to_index(index)
         self._sync_active_list_classes()
         self.refresh_grading_log()
 

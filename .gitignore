@@ -117,3 +117,4 @@ docker-data/
 
 .envs
 .tui_cache/
+.opengrader

@@ -19,6 +19,7 @@ class InputCommand(str, Enum):
     APP_QUIT = "app_quit"
     APP_HELP = "app_help"
     APP_BACK = "app_back"
+    SWITCH_ASSIGNMENT = "switch_assignment"
     QA_FILTER = "qa_filter"
     QA_MOVE_UP = "qa_move_up"
     QA_MOVE_DOWN = "qa_move_down"
@@ -108,6 +109,12 @@ class CommandBindingSpec:
 
 INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
     CommandBindingSpec("q", InputCommand.APP_QUIT, "Quit", (InputContext.GLOBAL,)),
+    CommandBindingSpec(
+        "f2",
+        InputCommand.SWITCH_ASSIGNMENT,
+        "Switch assignment",
+        (InputContext.QA, InputContext.GRADE),
+    ),
     CommandBindingSpec(
         "t",
         InputCommand.OPEN_FORMAT_GUIDE,

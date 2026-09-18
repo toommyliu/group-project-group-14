@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from opengrader.server.app import create_app
+from opengrader.server.workspace.app import create_app
 from opengrader.server.terminals.manager import SessionError, TerminalManager
 from opengrader.server.terminals.store import OutputHistory
 
@@ -245,45 +245,17 @@ def test_assignment_deletion_requires_confirmation_to_stop_terminals(tmp_path):
         assert client.get(f"/assignments/{assignment_id}/qa").status_code == 404
 
 
-def test_web_answer_refreshes_after_grading_file_changes(tmp_path):
-    from opengrader.core.submissions import (
-        StudentSubmissionGradeUpdate,
-        update_student_submission_file,
-    )
-
-    directory = assignment(tmp_path)
-    submission = directory / "submissions" / "student.submission.md"
-    submission.write_text("""---
-student_name: Test Student
-source_pdf: student.pdf
----
-
-- q1:
-  - Response text: 4
-  - Possible points: 2
-  - Points: 0
-""")
-    with TestClient(create_app(tmp_path)) as client:
-        submission_id = client.get("/assignments/test/submissions").json()[0]["id"]
-        url = f"/assignments/test/submissions/{submission_id}/answers/q1"
-        assert client.get(url).json()["points_awarded"] == 0
-        update_student_submission_file(
-            submission, StudentSubmissionGradeUpdate(question_id="q1", points_awarded=2)
-        )
-        assert client.get(url).json()["points_awarded"] == 2
-
-
 def test_terminal_names_and_order_survive_restart_and_reject_stale_lists(tmp_path):
-    assignment(tmp_path)
     with TestClient(create_app(tmp_path)) as client:
+        assignment_id = client.post("/assignments", json={"qa_markdown": QA}).json()["id"]
         records = [
-            client.post("/api/terminals", json={"assignment_id": "test"}).json()
+            client.post("/api/terminals", json={"assignment_id": assignment_id}).json()
             for _ in range(3)
         ]
         ids = [record["id"] for record in records]
         assert (
             client.post(
-                "/api/terminals", json={"assignment_id": "test", "kind": "tui"}
+                "/api/terminals", json={"assignment_id": assignment_id, "kind": "tui"}
             ).status_code
             == 422
         )
@@ -295,7 +267,7 @@ def test_terminal_names_and_order_survive_restart_and_reject_stale_lists(tmp_pat
         assert renamed.json()["title"] == "Extraction"
         order = [ids[2], ids[0], ids[1]]
         response = client.put(
-            "/api/terminals/order", json={"assignment_id": "test", "ids": order}
+            "/api/terminals/order", json={"assignment_id": assignment_id, "ids": order}
         )
         assert response.status_code == 200
         assert [record["id"] for record in response.json()] == order
@@ -303,24 +275,24 @@ def test_terminal_names_and_order_survive_restart_and_reject_stale_lists(tmp_pat
             assert (
                 client.put(
                     "/api/terminals/order",
-                    json={"assignment_id": "test", "ids": invalid},
+                    json={"assignment_id": assignment_id, "ids": invalid},
                 ).status_code
                 == 409
             )
         assert [
             record["id"]
             for record in client.get(
-                "/api/terminals", params={"assignment_id": "test"}
+                "/api/terminals", params={"assignment_id": assignment_id}
             ).json()["sessions"]
         ] == order
 
     # Old browser-TUI entries must not prevent saved shells from loading.
-    catalog = tmp_path / "terminals" / "sessions.json"
+    catalog = tmp_path / ".opengrader" / "terminals" / "sessions.json"
     stored = json.loads(catalog.read_text())
     stored.append({**records[0], "id": "e" * 32, "kind": "tui"})
     catalog.write_text(json.dumps(stored))
     with TestClient(create_app(tmp_path)) as client:
-        restored = client.get("/api/terminals", params={"assignment_id": "test"}).json()[
+        restored = client.get("/api/terminals", params={"assignment_id": assignment_id}).json()[
             "sessions"
         ]
         assert [record["id"] for record in restored] == order

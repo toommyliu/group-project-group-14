@@ -1,5 +1,8 @@
 import asyncio
 from dataclasses import replace
+from pathlib import Path
+
+import pytest
 
 from textual.widgets import (
     Button,
@@ -24,6 +27,54 @@ from opengrader.tui.ui.widgets.status_bar import StatusBar
 from opengrader.tui.ui.widgets.tabbed_list_pane import TabbedListPane
 
 from .fakes import DEFAULT_IMAGE_PATH, FakeDataProvider
+
+
+@pytest.fixture
+def workspace_provider(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from opengrader.core.workspace.intake import publish_pipeline
+    from opengrader.core.workspace.models import PipelineOutput
+    from opengrader.core.workspace.store import Workspace
+    from opengrader.server.workspace.app import create_app
+    from opengrader.server.workspace.client import ServiceConnection, WorkspaceClient
+    from opengrader.tui.data.workspace_provider import WorkspaceProvider
+
+    workspace = Workspace.create(tmp_path)
+    sample = Path("samples/cs146-quiz1")
+    publication = publish_pipeline(
+        workspace,
+        PipelineOutput(
+            qa_markdown=(sample / "qa.md").read_text(),
+            submissions_dir=str((sample / "student-submissions").resolve()),
+        ),
+    )
+    with TestClient(create_app(tmp_path, process_jobs=False)) as http:
+
+        class Client(WorkspaceClient):
+            def request(self, method, path, body=None, **kwargs):
+                response = http.request(
+                    method, path, json=body.model_dump() if body else None
+                )
+                response.raise_for_status()
+                return response.content
+
+            def observe(self, after, callback):
+                return lambda: None
+
+        client = Client(
+            ServiceConnection(
+                root=str(tmp_path),
+                url="http://testserver",
+                pid=0,
+                workspace_id=workspace.info().id,
+            )
+        )
+        provider = WorkspaceProvider(client, publication.assignment)
+        try:
+            yield provider
+        finally:
+            provider.close()
 
 
 def _seed(
@@ -235,18 +286,19 @@ def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
     asyncio.run(run())
 
 
-def test_app_loads_file_backed_grading_queue() -> None:
+def test_app_loads_workspace_grading_queue(workspace_provider) -> None:
+    from opengrader.core.workspace.store import DOCUMENT
+
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/cs146-quiz1/qa.md",
-            submissions_path="samples/cs146-quiz1/student-submissions",
+            data_provider=workspace_provider,
         )
 
         async with app.run_test() as pilot:
             await pilot.pause()
 
-            assert app.workflow_state.selection_labels["course"] == "CS146"
+            assert app.workflow_state.selection_labels["course"] == workspace_provider.course_label
             assert app.workflow_state.selection_labels["assignment"] == "CS146: Quiz 1"
             assert [item.item_id for item in app.workflow_state.question_items] == [
                 "q1",
@@ -268,6 +320,13 @@ def test_app_loads_file_backed_grading_queue() -> None:
             assert student_labels[0].endswith("/11 graded]")
             assert student_labels[1].startswith("987654321 [")
             assert student_labels[1].endswith("/11 graded]")
+            document = DOCUMENT.validate_json(workspace_provider.client.request(
+                "GET", f"{workspace_provider.base}/submissions/1/document"
+            ))
+            assert [q.question_id for q in document.questions] == [
+                item.item_id for item in app.workflow_state.question_items
+            ]
+            assert sum(q.possible_points or 0 for q in document.questions) == 85
 
     asyncio.run(run())
 
@@ -531,12 +590,11 @@ def test_qa_preview_shows_question_statistics() -> None:
     asyncio.run(run())
 
 
-def test_file_backed_app_opens_student_specific_grading_context() -> None:
+def test_workspace_app_opens_student_specific_grading_context(workspace_provider) -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/cs146-quiz1/qa.md",
-            submissions_path="samples/cs146-quiz1/student-submissions",
+            data_provider=workspace_provider,
         )
 
         async with app.run_test() as pilot:
@@ -549,8 +607,11 @@ def test_file_backed_app_opens_student_specific_grading_context() -> None:
             assert app.workflow_state.grading_run.max_points == 85
             assert current.question_id == "q1"
             assert current.prompt.startswith("Convert decimal ")
-            assert "/student-submissions/submission-" in current.image_path
-            assert current.image_path.endswith("/responses/q1.png")
+            image = Path(current.image_path)
+            assert image.parent == workspace_provider.cache
+            assert image.read_bytes() == Path(
+                "samples/cs146-quiz1/student-submissions/submission-0001/responses/q1.png"
+            ).read_bytes()
 
             title = app.get_grade_screen().query_one(
                 "#question-section-title", Label

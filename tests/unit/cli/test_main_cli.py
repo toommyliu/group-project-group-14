@@ -180,6 +180,18 @@ def test_an_unknown_command_exits_two_and_suggests_the_near_miss() -> None:
     assert "submission-extractor" in result.output
 
 
+def test_bare_command_opens_the_tui(monkeypatch) -> None:
+    from opengrader.tui import main as tui_main
+
+    opened: list[list[str]] = []
+    monkeypatch.setattr(tui_main, "run_app", lambda argv: opened.append(argv))
+
+    result = CliRunner().invoke(cli, [])
+
+    assert result.exit_code == 0
+    assert opened == [[]]
+
+
 def _row_labels(listing: str) -> list[str]:
     labels = []
     for line in listing.splitlines():

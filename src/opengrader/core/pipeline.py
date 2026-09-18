@@ -124,6 +124,8 @@ class PipelineReport:
     stages: tuple[StageOutcome, ...]
     submissions_dir: Path
     qa_file: Path | None
+    workspace: Path | None = None
+    assignment_id: str | None = None
 
     @property
     def ok(self) -> bool:

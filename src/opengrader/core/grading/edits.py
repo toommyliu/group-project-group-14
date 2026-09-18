@@ -1,16 +1,18 @@
-"""Validate web grade edits against the same rubric scoring used by the TUI."""
+"""Validate grade commands independently of their transport or interface."""
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, FiniteFloat
 
 from opengrader.core.qa_file.scoring import awarded_points_for_rubric_selection
 
-if TYPE_CHECKING:
-    from opengrader.server.app import Question
+from opengrader.core.workspace.models import Question
 
 
 class GradeEdit(BaseModel):
+    request_id: UUID
+    expected_context_revision: str
     expected_revision: str
     rubric_labels: list[str]
     analysis: str = Field(max_length=50000)
@@ -28,7 +30,9 @@ def grade_points(question: "Question", edit: GradeEdit) -> float | None:
     selected = [option for option in options if option.label in labels]
     base = [option for option in selected if option.kind != "bonus"]
     if any(option.selection_mode == "exclusive" for option in base) and len(base) > 1:
-        raise ValueError("An exclusive rubric item cannot be combined with other base items.")
+        raise ValueError(
+            "An exclusive rubric item cannot be combined with other base items."
+        )
     if edit.score_mode == "manual":
         if labels:
             raise ValueError("Clear rubric selections before entering a manual score.")
@@ -41,5 +45,7 @@ def grade_points(question: "Question", edit: GradeEdit) -> float | None:
         question.possible_points,
         [option.points_delta for option in base],
         [option.points_delta for option in options if option.kind != "bonus"],
-        bonus_points_values=[option.points_delta for option in selected if option.kind == "bonus"],
+        bonus_points_values=[
+            option.points_delta for option in selected if option.kind == "bonus"
+        ],
     )

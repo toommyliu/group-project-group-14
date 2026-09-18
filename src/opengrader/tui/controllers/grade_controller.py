@@ -13,6 +13,7 @@ from opengrader.core.grading import (
 from opengrader.core.grading.scoring import score_rubric_selection
 from opengrader.core.history import current_actor
 from opengrader.core.policy import read_policy
+from opengrader.core.workspace.models import WorkspaceEvent
 from opengrader.core.submissions import (
     AnswerGroup,
     GroupableResponse,
@@ -61,6 +62,8 @@ class GradeApp(Protocol):
     def get_qa_picker_screen(self) -> QAPickerScreen: ...
 
     def switch_to(self, page_id: str) -> None: ...
+
+    def show_grade_conflict(self) -> None: ...
 
 
 class GradeController:
@@ -388,7 +391,11 @@ class GradeController:
                     previous_analysis=pending.baseline,
                 )
             except Exception as exc:
-                error = f"Could not annotate PDF: {exc}"
+                error = f"Could not save feedback: {exc}"
+                self._pending_comment = pending
+                self._app.show_grade_conflict()
+                self._set_active_status(error)
+                return error
         self._record_comment_log_entry(
             pending.text,
             previous_comment=pending.baseline,
@@ -1241,7 +1248,7 @@ class GradeController:
             qa_screen.show_student_details(student)
         qa_screen.set_status(status)
 
-    def refresh_grade_screen(self, status: str) -> None:
+    def refresh_grade_screen(self, status: str, *, preserve_view: bool = False) -> None:
         grade_screen = self._app.get_grade_screen()
         self._state.grading_run.redact_identity = not self._state.teacher_mode
         self._state.grading_run.claim_slice = self.my_claim_summary()
@@ -1249,6 +1256,7 @@ class GradeController:
         grade_screen.bind_run(
             self._state.grading_run,
             breadcrumb_labels=self._state.breadcrumb_labels(),
+            preserve_view=preserve_view,
         )
         set_progress = getattr(grade_screen, "set_progress", None)
         if callable(set_progress):
@@ -1258,7 +1266,7 @@ class GradeController:
             set_answer_group(self._answer_group_label())
         grade_screen.set_status(status)
 
-    def refresh_qa_picker(self, status: str) -> None:
+    def refresh_qa_picker(self, status: str, *, preserve_view: bool = False) -> None:
         qa_screen = self._app.get_qa_picker_screen()
         labels = [
             self._state.selection_labels.get("course") or "Course",
@@ -1272,9 +1280,11 @@ class GradeController:
             or "Assignment",
             student_question_statuses=self._student_question_statuses(),
             question_statistics=self._question_statistics_by_id(),
+            preserve_view=preserve_view,
         )
-        self._restore_qa_picker_question_selection()
-        self._restore_qa_picker_student_selection()
+        if not preserve_view:
+            self._restore_qa_picker_question_selection()
+            self._restore_qa_picker_student_selection()
         qa_screen.set_status(status or self._extraction_hint_sentence())
 
     def _restore_qa_picker_question_selection(self) -> None:
@@ -1377,6 +1387,7 @@ class GradeController:
                 rubric_labels=rubric_labels,
             )
         except Exception as exc:
+            self._app.show_grade_conflict()
             return f"Could not save grade: {exc}"
         self._record_grade_log_entry(
             current_question,
@@ -1397,7 +1408,7 @@ class GradeController:
                     or tuple(revert.rubric_labels or ()) != tuple(rubric_labels)
                 )
             )
-        return "Saved grade to submission file."
+        return "Grade saved."
 
     def _retag_member_ai_note(
         self,
@@ -1732,6 +1743,13 @@ class GradeController:
             if key[:2] != (course_id, assignment_id)
         }
 
+        saved_scores = getattr(self._data_provider, "saved_scores", None)
+        if callable(saved_scores):
+            for student_id, questions in saved_scores().items():
+                for question_id, points in questions.items():
+                    self._set_qa_student_status(question_id, student_id, graded=points is not None)
+            return
+
         for student in self._state.student_items:
             for seed in self._build_question_seeds_for_selection(
                 student_item_id=student.item_id
@@ -1991,11 +2009,75 @@ class GradeController:
         return f"U: {pending} similar-answer merge(s) available"
 
 
+    def reset_after_recovery(self) -> None:
+        self._pending_comment = None
+        self.refresh_after_external_change()
+
+    def refresh_workspace(self, events: list[WorkspaceEvent]) -> None:
+        """Apply committed updates without navigating or committing the grader's draft."""
+        grading = self._on_grade_page()
+        question_id = self._current_question_id()
+        student_id = self._state.selection.student_item_id
+        if grading:
+            # Input.Changed may still be queued; preserve the text against its original revision.
+            self.on_comment_updated(self._app.get_grade_screen().current_comment_text())
+        students = self._student_items_for_current_course()
+        student_index = next(
+            (i for i, student in enumerate(students) if student.item_id == student_id),
+            None,
+        )
+        if grading and student_index is None:
+            self._app.get_grade_screen().set_status(
+                "This submission was removed. Return to the question picker to continue."
+            )
+            return
+        reload_answers = not grading or any(
+            event.kind == "assignment"
+            or event.submission_id == self._state.selection.student_id
+            for event in events
+        )
+        questions = self._state.grading_run.questions
+        if reload_answers:
+            questions = self._question_grades(
+                self._build_question_seeds_for_selection(
+                    student_item_id=student_id if grading else None,
+                )
+            )
+        self._hydrate_saved_grading_status()
+        self._state.student_items = students
+        self._state.grading_run.questions = questions
+        self._state.grading_run.max_points = self._max_points(questions)
+        self._state.question_items = self._question_items(questions)
+        if any(event.kind in ("assignment", "submission") for event in events):
+            self._answer_group_cache.clear()
+            self._suggestion_cache.clear()
+        self._unconfirmed_ai_cache.clear()
+        if grading:
+            self._state.active_student_index = student_index
+            index = self._question_index(question_id)
+            if index is not None:
+                self._state.active_question_index = index
+                self._state.grading_run.select_question(index)
+            if reload_answers:
+                self.refresh_grade_screen(status="", preserve_view=True)
+            else:
+                self._app.get_grade_screen().set_progress(
+                    self._qa_student_progress_label()
+                )
+        else:
+            self.refresh_qa_picker(status="", preserve_view=True)
+
     def refresh_after_external_change(self) -> None:
         question_index = self._question_index_in_run()
+        student_item_id = self._state.selection.student_item_id
         self.open_question_picker_for_assignment()
         if question_index is not None:
-            self.open_question_by_index(question_index)
+            self.open_question_by_index(
+                question_index,
+                student_index=self._student_index(student_item_id)
+                if student_item_id
+                else None,
+            )
 
     def _question_index_in_run(self) -> int | None:
         if self._state.current_page != PAGE_GRADE:
@@ -2141,6 +2223,15 @@ class GradeController:
     def _question_statistics_by_id(self) -> dict[str, QuestionStatistics]:
         if not self._state.student_items or not self._state.grading_run.questions:
             return {}
+
+        summaries = getattr(self._data_provider, "question_statistics", None)
+        if callable(summaries):
+            return summaries(
+                {
+                    question.question_id: question.points
+                    for question in self._state.grading_run.questions
+                }
+            )
 
         seeds_by_question_id: dict[str, list[QuestionSeed]] = {
             question.question_id: [] for question in self._state.grading_run.questions
