@@ -29,10 +29,6 @@ from opengrader.core.ocr.math_ocr import (
     describe_backend,
     resolve_math_transcriber,
 )
-from opengrader.core.ocr.ollama_vlm import (
-    OllamaVisionConfig,
-    ensure_model_available,
-)
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -1047,9 +1043,20 @@ def run_cli(
                 file=sys.stderr,
             )
 
+    resolved_ai = ai_config.with_overrides(
+        ai,
+        host=args.ollama_host,
+        vision_model=args.ollama_model,
+        timeout_seconds=args.ollama_timeout,
+    )
+
     ollama_server_proc = None
     ollama_log_file = None
-    if args.auto_ollama and bubble_sheet_layout is None:
+    if (
+        args.auto_ollama
+        and bubble_sheet_layout is None
+        and resolved_ai.provider.kind == "local"
+    ):
         parsed_url = urlparse(args.ollama_host)
         host = parsed_url.hostname or "127.0.0.1"
         port = parsed_url.port or 11434
@@ -1099,7 +1106,7 @@ def run_cli(
         subprocess.run(["ollama", "pull", args.ollama_model], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     ocr_config = None
-    ollama_config = None
+    vision_reader = None
 
     omr_mode = bubble_sheet_layout is not None
 
@@ -1112,21 +1119,17 @@ def run_cli(
 
     if not omr_mode and (not args.blank_template or args.llm_responses):
         print(f"Using Ollama vision model: {args.ollama_model}")
-        ollama_config = OllamaVisionConfig(
-            model=args.ollama_model,
-            host=args.ollama_host,
-            timeout_seconds=args.ollama_timeout,
-        )
+        vision_reader = ai_config.vision_reader(resolved_ai)
         try:
-            ensure_model_available(ollama_config)
+            ai_config.ensure_ready(resolved_ai, purpose="vision")
         except Exception as exc:
             print(f"Warning: Ollama model not available ({exc}). Proceeding without VLM for text extraction.", file=sys.stderr)
-            ollama_config = None
+            vision_reader = None
 
     print(f"Found {len(pdfs)} submission PDF(s)")
 
     external_progress = progress is not None
-    vlm_possible = bool(ollama_config) and not args.no_ollama_qa
+    vlm_possible = bool(vision_reader) and not args.no_ollama_qa
     progress_bar: Progress | None = None
     if vlm_possible and not external_progress:
         progress_bar = Progress(
@@ -1206,7 +1209,7 @@ def run_cli(
             "escalate_floor": escalate_floor,
             "math_backend": args.math_backend,
             "skip_ollama_qa": args.no_ollama_qa,
-            "vlm_model": ollama_config.model if ollama_config else "",
+            "vlm_model": resolved_ai.vision_model if vision_reader else "",
             "save_layout_debug": args.save_layout_debug,
             "update": args.update,
             "refresh_layout": args.refresh_layout,
@@ -1264,7 +1267,7 @@ def run_cli(
                 ocr_config=ocr_config,
                 dpi=render_dpi,
                 split_subquestions=not args.no_split_subquestions,
-                ollama_config=ollama_config,
+                vision_reader=vision_reader,
                 skip_ollama_qa=args.no_ollama_qa,
                 save_layout_debug=args.save_layout_debug,
                 blank_assignment_template=blank_assignment_template,
@@ -1299,6 +1302,13 @@ def run_cli(
         workers = resolve_worker_count(args.jobs, len(jobs), vlm_active=vlm_possible)
     if workers > 1:
         emit(f"Extracting {len(jobs)} submissions across {workers} parallel workers")
+    else:
+        # The parallel path bounds provider calls inside each spawned worker
+        # (see `_init_worker`); a sequential run makes them here instead, so
+        # this is where `--jobs` reaches the transport's semaphore for it.
+        from opengrader.core.llm.transport import set_concurrency_limit
+
+        set_concurrency_limit(1)
 
     completed = {"count": 0}
     refine_journal = (

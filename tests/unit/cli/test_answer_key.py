@@ -130,16 +130,16 @@ def _stub_extract(monkeypatch) -> dict:
     captured: dict = {}
 
     def fake_extract(
-        pdf_path, *, title, instructions, blank_template_path, ollama_config, emit, progress
+        pdf_path, *, title, instructions, blank_template_path, vision_reader, emit, progress
     ):
-        captured["ollama_config"] = ollama_config
+        captured["vision_reader"] = vision_reader
         return "assignment_title: Stub\n\n1. (1 points) x?\nSolution: y\n"
 
     monkeypatch.setattr(pdf_answer_key_module, "extract_qa_markdown_from_pdf", fake_extract)
     return captured
 
 
-def test_no_llm_read_scans_leaves_ollama_config_none(
+def test_no_llm_read_scans_leaves_vision_reader_none(
     answer_key_pdf: Path, tmp_path: Path, monkeypatch, capsys
 ) -> None:
     captured = _stub_extract(monkeypatch)
@@ -152,7 +152,7 @@ def test_no_llm_read_scans_leaves_ollama_config_none(
         ]
     )
 
-    assert captured["ollama_config"] is None
+    assert captured["vision_reader"] is None
     out = capsys.readouterr().out
     assert "OCR alone" in out
     assert "Read handwriting on scans" in out
@@ -162,9 +162,8 @@ def test_llm_read_scans_defaults_on_from_ai_setup(
     answer_key_pdf: Path, tmp_path: Path, monkeypatch
 ) -> None:
     ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
-    import opengrader.core.ocr.ollama_vlm as ollama_vlm_module
 
-    monkeypatch.setattr(ollama_vlm_module, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     captured = _stub_extract(monkeypatch)
 
     run_cli(
@@ -175,7 +174,7 @@ def test_llm_read_scans_defaults_on_from_ai_setup(
         ]
     )
 
-    assert captured["ollama_config"] is not None
+    assert captured["vision_reader"] is not None
 
 
 def test_llm_read_scans_defaults_off_when_ai_setup_leaves_it_off(
@@ -191,7 +190,7 @@ def test_llm_read_scans_defaults_off_when_ai_setup_leaves_it_off(
         ]
     )
 
-    assert captured["ollama_config"] is None
+    assert captured["vision_reader"] is None
 
 
 def test_load_blank_template_layout_extracts_questions(answer_key_pdf: Path) -> None:

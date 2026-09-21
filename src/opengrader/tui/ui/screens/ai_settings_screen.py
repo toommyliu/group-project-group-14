@@ -529,19 +529,23 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
     def _test(self, current: ResolvedAI) -> None:
         lines: list[str] = list(current.problems())
         try:
-            from opengrader.core.llm import list_models
-
-            available = list_models(ai_config.text_config(current))
+            available = ai_config.available_models(current)
         except Exception as exc:  # noqa: BLE001
             lines.append(f"Could not reach {current.host}: {exc}")
             lines.append(current.provider.setup_hint)
             self.app.call_from_thread(self._show, lines, None)
             return
 
-        lines.append(f"Connected to {current.host}.")
-        if available:
+        if not current.provider.supports_model_listing:
+            lines.append(
+                f"{current.provider.label} does not list its models, so the "
+                "timing check below is what proves the connection."
+            )
+        elif available:
+            lines.append(f"Connected to {current.host}.")
             lines.append(f"Models installed: {', '.join(available)}")
         else:
+            lines.append(f"Connected to {current.host}.")
             lines.append("No models installed yet.")
         for role, name in (
             ("Handwriting", current.vision_model),

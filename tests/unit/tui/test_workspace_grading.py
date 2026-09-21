@@ -23,7 +23,7 @@ from opengrader.server.workspace.client import (
 from opengrader.tui.data.workspace_provider import WorkspaceProvider
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens.grade_conflict_screen import GradeConflictScreen
-from opengrader.tui.workspace_home import PROCESS_WORKSPACE, WorkspaceHome
+from opengrader.tui.workspace_home import OPEN_TOOLS, PROCESS_WORKSPACE, WorkspaceHome
 
 
 @pytest.fixture
@@ -194,6 +194,43 @@ def test_empty_workspace_can_process_its_folder(grading_workspace):
         assert home.return_value == PROCESS_WORKSPACE
 
     asyncio.run(set_up())
+
+
+@pytest.mark.parametrize("how", ["key", "button"])
+def test_home_opens_the_tools_with_or_without_assignments(grading_workspace, how):
+    _store, _assignment, provider, _ = grading_workspace
+
+    async def run():
+        home = WorkspaceHome(provider.client)
+        async with home.run_test(size=(100, 35)) as pilot:
+            await pilot.pause()
+            if how == "key":
+                await pilot.press("s")
+            else:
+                home.query_one("#open-tools", Button).press()
+            await pilot.pause()
+        return home.return_value
+
+    assert asyncio.run(run()) == OPEN_TOOLS
+
+
+def test_w_opens_write_back_for_the_highlighted_assignment(grading_workspace):
+    from opengrader.tui.ui.screens.write_back_screen import WriteBackScreen
+
+    _store, assignment, provider, _ = grading_workspace
+
+    async def run():
+        home = WorkspaceHome(provider.client)
+        async with home.run_test(size=(100, 35)) as pilot:
+            await pilot.pause()
+            await pilot.press("w")
+            await pilot.pause()
+            screen = home.screen
+            return isinstance(screen, WriteBackScreen), screen._assignment_id
+
+    opened, assignment_id = asyncio.run(run())
+
+    assert opened and assignment_id == assignment.id
 
 
 def save_remote_grade(

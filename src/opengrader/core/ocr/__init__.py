@@ -27,6 +27,8 @@ __all__ = [
     "extract_title_metadata",
     "extract_question_prompt_and_answer",
     "TitleMetadataResult",
+    "VisionReader",
+    "OllamaVisionReader",
 ]
 
 _EXTRACTOR_NAMES = {
@@ -63,6 +65,12 @@ _OLLAMA_VLM_NAMES = {
 }
 
 
+_VISION_READER_NAMES = {
+    "VisionReader",
+    "OllamaVisionReader",
+}
+
+
 def __getattr__(name: str) -> Any:
     if name in _EXTRACTOR_NAMES:
         from . import extractor
@@ -72,6 +80,10 @@ def __getattr__(name: str) -> Any:
         from . import layout
 
         return getattr(layout, name)
+    if name in _VISION_READER_NAMES:
+        from . import vision_reader
+
+        return getattr(vision_reader, name)
     if name in _OLLAMA_VLM_NAMES:
         from . import ollama_vlm
 

@@ -4,7 +4,6 @@ from dataclasses import replace
 from pathlib import Path
 from opengrader.core import ai_config
 from opengrader.core.ocr import OcrConfig
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, ensure_model_available
 from opengrader.core.submissions.batch import ExtractionJob, run_extraction_batch
 from opengrader.core.submissions.transcription import DEFAULT_ESCALATION_FLOOR
 from opengrader.core.grading.automated import grade_student_file, RunJournal
@@ -24,12 +23,9 @@ class SubmissionIntake:
         self.auto_grade = auto_grade
         self.assignment_version = assignment_version
         self.ai = ai_config.resolve()
-        self.vision = OllamaVisionConfig(
-            model=self.ai.vision_model, host=self.ai.host,
-            timeout_seconds=self.ai.timeout_seconds,
-        )
+        self.vision = ai_config.vision_reader(self.ai)
         try:
-            ensure_model_available(self.vision)
+            ai_config.ensure_ready(self.ai, purpose="vision")
         except Exception as exc:
             if self.ai.read_handwriting or self.ai.escalate_only:
                 raise ValueError(
@@ -43,7 +39,7 @@ class SubmissionIntake:
         report = run_extraction_batch(
             [ExtractionJob(
                 pdf_path=pdf, output_dir=output, ocr_config=OcrConfig(),
-                ollama_config=self.vision,
+                vision_reader=self.vision,
                 llm_responses=self.ai.read_handwriting or self.ai.escalate_only,
                 llm_math=self.ai.transcribe_math, math_backend=self.ai.math_backend,
                 escalate_floor=DEFAULT_ESCALATION_FLOOR if self.ai.escalate_only else None,

@@ -14,6 +14,7 @@ from opengrader.core.ocr.extractor import (
     SubmissionResult,
 )
 from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResult
+from opengrader.core.ocr.vision_reader import OllamaVisionReader
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE
 from opengrader.core.submissions import student_file
 
@@ -327,8 +328,12 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
         *,
         image_path: str | Path,
         config: OllamaVisionConfig,
+        math_latex: bool = False,
     ) -> tuple[str, str]:
-        _ = image_path, config
+        # OllamaVisionReader.extract_question_prompt_and_answer always
+        # forwards math_latex explicitly (default False), so the fake must
+        # accept it even though this test doesn't exercise math mode.
+        _ = image_path, config, math_latex
         return "State Big-O complexity.", "O(n log n)"
 
     original_process = ocr_extractor.process_submission_pdf
@@ -346,7 +351,12 @@ def test_build_student_submission_document_uses_ollama_for_fields_and_qa(
             output_dir=output_dir,
             ocr_config=OcrConfig(),
             split_subquestions=False,
-            ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+            # OllamaVisionReader forwards this config to the (monkeypatched)
+            # ollama_vlm functions itself, so this now also exercises the
+            # reader's forwarding rather than a bare OllamaVisionConfig.
+            vision_reader=OllamaVisionReader(
+                config=OllamaVisionConfig(model="custom-model:latest")
+            ),
         )
 
         assert result.document.student_name == "Taylor Student"
@@ -793,7 +803,12 @@ def test_build_student_submission_document_prefers_focus_crop_for_ollama_fields(
             pdf_path=tmp_path / "student-0003.pdf",
             output_dir=output_dir,
             ocr_config=OcrConfig(),
-            ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+            # OllamaVisionReader forwards this config to the (monkeypatched)
+            # ollama_vlm.extract_field_text itself, so this now also
+            # exercises the reader's forwarding rather than a bare config.
+            vision_reader=OllamaVisionReader(
+                config=OllamaVisionConfig(model="custom-model:latest")
+            ),
             skip_ollama_qa=True,
         )
 
@@ -859,7 +874,12 @@ def test_build_student_submission_document_uses_structured_title_metadata(
             pdf_path=tmp_path / "student-0004.pdf",
             output_dir=output_dir,
             ocr_config=OcrConfig(),
-            ollama_config=OllamaVisionConfig(model="custom-model:latest"),
+            # OllamaVisionReader forwards this config to the (monkeypatched)
+            # ollama_vlm.extract_title_metadata itself, so this now also
+            # exercises the reader's forwarding rather than a bare config.
+            vision_reader=OllamaVisionReader(
+                config=OllamaVisionConfig(model="custom-model:latest")
+            ),
             skip_ollama_qa=True,
             progress_callback=progress.append,
         )

@@ -446,14 +446,18 @@ def probe_optional_import(module: str) -> ImportProbe:
 
 
 def probe_ollama(host: str, *, timeout_seconds: float = 3.0) -> OllamaProbe:
-    from opengrader.core.llm.ollama_client import OllamaConfig, OllamaError, list_models
+    from opengrader.core import ai_config
 
-    config = OllamaConfig(host=host, timeout_seconds=timeout_seconds)
+    # This is explicitly the Ollama probe (doctor's "is the local server up"
+    # check), so it resolves against that provider by name rather than
+    # whatever the user has configured — a cloud-configured install should
+    # still get a straight answer about the local server.
+    resolved = ai_config.for_provider(
+        "ollama", host=host, timeout_seconds=timeout_seconds
+    )
     try:
-        models = list_models(config)
-    except OllamaError as exc:
-        return OllamaProbe(host=host, reachable=False, error=summarize_connection_error(str(exc)))
-    except Exception as exc:  # pragma: no cover
+        models = ai_config.available_models(resolved)
+    except Exception as exc:  # provider client errors are provider-specific
         return OllamaProbe(host=host, reachable=False, error=summarize_connection_error(str(exc)))
     return OllamaProbe(host=host, reachable=True, models=tuple(models))
 

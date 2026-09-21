@@ -1,42 +1,46 @@
+"""Adapter kept for this module's callers.
+
+The request/response shape used to live here; it now lives in
+`core/llm/dialects/ollama.py`, and the HTTP now lives in `core/llm/transport.py`.
+This module is what is left: the same four names `ollama_client.py` and
+`core/ocr/ollama_vlm.py` have always called, implemented over the shared
+transport with `transport.NO_RETRY` so a local server that is not answering
+still fails on the first try, exactly as it did before the split (§7.3).
+
+`request` is imported and kept as a module attribute, unused directly, purely
+because `tests/unit/core/llm/test_ollama_client.py` and
+`tests/unit/ocr/test_ollama_vlm_hygiene.py` monkeypatch
+`ollama_transport.request.urlopen`. `urllib.request` is a single shared module
+object, so patching it here patches the same object `transport.py` calls
+through — the tests do not need to change for the transport to move.
+"""
+
 from __future__ import annotations
 
-import json
-import re
-from collections.abc import Callable
-from urllib import error, request
+from urllib import request
+
+from . import transport
+from .dialects.ollama import DIALECT as _OLLAMA
+from .transport import ErrorFactory, parse_json_object
+
+__all__ = [
+    "DEFAULT_HOST",
+    "DEFAULT_TIMEOUT_SECONDS",
+    "DEFAULT_KEEP_ALIVE",
+    "ErrorFactory",
+    "parse_json_object",
+    "fetch_model_names",
+    "generate_raw",
+]
 
 DEFAULT_HOST = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_KEEP_ALIVE = "10m"
 
-ErrorFactory = Callable[[str], Exception]
-
-
-def parse_json_object(raw: str) -> dict | None:
-    text = raw.strip()
-    if not text:
-        return None
-
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text).strip()
-
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    first = text.find("{")
-    last = text.rfind("}")
-    if first == -1 or last == -1 or last <= first:
-        return None
-    try:
-        parsed = json.loads(text[first : last + 1])
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+# The transport reports failures against a URL; this puts the name back, so an
+# error still reads "failed to reach Ollama at ..." as it always has. A person
+# reading it should not have to recognise a port number.
+_SERVICE = "Ollama"
 
 
 def fetch_model_names(
@@ -45,30 +49,22 @@ def fetch_model_names(
     timeout_seconds: float,
     error_factory: ErrorFactory,
 ) -> list[str]:
-    endpoint = f"{host.rstrip('/')}/api/tags"
-    req = request.Request(endpoint, method="GET")
+    endpoint = _OLLAMA.models_endpoint(host)
+    assert endpoint is not None  # the ollama dialect always has one
+    parsed = transport.send_json(
+        url=endpoint,
+        payload=None,
+        headers=_OLLAMA.auth_headers(None),
+        method="GET",
+        service=_SERVICE,
+        timeout_seconds=timeout_seconds,
+        error_factory=error_factory,
+        retry=transport.NO_RETRY,
+    )
     try:
-        with request.urlopen(req, timeout=timeout_seconds) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-    except error.URLError as exc:
-        raise error_factory(f"failed to reach Ollama at {endpoint}: {exc}") from exc
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise error_factory(f"invalid JSON response from Ollama: {exc}") from exc
-
-    models = parsed.get("models", []) if isinstance(parsed, dict) else []
-    if not isinstance(models, list):
-        raise error_factory("invalid Ollama model list response: models is not a list")
-
-    names: list[str] = []
-    for model in models:
-        if isinstance(model, dict):
-            name = str(model.get("name") or model.get("model") or "").strip()
-            if name:
-                names.append(name)
-    return sorted(set(names))
+        return _OLLAMA.model_names(parsed)
+    except ValueError as exc:
+        raise error_factory(transport.redact(str(exc))) from exc
 
 
 def generate_raw(
@@ -84,42 +80,25 @@ def generate_raw(
     timeout_seconds: float,
     error_factory: ErrorFactory,
 ) -> str:
-    merged_options = dict(options) if options is not None else {"temperature": 0}
-    if num_predict is not None:
-        merged_options["num_predict"] = num_predict
-
-    payload: dict = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": merged_options,
-    }
-    if images is not None:
-        payload["images"] = images
-    if response_format is not None:
-        payload["format"] = response_format
-    if keep_alive is not None:
-        payload["keep_alive"] = keep_alive
-
-    endpoint = f"{host.rstrip('/')}/api/generate"
-    body = json.dumps(payload).encode("utf-8")
-    req = request.Request(
-        endpoint,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    body = _OLLAMA.build_body(
+        model=model,
+        prompt=prompt,
+        images=images,
+        response_schema=response_format,
+        num_predict=num_predict,
+        keep_alive=keep_alive,
+        options=options,
     )
-    try:
-        with request.urlopen(req, timeout=timeout_seconds) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-    except error.URLError as exc:
-        raise error_factory(f"failed to call Ollama at {endpoint}: {exc}") from exc
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise error_factory(f"invalid JSON response from Ollama: {exc}") from exc
-
-    if isinstance(parsed, dict) and parsed.get("error"):
-        raise error_factory(str(parsed["error"]))
-    return str(parsed.get("response", "")).strip() if isinstance(parsed, dict) else ""
+    parsed = transport.send_json(
+        url=_OLLAMA.generate_endpoint(host),
+        payload=body,
+        headers=_OLLAMA.auth_headers(None),
+        service=_SERVICE,
+        timeout_seconds=timeout_seconds,
+        error_factory=error_factory,
+        retry=transport.NO_RETRY,
+    )
+    reported = _OLLAMA.error_text(parsed)
+    if reported:
+        raise error_factory(transport.redact(reported))
+    return _OLLAMA.reply_text(parsed)

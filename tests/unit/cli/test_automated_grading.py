@@ -492,8 +492,8 @@ def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> N
         lambda config, emit: emit("Starting Ollama server…"),
     )
     monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: None)
-    monkeypatch.setattr(ag, "ensure_model_available", lambda config: None)
-    monkeypatch.setattr(ag, "generate", lambda **k: "{}")
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr("opengrader.core.llm.generate", lambda **k: "{}")
 
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)
@@ -714,11 +714,9 @@ def test_identical_answers_cost_one_model_call_across_the_cohort(
     stub = _StubGenerator(
         {"rubric_labels": ["Partially Correct"], "confidence": 0.9, "rationale": "ok"}
     )
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "opengrader.cli.automated_grading.ensure_model_available", lambda config: None
-    )
-    monkeypatch.setattr(
-        "opengrader.cli.automated_grading.generate",
+        "opengrader.core.llm.generate",
         lambda *, prompt, config, **_kwargs: stub(prompt),
     )
 
@@ -749,11 +747,9 @@ def test_identical_answers_receive_the_same_grade(tmp_path: Path, monkeypatch) -
             ),
         ]
     )
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "opengrader.cli.automated_grading.ensure_model_available", lambda config: None
-    )
-    monkeypatch.setattr(
-        "opengrader.cli.automated_grading.generate",
+        "opengrader.core.llm.generate",
         lambda *, prompt, config, **_kwargs: next(replies),
     )
 
@@ -782,11 +778,9 @@ def test_different_answers_are_still_graded_separately(
     stub = _StubGenerator(
         {"rubric_labels": ["Partially Correct"], "confidence": 0.9, "rationale": "ok"}
     )
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "opengrader.cli.automated_grading.ensure_model_available", lambda config: None
-    )
-    monkeypatch.setattr(
-        "opengrader.cli.automated_grading.generate",
+        "opengrader.core.llm.generate",
         lambda *, prompt, config, **_kwargs: stub(prompt),
     )
 
@@ -806,11 +800,9 @@ def test_different_answers_are_still_graded_separately(
 
 def test_model_name_is_recorded_in_the_grade(tmp_path: Path, monkeypatch) -> None:
     solutions_path = _write_cohort(tmp_path, ["green"])
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     monkeypatch.setattr(
-        "opengrader.cli.automated_grading.ensure_model_available", lambda config: None
-    )
-    monkeypatch.setattr(
-        "opengrader.cli.automated_grading.generate",
+        "opengrader.core.llm.generate",
         lambda *, prompt, config, **_kwargs: json.dumps(
             {"rubric_labels": ["Partially Correct"], "confidence": 0.9, "rationale": "ok"}
         ),
@@ -847,10 +839,8 @@ def test_llm_generate_lambda_passes_grade_suggestion_schema(
             {"rubric_labels": ["Partially Correct"], "confidence": 0.9, "rationale": "ok"}
         )
 
-    monkeypatch.setattr(
-        "opengrader.cli.automated_grading.ensure_model_available", lambda config: None
-    )
-    monkeypatch.setattr("opengrader.cli.automated_grading.generate", fake_generate)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr("opengrader.core.llm.generate", fake_generate)
 
     run_cli(
         [
@@ -944,8 +934,8 @@ def test_llm_defaults_on_from_ai_setup(tmp_path: Path, monkeypatch) -> None:
     import opengrader.cli.automated_grading as ag
 
     ai_config.save_settings(ai_config.AISettings(grade_written=True))
-    monkeypatch.setattr(ag, "ensure_model_available", lambda config: None)
-    monkeypatch.setattr(ag, "generate", lambda **k: "{}")
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr("opengrader.core.llm.generate", lambda **k: "{}")
 
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)
@@ -969,7 +959,7 @@ def test_llm_defaults_off_when_ai_setup_leaves_it_off(tmp_path: Path, monkeypatc
     def _boom(*_a, **_k):  # pragma: no cover
         raise AssertionError("no model call should be attempted with --llm off")
 
-    monkeypatch.setattr(ag, "ensure_model_available", _boom)
+    monkeypatch.setattr(ai_config, "ensure_ready", _boom)
 
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)
@@ -987,7 +977,7 @@ def test_explicit_no_llm_beats_ai_setup(tmp_path: Path, monkeypatch) -> None:
     def _boom(*_a, **_k):  # pragma: no cover
         raise AssertionError("--no-llm must turn AI grading off even with it saved on")
 
-    monkeypatch.setattr(ag, "ensure_model_available", _boom)
+    monkeypatch.setattr(ai_config, "ensure_ready", _boom)
 
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)
@@ -1037,8 +1027,8 @@ def test_llm_does_not_refuse_once_calibration_is_measured(
             min_confidence_measured=True,
         )
     )
-    monkeypatch.setattr(ag, "ensure_model_available", lambda config: None)
-    monkeypatch.setattr(ag, "generate", lambda **k: "{}")
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr("opengrader.core.llm.generate", lambda **k: "{}")
 
     solutions_path = tmp_path / "solutions.md"
     solutions_path.write_text(SOLUTIONS_MD)

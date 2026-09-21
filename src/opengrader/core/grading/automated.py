@@ -23,7 +23,7 @@ from opengrader.core.grading.solutions import (
     solution_entries_for_submission,
     solution_version_for_submission,
 )
-from opengrader.core.llm import OllamaError
+from opengrader.core.llm import LLMError
 from opengrader.core.qa_file import QADocument
 from opengrader.core.history import GradeJournal, current_actor, resolve_history_dir
 from opengrader.core.submissions import (
@@ -341,6 +341,6 @@ def _suggest_or_warn(
                 generate=llm_generate,
             ),
         )
-    except OllamaError as exc:
+    except LLMError as exc:
         print(f"  LLM grading failed for {question_id}: {exc}", file=sys.stderr)
         return None

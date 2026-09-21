@@ -451,6 +451,11 @@ class _ConflictRow(Static):
             self.screen.focus_relative_conflict(self, -1)
 
 
+# Public name for screens that merge something other than a grader copy (the
+# workspace write-back); they subclass it to relabel ours/theirs.
+ConflictRow = _ConflictRow
+
+
 class MergeScreen(ModalScreen[bool]):
     DEFAULT_CSS = """
     MergeScreen {

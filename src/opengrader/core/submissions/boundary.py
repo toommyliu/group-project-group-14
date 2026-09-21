@@ -5,13 +5,12 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
-from opengrader.core.ocr.ollama_vlm import (
-    OllamaVisionConfig,
-    page_has_identity_field,
-)
 from opengrader.core.pdf_utils import render_page_to_image
+
+if TYPE_CHECKING:  # pragma: no cover
+    from opengrader.core.ocr.vision_reader import VisionReader
 from opengrader.core.submissions.splitter import SubmissionPageRange, _sanitize_filename
 
 
@@ -86,7 +85,7 @@ def page_has_identity_header(image, *, top_fraction: float = 0.35) -> tuple[bool
 def _analyze_pages(
     pdf_path: str | Path,
     *,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     dpi: int = 150,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[tuple[bool, int | None]]:
@@ -111,12 +110,12 @@ def _analyze_pages(
                     continue
 
                 has_header, readable = page_has_identity_header(image)
-                if not has_header and not readable and ollama_config is not None:
+                if not has_header and not readable and vision_reader is not None:
                     img_file = tmp_path / f"p{i}.png"
                     image.save(img_file)
                     try:
-                        has_header = page_has_identity_field(
-                            image_path=img_file, config=ollama_config
+                        has_header = vision_reader.page_has_identity_field(
+                            image_path=img_file
                         )
                     except Exception:
                         has_header = False
@@ -129,7 +128,7 @@ def _analyze_pages(
 def detect_page_signals(
     pdf_path: str | Path,
     *,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     dpi: int = 150,
     progress_callback: Callable[[str], None] | None = None,
 ) -> list[bool]:
@@ -137,7 +136,7 @@ def detect_page_signals(
         is_first
         for is_first, _qr_page in _analyze_pages(
             pdf_path,
-            ollama_config=ollama_config,
+            vision_reader=vision_reader,
             dpi=dpi,
             progress_callback=progress_callback,
         )
@@ -160,7 +159,7 @@ def boundaries_from_qr_pages(
 def plan_boundary_ranges(
     pdf_path: str | Path,
     *,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     filename_prefix: str = "submission",
     zero_pad_width: int = 4,
     progress_callback: Callable[[str], None] | None = None,
@@ -168,7 +167,7 @@ def plan_boundary_ranges(
     """Ranges use 1-based page numbers."""
     features = _analyze_pages(
         pdf_path,
-        ollama_config=ollama_config,
+        vision_reader=vision_reader,
         progress_callback=progress_callback,
     )
     detected = boundaries_from_qr_pages([qr_page for _flag, qr_page in features])

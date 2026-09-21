@@ -36,6 +36,9 @@ class TuiWorkflowState:
     active_question_index: int = -1
     teacher_mode: bool = False
     anonymity_locked: bool = False
+    # Something is open for grading (a folder or a workspace assignment), so
+    # the start page can offer a way back to it.
+    session_open: bool = False
     active_claims: tuple[WorkClaim, ...] = ()
     grader_actor: str = ""
     claim_filter_enabled: bool = True

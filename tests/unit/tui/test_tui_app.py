@@ -21,7 +21,7 @@ from opengrader.tui.data import RubricEditResult, RubricOptionSeed, StudentSumma
 from opengrader.tui.data.stub_data_provider import StubDataProvider
 from opengrader.tui.state import PAGE_GRADE, PAGE_QA_PICKER
 from opengrader.tui.tui import TuiApp
-from opengrader.tui.ui.screens import HelpScreen
+from opengrader.tui.ui.screens import HelpScreen, SetupScreen
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 from opengrader.tui.ui.widgets.status_bar import StatusBar
 from opengrader.tui.ui.widgets.tabbed_list_pane import TabbedListPane
@@ -2222,10 +2222,12 @@ def test_setup_page_scopes_out_qa_picker_hotkeys() -> None:
                 binding.command
                 for binding in app.input_controller.visible_bindings()
             }
+            # F2 is "Home"; no "Back to grading" (F3), since nothing is open.
             assert visible == {
                 InputCommand.APP_QUIT,
                 InputCommand.APP_HELP,
                 InputCommand.OPEN_FORMAT_GUIDE,
+                InputCommand.SWITCH_ASSIGNMENT,
             }
 
     asyncio.run(run())
@@ -2680,3 +2682,166 @@ def test_the_watch_stops_once_the_extractor_worker_reports_done(tmp_path) -> Non
     students, stopped = asyncio.run(run())
     assert students == 2
     assert stopped is True
+
+
+# --- The start page: restored, and reachable from every session ---------------
+#
+# `tui` must work with no workspace service. A bare TuiApp opens the start page
+# (pipeline steps plus helper tools); Launch Grading opens a folder in place;
+# F3 moves between the tools and grading in either mode.
+
+
+def _copy_sample(tmp_path: Path) -> tuple[Path, Path]:
+    import shutil
+
+    target = tmp_path / "cs146-quiz1"
+    shutil.copytree("samples/cs146-quiz1", target)
+    return target / "qa.md", target / "student-submissions"
+
+
+def test_a_bare_app_opens_tools_and_the_pipeline_can_open_a_folder(tmp_path) -> None:
+    from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
+    from opengrader.tui.state import PAGE_SETUP
+
+    qa, subs = _copy_sample(tmp_path)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_SETUP
+            await pilot.press("f3")  # nothing open: stays put
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_SETUP
+
+            # What the pipeline card posts when a run leaves submissions.
+            setup = app.get_setup_screen()
+            setup.post_message(SetupScreen.LaunchRequested(str(qa), str(subs)))
+            await pilot.pause()
+
+            assert isinstance(app.data_provider, SubmissionFilesProvider)
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+            assert app.workflow_state.session_open
+            assert len(app.workflow_state.question_items) == 11
+
+    asyncio.run(run())
+
+
+def test_f3_moves_between_tools_and_grading_and_f2_hands_back_to_home(
+    tmp_path,
+) -> None:
+    from opengrader.tui.state import PAGE_SETUP
+
+    qa, subs = _copy_sample(tmp_path)
+
+    async def run() -> object:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path=qa,
+            submissions_path=subs,
+        )
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+            await pilot.press("f3")
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_SETUP
+            visible = {b.command for b in app.input_controller.visible_bindings()}
+            assert InputCommand.OPEN_START_PAGE in visible  # "Back to grading"
+            await pilot.press("f3")
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+            await pilot.press("f2")  # back to Home: the launcher's call
+            await pilot.pause()
+        return app.return_value
+
+    assert asyncio.run(run()) == "switch_assignment"
+
+
+def test_a_workspace_session_reaches_the_tools_and_f2_still_exits_to_its_chooser(
+    workspace_provider,
+) -> None:
+    from opengrader.tui.state import PAGE_SETUP
+
+    async def run() -> object:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=workspace_provider)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.press("f3")
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_SETUP
+            await pilot.press("f3")
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+            await pilot.press("f2")
+            await pilot.pause()
+        return app.return_value
+
+    assert asyncio.run(run()) == "switch_assignment"
+
+
+def test_opening_a_folder_from_a_workspace_session_stops_following_it(
+    workspace_provider, tmp_path
+) -> None:
+    from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
+
+    qa, subs = _copy_sample(tmp_path)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=workspace_provider)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            assert app._stop_workspace_events is not None
+            await pilot.press("f3")
+            await pilot.pause()
+            # What the pipeline card posts when a run leaves submissions.
+            setup = app.get_setup_screen()
+            setup.post_message(SetupScreen.LaunchRequested(str(qa), str(subs)))
+            await pilot.pause()
+            assert isinstance(app.data_provider, SubmissionFilesProvider)
+            assert app._stop_workspace_events is None
+
+    asyncio.run(run())
+
+
+
+def test_tools_opened_on_a_scans_folder_fill_the_pipeline_card(tmp_path) -> None:
+    from textual.widgets import Collapsible
+
+    folder = tmp_path / "quiz2"
+    folder.mkdir()
+    (folder / "scans.pdf").write_bytes(b"%PDF-1.4\n")
+
+    async def run() -> tuple[str, bool]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, pipeline_folder=folder)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            return (
+                app.query_one("#pipe-scan", Input).value,
+                app.query_one("#section-pipeline", Collapsible).collapsed,
+            )
+
+    scan, collapsed = asyncio.run(run())
+    assert scan == str(folder / "scans.pdf")
+    assert collapsed is False
+
+
+def test_a_folder_opened_from_the_pipeline_is_remembered_for_home(tmp_path) -> None:
+    from opengrader.core.recents import load_recents
+
+    qa, subs = _copy_sample(tmp_path)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            app.get_setup_screen().post_message(
+                SetupScreen.LaunchRequested(str(qa), str(subs))
+            )
+            await pilot.pause()
+
+    asyncio.run(run())
+    [recent] = load_recents()
+    assert recent.kind == "folder"
+    assert recent.title == "CS146: Quiz 1"
+    assert recent.submissions == str(subs.resolve())

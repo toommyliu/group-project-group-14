@@ -33,18 +33,17 @@ def test_math_latex_prompt_instructs_latex(monkeypatch):
     assert "$...$" in prompts[0]
 
 
-def test_math_flag_threads_through_fill(monkeypatch, tmp_path):
+def test_math_flag_threads_through_fill(tmp_path):
     from opengrader.core.submissions import processor
     from opengrader.core.submissions.processor import _fill_responses_with_vlm
     from opengrader.core.submissions.student_file import StudentSubmissionQuestion
 
     seen: dict[str, bool] = {}
 
-    def fake_extract(*, image_path, config, math_latex=False):
-        seen["math_latex"] = math_latex
-        return "Q", r"$\frac{1}{2}$"
-
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", fake_extract)
+    class _StubReader:
+        def extract_question_prompt_and_answer(self, *, image_path, math_latex=False):
+            seen["math_latex"] = math_latex
+            return "Q", r"$\frac{1}{2}$"
 
     (tmp_path / "responses").mkdir()
     (tmp_path / "responses" / "q1.png").write_bytes(b"x")
@@ -58,7 +57,7 @@ def test_math_flag_threads_through_fill(monkeypatch, tmp_path):
     filled = _fill_responses_with_vlm(
         [question],
         tmp_path,
-        OllamaVisionConfig(),
+        _StubReader(),
         pdf_name="s.pdf",
         progress=processor.ExtractionProgress(),
         progress_callback=lambda _m: None,

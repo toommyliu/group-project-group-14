@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -93,14 +94,52 @@ def _question(qid: str, image: str | None, text: str = "") -> StudentSubmissionQ
     )
 
 
-def test_vlm_fill_transcribes_each_crop(monkeypatch, tmp_path: Path) -> None:
-    calls: list[Path] = []
+class _StubVisionReader:
+    """A settable `VisionReader` stub for `_fill_responses_with_vlm` tests.
 
-    def fake_vlm(*, image_path, config, math_latex=False):
-        calls.append(Path(image_path))
-        return ("prompt ignored", f"answer for {Path(image_path).stem}")
+    Records every image path passed to `extract_question_prompt_and_answer`
+    and `extract_handwriting_only` (in `answer_calls` / `handwriting_calls`),
+    and each method's outcome is configured per-test via plain attributes
+    instead of a bespoke fake function per test.
 
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", fake_vlm)
+    `answer` / `handwriting_answer` may be a literal string or a
+    `Callable[[Path], str]` computed from the crop path, for tests whose
+    answer depends on which crop was read. `raise_on_answer` /
+    `raise_on_handwriting`, when set to an exception instance, is raised
+    instead of returning a value, for the VLM-failure and
+    "must never be called" tests.
+    """
+
+    def __init__(self) -> None:
+        self.prompt: str = "prompt ignored"
+        self.answer: str | Callable[[Path], str] = ""
+        self.handwriting_answer: str | Callable[[Path], str] = ""
+        self.raise_on_answer: Exception | None = None
+        self.raise_on_handwriting: Exception | None = None
+        self.answer_calls: list[Path] = []
+        self.handwriting_calls: list[Path] = []
+
+    def extract_question_prompt_and_answer(self, *, image_path, math_latex=False):
+        path = Path(image_path)
+        self.answer_calls.append(path)
+        if self.raise_on_answer is not None:
+            raise self.raise_on_answer
+        answer = self.answer(path) if callable(self.answer) else self.answer
+        return self.prompt, answer
+
+    def extract_handwriting_only(self, *, image_path, math_latex=False):
+        path = Path(image_path)
+        self.handwriting_calls.append(path)
+        if self.raise_on_handwriting is not None:
+            raise self.raise_on_handwriting
+        if callable(self.handwriting_answer):
+            return self.handwriting_answer(path)
+        return self.handwriting_answer
+
+
+def test_vlm_fill_transcribes_each_crop(tmp_path: Path) -> None:
+    reader = _StubVisionReader()
+    reader.answer = lambda path: f"answer for {path.stem}"
 
     questions = [_question("q1", "responses/q1.png"), _question("q2", "responses/q2.png")]
     ticks: list[str] = []
@@ -109,7 +148,7 @@ def test_vlm_fill_transcribes_each_crop(monkeypatch, tmp_path: Path) -> None:
     filled = _fill_responses_with_vlm(
         questions,
         tmp_path,
-        config := object(),  # noqa: F841
+        reader,
         pdf_name="submission-0001.pdf",
         progress=progress,
         progress_callback=lambda _m: None,
@@ -117,14 +156,13 @@ def test_vlm_fill_transcribes_each_crop(monkeypatch, tmp_path: Path) -> None:
 
     assert [q.response_text for q in filled] == ["answer for q1", "answer for q2"]
     assert ticks == ["q1", "q2"]
-    assert [p.name for p in calls] == ["q1.png", "q2.png"]
+    assert [p.name for p in reader.answer_calls] == ["q1.png", "q2.png"]
 
 
-def test_vlm_fill_skips_already_filled_and_imageless(monkeypatch, tmp_path: Path) -> None:
-    def fake_vlm(*, image_path, config):
-        return ("", "SHOULD NOT BE USED")
-
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", fake_vlm)
+def test_vlm_fill_skips_already_filled_and_imageless(tmp_path: Path) -> None:
+    reader = _StubVisionReader()
+    reader.prompt = ""
+    reader.answer = "SHOULD NOT BE USED"
 
     questions = [
         _question("q1", "responses/q1.png", text="already graded text"),
@@ -134,7 +172,7 @@ def test_vlm_fill_skips_already_filled_and_imageless(monkeypatch, tmp_path: Path
     filled = _fill_responses_with_vlm(
         questions,
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(on_response=lambda p, q: ticks.append(q)),
         progress_callback=lambda _m: None,
@@ -144,11 +182,12 @@ def test_vlm_fill_skips_already_filled_and_imageless(monkeypatch, tmp_path: Path
     assert ticks == []
 
 
-def test_verified_blank_ink_never_calls_a_model(monkeypatch, tmp_path: Path) -> None:
-    def unexpected_call(**_kwargs):
-        raise AssertionError("a blank ink layer must not reach a model")
+def test_verified_blank_ink_never_calls_a_model(tmp_path: Path) -> None:
+    reader = _StubVisionReader()
+    reader.raise_on_handwriting = AssertionError(
+        "a blank ink layer must not reach a model"
+    )
 
-    monkeypatch.setattr(processor, "extract_handwriting_only", unexpected_call)
     question = _question("q1", "responses/q1.png")
     question = replace(
         question,
@@ -159,7 +198,7 @@ def test_verified_blank_ink_never_calls_a_model(monkeypatch, tmp_path: Path) -> 
     filled = _fill_responses_with_vlm(
         [question],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _message: None,
@@ -169,14 +208,10 @@ def test_verified_blank_ink_never_calls_a_model(monkeypatch, tmp_path: Path) -> 
     assert filled[0].response_source is None
 
 
-def test_ink_layer_uses_the_handwriting_only_prompt(monkeypatch, tmp_path: Path) -> None:
-    calls: list[Path] = []
+def test_ink_layer_uses_the_handwriting_only_prompt(tmp_path: Path) -> None:
+    reader = _StubVisionReader()
+    reader.handwriting_answer = "isolated answer"
 
-    def fake_handwriting(*, image_path, config, math_latex=False):
-        calls.append(Path(image_path))
-        return "isolated answer"
-
-    monkeypatch.setattr(processor, "extract_handwriting_only", fake_handwriting)
     question = replace(
         _question("q1", "responses/q1.png"),
         ink_image_path="responses/q1.ink.png",
@@ -188,22 +223,21 @@ def test_ink_layer_uses_the_handwriting_only_prompt(monkeypatch, tmp_path: Path)
     filled = _fill_responses_with_vlm(
         [question],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _message: None,
     )
 
-    assert calls == [tmp_path / "responses/q1.ink.png"]
+    assert reader.handwriting_calls == [tmp_path / "responses/q1.ink.png"]
     assert filled[0].response_text == "isolated answer"
     assert filled[0].ink_fragments[0].text == "isolated answer"
 
 
 def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:
-    def boom(*, image_path, config):
-        raise RuntimeError("ollama down")
+    reader = _StubVisionReader()
+    reader.raise_on_answer = RuntimeError("ollama down")
 
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", boom)
     monkeypatch.setattr(
         processor,
         "_ocr_image_with_confidence",
@@ -214,7 +248,7 @@ def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:
     filled = _fill_responses_with_vlm(
         [_question("q1", "responses/q1.png")],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=warnings.append,
@@ -252,13 +286,9 @@ def _escalating_fill(
     floor: float = 60.0,
     monkeypatch,
 ):
-    vlm_calls: list[str] = []
+    reader = _StubVisionReader()
+    reader.answer = vlm_text
 
-    def fake_vlm(*, image_path, config, math_latex=False):
-        vlm_calls.append(Path(image_path).name)
-        return ("prompt ignored", vlm_text)
-
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", fake_vlm)
     monkeypatch.setattr(
         processor, "_ocr_image_with_confidence", lambda path, psm=6: ocr
     )
@@ -266,12 +296,13 @@ def _escalating_fill(
     filled = _fill_responses_with_vlm(
         questions,
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _m: None,
         escalate_floor=floor,
     )
+    vlm_calls = [p.name for p in reader.answer_calls]
     return filled, vlm_calls
 
 
@@ -337,10 +368,9 @@ def test_a_model_that_reads_nothing_cannot_cost_the_ocr_answer(
 
 
 def test_a_failing_model_cannot_cost_the_ocr_answer(monkeypatch, tmp_path: Path) -> None:
-    def boom(*, image_path, config, math_latex=False):
-        raise RuntimeError("ollama down")
+    reader = _StubVisionReader()
+    reader.raise_on_answer = RuntimeError("ollama down")
 
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", boom)
     monkeypatch.setattr(
         processor, "_ocr_image_with_confidence", lambda path, psm=6: ("partial", 41.0)
     )
@@ -348,7 +378,7 @@ def test_a_failing_model_cannot_cost_the_ocr_answer(monkeypatch, tmp_path: Path)
     filled = _fill_responses_with_vlm(
         [_question("q1", "responses/q1.png")],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _m: None,
@@ -362,20 +392,19 @@ def test_a_failing_model_cannot_cost_the_ocr_answer(monkeypatch, tmp_path: Path)
 def test_the_default_order_is_still_model_first(monkeypatch, tmp_path: Path) -> None:
     ocr_calls: list[str] = []
 
-    def fake_vlm(*, image_path, config, math_latex=False):
-        return ("prompt ignored", "model reading")
+    reader = _StubVisionReader()
+    reader.answer = "model reading"
 
     def fake_ocr(path, psm=6):
         ocr_calls.append(Path(path).name)
         return ("ocr text", 95.0)
 
-    monkeypatch.setattr(processor, "extract_question_prompt_and_answer", fake_vlm)
     monkeypatch.setattr(processor, "_ocr_image_with_confidence", fake_ocr)
 
     filled = _fill_responses_with_vlm(
         [_question("q1", "responses/q1.png")],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _m: None,
@@ -387,11 +416,9 @@ def test_the_default_order_is_still_model_first(monkeypatch, tmp_path: Path) -> 
 
 
 def test_the_maths_backend_still_wins_when_escalating(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        processor,
-        "extract_question_prompt_and_answer",
-        lambda **_kwargs: ("prompt", "vision reading"),
-    )
+    reader = _StubVisionReader()
+    reader.answer = "vision reading"
+
     monkeypatch.setattr(
         processor, "_ocr_image_with_confidence", lambda path, psm=6: ("smudge", 30.0)
     )
@@ -399,7 +426,7 @@ def test_the_maths_backend_still_wins_when_escalating(monkeypatch, tmp_path: Pat
     filled = _fill_responses_with_vlm(
         [_question("q1", "responses/q1.png")],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(),
         progress_callback=lambda _m: None,
@@ -413,11 +440,9 @@ def test_the_maths_backend_still_wins_when_escalating(monkeypatch, tmp_path: Pat
 
 def test_escalation_ticks_progress_once_per_crop(monkeypatch, tmp_path: Path) -> None:
     ticks: list[str] = []
-    monkeypatch.setattr(
-        processor,
-        "extract_question_prompt_and_answer",
-        lambda **_kwargs: ("prompt", "model reading"),
-    )
+    reader = _StubVisionReader()
+    reader.answer = "model reading"
+
     monkeypatch.setattr(
         processor, "_ocr_image_with_confidence", lambda path, psm=6: ("x", 10.0)
     )
@@ -425,7 +450,7 @@ def test_escalation_ticks_progress_once_per_crop(monkeypatch, tmp_path: Path) ->
     _fill_responses_with_vlm(
         [_question("q1", "responses/q1.png"), _question("q2", "responses/q2.png")],
         tmp_path,
-        object(),
+        reader,
         pdf_name="s.pdf",
         progress=ExtractionProgress(on_response=lambda _p, q: ticks.append(q)),
         progress_callback=lambda _m: None,

@@ -34,7 +34,7 @@ from opengrader.core.grading.solutions import (
     MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
     solution_entries_for_submission,
 )
-from opengrader.core.llm import OllamaConfig, OllamaError, ensure_model_available, generate
+from opengrader.core.llm import LLMError
 from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.question_types import humanize_question_label
 from opengrader.core.submissions import load_student_submission_markdown
@@ -141,7 +141,7 @@ def run_models_over_targets(
                 progress(model, index, len(targets), target)
             try:
                 cases.append(evaluate_target(target, model=model, generate=generate_fn))
-            except OllamaError as exc:
+            except LLMError as exc:
                 if warn is not None:
                     warn(
                         f"{model}: grading {target.student_id}/{target.question_id} "
@@ -474,7 +474,7 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--llm-timeout",
         type=float,
-        default=OllamaConfig.timeout_seconds,
+        default=ai_config.DEFAULT_TIMEOUT_SECONDS,
         help="Per-request timeout in seconds (default: %(default)s).",
     )
     parser.add_argument(
@@ -576,16 +576,14 @@ def _build_parser() -> ArgumentParser:
     return parser
 
 
-def _start_ollama_server_if_needed(
-    config: OllamaConfig, emit: Callable[[str], None]
-) -> None:
-    parsed = urlparse(config.host)
-    host = parsed.hostname or "127.0.0.1"
+def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> None:
+    parsed = urlparse(host)
+    hostname = parsed.hostname or "127.0.0.1"
     port = parsed.port or 11434
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        if probe.connect_ex((host, port)) == 0:
+        if probe.connect_ex((hostname, port)) == 0:
             return
-    emit(f"Starting Ollama server at {config.host}…")
+    emit(f"Starting Ollama server at {host}…")
     try:
         subprocess.Popen(
             ["ollama", "serve"],
@@ -600,7 +598,7 @@ def _start_ollama_server_if_needed(
     while time.time() < deadline:
         time.sleep(1)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            if probe.connect_ex((host, port)) == 0:
+            if probe.connect_ex((hostname, port)) == 0:
                 return
     emit("Warning: timed out waiting for Ollama to start.")
 
@@ -612,10 +610,14 @@ def _default_generate_factory(
 
     def factory(model: str) -> GenerateFn:
         nonlocal started
-        config = OllamaConfig(model=model, host=host, timeout_seconds=timeout_seconds)
-        if auto_ollama:
+        resolved = ai_config.with_overrides(
+            host=host, text_model=model, timeout_seconds=timeout_seconds
+        )
+        if auto_ollama and resolved.kind == "local":
             if not started:
-                _start_ollama_server_if_needed(config, lambda msg: print(msg, file=sys.stderr))
+                _start_ollama_server_if_needed(
+                    resolved.host, lambda msg: print(msg, file=sys.stderr)
+                )
                 started = True
             print(
                 f"Pulling model '{model}' if needed — first run may download "
@@ -628,10 +630,8 @@ def _default_generate_factory(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        ensure_model_available(config)
-        return lambda prompt: generate(
-            prompt=prompt, config=config, response_format=GRADE_SUGGESTION_SCHEMA
-        )
+        ai_config.ensure_ready(resolved, purpose="text")
+        return ai_config.text_generate(resolved, response_format=GRADE_SUGGESTION_SCHEMA)
 
     return factory
 
@@ -718,7 +718,7 @@ def run_cli(
             progress=progress,
             warn=warn,
         )
-    except (OllamaError, RuntimeError) as exc:
+    except (LLMError, RuntimeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 

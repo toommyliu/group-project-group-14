@@ -11,14 +11,15 @@ from textual.widgets import Button, Static
 
 _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("q", "Quit Opengrader."),
-    ("F2", "Save pending feedback and choose an assignment in this workspace."),
+    ("F2", "Save pending feedback and go Home to open another class folder or workspace (in a workspace: its assignment list)."),
+    ("F3", "Tools: every pipeline step and helper tool (doctor, AI setup and providers, sharing, backup). F3 again goes back to grading."),
     (
         "t",
         "Toggle teacher mode. Grading is anonymous by default — students "
         "appear as IDs; teacher mode reveals names and the Name tab in "
         "the QA picker. Disabled when the assignment is locked to anonymous "
-        "grading (multi-grader mode; see the grading-policy tool). On the "
-        "start-up screen there is nobody to anonymize yet, so t opens the "
+        "grading (multi-grader mode; see the grading-policy tool). In Tools "
+        "(F3) with nothing open there is nobody to anonymize, so t opens the "
         "copy-paste answer-key format templates instead.",
     ),
     ("?", "Open this help."),
@@ -89,7 +90,7 @@ _REPORT_ROWS: list[tuple[str, str]] = [
         "from a terminal. Nothing else is written; this only measures. Unlike "
         "the other reports here it takes a while (every measured answer is "
         "one model call), so there is an answer limit for a quick first look. "
-        "Also in Helper Tools on the start-up screen.",
+        "Also in Tools (F3).",
     ),
     (
         "shift+H",
@@ -380,9 +381,9 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "result: 'opengrader-run class/' finds the scan, answer key, roster "
         "and blank template inside the class folder and builds there "
         "('--scan bundle.pdf --qa qa.md --out class/' still works, and any "
-        "flag overrides what the folder offered). On the start-up screen it "
-        "has a section of its own, RUN THE WHOLE PIPELINE, directly under "
-        "Start grading — open 'Run every step — one scan in, graded work out', "
+        "flag overrides what the folder offered). In Tools (F3) it has a "
+        "section of its own, RUN THE WHOLE PIPELINE, near the top: open "
+        "'Run every step — one scan in, graded work out', "
         "choose the class folder and press Scan folder to fill in the rest. "
         "It checks the scan, splits it, extracts every submission and "
         "auto-grades what it can, and you never have to hand the output of one "
@@ -460,7 +461,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
 _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     (
         "Where you set it up",
-        "One place: 'AI setup' in the start-up screen's Helper Tools. Which "
+        "One place: 'AI setup' under Helper Tools in Tools (F3). Which "
         "provider, which two models, which server, and how confident a grade "
         "suggestion has to be — answered once, saved for this computer, and "
         "read by everything: every step above, the whole-pipeline run, and the "
@@ -529,8 +530,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     (
         "Should you trust it?",
         "Don't guess. Grade some free responses by hand first, then press "
-        "shift+A (or open Calibrate AI grading in the start-up screen's "
-        "Helper Tools). It re-grades those same answers with the model and "
+        "shift+A (or open Calibrate AI grading in Tools, F3). It re-grades those same answers with the model and "
         "reports how often it agreed with you, per model and per confidence "
         "level — then names the minimum confidence the evidence supports and "
         "offers to save it into AI setup, where every tool picks it up. It "
@@ -572,7 +572,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "With that same box ticked, a step also 'ollama pull's the model it "
         "needs on first use — a one-time download. To pre-fetch the default, "
         "run 'ollama pull qwen2.5vl:7b' (~6 GB); 'ollama list' shows what you "
-        "have, and 'Check this computer' in Helper Tools reports whether the "
+        "have, and 'Check this computer' in Tools (F3) reports whether the "
         "models AI setup names are actually installed.",
     ),
     (
@@ -686,8 +686,19 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "optional Ollama server and its models, and whether this terminal can "
         "display answer crops. Run it on a new machine, and any time something "
         "misbehaves for no obvious reason. Add --smoke to build a template PDF "
-        "end to end. Read-only. CLI: doctor. Also in the setup screen's Helper "
-        "Tools as 'Check this computer'.",
+        "end to end. Read-only. CLI: doctor. Also in Tools (F3) as "
+        "'Check this computer'.",
+    ),
+    (
+        "AI providers",
+        "Connect an AI service other than the local one: a service your "
+        "department runs, or one you pay for. Each provider is a small file "
+        "naming the service's address, its models and the environment "
+        "variable that holds your key (never the key itself). Add one from a "
+        "shipped example, test it, or remove it. A service that is not on "
+        "this computer or your local network receives student work. Choose "
+        "the provider to use in AI setup. CLI: opengrader-providers. Also in "
+        "Tools (F3) as 'AI providers'.",
     ),
     (
         "AI setup",
@@ -696,7 +707,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "and how confident a grade suggestion must be before it is offered. "
         "What you save is read by every step and every command, including "
         "ones run from a terminal — no tool asks you about a model any more. "
-        "In the start-up screen's Helper Tools, right after 'Check this "
+        "In Tools (F3), right after 'Check this "
         "computer', which is what tells you whether those models are "
         "installed. See AI SETUP above for the full detail.",
     ),
@@ -747,8 +758,8 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "subfolder if there is one each, otherwise by the leading part of the "
         "filename (s1234-p1.jpg, s1234-p2.jpg), or set a fixed number of photos "
         "per student. HEIC (iPhone) photos need one extra install, and it names "
-        "the command. Your photos are only ever read. In the start-up screen's "
-        "Helper Tools as 'Import phone photos'. CLI: photo-import.",
+        "the command. Your photos are only ever read. In Tools (F3) as "
+        "'Import phone photos'. CLI: photo-import.",
     ),
     (
         "Region map",
@@ -757,7 +768,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "ago. Draw a box around each answer area once, on a blank copy, and "
         "every scan of that assignment is cropped against those boxes: no text "
         "layer needed, and nothing else in the pipeline changes. 'Draw answer "
-        "regions' in the start-up screen's Helper Tools opens the editor with "
+        "regions' in Tools (F3) opens the editor with "
         "the boxes already proposed for you to correct — j/k select, arrows "
         "move, shift+arrows resize, and the panel on the right sets each "
         "question's number, points and type. Saving is refused while anything "
@@ -791,8 +802,8 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "graded are kept, and anything you both changed is shown for you to "
         "settle one row at a time. An applied merge can be undone with "
         "grade-restore --without-actor merge:<name>. In the app: shift+E makes "
-        "a copy and shift+M merges one back; also Share with another grader on "
-        "the start-up screen. CLI: grade-merge pack/list/preview/apply.",
+        "a copy and shift+M merges one back; also Share with another grader in "
+        "Tools (F3). CLI: grade-merge pack/list/preview/apply.",
     ),
     (
         "Backup & integrity",
@@ -1028,7 +1039,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
     (
         "Generate template",
         "Helper: render a printable blank template PDF (one per version) from "
-        "a QA file. In the start-up screen's Helper Tools. Tick 'Add QR codes' "
+        "a QA file. In Tools (F3). Tick 'Add QR codes' "
         "for reliable auto-splitting/reordering (identical sheets), or add a "
         "roster to reveal per-student options: one anonymous QR sheet per student "
         "(prints the id, not the name) plus a teacher master key (id -> name) on "

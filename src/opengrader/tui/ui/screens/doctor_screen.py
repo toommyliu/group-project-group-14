@@ -9,7 +9,6 @@ from textual.widgets import Button, Checkbox, RichLog, Static
 
 from opengrader.core import ai_config
 from opengrader.core.environment import EnvironmentReport, build_environment_report
-from opengrader.core.llm.ollama_client import OllamaConfig
 from opengrader.tui.formatting import (
     format_environment_check,
     format_environment_verdict,
@@ -73,9 +72,9 @@ class DoctorScreen(ModalScreen[None]):
     def __init__(
         self,
         *,
-        vision_model: str = OllamaConfig.model,
+        vision_model: str = ai_config.DEFAULT_VISION_MODEL,
         text_model: str | None = None,
-        ollama_host: str = OllamaConfig.host,
+        ollama_host: str = ai_config.DEFAULT_HOST,
     ) -> None:
         super().__init__()
         self._vision_model = vision_model

@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING, Callable
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, extract_page_number
 from opengrader.core.pdf_utils import norm_bbox, render_page_to_image, safe_image_to_data
 
 if TYPE_CHECKING:  # pragma: no cover
     import fitz
+    from opengrader.core.ocr.vision_reader import VisionReader
 
 
 _ROMAN_RE = re.compile(r"^[IVXLCDM]+$", re.IGNORECASE)
@@ -344,7 +344,7 @@ class ReorderResult:
 def reorder_pdf_pages(
     pdf_path: str | Path,
     *,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     blank_template_layout: PageNumberLayoutInfo | None = None,
     extra_work_pages: bool = False,
     progress_callback: Callable[[str], None] | None = None,
@@ -387,10 +387,10 @@ def reorder_pdf_pages(
                 if num is None:
                     num = detect_page_number_tesseract(img, max_pages=expected_total)
 
-                if num is None and ollama_config:
+                if num is None and vision_reader:
                     img_file = tmp_path / f"p{i}.png"
                     img.save(img_file)
-                    num = extract_page_number(image_path=img_file, config=ollama_config)
+                    num = vision_reader.extract_page_number(image_path=img_file)
 
             detected.append(num)
 

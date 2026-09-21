@@ -10,6 +10,24 @@ from opengrader.core.qa_file.pdf_answer_key import (
 )
 
 
+class _StubVisionReader:
+    """Minimal VisionReader stub recording calls for the escalation tests.
+
+    `pdf_answer_key.extract_content` calls `extract_question_prompt_and_answer`
+    on whatever reader it is given, rather than a module-level function, so
+    these tests inject this stub as `vision_reader=` instead of monkeypatching
+    a module attribute that no longer exists.
+    """
+
+    def __init__(self, calls: list[str], answer: tuple[str, str]) -> None:
+        self._calls = calls
+        self._answer = answer
+
+    def extract_question_prompt_and_answer(self, *, image_path, math_latex=False):
+        self._calls.append("vlm")
+        return self._answer
+
+
 def _blank_scan_doc() -> fitz.Document:
     doc = fitz.open()
     doc.new_page(width=612, height=792)
@@ -45,7 +63,7 @@ def test_extract_content_uses_text_layer_and_skips_ocr(monkeypatch) -> None:
 
     seen: list[tuple[int, int]] = []
     blocks = extract_content(
-        doc, rendered, bboxes, max_q=1, ollama_config=None,
+        doc, rendered, bboxes, max_q=1, vision_reader=None,
         progress=lambda cur, total: seen.append((cur, total)),
     )
 
@@ -64,12 +82,8 @@ def test_ocr_looks_unreliable_signals() -> None:
 
 def test_confident_ocr_skips_the_vlm(monkeypatch) -> None:
     calls: list[str] = []
+    reader = _StubVisionReader(calls, ("VLM PROMPT", "VLM ANSWER"))
 
-    def _record_vlm(**_kwargs):
-        calls.append("vlm")
-        return ("VLM PROMPT", "VLM ANSWER")
-
-    monkeypatch.setattr(pdf_answer_key, "extract_question_prompt_and_answer", _record_vlm)
     monkeypatch.setattr(
         pdf_answer_key.pytesseract,
         "image_to_string",
@@ -81,7 +95,7 @@ def test_confident_ocr_skips_the_vlm(monkeypatch) -> None:
     rendered = {1: Image.new("RGB", (612, 792), "white")}
     blocks = extract_content(
         doc, rendered, {1: (1, (0.0, 0.0, 1.0, 0.5))}, max_q=1,
-        ollama_config=object(),
+        vision_reader=reader,
     )
 
     assert calls == []
@@ -90,12 +104,8 @@ def test_confident_ocr_skips_the_vlm(monkeypatch) -> None:
 
 def test_weak_ocr_escalates_to_the_vlm(monkeypatch) -> None:
     calls: list[str] = []
+    reader = _StubVisionReader(calls, ("What is 2+2?", "four"))
 
-    def _record_vlm(**_kwargs):
-        calls.append("vlm")
-        return ("What is 2+2?", "four")
-
-    monkeypatch.setattr(pdf_answer_key, "extract_question_prompt_and_answer", _record_vlm)
     monkeypatch.setattr(pdf_answer_key.pytesseract, "image_to_string", lambda *_a, **_k: "")
     monkeypatch.setattr(pdf_answer_key, "_ocr_mean_confidence", lambda _img: 0.0)
 
@@ -103,7 +113,7 @@ def test_weak_ocr_escalates_to_the_vlm(monkeypatch) -> None:
     rendered = {1: Image.new("RGB", (612, 792), "white")}
     blocks = extract_content(
         doc, rendered, {1: (1, (0.0, 0.0, 1.0, 0.5))}, max_q=1,
-        ollama_config=object(),
+        vision_reader=reader,
     )
 
     assert calls == ["vlm"]

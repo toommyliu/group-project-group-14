@@ -72,7 +72,7 @@ def _stub_build(monkeypatch, captured: dict) -> None:
         batch_module, "build_student_submission_document_unified", fake_build
     )
     monkeypatch.setattr(extractor_cli, "_load_blank_assignment_template", lambda _p: object())
-    monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
 
 
 def _scan_dir(tmp_path: Path) -> Path:
@@ -97,7 +97,7 @@ def test_llm_responses_flag_enables_vlm_in_template_mode(monkeypatch, tmp_path) 
     ])
 
     assert captured["llm_responses"] is True
-    assert captured["ollama_config"] is not None
+    assert captured["vision_reader"] is not None
     assert isinstance(captured["progress"], ExtractionProgress)
 
 
@@ -115,7 +115,7 @@ def test_template_mode_without_flag_has_no_ollama(monkeypatch, tmp_path) -> None
     ])
 
     assert captured["llm_responses"] is False
-    assert captured["ollama_config"] is None
+    assert captured["vision_reader"] is None
 
 
 def test_injected_progress_is_passed_through(monkeypatch, tmp_path) -> None:
@@ -277,7 +277,7 @@ def _stub_writing_build(monkeypatch, calls: list[str]) -> None:
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
 
 
 def _extract(scans: Path, out: Path, *extra: str) -> None:
@@ -380,7 +380,7 @@ def test_a_failed_scan_exits_nonzero_but_lets_the_others_finish(
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     scans = _scan_dir(tmp_path)
     (scans / "submission-0002.pdf").write_bytes(b"%PDF-1.4\n")
 
@@ -788,7 +788,7 @@ def _stub_refine_build(monkeypatch, *, readings: dict[str, tuple[str, float | No
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
 
 
 def test_refine_rewrites_only_the_low_confidence_answer(monkeypatch, tmp_path) -> None:
@@ -914,7 +914,7 @@ def test_refine_dpi_reaches_the_extraction(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
 
     _extract(scans, out, "--refine", "--refine-dpi", "450")
 
@@ -1011,7 +1011,7 @@ def test_llm_escalate_reaches_the_builder_and_implies_transcription(
 
     assert captured["escalate_floor"] == 60.0
     assert captured["llm_responses"] is True
-    assert captured["ollama_config"] is not None
+    assert captured["vision_reader"] is not None
 
 
 def test_escalate_confidence_overrides_the_floor(monkeypatch, tmp_path) -> None:
@@ -1123,7 +1123,7 @@ def test_the_run_reports_which_readers_produced_the_answers(
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(extractor_cli, "ensure_model_available", lambda _c: None)
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
     scans = _scan_dir(tmp_path)
 
     run_cli([
@@ -1152,7 +1152,7 @@ def test_llm_responses_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
     ])
 
     assert captured["llm_responses"] is True
-    assert captured["ollama_config"] is not None
+    assert captured["vision_reader"] is not None
 
 
 def test_llm_responses_defaults_off_when_ai_setup_leaves_it_off(monkeypatch, tmp_path) -> None:
@@ -1170,7 +1170,7 @@ def test_llm_responses_defaults_off_when_ai_setup_leaves_it_off(monkeypatch, tmp
     ])
 
     assert captured["llm_responses"] is False
-    assert captured["ollama_config"] is None
+    assert captured["vision_reader"] is None
 
 
 def test_explicit_no_llm_responses_beats_ai_setup(monkeypatch, tmp_path) -> None:
@@ -1189,7 +1189,7 @@ def test_explicit_no_llm_responses_beats_ai_setup(monkeypatch, tmp_path) -> None
     ])
 
     assert captured["llm_responses"] is False
-    assert captured["ollama_config"] is None
+    assert captured["vision_reader"] is None
 
 
 def test_llm_escalate_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:

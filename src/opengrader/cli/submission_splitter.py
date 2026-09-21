@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser, BooleanOptionalAction, RawDescriptionHelpFormatter
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import TYPE_CHECKING, Callable, NamedTuple
 import sys
 import tempfile
 import subprocess
@@ -25,7 +25,11 @@ from opengrader.core.submissions import (
     write_extra_pages_map,
 )
 from opengrader.core import ai_config
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, ensure_model_available
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Annotation only — the reader is built by ai_config.vision_reader(), never
+    # constructed here.
+    from opengrader.core.ocr.vision_reader import VisionReader
 
 from pypdf import PdfReader
 
@@ -256,18 +260,19 @@ def _start_ollama_server(args, emit: "Callable[[str], None]"):
     return proc, log_file
 
 
-def _verified_ollama_config(args, emit: "Callable[[str], None]") -> "OllamaVisionConfig | None":
-    config = OllamaVisionConfig(
-        model=args.ollama_model,
+def _verified_vision_reader(args, emit: "Callable[[str], None]") -> "VisionReader | None":
+    resolved = ai_config.with_overrides(
         host=args.ollama_host,
+        vision_model=args.ollama_model,
         timeout_seconds=args.ollama_timeout,
     )
+    reader = ai_config.vision_reader(resolved)
     try:
-        ensure_model_available(config)
+        ai_config.ensure_ready(resolved, purpose="vision")
     except Exception as exc:
         emit(f"Ollama vision fallback unavailable ({exc}); using Tesseract only.")
         return None
-    return config
+    return reader
 
 
 def _expected_pages_per_submission(args) -> int | None:
@@ -438,15 +443,21 @@ def run_cli(
     ollama_log_file = None
     try:
         if args.auto_ollama and may_use_vlm:
-            ollama_server_proc, ollama_log_file = _start_ollama_server(args, emit)
-        active_ollama = _verified_ollama_config(args, emit) if may_use_vlm else None
+            provider_kind = ai_config.with_overrides(
+                host=args.ollama_host,
+                vision_model=args.ollama_model,
+                timeout_seconds=args.ollama_timeout,
+            ).provider.kind
+            if provider_kind == "local":
+                ollama_server_proc, ollama_log_file = _start_ollama_server(args, emit)
+        vision_reader = _verified_vision_reader(args, emit) if may_use_vlm else None
 
         boundary_warnings: list[str] = []
         if use_boundary:
             emit("Detecting submission boundaries (student Name/ID header)…")
             ranges, boundary_warnings = plan_boundary_ranges(
                 input_pdf,
-                ollama_config=active_ollama,
+                vision_reader=vision_reader,
                 filename_prefix=args.filename_prefix,
                 zero_pad_width=args.zero_pad_width,
                 progress_callback=emit,
@@ -502,7 +513,7 @@ def run_cli(
                 emit(f"[{index}/{len(created)}] Reordering {pdf_path.name}…")
                 result = reorder_pdf_pages(
                     pdf_path,
-                    ollama_config=active_ollama,
+                    vision_reader=vision_reader,
                     blank_template_layout=blank_template_layout,
                     extra_work_pages=args.extra_work_pages,
                 )

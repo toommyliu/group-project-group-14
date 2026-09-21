@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import ollama_transport
+from .errors import LLMError
 from .ollama_transport import parse_json_object
 
 __all__ = [
@@ -24,7 +25,9 @@ class OllamaConfig:
     num_predict: int = 512
 
 
-class OllamaError(RuntimeError):
+class OllamaError(LLMError):
+    # A subclass, not a fresh RuntimeError: catchable on its own by code below
+    # the provider boundary, but also caught by anyone catching LLMError above it.
     pass
 
 

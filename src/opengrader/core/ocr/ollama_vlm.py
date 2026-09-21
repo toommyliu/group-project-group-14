@@ -1,15 +1,30 @@
 from __future__ import annotations
 
-import base64
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from opengrader.core.llm import ollama_transport
+from opengrader.core.llm.errors import LLMError
 from opengrader.core.llm.ollama_transport import parse_json_object as _parse_json_from_response
 
-from .constants import SUBSCRIPT_TRANSLATION
+from . import vision_prompts
+from .vision_reader import TitleMetadataResult
+
+__all__ = [
+    "OllamaVisionConfig",
+    "OllamaVisionError",
+    "TitleMetadataResult",
+    "ensure_model_available",
+    "list_available_models",
+    "extract_field_text",
+    "extract_student_field",
+    "extract_title_metadata",
+    "extract_question_prompt_and_answer",
+    "extract_handwriting_only",
+    "extract_page_number",
+    "page_has_identity_field",
+]
 
 
 @dataclass(frozen=True)
@@ -21,51 +36,13 @@ class OllamaVisionConfig:
     num_predict: int = 256
 
 
-class OllamaVisionError(RuntimeError):
+class OllamaVisionError(LLMError):
+    # A subclass, not a fresh RuntimeError: joins the shared provider-call
+    # family so code above the provider boundary can catch LLMError alone.
     pass
 
 
 _AVAILABLE_MODELS: set[tuple[str, str]] = set()
-
-
-@dataclass(frozen=True)
-class TitleMetadataResult:
-    course_code: str | None
-    assignment_title: str
-    assignment_version: str | None
-    raw_title: str
-
-
-def _image_to_base64(image_path: str | Path) -> str:
-    data = Path(image_path).read_bytes()
-    return base64.b64encode(data).decode("ascii")
-
-
-def _normalize_name(value: str) -> str:
-    text = value.strip()
-    text = re.sub(r"(?i)^name\s*[:\-]\s*", "", text)
-    text = re.sub(r"\s+", " ", text)
-    return text
-
-
-def _normalize_sid(value: str) -> str:
-    digits = "".join(re.findall(r"\d", value))
-    if len(digits) >= 9:
-        return digits[:9]
-    return digits
-
-
-def _normalize_version(value: str | None) -> str | None:
-    if value is None:
-        return None
-    text = value.translate(SUBSCRIPT_TRANSLATION)
-    text = re.sub(r"(?i)^version\s+", "", text.strip())
-    text = text.strip("()[]{}:;,- ")
-    text = re.sub(r"\s+", "", text)
-    text = text.replace("_", "")
-    if not text:
-        return None
-    return text.upper()
 
 
 def list_available_models(config: OllamaVisionConfig) -> list[str]:
@@ -103,7 +80,7 @@ def _generate_with_image(
     num_predict: int | None = None,
 ) -> str:
     ensure_model_available(config)
-    encoded_image = _image_to_base64(image_path)
+    encoded_image = vision_prompts.image_to_base64(image_path)
     return ollama_transport.generate_raw(
         host=config.host,
         model=config.model,
@@ -117,52 +94,21 @@ def _generate_with_image(
     )
 
 
-_VALUE_TEXT_SCHEMA = {
-    "type": "object",
-    "properties": {"value": {"type": "string"}},
-    "required": ["value"],
-}
-
-
 def extract_field_text(
     *,
     image_path: str | Path,
     field_kind: Literal["name", "sid"],
     config: OllamaVisionConfig,
 ) -> str:
-    if field_kind == "name":
-        prompt = (
-            "You are a strict OCR transcription engine for scanned assignments. "
-            "Read only visible text in the image. Extract only the student's name value. "
-            "The image may include the printed label 'Name'. Do not include the label. "
-            "Do not infer, complete, correct, or invent a name. "
-            "If the name is unreadable or not visible, return an empty string. "
-            'Return strict JSON only with this shape: {"value": "..."}.'
-        )
-    else:
-        prompt = (
-            "You are a strict OCR transcription engine for scanned assignments. "
-            "Read only visible text in the image. Extract only the student ID value. "
-            "The image may include label text like 'Student ID'. Do not include the label. "
-            "Return only digits that are visibly present. "
-            "Do not infer, complete, correct, or invent digits. "
-            "If the ID is unreadable or not visible, return an empty string. "
-            'Return strict JSON only with this shape: {"value": "..."}.'
-        )
-
+    request = vision_prompts.field_text_request(field_kind)
     raw = _generate_with_image(
         image_path=image_path,
-        prompt=prompt,
+        prompt=request.prompt,
         config=config,
-        response_format=_VALUE_TEXT_SCHEMA,
-        num_predict=128,
+        response_format=request.response_schema,
+        num_predict=request.num_predict,
     )
-    parsed = _parse_json_from_response(raw)
-    value = str(parsed.get("value", "")).strip() if parsed is not None else raw.strip()
-
-    if field_kind == "name":
-        return _normalize_name(value)
-    return _normalize_sid(value)
+    return vision_prompts.parse_field_text(raw, field_kind=field_kind)
 
 
 def extract_student_field(
@@ -178,91 +124,20 @@ def extract_student_field(
     )
 
 
-_TITLE_METADATA_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "course_code": {"type": "string"},
-        "assignment_title": {"type": "string"},
-        "assignment_version": {"type": "string"},
-        "raw_title": {"type": "string"},
-    },
-    "required": [
-        "course_code",
-        "assignment_title",
-        "assignment_version",
-        "raw_title",
-    ],
-}
-
-
 def extract_title_metadata(
     *,
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> TitleMetadataResult:
-    prompt = (
-        "You are a strict OCR transcription engine for scanned assignment titles. "
-        "Read only visible printed title text in the image. Do not infer, complete, "
-        "correct, or invent missing course, title, or version values. "
-        "If a value is unreadable or absent, return an empty string for that value. "
-        "Return strict JSON only with this shape: "
-        '{"course_code": "", "assignment_title": "", '
-        '"assignment_version": "", "raw_title": ""}. '
-        "For assignment_version, preserve visible version markers such as (A), "
-        "[B], Version C, suffix letters, or subscript-like letters/digits."
-    )
-
+    request = vision_prompts.title_metadata_request()
     raw = _generate_with_image(
         image_path=image_path,
-        prompt=prompt,
+        prompt=request.prompt,
         config=config,
-        response_format=_TITLE_METADATA_SCHEMA,
-        num_predict=256,
+        response_format=request.response_schema,
+        num_predict=request.num_predict,
     )
-    parsed = _parse_json_from_response(raw)
-    if parsed is None:
-        cleaned = re.sub(r"\s+", " ", raw).strip()
-        return TitleMetadataResult(
-            course_code=None,
-            assignment_title=cleaned,
-            assignment_version=None,
-            raw_title=cleaned,
-        )
-
-    course_code = str(parsed.get("course_code", "")).strip() or None
-    assignment_title = str(parsed.get("assignment_title", "")).strip()
-    raw_title = str(parsed.get("raw_title", "")).strip()
-    version = _normalize_version(str(parsed.get("assignment_version", "")).strip())
-
-    if not raw_title:
-        parts = [part for part in [course_code, assignment_title, version] if part]
-        raw_title = " ".join(parts)
-
-    return TitleMetadataResult(
-        course_code=course_code,
-        assignment_title=(
-            re.sub(r"\s+", " ", assignment_title).strip() or "Unknown Assignment"
-        ),
-        assignment_version=version,
-        raw_title=re.sub(r"\s+", " ", raw_title).strip(),
-    )
-
-
-# Answer comes first so handwriting gets the token budget before the prompt.
-_QUESTION_PROMPT_AND_ANSWER_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "answer": {"type": "string"},
-        "prompt": {"type": "string"},
-    },
-    "required": ["answer", "prompt"],
-}
-
-_HANDWRITING_SCHEMA = {
-    "type": "object",
-    "properties": {"text": {"type": "string"}},
-    "required": ["text"],
-}
+    return vision_prompts.parse_title_metadata(raw)
 
 
 def extract_question_prompt_and_answer(
@@ -271,47 +146,15 @@ def extract_question_prompt_and_answer(
     config: OllamaVisionConfig,
     math_latex: bool = False,
 ) -> tuple[str, str]:
-    prompt = (
-        "You are a strict OCR transcription engine for scanned assignments. "
-        "Your job is to read visible text in the image, not to answer the assignment question. "
-        "The image may contain printed question text and a student's handwritten response. "
-        "Transcribe only what is visibly written on the page. Do not infer, solve, "
-        "complete, correct, or generate an answer from the printed question. "
-        "If handwriting is messy, preserve your best reading of the handwriting. "
-        "If a word or symbol is uncertain, write [unclear]. "
-        "If no handwritten answer is visible, return an empty answer string. "
-    )
-    if math_latex:
-        prompt += (
-            "If the handwritten answer contains mathematical notation (fractions, "
-            "exponents, subscripts, roots, integrals, summations, matrices, Greek "
-            "letters, or similar), transcribe that math as LaTeX enclosed in "
-            "$...$ for inline math or $$...$$ for a displayed equation. Transcribe "
-            "ordinary prose as plain text; only wrap the mathematical parts in "
-            "LaTeX, and never add LaTeX to non-mathematical writing. "
-        )
-    prompt += (
-        "Return strict JSON only with this shape: "
-        '{"prompt": "...", "answer": "..."}. '
-        "The prompt field should contain printed question text only. "
-        "The answer field should contain the student's handwritten answer only."
-    )
-
+    request = vision_prompts.question_prompt_and_answer_request(math_latex=math_latex)
     raw = _generate_with_image(
         image_path=image_path,
-        prompt=prompt,
+        prompt=request.prompt,
         config=config,
-        response_format=_QUESTION_PROMPT_AND_ANSWER_SCHEMA,
-        num_predict=2048,
+        response_format=request.response_schema,
+        num_predict=request.num_predict,
     )
-    parsed = _parse_json_from_response(raw)
-    if parsed is None:
-        return "", raw.strip()
-
-    question_prompt = str(parsed.get("prompt", "")).strip()
-    answer = str(parsed.get("answer", "")).strip()
-    question_prompt = re.sub(r"\s+", " ", question_prompt)
-    return question_prompt, answer
+    return vision_prompts.parse_question_prompt_and_answer(raw)
 
 
 def extract_handwriting_only(
@@ -322,33 +165,15 @@ def extract_handwriting_only(
 ) -> str:
     """Transcribe a crop that has already had all printed template ink removed."""
 
-    prompt = (
-        "This is a student-ink isolation layer from a printed form. Transcribe every "
-        "handwritten textual mark literally, including isolated or oddly spaced words. "
-        "Template mismatch can leave fragments of crisp typeset form text or page "
-        "numbers; ignore those printed remnants. Preserve line breaks and do not infer, "
-        "solve, correct, or complete anything. Use [unclear] for handwriting you cannot "
-        "read and [mark] for a visible handwritten non-text mark. Return an empty string "
-        "only when no student-added ink is visible. "
-    )
-    if math_latex:
-        prompt += (
-            "Write visible mathematical notation as LaTeX inside $...$ or $$...$$, "
-            "without changing ordinary prose. "
-        )
-    prompt += 'Return strict JSON only with this shape: {"text": "..."}.'
-
+    request = vision_prompts.handwriting_only_request(math_latex=math_latex)
     raw = _generate_with_image(
         image_path=image_path,
-        prompt=prompt,
+        prompt=request.prompt,
         config=config,
-        response_format=_HANDWRITING_SCHEMA,
-        num_predict=1024,
+        response_format=request.response_schema,
+        num_predict=request.num_predict,
     )
-    parsed = _parse_json_from_response(raw)
-    if parsed is None or not isinstance(parsed.get("text"), str):
-        return raw.strip()
-    return str(parsed["text"]).strip()
+    return vision_prompts.parse_handwriting_only(raw)
 
 
 def extract_page_number(
@@ -356,36 +181,15 @@ def extract_page_number(
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> int | None:
-    prompt = (
-        "You are a strict OCR transcription engine for scanned assignments. "
-        "Read only the page number visible at the bottom of the image. "
-        "Return strict JSON only with this shape: {\"value\": \"...\"} "
-        "where value is the integer page number as a string. "
-        "If not found, return an empty string."
-    )
+    request = vision_prompts.page_number_request()
     raw = _generate_with_image(
         image_path=image_path,
-        prompt=prompt,
+        prompt=request.prompt,
         config=config,
-        response_format=_VALUE_TEXT_SCHEMA,
-        num_predict=128,
+        response_format=request.response_schema,
+        num_predict=request.num_predict,
     )
-    parsed = _parse_json_from_response(raw)
-    if parsed is not None:
-        val = parsed.get("value")
-        if val is not None:
-            try:
-                return int(val)
-            except (ValueError, TypeError):
-                pass
-    return None
-
-
-_FIRST_PAGE_SCHEMA = {
-    "type": "object",
-    "properties": {"first_page": {"type": "boolean"}},
-    "required": ["first_page"],
-}
+    return vision_prompts.parse_page_number(raw)
 
 
 def page_has_identity_field(
@@ -393,25 +197,12 @@ def page_has_identity_field(
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> bool:
-    prompt = (
-        "You are inspecting one scanned assignment page. Does this page contain "
-        "a student Name field/label or a Student ID (student number) field/label "
-        "near the top — i.e. is it the first or cover page of a submission? "
-        "Return strict JSON only with this shape: {\"first_page\": true} or "
-        "{\"first_page\": false}."
-    )
+    request = vision_prompts.identity_field_request()
     raw = _generate_with_image(
         image_path=image_path,
-        prompt=prompt,
+        prompt=request.prompt,
         config=config,
-        response_format=_FIRST_PAGE_SCHEMA,
-        num_predict=128,
+        response_format=request.response_schema,
+        num_predict=request.num_predict,
     )
-    parsed = _parse_json_from_response(raw)
-    if parsed is not None:
-        value = parsed.get("first_page")
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"true", "yes", "1"}
-    return False
+    return vision_prompts.parse_identity_field(raw)

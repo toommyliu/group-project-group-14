@@ -12,16 +12,20 @@ from .fakes import DEFAULT_IMAGE_PATH
 from .test_screen_conventions import CHECKBOX_LABEL_LIMIT
 
 
-def test_setup_primary_action_visible_without_scrolling() -> None:
+def test_the_session_card_is_visible_without_scrolling_and_points_home() -> None:
+    """Choosing what to grade moved to Home; this card says how to get there."""
+
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
 
-            button = app.query_one("#launch-button")
-            assert button.region.height > 0
-            assert button.region.y >= 0
-            assert button.region.y + button.region.height <= app.size.height
+            card = app.query_one("#setup-session")
+            assert card.region.height > 0
+            assert card.region.y >= 0
+            assert card.region.y + card.region.height <= app.size.height
+            assert "F2 for Home" in str(card.render())
+            assert not app.query("#launch-button")
 
     asyncio.run(run())
 
@@ -74,11 +78,11 @@ def test_setup_grading_never_passes_llm_and_probes_the_saved_model(monkeypatch) 
         "run_grading_cli",
         lambda argv, **kwargs: captured.__setitem__("argv", argv),
     )
-    monkeypatch.setattr(
-        setup_screen,
-        "ensure_model_available",
-        lambda config: captured.__setitem__("config", config),
-    )
+
+    def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
+        captured["model"] = (resolved or ai_config.resolve()).text_model
+
+    monkeypatch.setattr(ai_config, "ensure_ready", _probe)
     ai_config.save_settings(
         ai_config.AISettings(text_model="llama3.1", grade_written=True)
     )
@@ -101,7 +105,7 @@ def test_setup_grading_never_passes_llm_and_probes_the_saved_model(monkeypatch) 
     argv = captured.get("argv")
     assert argv == ["--solutions", "/tmp/sol.md", "--input", "/tmp/subs"]
     assert "--llm-model" not in argv
-    assert captured["config"].model == "llama3.1"
+    assert captured["model"] == "llama3.1"
 
 
 def test_template_qr_checkbox_reveals_roster_and_builds_argv(monkeypatch) -> None:
@@ -153,11 +157,11 @@ def test_setup_grading_defaults_model_when_no_ai_settings_are_saved(monkeypatch)
         "run_grading_cli",
         lambda argv, **kwargs: captured.__setitem__("argv", argv),
     )
-    monkeypatch.setattr(
-        setup_screen,
-        "ensure_model_available",
-        lambda config: captured.__setitem__("config", config),
-    )
+
+    def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
+        captured["model"] = (resolved or ai_config.resolve()).text_model
+
+    monkeypatch.setattr(ai_config, "ensure_ready", _probe)
     ai_config.save_settings(ai_config.AISettings(grade_written=True))
 
     async def run() -> None:
@@ -173,7 +177,7 @@ def test_setup_grading_defaults_model_when_no_ai_settings_are_saved(monkeypatch)
 
     asyncio.run(run())
 
-    assert captured["config"].model == ai_config.DEFAULT_TEXT_MODEL
+    assert captured["model"] == ai_config.DEFAULT_TEXT_MODEL
     assert captured["argv"] == ["--solutions", "/tmp/sol.md", "--input", "/tmp/subs"]
     assert "--llm-model" not in captured["argv"]
 
@@ -335,10 +339,8 @@ def test_setup_grading_runs_in_background_with_progress(monkeypatch) -> None:
 
 
 def test_setup_llm_unavailable_triggers_auto_ollama(monkeypatch) -> None:
-    from opengrader.core.llm import OllamaError
-
-    def _raise(config) -> None:
-        raise OllamaError("Ollama model 'llama3.1' is not available")
+    def _raise(resolved=None, *, purpose="text") -> None:
+        raise ai_config.AIUnavailableError("model 'llama3.1' is not available")
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
@@ -346,7 +348,7 @@ def test_setup_llm_unavailable_triggers_auto_ollama(monkeypatch) -> None:
         "run_grading_cli",
         lambda argv, **kwargs: captured.__setitem__("argv", argv),
     )
-    monkeypatch.setattr(setup_screen, "ensure_model_available", _raise)
+    monkeypatch.setattr(ai_config, "ensure_ready", _raise)
     ai_config.save_settings(ai_config.AISettings(grade_written=True))
 
     async def run() -> None:
@@ -1016,7 +1018,7 @@ def _stub_grading_cli(monkeypatch) -> dict[str, object]:  # noqa: ANN001
         lambda argv, **kwargs: captured.__setitem__("argv", argv),
     )
     monkeypatch.setattr(
-        setup_screen, "ensure_model_available", lambda config: None
+        ai_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
     )
     return captured
 
@@ -1162,21 +1164,27 @@ def test_handoff_and_backup_tools_are_present_and_collapsed() -> None:
     assert asyncio.run(run()) == (True, True)
 
 
-def test_the_handoff_tool_falls_back_to_the_launch_card_folder() -> None:
+def test_the_handoff_tool_falls_back_to_the_folder_being_graded(tmp_path) -> None:  # noqa: ANN001
+    import shutil
+
+    shutil.copytree("samples/cs146-quiz1", tmp_path / "quiz")
+    qa = (tmp_path / "quiz" / "qa.md").resolve()
+    subs = (tmp_path / "quiz" / "student-submissions").resolve()
+
     async def run() -> str:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH, qa_file_path=qa, submissions_path=subs
+        )
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#tui-sub-path", Input).value = "/tmp/subs"
-            app.query_one("#tui-qa-path", Input).value = "/tmp/qa.md"
+            await pilot.press("f3")  # to Tools, with the folder still open
             await pilot.pause()
-            screen._open_grader_packet()
+            app.query_one(SetupScreen)._open_grader_packet()
             await pilot.pause()
             modal = app.screen
             return f"{modal._submissions_path}|{modal._qa_file_path}"
 
-    assert asyncio.run(run()) == "/tmp/subs|/tmp/qa.md"
+    assert asyncio.run(run()) == f"{subs}|{qa}"
 
 
 def test_the_handoff_tool_prefers_its_own_folder_field() -> None:
@@ -1185,7 +1193,6 @@ def test_the_handoff_tool_prefers_its_own_folder_field() -> None:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            app.query_one("#tui-sub-path", Input).value = "/tmp/launch"
             app.query_one("#handoff-submissions", Input).value = "/tmp/other"
             await pilot.pause()
             screen._open_merge()
@@ -1340,7 +1347,7 @@ def test_grade_while_extracting_posts_the_current_paths() -> None:
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            app.query_one("#tui-qa-path", Input).value = "/tmp/qa.md"
+            app.query_one("#ext-qa", Input).value = "/tmp/qa.md"
             app.query_one("#ext-output", Input).value = "/tmp/subs"
             screen._open_grade_while_extracting()
             await pilot.pause()
@@ -1859,7 +1866,7 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
         ai_config.AISettings(
             vision_model="llava",
             text_model="llama3.1",
-            host="http://box:9999",
+            host="http://192.168.1.50:9999",
             auto_start=True,
             read_handwriting=True,
             grade_written=True,
@@ -1910,7 +1917,7 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
     assert request.llm.grade_written is True
     assert request.llm.vision_model == ""
     assert request.llm.text_model == ""
-    assert request.llm.host == "http://box:9999"
+    assert request.llm.host == "http://192.168.1.50:9999"
     assert request.llm.auto_ollama is True
     assert request.auto_grade is False
 
@@ -2101,107 +2108,6 @@ def _grading_folder(tmp_path, *, with_submissions=True):  # noqa: ANN001, ANN202
         student.mkdir(parents=True)
         (student / "submission-0001.submission.md").write_text("---\n---\n")
     return folder
-
-
-def test_the_launch_card_leads_with_one_class_folder_field() -> None:
-    async def run():
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            card = app.query_one("#launch-section")
-            inputs = [widget.id for widget in card.query(Input)]
-            return inputs, app.query_one("#launch-files", Collapsible).collapsed
-
-    inputs, collapsed = asyncio.run(run())
-    assert inputs[0] == "tui-class-folder"
-    assert inputs[1:] == ["tui-qa-path", "tui-sub-path"]
-    assert collapsed is True
-
-
-def test_scanning_the_launch_folder_fills_the_answer_key_and_submissions(tmp_path) -> None:  # noqa: ANN001
-    folder = _grading_folder(tmp_path)
-
-    async def run():
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#tui-class-folder", Input).value = str(folder)
-            screen._scan_launch_folder()
-            await pilot.pause()
-            return (
-                app.query_one("#tui-qa-path", Input).value,
-                app.query_one("#tui-sub-path", Input).value,
-                app.query_one("#tui-folder-summary").has_class("hidden"),
-                app.query_one("#launch-files", Collapsible).collapsed,
-            )
-
-    qa, subs, summary_hidden, collapsed = asyncio.run(run())
-    assert qa == str(folder / "qa.md")
-    assert subs == str(folder / "submissions")
-    assert summary_hidden is False
-    assert collapsed is True
-
-
-def test_launch_with_only_a_class_folder_opens_what_it_finds(tmp_path) -> None:  # noqa: ANN001
-    folder = _grading_folder(tmp_path)
-    posted: list[object] = []
-
-    async def run():
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            _capture_launches(screen, posted)
-            app.query_one("#tui-class-folder", Input).value = str(folder)
-            screen._launch_grading()
-
-    asyncio.run(run())
-    launches = [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
-    assert len(launches) == 1
-    assert launches[0].qa_path == str(folder / "qa.md")
-    assert launches[0].submissions_path == str(folder / "submissions")
-
-
-def test_launch_shows_the_detected_files_when_something_is_missing(tmp_path) -> None:  # noqa: ANN001
-    folder = _grading_folder(tmp_path, with_submissions=False)
-    posted: list[object] = []
-    notices: list[str] = []
-
-    async def run():
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            _capture_launches(screen, posted)
-            app.notify = lambda message, **_: notices.append(str(message))  # type: ignore[method-assign]
-            app.query_one("#tui-class-folder", Input).value = str(folder)
-            screen._launch_grading()
-            await pilot.pause()
-            return app.query_one("#launch-files", Collapsible).collapsed
-
-    collapsed = asyncio.run(run())
-    assert collapsed is False
-    assert not [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
-    assert notices and "required" in notices[-1]
-
-
-def test_typed_launch_paths_still_launch_without_a_folder() -> None:
-    posted: list[object] = []
-
-    async def run():
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            _capture_launches(screen, posted)
-            app.query_one("#tui-qa-path", Input).value = "/tmp/qa.md"
-            app.query_one("#tui-sub-path", Input).value = "/tmp/subs"
-            screen._launch_grading()
-
-    asyncio.run(run())
-    launches = [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
-    assert [(m.qa_path, m.submissions_path) for m in launches] == [("/tmp/qa.md", "/tmp/subs")]
 
 
 def test_pipeline_blocked_report_does_not_open_the_grading_workspace(monkeypatch) -> None:
@@ -2605,7 +2511,9 @@ def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
     monkeypatch.setattr(setup_screen, "run_extractor_cli", _capture("extract"))
     monkeypatch.setattr(setup_screen, "run_answer_key_cli", _capture("answer_key"))
     monkeypatch.setattr(setup_screen, "run_grading_cli", _capture("grade"))
-    monkeypatch.setattr(setup_screen, "ensure_model_available", lambda config: None)
+    monkeypatch.setattr(
+        ai_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
+    )
 
     ai_config.save_settings(
         ai_config.AISettings(
@@ -2682,13 +2590,13 @@ def test_the_llm_readiness_probe_runs_off_the_ui_thread(monkeypatch) -> None:
 
     seen: dict[str, object] = {}
 
-    def _probe(config):  # noqa: ANN001, ANN202
+    def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
         seen["on_main_thread"] = (
             threading.current_thread() is threading.main_thread()
         )
 
     monkeypatch.setattr(setup_screen, "run_grading_cli", lambda argv, **kwargs: None)
-    monkeypatch.setattr(setup_screen, "ensure_model_available", _probe)
+    monkeypatch.setattr(ai_config, "ensure_ready", _probe)
     ai_config.save_settings(ai_config.AISettings(grade_written=True))
 
     async def run() -> None:
@@ -2715,7 +2623,9 @@ def test_the_llm_probe_is_skipped_entirely_when_the_ai_is_not_wanted(monkeypatch
 
     monkeypatch.setattr(setup_screen, "run_grading_cli", lambda argv, **kwargs: None)
     monkeypatch.setattr(
-        setup_screen, "ensure_model_available", lambda config: calls.append(config)
+        ai_config,
+        "ensure_ready",
+        lambda resolved=None, *, purpose="text": calls.append(resolved),
     )
 
     async def run() -> None:

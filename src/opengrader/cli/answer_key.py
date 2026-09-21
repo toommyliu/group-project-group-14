@@ -150,13 +150,12 @@ def _qa_from_pdf(
     emit: Callable[[str], None],
     progress: "Callable[[int, int], None] | None" = None,
 ) -> str:
-    from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, ensure_model_available
     from opengrader.core.qa_file.pdf_answer_key import extract_qa_markdown_from_pdf
 
     server_proc = None
     log_file = None
     try:
-        ollama_config = None
+        vision_reader = None
         if not args.llm_read_scans:
             emit(
                 "The scan will be read with OCR alone (turn on 'Read "
@@ -164,34 +163,38 @@ def _qa_from_pdf(
                 "model)."
             )
         else:
-            if args.auto_ollama:
+            resolved_default = ai_config.resolve()
+            resolved = ai_config.with_overrides(
+                resolved_default,
+                host=args.ollama_host,
+                vision_model=args.ollama_model,
+                timeout_seconds=args.ollama_timeout,
+            )
+            if args.auto_ollama and resolved.provider.kind == "local":
                 server_proc, log_file = _start_ollama_server_if_needed(args, emit)
                 emit(f"Ensuring model '{args.ollama_model}' is available...")
                 subprocess.run(
                     ["ollama", "pull", args.ollama_model],
                     check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-            resolved_default = ai_config.resolve()
             if (
                 args.auto_ollama
                 or args.ollama_model != resolved_default.vision_model
                 or args.ollama_host != resolved_default.host
             ):
-                ollama_config = OllamaVisionConfig(
-                    model=args.ollama_model, host=args.ollama_host, timeout_seconds=args.ollama_timeout,
-                )
+                vision_reader = ai_config.vision_reader(resolved)
                 try:
-                    ensure_model_available(ollama_config)
+                    ai_config.ensure_ready(resolved, purpose="vision")
                 except Exception as exc:
                     emit(f"Warning: Ollama vision model unavailable ({exc}); using Tesseract only.")
-                    ollama_config = None
+                    vision_reader = None
 
         return extract_qa_markdown_from_pdf(
             input_path,
             title=args.title or "Extracted Assignment",
             instructions=args.instructions or "Auto-generated",
             blank_template_path=args.blank_template,
-            ollama_config=ollama_config,
+            vision_reader=vision_reader,
             emit=emit,
             progress=progress,
         )

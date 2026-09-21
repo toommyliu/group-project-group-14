@@ -55,7 +55,9 @@ def service(monkeypatch, tmp_path):
 def test_run_app_opens_latest_assignment_unless_explicit(service, explicit) -> None:
     assignments = Workspace(Path(service.root)).assignments()
     expected = assignments[0] if explicit else assignments[-1]
-    args = ["--assignment", expected.id] if explicit else []
+    args = ["--workspace", service.root]
+    if explicit:
+        args += ["--assignment", expected.id]
     with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
         run_app(args)
     provider = app_cls.call_args.kwargs["data_provider"]
@@ -88,7 +90,7 @@ def test_switch_assignment_releases_session_and_loads_new_selection(service) -> 
             ).id
 
         home_cls.return_value.run.side_effect = choose_assignment
-        run_app([])
+        run_app(["--workspace", service.root])
 
     providers = [call.kwargs["data_provider"] for call in app_cls.call_args_list]
     assert [provider.assignment.id for provider in providers] == [
@@ -109,7 +111,7 @@ def test_empty_workspace_opens_home_and_can_quit(service) -> None:
         patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
     ):
         home_cls.return_value.run.return_value = None
-        run_app([])
+        run_app(["--workspace", service.root])
     home_cls.return_value.run.assert_called_once_with()
     app_cls.assert_not_called()
 
@@ -183,7 +185,7 @@ def test_graphics_override_is_applied_before_the_app_starts(
 
     monkeypatch.setattr("opengrader.tui.main.TuiApp", RecordingApp)
     try:
-        run_app(["--graphics", "iterm2"])
+        run_app(["--graphics", "iterm2", "--workspace", service.root])
     finally:
         terminal_graphics.set_active_graphics(None)
 
@@ -193,3 +195,262 @@ def test_graphics_override_is_applied_before_the_app_starts(
 def test_unknown_graphics_protocol_is_rejected() -> None:
     with pytest.raises(SystemExit):
         run_app(["--graphics", "jpeg"])
+
+
+# --- Home: the terminal app works without the workspace service ------------
+
+
+@pytest.fixture
+def no_service(monkeypatch, tmp_path):
+    """An ordinary folder, and a service that must never be started."""
+
+    def _refuse(root):
+        raise AssertionError(f"the standalone path started a service for {root}")
+
+    monkeypatch.setattr("opengrader.server.workspace.client.ensure_service", _refuse)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def sample(tmp_path):
+    import shutil
+
+    target = tmp_path / "quiz"
+    repo = Path(__file__).resolve().parents[3]
+    shutil.copytree(repo / "samples" / "cs146-quiz1", target)
+    return target
+
+
+def test_a_bare_tui_opens_home_and_nothing_else(no_service) -> None:
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.return_value = None
+        run_app([])
+
+    home_cls.assert_called_once_with(start_path="", message="")
+    app_cls.assert_not_called()
+    assert not (no_service / ".opengrader").exists()  # no workspace created
+
+
+def test_a_bare_tui_in_a_workspace_still_opens_home_prefilled(service, monkeypatch) -> None:
+    """A workspace is never entered without being chosen (option a)."""
+    monkeypatch.chdir(service.root)
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.return_value = None
+        run_app([])
+
+    home_cls.assert_called_once_with(start_path=str(Path.cwd()), message="")
+    app_cls.assert_not_called()
+
+
+def test_a_folder_chosen_on_home_is_graded_remembered_and_f2_returns(
+    no_service, sample
+) -> None:
+    from opengrader.core.recents import load_recents
+    from opengrader.tui.home import HomeChoice
+
+    qa, subs = sample / "qa.md", sample / "student-submissions"
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.side_effect = [
+            HomeChoice("folder", folder=sample, qa_file=qa, submissions=subs),
+            None,
+        ]
+        app_cls.return_value.run.return_value = "switch_assignment"
+        run_app([])
+
+    app_cls.assert_called_once_with(qa_file_path=qa, submissions_path=subs)
+    assert home_cls.call_count == 2  # F2 came back to Home
+    assert home_cls.call_args.kwargs["start_path"] == str(sample)
+    [recent] = load_recents()
+    assert (recent.kind, recent.title) == ("folder", "CS146: Quiz 1")
+
+
+def test_quitting_grading_quits_the_app(no_service, sample) -> None:
+    from opengrader.tui.home import HomeChoice
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.return_value = HomeChoice(
+            "folder", folder=sample, qa_file=sample / "qa.md",
+            submissions=sample / "student-submissions",
+        )
+        app_cls.return_value.run.return_value = None
+        run_app([])
+
+    assert home_cls.call_count == 1
+
+
+def test_a_broken_folder_comes_back_to_home_with_the_reason(no_service, sample) -> None:
+    from opengrader.tui.home import HomeChoice
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        app_cls.side_effect = ValueError("bad answer key")
+        home_cls.return_value.run.side_effect = [
+            HomeChoice("folder", folder=sample, qa_file=sample / "qa.md",
+                       submissions=sample / "student-submissions"),
+            None,
+        ]
+        run_app([])
+
+    assert "bad answer key" in home_cls.call_args.kwargs["message"]
+
+
+def test_scans_open_tools_with_the_pipeline_filled_in(no_service) -> None:
+    from opengrader.tui.home import HomeChoice
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.return_value = HomeChoice(
+            "tools", pipeline_folder=no_service
+        )
+        app_cls.return_value.run.return_value = None
+        run_app([])
+
+    app_cls.assert_called_once_with(pipeline_folder=no_service)
+
+
+def test_a_workspace_chosen_on_home_opens_and_its_home_key_returns(service) -> None:
+    from opengrader.core.recents import load_recents
+    from opengrader.tui.home import HomeChoice
+    from opengrader.tui.workspace_home import GO_HOME
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as ws_home,
+    ):
+        home_cls.return_value.run.side_effect = [
+            HomeChoice("workspace", folder=Path(service.root)),
+            None,
+        ]
+        app_cls.return_value.run.return_value = "switch_assignment"  # F2
+        ws_home.return_value.run.return_value = GO_HOME
+        run_app([])
+
+    assert app_cls.call_args.kwargs["data_provider"].client.connection == service
+    assert home_cls.call_count == 2
+    assert load_recents()[0].kind == "workspace"
+
+
+def test_a_workspace_that_will_not_start_returns_to_home_with_the_reason(
+    service, monkeypatch
+) -> None:
+    from opengrader.tui.home import HomeChoice
+
+    def _broken(root):
+        raise RuntimeError("The workspace service could not start.")
+
+    monkeypatch.setattr("opengrader.server.workspace.client.ensure_service", _broken)
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True),
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.side_effect = [
+            HomeChoice("workspace", folder=Path(service.root)),
+            None,
+        ]
+        run_app([])
+
+    assert "could not start" in home_cls.call_args.kwargs["message"]
+
+
+def test_qa_file_and_submissions_grade_a_folder_directly(no_service, sample) -> None:
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+    ):
+        app_cls.return_value.run.return_value = None
+        run_app(["--qa-file", str(sample / "qa.md"), "--submissions", str(sample)])
+
+    app_cls.assert_called_once_with(
+        qa_file_path=sample / "qa.md", submissions_path=sample
+    )
+    home_cls.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--qa-file", "qa.md"],
+        ["--submissions", "subs"],
+        ["--qa-file", "qa.md", "--submissions", "subs", "--workspace", "."],
+    ],
+)
+def test_folder_flags_are_validated(no_service, argv) -> None:
+    with patch("opengrader.tui.main.TuiApp", autospec=True), pytest.raises(SystemExit) as exc:
+        run_app(argv)
+
+    assert exc.value.code == 2
+
+
+def test_an_explicit_workspace_whose_service_fails_is_an_error(service, monkeypatch) -> None:
+    def _broken(root):
+        raise RuntimeError("The workspace service could not start.")
+
+    monkeypatch.setattr("opengrader.server.workspace.client.ensure_service", _broken)
+    with patch("opengrader.tui.main.TuiApp", autospec=True), pytest.raises(SystemExit) as exc:
+        run_app(["--workspace", service.root])
+
+    assert exc.value.code == 2
+
+
+def test_tools_from_the_workspace_chooser_then_f2_returns_to_the_chooser(service) -> None:
+    from opengrader.tui.workspace_home import OPEN_TOOLS
+
+    workspace = Workspace(Path(service.root))
+    for assignment in workspace.assignments():
+        workspace.delete_assignment(assignment.id)
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.side_effect = [OPEN_TOOLS, None]
+        app_cls.return_value.run.return_value = "switch_assignment"
+        run_app(["--workspace", service.root])
+
+    app_cls.assert_called_once_with()  # Tools, over no workspace
+    assert home_cls.return_value.run.call_count == 2
+
+
+def test_open_as_workspace_imports_then_opens_that_assignment(service, sample) -> None:
+    from opengrader.tui.home import HomeChoice
+
+    oldest, _latest = Workspace(Path(service.root)).assignments()
+    calls = []
+
+    def _import(qa, subs):
+        calls.append((qa, subs))
+        return Path(service.root), oldest.id
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+        patch("opengrader.tui.main._import_as_workspace", side_effect=_import),
+    ):
+        home_cls.return_value.run.return_value = HomeChoice(
+            "new_workspace", folder=sample, qa_file=sample / "qa.md",
+            submissions=sample / "student-submissions",
+        )
+        app_cls.return_value.run.return_value = None
+        run_app([])
+
+    assert calls == [(sample / "qa.md", sample / "student-submissions")]
+    # The imported assignment, not the newest one, is what opens.
+    assert app_cls.call_args.kwargs["data_provider"].assignment.id == oldest.id

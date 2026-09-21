@@ -1,3 +1,6 @@
+from .dialect_client import DialectConfig
+from .dialects import DIALECT_NAMES, get_dialect, registered_dialects
+from .errors import LLMError, TransportError
 from .ollama_client import (
     OllamaConfig,
     OllamaError,
@@ -14,4 +17,10 @@ __all__ = [
     "generate",
     "list_models",
     "parse_json_object",
+    "LLMError",
+    "TransportError",
+    "DialectConfig",
+    "get_dialect",
+    "registered_dialects",
+    "DIALECT_NAMES",
 ]

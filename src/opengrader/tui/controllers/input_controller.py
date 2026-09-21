@@ -20,6 +20,7 @@ class InputCommand(str, Enum):
     APP_HELP = "app_help"
     APP_BACK = "app_back"
     SWITCH_ASSIGNMENT = "switch_assignment"
+    OPEN_START_PAGE = "open_start_page"
     QA_FILTER = "qa_filter"
     QA_MOVE_UP = "qa_move_up"
     QA_MOVE_DOWN = "qa_move_down"
@@ -95,6 +96,7 @@ class CommandBindingSpec:
     key_display: str | None = None
     requires_teacher_mode: bool = False
     requires_unlocked_anonymity: bool = False
+    requires_open_session: bool = False
 
     def to_binding(self) -> Binding:
         return Binding(
@@ -114,6 +116,25 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         InputCommand.SWITCH_ASSIGNMENT,
         "Switch assignment",
         (InputContext.QA, InputContext.GRADE),
+    ),
+    CommandBindingSpec(
+        "f2",
+        InputCommand.SWITCH_ASSIGNMENT,
+        "Home",
+        (InputContext.SETUP,),
+    ),
+    CommandBindingSpec(
+        "f3",
+        InputCommand.OPEN_START_PAGE,
+        "Tools",
+        (InputContext.QA, InputContext.GRADE),
+    ),
+    CommandBindingSpec(
+        "f3",
+        InputCommand.OPEN_START_PAGE,
+        "Back to grading",
+        (InputContext.SETUP,),
+        requires_open_session=True,
     ),
     CommandBindingSpec(
         "t",
@@ -561,6 +582,8 @@ class InputController:
             if binding.requires_teacher_mode and not self._state.teacher_mode:
                 continue
             if binding.requires_unlocked_anonymity and self._state.anonymity_locked:
+                continue
+            if binding.requires_open_session and not self._state.session_open:
                 continue
             if InputContext.GLOBAL in binding.contexts:
                 return True

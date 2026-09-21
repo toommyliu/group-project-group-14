@@ -46,7 +46,6 @@ def fake_cloud_provider():
     spec = ProviderSpec(
         name="fake-cloud",
         label="Fake Cloud (test)",
-        kind="cloud",
         summary="A hosted test provider used only by this test file.",
         default_host="https://api.fake-cloud.example/v1",
         default_vision_model="fake-vision-1",

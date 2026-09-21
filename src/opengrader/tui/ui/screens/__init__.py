@@ -17,6 +17,7 @@ from .handoff_screen import GraderPacketScreen, MergeScreen
 from .help_screen import HelpScreen
 from .item_analysis_screen import ItemAnalysisScreen
 from .llm_eval_screen import LlmEvalScreen
+from .provider_screen import ProviderScreen
 from .path_picker_screen import PathPickerScreen
 from .regrade_queue_screen import RegradeChoice, RegradeQueueScreen
 from .region_map_screen import RegionMapScreen
@@ -50,6 +51,7 @@ __all__ = [
     "HelpScreen",
     "ItemAnalysisScreen",
     "LlmEvalScreen",
+    "ProviderScreen",
     "PathPickerScreen",
     "RegradeChoice",
     "RegradeQueueScreen",

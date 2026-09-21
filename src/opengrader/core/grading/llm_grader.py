@@ -9,7 +9,7 @@ from opengrader.core.qa_file.scoring import (
     RubricSelectionMode,
     awarded_points_for_rubric_selection,
 )
-from opengrader.core.llm.ollama_client import parse_json_object
+from opengrader.core.llm import parse_json_object
 
 GenerateFn = Callable[[str], str]
 

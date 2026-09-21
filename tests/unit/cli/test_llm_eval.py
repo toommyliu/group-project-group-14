@@ -520,8 +520,10 @@ def test_default_generate_factory_wires_grade_suggestion_schema(monkeypatch) -> 
         captured_kwargs.update(kwargs)
         return "{}"
 
-    monkeypatch.setattr(llm_eval, "ensure_model_available", lambda config: None)
-    monkeypatch.setattr(llm_eval, "generate", fake_generate)
+    from opengrader.core import ai_config
+
+    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr("opengrader.core.llm.generate", fake_generate)
 
     factory = llm_eval._default_generate_factory(
         "http://127.0.0.1:11434", 30.0, auto_ollama=False

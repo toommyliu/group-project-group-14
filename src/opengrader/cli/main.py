@@ -13,7 +13,7 @@ PROGRAM_NAME = "opengrader"
 
 EXIT_INTERRUPTED = 130
 
-UNADVERTISED_ALIASES = frozenset({"opengrader-run"})
+UNADVERTISED_ALIASES = frozenset({"opengrader-run", "opengrader-providers"})
 
 
 SECTION_START = "Start here"
@@ -87,6 +87,13 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="is this machine set up? run this first when something breaks",
         section=SECTION_START,
         takes_argv=False,
+    ),
+    Subcommand(
+        name="providers",
+        target="opengrader.cli.providers:run_cli",
+        summary="add, test or remove an AI service of your own",
+        section=SECTION_START,
+        aliases=("opengrader-providers",),
     ),
     Subcommand(
         name="create-answer-key",

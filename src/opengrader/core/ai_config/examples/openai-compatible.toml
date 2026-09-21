@@ -1,0 +1,41 @@
+# Example provider manifest: a self-hosted OpenAI-compatible gateway —
+# vLLM, LM Studio, llama.cpp's server, or a department-run proxy in front of
+# any of them. All three speak the same request/response shape OpenAI does,
+# which is what "openai-chat" names here: a *wire dialect*, not a company.
+#
+# Not loaded automatically — see the note at the top of openai.toml. Copy
+# this file into your config directory as providers/<something>.toml (rename
+# it first — see the `name` field below), or start from it with:
+#
+#   opengrader-providers add --example openai-compatible
+#
+# Point `host` at wherever your gateway actually runs. If that address is
+# not on this machine or your local network, `host_kind()` will (correctly)
+# derive kind = "cloud" for it — an OpenAI-compatible server is not
+# automatically "local" just because it isn't OpenAI, and every §7.7
+# safeguard keyed on `kind` needs that to be true.
+
+name         = "campus-gateway"                 # rename this to something stable for your site
+label        = "Campus AI Gateway"
+summary      = "A department-run OpenAI-compatible gateway in front of a self-hosted model."
+dialect      = "openai-chat"
+host         = "https://ai-gateway.example.edu/v1"
+vision_model = "qwen2.5-vl-7b-instruct"
+text_model   = "qwen2.5-vl-7b-instruct"
+setup_hint   = "Ask your department's AI gateway admin for a key, or for access to the credential helper below."
+
+# Most self-hosted gateways cannot enumerate their own models either; adjust
+# to true if yours has an OpenAI-style /v1/models endpoint.
+supports_model_listing = false
+
+# credential_command is the escape hatch modelled on git's credential
+# helpers (§7.8 Q5): its stdout is used as the API key, so a key can live in
+# an OS keychain, `pass`, or `op` instead of an environment variable.
+# Opengrader never runs this on its own — the command is parsed and stored
+# here, but executing it needs its own one-time consent screen (L6, §7.7),
+# which shows the literal argv below before anything runs.
+credential_command = ["op", "read", "op://vault/opengrader/campus-gateway-key"]
+
+# No [pricing] table here on purpose: a department-run gateway usually has
+# no per-token bill to estimate. Add one if yours does; the L4 pre-flight
+# estimate simply has nothing to show without it.

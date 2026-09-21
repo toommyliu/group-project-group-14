@@ -50,16 +50,11 @@ if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.bubble_sheet import BubbleSheetLayout
     from opengrader.core.ocr.extractor import process_submission_pdf
     from opengrader.core.ocr import OcrConfig
+    from opengrader.core.ocr.vision_reader import VisionReader
 from opengrader.core.ocr.math_ocr import (
     DEFAULT_MATH_BACKEND,
     MathTranscriber,
     resolve_math_transcriber,
-)
-from opengrader.core.ocr.ollama_vlm import (
-    OllamaVisionConfig,
-    extract_field_text,
-    extract_handwriting_only,
-    extract_question_prompt_and_answer,
 )
 from opengrader.core.ocr.ink_extraction import (
     RegisteredTemplatePage,
@@ -1537,7 +1532,7 @@ def _render_submission_markdown(
 def _fill_responses_with_vlm(
     questions: list[StudentSubmissionQuestion],
     submission_dir: Path,
-    ollama_config: OllamaVisionConfig,
+    vision_reader: "VisionReader",
     *,
     pdf_name: str,
     progress: ExtractionProgress,
@@ -1562,7 +1557,7 @@ def _fill_responses_with_vlm(
             reading = _transcribe_crop(
                 crop_path,
                 question_id=question.question_id,
-                ollama_config=ollama_config,
+                vision_reader=vision_reader,
                 progress_callback=progress_callback,
                 math_latex=math_latex,
                 math_transcriber=math_transcriber,
@@ -1596,7 +1591,7 @@ def _transcribe_crop(
     crop_path: Path,
     *,
     question_id: str,
-    ollama_config: OllamaVisionConfig | None,
+    vision_reader: "VisionReader | None",
     progress_callback: Callable[[str], None],
     math_latex: bool = False,
     math_transcriber: "MathTranscriber | None" = None,
@@ -1617,27 +1612,24 @@ def _transcribe_crop(
         return (text, None, SOURCE_MATH_MODEL)
 
     def _read_with_vlm() -> tuple[str, float | None, str | None] | None:
-        if ollama_config is None:
+        if vision_reader is None:
             return None
         progress_callback(f"Transcribing {question_id} with Ollama VLM...")
         try:
             if handwriting_only:
-                answer = extract_handwriting_only(
+                answer = vision_reader.extract_handwriting_only(
                     image_path=crop_path,
-                    config=ollama_config,
                     math_latex=math_latex,
                 )
             else:
                 if math_latex:
-                    _prompt, answer = extract_question_prompt_and_answer(
+                    _prompt, answer = vision_reader.extract_question_prompt_and_answer(
                         image_path=crop_path,
-                        config=ollama_config,
                         math_latex=True,
                     )
                 else:
-                    _prompt, answer = extract_question_prompt_and_answer(
+                    _prompt, answer = vision_reader.extract_question_prompt_and_answer(
                         image_path=crop_path,
-                        config=ollama_config,
                     )
         except Exception as exc:
             progress_callback(f"  Warning: Ollama VLM failed for {question_id}: {exc}")
@@ -1677,7 +1669,7 @@ def _build_document_from_assignment_template(
     submission_dir: Path,
     template: AssignmentTemplate,
     *,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: "VisionReader | None" = None,
     llm_responses: bool = False,
     llm_math: bool = False,
     math_transcriber: "MathTranscriber | None" = None,
@@ -1803,7 +1795,7 @@ def _build_document_from_assignment_template(
             for question in questions
         ]
 
-    if llm_responses and ollama_config is not None:
+    if llm_responses and vision_reader is not None:
         crop_count = sum(
             1
             for question in questions
@@ -1817,7 +1809,7 @@ def _build_document_from_assignment_template(
         questions = _fill_responses_with_vlm(
             questions,
             submission_dir,
-            ollama_config,
+            vision_reader,
             pdf_name=pdf_path.name,
             progress=progress,
             progress_callback=progress_callback,
@@ -1830,12 +1822,11 @@ def _build_document_from_assignment_template(
     name_confidence: float | None = None
     if name_image and (name_ink is None or name_ink.has_ink):
         name_path = submission_dir / name_image
-        if ollama_config is not None:
+        if vision_reader is not None:
             try:
-                student_name = extract_field_text(
+                student_name = vision_reader.extract_field_text(
                     image_path=name_path,
                     field_kind="name",
-                    config=ollama_config,
                 )
             except Exception as exc:
                 progress_callback(f"  Warning: could not read student name: {exc}")
@@ -1848,12 +1839,11 @@ def _build_document_from_assignment_template(
     id_confidence: float | None = None
     if id_image and (id_ink is None or id_ink.has_ink):
         id_path = submission_dir / id_image
-        if ollama_config is not None:
+        if vision_reader is not None:
             try:
-                student_id = extract_field_text(
+                student_id = vision_reader.extract_field_text(
                     image_path=id_path,
                     field_kind="sid",
-                    config=ollama_config,
                 )
             except Exception as exc:
                 progress_callback(f"  Warning: could not read student ID: {exc}")
@@ -1929,7 +1919,7 @@ def _build_document_from_ocr_result(
     ocr_config: OcrConfig,
     dpi: int,
     split_subquestions: bool,
-    ollama_config: OllamaVisionConfig | None,
+    vision_reader: "VisionReader | None",
     skip_ollama_qa: bool,
     save_layout_debug: bool,
     progress_callback: Callable[[str], None],
@@ -1971,10 +1961,10 @@ def _build_document_from_ocr_result(
 
         if field_res.field_id == "student_name":
             name_image_path = field_crop.relative_to(submission_dir).as_posix()
-            if ollama_config:
+            if vision_reader:
                 progress_callback("Extracting name with Ollama VLM...")
                 try:
-                    student_name = extract_field_text(image_path=field_crop, field_kind="name", config=ollama_config)
+                    student_name = vision_reader.extract_field_text(image_path=field_crop, field_kind="name")
                 except Exception as e:
                     progress_callback(f"  Warning: Ollama VLM failed for name: {e}")
             if not student_name:
@@ -1983,10 +1973,10 @@ def _build_document_from_ocr_result(
                 )
         elif field_res.field_id == "student_id":
             id_image_path = field_crop.relative_to(submission_dir).as_posix()
-            if ollama_config:
+            if vision_reader:
                 progress_callback("Extracting student ID with Ollama VLM...")
                 try:
-                    student_id = extract_field_text(image_path=field_crop, field_kind="sid", config=ollama_config)
+                    student_id = vision_reader.extract_field_text(image_path=field_crop, field_kind="sid")
                 except Exception as e:
                     progress_callback(f"  Warning: Ollama VLM failed for student ID: {e}")
             if not student_id:
@@ -1994,7 +1984,7 @@ def _build_document_from_ocr_result(
                     field_crop, digits=True
                 )
 
-    vlm_active = bool(not skip_ollama_qa and ollama_config)
+    vlm_active = bool(not skip_ollama_qa and vision_reader)
     if vlm_active:
         vlm_count = sum(1 for q_res in submission_result.questions if q_res.output_path)
         progress.file_start(pdf_path.name, vlm_count)
@@ -2008,7 +1998,7 @@ def _build_document_from_ocr_result(
             response_text, response_confidence, response_source = _transcribe_crop(
                 crop_path,
                 question_id=q_res.question_id,
-                ollama_config=None if skip_ollama_qa else ollama_config,
+                vision_reader=None if skip_ollama_qa else vision_reader,
                 progress_callback=progress_callback,
                 math_latex=llm_math,
                 math_transcriber=math_transcriber,
@@ -2062,7 +2052,7 @@ def build_student_submission_document_unified(
     ocr_config: OcrConfig | None,
     dpi: int,
     split_subquestions: bool,
-    ollama_config: OllamaVisionConfig | None,
+    vision_reader: "VisionReader | None",
     skip_ollama_qa: bool,
     save_layout_debug: bool,
     blank_assignment_template: AssignmentTemplate | None,
@@ -2124,7 +2114,7 @@ def build_student_submission_document_unified(
                 pdf_path,
                 submission_dir,
                 blank_assignment_template,
-                ollama_config=ollama_config,
+                vision_reader=vision_reader,
                 llm_responses=llm_responses,
                 llm_math=llm_math,
                 math_transcriber=math_transcriber,
@@ -2178,7 +2168,7 @@ def build_student_submission_document_unified(
             ocr_config=ocr_config,
             dpi=dpi,
             split_subquestions=split_subquestions,
-            ollama_config=ollama_config,
+            vision_reader=vision_reader,
             skip_ollama_qa=skip_ollama_qa,
             save_layout_debug=save_layout_debug,
             progress_callback=progress_callback,

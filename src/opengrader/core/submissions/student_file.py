@@ -23,7 +23,7 @@ from opengrader.core.source_location import QuestionSourceSegment
 
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.ocr.extractor import OcrConfig
-    from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig, TitleMetadataResult
+    from opengrader.core.ocr.vision_reader import TitleMetadataResult, VisionReader
 
 
 _TITLE_COURSE_RE = re.compile(r"\b([A-Z]{2,}\s*\d{1,4}[A-Z]?)\b", re.IGNORECASE)
@@ -1206,7 +1206,7 @@ def _iter_field_crop_candidates(crop_path: Path) -> list[Path]:
     return [crop_path] if crop_path.exists() else []
 
 
-def _score_ollama_field_value(value: str, field_kind: Literal["name", "sid"]) -> float:
+def _score_vision_field_value(value: str, field_kind: Literal["name", "sid"]) -> float:
     text = value.strip()
     if not text:
         return -1.0
@@ -1237,29 +1237,26 @@ def _score_ollama_field_value(value: str, field_kind: Literal["name", "sid"]) ->
     return score
 
 
-def _extract_best_ollama_field_text(
+def _extract_best_vision_field_text(
     *,
     crop_path: Path,
     field_kind: Literal["name", "sid"],
-    config: OllamaVisionConfig,
+    reader: VisionReader,
     fallback_value: str,
 ) -> str:
-    from opengrader.core.ocr.ollama_vlm import extract_field_text
-
     best_value = fallback_value.strip()
-    best_score = _score_ollama_field_value(best_value, field_kind)
+    best_score = _score_vision_field_value(best_value, field_kind)
 
     for candidate_path in _iter_field_crop_candidates(crop_path):
         try:
-            extracted = extract_field_text(
+            extracted = reader.extract_field_text(
                 image_path=candidate_path,
                 field_kind=field_kind,
-                config=config,
             ).strip()
         except Exception:
             continue
 
-        candidate_score = _score_ollama_field_value(extracted, field_kind)
+        candidate_score = _score_vision_field_value(extracted, field_kind)
         if candidate_score > best_score:
             best_value = extracted
             best_score = candidate_score
@@ -1806,17 +1803,13 @@ def build_student_submission_document(
     ocr_config: OcrConfig,
     dpi: int = 300,
     split_subquestions: bool = True,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     skip_ollama_qa: bool = False,
     save_layout_debug: bool = False,
     progress_callback: Callable[[str], None] | None = None,
 ) -> StudentSubmissionBuildResult:
+    from opengrader.core import ai_config
     from opengrader.core.ocr.extractor import process_submission_pdf
-    from opengrader.core.ocr.ollama_vlm import (
-        OllamaVisionConfig,
-        extract_question_prompt_and_answer,
-        extract_title_metadata,
-    )
 
     pdf = Path(pdf_path)
     root_out_dir = Path(output_dir)
@@ -1842,17 +1835,17 @@ def build_student_submission_document(
         if field.crop_path
     }
 
-    active_ollama_config = ollama_config or OllamaVisionConfig()
+    active_vision_reader = vision_reader or ai_config.vision_reader()
 
     for field_id, field_kind in (("student_name", "name"), ("student_id", "sid")):
         crop_path = field_crop_by_id.get(field_id)
         if crop_path is None or not crop_path.exists():
             continue
         _emit_progress(progress_callback, f"Ollama field OCR: {field_id}")
-        extracted = _extract_best_ollama_field_text(
+        extracted = _extract_best_vision_field_text(
             crop_path=crop_path,
             field_kind=field_kind,
-            config=active_ollama_config,
+            reader=active_vision_reader,
             fallback_value=fields_by_id.get(field_id, ""),
         )
         if extracted:
@@ -1871,9 +1864,8 @@ def build_student_submission_document(
         _emit_progress(progress_callback, "Ollama title OCR")
         try:
             title_meta = _assignment_metadata_from_title_result(
-                extract_title_metadata(
+                active_vision_reader.extract_title_metadata(
                     image_path=title_crop_path,
-                    config=active_ollama_config,
                 )
             )
         except Exception as exc:
@@ -1969,9 +1961,8 @@ def build_student_submission_document(
                     f"Ollama QA [{index}/{total_question_jobs}]: {question_id}",
                 )
                 try:
-                    prompt_text, response_text = extract_question_prompt_and_answer(
+                    prompt_text, response_text = active_vision_reader.extract_question_prompt_and_answer(
                         image_path=image_path,
-                        config=active_ollama_config,
                     )
                 except Exception as exc:
                     _emit_progress(

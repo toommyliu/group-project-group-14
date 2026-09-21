@@ -158,6 +158,8 @@ def test_every_hotkey_in_the_help_is_a_real_binding() -> None:
             real.add(key)
             if len(key) == 1 and key.isupper():
                 real.add(f"shift+{key}")
+            if key.startswith("f") and key[1:].isdigit():
+                real.add(key.upper())  # help writes function keys as F2
 
     spelled = {"?": "question_mark", "esc": "escape", ".": "full_stop", ",": "comma",
                "↑": "up", "↓": "down", "→": "right", "←": "left"}
@@ -249,7 +251,7 @@ def test_every_control_the_help_quotes_exists_in_the_ui() -> None:
         path.read_text(encoding="utf-8")
         for path in (root / "src" / "opengrader" / "tui").rglob("*.py")
     )
-    ui_source += (root / "src" / "opengrader" / "core" / "ai_config.py").read_text(
+    ui_source += (root / "src" / "opengrader" / "core" / "ai_config" / "__init__.py").read_text(
         encoding="utf-8"
     )
 

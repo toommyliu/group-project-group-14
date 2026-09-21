@@ -26,7 +26,6 @@ from opengrader.core.grading.solutions import (
     objective_correctness,
     solution_entries_for_submission,
 )
-from opengrader.core.llm import OllamaConfig, OllamaError, ensure_model_available, generate
 from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.grading.automated import (
     DEFAULT_LLM_MIN_CONFIDENCE, JOURNAL_ACTOR_AUTO, JOURNAL_ACTOR_LLM,
@@ -120,7 +119,7 @@ def setup_args() -> ArgumentParser:
     parser.add_argument(
         "--llm-timeout",
         type=float,
-        default=OllamaConfig.timeout_seconds,
+        default=ai_config.DEFAULT_TIMEOUT_SECONDS,
         help="Per-request timeout in seconds (default: %(default)s).",
     )
     parser.add_argument(
@@ -174,16 +173,14 @@ def setup_args() -> ArgumentParser:
     return parser
 
 
-def _start_ollama_server_if_needed(
-    config: OllamaConfig, emit: Callable[[str], None]
-) -> None:
-    parsed = urlparse(config.host)
-    host = parsed.hostname or "127.0.0.1"
+def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> None:
+    parsed = urlparse(host)
+    hostname = parsed.hostname or "127.0.0.1"
     port = parsed.port or 11434
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        if probe.connect_ex((host, port)) == 0:
+        if probe.connect_ex((hostname, port)) == 0:
             return
-    emit(f"Starting Ollama server at {config.host}…")
+    emit(f"Starting Ollama server at {host}…")
     try:
         subprocess.Popen(
             ["ollama", "serve"],
@@ -198,7 +195,7 @@ def _start_ollama_server_if_needed(
     while time.time() < deadline:
         time.sleep(1)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            if probe.connect_ex((host, port)) == 0:
+            if probe.connect_ex((hostname, port)) == 0:
                 return
     emit("Warning: timed out waiting for Ollama to start.")
 
@@ -242,38 +239,39 @@ def run_cli(
     llm_generate: GenerateFn | None = None
     llm_model = ""
     if args.llm:
-        config = OllamaConfig(
-            model=args.llm_model,
+        resolved = ai_config.with_overrides(
+            resolved_ai,
             host=args.llm_host,
+            text_model=args.llm_model,
             timeout_seconds=args.llm_timeout,
         )
-        if args.auto_ollama:
+        if args.auto_ollama and resolved.kind == "local":
             try:
-                _start_ollama_server_if_needed(config, emit)
+                _start_ollama_server_if_needed(resolved.host, emit)
             except RuntimeError as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 sys.exit(1)
             emit(
-                f"Pulling model '{config.model}' if needed — "
+                f"Pulling model '{resolved.text_model}' if needed — "
                 "first run may download several GB…"
             )
             subprocess.run(
-                ["ollama", "pull", config.model],
+                ["ollama", "pull", resolved.text_model],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         try:
-            ensure_model_available(config)
-        except OllamaError as exc:
+            ai_config.ensure_ready(resolved, purpose="text")
+        except ai_config.AIUnavailableError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
-        llm_generate = lambda prompt: generate(  # noqa: E731
-            prompt=prompt, config=config, response_format=GRADE_SUGGESTION_SCHEMA
+        llm_generate = ai_config.text_generate(
+            resolved, response_format=GRADE_SUGGESTION_SCHEMA
         )
-        llm_model = config.model
+        llm_model = resolved.text_model
         emit(
-            f"LLM free-response grading enabled (model={config.model}, "
+            f"LLM free-response grading enabled (model={resolved.text_model}, "
             f"min confidence={args.llm_min_confidence:g})."
         )
 

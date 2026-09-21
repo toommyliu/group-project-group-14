@@ -5,7 +5,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import cv2
 import fitz
@@ -27,10 +27,9 @@ from opengrader.core.pdf_utils import (
     render_page_to_image,
     norm_bbox,
 )
-from opengrader.core.ocr.ollama_vlm import (
-    OllamaVisionConfig,
-    extract_question_prompt_and_answer,
-)
+
+if TYPE_CHECKING:  # pragma: no cover
+    from opengrader.core.ocr.vision_reader import VisionReader
 
 
 def detect_question_positions(doc):
@@ -284,7 +283,7 @@ def extract_content(
     rendered_pages: dict[int, Image.Image],
     question_bboxes: dict[int, tuple[int, tuple[float, float, float, float]]],
     max_q: int,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     progress: Callable[[int, int], None] | None = None,
 ):
     markdown_questions = []
@@ -326,15 +325,14 @@ def extract_content(
             inner_box_y_frac = find_answer_box(cropped_image)
             full_text = pytesseract.image_to_string(cropped_image).strip()
 
-            if ollama_config and _ocr_looks_unreliable(
+            if vision_reader and _ocr_looks_unreliable(
                 full_text, _ocr_mean_confidence(cropped_image)
             ):
                 with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
                     cropped_image.save(tmp.name)
                     try:
-                        vlm_prompt, vlm_answer = extract_question_prompt_and_answer(
-                            image_path=Path(tmp.name),
-                            config=ollama_config
+                        vlm_prompt, vlm_answer = vision_reader.extract_question_prompt_and_answer(
+                            image_path=Path(tmp.name)
                         )
                         if vlm_prompt:
                             full_text = vlm_prompt
@@ -408,7 +406,7 @@ def extract_qa_markdown_from_pdf(
     title: str,
     instructions: str = "Auto-generated",
     blank_template_path: str | Path | None = None,
-    ollama_config: OllamaVisionConfig | None = None,
+    vision_reader: VisionReader | None = None,
     emit: Callable[[str], None] | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> str:
@@ -487,7 +485,7 @@ def extract_qa_markdown_from_pdf(
         say("Extracting content via OCR...")
         qa_blocks = extract_content(
             answer_key_doc, rendered_answer_key_pages, final_question_bboxes, max_q,
-            ollama_config=ollama_config,
+            vision_reader=vision_reader,
             progress=progress,
         )
 

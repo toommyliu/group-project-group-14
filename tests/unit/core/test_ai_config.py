@@ -7,6 +7,10 @@ import pytest
 
 from opengrader.core import ai_config
 
+# The VisionReader a fake cloud provider hands back. Module-level rather
+# than yielded, so the fixture's existing 4-tuple shape stays put.
+_READER_SENTINEL = object()
+
 
 def test_vision_defaults_match_ollama_vision_config() -> None:
     from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
@@ -272,10 +276,13 @@ def fake_cloud_provider():
         calls["vision"] = resolved
         return vision_sentinel
 
+    def _vision_reader_factory(resolved: ai_config.ResolvedAI) -> object:
+        calls["vision_reader"] = resolved
+        return _READER_SENTINEL
+
     spec = ai_config.ProviderSpec(
         name="fake-cloud",
         label="Fake Cloud",
-        kind="cloud",
         summary="A fake cloud provider used only to exercise the registry.",
         default_host="https://fake.example/api",
         default_vision_model="fake-vision-1",
@@ -285,6 +292,7 @@ def fake_cloud_provider():
         requires_api_key=True,
         text_config_factory=_text_factory,
         vision_config_factory=_vision_factory,
+        vision_reader_factory=_vision_reader_factory,
     )
     ai_config.register_provider(spec)
     try:
@@ -694,3 +702,44 @@ def test_measure_generate_latency_picks_the_model_for_the_role() -> None:
 
     assert handwriting.model == "vision-x"
     assert grading.model == "text-y"
+
+
+def test_vision_reader_routes_through_the_provider_not_through_ollama(
+    fake_cloud_provider,
+) -> None:
+    """The Phase 2 half of the seam, checked the same way Phase 1 checked its own.
+
+    `vision_config()` builds a *client*; `vision_reader()` builds the thing
+    consumers above the boundary actually hold. A provider that supplies its
+    own reader must be able to serve transcription without any part of
+    `ollama_vlm` being reachable from the call — which is the whole of F2.
+    """
+    spec, _text, _vision, calls = fake_cloud_provider
+    resolved = ai_config.resolve(ai_config.AISettings(provider=spec.name), environ={})
+
+    assert ai_config.vision_reader(resolved) is _READER_SENTINEL
+    assert calls["vision_reader"] is resolved
+
+
+def test_the_local_provider_hands_back_a_real_vision_reader() -> None:
+    from opengrader.core.ocr.vision_reader import OllamaVisionReader, VisionReader
+
+    reader = ai_config.vision_reader(ai_config.for_provider("ollama"))
+
+    assert isinstance(reader, OllamaVisionReader)
+    assert isinstance(reader, VisionReader)
+    assert reader.config.model == ai_config.DEFAULT_VISION_MODEL
+
+
+def test_a_vision_reader_survives_the_process_boundary() -> None:
+    """`ExtractionJob` carries one into a spawned worker in batch.py.
+
+    A reader that held a session, a socket or a closure would pickle-fail there
+    and take a whole cohort's extraction with it — and only under parallelism,
+    which is the default. Cheaper to pin here.
+    """
+    import pickle
+
+    reader = ai_config.vision_reader(ai_config.for_provider("ollama"))
+
+    assert pickle.loads(pickle.dumps(reader)) == reader

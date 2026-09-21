@@ -11,6 +11,10 @@ from opengrader.core.workspace.models import Assignment
 from opengrader.server.workspace.client import WorkspaceClient
 
 PROCESS_WORKSPACE = "process_workspace"
+# Leave the chooser for the start page: every pipeline step and helper tool.
+OPEN_TOOLS = "open_tools"
+# Back to the terminal app's Home screen, to open another folder or workspace.
+GO_HOME = "go_home"
 
 
 def process_workspace_argv(root: str) -> list[str]:
@@ -22,6 +26,10 @@ class WorkspaceHome(App[str | None]):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh assignments"),
+        ("s", "tools", "Tools & settings"),
+        ("w", "write_back", "Write grades to files"),
+        ("h", "home", "Home"),
+        ("escape", "home", "Home"),
     ]
     DEFAULT_CSS = """
     #workspace-home {
@@ -44,6 +52,10 @@ class WorkspaceHome(App[str | None]):
 
     #assignment-picker {
         height: 1fr;
+    }
+
+    #open-tools, #go-home, #write-back {
+        margin-top: 1;
     }
 
     #picker-title,
@@ -109,6 +121,15 @@ class WorkspaceHome(App[str | None]):
             with Vertical(id="assignment-picker"):
                 yield Label("Choose an assignment to grade", id="picker-title")
                 yield ListView(id="assignments")
+                yield Button(
+                    "Write grades to files (W)",
+                    id="write-back",
+                    tooltip=(
+                        "Copy this assignment's workspace grades into its "
+                        ".submission.md files, so exports and backups see them. "
+                        "Shows a preview first."
+                    ),
+                )
             with Vertical(id="empty-workspace"):
                 yield Label("Set up your first assignment", id="empty-title")
                 yield Static(
@@ -128,6 +149,15 @@ class WorkspaceHome(App[str | None]):
                     id="cli-description",
                 )
                 yield Static(command, id="cli-command", markup=False)
+            yield Button("← Home (H)", id="go-home")
+            yield Button(
+                "Tools & settings (S)",
+                id="open-tools",
+                tooltip=(
+                    "The start page: check this computer, AI setup and "
+                    "providers, sharing, backup, and every pipeline step."
+                ),
+            )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -163,3 +193,31 @@ class WorkspaceHome(App[str | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "process-folder":
             self.exit(PROCESS_WORKSPACE)
+        elif event.button.id == "open-tools":
+            self.exit(OPEN_TOOLS)
+        elif event.button.id == "go-home":
+            self.exit(GO_HOME)
+        elif event.button.id == "write-back":
+            self.action_write_back()
+
+    def action_home(self) -> None:
+        self.exit(GO_HOME)
+
+    def action_write_back(self) -> None:
+        from opengrader.tui.ui.screens.write_back_screen import WriteBackScreen
+
+        listing = self.query_one("#assignments", ListView)
+        if not self.assignments or listing.index is None:
+            self.notify("Choose an assignment first.")
+            return
+        chosen = self.assignments[listing.index]
+        self.push_screen(
+            WriteBackScreen(
+                workspace_root=self.client.connection.root,
+                assignment_id=chosen.id,
+                title=chosen.title,
+            )
+        )
+
+    def action_tools(self) -> None:
+        self.exit(OPEN_TOOLS)

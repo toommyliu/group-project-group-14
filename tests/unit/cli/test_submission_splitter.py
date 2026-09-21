@@ -24,7 +24,7 @@ def _bundle(path: Path, pages: int) -> Path:
 
 def _no_ollama(monkeypatch) -> None:
     monkeypatch.setattr(
-        submission_splitter, "_verified_ollama_config", lambda args, emit: None
+        submission_splitter, "_verified_vision_reader", lambda args, emit: None
     )
 
 
@@ -375,7 +375,7 @@ def _record_vlm_calls(monkeypatch) -> list[int]:
     calls: list[int] = []
     monkeypatch.setattr(
         submission_splitter,
-        "_verified_ollama_config",
+        "_verified_vision_reader",
         lambda args, emit: calls.append(1) or None,
     )
     return calls

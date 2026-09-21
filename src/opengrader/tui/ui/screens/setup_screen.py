@@ -25,7 +25,6 @@ from textual.widgets import (
 )
 
 from opengrader.core import ai_config
-from opengrader.core.llm import OllamaError, ensure_model_available
 from opengrader.core.pipeline import (
     STAGE_EXTRACT,
     LlmOptions,
@@ -56,7 +55,6 @@ from opengrader.cli.automated_grading import (
 )
 from opengrader.cli.qa_file import run_cli as run_qa_file_cli
 from opengrader.core.class_folder import (
-    GRADING_ROLES,
     ClassFolderScan,
     describe_class_folder,
     scan_class_folder,
@@ -68,6 +66,7 @@ from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
 from opengrader.tui.ui.screens.course_grades_screen import CourseGradesScreen
 from opengrader.tui.ui.screens.handoff_screen import GraderPacketScreen, MergeScreen
 from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
+from opengrader.tui.ui.screens.provider_screen import ProviderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
 
@@ -315,9 +314,7 @@ class SetupScreen(Vertical):
         "policy-submissions": ("directory", "Choose the submissions directory"),
         "handoff-submissions": ("directory", "Choose the submissions directory"),
         "backup-submissions": ("directory", "Choose the submissions directory"),
-        "tui-class-folder": ("directory", "Choose the class folder"),
-        "tui-qa-path": ("file", "Choose the QA markdown file"),
-        "tui-sub-path": ("any", "Choose the submissions file or directory"),
+        "ext-qa": ("file", "Choose the QA markdown file"),
         "pipe-scan": ("any", "Choose the scanned bundle PDF, or a folder of split PDFs"),
         "pipe-qa": ("file", "Choose the answer-key markdown file"),
         "pipe-out": ("directory", "Choose the class folder"),
@@ -399,42 +396,11 @@ class SetupScreen(Vertical):
                         id="setup-subtitle",
                     )
 
-                with Vertical(id="launch-section") as launch_card:
-                    launch_card.border_title = "▸ Start grading"
-                    yield Static(
-                        "Choose a class folder (or a grader packet) — its answer "
-                        "key and submissions are found for you. New scans? Run "
-                        "the pipeline below first.",
-                        classes="card-hint",
-                    )
-                    yield self._field_label(
-                        "Class folder", "holds the answer key and the graded submissions"
-                    )
-                    yield self._path_row("Path to the class folder…", "tui-class-folder")
-                    yield Static(
-                        "",
-                        id="tui-folder-summary",
-                        classes="card-hint hidden",
-                        markup=False,
-                    )
-                    with Collapsible(
-                        title="Answer key and submissions — filled in from the folder",
-                        id="launch-files",
-                        collapsed=True,
-                    ):
-                        yield self._field_label(
-                            "Answer key", "QA markdown file, e.g. solutions.md"
-                        )
-                        yield self._path_row("Path to QA markdown file…", "tui-qa-path")
-                        yield self._field_label(
-                            "Submissions", "directory containing .submission.md files"
-                        )
-                        yield self._path_row(
-                            "Path to submissions directory…", "tui-sub-path"
-                        )
-                    yield self._card_actions(
-                        Button("Launch Grading", variant="success", id="launch-button", compact=True)
-                    )
+                with Vertical(id="launch-section") as session_card:
+                    # Choosing what to grade lives on Home (tui/home.py) now;
+                    # this card only says what is open, and how to get back.
+                    session_card.border_title = "▸ Grading"
+                    yield Static("", id="setup-session", classes="card-hint", markup=False)
 
                 yield Static(
                     "[b]RUN THE WHOLE PIPELINE[/b]", id="pipeline-heading",
@@ -830,6 +796,10 @@ class SetupScreen(Vertical):
                             "lands — no need to wait for the whole batch.",
                             classes="card-hint",
                         )
+                        yield self._field_label(
+                            "Answer key", "needed to grade while extraction runs"
+                        )
+                        yield self._path_row("Path to QA markdown file…", "ext-qa")
                         yield self._card_actions(
                             Button(
                                 "Grade what's ready →",
@@ -977,6 +947,36 @@ class SetupScreen(Vertical):
                         Button(
                             "Open AI setup",
                             id="run-ai-settings",
+                            variant="primary",
+                            compact=True,
+                        )
+                    )
+
+                with Collapsible(
+                    title="AI providers — connect a service your department runs",
+                    id="section-providers",
+                    collapsed=True,
+                ):
+                    yield Static(
+                        "Opengrader's AI runs on this computer unless you add "
+                        "another service here: a small file naming where the "
+                        "service is, which models to ask for, and which "
+                        "environment variable holds your key. The key itself "
+                        "is never written down. Once added, a provider appears "
+                        "in AI setup, where you choose it.",
+                        classes="card-hint",
+                    )
+                    yield Static(
+                        "A service that is not on this computer or your local "
+                        "network receives student work: answer images and "
+                        "handwriting. Check with your institution before you "
+                        "choose one.",
+                        classes="card-hint",
+                    )
+                    yield self._card_actions(
+                        Button(
+                            "Manage providers",
+                            id="run-providers",
                             variant="primary",
                             compact=True,
                         )
@@ -1417,8 +1417,6 @@ class SetupScreen(Vertical):
                 self._sync_policy_checkbox()
             elif input_id == "pipe-out":
                 self._scan_class_folder()
-            elif input_id == "tui-class-folder":
-                self._scan_launch_folder()
 
         self.app.push_screen(
             PathPickerScreen(title=title, mode=mode, start_path=start_path),
@@ -1453,9 +1451,7 @@ class SetupScreen(Vertical):
                 event.stop()
                 self._open_path_picker(input_id)
                 return
-        if event.button.id == "launch-button":
-            self._launch_grading()
-        elif event.button.id == "run-splitter":
+        if event.button.id == "run-splitter":
             self._run_splitter()
         elif event.button.id == "run-extractor":
             self._run_extractor()
@@ -1483,6 +1479,8 @@ class SetupScreen(Vertical):
             self._open_doctor()
         elif event.button.id == "run-ai-settings":
             self._open_ai_settings()
+        elif event.button.id == "run-providers":
+            self._open_providers()
         elif event.button.id == "run-photo-import":
             self._run_photo_import()
         elif event.button.id == "run-region-map":
@@ -1498,7 +1496,7 @@ class SetupScreen(Vertical):
         own = self._clean_path(self.query_one(f"#{input_id}", Input).value)
         if own:
             return own
-        return self._clean_path(self.query_one("#tui-sub-path", Input).value)
+        return self._session_paths()[1]
 
     def _open_grader_packet(self) -> None:
         submissions = self._handoff_submissions("handoff-submissions")
@@ -1510,9 +1508,7 @@ class SetupScreen(Vertical):
         self.app.push_screen(
             GraderPacketScreen(
                 submissions_path=submissions,
-                qa_file_path=self._clean_path(
-                    self.query_one("#tui-qa-path", Input).value
-                ),
+                qa_file_path=self._session_paths()[0],
             )
         )
 
@@ -1685,9 +1681,16 @@ class SetupScreen(Vertical):
 
         self.app.push_screen(AISettingsScreen(), _refresh)
 
+    def _open_providers(self) -> None:
+        def _refresh(changed: bool | None) -> None:
+            if changed:
+                self._refresh_ai_displays()
+
+        self.app.push_screen(ProviderScreen(), _refresh)
+
     def _open_course_grades(self) -> None:
         prefill = ""
-        submissions = self._clean_path(self.query_one("#tui-sub-path", Input).value)
+        submissions = self._session_paths()[1]
         if submissions:
             prefill = str(_find_course_file(Path(submissions)) or "")
         self.app.push_screen(CourseGradesScreen(course_path=prefill))
@@ -2020,11 +2023,12 @@ class SetupScreen(Vertical):
         self.app.notify(message, severity="error" if is_error else "information")
 
     def _open_grade_while_extracting(self) -> None:
-        qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
+        qa_path = self._clean_path(self.query_one("#ext-qa", Input).value)
+        qa_path = qa_path or self._session_paths()[0]
         output_dir = self._clean_path(self.query_one("#ext-output", Input).value)
         if not qa_path:
             self.app.notify(
-                "Set the answer key path in \"Start grading\" above first.",
+                "Set the answer key below the progress bar first.",
                 severity="error",
             )
             return
@@ -2061,50 +2065,30 @@ class SetupScreen(Vertical):
         summary.remove_class("hidden")
         return found
 
-    def _scan_launch_folder(self) -> ClassFolderScan | None:
-        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
-        if not folder or not Path(folder).is_dir():
-            self.app.notify(
-                "Choose an existing class folder to open.", severity="error"
-            )
-            return None
-        try:
-            found = scan_class_folder(folder)
-        except OSError as exc:
-            self.app.notify(f"Could not read {folder}: {exc}", severity="error")
-            return None
+    def show_session(self, text: str) -> None:
+        """What is open for grading, as the launcher and TuiApp see it."""
+        self.query_one("#setup-session", Static).update(text)
 
-        self._autofill("tui-qa-path", found.qa_file)
-        self._autofill("tui-sub-path", found.submissions)
+    def open_pipeline_folder(self, folder: str | Path) -> None:
+        """Arrive from Home on a folder of new scans: pipeline card filled in."""
+        self.query_one("#pipe-out", Input).value = str(folder)
+        section = self.query_one("#section-pipeline", Collapsible)
+        section.collapsed = False
+        self._scan_class_folder()
+        self.call_after_refresh(section.scroll_visible)
 
-        summary = self.query_one("#tui-folder-summary", Static)
-        summary.update(
-            "\n".join(
-                describe_class_folder(found, GRADING_ROLES, include_notes=False)
-            )
-        )
-        summary.remove_class("hidden")
-        if found.qa_file is None or found.submissions is None:
-            self.query_one("#launch-files", Collapsible).collapsed = False
-        return found
+    def _session_paths(self) -> tuple[str, str]:
+        """(answer key, submissions) of the folder being graded, if any.
 
-    def _launch_grading(self) -> None:
-        qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
-        sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
-        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
-        if (not qa_path or not sub_path) and folder and Path(folder).is_dir():
-            self._scan_launch_folder()
-            qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
-            sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
-
-        if not qa_path or not sub_path:
-            self.query_one("#launch-files", Collapsible).collapsed = False
-            self.app.notify(
-                "Both QA path and Submissions path are required to launch.",
-                severity="error",
-            )
-            return
-        self.post_message(self.LaunchRequested(qa_path, sub_path))
+        Tools that act on "the class" default to whatever is open, the way
+        the Start grading card's fields used to be their fallback.
+        """
+        provider = getattr(self.app, "data_provider", None)
+        if not getattr(self.app.workflow_state, "session_open", False):
+            return "", ""
+        qa = getattr(provider, "qa_file_path", None)
+        subs = getattr(provider, "submissions_path", None)
+        return (str(qa) if qa else "", str(subs) if subs else "")
 
     def _autofill(
         self, input_id: str, path: Path | None, *, checkbox_id: str | None = None
@@ -2406,7 +2390,7 @@ class SetupScreen(Vertical):
             self.app.notify(
                 f"{report.submission_count} submission(s) ready in "
                 f"{report.submissions_dir}. Add an answer key above, or open "
-                'them from "Start grading".'
+                "open them from Home (F2)."
             )
             return
 
@@ -2505,8 +2489,8 @@ class SetupScreen(Vertical):
 
         if probe_llm:
             try:
-                ensure_model_available(ai_config.text_config())
-            except OllamaError:
+                ai_config.ensure_ready(purpose="text")
+            except ai_config.AIUnavailableError:
                 argv = [*argv, *self._auto_ollama_argv()]
 
         def on_file_start(file_name: str, index: int, total: int) -> None:
@@ -2665,8 +2649,6 @@ class SetupScreen(Vertical):
             self._sync_policy_checkbox()
         elif event.input.id == "pipe-out":
             self._scan_class_folder()
-        elif event.input.id == "tui-class-folder":
-            self._scan_launch_folder()
 
     def _sync_policy_checkbox(self) -> None:
         submissions = self._clean_path(

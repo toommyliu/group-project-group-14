@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal, Sequence
 
 from opengrader.core.ocr.math_ocr import DEFAULT_MATH_BACKEND
-from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
 
 from .manifest import relative_outputs
 from .processor import (
@@ -26,6 +25,7 @@ from .transcription import tally_reading_sources
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.bubble_sheet import BubbleSheetLayout
     from opengrader.core.ocr import OcrConfig
+    from opengrader.core.ocr.vision_reader import VisionReader
 
 AUTO_WORKER_CAP = 8
 VLM_AUTO_WORKER_CAP = 4
@@ -42,7 +42,7 @@ class ExtractionJob:
     ocr_config: OcrConfig | None = None
     dpi: int = 300
     split_subquestions: bool = True
-    ollama_config: OllamaVisionConfig | None = None
+    vision_reader: "VisionReader | None" = None
     skip_ollama_qa: bool = False
     save_layout_debug: bool = False
     blank_assignment_template: AssignmentTemplate | None = None
@@ -169,7 +169,7 @@ def _execute_job(
             ocr_config=job.ocr_config,
             dpi=job.dpi,
             split_subquestions=job.split_subquestions,
-            ollama_config=job.ollama_config,
+            vision_reader=job.vision_reader,
             skip_ollama_qa=job.skip_ollama_qa,
             save_layout_debug=job.save_layout_debug,
             blank_assignment_template=job.blank_assignment_template,
@@ -336,7 +336,7 @@ def _execute_job_inline(
             ocr_config=job.ocr_config,
             dpi=job.dpi,
             split_subquestions=job.split_subquestions,
-            ollama_config=job.ollama_config,
+            vision_reader=job.vision_reader,
             skip_ollama_qa=job.skip_ollama_qa,
             save_layout_debug=job.save_layout_debug,
             blank_assignment_template=job.blank_assignment_template,
@@ -393,10 +393,21 @@ def _worker_render_cache_bytes(workers: int) -> int:
     return max(_MIN_WORKER_RENDER_CACHE_BYTES, budget // max(1, workers))
 
 
-def _init_worker(render_cache_bytes: int) -> None:
+def _init_worker(render_cache_bytes: int, ai_calls_in_flight: int = 1) -> None:
     from opengrader.core.render_cache import configure_render_cache
 
     configure_render_cache(max_bytes=render_cache_bytes)
+
+    # The provider-call budget this worker is allowed, which is how `--jobs`
+    # reaches the transport's semaphore. A worker handles one submission at a
+    # time, so its own budget is one; the fleet-wide bound a hosted service
+    # actually sees is the worker count, which is `--jobs` by another name.
+    # Setting it here rather than leaving it unbounded means a future
+    # thread-fanned worker inherits a cap instead of discovering it needs one
+    # from a rate-limit response.
+    from opengrader.core.llm.transport import set_concurrency_limit
+
+    set_concurrency_limit(ai_calls_in_flight)
 
 
 _MIN_WORKER_RENDER_CACHE_BYTES = 64 * 1024 * 1024
@@ -431,7 +442,7 @@ def _run_parallel(
                 max_workers=workers,
                 mp_context=context,
                 initializer=_init_worker,
-                initargs=(_worker_render_cache_bytes(workers),),
+                initargs=(_worker_render_cache_bytes(workers), 1),
             ) as pool:
                 pending = {
                     pool.submit(_execute_job, job, event_queue): job for job in jobs

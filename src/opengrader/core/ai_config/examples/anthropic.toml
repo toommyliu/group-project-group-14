@@ -1,0 +1,29 @@
+# Example provider manifest: Anthropic's hosted API.
+#
+# Not loaded automatically — see the note at the top of openai.toml, or the
+# comment above example_names() in manifests.py, for why examples/ is not
+# providers/. Copy this file into your config directory as
+# providers/anthropic.toml, or run:
+#
+#   opengrader-providers add --example anthropic
+
+name         = "anthropic"
+label        = "Anthropic"
+summary      = "Claude models over Anthropic's hosted API."
+dialect      = "anthropic-messages"
+host         = "https://api.anthropic.com/v1"   # the API base; the dialect appends /messages
+vision_model = "claude-haiku-4-5-20251001"
+text_model   = "claude-haiku-4-5-20251001"
+api_key_env  = "ANTHROPIC_API_KEY"
+setup_hint   = "Create a key at https://console.anthropic.com/settings/keys, then set ANTHROPIC_API_KEY."
+
+# Anthropic lists the models a key can use (GET /v1/models), so the
+# pre-flight checks the model is actually there, not just that a key resolves.
+# The list carries dated ids, which is why the models above are not aliases.
+supports_model_listing = true
+
+# Approximate list pricing, per million tokens, as of this file being
+# written — check https://www.anthropic.com/pricing before trusting it.
+[pricing]
+input_per_mtok  = 1.0
+output_per_mtok = 5.0
