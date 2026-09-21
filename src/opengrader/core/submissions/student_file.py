@@ -509,13 +509,6 @@ def _bonus_rubric_label(child_label: str) -> str:
     return f"{_BONUS_RUBRIC_PREFIX}{child_label.strip()}"
 
 
-def _strip_partial_rubric_prefix(label: str) -> str:
-    stripped = label.strip()
-    if stripped.startswith(_PARTIAL_RUBRIC_PREFIX):
-        return stripped[len(_PARTIAL_RUBRIC_PREFIX) :].strip()
-    return stripped
-
-
 def _parse_rubric_labels(
     value: str,
     children: tuple[str, ...] = (),
@@ -1014,22 +1007,6 @@ def blank_submission_file_references_markdown(content: str) -> str:
             lines[index] = f"{key}: {_yaml_double_quote('')}"
     updated = "\n".join(lines)
     return updated + "\n" if had_trailing_newline else updated
-
-
-def set_student_section_file(
-    path: str | Path,
-    *,
-    section: str,
-    expected_mtime_ns: int | None = None,
-) -> int:
-    submission_path = Path(path)
-    check_unmodified(submission_path, expected_mtime_ns)
-    updated = set_student_section_markdown(
-        submission_path.read_text(),
-        section=section,
-    )
-    submission_path.write_text(updated)
-    return submission_path.stat().st_mtime_ns
 
 
 def _normalize_assignment_version(raw: str | None) -> str | None:
@@ -1925,21 +1902,6 @@ def build_student_submission_document(
                         ]
 
         question_jobs.extend(question_images)
-
-    name_image_path = None
-    id_image_path = None
-    for field_res in extraction_result.fields:
-        if field_res.crop_path:
-            rel_path = ""
-            try:
-                rel_path = str(Path(field_res.crop_path).relative_to(submission_dir))
-            except ValueError:
-                rel_path = field_res.crop_path
-            
-            if field_res.field_id == "student_name":
-                name_image_path = rel_path
-            elif field_res.field_id == "student_id":
-                id_image_path = rel_path
 
     total_question_jobs = len(question_jobs)
     for index, (question_id, image_path, question_type, source_segments) in enumerate(

@@ -1,4 +1,3 @@
-from enum import Enum
 from typing import TypeAlias
 
 PAGE_EDGE_MARGIN = 24

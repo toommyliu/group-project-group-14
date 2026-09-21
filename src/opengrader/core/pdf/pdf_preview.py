@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from PIL import Image as PILImage
 
 if TYPE_CHECKING:
-    import fitz
+    pass
 
 
 def pdf_page_to_image(

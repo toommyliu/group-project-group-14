@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
-from opengrader.core.qa_file.scoring import EPSILON
 from opengrader.core.question_types import QuestionType
 from opengrader.core.submissions.answer_groups import normalize_answer_key
 from opengrader.core.submissions.student_file import StudentSubmissionDocument

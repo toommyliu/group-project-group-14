@@ -118,5 +118,3 @@ docker-data/
 .envs
 .tui_cache/
 .opengrader
-# Phase 0 spike run artifacts (see spikes/phase0-vision-parity/README.md)
-spikes/**/spike-results*.json

@@ -173,9 +173,6 @@ class TabbedListPane(TabbedPane):
             self._restore_active_row_index(index)
             self.refresh_index_subtitle()
 
-    def primary_list(self) -> IndexedListView:
-        return self._list_tabs[0]
-
     def active_list(self) -> IndexedListView | None:
         widget = self._active_widget()
         if isinstance(widget, IndexedListView):

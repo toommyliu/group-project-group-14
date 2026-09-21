@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 _TITLE_RE = re.compile(r"^\s*Quiz\s+title\s*:\s*(.*)$", re.IGNORECASE)
 # Outcome is an Opengrader extension to text2qti.
@@ -190,10 +189,6 @@ def parse_text2qti(text: str) -> ParsedAssignment:
 
     description = " ".join(description_lines).strip()
     return ParsedAssignment(title=title, description=description, questions=questions)
-
-
-def parse_text2qti_file(path: Path) -> ParsedAssignment:
-    return parse_text2qti(Path(path).read_text())
 
 
 def _format_points(value: float | None) -> str:

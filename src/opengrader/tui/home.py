@@ -37,7 +37,7 @@ from typing import Literal
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Footer, Header, Input, Label, ListItem, ListView, Static
 
 from opengrader.core.open_target import OpenTarget, detect_target

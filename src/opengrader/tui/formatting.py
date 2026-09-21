@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from rich.text import Text
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
     from opengrader.core.environment import EnvironmentCheck, EnvironmentReport
     from opengrader.core.release import (
         GradeChange,
-        GradeRelease,
         ReadinessIssue,
         ReadinessReport,
         ReleaseComparison,
@@ -886,20 +884,6 @@ def format_readiness_issue(issue: "ReadinessIssue") -> Text:
         remaining = issue.example_total - len(issue.examples)
         tail = f" and {remaining} more" if remaining > 0 else ""
         text.append(f"\n   e.g. {shown}{tail}", style="dim")
-    return text
-
-
-def format_release_row(release: "GradeRelease") -> Text:
-    text = Text(no_wrap=True, overflow="ellipsis")
-    text.append(release.release_id, style="bold")
-    text.append("  ")
-    stamp = release.created_at
-    text.append(
-        stamp[:16].replace("T", " ") if len(stamp) >= 16 else stamp, style="dim"
-    )
-    text.append(f"  {release.student_count} student(s)")
-    if release.label:
-        text.append(f"  {release.label}", style="italic")
     return text
 
 

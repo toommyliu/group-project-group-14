@@ -89,11 +89,6 @@ class RegionMap:
     version: int = REGION_MAP_VERSION
     created_at: str = ""
 
-    def question_at(self, index: int) -> MappedQuestion | None:
-        if 0 <= index < len(self.questions):
-            return self.questions[index]
-        return None
-
     def boxes_on_page(self, page: int) -> tuple[tuple[str, RegionBox], ...]:
         found: list[tuple[str, RegionBox]] = []
         for label, box in (

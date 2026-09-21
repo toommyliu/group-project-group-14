@@ -17,7 +17,6 @@ from opengrader.tui.formatting import (
     format_readiness_summary,
     format_release_change,
     format_release_comparison_summary,
-    format_release_row,
     format_release_total_change,
 )
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from statistics import median
 from typing import Literal
 
 import numpy as np
@@ -139,16 +138,6 @@ class _OcrWord:
     @property
     def bottom(self) -> int:
         return self.top + self.height
-
-
-@dataclass(frozen=True)
-class _QuestionMarker:
-    page_number: int
-    question_number: int
-    x_px: int
-    y_px: int
-    conf: float
-    has_points_hint: bool
 
 
 def _normalize_name_text(raw: str) -> str:

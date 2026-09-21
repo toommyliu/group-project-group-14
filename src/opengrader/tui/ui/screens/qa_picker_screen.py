@@ -415,9 +415,6 @@ class QAPickerScreen(Vertical):
             return
         self.focus_questions()
 
-    def filter_mode_active(self) -> bool:
-        return self._filter_target_id is not None
-
     def move_cursor(self, direction: int) -> None:
         self._set_active_list("qa-list")
         qa_list = self.query_one("#qa-list", ListView)

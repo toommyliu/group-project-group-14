@@ -19,6 +19,18 @@ LOG="${TMPDIR:-/tmp}/opengrader-bootstrap.log"
 SYNC_SOURCE=""
 if [[ -f "$SCRIPT_DIR/source-path" ]] && command -v rsync >/dev/null 2>&1; then
   candidate="$(cat "$SCRIPT_DIR/source-path")"
+  # An external drive can come back under another name ("Samsung_T5 1"):
+  # look for the same checkout on every mounted volume and remember it.
+  if [[ ! -f "$candidate/pyproject.toml" && "$candidate" == /Volumes/*/* ]]; then
+    rest="${candidate#/Volumes/*/}"
+    for volume in /Volumes/*; do
+      if grep -qs '^name = "opengrader"$' "$volume/$rest/pyproject.toml"; then
+        candidate="$volume/$rest"
+        printf '%s\n' "$candidate" >"$SCRIPT_DIR/source-path"
+        break
+      fi
+    done
+  fi
   if [[ -f "$candidate/pyproject.toml" ]]; then
     SYNC_SOURCE="$candidate"
   fi

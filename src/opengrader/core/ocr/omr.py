@@ -12,7 +12,6 @@ from opengrader.core.bubble_sheet import (
     Bubble,
     BubbleReading,
     BubbleSheetLayout,
-    Fiducial,
     MarkConfig,
     decide_question_mark,
 )

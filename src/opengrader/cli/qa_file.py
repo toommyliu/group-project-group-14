@@ -13,7 +13,6 @@ from opengrader.core.pdf.templates import (
 )
 from opengrader.core.qa_file import (
     load_qa_markdown,
-    render_qa_markdown,
     qa_to_template_questions,
 )
 from opengrader.core.roster import load_roster_students

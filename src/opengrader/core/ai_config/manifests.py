@@ -47,7 +47,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import DEFAULT_PROVIDER, ProviderPricing, ProviderSpec, host_kind, manifests_dir
+from . import DEFAULT_PROVIDER, ProviderPricing, ProviderSpec, manifests_dir
 
 __all__ = [
     "ManifestError",

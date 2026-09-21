@@ -178,10 +178,6 @@ class TabbedPane(Vertical):
     def size_units(self) -> int:
         return self._size_units
 
-    def set_size_units(self, units: int) -> None:
-        self._size_units = max(1, units)
-        self.styles.height = f"{self._size_units}fr"
-
     def _active_tab(self) -> TabbedPaneTab | None:
         if not self._tabs:
             return None
@@ -345,9 +341,6 @@ class TabbedPane(Vertical):
         if active:
             return f"[$accent bold]{clickable}[/]"
         return f"[$text-muted]{clickable}[/]"
-
-    def sync_focus_class(self) -> None:
-        self._sync_focus_class()
 
     def _sync_focus_class(self) -> None:
         self.set_class(self.has_focus or self.has_focus_within, "-pane-focused")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Sequence
 
 from opengrader.core.history.journal import GradeJournalEntry
 from opengrader.core.history.restore import student_key
@@ -482,5 +482,3 @@ def format_percent(value: float) -> str:
     return f"{value * 100:.0f}%"
 
 
-def source_breakdown(report: TranscriptionEvalReport) -> Mapping[str, AccuracyStats]:
-    return {stats.label: stats for stats in report.by_source}

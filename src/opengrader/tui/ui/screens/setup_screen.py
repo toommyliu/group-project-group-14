@@ -5,7 +5,6 @@ import os
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from dataclasses import replace
-from typing import Literal
 
 from textual import work
 from textual.app import ComposeResult
@@ -15,7 +14,6 @@ from textual.widgets import (
     Button,
     Checkbox,
     Input,
-    Label,
     ProgressBar,
     RadioButton,
     RadioSet,
@@ -49,7 +47,6 @@ from opengrader.cli.submission_extractor import run_cli as run_extractor_cli
 from opengrader.cli.submission_splitter import run_cli as run_splitter_cli
 from opengrader.cli.answer_key import run_cli as run_answer_key_cli
 from opengrader.cli.automated_grading import (
-    DEFAULT_LLM_MIN_CONFIDENCE as _DEFAULT_LLM_MIN_CONFIDENCE,
     GradingProgress,
     run_cli as run_grading_cli,
 )

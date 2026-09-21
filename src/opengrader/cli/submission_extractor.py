@@ -6,7 +6,6 @@ import hashlib
 import contextlib
 import shutil
 import sys
-import os
 import tempfile
 import subprocess
 import time
@@ -26,7 +25,6 @@ from opengrader.core.ocr import OcrConfig
 from opengrader.core.ocr.math_ocr import (
     MATH_BACKEND_NAMES,
     MathOcrError,
-    describe_backend,
     resolve_math_transcriber,
 )
 from rich.console import Console

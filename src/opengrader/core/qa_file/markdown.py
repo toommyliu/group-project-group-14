@@ -23,7 +23,7 @@ from opengrader.core.question_types import (
     normalize_boolean,
 )
 
-from .numeric import format_numeric_spec, parse_numeric_answers
+from .numeric import parse_numeric_answers
 from .scoring import RubricOptionKind, RubricSelectionMode, rubric_scoring_mode
 
 if TYPE_CHECKING:  # pragma: no cover

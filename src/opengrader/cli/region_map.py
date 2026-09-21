@@ -19,7 +19,6 @@ from opengrader.core.region_map import (
     load_region_map,
     propose_region_map,
     region_map_errors,
-    region_map_to_json,
     save_region_map,
     seed_region_map_from_qa,
     validate_region_map,

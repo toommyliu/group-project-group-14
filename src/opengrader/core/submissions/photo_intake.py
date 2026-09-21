@@ -13,7 +13,7 @@ from opengrader.core.submissions.scan_check import DEFAULT_DPI_FLOOR
 from opengrader.core.submissions.splitter import _sanitize_filename
 
 if TYPE_CHECKING:  # pragma: no cover
-    import cv2
+    pass
 
 
 PAPER_SIZES_IN: dict[str, tuple[float, float]] = {

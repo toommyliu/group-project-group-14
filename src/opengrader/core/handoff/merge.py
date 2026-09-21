@@ -105,10 +105,6 @@ class MergePlan:
     def student_count(self) -> int:
         return len({change.student_key for change in self.changes})
 
-    def conflict_by_id(self) -> dict[str, MergeConflict]:
-        return {conflict.conflict_id: conflict for conflict in self.conflicts}
-
-
 def baseline_from_journal(
     entries: Iterable[GradeJournalEntry],
 ) -> dict[tuple[str, str], CellState]:

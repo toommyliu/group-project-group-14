@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
 import os
 import re
-import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from difflib import SequenceMatcher
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -25,7 +22,6 @@ from opengrader.core.pdf_utils import (
     crop_norm,
     render_page_to_image,
     safe_image_to_data,
-    norm_bbox,
 )
 from .student_file import (
     IdentityCandidate,
@@ -48,7 +44,6 @@ from .transcription import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.bubble_sheet import BubbleSheetLayout
-    from opengrader.core.ocr.extractor import process_submission_pdf
     from opengrader.core.ocr import OcrConfig
     from opengrader.core.ocr.vision_reader import VisionReader
 from opengrader.core.ocr.math_ocr import (
@@ -911,16 +906,6 @@ def _extract_questions_from_text(lines: list[_TextLine]) -> list[StudentSubmissi
     return questions
 
 
-def _ocr_image(image_path: Path, *, psm: int = 6) -> str:
-    import pytesseract
-
-    try:
-        with Image.open(image_path) as img:
-            return pytesseract.image_to_string(img, config=f"--psm {psm}").strip()
-    except Exception:
-        return ""
-
-
 def _ocr_image_with_confidence(
     image_path: Path, *, psm: int = 6
 ) -> tuple[str, float | None]:
@@ -1010,26 +995,6 @@ def _ocr_data_with_confidence(
         sum(confidences) / len(confidences) if confidences else None,
     )
 
-
-def _ocr_image_digits(image_path: Path) -> str:
-    import pytesseract
-
-    digit_only = "tessedit_char_whitelist=0123456789"
-    best = ""
-    for config_str in (
-        f"--psm 11 -c {digit_only}",
-        f"--psm 7 -c {digit_only}",
-        f"--psm 6 -c {digit_only}",
-    ):
-        try:
-            with Image.open(image_path) as img:
-                text = pytesseract.image_to_string(img, config=config_str)
-        except Exception:
-            continue
-        digits = re.sub(r"\D", "", text)
-        if len(digits) > len(best):
-            best = digits
-    return best
 
 def _template_response_field(
     label: _TextLine,
@@ -1522,12 +1487,6 @@ def _source_pdf_relpath(pdf_path: Path, submission_dir: Path) -> str:
 
 def _assignment_title_from_lines(lines: list[_TextLine]) -> str:
     return lines[0].text.strip() if lines else "Unknown Assignment"
-
-def _render_submission_markdown(
-    document: StudentSubmissionDocument,
-) -> str:
-    return render_student_submission_markdown(document)
-
 
 def _fill_responses_with_vlm(
     questions: list[StudentSubmissionQuestion],

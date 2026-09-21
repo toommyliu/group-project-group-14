@@ -111,10 +111,6 @@ class GraderAgreementReport:
     def has_overlap(self) -> bool:
         return bool(self.same_work_pairs or self.same_answer_pairs)
 
-    def pairs_for(self, basis: OverlapBasis) -> tuple[PairAgreement, ...]:
-        return self.same_work_pairs if basis == "same_work" else self.same_answer_pairs
-
-
 def _weighted(answers: Iterable[GradedAnswer]) -> list[tuple[GradedAnswer, float]]:
     kept: list[tuple[GradedAnswer, float]] = []
     for answer in answers:

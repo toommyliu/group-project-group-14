@@ -130,12 +130,6 @@ class BubbleSheetLayout:
     def fiducials_on_page(self, page: int) -> tuple[Fiducial, ...]:
         return tuple(mark for mark in self.fiducials if mark.page == page)
 
-    def row_for(self, question_id: str) -> QuestionRow | None:
-        for row in self.rows:
-            if row.question_id == question_id:
-                return row
-        return None
-
     @property
     def question_ids(self) -> tuple[str, ...]:
         return tuple(row.question_id for row in self.rows)

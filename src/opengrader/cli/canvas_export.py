@@ -8,7 +8,7 @@ import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
-from opengrader.core.curve import Curve, apply_curve, read_curve
+from opengrader.core.curve import apply_curve, read_curve
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionQuestion,

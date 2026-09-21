@@ -287,20 +287,6 @@ def find_ink_fragments(mask: np.ndarray, *, dpi: int = 300) -> tuple[InkFragment
     return tuple(_reading_order(fragments))
 
 
-def crop_ink_fragment(
-    ink: StudentInk,
-    fragment: InkFragment,
-    *,
-    padding: int = 12,
-) -> Image.Image:
-    x, y, width, height = fragment.bbox_px
-    x0 = max(0, x - padding)
-    y0 = max(0, y - padding)
-    x1 = min(ink.image.width, x + width + padding)
-    y1 = min(ink.image.height, y + height + padding)
-    return ink.image.crop((x0, y0, x1, y1))
-
-
 def crop_student_ink(
     ink: StudentInk,
     box: tuple[int, int, int, int],

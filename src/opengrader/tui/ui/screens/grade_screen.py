@@ -422,18 +422,6 @@ class GradeScreen(Vertical):
             self.response_text = response_text
             super().__init__()
 
-    class RubricEditRequested(Message):
-        pass
-
-    class NextStudentRequested(Message):
-        pass
-
-    class PreviousStudentRequested(Message):
-        pass
-
-    class FinalizeStudentRequested(Message):
-        pass
-
     class ReturnToHomeRequested(Message):
         pass
 

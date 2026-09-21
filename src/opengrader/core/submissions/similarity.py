@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 from enum import Enum
 from typing import Literal
 
-from opengrader.core.question_types import FREE_RESPONSE, QuestionType
+from opengrader.core.question_types import FREE_RESPONSE
 from opengrader.core.submissions.student_file import StudentSubmissionDocument
 
 SimilaritySeverity = Literal["high", "medium"]

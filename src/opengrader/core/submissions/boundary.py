@@ -125,24 +125,6 @@ def _analyze_pages(
     return features
 
 
-def detect_page_signals(
-    pdf_path: str | Path,
-    *,
-    vision_reader: VisionReader | None = None,
-    dpi: int = 150,
-    progress_callback: Callable[[str], None] | None = None,
-) -> list[bool]:
-    return [
-        is_first
-        for is_first, _qr_page in _analyze_pages(
-            pdf_path,
-            vision_reader=vision_reader,
-            dpi=dpi,
-            progress_callback=progress_callback,
-        )
-    ]
-
-
 def boundaries_from_qr_pages(
     qr_pages: Sequence[int | None],
 ) -> DetectedBoundaries | None:

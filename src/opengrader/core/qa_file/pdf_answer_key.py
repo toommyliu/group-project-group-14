@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import sys
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -37,7 +37,6 @@ def detect_question_positions(doc):
     max_q = 0
 
     for pg_idx in range(len(doc)):
-        page = doc[pg_idx]
         img, _, _ = render_page_to_image(doc, pg_idx, dpi=300)
         img_w, img_h = img.size
 
