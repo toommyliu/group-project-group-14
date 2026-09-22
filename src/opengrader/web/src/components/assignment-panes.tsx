@@ -1,7 +1,8 @@
 import { useWideAssignmentLayout } from '@/hooks/use-wide-assignment-layout';
 import { usePreference } from '@/hooks/use-preference';
-import { useGroupRef } from 'react-resizable-panels';
-import { useRef, type ReactNode } from 'react';
+import { useGroupRef, usePanelRef } from 'react-resizable-panels';
+import { useRef, useState, type ReactNode } from 'react';
+import { Button } from './ui/button';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -9,22 +10,44 @@ import {
 } from './ui/resizable';
 
 export function AssignmentPanes({
-  editor,
+  renderEditor,
   preview,
 }: {
-  editor: ReactNode;
+  renderEditor: (previewToggle: ReactNode) => ReactNode;
   preview: ReactNode;
 }) {
   const wide = useWideAssignmentLayout();
   const [width, setWidth] = usePreference('editorWidth');
   const groupRef = useGroupRef();
+  const previewRef = usePanelRef();
   const pointerResize = useRef(false);
+  const [collapsed, setCollapsed] = useState(true);
+  const togglePreview = () => {
+    if (wide) {
+      if (collapsed) previewRef.current?.expand();
+      else previewRef.current?.collapse();
+    }
+    setCollapsed(!collapsed);
+  };
+  const toggle = (
+    <Button
+      type="button"
+      variant="outline"
+      aria-expanded={!collapsed}
+      aria-controls="assignment-pdf-preview"
+      onClick={togglePreview}
+    >
+      {collapsed ? 'Show PDF' : 'Hide PDF'}
+    </Button>
+  );
 
   if (!wide)
     return (
       <div className="grid gap-8">
-        {editor}
-        {preview}
+        {renderEditor(toggle)}
+        <div id="assignment-pdf-preview" hidden={collapsed}>
+          {preview}
+        </div>
       </div>
     );
 
@@ -33,7 +56,10 @@ export function AssignmentPanes({
     <ResizablePanelGroup
       groupRef={groupRef}
       orientation="horizontal"
-      defaultLayout={{ editor: width, preview: 100 - width }}
+      defaultLayout={{
+        editor: collapsed ? 100 : width,
+        preview: collapsed ? 0 : 100 - width,
+      }}
       className="items-stretch overflow-visible!"
       onLayoutChange={(next) => {
         if (
@@ -52,7 +78,7 @@ export function AssignmentPanes({
           ? { editor: 50, preview: 50 }
           : { editor: next.editor, preview: next.preview };
         if (snap) groupRef.current?.setLayout(value);
-        setWidth(value.editor);
+        if (value.preview > 0) setWidth(value.editor);
       }}
     >
       <ResizablePanel
@@ -60,11 +86,12 @@ export function AssignmentPanes({
         minSize="25%"
         className="min-w-0 overflow-visible! pe-4"
       >
-        {editor}
+        {renderEditor(toggle)}
       </ResizablePanel>
       <ResizableHandle
-        withHandle
+        withHandle={!collapsed}
         aria-label="Resize QA file and preview"
+        className={collapsed ? 'pointer-events-none invisible' : undefined}
         onPointerDownCapture={() => {
           pointerResize.current = true;
         }}
@@ -72,8 +99,17 @@ export function AssignmentPanes({
           pointerResize.current = false;
         }}
       />
-      <ResizablePanel id="preview" minSize="25%" className="min-w-0 ps-4">
-        {preview}
+      <ResizablePanel
+        id="preview"
+        panelRef={previewRef}
+        minSize="25%"
+        collapsible
+        onResize={(size) => setCollapsed(size.asPercentage === 0)}
+        className="min-w-0 ps-4"
+      >
+        <div id="assignment-pdf-preview" hidden={collapsed}>
+          {preview}
+        </div>
       </ResizablePanel>
     </ResizablePanelGroup>
   );
