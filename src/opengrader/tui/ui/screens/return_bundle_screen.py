@@ -102,11 +102,15 @@ class ReturnBundleScreen(ModalScreen[None]):
         submissions_path: str = "",
         output_path: str = "",
         default_name: str = "",
+        workspace_root: str = "",
+        workspace_assignment: str = "",
     ) -> None:
         super().__init__()
         self._submissions_path = submissions_path
         self._initial_output = output_path
         self._default_name = default_name
+        self._workspace_root = workspace_root
+        self._workspace_assignment = workspace_assignment
 
     @staticmethod
     def _field_label(text: str, detail: str = "") -> Static:
@@ -189,7 +193,7 @@ class ReturnBundleScreen(ModalScreen[None]):
     @on(Button.Pressed, "#return-bundle-run")
     def _on_run_pressed(self, event: Button.Pressed) -> None:
         event.stop()
-        if not self._submissions_path:
+        if not self._submissions_path and not self._workspace_root:
             self.app.notify("No submissions loaded to export.", severity="error")
             return
 
@@ -197,7 +201,15 @@ class ReturnBundleScreen(ModalScreen[None]):
         name = self.query_one("#return-bundle-name", Input).value.strip()
         content = self.query_one("#return-bundle-content", Select).value
 
-        argv = ["--submissions", self._submissions_path, "--content", str(content)]
+        argv: list[str]
+        if self._workspace_root:
+            argv = [
+                "--workspace", self._workspace_root,
+                "--assignment", self._workspace_assignment,
+            ]
+        else:
+            argv = ["--submissions", self._submissions_path]
+        argv += ["--content", str(content)]
         if output:
             argv += ["--output", output]
         if name:

@@ -51,7 +51,7 @@ def publish_pipeline(
             "No extracted submissions were found. Run extraction before publishing."
         )
     assignment = workspace.create_assignment(
-        output.qa_markdown, source_key=f"pipeline:{directory}"
+        output.qa_markdown, assignment_id=output.assignment_id
     )
     with workspace.connect() as db:
         existing = {

@@ -10,6 +10,7 @@ from opengrader.core.curve import read_curve
 from opengrader.core.qa_file import (
     load_qa_markdown,
     outcomes_by_question,
+    parse_qa_markdown,
     possible_points_by_question,
 )
 from opengrader.core.export.gradebook import (
@@ -39,10 +40,11 @@ def setup_args() -> ArgumentParser:
     )
     parser.add_argument(
         "--submissions",
-        required=True,
         metavar="PATH",
-        help="Path to a .submission.md file or directory containing submission files.",
+        help="Read extraction files instead of the current workspace assignment.",
     )
+    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
+    parser.add_argument("--assignment", help="Assignment ID within the workspace.")
     parser.add_argument(
         "--output",
         metavar="PATH",
@@ -63,32 +65,55 @@ def setup_args() -> ArgumentParser:
 def run_cli(argv: list[str] | None = None) -> None:
     parser = setup_args()
     args = parser.parse_args(argv)
-
-    submissions_path = Path(args.submissions)
-    try:
-        paths = discover_submission_paths(submissions_path)
-    except FileNotFoundError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    solutions = Path(args.solutions) if args.solutions else None
+    if solutions is not None and not solutions.is_file():
+        print(f"error: solutions file not found: {solutions}", file=sys.stderr)
         sys.exit(1)
 
-    if not paths:
-        print(
-            f"error: no *.submission.md files found in {submissions_path}",
-            file=sys.stderr,
+    if args.submissions:
+        submissions_path = Path(args.submissions)
+        try:
+            paths = discover_submission_paths(submissions_path)
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        if not paths:
+            print(
+                f"error: no *.submission.md files found in {submissions_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        docs = [load_student_submission_markdown(path) for path in paths]
+        curve = read_curve(submissions_path)
+        qa_doc = load_qa_markdown(solutions) if solutions is not None else None
+    else:
+        from opengrader.core.workspace.context import (
+            current_assignment,
+            submissions_path,
         )
-        sys.exit(1)
 
-    docs = [load_student_submission_markdown(path) for path in paths]
-    curve = read_curve(submissions_path)
+        try:
+            workspace, assignment_id = current_assignment(
+                workspace_root=args.workspace, assignment_id=args.assignment
+            )
+            docs = [
+                workspace.document(assignment_id, item.id)
+                for item in workspace.submissions(assignment_id)
+            ]
+            if not docs:
+                raise ValueError("This assignment has no submissions to export.")
+            curve = read_curve(submissions_path(workspace, assignment_id))
+            qa_doc = (
+                load_qa_markdown(solutions)
+                if solutions is not None
+                else parse_qa_markdown(workspace.assignment_source(assignment_id))
+            )
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
 
     outcomes: dict[str, tuple[str, ...]] | None = None
     outcome_points: dict[str, float] | None = None
-    if args.solutions:
-        qa_path = Path(args.solutions)
-        if not qa_path.exists():
-            print(f"error: solutions file not found: {qa_path}", file=sys.stderr)
-            sys.exit(1)
-        qa_doc = load_qa_markdown(qa_path)
+    if qa_doc is not None:
         outcomes = outcomes_by_question(qa_doc)
         outcome_points = possible_points_by_question(qa_doc)
 

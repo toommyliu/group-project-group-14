@@ -60,6 +60,64 @@ def test_grade_check_reports_ready(folder: Path, capsys):
     assert "1/1 answers graded" in output
 
 
+def test_grade_check_inside_workspace_reads_saved_grades(
+    folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from opengrader.core.submissions import load_student_submission_markdown
+    from opengrader.core.workspace.intake import publish_submission
+    from opengrader.core.workspace.store import Workspace
+
+    workspace = Workspace.create(tmp_path / "course")
+    assignment = workspace.create_assignment(
+        "- (5 points) What is a loop?\n  - **Answer**\n    - A repeat\n"
+    )
+    source = folder / "sub-0001.submission.md"
+    publish_submission(
+        workspace,
+        assignment.id,
+        load_student_submission_markdown(source),
+        asset_root=folder,
+        source_key="one",
+    )
+    _ungrade(folder)
+    monkeypatch.chdir(workspace.root)
+
+    context = grade_check([])
+
+    assert context.readiness.ready
+    assert "1/1 answers graded" in capsys.readouterr().out
+
+
+def test_grade_release_inside_workspace_records_saved_grades(
+    folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from opengrader.core.submissions import load_student_submission_markdown
+    from opengrader.core.workspace.context import submissions_path
+    from opengrader.core.workspace.intake import publish_submission
+    from opengrader.core.workspace.store import Workspace
+
+    workspace = Workspace.create(tmp_path / "course")
+    assignment = workspace.create_assignment(
+        "- (5 points) What is a loop?\n  - **Answer**\n    - A repeat\n"
+    )
+    source = folder / "sub-0001.submission.md"
+    publish_submission(
+        workspace,
+        assignment.id,
+        load_student_submission_markdown(source),
+        asset_root=folder,
+        source_key="one",
+    )
+    _ungrade(folder)
+    monkeypatch.chdir(workspace.root)
+
+    grade_release(["create", "--yes"])
+
+    releases = read_releases(submissions_path(workspace, assignment.id))
+    assert len(releases) == 1
+    assert releases[0].students[0].total == 3
+
+
 def test_grade_check_fails_on_blocking_for_scripts(folder: Path):
     (folder / "sub-0002.submission.md").write_text(
         _submission("").replace("  - Rubric: Correct", "  - Rubric:")

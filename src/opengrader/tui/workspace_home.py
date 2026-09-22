@@ -1,6 +1,7 @@
 """Choose an assignment from the workspace service."""
 
 import shlex
+from pathlib import Path
 
 from pydantic import TypeAdapter
 from textual.app import App, ComposeResult
@@ -17,8 +18,8 @@ OPEN_TOOLS = "open_tools"
 GO_HOME = "go_home"
 
 
-def process_workspace_argv(root: str) -> list[str]:
-    return [root, "--workspace", root]
+def process_workspace_argv(folder: str, root: str) -> list[str]:
+    return [folder, "--workspace", root]
 
 
 class WorkspaceHome(App[str | None]):
@@ -106,14 +107,17 @@ class WorkspaceHome(App[str | None]):
     }
     """
 
-    def __init__(self, client: WorkspaceClient):
+    def __init__(self, client: WorkspaceClient, folder: Path | None = None):
         super().__init__()
         self.client = client
+        self.folder = folder or Path(client.connection.root)
         self.assignments: list[Assignment] = []
 
     def compose(self) -> ComposeResult:
         root = self.client.connection.root
-        command = shlex.join(["opengrader", "run", *process_workspace_argv(root)])
+        command = shlex.join(
+            ["opengrader", "run", *process_workspace_argv(str(self.folder), root)]
+        )
         yield Header()
         with Vertical(id="workspace-home"):
             yield Label("Workspace", id="workspace-name")

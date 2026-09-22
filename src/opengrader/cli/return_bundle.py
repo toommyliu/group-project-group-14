@@ -10,8 +10,18 @@ from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.export.bundle import (
     BUNDLE_PRESETS,
     BundleContent,
+    BundleSubmission,
     build_return_bundle,
 )
+from opengrader.core.curve import read_curve
+from opengrader.core.qa_file import parse_qa_markdown
+from opengrader.core.workspace.context import (
+    current_assignment,
+    inputs_for_assignment,
+    resolve_path,
+    submissions_path as workspace_submissions_path,
+)
+from opengrader.core.workspace.store import WorkspaceNotFound
 
 EPILOG = """
 examples:
@@ -38,10 +48,11 @@ def setup_args() -> ArgumentParser:
     )
     parser.add_argument(
         "--submissions",
-        required=True,
         metavar="PATH",
-        help="Path to a .submission.md file or directory of submission files.",
+        help="Read extraction files instead of the current workspace assignment.",
     )
+    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
+    parser.add_argument("--assignment", help="Assignment ID within the workspace.")
     parser.add_argument(
         "--output",
         metavar="DIR",
@@ -114,22 +125,46 @@ def run_cli(argv: list[str] | None = None) -> None:
     parser = setup_args()
     args = parser.parse_args(argv)
 
-    submissions_path = Path(args.submissions)
-    output_dir = Path(args.output) if args.output else submissions_path
-    if output_dir.is_file():
-        output_dir = output_dir.parent
-
     content = _resolve_content(args)
-
-    qa_document = None
-    if args.solutions:
-        qa_path = Path(args.solutions)
-        if not qa_path.exists():
-            print(f"error: solutions file not found: {qa_path}", file=sys.stderr)
-            sys.exit(1)
-        qa_document = load_qa_markdown(qa_path)
-
     try:
+        qa_document = None
+        if args.solutions:
+            qa_path = Path(args.solutions)
+            if not qa_path.is_file():
+                raise FileNotFoundError(f"solutions file not found: {qa_path}")
+            qa_document = load_qa_markdown(qa_path)
+
+        submissions = None
+        curve = None
+        if args.submissions:
+            submissions_path = Path(args.submissions)
+            output_dir = Path(args.output) if args.output else submissions_path
+        else:
+            workspace, assignment_id = current_assignment(
+                workspace_root=args.workspace, assignment_id=args.assignment
+            )
+            submissions = []
+            for item in workspace.submissions(assignment_id):
+                document = workspace.document(assignment_id, item.id)
+                try:
+                    source_pdf = workspace.asset(document.source_pdf)
+                except WorkspaceNotFound:
+                    source_pdf = None
+                submissions.append(BundleSubmission(document, source_pdf))
+            submissions_path = workspace_submissions_path(workspace, assignment_id)
+            saved = inputs_for_assignment(workspace, assignment_id)
+            default_output = (
+                resolve_path(workspace.root, saved.folder)
+                if saved is not None
+                else workspace.root
+            )
+            output_dir = Path(args.output) if args.output else default_output
+            curve = read_curve(submissions_path)
+            if qa_document is None:
+                qa_document = parse_qa_markdown(workspace.assignment_source(assignment_id))
+
+        if output_dir.is_file():
+            output_dir = output_dir.parent
         result = build_return_bundle(
             submissions_path,
             output_dir,
@@ -138,6 +173,8 @@ def run_cli(argv: list[str] | None = None) -> None:
             anonymous=args.anonymous,
             progress=lambda message: print(message),
             qa_document=qa_document,
+            curve=curve,
+            submissions=submissions,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

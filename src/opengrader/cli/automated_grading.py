@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.grading.answer_cache import AnswerGradeCache
 from opengrader.core.grading.llm_grader import (
     GRADE_SUGGESTION_SCHEMA,
@@ -78,7 +78,7 @@ def _submission_paths(input_path: Path) -> list[Path]:
 
 
 def setup_args() -> ArgumentParser:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description="Grade student markdown files using a solutions template.",
         epilog=EPILOG,
@@ -119,7 +119,7 @@ def setup_args() -> ArgumentParser:
     parser.add_argument(
         "--llm-timeout",
         type=float,
-        default=ai_config.DEFAULT_TIMEOUT_SECONDS,
+        default=app_config.DEFAULT_TIMEOUT_SECONDS,
         help="Per-request timeout in seconds (default: %(default)s).",
     )
     parser.add_argument(
@@ -217,7 +217,7 @@ def run_cli(
     args = parser.parse_args(argv)
 
     if args.llm:
-        resolved_ai = ai_config.resolve()
+        resolved_ai = app_config.resolve()
         problems = resolved_ai.problems()
         if problems:
             for problem in problems:
@@ -239,7 +239,7 @@ def run_cli(
     llm_generate: GenerateFn | None = None
     llm_model = ""
     if args.llm:
-        resolved = ai_config.with_overrides(
+        resolved = app_config.with_overrides(
             resolved_ai,
             host=args.llm_host,
             text_model=args.llm_model,
@@ -262,11 +262,11 @@ def run_cli(
                 stderr=subprocess.DEVNULL,
             )
         try:
-            ai_config.ensure_ready(resolved, purpose="text")
-        except ai_config.AIUnavailableError as exc:
+            app_config.ensure_ready(resolved, purpose="text")
+        except app_config.AIUnavailableError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
-        llm_generate = ai_config.text_generate(
+        llm_generate = app_config.text_generate(
             resolved, response_format=GRADE_SUGGESTION_SCHEMA
         )
         llm_model = resolved.text_model

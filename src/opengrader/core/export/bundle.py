@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 from opengrader.core.analytics.item_analysis import (
     build_item_analysis,
@@ -73,6 +73,12 @@ class BundleResult:
         return len(self.student_pdf_paths)
 
 
+@dataclass(frozen=True)
+class BundleSubmission:
+    document: StudentSubmissionDocument
+    source_pdf: Path | None
+
+
 def _slugify(text: str, *, fallback: str = "assignment") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
     return slug or fallback
@@ -117,7 +123,9 @@ def _student_pdf_stem(
     return _safe_filename(readable)
 
 
-def _resolve_source_pdf(submission_path: Path, source_pdf: str) -> Path:
+def _resolve_source_pdf(submission_path: Path, source_pdf: str) -> Path | None:
+    if not source_pdf.strip():
+        return None
     source = Path(source_pdf).expanduser()
     if not source.is_absolute():
         source = submission_path.parent / source
@@ -138,6 +146,7 @@ def build_return_bundle(
     anonymous: bool = False,
     progress: ProgressFn | None = None,
     qa_document: object | None = None,
+    submissions: Sequence[BundleSubmission] | None = None,
 ) -> BundleResult:
     """curve=None uses the assignment's saved curve."""
     emit = progress or _noop
@@ -147,12 +156,19 @@ def build_return_bundle(
     if content.is_empty:
         raise ValueError("no bundle content selected — choose at least one document")
 
-    paths = discover_submission_paths(submissions_path)
-    if not paths:
-        raise ValueError(f"no *.submission.md files found in {submissions_path}")
-
-    emit(f"Loading {len(paths)} submission(s)…")
-    documents = [load_student_submission_markdown(path) for path in paths]
+    if submissions is None:
+        paths = discover_submission_paths(submissions_path)
+        if not paths:
+            raise ValueError(f"no *.submission.md files found in {submissions_path}")
+        emit(f"Loading {len(paths)} submission(s)…")
+        loaded = [(path, load_student_submission_markdown(path)) for path in paths]
+        submissions = [
+            BundleSubmission(document, _resolve_source_pdf(path, document.source_pdf))
+            for path, document in loaded
+        ]
+    if not submissions:
+        raise ValueError("This assignment has no submissions to export.")
+    documents = [item.document for item in submissions]
     if curve is None:
         curve = read_curve(submissions_path)
 
@@ -175,12 +191,13 @@ def build_return_bundle(
         pdf_dir = bundle_dir / _STUDENT_PDF_DIR
         pdf_dir.mkdir(parents=True, exist_ok=True)
         used_stems: set[str] = set()
-        for path, document in zip(paths, documents, strict=True):
+        for item in submissions:
+            document = item.document
             stem = _unique_stem(_student_pdf_stem(document, anonymous=anonymous), used_stems)
-            source_pdf = _resolve_source_pdf(path, document.source_pdf)
-            if not source_pdf.exists():
+            source_pdf = item.source_pdf
+            if source_pdf is None or not source_pdf.exists():
                 warnings.append(
-                    f"{document.student_id or document.student_name or path.name}: "
+                    f"{document.student_id or document.student_name or 'unidentified'}: "
                     f"source PDF not found ({document.source_pdf}); no annotated PDF."
                 )
                 continue

@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Literal, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Sequence
+
+if TYPE_CHECKING:
+    from opengrader.core.workspace.store import Workspace
 
 from opengrader.core.claims import WorkClaim
 from opengrader.core.curve import Curve, apply_curve, describe_curve
@@ -855,15 +858,7 @@ def load_release_context(
     *,
     roster_path: str | Path | None = None,
 ) -> ReleaseContext:
-    from opengrader.core.analytics.rubric_drift import detect_rubric_drift
-    from opengrader.core.claims import read_claims
-    from opengrader.core.curve import read_curve
-    from opengrader.core.history import read_journal, resolve_history_dir
     from opengrader.core.export.gradebook import discover_submission_paths
-    from opengrader.core.roster import load_roster_students
-    from opengrader.core.submissions.consistency import build_consistency_flags
-    from opengrader.core.submissions.regrade import read_regrade_requests
-    from opengrader.core.submissions.review import build_review_flags
     from opengrader.core.submissions.student_file import (
         load_student_submission_markdown,
     )
@@ -876,6 +871,51 @@ def load_release_context(
             documents.append(load_student_submission_markdown(path))
         except (OSError, ValueError):
             unreadable.append(path.name)
+
+    return _release_context_from_documents(
+        base, documents, roster_path=roster_path, unreadable=tuple(unreadable)
+    )
+
+
+def load_workspace_release_context(
+    workspace: "Workspace", assignment_id: str, *, roster_path: str | Path | None = None
+) -> ReleaseContext:
+    from opengrader.core.workspace.context import (
+        inputs_for_assignment,
+        resolve_path,
+        submissions_path,
+    )
+
+    saved = inputs_for_assignment(workspace, assignment_id)
+    base = submissions_path(workspace, assignment_id)
+    if saved is not None:
+        folder = resolve_path(workspace.root, saved.folder)
+        if roster_path is None and saved.roster is not None:
+            roster_path = resolve_path(folder, saved.roster)
+    documents = [
+        workspace.document(assignment_id, item.id)
+        for item in workspace.submissions(assignment_id)
+    ]
+    return _release_context_from_documents(
+        base, documents, roster_path=roster_path, unreadable=()
+    )
+
+
+def _release_context_from_documents(
+    base: Path,
+    documents: Sequence[StudentSubmissionDocument],
+    *,
+    roster_path: str | Path | None,
+    unreadable: tuple[str, ...],
+) -> ReleaseContext:
+    from opengrader.core.analytics.rubric_drift import detect_rubric_drift
+    from opengrader.core.claims import read_claims
+    from opengrader.core.curve import read_curve
+    from opengrader.core.history import read_journal, resolve_history_dir
+    from opengrader.core.roster import load_roster_students
+    from opengrader.core.submissions.consistency import build_consistency_flags
+    from opengrader.core.submissions.regrade import read_regrade_requests
+    from opengrader.core.submissions.review import build_review_flags
 
     roster = None
     if roster_path is not None:
@@ -906,5 +946,5 @@ def load_release_context(
         curve=curve,
         readiness=readiness,
         previous_release=previous,
-        unreadable_files=tuple(unreadable),
+        unreadable_files=unreadable,
     )

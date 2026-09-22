@@ -9,8 +9,10 @@ from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 import shlex
+from uuid import uuid4
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
+from opengrader.core.workspace.models import AssignmentInputs
 from opengrader.core.pipeline import (
     PIPELINE_STAGES,
     LlmOptions,
@@ -44,15 +46,16 @@ class folder:
 
 resuming:
   Re-run the same command. Nothing is repeated that does not need to be, and the
-  summary says which stages were reused. --fresh ignores the ledger entirely.
+  summary says which stages were reused. If inputs change, use --fresh to process
+  them as a new assignment while preserving previous grades.
 
 what it builds under --out:
   split/                       per-student PDFs (skipped when --scan is a directory)
   submissions/                 the *.submission.md folder for file utilities
   .opengrader/run-ledger.jsonl the stage ledger that makes a re-run resumable
 
-With an answer key, completed results are published to the current workspace.
-Use --workspace to choose another workspace. Re-runs preserve saved grades.
+With an answer key, completed results are published to the assignment's workspace.
+Re-runs preserve saved grades.
 """
 
 _STATUS_LABEL = {
@@ -129,7 +132,7 @@ class _Narrator:
 
 
 def _build_parser() -> ArgumentParser:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description=(
             "Run the whole pre-grading pipeline — scan check, split, extract, "
@@ -170,8 +173,9 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--workspace",
         type=Path,
-        help="Workspace to receive processed submissions. Defaults to the current workspace.",
+        help="Workspace to receive processed submissions. Defaults to the folder's nearest workspace.",
     )
+    parser.add_argument("--assignment", help="Use this assignment ID in the workspace.")
     parser.add_argument(
         "--qa",
         default=None,
@@ -228,8 +232,8 @@ def _build_parser() -> ArgumentParser:
         default="",
         help=(
             "Ollama vision model for transcription. Left blank, each stage "
-            "resolves its own default from the AI Setup settings (settings > "
-            "environment > built-in default) — set it there once instead of "
+            "resolves its own default from the AI Setup settings (saved setting "
+            "> built-in default) — set it there once instead of "
             "passing it here on every run."
         ),
     )
@@ -290,7 +294,7 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--fresh",
         action="store_true",
-        help="Ignore the run ledger and redo every stage from scratch.",
+        help="Redo every stage; changed inputs create a new assignment and preserve prior grades.",
     )
     parser.add_argument(
         "--dry-run",
@@ -307,9 +311,9 @@ def _build_parser() -> ArgumentParser:
 
 
 def _build_request(
-    args, ai: "ai_config.ResolvedAI | None" = None
+    args, ai: "app_config.ResolvedAI | None" = None
 ) -> PipelineRequest:
-    resolved_ai = ai if ai is not None else ai_config.resolve()
+    resolved_ai = ai if ai is not None else app_config.resolve()
     return PipelineRequest(
         scan=Path(args.scan),
         output_dir=Path(args.out),
@@ -377,7 +381,11 @@ def _print_summary(report: PipelineReport) -> None:
         print("\nThe run stopped early; the stages above are what landed.")
         return
     if report.ready_to_grade:
-        if report.assignment_id is not None and report.workspace is not None:
+        if (
+            report.qa_file is not None
+            and report.assignment_id is not None
+            and report.workspace is not None
+        ):
             print(
                 "Open for grading: "
                 + shlex.join(
@@ -497,19 +505,20 @@ def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
         args.out = str(found.folder)
 
 
-def _publish_results(report: PipelineReport, root: Path | None) -> PipelineReport:
+def _publish_results(
+    report: PipelineReport, root: Path, assignment_id: str
+) -> PipelineReport:
     from opengrader.core.workspace.models import PipelineOutput, PipelinePublication
-    from opengrader.core.workspace.store import discover_workspace
     from opengrader.server.workspace.client import WorkspaceClient, ensure_service
 
     try:
         if report.qa_file is None:
             raise ValueError("An answer key is required to publish submissions.")
         output = PipelineOutput(
+            assignment_id=assignment_id,
             qa_markdown=report.qa_file.read_text(encoding="utf-8"),
             submissions_dir=str(report.submissions_dir.resolve()),
         )
-        root = (root or discover_workspace(Path.cwd()) or Path.cwd()).resolve()
         client = WorkspaceClient(ensure_service(root))
         result = PipelinePublication.model_validate_json(
             client.request("POST", "/api/pipeline-results", output, timeout=300)
@@ -534,9 +543,135 @@ def _publish_results(report: PipelineReport, root: Path | None) -> PipelineRepor
     )
 
 
+def _run_target(parser: ArgumentParser, args) -> Path:
+    from opengrader.core.workspace.context import (
+        assignment_for_directory,
+        inputs_for_assignment,
+        resolve_path,
+    )
+    from opengrader.core.workspace.store import Workspace, discover_workspace
+
+    if args.folder:
+        return Path(args.folder).expanduser().resolve()
+    if args.scan or args.out:
+        if not args.scan or not args.out:
+            parser.error("give a class folder, or both --scan and --out")
+        return Path(args.out).expanduser().resolve()
+    root = discover_workspace(Path.cwd())
+    if root is not None:
+        workspace = Workspace(root)
+        try:
+            assignment_id = assignment_for_directory(
+                workspace,
+                Path.cwd(),
+                assignment_id=args.assignment,
+                include_pending=True,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        if assignment_id is not None:
+            saved = inputs_for_assignment(workspace, assignment_id)
+            if saved is not None:
+                return resolve_path(root, saved.folder)
+    return Path.cwd().resolve()
+
+
+def _fill_saved_inputs(args, workspace_root: Path, target: Path) -> None:
+    from opengrader.core.workspace.context import resolve_path
+    from opengrader.core.workspace.store import DATABASE, Workspace
+
+    if not (workspace_root / DATABASE).is_file():
+        return
+    saved = next(
+        (
+            item
+            for item in Workspace(workspace_root).assignment_inputs()
+            if resolve_path(workspace_root, item.folder) == target
+        ),
+        None,
+    )
+    if saved is None:
+        return
+    for key in ("scan", "output", "qa", "roster", "blank_template"):
+        dest = "out" if key == "output" else key
+        value = getattr(args, dest)
+        stored = getattr(saved, key)
+        if not value and stored:
+            setattr(args, dest, str(resolve_path(target, stored)))
+    if args.pages_per_submission is None:
+        args.pages_per_submission = saved.pages_per_submission
+
+
+def _save_inputs(
+    args, root: Path, target: Path
+) -> tuple[AssignmentInputs, str | None]:
+    from opengrader.core.workspace.context import input_state, resolve_path, stored_path
+    from opengrader.core.workspace.store import DATABASE, Workspace
+
+    workspace = Workspace(root) if (root / DATABASE).is_file() else Workspace.create(root)
+    saved = next(
+        (
+            item for item in workspace.assignment_inputs()
+            if resolve_path(root, item.folder) == target
+        ),
+        None,
+    )
+    if saved is not None and args.assignment and args.assignment != saved.id:
+        raise ValueError("This folder belongs to another assignment.")
+    assignment_id = (
+        saved.id if saved is not None else args.assignment or workspace.assignment_id_for_folder(target)
+    )
+    inputs = AssignmentInputs(
+        id=assignment_id,
+        folder=stored_path(root, target),
+        scan=stored_path(target, Path(args.scan)),
+        output=stored_path(target, Path(args.out)),
+        submissions=stored_path(target, Path(args.out) / "submissions"),
+        qa=stored_path(target, Path(args.qa)) if args.qa else None,
+        roster=stored_path(target, Path(args.roster)) if args.roster else None,
+        blank_template=(
+            stored_path(target, Path(args.blank_template))
+            if args.blank_template else None
+        ),
+        pages_per_submission=args.pages_per_submission,
+        input_state=input_state({
+            "scan": Path(args.scan),
+            "qa": Path(args.qa) if args.qa else None,
+            "roster": Path(args.roster) if args.roster else None,
+            "blank_template": Path(args.blank_template) if args.blank_template else None,
+        }),
+    )
+    changed = saved is not None and inputs != saved
+    published = saved is not None and any(
+        assignment.id == saved.id for assignment in workspace.assignments()
+    )
+    if changed and published:
+        if not args.fresh:
+            raise ValueError(
+                "Assignment inputs changed. Pass --fresh to process them as a new assignment; existing grades stay in the previous assignment."
+            )
+        return inputs.model_copy(update={"id": str(uuid4())}), saved.id
+    workspace.save_assignment_inputs(inputs)
+    return inputs, None
+
+
 def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    from opengrader.core.workspace.store import discover_workspace
+
+    try:
+        target = _run_target(parser, args)
+        root = (
+            args.workspace.expanduser().resolve()
+            if args.workspace is not None
+            else discover_workspace(target) or target
+        )
+        _fill_saved_inputs(args, root, target)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if args.folder is None and not args.scan:
+        args.folder = str(target)
     _resolve_class_folder(
         parser, args, stream=sys.stderr if args.as_json else sys.stdout
     )
@@ -546,6 +681,11 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
         _print_plan(request)
         return None
 
+    try:
+        inputs, previous_id = _save_inputs(args, root, target)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
     narrator = _Narrator(stream=sys.stderr if args.as_json else sys.stdout)
     if args.as_json:
         with redirect_stdout(sys.stderr):
@@ -553,9 +693,14 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
     else:
         report = run_pipeline(request, progress=narrator.as_progress())
 
+    report = replace(report, workspace=root)
     if report.ok and report.ready_to_grade and request.qa_file is not None:
         narrator.status("Publishing results to the workspace.")
-        report = _publish_results(report, args.workspace)
+        report = _publish_results(report, root, inputs.id)
+    if report.ok and report.assignment_id == inputs.id and previous_id is not None:
+        from opengrader.core.workspace.store import Workspace
+
+        Workspace(root).replace_assignment_inputs(previous_id, inputs)
 
     if args.as_json:
         print(json.dumps(_report_to_dict(report), indent=2))

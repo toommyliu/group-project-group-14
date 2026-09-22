@@ -8,7 +8,7 @@ import pytest
 
 from opengrader.cli import automated_grading, run as run_module
 from opengrader.cli import submission_extractor, submission_splitter
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.pipeline import (
     STAGE_AUTO_GRADE,
     STAGE_EXTRACT,
@@ -62,9 +62,9 @@ def captured(monkeypatch, tmp_path):
 
     monkeypatch.setattr(run_module, "run_pipeline", fake_run)
 
-    def publish(report, root):
-        seen["publication"] = report, root
-        return replace(report, workspace=root or tmp_path, assignment_id="assignment")
+    def publish(report, root, assignment_id):
+        seen["publication"] = report, root, assignment_id
+        return replace(report, workspace=root or tmp_path, assignment_id=assignment_id)
 
     monkeypatch.setattr(run_module, "_publish_results", publish)
     return seen
@@ -125,8 +125,8 @@ def test_no_auto_grade_turns_the_stage_off(tmp_path, captured) -> None:
 
 
 def test_llm_absent_follows_the_two_settings_independently(tmp_path, captured) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, grade_written=False)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, grade_written=False)
     )
     run_module.run_cli(_argv(tmp_path))
     llm = captured["request"].llm
@@ -135,8 +135,8 @@ def test_llm_absent_follows_the_two_settings_independently(tmp_path, captured) -
 
 
 def test_llm_absent_follows_the_two_settings_the_other_way(tmp_path, captured) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=False, grade_written=True)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=False, grade_written=True)
     )
     run_module.run_cli(_argv(tmp_path))
     llm = captured["request"].llm
@@ -145,8 +145,8 @@ def test_llm_absent_follows_the_two_settings_the_other_way(tmp_path, captured) -
 
 
 def test_llm_flag_is_a_blunt_override_for_both(tmp_path, captured) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=False, grade_written=False)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=False, grade_written=False)
     )
     run_module.run_cli(_argv(tmp_path, "--llm"))
     llm = captured["request"].llm
@@ -157,8 +157,8 @@ def test_llm_flag_is_a_blunt_override_for_both(tmp_path, captured) -> None:
 def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
     tmp_path, captured
 ) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, grade_written=True)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, grade_written=True)
     )
     run_module.run_cli(_argv(tmp_path, "--no-llm"))
     llm = captured["request"].llm
@@ -167,29 +167,29 @@ def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
 
 
 def test_auto_grade_defaults_on_from_ai_setup(tmp_path, captured) -> None:
-    ai_config.save_settings(ai_config.AISettings(auto_grade=True))
+    app_config.save_settings(app_config.AISettings(auto_grade=True))
     run_module.run_cli(_argv(tmp_path))
     assert captured["request"].auto_grade is True
 
 
 def test_auto_grade_defaults_off_from_ai_setup(tmp_path, captured) -> None:
-    ai_config.save_settings(ai_config.AISettings(auto_grade=False))
+    app_config.save_settings(app_config.AISettings(auto_grade=False))
     run_module.run_cli(_argv(tmp_path))
     assert captured["request"].auto_grade is False
 
 
 def test_no_auto_grade_still_works_with_ai_setup_on(tmp_path, captured) -> None:
-    ai_config.save_settings(ai_config.AISettings(auto_grade=True))
+    app_config.save_settings(app_config.AISettings(auto_grade=True))
     run_module.run_cli(_argv(tmp_path, "--no-auto-grade"))
     assert captured["request"].auto_grade is False
 
 
 def test_auto_ollama_defaults_from_ai_setup(tmp_path, captured) -> None:
-    ai_config.save_settings(ai_config.AISettings(auto_start=False))
+    app_config.save_settings(app_config.AISettings(auto_start=False))
     run_module.run_cli(_argv(tmp_path))
     assert captured["request"].llm.auto_ollama is False
 
-    ai_config.save_settings(ai_config.AISettings(auto_start=True))
+    app_config.save_settings(app_config.AISettings(auto_start=True))
     run_module.run_cli(_argv(tmp_path))
     assert captured["request"].llm.auto_ollama is True
 
@@ -227,7 +227,7 @@ def test_a_finished_run_prints_how_to_open_it(tmp_path, captured, capsys) -> Non
     out = capsys.readouterr().out
     assert "2 submission(s) ready" in out
     assert "uv run opengrader tui --workspace" in out
-    assert "--assignment assignment" in out
+    assert f"--assignment {captured['publication'][2]}" in out
     assert captured["publication"][1] == workspace
 
 
@@ -550,6 +550,102 @@ def test_a_class_folder_fills_every_input_and_is_the_output(
     out = capsys.readouterr().out
     assert f"Class folder {folder}" in out
     assert "✓ answer key" in out
+
+
+def test_run_folder_uses_its_parent_workspace(tmp_path, captured) -> None:
+    from opengrader.core.workspace.store import Workspace
+
+    course = tmp_path / "course"
+    course.mkdir()
+    folder = _class_folder(course)
+    workspace = Workspace.create(course)
+
+    run_module.run_cli([str(folder)])
+
+    assert captured["publication"][1] == course
+    binding = workspace.assignment_inputs()[0]
+    assert binding.folder == "cs146-quiz1"
+    assert binding.scan == "scans.pdf"
+    assert binding.qa == "qa.md"
+    assert captured["publication"][2] == binding.id
+
+
+def test_run_folder_creates_its_own_workspace_when_none_exists(tmp_path, captured) -> None:
+    from opengrader.core.workspace.store import Workspace
+
+    folder = _class_folder(tmp_path)
+
+    run_module.run_cli([str(folder)])
+
+    assert captured["publication"][1] == folder
+    assert Workspace(folder).assignment_inputs()[0].folder == "."
+
+
+def test_bare_run_from_an_assignment_subfolder_reuses_saved_inputs(
+    tmp_path, monkeypatch, captured
+) -> None:
+    folder = _class_folder(tmp_path)
+    run_module.run_cli([str(folder)])
+    incoming = folder / "incoming"
+    incoming.mkdir()
+    monkeypatch.chdir(incoming)
+
+    run_module.run_cli([])
+
+    assert captured["request"].scan == folder / "scans.pdf"
+    assert captured["request"].qa_file == folder / "qa.md"
+    assert captured["publication"][1] == folder
+
+
+def test_changed_scan_requires_fresh_and_keeps_the_previous_assignment(
+    tmp_path, captured, capsys
+) -> None:
+    from opengrader.core.workspace.store import Workspace
+
+    folder = _class_folder(tmp_path)
+    run_module.run_cli([str(folder)])
+    workspace = Workspace(folder)
+    old_id = workspace.assignment_inputs()[0].id
+    workspace.create_assignment(_QA_TEXT, assignment_id=old_id)
+    (folder / "scans.pdf").write_bytes(b"%PDF-1.4\nchanged\n")
+
+    with pytest.raises(SystemExit) as raised:
+        run_module.run_cli([str(folder)])
+    assert raised.value.code == 2
+    assert "--fresh" in capsys.readouterr().err
+    assert workspace.assignment_inputs()[0].id == old_id
+
+    run_module.run_cli([str(folder), "--fresh"])
+
+    new_id = workspace.assignment_inputs()[0].id
+    assert new_id != old_id
+    assert captured["publication"][2] == new_id
+    assert workspace.assignments()[0].id == old_id
+
+
+def test_failed_fresh_publication_keeps_the_previous_assignment_selected(
+    tmp_path, captured, monkeypatch
+) -> None:
+    from opengrader.core.workspace.store import Workspace
+
+    folder = _class_folder(tmp_path)
+    run_module.run_cli([str(folder)])
+    workspace = Workspace(folder)
+    old_id = workspace.assignment_inputs()[0].id
+    workspace.create_assignment(_QA_TEXT, assignment_id=old_id)
+    (folder / "scans.pdf").write_bytes(b"%PDF-1.4\nchanged\n")
+
+    def failed_publish(report, root, assignment_id):
+        return replace(
+            report,
+            stages=(*report.stages, _outcome("publish", StageStatus.FAILED)),
+        )
+
+    monkeypatch.setattr(run_module, "_publish_results", failed_publish)
+    report = run_module.run_cli([str(folder), "--fresh"])
+
+    assert report is not None and not report.ok
+    assert workspace.assignment_inputs()[0].id == old_id
 
 
 def test_a_flag_overrides_what_the_folder_offered(tmp_path, captured, capsys) -> None:

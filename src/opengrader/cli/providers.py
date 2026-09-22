@@ -1,12 +1,3 @@
-"""Register, inspect and test the user's own AI provider manifests (§7.5).
-
-Ollama stays the offline default (L0, `About/AI_README.md` §7.7): a fresh
-install registers nothing here. Every subcommand that touches a *cloud*
-provider says so in the output, because §7.7's L3 asks that a cloud
-provider be stated wherever the AI is mentioned, and this command is one of
-those places.
-"""
-
 from __future__ import annotations
 
 import json
@@ -15,8 +6,8 @@ import time
 from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
-from opengrader.core import ai_config
-from opengrader.core.ai_config import manifests as ai_manifests
+from opengrader.core import app_config
+from opengrader.core.app_config import manifests as ai_manifests
 
 EPILOG = """
 examples:
@@ -41,10 +32,7 @@ def _error(message: str) -> None:
     print(f"Error: {message}", file=sys.stderr)
 
 
-# --- shared rendering helpers -----------------------------------------------
-
-
-def _provider_to_dict(spec: ai_config.ProviderSpec) -> dict:
+def _provider_to_dict(spec: app_config.ProviderSpec) -> dict:
     return {
         "name": spec.name,
         "label": spec.label,
@@ -55,7 +43,7 @@ def _provider_to_dict(spec: ai_config.ProviderSpec) -> dict:
         "text_model": spec.default_text_model,
         "requires_api_key": spec.requires_api_key,
         "api_key_env": spec.api_key_env,
-        "api_key_set": bool(ai_config.resolve_api_key(spec)) if spec.api_key_env else None,
+        "api_key_set": bool(app_config.resolve_api_key(spec)) if spec.api_key_env else None,
         "credential_command": list(spec.credential_command),
         "supports_model_listing": spec.supports_model_listing,
         "source": spec.source,
@@ -63,15 +51,15 @@ def _provider_to_dict(spec: ai_config.ProviderSpec) -> dict:
     }
 
 
-def _print_provider(spec: ai_config.ProviderSpec) -> None:
+def _print_provider(spec: app_config.ProviderSpec) -> None:
     print(f"{spec.label}  [{spec.name}]")
     for label, value in ai_manifests.describe_provider(spec):
         print(f"  {label + ':':<15}{value}")
 
 
 def _cmd_list(args: Namespace) -> None:
-    providers = ai_config.registered_providers()
-    problems = ai_config.manifest_problems()
+    providers = app_config.registered_providers()
+    problems = app_config.manifest_problems()
 
     if args.as_json:
         body = {
@@ -101,9 +89,6 @@ def _cmd_list(args: Namespace) -> None:
             print(f"  {name:<20} opengrader-providers add --example {name}")
 
 
-# --- add ---------------------------------------------------------------
-
-
 def _install(text: str, *, force: bool) -> tuple[Path, str]:
     try:
         dest, spec = ai_manifests.install_manifest(text, force=force)
@@ -117,16 +102,10 @@ def _install(text: str, *, force: bool) -> tuple[Path, str]:
 
 
 def _confirm_add(dest: Path, name: str) -> None:
-    """Reload the registry and say plainly whether the new provider is live.
-
-    A user who has just added a manifest should not have to restart to learn
-    whether it took (§7.9 Phase 4's exit criterion) — so this reads
-    `reload_manifests()`'s own problem list rather than assuming success.
-    """
-    problems = ai_config.reload_manifests()
-    live = {spec.name for spec in ai_config.registered_providers()}
+    problems = app_config.reload_manifests()
+    live = {spec.name for spec in app_config.registered_providers()}
     if name in live:
-        spec = ai_config.get_provider(name)
+        spec = app_config.get_provider(name)
         print(f"Wrote {dest}")
         print(f"'{name}' is now registered and available to every tool.")
         if spec.kind == "cloud":
@@ -146,9 +125,6 @@ def _confirm_add(dest: Path, name: str) -> None:
                 "exist yet."
             )
     else:
-        # It parsed fine when we validated it, but load_all() re-reads the
-        # directory and something about that pass disagreed — say so rather
-        # than a silent "succeeded".
         reason = next((p for p in problems if str(dest) in p), None)
         _error(
             f"wrote {dest}, but it did not load back in"
@@ -181,8 +157,6 @@ def _cmd_add(args: Namespace) -> None:
             _error(f"no such file: {source}")
             sys.exit(1)
         try:
-            # Validated against its own path first, so an error names the
-            # file the user pointed at rather than the one we would write.
             ai_manifests.load_file(source)
             text = source.read_text(encoding="utf-8")
         except (ai_manifests.ManifestError, OSError, UnicodeDecodeError) as exc:
@@ -191,7 +165,6 @@ def _cmd_add(args: Namespace) -> None:
         _confirm_add(*_install(text, force=args.force))
         return
 
-    # Flags mode.
     missing = [
         flag
         for flag, value in (
@@ -209,7 +182,7 @@ def _cmd_add(args: Namespace) -> None:
 
     pricing = None
     if args.input_per_mtok is not None or args.output_per_mtok is not None:
-        pricing = ai_config.ProviderPricing(
+        pricing = app_config.ProviderPricing(
             input_per_mtok=args.input_per_mtok or 0.0,
             output_per_mtok=args.output_per_mtok or 0.0,
         )
@@ -236,10 +209,7 @@ def _cmd_add(args: Namespace) -> None:
     _confirm_add(*_install(text, force=args.force))
 
 
-# --- validate ------------------------------------------------------------
-
-
-def _print_valid(path: Path, spec: ai_config.ProviderSpec) -> None:
+def _print_valid(path: Path, spec: app_config.ProviderSpec) -> None:
     print(f"OK    {path}")
     print(f"      name: {spec.name}  kind: {spec.kind} (derived from host {spec.default_host})")
 
@@ -263,7 +233,7 @@ def _cmd_validate(args: Namespace) -> None:
     target = args.target
 
     if not target:
-        directory = ai_config.manifests_dir()
+        directory = app_config.manifests_dir()
         try:
             files = sorted(
                 (p for p in directory.iterdir() if p.is_file() and p.suffix == ".toml"),
@@ -289,14 +259,14 @@ def _cmd_validate(args: Namespace) -> None:
             sys.exit(2)
         return
 
-    file_candidate = ai_config.manifests_dir() / f"{target}.toml"
+    file_candidate = app_config.manifests_dir() / f"{target}.toml"
     if file_candidate.is_file():
         if not _validate_one(file_candidate):
             sys.exit(2)
         return
 
     known = next(
-        (spec for spec in ai_config.registered_providers() if spec.name == target), None
+        (spec for spec in app_config.registered_providers() if spec.name == target), None
     )
     if known is not None and known.source == "builtin":
         _error(f"'{target}' is a built-in provider — there is no manifest file for it.")
@@ -309,12 +279,9 @@ def _cmd_validate(args: Namespace) -> None:
     sys.exit(1)
 
 
-# --- test ------------------------------------------------------------------
-
-
 def _cmd_test(args: Namespace) -> None:
     name = args.provider
-    known = {spec.name for spec in ai_config.registered_providers()}
+    known = {spec.name for spec in app_config.registered_providers()}
     if name not in known:
         _error(
             f"no provider named {name!r}. Known providers: "
@@ -322,7 +289,7 @@ def _cmd_test(args: Namespace) -> None:
         )
         sys.exit(2)
 
-    resolved = ai_config.for_provider(name)
+    resolved = app_config.for_provider(name)
     print(
         f"Testing {resolved.provider.label} ({resolved.kind}) at {resolved.host} ..."
     )
@@ -350,13 +317,13 @@ def _cmd_test(args: Namespace) -> None:
                 sys.exit(2)
 
     try:
-        ai_config.ensure_ready(resolved, purpose="text")
-    except ai_config.AIUnavailableError as exc:
+        app_config.ensure_ready(resolved, purpose="text")
+    except app_config.AIUnavailableError as exc:
         _error(str(exc))
         sys.exit(2)
 
     try:
-        generate = ai_config.text_generate(resolved)
+        generate = app_config.text_generate(resolved)
         start = time.perf_counter()
         reply = generate(_TEST_PROMPT)
         elapsed = time.perf_counter() - start
@@ -370,13 +337,10 @@ def _cmd_test(args: Namespace) -> None:
     print(f"{resolved.provider.label} is reachable and working.")
 
 
-# --- remove ------------------------------------------------------------
-
-
 def _cmd_remove(args: Namespace) -> None:
     name = args.provider
     spec = next(
-        (s for s in ai_config.registered_providers() if s.name == name), None
+        (s for s in app_config.registered_providers() if s.name == name), None
     )
     if spec is None:
         _error(
@@ -414,18 +378,15 @@ def _cmd_remove(args: Namespace) -> None:
         sys.exit(1)
 
     print(f"Removed {name!r} ({manifest_path}).")
-    ai_config.reload_manifests()
+    app_config.reload_manifests()
 
-    settings = ai_config.load_settings()
+    settings = app_config.load_settings()
     if settings.provider == name:
         print(
             f"'{name}' was your active AI provider. Opengrader will now fall "
-            f"back to {ai_config.DEFAULT_PROVIDER!r} until you choose another "
+            f"back to {app_config.DEFAULT_PROVIDER!r} until you choose another "
             "in AI Setup."
         )
-
-
-# --- argument parsing --------------------------------------------------
 
 
 def _add_add_parser(subparsers) -> None:
@@ -446,7 +407,7 @@ def _add_add_parser(subparsers) -> None:
     )
     add.add_argument("--name", default="", help="Provider id (flags mode).")
     add.add_argument("--label", default="", help="What the dropdown shows.")
-    add.add_argument("--dialect", default="", choices=(*ai_config.dialect_names(), ""))
+    add.add_argument("--dialect", default="", choices=(*app_config.dialect_names(), ""))
     add.add_argument("--host", default="", help="API base, e.g. https://host/v1")
     add.add_argument("--vision-model", default="")
     add.add_argument("--text-model", default="")
@@ -467,8 +428,7 @@ def _add_add_parser(subparsers) -> None:
         nargs="+",
         default=(),
         help=(
-            "argv of a command whose stdout is the key (git-credential style). "
-            "Never executed by this tool — see L6 in About/AI_README.md."
+            "Command whose stdout would be the key. Stored but not executed."
         ),
     )
     add.add_argument("--input-per-mtok", type=float, default=None)
@@ -480,10 +440,7 @@ def _add_add_parser(subparsers) -> None:
 
 def _build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        description=(
-            "Add, inspect, test and remove your own AI provider manifests — "
-            "the bring-your-own-service surface (About/AI_README.md §7.5)."
-        ),
+        description="Add, inspect, test and remove AI provider manifests.",
         epilog=EPILOG,
         formatter_class=RawDescriptionHelpFormatter,
     )

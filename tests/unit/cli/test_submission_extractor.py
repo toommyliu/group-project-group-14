@@ -7,7 +7,7 @@ import pytest
 
 import opengrader.cli.submission_extractor as extractor_cli
 import opengrader.core.submissions.batch as batch_module
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.cli.submission_extractor import (
     _parse_jobs,
     _parse_roster_arg,
@@ -72,7 +72,7 @@ def _stub_build(monkeypatch, captured: dict) -> None:
         batch_module, "build_student_submission_document_unified", fake_build
     )
     monkeypatch.setattr(extractor_cli, "_load_blank_assignment_template", lambda _p: object())
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
 
 
 def _scan_dir(tmp_path: Path) -> Path:
@@ -277,7 +277,7 @@ def _stub_writing_build(monkeypatch, calls: list[str]) -> None:
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
 
 
 def _extract(scans: Path, out: Path, *extra: str) -> None:
@@ -380,7 +380,7 @@ def test_a_failed_scan_exits_nonzero_but_lets_the_others_finish(
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
     scans = _scan_dir(tmp_path)
     (scans / "submission-0002.pdf").write_bytes(b"%PDF-1.4\n")
 
@@ -788,7 +788,7 @@ def _stub_refine_build(monkeypatch, *, readings: dict[str, tuple[str, float | No
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
 
 
 def test_refine_rewrites_only_the_low_confidence_answer(monkeypatch, tmp_path) -> None:
@@ -914,7 +914,7 @@ def test_refine_dpi_reaches_the_extraction(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
 
     _extract(scans, out, "--refine", "--refine-dpi", "450")
 
@@ -1123,7 +1123,7 @@ def test_the_run_reports_which_readers_produced_the_answers(
     monkeypatch.setattr(
         batch_module, "build_student_submission_document_unified", fake_build
     )
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
     scans = _scan_dir(tmp_path)
 
     run_cli([
@@ -1138,7 +1138,7 @@ def test_the_run_reports_which_readers_produced_the_answers(
 
 
 def test_llm_responses_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
-    ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
     captured: dict = {}
     _stub_build(monkeypatch, captured)
     scans = _scan_dir(tmp_path)
@@ -1156,7 +1156,7 @@ def test_llm_responses_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
 
 
 def test_llm_responses_defaults_off_when_ai_setup_leaves_it_off(monkeypatch, tmp_path) -> None:
-    ai_config.save_settings(ai_config.AISettings())
+    app_config.save_settings(app_config.AISettings())
     captured: dict = {}
     _stub_build(monkeypatch, captured)
     scans = _scan_dir(tmp_path)
@@ -1174,7 +1174,7 @@ def test_llm_responses_defaults_off_when_ai_setup_leaves_it_off(monkeypatch, tmp
 
 
 def test_explicit_no_llm_responses_beats_ai_setup(monkeypatch, tmp_path) -> None:
-    ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
     captured: dict = {}
     _stub_build(monkeypatch, captured)
     scans = _scan_dir(tmp_path)
@@ -1193,8 +1193,8 @@ def test_explicit_no_llm_responses_beats_ai_setup(monkeypatch, tmp_path) -> None
 
 
 def test_llm_escalate_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, escalate_only=True)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, escalate_only=True)
     )
     captured: dict = {}
     _stub_build(monkeypatch, captured)
@@ -1207,8 +1207,8 @@ def test_llm_escalate_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
 
 
 def test_llm_math_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, transcribe_math=True)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, transcribe_math=True)
     )
     captured: dict = {}
     _stub_build(monkeypatch, captured)
@@ -1226,8 +1226,8 @@ def test_llm_math_defaults_on_from_ai_setup(monkeypatch, tmp_path) -> None:
 
 
 def test_explicit_no_llm_math_beats_ai_setup(monkeypatch, tmp_path) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, transcribe_math=True)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, transcribe_math=True)
     )
     captured: dict = {}
     _stub_build(monkeypatch, captured)

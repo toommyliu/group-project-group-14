@@ -19,9 +19,13 @@ def _qa_picker_app() -> TuiApp:
 
 
 class _BundleApp(App):
-    def __init__(self, submissions_path: str) -> None:
+    def __init__(
+        self, submissions_path: str, *, workspace_root: str = "", assignment_id: str = ""
+    ) -> None:
         super().__init__()
         self._submissions_path = submissions_path
+        self._workspace_root = workspace_root
+        self._assignment_id = assignment_id
 
     def on_mount(self) -> None:
         self.push_screen(
@@ -29,6 +33,8 @@ class _BundleApp(App):
                 submissions_path=self._submissions_path,
                 output_path="/tmp/out",
                 default_name="quiz-1-return-2026-07-28",
+                workspace_root=self._workspace_root,
+                workspace_assignment=self._assignment_id,
             )
         )
 
@@ -117,6 +123,29 @@ def test_export_without_submissions_notifies_and_skips(monkeypatch) -> None:
             await pilot.click("#return-bundle-run")
             await pilot.pause()
             assert calls == []
+
+    asyncio.run(run())
+
+
+def test_workspace_export_passes_selected_assignment(monkeypatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        bundle_module, "run_return_bundle_cli", lambda argv: calls.append(argv)
+    )
+
+    async def run() -> None:
+        app = _BundleApp("", workspace_root="/course", assignment_id="quiz-id")
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.click("#return-bundle-run")
+            await app.workers.wait_for_complete()
+            assert calls == [
+                [
+                    "--workspace", "/course", "--assignment", "quiz-id",
+                    "--content", "all", "--output", "/tmp/out",
+                    "--name", "quiz-1-return-2026-07-28",
+                ]
+            ]
 
     asyncio.run(run())
 

@@ -1,51 +1,9 @@
-"""Write a workspace's grades back into the class folder it was imported from.
-
-A workspace keeps grades in its database; the `.submission.md` files it was
-imported from are what every other tool reads (Canvas and gradebook export,
-return bundles, backups, grade history). Without this module, grading in a
-workspace is a dead end: nothing it records can be handed back.
-
-**This is `grade-merge`, pointed at a workspace.** A workspace is exactly a
-grader's copy that went away and came back, so write-back reuses
-`core/handoff/merge.py` rather than inventing a second reconciler:
-
-* **ours**   = the `.submission.md` files as they are now;
-* **theirs** = the workspace's current grades (`Workspace.document`);
-* **base**   = the state both started from. The first time, that is the
-  imported copy the workspace kept (`submissions.original`); after a
-  write-back, it is the workspace state that write-back used, saved in
-  `.opengrader/write-back/<assignment>.json`. Without that second rule, every
-  later write-back would report the files' own previous write-back as a
-  conflicting edit.
-
-So a grade changed only in the workspace is copied into the file, a grade
-changed only in the folder is kept, and one changed in both is a conflict the
-person decides. Only `grade` and `comment` are merged, since those are what a
-workspace edits.
-
-Two deliberate differences from `grade-merge`:
-
-* **Files are matched by path, not by student.** Every imported submission
-  records its file (`source_key = "pipeline:<relative path>"`), so a student
-  ID corrected in the file after import cannot unmatch it.
-* **The folder is proven, not guessed.** An imported assignment's id is
-  `uuid5(workspace id, "pipeline:<absolute submissions folder>")`, so a
-  candidate folder is accepted only if it reproduces that id. An assignment
-  created in the web app has no folder, and says so.
-
-The workspace database is only read here (the service owns writes, and WAL
-lets other processes read alongside it). Everything this writes goes to the
-class folder, to its grade history under the actor `merge:workspace`, and to
-the sync-state file.
-"""
-
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from uuid import UUID, uuid5
+from typing import Literal
 
 from opengrader.core.handoff.merge import (
     MergeChange,
@@ -68,6 +26,7 @@ from opengrader.core.submissions.student_file import (
     load_student_submission_markdown,
 )
 from opengrader.core.workspace.store import DOCUMENT, Workspace
+from opengrader.core.workspace.context import inputs_for_assignment, resolve_path
 
 __all__ = [
     "WRITE_BACK_ASPECTS",
@@ -80,19 +39,15 @@ __all__ = [
 ]
 
 WRITE_BACK_ASPECTS = ("grade", "comment")
-# Grade history records write-back under this actor, so it can be undone alone
-# with `grade-restore apply --without-actor merge:workspace`.
 WRITE_BACK_SOURCE = "workspace"
 _PIPELINE = "pipeline:"
 _STATE_DIR = Path(".opengrader") / "write-back"
-# How deep below the workspace root to look for the imported folder.
-_SEARCH_DEPTH = 4
 
 Cells = dict[tuple[str, str], CellState]
 
 
 class WriteBackError(ValueError):
-    """Write-back cannot run; the message says why and what to do."""
+    """Workspace grades cannot be written to their source files."""
 
 
 @dataclass(frozen=True)
@@ -101,11 +56,10 @@ class WriteBackPlan:
     assignment_title: str
     submissions_dir: Path
     plan: MergePlan
-    # source_key -> the file it was imported from
     paths_by_key: dict[str, Path]
     theirs: Cells = field(repr=False)
     base: Cells = field(repr=False, default_factory=dict)
-    base_from: str = "import"  # or "last write-back"
+    base_from: Literal["import", "last write-back"] = "import"
     missing_files: tuple[str, ...] = ()
     unreadable: tuple[str, ...] = ()
 
@@ -115,12 +69,12 @@ class WriteBackPlan:
 
 
 def locate_submissions_dir(workspace: Workspace, assignment_id: str) -> Path | None:
-    """The folder this assignment was imported from, if it can be proven."""
-    namespace = UUID(workspace.info().id)
-    for candidate in _candidate_dirs(workspace.root):
-        if str(uuid5(namespace, f"{_PIPELINE}{candidate}")) == assignment_id:
-            return candidate
-    return None
+    saved = inputs_for_assignment(workspace, assignment_id)
+    if saved is None or saved.submissions is None:
+        return None
+    folder = resolve_path(workspace.root, saved.folder)
+    source = resolve_path(folder, saved.submissions)
+    return source if source.is_dir() else None
 
 
 def plan_write_back(root: str | Path, assignment_id: str) -> WriteBackPlan:
@@ -134,9 +88,8 @@ def plan_write_back(root: str | Path, assignment_id: str) -> WriteBackPlan:
     folder = locate_submissions_dir(workspace, assignment_id)
     if folder is None:
         raise WriteBackError(
-            f"'{title}' was not imported from a folder under {workspace.root} "
-            "(it may have been created in the web app, or its folder was moved "
-            "or renamed), so there are no files to write its grades to."
+            f"'{title}' has no available source submissions folder. "
+            "The folder may have moved, or this assignment was created without one."
         )
 
     rows = _submission_rows(workspace, assignment_id)
@@ -166,14 +119,11 @@ def plan_write_back(root: str | Path, assignment_id: str) -> WriteBackPlan:
         theirs.update(_cells(source_key, workspace.document(assignment_id, submission_id)))
         base.update(_cells(source_key, original))
 
-    # The last write-back wins where it has a cell; a submission imported
-    # since then still starts from its imported copy.
+    # Use the last successful write-back as the merge base for existing cells.
     if saved is not None:
         base.update(saved)
 
-    # The workspace adds a blank placeholder for any question the extraction
-    # missed. A file cannot gain a question, so a blank one is not worth
-    # reporting; a graded one is (plan_merge lists it as unknown).
+    # Skip blank workspace placeholders for questions missing from source files.
     theirs_here = {
         key: cell
         for key, cell in theirs.items()
@@ -201,13 +151,6 @@ def apply_write_back(
     decisions: dict[str, str] | None = None,
     policy: str = "ours",
 ) -> MergeOutcome:
-    """Write the plan's changes, plus every conflict decided "theirs".
-
-    `policy` is what an undecided conflict gets; the default keeps the file.
-    After writing, the workspace state this plan saw becomes the base for the
-    next write-back, except for any cell whose write failed, which keeps its
-    old base so the change is offered again.
-    """
     plan = write_back.plan
     changes = list(plan.changes) + list(
         resolve_conflicts(plan.conflicts, policy=policy, decisions=decisions or {})
@@ -216,8 +159,7 @@ def apply_write_back(
     _journal(write_back, outcome.written)
 
     failed = {(change.student_key, change.question_id) for change, _ in outcome.failed}
-    # A cell whose write failed keeps the base this plan used, so the next
-    # write-back sees the same change and offers it again.
+    # Failed cells keep their old base so retries still offer the change.
     state = {
         key: (write_back.base[key] if key in failed and key in write_back.base else cell)
         for key, cell in write_back.theirs.items()
@@ -225,9 +167,6 @@ def apply_write_back(
     }
     _save_state(Path(root), write_back.assignment_id, state)
     return outcome
-
-
-# --- reading the workspace ---------------------------------------------------
 
 
 def _submission_rows(
@@ -246,23 +185,8 @@ def _submission_rows(
     ]
 
 
-def _candidate_dirs(root: Path) -> list[Path]:
-    """Every folder under `root` that holds, at any depth, a submission file."""
-    root = root.resolve()
-    found: set[Path] = set()
-    for current, dirs, files in os.walk(root):
-        here = Path(current)
-        depth = len(here.relative_to(root).parts)
-        dirs[:] = [d for d in dirs if not d.startswith(".") and depth < _SEARCH_DEPTH]
-        if any(name.endswith(".submission.md") for name in files):
-            found.add(here)
-            found.update(parent for parent in here.parents if parent.is_relative_to(root))
-    return sorted(found, key=lambda path: (len(path.parts), str(path)))
-
-
 def _cells(key: str, document: StudentSubmissionDocument) -> Cells:
-    # current_cells_from_documents keys by student; re-key by file so a
-    # corrected student ID cannot unmatch a submission.
+    # Match by source file even if the student ID changes.
     anonymous = replace(document, student_id=key, student_name="")
     return {
         (key, question_id): CellState(
@@ -281,7 +205,6 @@ def _blank(cell: CellState) -> bool:
 
 
 def _label(document: StudentSubmissionDocument, path: Path) -> str:
-    # The ID first: a write-back preview is no reason to break anonymous grading.
     return document.student_id.strip() or path.parent.name or path.stem
 
 
@@ -313,9 +236,6 @@ def _journal(write_back: WriteBackPlan, written: tuple[MergeChange, ...]) -> Non
             )
         except OSError:
             pass
-
-
-# --- the sync base -------------------------------------------------------------
 
 
 def _state_path(root: Path, assignment_id: str) -> Path:

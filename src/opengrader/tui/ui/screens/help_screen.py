@@ -605,7 +605,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Where it is saved",
-        "A small ai.json in your user config folder — Library/Application "
+        "A small config.json in your user config folder — Library/Application "
         "Support/Opengrader on macOS, .config/opengrader on Linux, AppData "
         "Roaming/Opengrader on Windows. It describes this computer, so it is "
         "deliberately NOT inside an assignment folder: a folder handed to a "
@@ -614,13 +614,9 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
     (
         "From a terminal",
-        "An explicit flag always wins, then an OPENGRADER_AI_* environment "
-        "variable (PROVIDER, HOST, VISION_MODEL, TEXT_MODEL, MATH_BACKEND, "
-        "TIMEOUT, MIN_CONFIDENCE, AUTO_START), then the saved settings, then "
-        "the built-in default. The environment tier sits above the file so a "
-        "lab machine or a script can pin a model for one run without editing "
-        "your preferences; OPENGRADER_AI_CONFIG points the whole thing at a "
-        "different settings file.",
+        "An explicit flag wins over the saved settings, which win over the "
+        "built-in defaults. Edit config.json to change your machine defaults; "
+        "its $schema field gives editors completion and validation.",
     ),
     (
         "Cloud AI?",

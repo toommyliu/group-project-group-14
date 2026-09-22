@@ -1,10 +1,3 @@
-"""Workspace grades written back into the class folder (core/workspace/writeback.py).
-
-Built on a real workspace database and a real copy of the sample class; only
-the service is absent, because write-back reads the database directly and
-writes only files.
-"""
-
 from __future__ import annotations
 
 import json
@@ -22,7 +15,7 @@ from opengrader.core.submissions.student_file import (
     update_student_submission_file,
 )
 from opengrader.core.workspace.intake import publish_pipeline
-from opengrader.core.workspace.models import PipelineOutput
+from opengrader.core.workspace.models import AssignmentInputs, PipelineOutput
 from opengrader.core.workspace.store import Workspace
 from opengrader.core.workspace.writeback import (
     WriteBackError,
@@ -42,9 +35,19 @@ def cls(tmp_path: Path):
     published = publish_pipeline(
         store,
         PipelineOutput(
+            assignment_id=store.assignment_id_for_folder(root),
             qa_markdown=(root / "qa.md").read_text(encoding="utf-8"),
             submissions_dir=str((root / "student-submissions").resolve()),
         ),
+    )
+    store.save_assignment_inputs(
+        AssignmentInputs(
+            id=published.assignment.id,
+            folder=".",
+            scan="",
+            output=".",
+            submissions="student-submissions",
+        )
     )
     first, second = (s.id for s in store.submissions(published.assignment.id))
     files = sorted((root / "student-submissions").rglob("*.submission.md"))
@@ -89,7 +92,7 @@ def _read(cls, index: int, question: str):
     return {q.question_id: q for q in document.questions}[question]
 
 
-def test_the_imported_folder_is_proven_by_the_assignment_id(cls) -> None:
+def test_the_imported_folder_comes_from_the_assignment_binding(cls) -> None:
     folder = locate_submissions_dir(cls["store"], cls["aid"])
 
     assert folder == (cls["root"] / "student-submissions").resolve()
@@ -223,7 +226,7 @@ def test_a_deleted_file_is_reported_not_fatal(cls) -> None:
 def test_an_assignment_made_in_the_web_app_has_no_folder(cls) -> None:
     web = cls["store"].create_assignment("---\ntitle: Web only\n---\n- (1 points) Q\n")
 
-    with pytest.raises(WriteBackError, match="not imported from a folder"):
+    with pytest.raises(WriteBackError, match="no available source submissions folder"):
         plan_write_back(cls["root"], web.id)
 
 

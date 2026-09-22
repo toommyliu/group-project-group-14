@@ -6,6 +6,7 @@ import difflib
 import importlib
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import click
 
@@ -388,6 +389,8 @@ class OpengraderCLI(click.Group):
     ) -> tuple[str | None, click.Command | None, list[str]]:
         name = args[0] if args else ""
         if name and not name.startswith("-") and self.get_command(ctx, name) is None:
+            if Path(name).expanduser().is_dir():
+                return super().resolve_command(ctx, ["tui", name, *args[1:]])
             raise click.UsageError(unknown_command_message(name), ctx)
         return super().resolve_command(ctx, args)
 

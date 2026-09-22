@@ -6,7 +6,7 @@ import json
 import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.environment import (
     EnvironmentCheck,
     EnvironmentReport,
@@ -80,7 +80,7 @@ def _report_to_json(report: EnvironmentReport) -> dict:
 
 
 def build_parser() -> ArgumentParser:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description="Check that this machine has everything Opengrader needs.",
         epilog=EPILOG,
@@ -127,7 +127,7 @@ def build_parser() -> ArgumentParser:
 
 def run_cli(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
 
     report = build_environment_report(
         vision_model=args.ollama_model,

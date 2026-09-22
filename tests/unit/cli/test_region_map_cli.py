@@ -274,9 +274,9 @@ def test_an_assignment_with_no_text_layer_extracts_against_its_region_map(
     tmp_path: Path, monkeypatch
 ) -> None:
     import opengrader.cli.submission_extractor as extractor_cli
-    from opengrader.core import ai_config
+    from opengrader.core import app_config
 
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
 
     assignment = _image_only_pdf(tmp_path / "paper-assignment.pdf", pages=2, marker="BLANK")
     scans = tmp_path / "scans"

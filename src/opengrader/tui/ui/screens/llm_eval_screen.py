@@ -12,7 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, RichLog, Select, Static, TextArea
 
 from opengrader.cli.llm_eval import run_cli as run_llm_eval_cli
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.grading.evaluation import (
     DEFAULT_TARGET_AGREEMENT,
     LlmEvalReport,
@@ -220,10 +220,10 @@ class LlmEvalScreen(ModalScreen[float | None]):
 
                 yield self._field_label(
                     "Models to compare",
-                    f"comma-separated; blank = {ai_config.DEFAULT_TEXT_MODEL}",
+                    f"comma-separated; blank = {app_config.DEFAULT_TEXT_MODEL}",
                 )
                 yield Input(
-                    placeholder=f"e.g. {ai_config.DEFAULT_TEXT_MODEL}, llama3.1",
+                    placeholder=f"e.g. {app_config.DEFAULT_TEXT_MODEL}, llama3.1",
                     id="llm-eval-models",
                 )
 

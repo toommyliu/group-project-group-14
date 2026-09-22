@@ -711,12 +711,17 @@ class QAPickerScreen(Vertical):
         )
 
     def _open_return_bundle(self) -> None:
+        from opengrader.tui.data.workspace_provider import WorkspaceProvider
+
         provider = getattr(self.app, "data_provider", None)
         submissions = str(getattr(provider, "submissions_path", "") or "")
+        workspace = provider if isinstance(provider, WorkspaceProvider) else None
         default_output = ""
         if submissions:
             base = Path(submissions)
             default_output = str(base if base.is_dir() else base.parent)
+        elif workspace:
+            default_output = workspace.client.connection.root
 
         default_name = ""
         name_fn = getattr(provider, "default_bundle_name", None)
@@ -731,12 +736,17 @@ class QAPickerScreen(Vertical):
                 submissions_path=submissions,
                 output_path=default_output,
                 default_name=default_name,
+                workspace_root=workspace.client.connection.root if workspace else "",
+                workspace_assignment=workspace.assignment.id if workspace else "",
             )
         )
 
     def _open_canvas_export(self) -> None:
+        from opengrader.tui.data.workspace_provider import WorkspaceProvider
+
         provider = getattr(self.app, "data_provider", None)
         submissions = str(getattr(provider, "submissions_path", "") or "")
+        workspace = provider if isinstance(provider, WorkspaceProvider) else None
 
         workflow_state = getattr(self.app, "workflow_state", None)
         labels = workflow_state.selection_labels if workflow_state else {}
@@ -745,6 +755,8 @@ class QAPickerScreen(Vertical):
                 submissions_path=submissions,
                 course=labels.get("course", ""),
                 assignment=labels.get("assignment", ""),
+                workspace_root=workspace.client.connection.root if workspace else "",
+                workspace_assignment=workspace.assignment.id if workspace else "",
             )
         )
 

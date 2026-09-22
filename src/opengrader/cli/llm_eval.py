@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from urllib.parse import urlparse
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.grading.evaluation import (
     DEFAULT_BUCKET_SIZE,
     DEFAULT_MIN_SAMPLE,
@@ -427,7 +427,7 @@ def report_to_dict(report: LlmEvalReport) -> dict[str, object]:
 
 
 def _build_parser() -> ArgumentParser:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description=(
             "Measure how well an LLM grades free responses, by re-grading "
@@ -474,7 +474,7 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument(
         "--llm-timeout",
         type=float,
-        default=ai_config.DEFAULT_TIMEOUT_SECONDS,
+        default=app_config.DEFAULT_TIMEOUT_SECONDS,
         help="Per-request timeout in seconds (default: %(default)s).",
     )
     parser.add_argument(
@@ -610,7 +610,7 @@ def _default_generate_factory(
 
     def factory(model: str) -> GenerateFn:
         nonlocal started
-        resolved = ai_config.with_overrides(
+        resolved = app_config.with_overrides(
             host=host, text_model=model, timeout_seconds=timeout_seconds
         )
         if auto_ollama and resolved.kind == "local":
@@ -630,8 +630,8 @@ def _default_generate_factory(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        ai_config.ensure_ready(resolved, purpose="text")
-        return ai_config.text_generate(resolved, response_format=GRADE_SUGGESTION_SCHEMA)
+        app_config.ensure_ready(resolved, purpose="text")
+        return app_config.text_generate(resolved, response_format=GRADE_SUGGESTION_SCHEMA)
 
     return factory
 
@@ -673,7 +673,7 @@ def run_cli(
     if args.limit is not None:
         targets = spread_targets(targets, args.limit)
 
-    models = args.llm_models or [ai_config.resolve().text_model]
+    models = args.llm_models or [app_config.resolve().text_model]
 
     if not targets:
         report = build_llm_eval_report(

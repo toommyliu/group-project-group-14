@@ -112,3 +112,44 @@ def test_cli_errors_on_missing_path(tmp_path: Path, capsys) -> None:
         run_cli(["--submissions", str(tmp_path / "nope"), "--gradebook"])
     assert excinfo.value.code == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_cli_workspace_bundle_uses_saved_grades_and_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from opengrader.core.submissions import load_student_submission_markdown
+    from opengrader.core.workspace.intake import publish_submission
+    from opengrader.core.workspace.models import AssignmentInputs
+    from opengrader.core.workspace.store import Workspace
+
+    course = tmp_path / "course"
+    folder = course / "quiz"
+    folder.mkdir(parents=True)
+    _write_cohort(folder)
+    workspace = Workspace.create(course)
+    assignment_id = workspace.assignment_id_for_folder(folder)
+    workspace.save_assignment_inputs(
+        AssignmentInputs(id=assignment_id, folder="quiz", scan="scans.pdf", output=".")
+    )
+    workspace.create_assignment(
+        "- (10 points) First question\n  - **Answer**\n    - Yes\n",
+        assignment_id=assignment_id,
+    )
+    for index in (1, 2):
+        source = folder / f"s{index}.submission.md"
+        publish_submission(
+            workspace,
+            assignment_id,
+            load_student_submission_markdown(source),
+            asset_root=folder,
+            source_key=f"s{index}",
+        )
+        source.write_text("stale extraction", encoding="utf-8")
+
+    monkeypatch.chdir(folder)
+    run_cli(["--name", "return", "--content", "gradebook-student"])
+
+    bundle = folder / "return"
+    assert (bundle / "gradebook" / "gradebook.csv").exists()
+    assert len(list((bundle / "student-pdfs").glob("*.pdf"))) == 2
+    assert "Tommy Liu" in (bundle / "gradebook" / "gradebook.csv").read_text()

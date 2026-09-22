@@ -93,11 +93,15 @@ class CanvasExportScreen(ModalScreen[None]):
         submissions_path: str = "",
         course: str = "",
         assignment: str = "",
+        workspace_root: str = "",
+        workspace_assignment: str = "",
     ) -> None:
         super().__init__()
         self._initial_submissions = submissions_path
         self._initial_course = course
         self._initial_assignment = assignment
+        self._workspace_root = workspace_root
+        self._workspace_assignment = workspace_assignment
 
     @staticmethod
     def _field_label(text: str, detail: str = "") -> Static:
@@ -114,7 +118,9 @@ class CanvasExportScreen(ModalScreen[None]):
                 id="canvas-export-hint",
             )
             yield self._field_label(
-                "Submissions", ".submission.md file or directory"
+                "Submissions",
+                "leave blank to use saved workspace grades" if self._workspace_root
+                else ".submission.md file or directory",
             )
             with Horizontal(classes="path-row"):
                 yield Input(
@@ -190,18 +196,22 @@ class CanvasExportScreen(ModalScreen[None]):
         course = self.query_one("#canvas-export-course", Input).value.strip()
         assignment = self.query_one("#canvas-export-assignment", Input).value.strip()
 
-        if not submissions or not course or not assignment:
+        if (not submissions and not self._workspace_root) or not course or not assignment:
             self.app.notify(
-                "Submissions path, course, and assignment are all required.",
+                "Enter a submissions path, course, and assignment.",
                 severity="error",
             )
             return
 
-        argv = [
-            "--submissions", submissions,
-            "--course", course,
-            "--assignment", assignment,
-        ]
+        argv: list[str] = []
+        if submissions:
+            argv += ["--submissions", submissions]
+        else:
+            argv += [
+                "--workspace", self._workspace_root,
+                "--workspace-assignment", self._workspace_assignment,
+            ]
+        argv += ["--course", course, "--assignment", assignment]
         if self.query_one("#canvas-export-dry-run", Checkbox).value:
             argv.append("--dry-run")
 

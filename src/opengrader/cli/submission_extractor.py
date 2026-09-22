@@ -20,7 +20,7 @@ from argparse import (
 from pathlib import Path
 from typing import Callable
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.ocr import OcrConfig
 from opengrader.core.ocr.math_ocr import (
     MATH_BACKEND_NAMES,
@@ -433,7 +433,7 @@ def run_cli(
     progress: ExtractionProgress | None = None,
     status_callback: "Callable[[str], None] | None" = None,
 ) -> None:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description=(
             "Convert scanned per-student submission PDFs into markdown student "
@@ -1041,7 +1041,7 @@ def run_cli(
                 file=sys.stderr,
             )
 
-    resolved_ai = ai_config.with_overrides(
+    resolved_ai = app_config.with_overrides(
         ai,
         host=args.ollama_host,
         vision_model=args.ollama_model,
@@ -1117,9 +1117,9 @@ def run_cli(
 
     if not omr_mode and (not args.blank_template or args.llm_responses):
         print(f"Using Ollama vision model: {args.ollama_model}")
-        vision_reader = ai_config.vision_reader(resolved_ai)
+        vision_reader = app_config.vision_reader(resolved_ai)
         try:
-            ai_config.ensure_ready(resolved_ai, purpose="vision")
+            app_config.ensure_ready(resolved_ai, purpose="vision")
         except Exception as exc:
             print(f"Warning: Ollama model not available ({exc}). Proceeding without VLM for text extraction.", file=sys.stderr)
             vision_reader = None

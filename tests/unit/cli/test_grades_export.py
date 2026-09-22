@@ -83,6 +83,53 @@ def test_grades_export_writes_gradebook_csv(tmp_path: Path) -> None:
     assert rows[2] == ["s1", "Tommy Liu", "10", "4", "14", "20"]
 
 
+def test_grades_export_inside_assignment_reads_saved_workspace_grades(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from opengrader.core.submissions import load_student_submission_markdown
+    from opengrader.core.workspace.intake import publish_submission
+    from opengrader.core.workspace.models import AssignmentInputs
+    from opengrader.core.workspace.store import Workspace
+
+    course = tmp_path / "course"
+    folder = course / "midterm"
+    folder.mkdir(parents=True)
+    workspace = Workspace.create(course)
+    assignment_id = workspace.assignment_id_for_folder(folder)
+    workspace.save_assignment_inputs(
+        AssignmentInputs(
+            id=assignment_id, folder="midterm", scan="scans.pdf", output="."
+        )
+    )
+    workspace.create_assignment(
+        "- (10 points) First question\n  - **Answer**\n    - Yes\n",
+        assignment_id=assignment_id,
+    )
+    submission = folder / "one.submission.md"
+    submission.write_text(
+        "---\nstudent_id: '123'\nstudent_name: Alice\n---\n"
+        "- q1:\n  - Response text: Yes\n  - Possible points: 10\n  - Points: 7\n"
+    )
+    publish_submission(
+        workspace,
+        assignment_id,
+        load_student_submission_markdown(submission),
+        asset_root=folder,
+        source_key="one",
+    )
+    submission.write_text("invalid extraction after grading")
+    monkeypatch.chdir(folder)
+    output = tmp_path / "grades.csv"
+
+    run_cli(["--output", str(output)])
+
+    rows = list(csv.reader(output.open(encoding="utf-8")))
+    assert rows == [
+        ["student_id", "student_name", "Q1", "total", "possible"],
+        ["123", "Alice", "7", "7", "10"],
+    ]
+
+
 def test_grades_export_ungraded_cell_is_blank(tmp_path: Path) -> None:
     submissions = tmp_path / "subs"
     submissions.mkdir()
