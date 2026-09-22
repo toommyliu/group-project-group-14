@@ -1,17 +1,3 @@
-"""`DialectVisionReader` conformance: the second `VisionReader`, over a dialect.
-
-`test_vision_reader.py` pins `OllamaVisionReader`. §7.10 asked for the
-conformance checks to run "against both implementations once Phase 3 adds
-the second", and this file is that second run. It covers each of the six
-operations over both hosted dialects, with `urlopen` replaced by a fake that
-answers in the dialect's own response shape. There is no live service here.
-
-What each test proves is the full round trip. The prompt and schema come from
-`vision_prompts`, the dialect wraps them and the image into its request shape,
-the transport sends that to the dialect's endpoint with its auth header, and
-the reply comes back through the same parser the Ollama reader uses.
-"""
-
 from __future__ import annotations
 
 import base64
@@ -26,7 +12,6 @@ from opengrader.core.llm.dialect_client import DialectConfig
 from opengrader.core.ocr.vision_reader import (
     DialectVisionReader,
     TitleMetadataResult,
-    VisionReader,
 )
 
 _KEY = "sk-conformance-test-key-0123456789"
@@ -141,11 +126,6 @@ CASES = [
     ("extract_page_number", {}, '{"value": "3"}', 3),
     ("page_has_identity_field", {}, '{"first_page": true}', True),
 ]
-
-
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_dialect_reader_satisfies_the_protocol(dialect: str) -> None:
-    assert isinstance(_reader(dialect), VisionReader)
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)

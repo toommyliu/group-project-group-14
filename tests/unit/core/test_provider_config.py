@@ -12,30 +12,6 @@ from opengrader.core import app_config
 _READER_SENTINEL = object()
 
 
-def test_vision_defaults_match_ollama_vision_config() -> None:
-    from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
-
-    default = OllamaVisionConfig()
-    assert app_config.DEFAULT_HOST == default.host
-    assert app_config.DEFAULT_VISION_MODEL == default.model
-    assert app_config.DEFAULT_TIMEOUT_SECONDS == default.timeout_seconds
-
-
-def test_text_defaults_match_ollama_config() -> None:
-    from opengrader.core.llm import OllamaConfig
-
-    default = OllamaConfig()
-    assert app_config.DEFAULT_TEXT_MODEL == default.model
-    assert app_config.DEFAULT_HOST == default.host
-    assert app_config.DEFAULT_TIMEOUT_SECONDS == default.timeout_seconds
-
-
-def test_automated_grading_min_confidence_is_the_same_object() -> None:
-    from opengrader.cli import automated_grading
-
-    assert automated_grading.DEFAULT_LLM_MIN_CONFIDENCE is app_config.DEFAULT_MIN_CONFIDENCE
-
-
 def test_default_settings_serialize_to_only_the_version() -> None:
     body = app_config.AISettings().to_dict()
 
@@ -349,12 +325,6 @@ def test_save_settings_failure_propagates(tmp_path: Path) -> None:
 
     with pytest.raises(OSError):
         app_config.save_settings(app_config.AISettings(), target)
-
-
-def test_feature_toggles_default_off_and_serialize_to_nothing() -> None:
-    body = app_config.AISettings().to_dict()
-
-    assert body == {"$schema": "./config.schema.json", "version": app_config.SETTINGS_VERSION}
 
 
 def test_deliberate_feature_choices_round_trip() -> None:

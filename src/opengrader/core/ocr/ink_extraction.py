@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
-import cv2
 import numpy as np
 from PIL import Image
 
@@ -64,6 +63,7 @@ def register_template_page(
     max_dimension: int = _REGISTRATION_MAX_DIMENSION,
 ) -> RegisteredTemplatePage:
     """Warp a blank template page into the coordinate system of a scanned page."""
+    import cv2
 
     scan_rgb = np.asarray(scan.convert("RGB"))
     template_rgb = np.asarray(template.convert("RGB"))
@@ -165,6 +165,7 @@ def isolate_student_ink(
     dpi: int = 300,
 ) -> StudentInk:
     """Remove registered printed content while retaining added pen and pencil marks."""
+    import cv2
 
     scan_rgb = np.asarray(scan_crop.convert("RGB"))
     template_rgb = np.asarray(aligned_template_crop.convert("RGB"))
@@ -244,6 +245,7 @@ def isolate_student_ink(
 
 def find_ink_fragments(mask: np.ndarray, *, dpi: int = 300) -> tuple[InkFragment, ...]:
     """Find every non-speck ink cluster without assuming where an answer belongs."""
+    import cv2
 
     binary = _as_foreground_mask(mask)
     min_component_area = max(3, round(4 * (dpi / 300) ** 2))
@@ -305,6 +307,8 @@ def crop_student_ink(
 def _registration_image(
     rgb: np.ndarray, max_dimension: int
 ) -> tuple[np.ndarray, float]:
+    import cv2
+
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     height, width = gray.shape
     scale = min(1.0, max_dimension / max(height, width))
@@ -318,6 +322,8 @@ def _registration_image(
 
 
 def _ink_mask(gray: np.ndarray, *, threshold: int, min_contrast: int) -> np.ndarray:
+    import cv2
+
     background = cv2.GaussianBlur(gray, (0, 0), sigmaX=12, sigmaY=12)
     contrast = cv2.subtract(background, gray)
     mask = ((gray < threshold) & (contrast >= min_contrast)).astype(np.uint8) * 255
@@ -333,6 +339,8 @@ def _as_foreground_mask(mask: np.ndarray) -> np.ndarray:
 
 
 def _remove_small_components(mask: np.ndarray, *, min_area: int) -> np.ndarray:
+    import cv2
+
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
     cleaned = np.zeros_like(mask)
     for label in range(1, count):
@@ -343,6 +351,7 @@ def _remove_small_components(mask: np.ndarray, *, min_area: int) -> np.ndarray:
 
 def _remove_page_edge_lines(mask: np.ndarray) -> np.ndarray:
     """Drop sparse scan-frame remnants without treating interior underlines as noise."""
+    import cv2
 
     height, width = mask.shape
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)

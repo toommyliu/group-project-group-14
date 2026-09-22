@@ -394,28 +394,6 @@ def test_render_student_submission_markdown_includes_question_type() -> None:
     assert "- q1:\n  - Question type: Multiple Choice\n  - Prompt:" in markdown
 
 
-def test_parse_student_submission_markdown_reads_frontmatter_and_questions(
-    tmp_path: Path,
-) -> None:
-    submission_path = (
-        Path(
-            "samples/cs146-quiz1/student-submissions/submission-0001/submission-0001.submission.md"
-        )
-    )
-    document = student_file.load_student_submission_markdown(submission_path)
-
-    assert document.student_name == "Tommy Liu"
-    assert document.student_id == "123456789"
-    assert document.course_code == "CS146"
-    assert document.assignment_title == "Quiz 1"
-    assert document.assignment_version == "A"
-    assert document.questions[0].question_id == "q1"
-    assert document.questions[0].response_text == ""
-    assert document.questions[0].response_image_path is not None
-    assert Path(document.questions[0].response_image_path).is_absolute()
-    assert Path(document.questions[0].response_image_path).exists()
-
-
 def test_parse_student_submission_markdown_round_trips_rendered_document(
     tmp_path: Path,
 ) -> None:

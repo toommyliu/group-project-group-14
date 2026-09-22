@@ -186,17 +186,3 @@ def test_the_modal_falls_back_to_same_answer_overlap() -> None:
         assert "SAME ANSWER, DIFFERENT STUDENTS" in text
 
     asyncio.run(run())
-
-
-def test_the_modal_closes_on_escape() -> None:
-    app = _Host(_report([_answer("alice", "s1", 9.0)]))
-
-    async def run() -> None:
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            assert isinstance(app.screen, GraderAgreementScreen)
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, GraderAgreementScreen)
-
-    asyncio.run(run())

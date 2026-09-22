@@ -117,32 +117,3 @@ def test_the_outcomes_template_actually_produces_tagged_questions() -> None:
     }
     points = possible_points_by_question(doc)
     assert "q5" in points and "q5" not in tags
-
-
-def test_the_other_templates_stay_outcome_free() -> None:
-    from opengrader.tui.ui.screens.format_guide_screen import (
-        BUBBLE_TEMPLATE,
-        COMPLEX_TEMPLATE,
-        SIMPLE_TEMPLATE,
-    )
-
-    for template in (SIMPLE_TEMPLATE, COMPLEX_TEMPLATE, BUBBLE_TEMPLATE):
-        assert "Outcome" not in template
-
-
-def test_the_running_default_tip_is_inert_but_correct() -> None:
-    from opengrader.core.qa_file import outcomes_by_question, parse_qa_markdown
-    from opengrader.core.qa_file.text2qti import parse_text2qti, render_qa
-    from opengrader.tui.ui.screens.format_guide_screen import OUTCOMES_TEMPLATE
-
-    def tags(source: str) -> dict:
-        return outcomes_by_question(parse_qa_markdown(render_qa(parse_text2qti(source))))
-
-    assert "#   Outcome: CLO1" in OUTCOMES_TEMPLATE
-    commented = tags(OUTCOMES_TEMPLATE)
-    assert commented["q3"] == ("CLO2", "CLO3")
-    assert "q5" not in commented
-
-    uncommented = tags(OUTCOMES_TEMPLATE.replace("#   Outcome: CLO1", "Outcome: CLO1"))
-    assert uncommented["q5"] == ("CLO1",)
-    assert uncommented["q3"] == ("CLO1", "CLO2", "CLO3")

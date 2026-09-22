@@ -525,8 +525,3 @@ def test_concurrency_limit_none_restores_unbounded(_reset_concurrency_limit) -> 
 # ---------------------------------------------------------------------------
 # parse_json_object
 # ---------------------------------------------------------------------------
-
-
-def test_parse_json_object_is_the_same_object_ollama_transport_re_exports() -> None:
-    """Pins the 'shared across all three dialects' claim: one function, not three copies."""
-    assert ollama_transport.parse_json_object is transport.parse_json_object

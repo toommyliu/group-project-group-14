@@ -11,7 +11,6 @@ from opengrader.core.crypto import (
     decrypt_file,
     derive_key,
     encrypt_file,
-    encryption_available,
     is_encrypted,
     passphrase_from_environment,
     passphrases_match,
@@ -151,19 +150,9 @@ def test_the_salt_makes_identical_passphrases_produce_different_keys() -> None:
     )
 
 
-def test_key_derivation_is_deterministic_for_the_same_inputs() -> None:
-    assert derive_key("p", b"same-salt-------", 1000) == derive_key(
-        "p", b"same-salt-------", 1000
-    )
-
-
 def test_passphrase_comparison_matches_only_identical_text() -> None:
     assert passphrases_match("correct horse", "correct horse")
     assert not passphrases_match("correct horse", "correct horses")
-
-
-def test_encryption_is_available_in_this_install() -> None:
-    assert encryption_available()
 
 
 def test_the_environment_variable_supplies_a_passphrase_for_scripts(

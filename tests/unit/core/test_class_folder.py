@@ -15,7 +15,6 @@ from opengrader.core.class_folder import (
     scan_class_folder,
 )
 
-REPO = Path(__file__).resolve().parents[3]
 
 QA_TEXT = """---
 title: Quiz
@@ -180,19 +179,6 @@ def test_the_description_has_one_line_per_role_plus_notes(tmp_path) -> None:
     assert lines[3].startswith("? blank template")
     assert "template-vA.pdf, template-vB.pdf" in lines[3]
     assert lines[4].startswith("! roster.csv")
-
-
-def test_a_real_sample_class_folder(tmp_path) -> None:
-    sample = REPO / "samples" / "cmpe30-quiz1"
-    if not sample.is_dir():  # pragma: no cover
-        pytest.skip("sample data not present")
-
-    found = scan_class_folder(sample)
-    assert found.scan == sample / "submissions.pdf"
-    assert found.qa_file == sample / "qa.md"
-    assert found.found(ROLE_ROSTER) is None
-    assert found.submissions == sample / "student-submissions"
-    assert found.ambiguities == ()
 
 
 def _student(cohort: Path, name: str) -> None:

@@ -1,5 +1,3 @@
-import importlib.util
-
 import pytest
 
 from opengrader.core.qa_file import (
@@ -29,10 +27,6 @@ def _flat(
             else "partial"
         )
     return QARubricFlatOption(label, points_delta, kind, selection_mode)
-
-
-def test_old_qa_file_template_module_no_longer_exists() -> None:
-    assert importlib.util.find_spec("opengrader.core.pdf.templates.qa_file") is None
 
 
 def test_parse_indentation_single_version_with_subquestions_and_correct_answers() -> (

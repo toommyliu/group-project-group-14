@@ -22,6 +22,8 @@ def test_enable_textual_feature_merges_and_deduplicates(monkeypatch) -> None:
 def service(monkeypatch, tmp_path):
     from opengrader.server.workspace.client import ServiceConnection, WorkspaceClient
 
+    # The repository may itself be a workspace; isolate Home's auto-discovery.
+    monkeypatch.chdir(tmp_path.parent)
     workspace = Workspace.create(tmp_path)
     workspace.create_assignment(
         "---\ntitle: Older exam\n---\n- (2 points) First question\n"
@@ -217,11 +219,12 @@ def no_service(monkeypatch, tmp_path):
 
 @pytest.fixture
 def sample(tmp_path):
-    import shutil
-
     target = tmp_path / "quiz"
-    repo = Path(__file__).resolve().parents[3]
-    shutil.copytree(repo / "samples" / "cs146-quiz1", target)
+    target.mkdir()
+    (target / "qa.md").write_text(
+        "---\ntitle: CS146: Quiz 1\n---\n- (2 points) First question\n"
+    )
+    (target / "student-submissions").mkdir()
     return target
 
 
@@ -291,6 +294,10 @@ def test_quitting_grading_quits_the_app(no_service, sample) -> None:
         run_app([])
 
     assert home_cls.call_count == 1
+    app_cls.assert_called_once_with(
+        qa_file_path=sample / "qa.md",
+        submissions_path=sample / "student-submissions",
+    )
 
 
 def test_a_broken_folder_comes_back_to_home_with_the_reason(no_service, sample) -> None:
@@ -483,13 +490,15 @@ def test_open_as_workspace_imports_then_opens_that_assignment(service, sample) -
         patch("opengrader.tui.home.Home", autospec=True) as home_cls,
         patch("opengrader.tui.main._import_as_workspace", side_effect=_import),
     ):
-        home_cls.return_value.run.return_value = HomeChoice(
-            "new_workspace", folder=sample, qa_file=sample / "qa.md",
-            submissions=sample / "student-submissions",
-        )
+        home_cls.return_value.run.side_effect = [
+            HomeChoice(
+                "new_workspace", folder=sample, qa_file=sample / "qa.md",
+                submissions=sample / "student-submissions",
+            ),
+            None,
+        ]
         app_cls.return_value.run.return_value = None
         run_app([])
 
     assert calls == [(sample / "qa.md", sample / "student-submissions")]
-    # The imported assignment, not the newest one, is what opens.
     assert app_cls.call_args.kwargs["data_provider"].assignment.id == oldest.id
