@@ -1785,7 +1785,7 @@ def build_student_submission_document(
     save_layout_debug: bool = False,
     progress_callback: Callable[[str], None] | None = None,
 ) -> StudentSubmissionBuildResult:
-    from opengrader.core import ai_config
+    from opengrader.core import app_config
     from opengrader.core.ocr.extractor import process_submission_pdf
 
     pdf = Path(pdf_path)
@@ -1812,7 +1812,7 @@ def build_student_submission_document(
         if field.crop_path
     }
 
-    active_vision_reader = vision_reader or ai_config.vision_reader()
+    active_vision_reader = vision_reader or app_config.vision_reader()
 
     for field_id, field_kind in (("student_name", "name"), ("student_id", "sid")):
         crop_path = field_crop_by_id.get(field_id)

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 from typing import Callable, Iterator
@@ -17,6 +18,7 @@ from opengrader.core.submissions.student_file import StudentSubmissionDocument
 from opengrader.core.workspace.models import (
     Answer,
     Assignment,
+    AssignmentInputs,
     FeedbackJob,
     GradeSaveResult,
     Submission,
@@ -29,6 +31,11 @@ DOCUMENT = TypeAdapter(StudentSubmissionDocument)
 _SCHEMA = """
 CREATE TABLE workspace (id TEXT PRIMARY KEY, actor TEXT NOT NULL);
 CREATE TABLE assignments (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL);
+CREATE TABLE assignment_inputs (
+    id TEXT PRIMARY KEY, folder TEXT NOT NULL UNIQUE, scan TEXT NOT NULL,
+    output TEXT NOT NULL, submissions TEXT, qa TEXT, roster TEXT, blank_template TEXT,
+    pages_per_submission INTEGER, input_state TEXT NOT NULL
+);
 CREATE TABLE submission_sequence (id INTEGER PRIMARY KEY AUTOINCREMENT);
 CREATE TABLE submissions (
     assignment_id TEXT NOT NULL REFERENCES assignments(id),
@@ -60,7 +67,7 @@ CREATE TABLE feedback_jobs (
     PRIMARY KEY (assignment_id, submission_id),
     FOREIGN KEY (assignment_id, submission_id) REFERENCES submissions(assignment_id, id)
 );
-PRAGMA user_version = 1;
+PRAGMA user_version = 4;
 """
 
 
@@ -105,7 +112,7 @@ class Workspace:
         if not self.database.is_file():
             raise ValueError("No workspace database in this directory.")
         with self.connect() as db:
-            if db.execute("PRAGMA user_version").fetchone()[0] != 1:
+            if db.execute("PRAGMA user_version").fetchone()[0] != 4:
                 raise ValueError(
                     "This workspace needs a compatible version of Opengrader."
                 )
@@ -168,16 +175,59 @@ class Workspace:
                 )
             ]
 
+    def assignment_inputs(self) -> list[AssignmentInputs]:
+        with self.connect() as db:
+            return [
+                AssignmentInputs(**dict(row))
+                for row in db.execute("SELECT * FROM assignment_inputs")
+            ]
+
+    def save_assignment_inputs(self, inputs: AssignmentInputs) -> None:
+        with self.connect(write=True) as db:
+            by_folder = db.execute(
+                "SELECT id FROM assignment_inputs WHERE folder=?", (inputs.folder,)
+            ).fetchone()
+            if by_folder is not None and by_folder[0] != inputs.id:
+                raise WorkspaceConflict("This folder belongs to another assignment.")
+            by_id = db.execute(
+                "SELECT folder FROM assignment_inputs WHERE id=?", (inputs.id,)
+            ).fetchone()
+            if by_id is not None and by_id[0] != inputs.folder:
+                raise WorkspaceConflict("This assignment belongs to another folder.")
+            db.execute(
+                """INSERT INTO assignment_inputs
+                   (id, folder, scan, output, submissions, qa, roster, blank_template, pages_per_submission, input_state)
+                   VALUES (:id, :folder, :scan, :output, :submissions, :qa, :roster, :blank_template, :pages_per_submission, :input_state)
+                   ON CONFLICT(id) DO UPDATE SET
+                     scan=excluded.scan, output=excluded.output, submissions=excluded.submissions, qa=excluded.qa,
+                     roster=excluded.roster, blank_template=excluded.blank_template,
+                     pages_per_submission=excluded.pages_per_submission,
+                     input_state=excluded.input_state""",
+                inputs.model_dump(),
+            )
+
+    def replace_assignment_inputs(self, old_id: str, inputs: AssignmentInputs) -> None:
+        with self.connect(write=True) as db:
+            db.execute("DELETE FROM assignment_inputs WHERE id=?", (old_id,))
+            db.execute(
+                """INSERT INTO assignment_inputs
+                   (id, folder, scan, output, submissions, qa, roster, blank_template, pages_per_submission, input_state)
+                   VALUES (:id, :folder, :scan, :output, :submissions, :qa, :roster, :blank_template, :pages_per_submission, :input_state)""",
+                inputs.model_dump(),
+            )
+
+    def assignment_id_for_folder(self, folder: Path) -> str:
+        relative = os.path.relpath(folder.resolve(), self.root)
+        return str(uuid5(UUID(self.info().id), f"folder:{relative}"))
+
     def create_assignment(
-        self, source: str, *, source_key: str | None = None
+        self, source: str, *, assignment_id: str | None = None
     ) -> Assignment:
-        """A stable source key lets processing retries reuse the same assignment."""
+        """A saved ID lets processing retries reuse the same assignment."""
         from opengrader.core.qa_file import parse_qa_markdown
 
         qa = parse_qa_markdown(source)
-        assignment_id = (
-            uuid5(UUID(self.info().id), source_key) if source_key else uuid4()
-        )
+        assignment_id = UUID(assignment_id) if assignment_id else uuid4()
         summary = Assignment(
             id=str(assignment_id), title=qa.title or "Untitled assignment"
         )
@@ -188,7 +238,7 @@ class Workspace:
             if existing is not None:
                 if existing[0] != source:
                     raise WorkspaceConflict(
-                        "The answer key for this processing run changed. Use a new output directory for a new assignment."
+                        "The answer key for this assignment changed. Create another assignment to use a different key."
                     )
                 return summary
             db.execute(
@@ -256,6 +306,7 @@ class Workspace:
                     f"DELETE FROM {table} WHERE assignment_id=?", (assignment_id,)
                 )
             db.execute("DELETE FROM assignments WHERE id=?", (assignment_id,))
+            db.execute("DELETE FROM assignment_inputs WHERE id=?", (assignment_id,))
             record_event(db, assignment_id, kind="assignment")
 
     def assignment_source(self, assignment_id: str) -> str:

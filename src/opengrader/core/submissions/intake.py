@@ -2,7 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.ocr import OcrConfig
 from opengrader.core.submissions.batch import ExtractionJob, run_extraction_batch
 from opengrader.core.submissions.transcription import DEFAULT_ESCALATION_FLOOR
@@ -22,10 +22,10 @@ class SubmissionIntake:
         self.qa = parse_qa_markdown(qa_file.read_text())
         self.auto_grade = auto_grade
         self.assignment_version = assignment_version
-        self.ai = ai_config.resolve()
-        self.vision = ai_config.vision_reader(self.ai)
+        self.ai = app_config.resolve()
+        self.vision = app_config.vision_reader(self.ai)
         try:
-            ai_config.ensure_ready(self.ai, purpose="vision")
+            app_config.ensure_ready(self.ai, purpose="vision")
         except Exception as exc:
             if self.ai.read_handwriting or self.ai.escalate_only:
                 raise ValueError(

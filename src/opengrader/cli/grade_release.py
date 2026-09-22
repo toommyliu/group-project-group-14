@@ -17,10 +17,12 @@ from opengrader.core.release import (
     compare_release,
     latest_release,
     load_release_context,
+    load_workspace_release_context,
     read_release,
     read_releases,
     write_release,
 )
+from opengrader.core.workspace.store import Workspace
 
 EPILOG = """
 examples:
@@ -58,7 +60,7 @@ def _build_parser() -> ArgumentParser:
     create = subparsers.add_parser(
         "create", help="Check readiness and record a release (previews without --yes)."
     )
-    create.add_argument("--submissions", required=True)
+    create.add_argument("--submissions")
     create.add_argument(
         "--label",
         default="",
@@ -79,11 +81,11 @@ def _build_parser() -> ArgumentParser:
     )
 
     listing = subparsers.add_parser("list", help="Every recorded release, oldest first.")
-    listing.add_argument("--submissions", required=True)
+    listing.add_argument("--submissions")
     listing.add_argument("--json", action="store_true")
 
     show = subparsers.add_parser("show", help="One release's recorded grades.")
-    show.add_argument("--submissions", required=True)
+    show.add_argument("--submissions")
     show.add_argument(
         "--release", default="", help="Release id (default: the most recent)."
     )
@@ -92,7 +94,7 @@ def _build_parser() -> ArgumentParser:
     diff = subparsers.add_parser(
         "diff", help="What has changed since a release handed grades out."
     )
-    diff.add_argument("--submissions", required=True)
+    diff.add_argument("--submissions")
     diff.add_argument(
         "--release", default="", help="Release id (default: the most recent)."
     )
@@ -107,15 +109,29 @@ def _build_parser() -> ArgumentParser:
     )
     diff.add_argument("--json", action="store_true")
 
+    for command in (create, listing, show, diff):
+        command.add_argument("--workspace", type=Path, help="Workspace directory.")
+        command.add_argument("--assignment", help="Assignment ID within the workspace.")
     return parser
 
 
-def _resolve_submissions(raw: str) -> Path:
-    path = Path(raw).expanduser()
-    if not path.exists():
-        print(f"Error: submissions path not found: {path}", file=sys.stderr)
-        sys.exit(1)
-    return path
+def _resolve_submissions(args: Namespace) -> tuple[Path, Workspace | None, str | None]:
+    if args.submissions:
+        path = Path(args.submissions).expanduser()
+        if not path.exists():
+            print(f"Error: submissions path not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        return path, None, None
+    from opengrader.core.workspace.context import current_assignment, submissions_path
+
+    try:
+        workspace, assignment_id = current_assignment(
+            workspace_root=args.workspace, assignment_id=args.assignment
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
+    return submissions_path(workspace, assignment_id), workspace, assignment_id
 
 
 def _resolve_release(submissions: Path, release_id: str) -> GradeRelease:
@@ -145,9 +161,13 @@ def _number(value: float | None) -> str:
 
 
 def _cmd_create(args: Namespace) -> None:
-    submissions = _resolve_submissions(args.submissions)
-    context = load_release_context(
-        submissions, roster_path=args.roster.strip() or None
+    submissions, workspace, assignment_id = _resolve_submissions(args)
+    context = (
+        load_workspace_release_context(
+            workspace, assignment_id, roster_path=args.roster.strip() or None
+        )
+        if workspace is not None and assignment_id is not None
+        else load_release_context(submissions, roster_path=args.roster.strip() or None)
     )
     print_readiness(context)
     print()
@@ -194,7 +214,7 @@ def _cmd_create(args: Namespace) -> None:
 
 
 def _cmd_list(args: Namespace) -> None:
-    submissions = _resolve_submissions(args.submissions)
+    submissions, _, _ = _resolve_submissions(args)
     releases = read_releases(submissions)
     if args.json:
         print(
@@ -227,7 +247,7 @@ def _cmd_list(args: Namespace) -> None:
 
 
 def _cmd_show(args: Namespace) -> None:
-    submissions = _resolve_submissions(args.submissions)
+    submissions, _, _ = _resolve_submissions(args)
     release = _resolve_release(submissions, args.release)
     if args.json:
         print(
@@ -332,9 +352,13 @@ def _print_comparison(comparison: ReleaseComparison, *, compared_curve: str) -> 
 
 
 def _cmd_diff(args: Namespace) -> None:
-    submissions = _resolve_submissions(args.submissions)
+    submissions, workspace, assignment_id = _resolve_submissions(args)
     release = _resolve_release(submissions, args.release)
-    context = load_release_context(submissions)
+    context = (
+        load_workspace_release_context(workspace, assignment_id)
+        if workspace is not None and assignment_id is not None
+        else load_release_context(submissions)
+    )
     current_curve = None if args.raw else read_curve(submissions)
     comparison = compare_release(release, context.documents, curve=current_curve)
 

@@ -1,10 +1,3 @@
-"""`opengrader providers`: the bring-your-own-service CLI (§7.5).
-
-Each test runs against the private `providers/` directory the root conftest
-gives it, and `urlopen` is replaced wherever a call could go out. There is no
-live service in these tests.
-"""
-
 from __future__ import annotations
 
 import json
@@ -12,7 +5,8 @@ import json
 import pytest
 
 from opengrader.cli import providers as cli
-from opengrader.core import ai_config
+from opengrader.core import app_config
+from opengrader.core.app_config import manifests
 
 FLAGS = [
     "add",
@@ -28,13 +22,13 @@ FLAGS = [
 
 @pytest.fixture(autouse=True)
 def _clean_registry():
-    ai_config.reload_manifests()
+    app_config.reload_manifests()
     try:
         yield
     finally:
-        for path in ai_config.manifests_dir().glob("*.toml"):
+        for path in app_config.manifests_dir().glob("*.toml"):
             path.unlink()
-        ai_config.reload_manifests()
+        app_config.reload_manifests()
 
 
 @pytest.fixture
@@ -67,11 +61,11 @@ def test_add_from_flags_registers_a_cloud_provider_and_says_so(capsys, no_networ
     assert _run(FLAGS) == 0
 
     out = capsys.readouterr().out
-    spec = ai_config.get_provider("campus")
+    spec = app_config.get_provider("campus")
     assert spec.source == "user" and spec.kind == "cloud"
     assert "CLOUD" in out and "ai.example.edu" in out
     assert "CAMPUS_KEY" in out
-    assert (ai_config.manifests_dir() / "campus.toml").is_file()
+    assert (app_config.manifests_dir() / "campus.toml").is_file()
 
 
 def test_add_refuses_to_overwrite_without_force(capsys, no_network) -> None:
@@ -85,10 +79,10 @@ def test_add_refuses_to_overwrite_without_force(capsys, no_network) -> None:
 def test_add_example_copies_the_shipped_file(no_network) -> None:
     assert _run(["add", "--example", "anthropic"]) == 0
 
-    spec = ai_config.get_provider("anthropic")
+    spec = app_config.get_provider("anthropic")
     assert spec.dialect == "anthropic-messages"
-    written = (ai_config.manifests_dir() / "anthropic.toml").read_text(encoding="utf-8")
-    assert written.startswith("# Example provider manifest")
+    written = (app_config.manifests_dir() / "anthropic.toml").read_text(encoding="utf-8")
+    assert written == manifests.example_text("anthropic")
 
 
 def test_add_from_a_file_validates_it_first(tmp_path, capsys, no_network) -> None:
@@ -102,7 +96,7 @@ def test_add_from_a_file_validates_it_first(tmp_path, capsys, no_network) -> Non
 
     assert _run(["add", "--from", str(bad)]) == 1
     assert "kind" in capsys.readouterr().err
-    assert list(ai_config.manifests_dir().glob("*.toml")) == []
+    assert list(app_config.manifests_dir().glob("*.toml")) == []
 
 
 def test_add_needs_exactly_one_source(capsys) -> None:
@@ -111,7 +105,7 @@ def test_add_needs_exactly_one_source(capsys) -> None:
 
 
 def test_validate_reports_each_file(capsys, no_network) -> None:
-    directory = ai_config.manifests_dir()
+    directory = app_config.manifests_dir()
     directory.mkdir(parents=True, exist_ok=True)
     assert _run(FLAGS) == 0
     (directory / "broken.toml").write_text("not = [valid", encoding="utf-8")
@@ -128,8 +122,8 @@ def test_remove_deletes_only_what_the_user_added(capsys, no_network) -> None:
 
     assert _run(["remove", "ollama", "--yes"]) == 1
     assert _run(["remove", "campus", "--yes"]) == 0
-    assert "campus" not in {s.name for s in ai_config.registered_providers()}
-    assert not (ai_config.manifests_dir() / "campus.toml").exists()
+    assert "campus" not in {s.name for s in app_config.registered_providers()}
+    assert not (app_config.manifests_dir() / "campus.toml").exists()
 
 
 def test_test_refuses_a_cloud_provider_without_confirmation(

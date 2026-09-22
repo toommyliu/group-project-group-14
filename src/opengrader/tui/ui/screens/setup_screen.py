@@ -22,7 +22,7 @@ from textual.widgets import (
     Collapsible,
 )
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.pipeline import (
     STAGE_EXTRACT,
     LlmOptions,
@@ -358,8 +358,8 @@ class SetupScreen(Vertical):
         return Horizontal(*buttons, classes="card-actions")
 
     @staticmethod
-    def _ai() -> ai_config.ResolvedAI:
-        return ai_config.resolve()
+    def _ai() -> app_config.ResolvedAI:
+        return app_config.resolve()
 
     def _auto_ollama_argv(self) -> list[str]:
         return ["--auto-ollama"] if self._ai().auto_start else []
@@ -1671,7 +1671,7 @@ class SetupScreen(Vertical):
         self.query_one("#pipe-ai-status", Static).update(self._ai_status_text("pipe"))
 
     def _open_ai_settings(self) -> None:
-        def _refresh(saved: ai_config.AISettings | None) -> None:
+        def _refresh(saved: app_config.AISettings | None) -> None:
             if saved is None:
                 return
             self._refresh_ai_displays()
@@ -1700,13 +1700,13 @@ class SetupScreen(Vertical):
             if recommended is None:
                 return
             settings = replace(
-                ai_config.load_settings(),
+                app_config.load_settings(),
                 min_confidence=round(recommended, 2),
                 min_confidence_measured=True,
                 grade_written=True,
             )
             try:
-                ai_config.save_settings(settings)
+                app_config.save_settings(settings)
             except OSError as exc:
                 self.app.notify(
                     f"Could not save the measured confidence: {exc}",
@@ -2075,11 +2075,6 @@ class SetupScreen(Vertical):
         self.call_after_refresh(section.scroll_visible)
 
     def _session_paths(self) -> tuple[str, str]:
-        """(answer key, submissions) of the folder being graded, if any.
-
-        Tools that act on "the class" default to whatever is open, the way
-        the Start grading card's fields used to be their fallback.
-        """
         provider = getattr(self.app, "data_provider", None)
         if not getattr(self.app.workflow_state, "session_open", False):
             return "", ""
@@ -2486,8 +2481,8 @@ class SetupScreen(Vertical):
 
         if probe_llm:
             try:
-                ai_config.ensure_ready(purpose="text")
-            except ai_config.AIUnavailableError:
+                app_config.ensure_ready(purpose="text")
+            except app_config.AIUnavailableError:
                 argv = [*argv, *self._auto_ollama_argv()]
 
         def on_file_start(file_name: str, index: int, total: int) -> None:

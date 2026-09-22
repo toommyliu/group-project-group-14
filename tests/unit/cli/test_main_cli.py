@@ -119,6 +119,16 @@ def test_dispatch_makes_a_real_argparse_usage_line_name_the_dispatched_command(
     assert "usage: opengrader qa-file " in out
 
 
+def test_folder_shorthand_opens_the_tui_command(tmp_path: Path) -> None:
+    folder = tmp_path / "midterm"
+    folder.mkdir()
+
+    result = CliRunner().invoke(cli, [str(folder), "--help"])
+
+    assert result.exit_code == 0
+    assert "usage: opengrader tui" in result.output
+
+
 def test_dispatch_exit_codes_follow_the_entry_functions_return_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

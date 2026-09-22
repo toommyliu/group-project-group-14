@@ -1,0 +1,19 @@
+# Install with: opengrader-providers add --example openai
+# api_key_env names a variable; keep the key out of this file.
+
+name         = "openai"
+label        = "OpenAI"
+summary      = "OpenAI's hosted GPT models, over the API key you already have."
+dialect      = "openai-chat"
+host         = "https://api.openai.com/v1"
+vision_model = "gpt-4o-mini"
+text_model   = "gpt-4o-mini"
+api_key_env  = "OPENAI_API_KEY"
+setup_hint   = "Create a key at https://platform.openai.com/api-keys, then set OPENAI_API_KEY."
+
+supports_model_listing = true
+
+# Example pricing in dollars per million tokens. Check current rates before use.
+[pricing]
+input_per_mtok  = 0.15
+output_per_mtok = 0.60

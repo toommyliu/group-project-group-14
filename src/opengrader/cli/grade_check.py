@@ -12,6 +12,7 @@ from opengrader.core.release import (
     ReadinessReport,
     ReleaseContext,
     load_release_context,
+    load_workspace_release_context,
 )
 
 EPILOG = """
@@ -38,9 +39,10 @@ def _build_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "--submissions",
-        required=True,
-        help="Submissions directory (or a single .submission.md file).",
+        help="Check extraction files instead of the current workspace assignment.",
     )
+    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
+    parser.add_argument("--assignment", help="Assignment ID within the workspace.")
     parser.add_argument(
         "--roster",
         default="",
@@ -136,15 +138,28 @@ def print_readiness(context: ReleaseContext) -> None:
 
 
 def run_cli(argv: list[str] | None = None) -> ReleaseContext:
-    args = _build_parser().parse_args(argv)
-    submissions = Path(args.submissions).expanduser()
-    if not submissions.exists():
-        print(f"Error: submissions path not found: {submissions}", file=sys.stderr)
-        sys.exit(1)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.submissions:
+        submissions = Path(args.submissions).expanduser()
+        if not submissions.exists():
+            print(f"Error: submissions path not found: {submissions}", file=sys.stderr)
+            sys.exit(1)
+        context = load_release_context(
+            submissions, roster_path=args.roster.strip() or None
+        )
+    else:
+        from opengrader.core.workspace.context import current_assignment
 
-    context = load_release_context(
-        submissions, roster_path=args.roster.strip() or None
-    )
+        try:
+            workspace, assignment_id = current_assignment(
+                workspace_root=args.workspace, assignment_id=args.assignment
+            )
+            context = load_workspace_release_context(
+                workspace, assignment_id, roster_path=args.roster.strip() or None
+            )
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
 
     if args.json:
         print(json.dumps(_report_payload(context), indent=2))

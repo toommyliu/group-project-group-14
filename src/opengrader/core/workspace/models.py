@@ -29,7 +29,21 @@ class Assignment(BaseModel):
     title: str
 
 
+class AssignmentInputs(BaseModel):
+    id: str
+    folder: str
+    scan: str
+    output: str
+    submissions: str | None = None
+    qa: str | None = None
+    roster: str | None = None
+    blank_template: str | None = None
+    pages_per_submission: int | None = None
+    input_state: str = ""
+
+
 class PipelineOutput(BaseModel):
+    assignment_id: str
     qa_markdown: str
     submissions_dir: str
 

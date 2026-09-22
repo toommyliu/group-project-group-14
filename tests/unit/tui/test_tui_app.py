@@ -45,6 +45,7 @@ def workspace_provider(tmp_path):
     publication = publish_pipeline(
         workspace,
         PipelineOutput(
+            assignment_id=workspace.assignment_id_for_folder(sample),
             qa_markdown=(sample / "qa.md").read_text(),
             submissions_dir=str((sample / "student-submissions").resolve()),
         ),
@@ -2684,7 +2685,6 @@ def test_the_watch_stops_once_the_extractor_worker_reports_done(tmp_path) -> Non
     assert stopped is True
 
 
-# --- The start page: restored, and reachable from every session ---------------
 #
 # `tui` must work with no workspace service. A bare TuiApp opens the start page
 # (pipeline steps plus helper tools); Launch Grading opens a folder in place;
@@ -2802,7 +2802,6 @@ def test_opening_a_folder_from_a_workspace_session_stops_following_it(
             assert app._stop_workspace_events is None
 
     asyncio.run(run())
-
 
 
 def test_tools_opened_on_a_scans_folder_fill_the_pipeline_card(tmp_path) -> None:

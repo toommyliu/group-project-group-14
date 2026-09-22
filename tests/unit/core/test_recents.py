@@ -1,16 +1,10 @@
-"""Home's recently opened list (core/recents.py).
-
-The root conftest points the user config directory at a fresh temp folder per
-test, so `recents_path()` is private to each test.
-"""
-
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 from opengrader.core import recents
-from opengrader.core.ai_config import settings_path
+from opengrader.core.app_config import settings_path
 
 
 def test_the_list_lives_beside_ai_json_not_in_an_assignment_folder() -> None:

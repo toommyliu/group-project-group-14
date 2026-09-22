@@ -5,7 +5,7 @@ import pytest
 from pypdf import PdfReader
 
 from opengrader.cli import submission_splitter
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.submissions.extra_pages import (
     read_extra_pages_map,
     resolve_extra_pages_path,
@@ -420,7 +420,7 @@ def test_llm_page_numbers_on_uses_vlm_during_boundary_detection(
 
 
 def test_llm_page_numbers_defaults_from_ai_setup(tmp_path: Path, monkeypatch) -> None:
-    ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
     calls = _record_vlm_calls(monkeypatch)
     bundle = _bundle(tmp_path / "scans.pdf", 4)
 
@@ -439,7 +439,7 @@ def test_llm_page_numbers_defaults_from_ai_setup(tmp_path: Path, monkeypatch) ->
 def test_llm_page_numbers_defaults_off_when_ai_setup_leaves_it_off(
     tmp_path: Path, monkeypatch
 ) -> None:
-    ai_config.save_settings(ai_config.AISettings())
+    app_config.save_settings(app_config.AISettings())
     calls = _record_vlm_calls(monkeypatch)
     bundle = _bundle(tmp_path / "scans.pdf", 4)
 

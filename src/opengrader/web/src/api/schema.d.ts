@@ -774,6 +774,8 @@ export interface components {
         };
         /** PipelineOutput */
         PipelineOutput: {
+            /** Assignment Id */
+            assignment_id: string;
             /** Qa Markdown */
             qa_markdown: string;
             /** Submissions Dir */

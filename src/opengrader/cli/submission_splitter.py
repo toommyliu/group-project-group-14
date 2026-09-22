@@ -24,11 +24,9 @@ from opengrader.core.submissions import (
     summarize_issues,
     write_extra_pages_map,
 )
-from opengrader.core import ai_config
+from opengrader.core import app_config
 
 if TYPE_CHECKING:  # pragma: no cover
-    # Annotation only — the reader is built by ai_config.vision_reader(), never
-    # constructed here.
     from opengrader.core.ocr.vision_reader import VisionReader
 
 from pypdf import PdfReader
@@ -50,7 +48,7 @@ examples:
 
 
 def _build_parser() -> ArgumentParser:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description=(
             "Split one scanned PDF that contains many student submissions into "
@@ -261,14 +259,14 @@ def _start_ollama_server(args, emit: "Callable[[str], None]"):
 
 
 def _verified_vision_reader(args, emit: "Callable[[str], None]") -> "VisionReader | None":
-    resolved = ai_config.with_overrides(
+    resolved = app_config.with_overrides(
         host=args.ollama_host,
         vision_model=args.ollama_model,
         timeout_seconds=args.ollama_timeout,
     )
-    reader = ai_config.vision_reader(resolved)
+    reader = app_config.vision_reader(resolved)
     try:
-        ai_config.ensure_ready(resolved, purpose="vision")
+        app_config.ensure_ready(resolved, purpose="vision")
     except Exception as exc:
         emit(f"Ollama vision fallback unavailable ({exc}); using Tesseract only.")
         return None
@@ -443,7 +441,7 @@ def run_cli(
     ollama_log_file = None
     try:
         if args.auto_ollama and may_use_vlm:
-            provider_kind = ai_config.with_overrides(
+            provider_kind = app_config.with_overrides(
                 host=args.ollama_host,
                 vision_model=args.ollama_model,
                 timeout_seconds=args.ollama_timeout,

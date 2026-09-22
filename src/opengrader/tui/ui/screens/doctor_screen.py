@@ -7,7 +7,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, RichLog, Static
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.environment import EnvironmentReport, build_environment_report
 from opengrader.tui.formatting import (
     format_environment_check,
@@ -72,9 +72,9 @@ class DoctorScreen(ModalScreen[None]):
     def __init__(
         self,
         *,
-        vision_model: str = ai_config.DEFAULT_VISION_MODEL,
+        vision_model: str = app_config.DEFAULT_VISION_MODEL,
         text_model: str | None = None,
-        ollama_host: str = ai_config.DEFAULT_HOST,
+        ollama_host: str = app_config.DEFAULT_HOST,
     ) -> None:
         super().__init__()
         self._vision_model = vision_model
@@ -135,7 +135,7 @@ class DoctorScreen(ModalScreen[None]):
             ollama_host=self._ollama_host,
             check_graphics=False,
             smoke_test=smoke,
-            ai=ai_config.resolve(),
+            ai=app_config.resolve(),
             time_ai=False,
         )
         self.app.call_from_thread(self._show, report)

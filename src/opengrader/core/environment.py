@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from opengrader.core.crypto import encryption_available
 
 if TYPE_CHECKING:
-    from opengrader.core.ai_config import LatencyMeasurement, ResolvedAI
+    from opengrader.core.app_config import LatencyMeasurement, ResolvedAI
 
 CheckStatus = Literal["ready", "degraded", "broken", "unknown"]
 
@@ -340,7 +340,7 @@ def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
 
 
 def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> EnvironmentCheck:
-    from opengrader.core import ai_config
+    from opengrader.core import app_config
 
     if measurement is None:
         return EnvironmentCheck(
@@ -361,8 +361,8 @@ def evaluate_ai_latency(measurement: "LatencyMeasurement | None") -> Environment
         )
 
     share = measurement.share_of_limit
-    if share is not None and share >= ai_config.TIMEOUT_WARN_FRACTION:
-        recommended = ai_config.recommend_timeout(measurement.seconds or 0, measurement.limit)
+    if share is not None and share >= app_config.TIMEOUT_WARN_FRACTION:
+        recommended = app_config.recommend_timeout(measurement.seconds or 0, measurement.limit)
         if recommended is not None:
             return EnvironmentCheck(
                 name="AI response time",
@@ -446,17 +446,17 @@ def probe_optional_import(module: str) -> ImportProbe:
 
 
 def probe_ollama(host: str, *, timeout_seconds: float = 3.0) -> OllamaProbe:
-    from opengrader.core import ai_config
+    from opengrader.core import app_config
 
     # This is explicitly the Ollama probe (doctor's "is the local server up"
     # check), so it resolves against that provider by name rather than
     # whatever the user has configured — a cloud-configured install should
     # still get a straight answer about the local server.
-    resolved = ai_config.for_provider(
+    resolved = app_config.for_provider(
         "ollama", host=host, timeout_seconds=timeout_seconds
     )
     try:
-        models = ai_config.available_models(resolved)
+        models = app_config.available_models(resolved)
     except Exception as exc:  # provider client errors are provider-specific
         return OllamaProbe(host=host, reachable=False, error=summarize_connection_error(str(exc)))
     return OllamaProbe(host=host, reachable=True, models=tuple(models))
@@ -517,9 +517,9 @@ def run_smoke_test() -> tuple[bool, str]:
 
 
 def probe_ai_latency(resolved: "ResolvedAI") -> "LatencyMeasurement | None":
-    from opengrader.core import ai_config
+    from opengrader.core import app_config
 
-    return ai_config.measure_generate_latency(resolved)
+    return app_config.measure_generate_latency(resolved)
 
 
 def build_environment_report(

@@ -1,21 +1,3 @@
-"""Add, inspect, test and remove AI providers from the TUI (§7.5).
-
-The TUI face of `opengrader-providers`. Both go through the same helpers in
-`core/ai_config/manifests.py`, which validate a manifest before it is written,
-never overwrite one unasked, and describe a provider the same way everywhere.
-
-This screen does not pick the active provider. That is still AI Setup's job,
-and AI Setup does not know this screen exists. A provider added here shows up
-in AI Setup's dropdown only because the registry says it is there. If that
-ever needs an edit to `ai_settings_screen.py`, the registry contract has broken
-somewhere (§7.9, Phase 4's exit criterion).
-
-Anything that would reach a cloud host or delete a file needs a second press.
-The first press states what will happen, and changing the selection disarms
-it. This is not the L1 consent modal, which is Phase 5's. It only makes sure
-one stray keypress cannot send anything.
-"""
-
 from __future__ import annotations
 
 from textual import on
@@ -25,8 +7,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, RichLog, Select, Static
 
-from opengrader.core import ai_config
-from opengrader.core.ai_config import manifests as ai_manifests
+from opengrader.core import app_config
+from opengrader.core.app_config import manifests as ai_manifests
 
 
 class ProviderScreen(ModalScreen[bool]):
@@ -102,10 +84,7 @@ class ProviderScreen(ModalScreen[bool]):
     def __init__(self) -> None:
         super().__init__()
         self._changed = False
-        # (action, provider name) awaiting its confirming second press.
         self._armed: tuple[str, str] | None = None
-
-    # --- layout ------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         examples = ai_manifests.example_names()
@@ -118,13 +97,13 @@ class ProviderScreen(ModalScreen[bool]):
                 "and which models to ask for. It never holds your key, only "
                 "the name of the variable the key is in. Choose which "
                 "provider to use in AI setup.\n"
-                f"Provider files live in {ai_config.manifests_dir()}",
+                f"Provider files live in {app_config.manifests_dir()}",
                 id="prov-hint",
             )
             with Horizontal(classes="prov-row"):
                 yield Select(
                     self._provider_options(),
-                    value=ai_config.DEFAULT_PROVIDER,
+                    value=app_config.DEFAULT_PROVIDER,
                     allow_blank=False,
                     id="prov-select",
                 )
@@ -156,21 +135,19 @@ class ProviderScreen(ModalScreen[bool]):
         self._show_selected()
         self._show_problems()
 
-    # --- state -------------------------------------------------------------
-
     @staticmethod
     def _provider_options() -> list[tuple[str, str]]:
         options = []
-        for spec in ai_config.registered_providers():
+        for spec in app_config.registered_providers():
             suffix = "  (cloud)" if spec.sends_data_off_machine else ""
             options.append((f"{spec.label}{suffix}", spec.name))
         return options
 
-    def _selected(self) -> ai_config.ProviderSpec | None:
+    def _selected(self) -> app_config.ProviderSpec | None:
         value = self.query_one("#prov-select", Select).value
         if not isinstance(value, str):
             return None
-        for spec in ai_config.registered_providers():
+        for spec in app_config.registered_providers():
             if spec.name == value:
                 return spec
         return None
@@ -190,7 +167,7 @@ class ProviderScreen(ModalScreen[bool]):
         remove.disabled = spec.source != "user"
 
     def _show_problems(self) -> None:
-        problems = ai_config.manifest_problems()
+        problems = app_config.manifest_problems()
         text = ""
         if problems:
             text = "Skipped provider files:\n" + "\n".join(f"  • {p}" for p in problems)
@@ -202,7 +179,7 @@ class ProviderScreen(ModalScreen[bool]):
         names = {name for _label, name in options}
         keep = select if select in names else picker.value
         picker.set_options(options)
-        picker.value = keep if keep in names else ai_config.DEFAULT_PROVIDER
+        picker.value = keep if keep in names else app_config.DEFAULT_PROVIDER
         self._armed = None
         self._show_selected()
         self._show_problems()
@@ -221,8 +198,6 @@ class ProviderScreen(ModalScreen[bool]):
             return True
         self._armed = (action, name)
         return False
-
-    # --- events ------------------------------------------------------------
 
     @on(Select.Changed, "#prov-select")
     def _on_select(self, event: Select.Changed) -> None:
@@ -246,7 +221,7 @@ class ProviderScreen(ModalScreen[bool]):
         except ai_manifests.ManifestError as exc:
             self._log(str(exc))
             return
-        ai_config.reload_manifests()
+        app_config.reload_manifests()
         self._changed = True
         self._refresh_providers(select=spec.name)
         lines = [f"Added {spec.label}: wrote {dest}."]
@@ -283,23 +258,23 @@ class ProviderScreen(ModalScreen[bool]):
         except ai_manifests.ManifestError as exc:
             self._log(str(exc))
             return
-        ai_config.reload_manifests()
+        app_config.reload_manifests()
         self._changed = True
-        self._refresh_providers(select=ai_config.DEFAULT_PROVIDER)
+        self._refresh_providers(select=app_config.DEFAULT_PROVIDER)
         lines = [f"Removed {spec.label} ({path})."]
-        if ai_config.load_settings().provider == spec.name:
+        if app_config.load_settings().provider == spec.name:
             lines.append(
                 f"It was the provider chosen in AI setup, so Opengrader falls "
-                f"back to {ai_config.OLLAMA.label} until you choose another."
+                f"back to {app_config.OLLAMA.label} until you choose another."
             )
         self._log(*lines)
 
     @on(Button.Pressed, "#prov-reload")
     def _on_reload(self, event: Button.Pressed) -> None:
         event.stop()
-        before = {spec.name for spec in ai_config.registered_providers()}
-        problems = ai_config.reload_manifests()
-        after = {spec.name for spec in ai_config.registered_providers()}
+        before = {spec.name for spec in app_config.registered_providers()}
+        problems = app_config.reload_manifests()
+        after = {spec.name for spec in app_config.registered_providers()}
         if before != after:
             self._changed = True
         self._refresh_providers()
@@ -332,15 +307,15 @@ class ProviderScreen(ModalScreen[bool]):
         self.run_worker(lambda: self._test(spec.name), thread=True, exclusive=True)
 
     def _test(self, name: str) -> None:
-        resolved = ai_config.for_provider(name)
+        resolved = app_config.for_provider(name)
         lines: list[str] = []
         try:
-            ai_config.ensure_ready(resolved, purpose="text")
-        except ai_config.AIUnavailableError as exc:
+            app_config.ensure_ready(resolved, purpose="text")
+        except app_config.AIUnavailableError as exc:
             lines.append(str(exc))
             self.app.call_from_thread(self._finish_test, lines)
             return
-        measurement = ai_config.measure_generate_latency(
+        measurement = app_config.measure_generate_latency(
             resolved, role="grading", prompt=ai_manifests.CONNECTION_TEST_PROMPT
         )
         lines.append(measurement.describe())

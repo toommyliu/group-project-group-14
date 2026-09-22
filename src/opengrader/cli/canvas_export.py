@@ -113,9 +113,12 @@ def setup_args() -> ArgumentParser:
     )
     parser.add_argument(
         "--submissions",
-        required=True,
         metavar="PATH",
-        help="Path to a .submission.md file or directory containing submission files.",
+        help="Read extraction files instead of the current workspace assignment.",
+    )
+    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
+    parser.add_argument(
+        "--workspace-assignment", help="Assignment ID within the workspace."
     )
     parser.add_argument(
         "--course",
@@ -161,15 +164,40 @@ def run_cli(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    submissions_path = Path(args.submissions)
-    try:
-        paths = _submission_paths(submissions_path)
-    except FileNotFoundError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        sys.exit(1)
+    if args.submissions:
+        submissions_path = Path(args.submissions)
+        try:
+            paths = _submission_paths(submissions_path)
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        records = [(path, load_student_submission_markdown(path)) for path in paths]
+    else:
+        from opengrader.core.workspace.context import (
+            current_assignment,
+            submissions_path as workspace_submissions_path,
+        )
 
-    if not paths:
-        print(f"error: no *.submission.md files found in {submissions_path}", file=sys.stderr)
+        if args.attach_pdf:
+            parser.error("--attach-pdf requires --submissions with annotated PDFs.")
+        try:
+            workspace, assignment_id = current_assignment(
+                workspace_root=args.workspace,
+                assignment_id=args.workspace_assignment,
+            )
+            submissions_path = workspace_submissions_path(workspace, assignment_id)
+            records = [
+                (
+                    submissions_path / f"submission-{item.id}.submission.md",
+                    workspace.document(assignment_id, item.id),
+                )
+                for item in workspace.submissions(assignment_id)
+            ]
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+
+    if not records:
+        print(f"error: no submissions found in {submissions_path}", file=sys.stderr)
         sys.exit(1)
 
     curve = read_curve(submissions_path)
@@ -181,9 +209,8 @@ def run_cli(argv: list[str] | None = None) -> None:
 
     ready = skipped = failed = 0
 
-    for path in paths:
+    for path, doc in records:
         print(f"  {path.name}")
-        doc = load_student_submission_markdown(path)
 
         ungraded = _ungraded_count(doc)
         if ungraded > 0 and not args.partial:

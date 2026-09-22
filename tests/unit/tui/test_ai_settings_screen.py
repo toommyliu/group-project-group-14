@@ -7,8 +7,8 @@ import pytest
 from textual.app import App
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
-from opengrader.core import ai_config
-from opengrader.core.ai_config import AISettings, ProviderSpec
+from opengrader.core import app_config
+from opengrader.core.app_config import AISettings, ProviderSpec
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
 
 _SIZE = (120, 44)
@@ -54,11 +54,11 @@ def fake_cloud_provider():
         api_key_env="FAKE_CLOUD_API_KEY",
         requires_api_key=True,
     )
-    ai_config.register_provider(spec)
+    app_config.register_provider(spec)
     try:
         yield spec
     finally:
-        ai_config._REGISTRY.pop(spec.name, None)
+        app_config._REGISTRY.pop(spec.name, None)
 
 
 def test_cancel_writes_nothing_and_dismisses_with_none() -> None:
@@ -72,7 +72,7 @@ def test_cancel_writes_nothing_and_dismisses_with_none() -> None:
             await pilot.pause()
 
     asyncio.run(run())
-    assert not ai_config.settings_path().exists()
+    assert not app_config.settings_path().exists()
 
 
 def test_cancel_dismisses_with_none() -> None:
@@ -107,7 +107,7 @@ def test_save_persists_and_returns_the_settings() -> None:
     assert result.vision_model == "llama-vision:9b"
     assert result.host == "http://box:11434"
 
-    reloaded = ai_config.load_settings()
+    reloaded = app_config.load_settings()
     assert reloaded.vision_model == "llama-vision:9b"
     assert reloaded.host == "http://box:11434"
 
@@ -128,12 +128,15 @@ def test_saving_with_nothing_typed_records_only_the_version() -> None:
         return placeholders
 
     vision_ph, text_ph, host_ph = asyncio.run(run())
-    assert vision_ph == ai_config.DEFAULT_VISION_MODEL
-    assert text_ph == ai_config.DEFAULT_TEXT_MODEL
-    assert host_ph == ai_config.DEFAULT_HOST
+    assert vision_ph == app_config.DEFAULT_VISION_MODEL
+    assert text_ph == app_config.DEFAULT_TEXT_MODEL
+    assert host_ph == app_config.DEFAULT_HOST
 
-    raw = json.loads(ai_config.settings_path().read_text(encoding="utf-8"))
-    assert raw == {"version": ai_config.SETTINGS_VERSION}
+    raw = json.loads(app_config.settings_path().read_text(encoding="utf-8"))
+    assert raw == {
+        "$schema": "./config.schema.json",
+        "version": app_config.SETTINGS_VERSION,
+    }
 
 
 def test_existing_settings_prefill_the_form_and_resaving_is_a_no_op() -> None:
@@ -144,10 +147,11 @@ def test_existing_settings_prefill_the_form_and_resaving_is_a_no_op() -> None:
         min_confidence=0.55,
         auto_start=False,
     )
-    path = ai_config.save_settings(original)
+    path = app_config.save_settings(original)
     before = path.read_text(encoding="utf-8")
     before_keys = set(json.loads(before))
     assert before_keys == {
+        "$schema",
         "version",
         "vision_model",
         "text_model",
@@ -207,7 +211,7 @@ def test_connection_test_resolves_the_typed_values_and_writes_nothing(
     assert captured, "list_models was never called"
     assert captured[0].model == "typed-text-model"
     assert captured[0].host == "http://typed-host:1"
-    assert not ai_config.settings_path().exists()
+    assert not app_config.settings_path().exists()
 
 
 def test_a_failed_connection_test_shows_the_providers_setup_hint(
@@ -231,7 +235,7 @@ def test_a_failed_connection_test_shows_the_providers_setup_hint(
 
     text = asyncio.run(run())
     assert "connection refused" in text
-    hint = ai_config.get_provider(ai_config.DEFAULT_PROVIDER).setup_hint
+    hint = app_config.get_provider(app_config.DEFAULT_PROVIDER).setup_hint
     assert "ollama pull qwen2.5vl:7b" in hint
     assert "ollama pull qwen2.5vl:7b" in text
 
@@ -276,7 +280,7 @@ def test_an_api_key_is_never_written_to_the_settings_file(
             await pilot.pause()
 
     asyncio.run(run())
-    raw_text = ai_config.settings_path().read_text(encoding="utf-8")
+    raw_text = app_config.settings_path().read_text(encoding="utf-8")
     assert "sk-super-secret-value" not in raw_text
     raw = json.loads(raw_text)
     assert "api_key" not in raw
@@ -309,7 +313,7 @@ def test_an_out_of_range_confidence_is_refused_with_a_message(
     assert dismissed is False
     assert notices, "an out-of-range confidence must notify, not save silently"
     assert notices[-1][1] == "error"
-    assert not ai_config.settings_path().exists()
+    assert not app_config.settings_path().exists()
 
 
 def test_a_non_numeric_confidence_is_refused_with_a_message(
@@ -338,7 +342,7 @@ def test_a_non_numeric_confidence_is_refused_with_a_message(
     assert dismissed is False
     assert notices, "a non-numeric confidence must notify, not crash"
     assert notices[-1][1] == "error"
-    assert not ai_config.settings_path().exists()
+    assert not app_config.settings_path().exists()
 
 
 def test_a_valid_confidence_is_accepted_and_round_trips() -> None:
@@ -355,11 +359,11 @@ def test_a_valid_confidence_is_accepted_and_round_trips() -> None:
     result = asyncio.run(run())
     assert isinstance(result, AISettings)
     assert result.min_confidence == pytest.approx(0.42)
-    assert ai_config.load_settings().min_confidence == pytest.approx(0.42)
+    assert app_config.load_settings().min_confidence == pytest.approx(0.42)
 
 
 def test_timeout_prefills_from_settings_and_round_trips() -> None:
-    ai_config.save_settings(AISettings(timeout_seconds=300.0))
+    app_config.save_settings(AISettings(timeout_seconds=300.0))
 
     async def run() -> tuple[str, AISettings | None]:
         app = _Host(AISettingsScreen())
@@ -375,11 +379,11 @@ def test_timeout_prefills_from_settings_and_round_trips() -> None:
     assert shown == "300"
     assert result is not None
     assert result.timeout_seconds == pytest.approx(300.0)
-    assert ai_config.load_settings().timeout_seconds == pytest.approx(300.0)
+    assert app_config.load_settings().timeout_seconds == pytest.approx(300.0)
 
 
 def test_blank_timeout_saves_none() -> None:
-    ai_config.save_settings(AISettings(timeout_seconds=300.0))
+    app_config.save_settings(AISettings(timeout_seconds=300.0))
 
     async def run() -> AISettings | None:
         app = _Host(AISettingsScreen())
@@ -395,14 +399,14 @@ def test_blank_timeout_saves_none() -> None:
     result = asyncio.run(run())
     assert result is not None
     assert result.timeout_seconds is None
-    assert ai_config.load_settings().timeout_seconds is None
+    assert app_config.load_settings().timeout_seconds is None
 
 
 @pytest.mark.parametrize("bad", ["not-a-number", "0", "-5"])
 def test_an_invalid_timeout_is_refused_with_a_message(
     bad: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ai_config.save_settings(AISettings(timeout_seconds=300.0))
+    app_config.save_settings(AISettings(timeout_seconds=300.0))
     notices: list[tuple[str, str]] = []
 
     async def run() -> bool:
@@ -426,7 +430,7 @@ def test_an_invalid_timeout_is_refused_with_a_message(
     assert dismissed is False
     assert notices, "an invalid timeout must notify, not save silently"
     assert notices[-1][1] == "error"
-    assert ai_config.load_settings().timeout_seconds == pytest.approx(300.0)
+    assert app_config.load_settings().timeout_seconds == pytest.approx(300.0)
 
 
 def test_new_ai_switches_round_trip_through_collect() -> None:
@@ -457,7 +461,7 @@ def test_new_ai_switches_round_trip_through_collect() -> None:
     assert result.require_calibration is True
     assert result.auto_grade is False
 
-    reloaded = ai_config.load_settings()
+    reloaded = app_config.load_settings()
     assert reloaded.read_handwriting is True
     assert reloaded.escalate_only is True
     assert reloaded.transcribe_math is True
@@ -523,7 +527,7 @@ def test_grading_suboptions_hidden_until_ticked() -> None:
 
 
 def test_suboptions_shown_at_compose_when_already_saved_on() -> None:
-    ai_config.save_settings(AISettings(read_handwriting=True, grade_written=True))
+    app_config.save_settings(AISettings(read_handwriting=True, grade_written=True))
 
     async def run() -> tuple[bool, bool]:
         app = _Host(AISettingsScreen())
@@ -541,7 +545,7 @@ def test_suboptions_shown_at_compose_when_already_saved_on() -> None:
 
 
 def test_min_confidence_measured_is_preserved_when_the_box_is_untouched() -> None:
-    ai_config.save_settings(
+    app_config.save_settings(
         AISettings(min_confidence=0.81, min_confidence_measured=True)
     )
 
@@ -559,11 +563,11 @@ def test_min_confidence_measured_is_preserved_when_the_box_is_untouched() -> Non
     assert result is not None
     assert result.min_confidence == pytest.approx(0.81)
     assert result.min_confidence_measured is True
-    assert ai_config.load_settings().min_confidence_measured is True
+    assert app_config.load_settings().min_confidence_measured is True
 
 
 def test_min_confidence_measured_is_cleared_when_the_value_is_edited() -> None:
-    ai_config.save_settings(
+    app_config.save_settings(
         AISettings(min_confidence=0.81, min_confidence_measured=True)
     )
 
@@ -581,26 +585,26 @@ def test_min_confidence_measured_is_cleared_when_the_value_is_edited() -> None:
     assert result is not None
     assert result.min_confidence == pytest.approx(0.9)
     assert result.min_confidence_measured is False
-    assert ai_config.load_settings().min_confidence_measured is False
+    assert app_config.load_settings().min_confidence_measured is False
 
 
 def test_connection_test_times_a_call_and_offers_to_apply_a_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_list_models(config):  # noqa: ANN001
-        return [ai_config.DEFAULT_VISION_MODEL, ai_config.DEFAULT_TEXT_MODEL]
+        return [app_config.DEFAULT_VISION_MODEL, app_config.DEFAULT_TEXT_MODEL]
 
     monkeypatch.setattr("opengrader.core.llm.list_models", fake_list_models)
 
     def fake_measure(resolved, *, role="handwriting", **kwargs):  # noqa: ANN001
-        return ai_config.LatencyMeasurement(
+        return app_config.LatencyMeasurement(
             role=role,
             model=resolved.vision_model,
             limit=resolved.timeout_seconds,
             seconds=100.0,
         )
 
-    monkeypatch.setattr(ai_config, "measure_generate_latency", fake_measure)
+    monkeypatch.setattr(app_config, "measure_generate_latency", fake_measure)
 
     async def run() -> tuple[str, bool, str]:
         app = _Host(AISettingsScreen())
@@ -631,19 +635,19 @@ def test_apply_button_stays_hidden_and_disabled_with_no_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_list_models(config):  # noqa: ANN001
-        return [ai_config.DEFAULT_VISION_MODEL, ai_config.DEFAULT_TEXT_MODEL]
+        return [app_config.DEFAULT_VISION_MODEL, app_config.DEFAULT_TEXT_MODEL]
 
     monkeypatch.setattr("opengrader.core.llm.list_models", fake_list_models)
 
     def fake_measure(resolved, *, role="handwriting", **kwargs):  # noqa: ANN001
-        return ai_config.LatencyMeasurement(
+        return app_config.LatencyMeasurement(
             role=role,
             model=resolved.vision_model,
             limit=resolved.timeout_seconds,
             seconds=1.0,
         )
 
-    monkeypatch.setattr(ai_config, "measure_generate_latency", fake_measure)
+    monkeypatch.setattr(app_config, "measure_generate_latency", fake_measure)
 
     async def run() -> tuple[bool, bool]:
         app = _Host(AISettingsScreen())

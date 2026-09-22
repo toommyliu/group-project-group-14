@@ -1,0 +1,15 @@
+# Install with: opengrader-providers add --example openai-compatible
+# Replace the name, host, models, and credential variable for your gateway.
+
+name         = "campus-gateway"
+label        = "Campus AI Gateway"
+summary      = "A department-run OpenAI-compatible gateway in front of a self-hosted model."
+dialect      = "openai-chat"
+host         = "https://ai-gateway.example.edu/v1"
+vision_model = "qwen2.5-vl-7b-instruct"
+text_model   = "qwen2.5-vl-7b-instruct"
+api_key_env  = "CAMPUS_AI_KEY"
+setup_hint   = "Ask your department's AI gateway admin for a key, then set CAMPUS_AI_KEY."
+
+# Set to true if the gateway supports /v1/models.
+supports_model_listing = false

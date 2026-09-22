@@ -26,7 +26,7 @@ Opengrader is a local, offline-first exam-grading toolchain — think Gradescope
 - **Grading TUI** — Gradescope-style question-by-question rubric grading in the terminal: in-terminal response images, rubric editing, per-question statistics, anonymous grading by default (teacher mode reveals names), and automatic write-back of grades to submission files and annotated PDFs.
 - **Automated grading** — auto-score submissions against a solutions file (exact answer matching; unmatched free responses are left for manual grading).
 - **Canvas export** — push scores and per-question comments to Canvas LMS via `canvas-sak`, from the CLI or from inside the TUI.
-- **Offline-first** — no cloud APIs, no database; all state lives in files. The only network use is the localhost Ollama server and optional Canvas export.
+- **Offline-first** — grading work is saved in a local SQLite workspace. The only network use is the localhost Ollama server and optional Canvas export.
 
 ## Prerequisites
 
@@ -103,9 +103,8 @@ The icon opens a terminal window and launches the TUI, quietly installing/repair
 
 ## Usage Guide
 
-The new read-only [web grading viewer](src/opengrader/web/README.md) browses
-prepared assignments through `opengrader serve`. Its setup guide covers building
-the web app, placing assignments in the server workspace, and local development.
+The [web grading app](src/opengrader/web/README.md) opens assignments from the
+same workspace as the terminal app through `opengrader serve`.
 
 Every tool lives behind one front door:
 ```bash
@@ -119,9 +118,9 @@ as before — `uv run submission-splitter ...` and
 same flags — so every command in this guide keeps working; `opengrader` is
 just the one name to remember instead of thirty.
 
-Run the TUI:
+Run the TUI in an assignment folder:
 ```bash
-uv run opengrader tui --qa-file /path/to/qa.md --submissions /path/to/student-submissions
+uv run opengrader tui /path/to/course/quiz-1
 ```
 (`uv run tui ...` and `uv run opengrader grade ...` are the same command.)
 
@@ -151,21 +150,29 @@ auto-grades what it can, and opens the grading app on the result:
 uv run opengrader-run cs146-quiz1/
 ```
 
-Point it at the class folder: the scanned bundle, the answer key, a roster
+Point it at an assignment folder: the scanned bundle, the answer key, a roster
 (`ID<TAB>NAME`) and a blank template (a PDF named `*template*` or `*blank*`)
 are found inside it, and the results are built there too. If two files could
 both be the scan or the answer key it stops and names them. Any flag overrides
 what it found, and the explicit form still works:
 `uv run opengrader-run --scan scans/all-submissions.pdf --qa qa.md --out cohort/`.
 
-Interrupted? Re-scanned a page? Changed your mind? **Run the exact same command
-again.** Every step that is still valid is reused rather than repeated, so a
-second run on an unchanged class takes seconds, and the summary at the end says
-which steps were reused. Add `--dry-run` to see what it would do without doing
-any of it. If you would rather not use a terminal, the setup screen has the same
-thing in its own section, "RUN THE WHOLE PIPELINE", directly under Start
-grading — open "Run every step — one scan in, graded work out", choose the
-class folder and press Scan folder.
+Opengrader creates a workspace in that folder, or uses the nearest workspace
+above it. One workspace can hold several assignments in separate folders:
+
+```text
+course/
+  .opengrader/workspace.sqlite3
+  quiz-1/scans.pdf
+  quiz-2/scans.pdf
+```
+
+Run from `quiz-1/` or `quiz-2/` to select that assignment. From `course/`,
+pass `--assignment <id>` when there are several. Re-running with unchanged inputs
+reuses completed pipeline steps and keeps saved grades. If an input changes,
+`opengrader run` asks for `--fresh`; that starts a new assignment and preserves
+the old grading work. Add `--dry-run` to preview the pipeline. The TUI setup
+screen also provides "Run every step — one scan in, graded work out".
 
 <details>
 <summary>Available Scripts</summary>
@@ -174,8 +181,8 @@ Every script below runs standalone (`uv run <name> ...`) or through the front
 door (`uv run opengrader <name> ...`) — same code, same flags, either
 spelling.
 
-- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it a class folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
-- `tui`: Launch the TUI. Optionally pass `--qa-file` and `--submissions` together to load real files.
+- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
+- `tui`: Launch the TUI for an assignment folder or pass `--workspace` and `--assignment`.
 - `tui-dev`: Launch the TUI with Textual devtools enabled.
 - `qa-file`: Work with QA markdown files.
   - `validate --qa-file <qa.md>`: Validate QA markdown structure.
@@ -188,7 +195,7 @@ spelling.
 - `create-answer-key` (`answer-key`): Build a QA markdown draft from an existing answer key — a [text2qti](https://github.com/gpoore/text2qti) file, a Word document, or a solved answer-key PDF (OCR + vision model for a scanned one). The input format is detected from the file extension; replaces the old `pdf-to-qa-solutions` and `text2qti-to-qa` scripts, both retired.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
 - `claim`: Divide grading between several TAs. `claim divide --graders alice,bob,carol` splits the cohort into contiguous slices; `claim status` shows coverage, gaps and any double-booked work. Claiming work someone else holds is refused.
-- `canvas-export`: Push scores and per-question comments from `.submission.md` files to Canvas LMS (requires `canvas-sak` setup; supports `--dry-run`).
+- `canvas-export`: Push saved workspace scores and per-question comments to Canvas LMS (requires `canvas-sak` setup; supports `--dry-run`). Pass `--submissions` to export file-based grading work.
 
 </details>
 
@@ -332,9 +339,9 @@ before processing submissions.
 
 #### AI Settings
 
-Opengrader saves your AI configuration once in a settings file — which models to use, where they live, and how confident they must be before suggesting a grade — so every tool uses the same settings without re-entering them. The settings live in your user config directory (`~/Library/Application Support/Opengrader/ai.json` on macOS, `~/.config/opengrader/ai.json` on Linux, `%APPDATA%\Opengrader\ai.json` on Windows). Blank fields mean "follow Opengrader's recommended default," so upgrading Opengrader can move you forward to a newer model without overwriting your deliberate choices.
+Opengrader saves your AI configuration once in `config.json` in your user config directory (`~/Library/Application Support/Opengrader/config.json` on macOS, `~/.config/opengrader/config.json` on Linux, `%APPDATA%\Opengrader\config.json` on Windows). The file points to a local JSON Schema for editor completion and validation. Blank fields follow Opengrader's recommended defaults.
 
-Settings are resolved in this order (highest priority first): an explicit `--ollama-model` / `--ollama-host` / `--ollama-timeout` CLI flag, then an `OPENGRADER_AI_VISION_MODEL` / `OPENGRADER_AI_HOST` / `OPENGRADER_AI_TIMEOUT` environment variable, then the saved settings file, then Opengrader's built-in defaults. To point the whole system at a different settings file, set `OPENGRADER_AI_CONFIG=/path/to/settings.json`.
+Settings are resolved in this order: explicit command flags, saved settings, then Opengrader's built-in defaults. Provider credentials can still come from the provider's credential environment variable.
 
 Edit the settings from the TUI: launch it and open the "AI setup" tool under "Helper Tools" in the setup screen.
 
@@ -343,16 +350,19 @@ Edit the settings from the TUI: launch it and open the "AI setup" tool under "He
 uv run automated-grading --solutions /path/to/solutions.md --input /path/to/student-submissions
 ```
 
-5. Launch the TUI with the generated files:
+5. Process the assignment folder into a workspace, then launch the TUI:
 ```bash
-uv run tui \
-  --qa-file /path/to/qa.md \
-  --submissions /path/to/student-submissions
+uv run opengrader-run /path/to/assignment-folder
+uv run tui /path/to/assignment-folder
 ```
+
+The standalone file tools above edit `.submission.md` files. Grading in the TUI
+and web app uses the published workspace grades; editing extraction files after
+publication does not change them.
 
 6. (Optional) Export grades to Canvas when grading is done:
 ```bash
-uv run canvas-export --submissions /path/to/student-submissions --course "CS146" --assignment "Quiz 1" --dry-run
+uv run canvas-export --course "CS146" --assignment "Quiz 1" --dry-run
 ```
 
 #### Run it from anywhere (Optional)

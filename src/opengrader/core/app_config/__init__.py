@@ -59,25 +59,8 @@ DEFAULT_MIN_CONFIDENCE = 0.7
 
 DEFAULT_MATH_BACKEND = "vlm"
 
-ENV_PREFIX = "OPENGRADER_AI_"
-ENV_PROVIDER = f"{ENV_PREFIX}PROVIDER"
-ENV_HOST = f"{ENV_PREFIX}HOST"
-ENV_VISION_MODEL = f"{ENV_PREFIX}VISION_MODEL"
-ENV_TEXT_MODEL = f"{ENV_PREFIX}TEXT_MODEL"
-ENV_MATH_BACKEND = f"{ENV_PREFIX}MATH_BACKEND"
-ENV_TIMEOUT = f"{ENV_PREFIX}TIMEOUT"
-ENV_MIN_CONFIDENCE = f"{ENV_PREFIX}MIN_CONFIDENCE"
-ENV_AUTO_START = f"{ENV_PREFIX}AUTO_START"
-ENV_READ_HANDWRITING = f"{ENV_PREFIX}READ_HANDWRITING"
-ENV_ESCALATE_ONLY = f"{ENV_PREFIX}ESCALATE_ONLY"
-ENV_TRANSCRIBE_MATH = f"{ENV_PREFIX}TRANSCRIBE_MATH"
-ENV_GRADE_WRITTEN = f"{ENV_PREFIX}GRADE_WRITTEN"
-ENV_AUTO_GRADE = f"{ENV_PREFIX}AUTO_GRADE"
-ENV_REQUIRE_CALIBRATION = f"{ENV_PREFIX}REQUIRE_CALIBRATION"
-
-ENV_CONFIG_PATH = "OPENGRADER_AI_CONFIG"
-
-SETTINGS_FILENAME = "ai.json"
+SETTINGS_FILENAME = "config.json"
+SCHEMA_FILENAME = "config.schema.json"
 SETTINGS_VERSION = 1
 
 
@@ -85,22 +68,7 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]"
 
 
 def host_kind(host: str) -> Literal["local", "cloud"]:
-    """Is this address on this machine (or this network), or is it out there?
-
-    **The single most important function in this module.** A manifest is
-    user-editable text that decides where student work is sent, so a provider
-    must not be able to *declare* itself local: one line in a TOML file would
-    otherwise switch off every safeguard §7.7 describes. The kind is therefore
-    computed from the address the request will actually go to, and
-    `ProviderSpec.kind` is a derived property rather than a constructor
-    argument.
-
-    Loopback, RFC1918, link-local and `.local` are local; everything else,
-    including anything unparseable, is cloud. Unparseable resolving to *cloud*
-    is deliberate: the failure that matters is treating a remote host as
-    local, so an address we cannot read gets the careful answer, not the
-    convenient one.
-    """
+    """Treat unrecognized addresses as cloud so they cannot bypass cloud safeguards."""
     text = (host or "").strip()
     if not text:
         return "cloud"
@@ -132,13 +100,6 @@ def host_kind(host: str) -> Literal["local", "cloud"]:
 
 @dataclass(frozen=True)
 class ProviderPricing:
-    """What a service charges, so a pre-flight can state a number (L4).
-
-    Optional, and declared by the provider rather than discovered: no API
-    reports its own price list, and a wrong estimate shown confidently is
-    worse than no estimate at all — so absent stays absent.
-    """
-
     input_per_mtok: float = 0.0
     output_per_mtok: float = 0.0
 
@@ -149,22 +110,7 @@ class ProviderPricing:
 
 @dataclass(frozen=True)
 class ProviderSpec:
-    """One AI service, as a record rather than a branch.
-
-    Everything here is data a user could write in a TOML file, which is the
-    requirement §7.2 exists to satisfy: a provider that must be added by
-    editing this module is not a provider the user can choose. The optional
-    `*_factory` callables are the exception, and only the built-in Ollama
-    entry uses them — a provider that names a `dialect` instead gets the
-    generic implementations above, which is how a manifest can supply no code
-    at all and still work.
-
-    `kind` is conspicuously absent from the fields: it is derived from the
-    host (see `host_kind`), because a manifest that could declare itself local
-    could switch off every safeguard in §7.7 with one line.
-    """
-
-    name: str  # Persisted provider IDs must not be renamed.
+    name: str
     label: str
     summary: str
     default_host: str
@@ -175,38 +121,19 @@ class ProviderSpec:
     requires_api_key: bool = False
     text_config_factory: Callable[["ResolvedAI"], Any] | None = None
     vision_config_factory: Callable[["ResolvedAI"], Any] | None = None
-    # The transcription seam (core/ocr/vision_reader.VisionReader). Separate
-    # from vision_config_factory because a provider's *client config* and the
-    # *reader built over it* are not the same thing: a dialect-backed provider
-    # has a reader and no Ollama-shaped config at all.
     vision_reader_factory: Callable[["ResolvedAI"], Any] | None = None
-    # Can this service enumerate the models it will answer for? Ollama can
-    # (/api/tags); most hosted APIs cannot, and a few that can charge for the
-    # privilege. When False, ensure_ready() falls back to checking that a
-    # credential resolves — the point is to fail *before* a long extraction
-    # starts, and either check achieves that.
     supports_model_listing: bool = True
     list_models_factory: Callable[["ResolvedAI"], list[str]] | None = None
     text_generate_factory: Callable[..., Callable[[str], str]] | None = None
-    # The wire shape this service speaks: one of core.llm.dialects.DIALECT_NAMES.
-    # Empty means the spec brings its own factories instead, which is how the
-    # built-in Ollama entry works and how a future non-HTTP provider could.
     dialect: str = ""
-    # Where this provider came from, so a screen can say *you added this one*
-    # and `doctor` can tell a shipped example from something hand-written.
     source: Literal["builtin", "user"] = "builtin"
     manifest_path: str = ""
     pricing: ProviderPricing | None = None
-    # A command whose stdout is the API key — git's credential-helper idea, so
-    # an instructor can use a keychain, `pass` or `op` without Opengrader ever
-    # holding a secret. Parsed and displayed here; **not executed**, because
-    # executing a command named by a user-editable file needs the L6 consent
-    # screen, and that ships with the rest of §7.7 in Phase 5.
+    # Parsed from manifests but never executed.
     credential_command: tuple[str, ...] = ()
 
     @property
     def kind(self) -> Literal["local", "cloud"]:
-        """Derived from the host, never declared. See `host_kind`."""
         return host_kind(self.default_host)
 
     @property
@@ -215,23 +142,11 @@ class ProviderSpec:
 
     @property
     def allows_identity_fields(self) -> bool:
-        """May this provider be shown a student's name or nine-digit ID?
-
-        False for anything off this machine, with no override anywhere — L5,
-        and §7.8 Q3 on why it is a hard block rather than a setting. The pin
-        itself lands with Phase 5; this is the fact it reads.
-        """
         return self.kind == "local"
 
 
 class AIUnavailableError(RuntimeError):
-    """The configured AI provider cannot serve this run, and we know it now.
-
-    Raised by ensure_ready() so a caller can fail (or degrade) before a long
-    job starts, without having to name a provider's own error type. Each
-    client keeps its own exception for wire-level failures; this one means
-    "the pre-flight says don't bother".
-    """
+    """The selected provider failed its readiness check."""
 
 
 def _ollama_text_config(resolved: "ResolvedAI") -> Any:
@@ -273,14 +188,6 @@ def _ollama_text_generate(
     return _call
 
 
-# --- Providers that are nothing but a dialect and a host --------------------
-#
-# A manifest cannot supply code (§7.5), so every user-defined provider shares
-# these four functions and differs only in the record they read. That is the
-# whole bet of §7.2 made mechanical: the service is data, the shape is code,
-# and there is exactly one copy of the code.
-
-
 def _dialect_config(resolved: "ResolvedAI", *, model: str) -> Any:
     from opengrader.core.llm.dialect_client import DialectConfig
 
@@ -291,8 +198,6 @@ def _dialect_config(resolved: "ResolvedAI", *, model: str) -> Any:
         timeout_seconds=resolved.timeout_seconds,
         api_key=resolved.api_key,
         label=resolved.provider.label,
-        # A server on this machine gets today's behaviour — fail at once. A
-        # hosted one gets the backoff it needs to ride out a rate limit.
         max_attempts=1 if resolved.kind == "local" else 4,
     )
 
@@ -359,7 +264,6 @@ OLLAMA = ProviderSpec(
     dialect="ollama",
 )
 
-# Ollama stays first, and a fresh install has nothing else in here (L0).
 _REGISTRY: dict[str, ProviderSpec] = {OLLAMA.name: OLLAMA}
 
 _manifests_loaded = False
@@ -371,19 +275,7 @@ def register_provider(spec: ProviderSpec) -> None:
 
 
 def _ensure_manifests_loaded() -> None:
-    """Fold the user's provider manifests into the registry, once per process.
-
-    Lazy rather than at import: this module is imported by the TUI at startup
-    and by every CLI's argument parser, and reading a directory as a side
-    effect of an import is the kind of thing that makes a test suite depend on
-    whose laptop it runs on. The first question anyone asks the registry pays
-    for it instead.
-
-    A manifest that will not parse costs that one provider and nothing else —
-    the same degradation rule `load_settings` and `core/policy.py` already
-    follow. The reason is on the startup path of every command: a stray
-    character in a settings directory must cost a setting, never a launch.
-    """
+    """Load manifests on first use; invalid files do not prevent startup."""
     global _manifests_loaded, _manifest_problems
     if _manifests_loaded:
         return
@@ -392,15 +284,12 @@ def _ensure_manifests_loaded() -> None:
         from . import manifests as _manifests
 
         specs, problems = _manifests.load_all()
-    except Exception as exc:  # noqa: BLE001 - see the docstring; never a launch
+    except Exception as exc:  # noqa: BLE001 - bad manifests must not prevent startup
         _manifest_problems = (f"Could not read provider manifests: {exc}",)
         return
     skipped: list[str] = []
     for spec in specs:
         if spec.name in _REGISTRY:
-            # Two files claiming one id: the first (by filename) wins, and the
-            # other is reported rather than silently dropped — otherwise an
-            # edit to the losing file would appear to do nothing at all.
             owner = _REGISTRY[spec.name].manifest_path or "a built-in provider"
             skipped.append(
                 f"{spec.manifest_path}: name {spec.name!r} is already used by "
@@ -412,12 +301,6 @@ def _ensure_manifests_loaded() -> None:
 
 
 def reload_manifests() -> tuple[str, ...]:
-    """Drop every user-defined provider and read the directory again.
-
-    For the tests, and for `opengrader-providers` after it writes a file — a
-    user who has just added a manifest should not have to restart to see
-    whether it took.
-    """
     global _manifests_loaded, _manifest_problems
     for name, spec in list(_REGISTRY.items()):
         if spec.source == "user":
@@ -429,22 +312,15 @@ def reload_manifests() -> tuple[str, ...]:
 
 
 def manifest_problems() -> tuple[str, ...]:
-    """Why a manifest was skipped — surfaced by `problems()` and by `doctor`."""
     _ensure_manifests_loaded()
     return _manifest_problems
 
 
-def manifests_dir(*, environ: dict[str, str] | None = None) -> Path:
-    """`providers/` beside `ai.json`, wherever that turned out to be."""
-    return settings_path(environ=environ).parent / "providers"
+def manifests_dir() -> Path:
+    return settings_path().parent / "providers"
 
 
 def dialect_names() -> tuple[str, ...]:
-    """The wire dialects a manifest may name, for a CLI choice list or a form.
-
-    Here so that code above the provider boundary can offer the list without
-    importing `core.llm.dialects`, which would be naming a dialect (§7.3).
-    """
     from opengrader.core.llm.dialects import DIALECT_NAMES
 
     return DIALECT_NAMES
@@ -480,7 +356,10 @@ class AISettings:
 
     def to_dict(self) -> dict[str, Any]:
         blank = AISettings()
-        body: dict[str, Any] = {"version": SETTINGS_VERSION}
+        body: dict[str, Any] = {
+            "$schema": f"./{SCHEMA_FILENAME}",
+            "version": SETTINGS_VERSION,
+        }
         for name in (
             "provider",
             "host",
@@ -579,20 +458,14 @@ def _config_dir() -> Path:
     return Path.home() / ".config" / "opengrader"
 
 
-def settings_path(*, environ: dict[str, str] | None = None) -> Path:
-    env = os.environ if environ is None else environ
-    override = env.get(ENV_CONFIG_PATH, "").strip()
-    if override:
-        return Path(override).expanduser()
+def settings_path() -> Path:
     return _config_dir() / SETTINGS_FILENAME
 
 
 def load_settings(
     path: Path | None = None,
-    *,
-    environ: dict[str, str] | None = None,
 ) -> AISettings:
-    target = path or settings_path(environ=environ)
+    target = path or settings_path()
     try:
         raw = target.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -607,11 +480,20 @@ def load_settings(
 def save_settings(
     settings: AISettings,
     path: Path | None = None,
-    *,
-    environ: dict[str, str] | None = None,
 ) -> Path:
-    target = path or settings_path(environ=environ)
+    from pydantic import TypeAdapter
+
+    target = path or settings_path()
     target.parent.mkdir(parents=True, exist_ok=True)
+    schema = TypeAdapter(AISettings).json_schema()
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["additionalProperties"] = False
+    schema["properties"]["$schema"] = {"type": "string"}
+    schema["properties"]["version"] = {"const": SETTINGS_VERSION}
+    schema_path = target.with_name(SCHEMA_FILENAME)
+    schema_text = json.dumps(schema, indent=2, sort_keys=True) + "\n"
+    if not schema_path.is_file() or schema_path.read_text(encoding="utf-8") != schema_text:
+        schema_path.write_text(schema_text, encoding="utf-8")
     target.write_text(
         json.dumps(settings.to_dict(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -640,14 +522,7 @@ class ResolvedAI:
 
     @property
     def kind(self) -> Literal["local", "cloud"]:
-        """Derived from the *resolved* host, not from the provider's default.
-
-        Deliberately not `self.provider.kind`: a host can be overridden by a
-        flag, an environment variable or the settings file, and pointing the
-        local provider at a public address is a real way to send a cohort's
-        handwriting off this machine. The safeguards read this, so it has to
-        follow the address the request is going to.
-        """
+        """Classify the actual request host, including user overrides."""
         return host_kind(self.host)
 
     @property
@@ -697,19 +572,7 @@ def resolve_api_key(
     *,
     environ: dict[str, str] | None = None,
 ) -> str | None:
-    """Read the key out of the environment. Never write one anywhere.
-
-    The rule this module has always held: the settings file stores the
-    variable's *name*, so a key cannot travel inside a backup archive
-    (`core/integrity.py`) or a grader packet (`core/handoff/packet.py`).
-    Nothing here softens that.
-
-    What is new is the second line of defence: a key we resolve is handed to
-    the transport's redaction registry, so that if it does reach an error
-    message — a connection-test log, `run-ledger.jsonl`, an exception `doctor`
-    prints — it is scrubbed on the way out. Storing it correctly and never
-    printing it are different guarantees, and L8 asks for both.
-    """
+    """Read a provider key from the environment and register it for redaction."""
     if not provider.api_key_env:
         return None
     env = os.environ if environ is None else environ
@@ -732,31 +595,7 @@ def resolve(
     path: Path | None = None,
 ) -> ResolvedAI:
     env = os.environ if environ is None else environ
-    base = settings if settings is not None else load_settings(path, environ=env)
-
-    base = replace(
-        base,
-        provider=_env_text(env, ENV_PROVIDER, base.provider),
-        host=_env_text(env, ENV_HOST, base.host),
-        vision_model=_env_text(env, ENV_VISION_MODEL, base.vision_model),
-        text_model=_env_text(env, ENV_TEXT_MODEL, base.text_model),
-        math_backend=_env_text(env, ENV_MATH_BACKEND, base.math_backend),
-        timeout_seconds=_env_float(env, ENV_TIMEOUT, base.timeout_seconds),
-        min_confidence=_env_unit(env, ENV_MIN_CONFIDENCE, base.min_confidence),
-        auto_start=_as_bool(env.get(ENV_AUTO_START), base.auto_start),
-        read_handwriting=_as_bool(
-            env.get(ENV_READ_HANDWRITING), base.read_handwriting
-        ),
-        escalate_only=_as_bool(env.get(ENV_ESCALATE_ONLY), base.escalate_only),
-        transcribe_math=_as_bool(
-            env.get(ENV_TRANSCRIBE_MATH), base.transcribe_math
-        ),
-        grade_written=_as_bool(env.get(ENV_GRADE_WRITTEN), base.grade_written),
-        auto_grade=_as_bool(env.get(ENV_AUTO_GRADE), base.auto_grade),
-        require_calibration=_as_bool(
-            env.get(ENV_REQUIRE_CALIBRATION), base.require_calibration
-        ),
-    )
+    base = settings if settings is not None else load_settings(path)
 
     provider = get_provider(base.provider)
     host = base.host or provider.default_host
@@ -788,36 +627,9 @@ def resolve(
     )
 
 
-def _env_text(env: dict[str, str], name: str, fallback: str) -> str:
-    value = env.get(name, "")
-    return value.strip() or fallback
-
-
-def _env_float(env: dict[str, str], name: str, fallback: float | None) -> float | None:
-    if name not in env:
-        return fallback
-    parsed = _as_positive_float(env.get(name))
-    return parsed if parsed is not None else fallback
-
-
-def _env_unit(env: dict[str, str], name: str, fallback: float | None) -> float | None:
-    if name not in env:
-        return fallback
-    parsed = _as_unit_float(env.get(name))
-    return parsed if parsed is not None else fallback
-
-
 def _factory(
     current: ResolvedAI, attribute: str, dialect_default: Callable[..., Any], role: str
 ) -> Callable[..., Any]:
-    """The provider's own factory, or the generic dialect one, or an error.
-
-    A manifest supplies no code (§7.5), so a user-defined provider arrives with
-    every factory unset and a dialect name instead. Resolving that here rather
-    than filling four closures into each spec keeps `ProviderSpec` a record
-    that can be built from a TOML file — which is the whole point of it being
-    one.
-    """
     explicit = getattr(current.provider, attribute)
     if explicit is not None:
         return explicit
@@ -840,15 +652,6 @@ def text_config(resolved: ResolvedAI | None = None) -> Any:
 def text_generate(
     resolved: ResolvedAI | None = None, *, response_format: dict | None = None
 ) -> Callable[[str], str]:
-    """A `GenerateFn` for the configured provider — the text seam, as a callable.
-
-    `core/grading/llm_grader.py` has always taken an injected
-    `GenerateFn: Callable[[str], str]` and never named a client (finding F3, the
-    seam that already worked). This is the factory that finally lets every
-    caller hand it one without naming a client either: before it, each CLI
-    closed over an `OllamaConfig` and called Ollama's `generate` by name, which
-    is F1 surviving in the one place the bridges did not reach.
-    """
     current = resolved if resolved is not None else resolve()
     factory = _factory(
         current, "text_generate_factory", _dialect_text_generate, "text client"
@@ -864,13 +667,6 @@ def vision_config(resolved: ResolvedAI | None = None) -> Any:
 
 
 def vision_reader(resolved: ResolvedAI | None = None) -> Any:
-    """The configured provider's VisionReader — the seam, not a client.
-
-    This is what every consumer above the provider boundary should ask for.
-    vision_config() below it stays, because a provider's reader is built over
-    its client config, but nothing outside core/ocr and core/llm needs to know
-    that a client config exists at all.
-    """
     current = resolved if resolved is not None else resolve()
     return _factory(
         current, "vision_reader_factory", _dialect_vision_reader, "vision reader"
@@ -885,23 +681,7 @@ def with_overrides(
     text_model: str | None = None,
     timeout_seconds: float | None = None,
 ) -> ResolvedAI:
-    """Fold explicit flag values onto an already-resolved configuration.
-
-    This is the *flag* tier of the flag > env > file > default precedence this
-    module documents. Every AI-capable CLI takes its argparse defaults from
-    resolve() and then has to let an explicitly typed flag win; before this
-    function existed each one did that by constructing a provider's client
-    config by hand, which is why the registry could only ever decide *which
-    model string to type in*, never *which client to build*.
-
-    A None or blank value means "not supplied, keep what resolve() decided",
-    so a caller can forward argparse results unconditionally without first
-    working out which of them the user actually typed.
-
-    Note that this deliberately does not re-run resolve(): the provider, the
-    API key and every feature toggle are already settled by the time a flag is
-    applied, and a flag may not change which provider is in use.
-    """
+    """Apply explicit host, model, and timeout flags to resolved settings."""
     current = resolved if resolved is not None else resolve()
     return replace(
         current,
@@ -931,27 +711,7 @@ def for_provider(
     timeout_seconds: float | None = None,
     environ: dict[str, str] | None = None,
 ) -> ResolvedAI:
-    """Resolve against one *named* provider, ignoring what the user configured.
-
-    For probes that ask about a specific service rather than about the active
-    one — `doctor`'s "is the local Ollama server up?" is the motivating case,
-    and it must keep giving a straight answer about Ollama on a machine whose
-    configured provider is something else entirely.
-
-    Reads neither the settings file nor the `OPENGRADER_AI_*` variables, so
-    the answer depends only on the arguments and the provider's own defaults.
-    That matters for a probe: a diagnostic that silently picks up ambient
-    configuration is a diagnostic you cannot trust when it disagrees with you.
-
-    The one exception is the API key, read from `environ` (default: the
-    process environment) through the provider's own `api_key_env`. A key has
-    nowhere else to live, since `resolve_api_key` never persists one, so a
-    probe that ignored the environment could never test a provider that
-    needs one.
-
-    Prefer this to building a ResolvedAI by hand — every field this fills in is
-    a field a caller would otherwise have to keep in sync with the dataclass.
-    """
+    """Resolve a named provider from its defaults and credential environment."""
     base = resolve(AISettings(provider=name), environ={})
     base = replace(base, api_key=resolve_api_key(base.provider, environ=environ))
     return with_overrides(
@@ -964,11 +724,6 @@ def for_provider(
 
 
 def available_models(resolved: ResolvedAI | None = None) -> list[str]:
-    """Every model the configured provider says it will answer for.
-
-    Empty when the provider cannot enumerate its models — which is not an
-    error, just an absence: see supports_model_listing.
-    """
     current = resolved if resolved is not None else resolve()
     if not current.provider.supports_model_listing:
         return []
@@ -985,22 +740,7 @@ def ensure_ready(
     *,
     purpose: Literal["vision", "text"] = "vision",
 ) -> None:
-    """Fail now, rather than part-way through a cohort.
-
-    The property worth keeping from Ollama's ensure_model_available is not
-    that it lists models — it is that a misconfigured run stops before it has
-    half-processed a class. So this checks whatever the provider can actually
-    be asked:
-
-      * a provider that enumerates models is asked whether it has this one;
-      * a provider that does not is asked only for a credential, because a
-        missing key is the failure that is both most likely and cheapest to
-        detect.
-
-    Raises AIUnavailableError, naming what to do about it. Callers that can
-    degrade (Tesseract-only extraction, say) should catch it and carry on;
-    callers that cannot should exit 2.
-    """
+    """Check credentials and, when supported, model availability before a run."""
     current = resolved if resolved is not None else resolve()
     provider = current.provider
 
@@ -1078,14 +818,6 @@ def recommend_timeout(measured: float, limit: float) -> float | None:
 
 
 def _generate_for(config: Any) -> Callable[..., str]:
-    """The raw `generate(config=, prompt=, num_predict=)` that speaks `config`.
-
-    `text_config()` hands back whichever client config the provider builds:
-    an `OllamaConfig` for the built-in entry, a `DialectConfig` for anything a
-    manifest declared. Calling Ollama's `generate` on the second would send an
-    Ollama-shaped body to `<host>/api/generate` on someone else's service, so
-    the config's own type picks the function, not an assumption.
-    """
     from opengrader.core.llm.dialect_client import DialectConfig
 
     if isinstance(config, DialectConfig):

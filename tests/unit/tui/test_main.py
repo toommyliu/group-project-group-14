@@ -52,14 +52,19 @@ def service(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_run_app_opens_latest_assignment_unless_explicit(service, explicit) -> None:
+def test_run_app_chooses_when_multiple_assignments_exist(service, explicit) -> None:
     assignments = Workspace(Path(service.root)).assignments()
-    expected = assignments[0] if explicit else assignments[-1]
+    expected = assignments[0]
     args = ["--workspace", service.root]
     if explicit:
         args += ["--assignment", expected.id]
-    with patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls:
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
+    ):
+        home_cls.return_value.run.return_value = expected.id
         run_app(args)
+    assert home_cls.return_value.run.call_count == (0 if explicit else 1)
     provider = app_cls.call_args.kwargs["data_provider"]
     assert provider.client.connection == service
     assert provider.assignment == expected
@@ -185,7 +190,8 @@ def test_graphics_override_is_applied_before_the_app_starts(
 
     monkeypatch.setattr("opengrader.tui.main.TuiApp", RecordingApp)
     try:
-        run_app(["--graphics", "iterm2", "--workspace", service.root])
+        assignment = Workspace(Path(service.root)).assignments()[0]
+        run_app(["--graphics", "iterm2", "--workspace", service.root, "--assignment", assignment.id])
     finally:
         terminal_graphics.set_active_graphics(None)
 
@@ -195,9 +201,6 @@ def test_graphics_override_is_applied_before_the_app_starts(
 def test_unknown_graphics_protocol_is_rejected() -> None:
     with pytest.raises(SystemExit):
         run_app(["--graphics", "jpeg"])
-
-
-# --- Home: the terminal app works without the workspace service ------------
 
 
 @pytest.fixture
@@ -235,18 +238,17 @@ def test_a_bare_tui_opens_home_and_nothing_else(no_service) -> None:
     assert not (no_service / ".opengrader").exists()  # no workspace created
 
 
-def test_a_bare_tui_in_a_workspace_still_opens_home_prefilled(service, monkeypatch) -> None:
-    """A workspace is never entered without being chosen (option a)."""
+def test_a_bare_tui_in_a_workspace_opens_assignment_chooser(service, monkeypatch) -> None:
     monkeypatch.chdir(service.root)
     with (
         patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
-        patch("opengrader.tui.home.Home", autospec=True) as home_cls,
+        patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
     ):
-        home_cls.return_value.run.return_value = None
+        home_cls.return_value.run.return_value = Workspace(Path(service.root)).assignments()[0].id
         run_app([])
 
-    home_cls.assert_called_once_with(start_path=str(Path.cwd()), message="")
-    app_cls.assert_not_called()
+    home_cls.assert_called_once()
+    app_cls.assert_called_once()
 
 
 def test_a_folder_chosen_on_home_is_graded_remembered_and_f2_returns(
@@ -340,12 +342,49 @@ def test_a_workspace_chosen_on_home_opens_and_its_home_key_returns(service) -> N
             None,
         ]
         app_cls.return_value.run.return_value = "switch_assignment"  # F2
-        ws_home.return_value.run.return_value = GO_HOME
+        ws_home.return_value.run.side_effect = [
+            Workspace(Path(service.root)).assignments()[0].id,
+            GO_HOME,
+        ]
         run_app([])
 
     assert app_cls.call_args.kwargs["data_provider"].client.connection == service
     assert home_cls.call_count == 2
     assert load_recents()[0].kind == "workspace"
+
+
+def test_home_import_records_the_source_submissions_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil
+
+    from opengrader.core.workspace.intake import publish_pipeline
+    from opengrader.core.workspace.writeback import locate_submissions_dir
+    from opengrader.server.workspace.client import ServiceConnection, WorkspaceClient
+    from opengrader.tui.main import _import_as_workspace
+
+    root = tmp_path / "quiz"
+    shutil.copytree(Path("samples/cs146-quiz1"), root)
+    workspace = Workspace.create(root)
+    connection = ServiceConnection(
+        root=str(root), url="http://localhost", pid=0,
+        workspace_id=workspace.info().id,
+    )
+    monkeypatch.setattr(
+        "opengrader.server.workspace.client.ensure_service", lambda root: connection
+    )
+
+    def request(self, method, path, body, **kwargs):
+        assert (method, path) == ("POST", "/api/pipeline-results")
+        return publish_pipeline(workspace, body).model_dump_json().encode()
+
+    monkeypatch.setattr(WorkspaceClient, "request", request)
+    imported_root, assignment_id = _import_as_workspace(
+        root / "qa.md", root / "student-submissions"
+    )
+
+    assert imported_root == root
+    assert locate_submissions_dir(workspace, assignment_id) == root / "student-submissions"
 
 
 def test_a_workspace_that_will_not_start_returns_to_home_with_the_reason(

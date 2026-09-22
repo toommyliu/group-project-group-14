@@ -1,25 +1,3 @@
-"""Phase 4's exit criterion: a provider nobody coded completes an extraction.
-
-§7.9: "A hand-written manifest for a service not known to the codebase appears
-in the AI Setup dropdown and completes an extraction." The dropdown half is in
-`tests/unit/tui/test_provider_screen.py`. This file is the extraction half.
-
-Nothing here names a provider. The test writes a TOML file, reloads the
-registry, and asks `ai_config.vision_reader(resolve())` for a reader, the way
-every CLI does. It then runs a real batch extraction with that reader. The
-only fake is `urlopen`, which answers in the manifest's dialect. So the
-request shape, auth header, endpoint and reply parsing are all real, and the
-test checks all four as well as checking that the answer landed in the file.
-
-The Tesseract layout scanner is replaced as in
-`test_extraction_through_a_stub_reader.py`, for the reason given there: it is
-not part of the provider seam.
-
-Note for Phase 5: this provider is cloud, and today it is asked to read the
-name and student-ID crops too. L5 will pin those to a local reader. When it
-lands, the `identity_reads` assertion below is the one that must flip.
-"""
-
 from __future__ import annotations
 
 import json
@@ -29,7 +7,7 @@ import fitz
 import pytest
 from PIL import Image
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.ocr import extractor as ocr_extractor
 from opengrader.core.ocr.extractor import (
     FieldExtractionResult,
@@ -82,11 +60,11 @@ def _reply_for(prompt: str) -> str:
 
 @pytest.fixture
 def orbital(monkeypatch):
-    directory = ai_config.manifests_dir()
+    directory = app_config.manifests_dir()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "orbital.toml").write_text(MANIFEST, encoding="utf-8")
-    ai_config.reload_manifests()
-    ai_config.save_settings(ai_config.AISettings(provider="orbital-ocr"))
+    app_config.reload_manifests()
+    app_config.save_settings(app_config.AISettings(provider="orbital-ocr"))
     monkeypatch.setenv("ORBITAL_KEY", KEY)
 
     sent: list = []
@@ -103,7 +81,7 @@ def orbital(monkeypatch):
     finally:
         for path in directory.glob("*.toml"):
             path.unlink()
-        ai_config.reload_manifests()
+        app_config.reload_manifests()
 
 
 def _crop(path: Path) -> None:
@@ -114,11 +92,11 @@ def _crop(path: Path) -> None:
 def test_a_hand_written_manifest_completes_an_extraction(
     orbital, tmp_path, monkeypatch
 ) -> None:
-    resolved = ai_config.resolve()
+    resolved = app_config.resolve()
     assert resolved.provider.name == "orbital-ocr"
     assert resolved.provider.source == "user"
     assert resolved.problems() == ()
-    ai_config.ensure_ready(resolved)  # no listing, key present: passes offline
+    app_config.ensure_ready(resolved)  # no listing, key present: passes offline
 
     scans = tmp_path / "scans"
     out = tmp_path / "out"
@@ -162,7 +140,7 @@ def test_a_hand_written_manifest_completes_an_extraction(
         pdf_path=pdf,
         output_dir=out,
         ocr_config=OcrConfig(),
-        vision_reader=ai_config.vision_reader(resolved),
+        vision_reader=app_config.vision_reader(resolved),
     )
     report = run_extraction_batch([job], workers=1)
 
@@ -183,4 +161,4 @@ def test_a_hand_written_manifest_completes_an_extraction(
 
     prompts = [json.loads(r.data)["messages"][0]["content"][0]["text"] for r in orbital]
     identity_reads = [p for p in prompts if "student's name" in p or "student ID" in p]
-    assert len(identity_reads) == 2  # Phase 5 (L5) must drive this to zero.
+    assert len(identity_reads) == 2

@@ -2,6 +2,7 @@ from .bundle import (
     BUNDLE_PRESETS,
     BundleContent,
     BundleResult,
+    BundleSubmission,
     build_return_bundle,
     default_bundle_name,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "BUNDLE_PRESETS",
     "BundleContent",
     "BundleResult",
+    "BundleSubmission",
     "build_return_bundle",
     "default_bundle_name",
     "build_gradebook_rows",

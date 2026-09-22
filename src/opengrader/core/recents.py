@@ -1,15 +1,3 @@
-"""The Home screen's recently opened list.
-
-Kept beside `ai.json` in the user config directory (`ai_config.settings_path()`),
-never inside an assignment folder: a class folder handed to a TA, or backed up,
-must not carry the paths of everything else its owner has graded.
-
-Two rules, both from the settings file this sits next to. **Reading never
-fails**: a missing, unreadable or malformed file is an empty list, because it is
-read on the way into the app. **Writing is best effort**: `record_recent`
-swallows `OSError`, because forgetting a recent entry must never stop grading.
-"""
-
 from __future__ import annotations
 
 import json
@@ -56,10 +44,10 @@ class RecentItem:
         )
 
 
-def recents_path(*, environ: dict[str, str] | None = None) -> Path:
-    from opengrader.core.ai_config import settings_path
+def recents_path() -> Path:
+    from opengrader.core.app_config import settings_path
 
-    return settings_path(environ=environ).parent / RECENTS_FILENAME
+    return settings_path().parent / RECENTS_FILENAME
 
 
 def load_recents(path: Path | None = None) -> list[RecentItem]:

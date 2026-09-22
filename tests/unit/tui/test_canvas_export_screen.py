@@ -94,6 +94,38 @@ def test_export_runs_cli_with_expected_argv(monkeypatch, tmp_path: Path) -> None
     asyncio.run(run())
 
 
+def test_workspace_export_uses_saved_assignment_without_a_submissions_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        export_module, "run_canvas_export_cli", lambda argv: calls.append(argv)
+    )
+
+    async def run() -> None:
+        app = _qa_picker_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.push_screen(
+                CanvasExportScreen(
+                    workspace_root=str(tmp_path),
+                    workspace_assignment="assignment-123",
+                    course="CS146",
+                    assignment="Midterm",
+                )
+            )
+            await pilot.pause()
+            await pilot.click("#canvas-export-run")
+            await app.workers.wait_for_complete()
+
+    asyncio.run(run())
+
+    assert calls == [[
+        "--workspace", str(tmp_path),
+        "--workspace-assignment", "assignment-123",
+        "--course", "CS146", "--assignment", "Midterm", "--dry-run",
+    ]]
+
+
 def test_unchecking_dry_run_omits_the_flag(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(

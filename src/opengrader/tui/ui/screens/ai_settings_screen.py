@@ -9,8 +9,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
-from opengrader.core import ai_config
-from opengrader.core.ai_config import AISettings, ResolvedAI
+from opengrader.core import app_config
+from opengrader.core.app_config import AISettings, ResolvedAI
 from opengrader.core.ocr.math_ocr import (
     DEFAULT_MATH_BACKEND,
     MATH_BACKEND_NAMES,
@@ -108,7 +108,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
     def __init__(self, settings: AISettings | None = None) -> None:
         super().__init__()
-        self._settings = settings if settings is not None else ai_config.load_settings()
+        self._settings = settings if settings is not None else app_config.load_settings()
         self._timeout_recommendation: float | None = None
 
 
@@ -124,7 +124,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         return "" if shown else "hidden"
 
     def compose(self) -> ComposeResult:
-        current = ai_config.resolve(self._settings)
+        current = app_config.resolve(self._settings)
         provider = current.provider
 
         with Vertical(id="ai-dialog") as dialog:
@@ -237,7 +237,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
                 yield self._label("Where the AI runs")
                 yield Select(
-                    [(spec.label, spec.name) for spec in ai_config.registered_providers()],
+                    [(spec.label, spec.name) for spec in app_config.registered_providers()],
                     value=provider.name,
                     allow_blank=False,
                     id="ai-provider",
@@ -291,7 +291,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
                 yield self._label(
                     "How long to wait for the AI",
-                    f"blank = {ai_config.DEFAULT_TIMEOUT_SECONDS:g}s",
+                    f"blank = {app_config.DEFAULT_TIMEOUT_SECONDS:g}s",
                 )
                 yield Input(
                     value=(
@@ -300,7 +300,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                         else f"{self._settings.timeout_seconds:g}"
                     ),
                     placeholder=(
-                        f"e.g. {ai_config.DEFAULT_TIMEOUT_SECONDS:g} — raise "
+                        f"e.g. {app_config.DEFAULT_TIMEOUT_SECONDS:g} — raise "
                         "it if extraction on this computer times out"
                     ),
                     id="ai-timeout",
@@ -341,7 +341,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
 
                 yield self._label(
                     "Minimum confidence for a grade suggestion",
-                    f"0-1; blank = {ai_config.DEFAULT_MIN_CONFIDENCE:g}",
+                    f"0-1; blank = {app_config.DEFAULT_MIN_CONFIDENCE:g}",
                 )
                 yield Input(
                     value=(
@@ -349,7 +349,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                         if self._settings.min_confidence is None
                         else f"{self._settings.min_confidence:g}"
                     ),
-                    placeholder=f"e.g. {ai_config.DEFAULT_MIN_CONFIDENCE:g}",
+                    placeholder=f"e.g. {app_config.DEFAULT_MIN_CONFIDENCE:g}",
                     id="ai-min-confidence",
                 )
                 yield Static(
@@ -390,7 +390,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                 yield Button("Cancel", id="ai-cancel", compact=True)
 
     @staticmethod
-    def _key_row_classes(provider: ai_config.ProviderSpec) -> str:
+    def _key_row_classes(provider: app_config.ProviderSpec) -> str:
         return "" if provider.requires_api_key else "hidden"
 
     @staticmethod
@@ -436,7 +436,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         raw_timeout = self.query_one("#ai-timeout", Input).value.strip()
         timeout_seconds: float | None = None
         if raw_timeout:
-            timeout_seconds = ai_config.parse_timeout_seconds(raw_timeout)
+            timeout_seconds = app_config.parse_timeout_seconds(raw_timeout)
             if timeout_seconds is None:
                 self.app.notify(
                     "Timeout must be a number of seconds greater than 0.",
@@ -487,8 +487,8 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
     @on(Select.Changed, "#ai-provider")
     def _on_provider_changed(self, event: Select.Changed) -> None:
         event.stop()
-        provider = ai_config.get_provider(str(event.value))
-        preview = ai_config.resolve(replace(self._settings, provider=provider.name))
+        provider = app_config.get_provider(str(event.value))
+        preview = app_config.resolve(replace(self._settings, provider=provider.name))
 
         self.query_one("#ai-vision-model", Input).placeholder = (
             provider.default_vision_model
@@ -523,13 +523,13 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         log.clear()
         log.write("Testing…")
         self.run_worker(
-            lambda: self._test(ai_config.resolve(pending)), thread=True, exclusive=True
+            lambda: self._test(app_config.resolve(pending)), thread=True, exclusive=True
         )
 
     def _test(self, current: ResolvedAI) -> None:
         lines: list[str] = list(current.problems())
         try:
-            available = ai_config.available_models(current)
+            available = app_config.available_models(current)
         except Exception as exc:  # noqa: BLE001
             lines.append(f"Could not reach {current.host}: {exc}")
             lines.append(current.provider.setup_hint)
@@ -571,12 +571,12 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                 "installed here, so a call to it would just fail slowly."
             )
         else:
-            measurement = ai_config.measure_generate_latency(
+            measurement = app_config.measure_generate_latency(
                 current, role="handwriting"
             )
             lines.append(measurement.describe())
             if measurement.ok:
-                recommendation = ai_config.recommend_timeout(
+                recommendation = app_config.recommend_timeout(
                     measurement.seconds, current.timeout_seconds
                 )
                 if recommendation is not None:
@@ -617,7 +617,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         if pending is None:
             return
         try:
-            destination = ai_config.save_settings(pending)
+            destination = app_config.save_settings(pending)
         except OSError as exc:
             self.app.notify(f"Could not save AI settings: {exc}", severity="error")
             return

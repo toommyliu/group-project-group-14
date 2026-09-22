@@ -4,7 +4,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Button, Checkbox, Collapsible, Input, Label, RadioButton, Static
 
 import opengrader.tui.ui.screens.setup_screen as setup_screen
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens.setup_screen import SetupScreen
 
@@ -80,11 +80,11 @@ def test_setup_grading_never_passes_llm_and_probes_the_saved_model(monkeypatch) 
     )
 
     def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
-        captured["model"] = (resolved or ai_config.resolve()).text_model
+        captured["model"] = (resolved or app_config.resolve()).text_model
 
-    monkeypatch.setattr(ai_config, "ensure_ready", _probe)
-    ai_config.save_settings(
-        ai_config.AISettings(text_model="llama3.1", grade_written=True)
+    monkeypatch.setattr(app_config, "ensure_ready", _probe)
+    app_config.save_settings(
+        app_config.AISettings(text_model="llama3.1", grade_written=True)
     )
 
     async def run() -> None:
@@ -159,10 +159,10 @@ def test_setup_grading_defaults_model_when_no_ai_settings_are_saved(monkeypatch)
     )
 
     def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
-        captured["model"] = (resolved or ai_config.resolve()).text_model
+        captured["model"] = (resolved or app_config.resolve()).text_model
 
-    monkeypatch.setattr(ai_config, "ensure_ready", _probe)
-    ai_config.save_settings(ai_config.AISettings(grade_written=True))
+    monkeypatch.setattr(app_config, "ensure_ready", _probe)
+    app_config.save_settings(app_config.AISettings(grade_written=True))
 
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
@@ -177,7 +177,7 @@ def test_setup_grading_defaults_model_when_no_ai_settings_are_saved(monkeypatch)
 
     asyncio.run(run())
 
-    assert captured["model"] == ai_config.DEFAULT_TEXT_MODEL
+    assert captured["model"] == app_config.DEFAULT_TEXT_MODEL
     assert captured["argv"] == ["--solutions", "/tmp/sol.md", "--input", "/tmp/subs"]
     assert "--llm-model" not in captured["argv"]
 
@@ -196,8 +196,8 @@ def test_setup_splitter_never_passes_a_model_and_auto_starts_per_saved_setting(
     out = tmp_path / "out"
 
     async def run(*, auto_start: bool) -> None:
-        ai_config.save_settings(
-            ai_config.AISettings(
+        app_config.save_settings(
+            app_config.AISettings(
                 text_model="minicpm-v", auto_start=auto_start, read_handwriting=True
             )
         )
@@ -340,7 +340,7 @@ def test_setup_grading_runs_in_background_with_progress(monkeypatch) -> None:
 
 def test_setup_llm_unavailable_triggers_auto_ollama(monkeypatch) -> None:
     def _raise(resolved=None, *, purpose="text") -> None:
-        raise ai_config.AIUnavailableError("model 'llama3.1' is not available")
+        raise app_config.AIUnavailableError("model 'llama3.1' is not available")
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
@@ -348,8 +348,8 @@ def test_setup_llm_unavailable_triggers_auto_ollama(monkeypatch) -> None:
         "run_grading_cli",
         lambda argv, **kwargs: captured.__setitem__("argv", argv),
     )
-    monkeypatch.setattr(ai_config, "ensure_ready", _raise)
-    ai_config.save_settings(ai_config.AISettings(grade_written=True))
+    monkeypatch.setattr(app_config, "ensure_ready", _raise)
+    app_config.save_settings(app_config.AISettings(grade_written=True))
 
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
@@ -1018,14 +1018,14 @@ def _stub_grading_cli(monkeypatch) -> dict[str, object]:  # noqa: ANN001
         lambda argv, **kwargs: captured.__setitem__("argv", argv),
     )
     monkeypatch.setattr(
-        ai_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
+        app_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
     )
     return captured
 
 
 def test_min_confidence_is_omitted_when_none_is_saved(monkeypatch) -> None:  # noqa: ANN001
     captured = _stub_grading_cli(monkeypatch)
-    ai_config.save_settings(ai_config.AISettings(grade_written=True))
+    app_config.save_settings(app_config.AISettings(grade_written=True))
 
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
@@ -1044,8 +1044,8 @@ def test_min_confidence_is_omitted_when_none_is_saved(monkeypatch) -> None:  # n
 
 def test_min_confidence_never_becomes_a_cli_flag_even_when_saved(monkeypatch) -> None:  # noqa: ANN001
     captured = _stub_grading_cli(monkeypatch)
-    ai_config.save_settings(
-        ai_config.AISettings(min_confidence=0.85, grade_written=True)
+    app_config.save_settings(
+        app_config.AISettings(min_confidence=0.85, grade_written=True)
     )
 
     async def run() -> None:
@@ -1084,7 +1084,7 @@ def test_calibration_opens_prefilled_and_saves_its_answer_to_ai_setup() -> None:
             modal.dismiss(0.75)
             await pilot.pause()
 
-            return solutions, submissions, ai_config.load_settings().min_confidence
+            return solutions, submissions, app_config.load_settings().min_confidence
 
     solutions, submissions, saved = asyncio.run(run())
     assert solutions == "/tmp/sol.md"
@@ -1093,7 +1093,7 @@ def test_calibration_opens_prefilled_and_saves_its_answer_to_ai_setup() -> None:
 
 
 def test_calibration_accept_marks_the_confidence_measured_and_wants_ai_grading() -> None:
-    async def run() -> ai_config.AISettings:
+    async def run() -> app_config.AISettings:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -1107,7 +1107,7 @@ def test_calibration_accept_marks_the_confidence_measured_and_wants_ai_grading()
             app.screen.dismiss(0.8)
             await pilot.pause()
 
-            return ai_config.load_settings()
+            return app_config.load_settings()
 
     settings = asyncio.run(run())
     assert settings.min_confidence_measured is True
@@ -1135,7 +1135,7 @@ def test_calibration_refreshes_the_ai_setup_summary() -> None:
 
 def test_declining_the_calibration_leaves_ai_setup_alone() -> None:
     async def run() -> float | None:
-        ai_config.save_settings(ai_config.AISettings(min_confidence=0.6))
+        app_config.save_settings(app_config.AISettings(min_confidence=0.6))
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -1144,7 +1144,7 @@ def test_declining_the_calibration_leaves_ai_setup_alone() -> None:
             await pilot.pause()
             app.screen.dismiss(None)
             await pilot.pause()
-            return ai_config.load_settings().min_confidence
+            return app_config.load_settings().min_confidence
 
     assert asyncio.run(run()) == 0.6
 
@@ -1216,8 +1216,8 @@ def test_opening_a_handoff_tool_with_no_folder_is_refused_not_blank() -> None:
 
 
 def test_extractor_never_emits_llm_responses_escalate_or_math_flags(monkeypatch) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             read_handwriting=True, escalate_only=True, transcribe_math=True
         )
     )
@@ -1236,20 +1236,20 @@ def test_ext_ai_status_names_escalation_and_math(monkeypatch) -> None:  # noqa: 
             await pilot.pause()
             return str(app.query_one("#ext-ai-status", Static).render())
 
-    ai_config.save_settings(ai_config.AISettings())
+    app_config.save_settings(app_config.AISettings())
     off = asyncio.run(status())
     assert "AI: off" in off
 
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, escalate_only=True)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, escalate_only=True)
     )
     escalate_on = asyncio.run(status())
     assert "AI: off" not in escalate_on
     assert "OCR read badly" in escalate_on
     assert "LaTeX" not in escalate_on
 
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             read_handwriting=True, escalate_only=False, transcribe_math=True
         )
     )
@@ -1862,8 +1862,8 @@ def test_pipeline_checkboxes_reveal_their_dependent_rows() -> None:
 
 
 def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             vision_model="llava",
             text_model="llama3.1",
             host="http://192.168.1.50:9999",
@@ -1940,7 +1940,7 @@ def test_pipeline_request_defaults_when_every_disclosure_is_off(tmp_path) -> Non
     assert request.blank_template is None
     assert request.pages_per_submission is None
     assert request.force is False
-    resolved = ai_config.resolve()
+    resolved = app_config.resolve()
     assert resolved.read_handwriting is False
     assert resolved.grade_written is False
     assert resolved.auto_grade is True
@@ -1955,8 +1955,8 @@ def test_pipeline_request_defaults_when_every_disclosure_is_off(tmp_path) -> Non
 def test_pipeline_request_llm_options_follow_the_two_ai_jobs_independently(
     tmp_path,
 ) -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, grade_written=False)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, grade_written=False)
     )
 
     async def run():
@@ -2344,8 +2344,8 @@ def test_ai_setup_button_pushes_the_ai_settings_screen() -> None:
 
 
 def test_ai_summary_names_the_currently_resolved_provider_and_models() -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             text_model="llama3.1",
             vision_model="llava",
             read_handwriting=True,
@@ -2366,8 +2366,8 @@ def test_ai_summary_names_the_currently_resolved_provider_and_models() -> None:
 
 
 def test_ai_summary_names_no_models_when_every_feature_is_off() -> None:
-    ai_config.save_settings(
-        ai_config.AISettings(text_model="llama3.1", vision_model="llava")
+    app_config.save_settings(
+        app_config.AISettings(text_model="llama3.1", vision_model="llava")
     )
 
     async def run() -> str:
@@ -2396,7 +2396,7 @@ def test_split_ai_status_reflects_the_read_handwriting_setting() -> None:
     assert "page numbers are read from the text layer" in off
     assert "AI setup" in off
 
-    ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
     on = asyncio.run(_status_text("split-ai-status"))
     assert "AI: off" not in on
     assert "handwriting model" in on
@@ -2406,7 +2406,7 @@ def test_ak_ai_status_reflects_the_read_handwriting_setting() -> None:
     off = asyncio.run(_status_text("ak-ai-status"))
     assert "AI: off" in off
 
-    ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
     on = asyncio.run(_status_text("ak-ai-status"))
     assert "AI: off" not in on
     assert "handwriting model" in on
@@ -2417,8 +2417,8 @@ def test_grade_ai_status_names_model_confidence_and_calibration_requirement() ->
     assert "AI: off" in off
     assert "only answers your rubric can settle outright" in off
 
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             text_model="llama3.1",
             grade_written=True,
             min_confidence=0.9,
@@ -2431,8 +2431,8 @@ def test_grade_ai_status_names_model_confidence_and_calibration_requirement() ->
     assert "0.9" in on
     assert "no measurement is required" in on
 
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             text_model="llama3.1", grade_written=True, require_calibration=True
         )
     )
@@ -2446,8 +2446,8 @@ def test_pipe_ai_status_states_both_jobs_and_auto_grade() -> None:
     assert "does not grade written answers" in off
     assert "auto-grade runs automatically" in off
 
-    ai_config.save_settings(
-        ai_config.AISettings(read_handwriting=True, grade_written=False, auto_grade=False)
+    app_config.save_settings(
+        app_config.AISettings(read_handwriting=True, grade_written=False, auto_grade=False)
     )
     mixed = asyncio.run(_status_text("pipe-ai-status"))
     assert "reads hard-to-read handwriting" in mixed
@@ -2461,8 +2461,8 @@ def test_refresh_ai_displays_updates_every_status_line_and_the_summary() -> None
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            ai_config.save_settings(
-                ai_config.AISettings(
+            app_config.save_settings(
+                app_config.AISettings(
                     read_handwriting=True, grade_written=True, text_model="llama3.1"
                 )
             )
@@ -2512,11 +2512,11 @@ def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
     monkeypatch.setattr(setup_screen, "run_answer_key_cli", _capture("answer_key"))
     monkeypatch.setattr(setup_screen, "run_grading_cli", _capture("grade"))
     monkeypatch.setattr(
-        ai_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
+        app_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
     )
 
-    ai_config.save_settings(
-        ai_config.AISettings(
+    app_config.save_settings(
+        app_config.AISettings(
             text_model="llama3.1",
             vision_model="llava",
             min_confidence=0.85,
@@ -2596,8 +2596,8 @@ def test_the_llm_readiness_probe_runs_off_the_ui_thread(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(setup_screen, "run_grading_cli", lambda argv, **kwargs: None)
-    monkeypatch.setattr(ai_config, "ensure_ready", _probe)
-    ai_config.save_settings(ai_config.AISettings(grade_written=True))
+    monkeypatch.setattr(app_config, "ensure_ready", _probe)
+    app_config.save_settings(app_config.AISettings(grade_written=True))
 
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
@@ -2623,7 +2623,7 @@ def test_the_llm_probe_is_skipped_entirely_when_the_ai_is_not_wanted(monkeypatch
 
     monkeypatch.setattr(setup_screen, "run_grading_cli", lambda argv, **kwargs: None)
     monkeypatch.setattr(
-        ai_config,
+        app_config,
         "ensure_ready",
         lambda resolved=None, *, purpose="text": calls.append(resolved),
     )

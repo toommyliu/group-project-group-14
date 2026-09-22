@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.grading import suggest_free_response_grade
 from opengrader.core.grading.answer_cache import AnswerGradeCache, answer_grade_key
 from opengrader.core.grading.llm_grader import (
@@ -34,7 +34,7 @@ from opengrader.core.submissions import (
     update_student_submission_markdown,
 )
 
-DEFAULT_LLM_MIN_CONFIDENCE = ai_config.DEFAULT_MIN_CONFIDENCE
+DEFAULT_LLM_MIN_CONFIDENCE = app_config.DEFAULT_MIN_CONFIDENCE
 
 JOURNAL_ACTOR_AUTO = "automated-grading"
 JOURNAL_ACTOR_LLM = "automated-grading:llm"
@@ -103,7 +103,6 @@ class RunJournal:
             )
         except OSError:
             pass
-
 
 
 def grade_student_file(

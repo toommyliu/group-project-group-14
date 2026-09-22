@@ -82,6 +82,7 @@ def test_assignments_stay_in_creation_order_after_editing_or_deleting(tmp_path):
 def test_pipeline_publication_reuses_assignment_and_preserves_grades(managed):
     workspace, original, source = managed
     body = {
+        "assignment_id": workspace.assignment_id_for_folder(source.parent),
         "qa_markdown": workspace.assignment_source(original),
         "submissions_dir": str(source.parent.resolve()),
     }
@@ -135,6 +136,7 @@ def test_pipeline_can_retry_after_partially_publishing(managed):
     broken = source.parent / "two.submission.md"
     broken.write_text("not a submission")
     body = {
+        "assignment_id": workspace.assignment_id_for_folder(source.parent),
         "qa_markdown": workspace.assignment_source(original),
         "submissions_dir": str(source.parent.resolve()),
     }

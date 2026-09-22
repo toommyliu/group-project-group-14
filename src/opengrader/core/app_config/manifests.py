@@ -1,45 +1,5 @@
-"""Provider manifests — how a user connects their own AI service (§7.5).
-
-A manifest is a TOML file under `providers/<name>.toml`, beside `ai.json`
-(`manifests_dir()`). `_ensure_manifests_loaded()` in the parent package reads
-every file in that directory through `load_all()` below and folds whatever
-parses into the provider registry with the *existing* `register_provider` —
-no code change needed for a user-supplied provider to show up in the AI Setup
-dropdown, in `doctor`, or in any CLI's resolution.
-
-Four invariants make a user-editable format safe to load on every startup:
-
-* **`kind` is derived, never declared.** §7.5 calls this "the single most
-  important sentence in §7": a manifest that could say `kind = "local"` would
-  let one line in a text file switch off every safeguard in §7.7, because
-  every one of them (L5's identity-field pin, `--auto-ollama`, the L1 consent
-  screen) reads `ProviderSpec.kind`. So `kind` is not a constructor argument
-  at all — it is computed from `host` by `host_kind()` — and a manifest that
-  contains a `kind` key is rejected outright, on principle, before it gets
-  anywhere near that property.
-* **A manifest is data, and only data.** The allowed keys name a URL, a
-  dialect, two models and where a credential lives — nothing that could be
-  code, a prompt, or a header. Any other top-level key is an error naming the
-  offending key(s), so someone who tries to smuggle in `headers = {...}` or
-  `prompt = "..."` learns immediately that this format does not take code.
-  `credential_command` is the sole exception: it is parsed and stored here,
-  but this module never runs it — running it needs its own consent (L6),
-  which is not yet built.
-* **A manifest never holds a secret.** `api_key_env` must look like an
-  environment-variable name. That one rule is what stops someone pasting the
-  key itself into the file, which would put it on disk and inside every
-  backup archive and grader packet `core/integrity.py` and
-  `core/handoff/packet.py` protect against exactly that.
-* **An invalid manifest costs a provider, never a launch.** `load_all` never
-  raises; every file is tried independently and a bad one becomes one string
-  in the returned problem tuple, in the same spirit `load_settings` and
-  `core/policy.py` already follow — a settings directory sits on the startup
-  path of every command.
-"""
-
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import tomllib
@@ -63,22 +23,19 @@ __all__ = [
     "example_names",
     "example_text",
     "examples_dir",
-    "fingerprint",
     "CONNECTION_TEST_PROMPT",
 ]
 
-# What a connection test sends. Fixed and free of student data on purpose:
-# the test makes a real call to whatever host a provider names, and nothing
-# that crosses that connection should be a name, an id, a rubric or an answer.
+# Connection tests may reach a remote host; never include student data here.
 CONNECTION_TEST_PROMPT = "Reply with the single word: ready"
 
 
 class ManifestError(ValueError):
-    """One manifest is unusable. The message is written to be the fix."""
+    """Invalid provider manifest."""
 
 
 class ManifestExistsError(ManifestError):
-    """A manifest with that name is already installed; nothing was written."""
+    """Provider manifest already exists."""
 
 
 _REQUIRED_KEYS: tuple[str, ...] = (
@@ -104,20 +61,10 @@ _ALLOWED_KEYS = frozenset(_REQUIRED_KEYS) | frozenset(_OPTIONAL_KEYS)
 
 _PRICING_KEYS = frozenset({"input_per_mtok", "output_per_mtok"})
 
-# name is persisted into ai.json and doubles as the manifest's own filename
-# stem, so it gets the conservative rule a filesystem and a JSON key both
-# tolerate.
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
-# What stops someone pasting a key into this file: a plausible shell/POSIX
-# environment-variable name, and nothing that could itself be a secret.
 _ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# The provider ids a manifest cannot claim, because the registry already has
-# them under `register_provider`'s setdefault and a shadowing attempt is a
-# mistake worth naming rather than silently losing. Today that is just
-# Ollama; DEFAULT_PROVIDER is the source of truth rather than a repeated
-# literal string.
 _RESERVED_NAMES = frozenset({DEFAULT_PROVIDER})
 
 
@@ -131,12 +78,7 @@ def parse_manifest(
     path: Path | None = None,
     source: str = "user",
 ) -> ProviderSpec:
-    """Turn one already-parsed TOML table into a `ProviderSpec`.
-
-    Raises `ManifestError` for anything wrong with the data; never touches a
-    filesystem or the registry, so it is also what `load_file` and the
-    verification examples use directly.
-    """
+    """Validate a parsed TOML table without filesystem side effects."""
     where = _where(path)
     if not isinstance(data, dict):
         raise ManifestError(f"{where}a provider manifest must be a table of key = value pairs.")
@@ -165,7 +107,7 @@ def parse_manifest(
     if not _NAME_RE.match(name):
         raise ManifestError(
             f"{where}name {name!r} must match {_NAME_RE.pattern!r} — it is written into "
-            "ai.json and doubles as a filename, so it stays lowercase, alphanumeric, "
+            "config.json and doubles as a filename, so it stays lowercase, alphanumeric, "
             "and only '.', '_' or '-' besides."
         )
     if name in _RESERVED_NAMES:
@@ -337,19 +279,7 @@ def install_manifest(
     force: bool = False,
     directory: Path | None = None,
 ) -> tuple[Path, ProviderSpec]:
-    """Validate a manifest's source and write it to `providers/<name>.toml`.
-
-    The one place a manifest is written: `opengrader-providers add` and the
-    TUI's provider screen both come through here, so "validate before a byte
-    reaches disk" and "never overwrite unless asked" hold in one place. The
-    text is written verbatim, comments included, because it is the user's
-    file and not ours to reformat. The file is named after the manifest's
-    `name`, not after wherever it came from, so the id written into `ai.json`
-    and the file that defines it cannot drift apart.
-
-    This only writes. Callers follow it with `ai_config.reload_manifests()`
-    so the provider is live without a restart.
-    """
+    """Validate and write a manifest without overwriting unless forced."""
     spec = parse_text(text)
     target_dir = directory if directory is not None else manifests_dir()
     dest = target_dir / f"{spec.name}.toml"
@@ -364,12 +294,6 @@ def install_manifest(
 
 
 def remove_manifest(spec: ProviderSpec) -> Path:
-    """Delete the file a user-added provider came from. Raises `ManifestError`.
-
-    A built-in provider has no file and is refused rather than silently
-    ignored: a caller that asked to remove Ollama has misunderstood something
-    and should be told. Callers follow this with `ai_config.reload_manifests()`.
-    """
     if spec.source != "user" or not spec.manifest_path:
         raise ManifestError(
             f"{spec.name!r} is a built-in provider and cannot be removed. Only a "
@@ -386,17 +310,6 @@ def remove_manifest(spec: ProviderSpec) -> Path:
 
 
 def describe_provider(spec: ProviderSpec) -> list[tuple[str, str]]:
-    """What a person should know about a provider, as (label, value) rows.
-
-    Shared by `opengrader-providers list` and the TUI's provider screen so the
-    two cannot word the one fact that matters differently. That fact is the
-    first row: whether choosing this provider sends student work off this
-    machine, read from `sends_data_off_machine` like every other surface
-    that states it.
-
-    The key row says only whether the variable is set, never any part of its
-    value (L8).
-    """
     if spec.sends_data_off_machine:
         where = f"CLOUD: data leaves this machine and is sent to {spec.default_host}"
     else:
@@ -445,17 +358,9 @@ def describe_provider(spec: ProviderSpec) -> list[tuple[str, str]]:
 def load_all(
     *,
     directory: Path | None = None,
-    environ: dict[str, str] | None = None,
 ) -> tuple[list[ProviderSpec], tuple[str, ...]]:
-    """Every `*.toml` in `directory` (default: `manifests_dir()`), sorted by name.
-
-    Never raises. A directory that does not exist, or cannot be listed, is
-    indistinguishable from an empty one — that is L0's "a fresh install has
-    no cloud provider registered at all" holding even when the directory was
-    never created. A file that fails to parse costs that one provider; it is
-    reported as a problem string and every other file is still tried.
-    """
-    target = directory if directory is not None else manifests_dir(environ=environ)
+    """Load valid manifests and report errors without stopping startup."""
+    target = directory if directory is not None else manifests_dir()
     try:
         entries = sorted(
             (p for p in target.iterdir() if p.is_file() and p.suffix == ".toml"),
@@ -476,23 +381,6 @@ def load_all(
     return specs, tuple(problems)
 
 
-def fingerprint(spec: ProviderSpec) -> str:
-    """`sha256` of the fields L2 (§7.7) re-prompts consent over.
-
-    Consent (L1) is given to a specific service; if editing a manifest could
-    silently repoint it at a different host, dialect, credential variable or
-    credential command, consent given once would cover whatever the file
-    later became. L2 exists to close that: `AISettings` stores this digest
-    alongside the consent, and a change to it means "prompt again."
-
-    Fields are joined with `\\x00`, a byte no legitimate field value here
-    contains, so `("a", "bc")` and `("ab", "c")` never collide — a plain `+`
-    concatenation would conflate them.
-    """
-    parts = (spec.name, spec.default_host, spec.dialect, spec.api_key_env, *spec.credential_command)
-    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
-
-
 def render_manifest(
     *,
     name: str,
@@ -508,11 +396,7 @@ def render_manifest(
     credential_command: Sequence[str] = (),
     pricing: ProviderPricing | None = None,
 ) -> str:
-    """Render a manifest a human could have typed — for `opengrader-providers add`.
-
-    Validates through `parse_manifest` before formatting a single line, so
-    this never hands a caller TOML that would fail to load back in.
-    """
+    """Validate fields and render a provider manifest."""
     data: dict[str, Any] = {
         "name": name,
         "label": label,
@@ -536,7 +420,7 @@ def render_manifest(
             "input_per_mtok": pricing.input_per_mtok,
             "output_per_mtok": pricing.output_per_mtok,
         }
-    parse_manifest(data, source="user")  # fail loudly, not on the next load
+    parse_manifest(data, source="user")
 
     lines = [
         f"name         = {json.dumps(name)}",
@@ -564,28 +448,11 @@ def render_manifest(
     return text
 
 
-# --- Shipped examples --------------------------------------------------
-#
-# These live in examples/ beside this file, NOT in providers/, and load_all()
-# only ever reads providers/. That split is deliberate, not an oversight to
-# "fix" by pointing load_all at this directory too: L0 (§7.7) requires that a
-# fresh install register no cloud provider at all, pinned by a test asserting
-# registered_providers()[0].kind == "local" against an empty config
-# directory. §7.5's "ship built-in providers as manifests too, so the
-# dropdown is not empty" is satisfied by a user *copying one in* — today via
-# `example_text()`, and by `opengrader-providers add --example NAME`, which
-# reads example_names()/example_text() and writes the result into
-# providers/. Until a human (or that command) does that, an example is just a
-# file. Auto-loading it would put a cloud provider one keystroke away from
-# every fresh install, which is exactly what L0 exists to prevent.
-
-
 def examples_dir() -> Path:
     return Path(__file__).parent / "examples"
 
 
 def example_names() -> tuple[str, ...]:
-    """The shipped examples' names, sorted — what `--example` accepts."""
     try:
         entries = examples_dir().iterdir()
     except OSError:
@@ -594,12 +461,6 @@ def example_names() -> tuple[str, ...]:
 
 
 def example_text(name: str) -> str:
-    """One example's raw TOML source, to write out or to show a user.
-
-    The name is matched against the listing rather than joined onto a path:
-    this is reached from a command line, and a name is not a route to an
-    arbitrary file just because it happens to be a filename stem.
-    """
     if name not in example_names():
         known = ", ".join(example_names())
         raise ManifestError(f"no example named {name!r}. Known examples: {known}.")

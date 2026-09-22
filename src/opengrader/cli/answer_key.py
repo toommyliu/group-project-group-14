@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.qa_file.text2qti import parse_text2qti, render_qa
 
@@ -28,7 +28,7 @@ examples:
 
 
 def _build_parser() -> ArgumentParser:
-    ai = ai_config.resolve()
+    ai = app_config.resolve()
     parser = ArgumentParser(
         description=(
             "Build a QA-format answer key from a question file — a text2qti "
@@ -163,8 +163,8 @@ def _qa_from_pdf(
                 "model)."
             )
         else:
-            resolved_default = ai_config.resolve()
-            resolved = ai_config.with_overrides(
+            resolved_default = app_config.resolve()
+            resolved = app_config.with_overrides(
                 resolved_default,
                 host=args.ollama_host,
                 vision_model=args.ollama_model,
@@ -182,9 +182,9 @@ def _qa_from_pdf(
                 or args.ollama_model != resolved_default.vision_model
                 or args.ollama_host != resolved_default.host
             ):
-                vision_reader = ai_config.vision_reader(resolved)
+                vision_reader = app_config.vision_reader(resolved)
                 try:
-                    ai_config.ensure_ready(resolved, purpose="vision")
+                    app_config.ensure_ready(resolved, purpose="vision")
                 except Exception as exc:
                     emit(f"Warning: Ollama vision model unavailable ({exc}); using Tesseract only.")
                     vision_reader = None

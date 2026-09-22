@@ -1,47 +1,24 @@
-"""Unit tests for with_overrides, available_models, and ensure_ready.
-
-These three functions are the "bridge" layer between a resolved
-AISettings/ResolvedAI and the CLI call sites that consume them:
-
-  * with_overrides applies the "flag" tier of flag > env > file > default.
-  * available_models asks a provider what models it can answer for.
-  * ensure_ready fails fast, before a long job starts, if the configured
-    provider cannot serve this run.
-
-Each test registers its own fake ProviderSpec through register_provider and
-tears the registry down in a finally block, mirroring the fake_cloud_provider
-fixture in test_ai_config.py. This file is intentionally independent of that
-one (it copies rather than imports the pattern) so the two files can be
-edited, and can fail, without coupling.
-"""
-
 from __future__ import annotations
 
 import pytest
 
-from opengrader.core import ai_config
+from opengrader.core import app_config
 
 
 @pytest.fixture
 def fake_provider_registry():
-    """Snapshot the registry and restore it exactly, no matter what happens.
+    original_providers = app_config.registered_providers()
 
-    Yields a helper `register(spec)` that registers a ProviderSpec and
-    returns it, so tests can register one or several fake providers without
-    each writing its own try/finally.
-    """
-    original_providers = ai_config.registered_providers()
-
-    def _register(spec: ai_config.ProviderSpec) -> ai_config.ProviderSpec:
-        ai_config.register_provider(spec)
+    def _register(spec: app_config.ProviderSpec) -> app_config.ProviderSpec:
+        app_config.register_provider(spec)
         return spec
 
     try:
         yield _register
     finally:
-        ai_config._REGISTRY.clear()
+        app_config._REGISTRY.clear()
         for original in original_providers:
-            ai_config.register_provider(original)
+            app_config.register_provider(original)
 
 
 def _make_spec(
@@ -51,8 +28,8 @@ def _make_spec(
     api_key_env: str = "",
     supports_model_listing: bool = True,
     list_models_factory=None,
-) -> ai_config.ProviderSpec:
-    return ai_config.ProviderSpec(
+) -> app_config.ProviderSpec:
+    return app_config.ProviderSpec(
         name=name,
         label="Fake Bridge Provider",
         summary="A fake provider used only to exercise with_overrides/available_models/ensure_ready.",
@@ -67,23 +44,20 @@ def _make_spec(
     )
 
 
-def _resolve(registry, spec: ai_config.ProviderSpec, **settings_kwargs) -> ai_config.ResolvedAI:
+def _resolve(registry, spec: app_config.ProviderSpec, **settings_kwargs) -> app_config.ResolvedAI:
     registry(spec)
-    settings = ai_config.AISettings(provider=spec.name, **settings_kwargs)
-    return ai_config.resolve(settings, environ={})
+    settings = app_config.AISettings(provider=spec.name, **settings_kwargs)
+    return app_config.resolve(settings, environ={})
 
 
-# ---------------------------------------------------------------------------
 # with_overrides
-# ---------------------------------------------------------------------------
-
 
 class TestWithOverrides:
     def test_explicit_host_wins_over_resolved_value(self, fake_provider_registry) -> None:
         spec = _make_spec()
         resolved = _resolve(fake_provider_registry, spec)
 
-        overridden = ai_config.with_overrides(resolved, host="http://from-flag:9999")
+        overridden = app_config.with_overrides(resolved, host="http://from-flag:9999")
 
         assert overridden.host == "http://from-flag:9999"
 
@@ -91,7 +65,7 @@ class TestWithOverrides:
         spec = _make_spec()
         resolved = _resolve(fake_provider_registry, spec)
 
-        overridden = ai_config.with_overrides(resolved, vision_model="flag-vision")
+        overridden = app_config.with_overrides(resolved, vision_model="flag-vision")
 
         assert overridden.vision_model == "flag-vision"
 
@@ -99,7 +73,7 @@ class TestWithOverrides:
         spec = _make_spec()
         resolved = _resolve(fake_provider_registry, spec)
 
-        overridden = ai_config.with_overrides(resolved, text_model="flag-text")
+        overridden = app_config.with_overrides(resolved, text_model="flag-text")
 
         assert overridden.text_model == "flag-text"
 
@@ -107,7 +81,7 @@ class TestWithOverrides:
         spec = _make_spec()
         resolved = _resolve(fake_provider_registry, spec)
 
-        overridden = ai_config.with_overrides(resolved, timeout_seconds=45.0)
+        overridden = app_config.with_overrides(resolved, timeout_seconds=45.0)
 
         assert overridden.timeout_seconds == 45.0
 
@@ -122,7 +96,7 @@ class TestWithOverrides:
             timeout_seconds=77.0,
         )
 
-        overridden = ai_config.with_overrides(
+        overridden = app_config.with_overrides(
             resolved,
             host=None,
             vision_model=None,
@@ -148,7 +122,7 @@ class TestWithOverrides:
             text_model="saved-text",
         )
 
-        overridden = ai_config.with_overrides(
+        overridden = app_config.with_overrides(
             resolved, host=blank, vision_model=blank, text_model=blank
         )
 
@@ -163,14 +137,14 @@ class TestWithOverrides:
         spec = _make_spec()
         resolved = _resolve(fake_provider_registry, spec, timeout_seconds=77.0)
 
-        overridden = ai_config.with_overrides(resolved, timeout_seconds=bad_timeout)
+        overridden = app_config.with_overrides(resolved, timeout_seconds=bad_timeout)
 
         assert overridden.timeout_seconds == resolved.timeout_seconds
 
     def test_provider_api_key_and_toggles_are_untouched(self, fake_provider_registry) -> None:
         spec = _make_spec(requires_api_key=True, api_key_env="FAKE_BRIDGE_KEY")
         fake_provider_registry(spec)
-        settings = ai_config.AISettings(
+        settings = app_config.AISettings(
             provider=spec.name,
             read_handwriting=True,
             escalate_only=True,
@@ -179,11 +153,11 @@ class TestWithOverrides:
             auto_grade=False,
             require_calibration=True,
         )
-        resolved = ai_config.resolve(
+        resolved = app_config.resolve(
             settings, environ={"FAKE_BRIDGE_KEY": "sekrit"}
         )
 
-        overridden = ai_config.with_overrides(
+        overridden = app_config.with_overrides(
             resolved,
             host="http://from-flag:9999",
             vision_model="flag-vision",
@@ -204,7 +178,7 @@ class TestWithOverrides:
         spec = _make_spec()
         resolved = _resolve(fake_provider_registry, spec)
 
-        overridden = ai_config.with_overrides(
+        overridden = app_config.with_overrides(
             resolved,
             host="  http://padded:1234  ",
             vision_model="  padded-vision  ",
@@ -220,44 +194,41 @@ class TestWithOverrides:
     ) -> None:
         spec = _make_spec()
         fake_provider_registry(spec)
-        settings = ai_config.AISettings(provider=spec.name, host="http://saved:1111")
+        settings = app_config.AISettings(provider=spec.name, host="http://saved:1111")
 
         # with_overrides(None) re-runs resolve() internally with no explicit
         # settings/environ, matching a bare resolve() call in the same
         # process. We pin equivalence by calling with_overrides on an
         # already-resolved instance and confirming every override defaults
         # to a no-op, i.e. the result equals the input.
-        resolved = ai_config.resolve(settings, environ={})
-        overridden = ai_config.with_overrides(resolved)
+        resolved = app_config.resolve(settings, environ={})
+        overridden = app_config.with_overrides(resolved)
 
         assert overridden == resolved
 
 
-# ---------------------------------------------------------------------------
 # available_models
-# ---------------------------------------------------------------------------
-
 
 class TestAvailableModels:
     def test_returns_empty_list_when_no_list_models_factory(self, fake_provider_registry) -> None:
         spec = _make_spec(list_models_factory=None, supports_model_listing=True)
         resolved = _resolve(fake_provider_registry, spec)
 
-        assert ai_config.available_models(resolved) == []
+        assert app_config.available_models(resolved) == []
 
     def test_returns_empty_list_when_listing_unsupported_even_with_a_factory(
         self, fake_provider_registry
     ) -> None:
-        calls: list[ai_config.ResolvedAI] = []
+        calls: list[app_config.ResolvedAI] = []
 
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             calls.append(resolved)
             return ["should-not-be-returned"]
 
         spec = _make_spec(supports_model_listing=False, list_models_factory=factory)
         resolved = _resolve(fake_provider_registry, spec)
 
-        result = ai_config.available_models(resolved)
+        result = app_config.available_models(resolved)
 
         assert result == []
         assert calls == []  # the factory must not even be called
@@ -265,25 +236,22 @@ class TestAvailableModels:
     def test_returns_the_factorys_list_and_passes_resolved_through(
         self, fake_provider_registry
     ) -> None:
-        calls: list[ai_config.ResolvedAI] = []
+        calls: list[app_config.ResolvedAI] = []
 
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             calls.append(resolved)
             return ["model-a", "model-b"]
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
         resolved = _resolve(fake_provider_registry, spec)
 
-        result = ai_config.available_models(resolved)
+        result = app_config.available_models(resolved)
 
         assert result == ["model-a", "model-b"]
         assert calls == [resolved]
 
 
-# ---------------------------------------------------------------------------
 # ensure_ready
-# ---------------------------------------------------------------------------
-
 
 class TestEnsureReady:
     def test_raises_naming_the_env_var_when_key_required_and_missing(
@@ -292,24 +260,24 @@ class TestEnsureReady:
         spec = _make_spec(requires_api_key=True, api_key_env="FAKE_BRIDGE_KEY")
         resolved = _resolve(fake_provider_registry, spec)
 
-        with pytest.raises(ai_config.AIUnavailableError) as excinfo:
-            ai_config.ensure_ready(resolved)
+        with pytest.raises(app_config.AIUnavailableError) as excinfo:
+            app_config.ensure_ready(resolved)
 
         assert "FAKE_BRIDGE_KEY" in str(excinfo.value)
 
     def test_returns_none_and_does_not_list_when_provider_cannot_enumerate(
         self, fake_provider_registry
     ) -> None:
-        calls: list[ai_config.ResolvedAI] = []
+        calls: list[app_config.ResolvedAI] = []
 
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             calls.append(resolved)
             return ["irrelevant"]
 
         spec = _make_spec(supports_model_listing=False, list_models_factory=factory)
         resolved = _resolve(fake_provider_registry, spec)
 
-        result = ai_config.ensure_ready(resolved)
+        result = app_config.ensure_ready(resolved)
 
         assert result is None
         assert calls == []
@@ -317,7 +285,7 @@ class TestEnsureReady:
     def test_raises_naming_wanted_and_available_when_model_absent(
         self, fake_provider_registry
     ) -> None:
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             return ["model-a", "model-b"]
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
@@ -325,8 +293,8 @@ class TestEnsureReady:
             fake_provider_registry, spec, vision_model="missing-model"
         )
 
-        with pytest.raises(ai_config.AIUnavailableError) as excinfo:
-            ai_config.ensure_ready(resolved, purpose="vision")
+        with pytest.raises(app_config.AIUnavailableError) as excinfo:
+            app_config.ensure_ready(resolved, purpose="vision")
 
         message = str(excinfo.value)
         assert "missing-model" in message
@@ -334,16 +302,16 @@ class TestEnsureReady:
         assert "model-b" in message
 
     def test_returns_quietly_when_wanted_model_present(self, fake_provider_registry) -> None:
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             return ["model-a", "fake-vision-1"]
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
         resolved = _resolve(fake_provider_registry, spec)
 
-        assert ai_config.ensure_ready(resolved, purpose="vision") is None
+        assert app_config.ensure_ready(resolved, purpose="vision") is None
 
     def test_returns_quietly_when_list_comes_back_empty(self, fake_provider_registry) -> None:
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             return []
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
@@ -353,7 +321,7 @@ class TestEnsureReady:
 
         # An empty list means the service answered but told us nothing
         # useful; that is deliberately not evidence the model is missing.
-        assert ai_config.ensure_ready(resolved, purpose="vision") is None
+        assert app_config.ensure_ready(resolved, purpose="vision") is None
 
     def test_wraps_provider_exception_in_ai_unavailable_error_chained(
         self, fake_provider_registry
@@ -361,20 +329,20 @@ class TestEnsureReady:
         class FakeProviderClientError(RuntimeError):
             pass
 
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             raise FakeProviderClientError("connection refused")
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
         resolved = _resolve(fake_provider_registry, spec)
 
-        with pytest.raises(ai_config.AIUnavailableError) as excinfo:
-            ai_config.ensure_ready(resolved)
+        with pytest.raises(app_config.AIUnavailableError) as excinfo:
+            app_config.ensure_ready(resolved)
 
         assert isinstance(excinfo.value.__cause__, FakeProviderClientError)
         assert "connection refused" in str(excinfo.value)
 
     def test_purpose_vision_checks_vision_model(self, fake_provider_registry) -> None:
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             return ["only-the-text-model"]
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
@@ -385,15 +353,15 @@ class TestEnsureReady:
             text_model="only-the-text-model",
         )
 
-        with pytest.raises(ai_config.AIUnavailableError) as excinfo:
-            ai_config.ensure_ready(resolved, purpose="vision")
+        with pytest.raises(app_config.AIUnavailableError) as excinfo:
+            app_config.ensure_ready(resolved, purpose="vision")
         assert "the-vision-model" in str(excinfo.value)
 
         # text purpose should pass since text_model IS in the list
-        assert ai_config.ensure_ready(resolved, purpose="text") is None
+        assert app_config.ensure_ready(resolved, purpose="text") is None
 
     def test_purpose_text_checks_text_model(self, fake_provider_registry) -> None:
-        def factory(resolved: ai_config.ResolvedAI) -> list[str]:
+        def factory(resolved: app_config.ResolvedAI) -> list[str]:
             return ["only-the-vision-model"]
 
         spec = _make_spec(supports_model_listing=True, list_models_factory=factory)
@@ -404,9 +372,9 @@ class TestEnsureReady:
             text_model="the-text-model",
         )
 
-        with pytest.raises(ai_config.AIUnavailableError) as excinfo:
-            ai_config.ensure_ready(resolved, purpose="text")
+        with pytest.raises(app_config.AIUnavailableError) as excinfo:
+            app_config.ensure_ready(resolved, purpose="text")
         assert "the-text-model" in str(excinfo.value)
 
         # vision purpose should pass since vision_model IS in the list
-        assert ai_config.ensure_ready(resolved, purpose="vision") is None
+        assert app_config.ensure_ready(resolved, purpose="vision") is None

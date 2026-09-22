@@ -18,7 +18,7 @@ from opengrader.core.submissions.student_file import (
     update_student_submission_file,
 )
 from opengrader.core.workspace.intake import publish_pipeline
-from opengrader.core.workspace.models import PipelineOutput
+from opengrader.core.workspace.models import AssignmentInputs, PipelineOutput
 from opengrader.core.workspace.store import Workspace
 from opengrader.tui.ui.screens.write_back_screen import WriteBackScreen
 
@@ -33,11 +33,21 @@ def cls(tmp_path: Path):
     published = publish_pipeline(
         store,
         PipelineOutput(
+            assignment_id=store.assignment_id_for_folder(root),
             qa_markdown=(root / "qa.md").read_text(encoding="utf-8"),
             submissions_dir=str((root / "student-submissions").resolve()),
         ),
     )
     aid = published.assignment.id
+    store.save_assignment_inputs(
+        AssignmentInputs(
+            id=aid,
+            folder=".",
+            scan="",
+            output=".",
+            submissions="student-submissions",
+        )
+    )
     sid = store.submissions(aid)[0].id
     file = sorted((root / "student-submissions").rglob("*.submission.md"))[0]
 
@@ -136,7 +146,7 @@ def test_an_assignment_without_a_folder_explains_itself(cls) -> None:
             await _settle(pilot, lambda: "Cannot" in str(screen.query_one("#wb-summary", Static).render()))
             return str(screen.query_one("#wb-summary", Static).render())
 
-    assert "not imported from a folder" in asyncio.run(run())
+    assert "no available source submissions folder" in asyncio.run(run())
 
 
 def _body(screen) -> str:  # noqa: ANN001

@@ -8,7 +8,7 @@ import pytest
 
 import opengrader.core.qa_file.pdf_answer_key as pdf_answer_key_module
 from opengrader.cli.answer_key import run_cli
-from opengrader.core import ai_config
+from opengrader.core import app_config
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.qa_file.pdf_answer_key import _load_blank_template_layout
 
@@ -161,9 +161,9 @@ def test_no_llm_read_scans_leaves_vision_reader_none(
 def test_llm_read_scans_defaults_on_from_ai_setup(
     answer_key_pdf: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    ai_config.save_settings(ai_config.AISettings(read_handwriting=True))
+    app_config.save_settings(app_config.AISettings(read_handwriting=True))
 
-    monkeypatch.setattr(ai_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
     captured = _stub_extract(monkeypatch)
 
     run_cli(
@@ -180,7 +180,7 @@ def test_llm_read_scans_defaults_on_from_ai_setup(
 def test_llm_read_scans_defaults_off_when_ai_setup_leaves_it_off(
     answer_key_pdf: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    ai_config.save_settings(ai_config.AISettings())
+    app_config.save_settings(app_config.AISettings())
     captured = _stub_extract(monkeypatch)
 
     run_cli(

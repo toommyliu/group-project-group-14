@@ -251,7 +251,7 @@ def test_every_control_the_help_quotes_exists_in_the_ui() -> None:
         path.read_text(encoding="utf-8")
         for path in (root / "src" / "opengrader" / "tui").rglob("*.py")
     )
-    ui_source += (root / "src" / "opengrader" / "core" / "ai_config" / "__init__.py").read_text(
+    ui_source += (root / "src" / "opengrader" / "core" / "app_config" / "__init__.py").read_text(
         encoding="utf-8"
     )
 
@@ -288,9 +288,9 @@ def test_the_ai_section_documents_the_settings_file_and_precedence() -> None:
 
     joined = " ".join(dict(_LOCAL_AI_ROWS).values())
 
-    assert "ai.json" in joined
-    assert "OPENGRADER_AI_" in joined
-    assert "OPENGRADER_AI_CONFIG" in joined
+    assert "config.json" in joined
+    assert "$schema" in joined
+    assert "built-in defaults" in joined
 
 
 def test_the_ai_section_documents_the_request_timeout() -> None:

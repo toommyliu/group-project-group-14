@@ -1,0 +1,18 @@
+# Install with: opengrader-providers add --example anthropic
+
+name         = "anthropic"
+label        = "Anthropic"
+summary      = "Claude models over Anthropic's hosted API."
+dialect      = "anthropic-messages"
+host         = "https://api.anthropic.com/v1"   # the API base; the dialect appends /messages
+vision_model = "claude-haiku-4-5-20251001"
+text_model   = "claude-haiku-4-5-20251001"
+api_key_env  = "ANTHROPIC_API_KEY"
+setup_hint   = "Create a key at https://console.anthropic.com/settings/keys, then set ANTHROPIC_API_KEY."
+
+supports_model_listing = true
+
+# Example pricing in dollars per million tokens. Check current rates before use.
+[pricing]
+input_per_mtok  = 1.0
+output_per_mtok = 5.0
