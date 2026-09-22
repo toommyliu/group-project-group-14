@@ -14,6 +14,7 @@ import {
   type VisualEditResult,
 } from '@/api/queries';
 import { PageHeading } from '@/components/page-heading';
+import { FileUpload } from '@/components/file-upload';
 import { EditorResizeHandle } from '@/components/editor-resize-handle';
 import { AssignmentPanes } from '@/components/assignment-panes';
 import { AssignmentPreview } from '@/components/assignment-preview';
@@ -67,10 +68,10 @@ export function AssignmentEditor({
     []
   );
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
+  const [uploadError, setUploadError] = useState('');
   const [reading, setReading] = useState(false);
   const [mode, setMode] = useState('visual');
   const [visualPending, setVisualPending] = useState(false);
@@ -147,7 +148,7 @@ export function AssignmentEditor({
     if (!file) return;
     const id = ++fileRead.current;
     setReading(true);
-    setError('');
+    setUploadError('');
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(
         await file.arrayBuffer()
@@ -161,8 +162,8 @@ export function AssignmentEditor({
       }
     } catch {
       if (id === fileRead.current)
-        setError(
-          'Could not read this file. Select a markdown file or paste its content into the editor.'
+        setUploadError(
+          'Could not read this file. Choose a Markdown file or paste its content into the editor.'
         );
     } finally {
       if (id === fileRead.current) setReading(false);
@@ -257,14 +258,51 @@ export function AssignmentEditor({
 
   return (
     <>
-      <PageHeading
-        title={assignmentId ? 'Edit assignment' : 'Create assignment'}
-        description={
-          assignmentId
-            ? 'Edit the assignment, then check the PDF before saving.'
-            : 'Start an assignment or import a Markdown answer key.'
-        }
-      />
+      <div className="@container">
+        <div className="mb-8 flex flex-col gap-6 @min-[40rem]:flex-row @min-[40rem]:items-start">
+          <PageHeading
+            className="mb-0 min-w-0 flex-1"
+            title={assignmentId ? 'Edit assignment' : 'Create assignment'}
+            description={
+              assignmentId
+                ? 'Edit the assignment, then check the PDF before saving.'
+                : 'Start an assignment or import a Markdown answer key.'
+            }
+          />
+          <div className="w-full shrink-0 @min-[40rem]:w-64">
+            <FileUpload
+              title={assignmentId ? 'Replace answer key' : 'Import answer key'}
+              description={
+                assignmentId
+                  ? 'Drop a Markdown file here to replace the editor content, or select one.'
+                  : 'Drop a Markdown file here or select one.'
+              }
+              buttonLabel={
+                reading
+                  ? 'Reading file…'
+                  : uploadError
+                    ? 'Choose another file'
+                    : 'Select Markdown file'
+              }
+              inputLabel="Upload QA file"
+              accept=".md,text/markdown,text/plain"
+              disabled={reading || saving || !!saved || visualPending}
+              error={uploadError}
+              onFiles={(files) => void upload(files[0])}
+            >
+              <span
+                role="status"
+                className="mt-3 block text-sm wrap-break-word text-muted-foreground empty:hidden"
+                title={uploadedFileName || undefined}
+              >
+                {reading
+                  ? 'Reading file…'
+                  : uploadedFileName && `Imported ${uploadedFileName}`}
+              </span>
+            </FileUpload>
+          </div>
+        </div>
+      </div>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -314,44 +352,11 @@ export function AssignmentEditor({
               className="@container min-w-0 space-y-4"
               aria-labelledby="editor-heading"
             >
-              <div className="space-y-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  hidden
-                  aria-label="Upload QA file"
-                  accept=".md,text/markdown,text/plain"
-                  disabled={reading || saving || !!saved}
-                  onChange={(event) => {
-                    void upload(event.target.files?.[0]);
-                    event.target.value = '';
-                  }}
-                />
-                <div className="flex flex-col items-start gap-3 @min-[24rem]:flex-row @min-[24rem]:items-center @min-[24rem]:justify-between">
-                  <h2 id="editor-heading" className="text-lg font-semibold">
-                    Assignment editor
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {previewToggle}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={reading || saving || !!saved || visualPending}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      Upload
-                    </Button>
-                  </div>
-                </div>
-                <span
-                  role="status"
-                  className="block text-sm wrap-break-word text-muted-foreground empty:hidden"
-                  title={uploadedFileName || undefined}
-                >
-                  {reading
-                    ? 'Reading file…'
-                    : uploadedFileName && `Imported ${uploadedFileName}`}
-                </span>
+              <div className="flex flex-col items-start gap-3 @min-[24rem]:flex-row @min-[24rem]:items-center @min-[24rem]:justify-between">
+                <h2 id="editor-heading" className="text-lg font-semibold">
+                  Assignment editor
+                </h2>
+                {previewToggle}
               </div>
               <Tabs
                 value={mode}

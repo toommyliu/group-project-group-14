@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Upload } from 'lucide-react';
 import type { scansRoute } from '@/router';
 import { scansQuery, uploadScan } from '@/api/scans';
 import { PageHeading } from '@/components/page-heading';
 import { ScanBatchCard } from '@/components/scan-batch';
+import { FileUpload } from '@/components/file-upload';
 import { Button } from '@/components/ui/button';
 import { errorMessage } from '@/lib/error-message';
 import { ErrorAlert } from '@/components/error-alert';
@@ -25,10 +25,8 @@ export default function ScansPage({
   const { assignment, versions } = data;
   const query = useQuery(scansQuery(assignment.id));
   const client = useQueryClient();
-  const input = useRef<HTMLInputElement>(null);
   const uploading = useRef(false);
   const [transfers, setTransfers] = useState<Transfer[]>([]);
-  const [dragging, setDragging] = useState(false);
   const [refreshError, setRefreshError] = useState('');
   const batches = query.data?.batches ?? [];
   const published = batches.reduce(
@@ -121,97 +119,70 @@ export default function ScansPage({
             title="Manage scans"
             description={assignment.title}
           />
-          <div
-            className={`w-full shrink-0 rounded-lg border border-dashed p-4 @min-[40rem]:w-64 ${dragging ? 'bg-muted' : ''}`}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              void upload(Array.from(event.dataTransfer.files));
-            }}
-          >
-            <div className="space-y-1">
-              <h2 className="text-sm font-medium">Upload scans</h2>
-              <p className="text-sm text-muted-foreground">
-                Drop PDFs here or select files.
-              </p>
-            </div>
-            <Button
-              className="mt-3 w-full"
-              disabled={active}
-              onClick={() => input.current?.click()}
-            >
-              <Upload aria-hidden="true" />
-              {active ? 'Uploading…' : 'Select PDF files'}
-            </Button>
-            <input
-              ref={input}
-              type="file"
+          <div className="w-full shrink-0 @min-[40rem]:w-64">
+            <FileUpload
+              title="Upload scans"
+              description="Drop PDFs here or select files."
+              buttonLabel={active ? 'Uploading…' : 'Select PDF files'}
+              inputLabel="Upload PDF scans"
               accept=".pdf,application/pdf"
               multiple
-              className="hidden"
-              aria-label="Upload PDF scans"
-              onChange={(event) => {
-                void upload(Array.from(event.target.files ?? []));
-                event.target.value = '';
-              }}
-            />
-            {transfers.length > 0 && (
-              <ul className="mt-4 space-y-3" aria-live="polite">
-                {transfers.map((item) => (
-                  <li key={item.id} className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="min-w-0 break-all">
-                        {item.file.name}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {item.status === 'done'
-                          ? 'Uploaded'
-                          : item.status === 'uploading'
-                            ? item.percent === 100
-                              ? 'Checking PDF…'
-                              : `${item.percent}% uploaded`
-                            : item.status === 'waiting'
-                              ? 'Waiting'
-                              : 'Upload failed'}
-                      </span>
-                      {item.status === 'failed' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={active}
-                          onClick={() => {
-                            setTransfers((previous) =>
-                              previous.filter(
-                                (transfer) => transfer.id !== item.id
-                              )
-                            );
-                            void upload([item.file]);
-                          }}
-                        >
-                          Retry upload
-                        </Button>
+              disabled={active}
+              onFiles={(files) => void upload(files)}
+            >
+              {transfers.length > 0 && (
+                <ul className="mt-4 space-y-3" aria-live="polite">
+                  {transfers.map((item) => (
+                    <li key={item.id} className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="min-w-0 break-all">
+                          {item.file.name}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {item.status === 'done'
+                            ? 'Uploaded'
+                            : item.status === 'uploading'
+                              ? item.percent === 100
+                                ? 'Checking PDF…'
+                                : `${item.percent}% uploaded`
+                              : item.status === 'waiting'
+                                ? 'Waiting'
+                                : 'Upload failed'}
+                        </span>
+                        {item.status === 'failed' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={active}
+                            onClick={() => {
+                              setTransfers((previous) =>
+                                previous.filter(
+                                  (transfer) => transfer.id !== item.id
+                                )
+                              );
+                              void upload([item.file]);
+                            }}
+                          >
+                            Retry upload
+                          </Button>
+                        )}
+                      </div>
+                      {item.error && (
+                        <ErrorAlert className="mt-2" error={item.error} />
                       )}
-                    </div>
-                    {item.error && (
-                      <ErrorAlert className="mt-2" error={item.error} />
-                    )}
-                    {item.status === 'uploading' && (
-                      <progress
-                        className="mt-2 h-2 w-full"
-                        max={100}
-                        value={item.percent}
-                        aria-label={`Uploading ${item.file.name}`}
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
+                      {item.status === 'uploading' && (
+                        <progress
+                          className="mt-2 h-2 w-full"
+                          max={100}
+                          value={item.percent}
+                          aria-label={`Uploading ${item.file.name}`}
+                        />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </FileUpload>
           </div>
         </div>
       </div>
