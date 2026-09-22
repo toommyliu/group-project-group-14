@@ -94,13 +94,18 @@ export function AssignmentEditor({
   const acceptVisualEdit = useCallback(
     (edit: VisualEditResult) => {
       form.setFieldValue('qaMarkdown', edit.qa_markdown);
-      if (edit.preview) {
-        setOutline(edit.preview);
+      if (edit.preview) setOutline(edit.preview);
+      if (edit.validation_error) {
+        setResult({
+          source: edit.qa_markdown,
+          error: edit.validation_error,
+        });
+      } else if (edit.preview) {
         setResult({ source: edit.qa_markdown, data: edit.preview });
       } else {
         setResult({
           source: edit.qa_markdown,
-          error: edit.validation_error ?? 'Check the rubric values.',
+          error: 'Check the rubric values.',
         });
       }
       setVisualPending(false);

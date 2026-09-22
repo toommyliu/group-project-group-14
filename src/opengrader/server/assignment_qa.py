@@ -29,19 +29,35 @@ class VisualEditResult(AssignmentInput):
 def edit_assignment_draft(request: VisualEditInput) -> VisualEditResult:
     source = edit_qa_markdown(request.qa_markdown, request.edits, request.metadata)
     try:
-        preview = preview_qa(source)
+        preview = _parse_preview(source)
     except ValueError as exc:
         return VisualEditResult(qa_markdown=source, preview=None, validation_error=str(exc))
-    return VisualEditResult(qa_markdown=source, preview=preview, validation_error=None)
+    return VisualEditResult(
+        qa_markdown=source,
+        preview=preview,
+        validation_error=_question_validation_error(preview.document),
+    )
 
 
 def preview_qa(content: str) -> QAPreview:
-    document = parse_qa_markdown(content)
+    preview = _parse_preview(content)
+    error = _question_validation_error(preview.document)
+    if error:
+        raise ValueError(error)
+    return preview
+
+
+def _question_validation_error(document: QADocument) -> str | None:
     versions = document.version_questions or {"": document.questions}
     for version, questions in versions.items():
         if not flatten_question_contexts(questions):
             suffix = f" in version {version!r}" if version else ""
-            raise ValueError(f"No grading questions found{suffix}.")
+            return f"No grading questions found{suffix}."
+    return None
+
+
+def _parse_preview(content: str) -> QAPreview:
+    document = parse_qa_markdown(content)
     warnings = []
     if "![" in content or "<img" in content.lower():
         warnings.append(
