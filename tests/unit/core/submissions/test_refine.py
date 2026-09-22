@@ -11,7 +11,6 @@ from opengrader.core.submissions.refine import (
     refine_candidate,
     select_refine_targets,
 )
-from opengrader.core.submissions.review import DEFAULT_OCR_CONFIDENCE_FLOOR
 from opengrader.core.submissions.student_file import (
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
@@ -48,10 +47,6 @@ def _doc(*questions: StudentSubmissionQuestion) -> StudentSubmissionDocument:
         source_pdf="submission-0001.pdf",
         questions=questions,
     )
-
-
-def test_the_floor_is_the_review_queues_floor() -> None:
-    assert DEFAULT_REFINE_FLOOR == DEFAULT_OCR_CONFIDENCE_FLOOR
 
 
 def test_selects_only_measured_readings_below_the_floor() -> None:

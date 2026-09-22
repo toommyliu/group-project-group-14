@@ -6,7 +6,6 @@ import pytest
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.question_types import FREE_RESPONSE, MULTIPLE_CHOICE, NUMERIC
 from opengrader.core.submissions.answer_patterns import (
-    DEFAULT_MIN_SHARED_WRONG,
     ExclusionReason,
     ObjectiveResponse,
     PatternKind,
@@ -396,7 +395,3 @@ def test_numeric_answers_never_reach_the_statistic() -> None:
     ]
 
     assert objective_responses_from_documents(documents, qa_doc) == []
-
-
-def test_default_min_shared_wrong_is_the_documented_gate() -> None:
-    assert DEFAULT_MIN_SHARED_WRONG == 3

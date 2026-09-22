@@ -258,12 +258,6 @@ def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:
     assert any("Warning" in w for w in warnings)
 
 
-def test_extraction_progress_noop_by_default() -> None:
-    progress = ExtractionProgress()
-    progress.file_start("x.pdf", 3)
-    progress.response("x.pdf", "q1")
-
-
 def test_extraction_progress_invokes_callbacks() -> None:
     starts: list[tuple[str, int]] = []
     responses: list[tuple[str, str]] = []

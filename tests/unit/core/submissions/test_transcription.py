@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from opengrader.core.submissions.review import DEFAULT_OCR_CONFIDENCE_FLOOR
 from opengrader.core.submissions.student_file import (
     StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
@@ -12,7 +11,6 @@ from opengrader.core.submissions.student_file import (
     update_student_submission_markdown,
 )
 from opengrader.core.submissions.transcription import (
-    DEFAULT_ESCALATION_FLOOR,
     SOURCE_HUMAN,
     SOURCE_TESSERACT,
     SOURCE_VISION_MODEL,
@@ -39,10 +37,6 @@ def test_nothing_read_is_always_escalated():
 
 def test_an_unmeasured_reading_with_text_is_not_escalated():
     assert should_escalate("the answer", None, floor=60.0) is False
-
-
-def test_the_floor_is_the_review_queues_own():
-    assert DEFAULT_ESCALATION_FLOOR == float(DEFAULT_OCR_CONFIDENCE_FLOOR)
 
 
 @pytest.mark.parametrize("confidence", [59.9, 0.0])

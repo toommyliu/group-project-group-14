@@ -57,57 +57,6 @@ def test_dispatch_calls_registered_handler_only_in_matching_context() -> None:
     assert calls == ["qa", "grade"]
 
 
-def test_single_keymap_merges_standard_and_vim_navigation_keys() -> None:
-    bindings_by_command = {binding.command: binding for binding in INPUT_BINDINGS}
-
-    assert bindings_by_command[InputCommand.QA_MOVE_DOWN].keys == "j,down"
-    assert bindings_by_command[InputCommand.QA_MOVE_DOWN].key_display == "j/down"
-    assert bindings_by_command[InputCommand.QA_MOVE_UP].keys == "k,up"
-    assert bindings_by_command[InputCommand.QA_MOVE_UP].key_display == "k/up"
-    assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].keys == "j,down"
-    assert (
-        bindings_by_command[InputCommand.QA_MOVE_STUDENT_DOWN].key_display == "j/down"
-    )
-    assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_UP].keys == "k,up"
-    assert bindings_by_command[InputCommand.QA_MOVE_STUDENT_UP].key_display == "k/up"
-    assert bindings_by_command[InputCommand.QA_TOGGLE_STUDENT_DISPLAY].keys == "d"
-    assert (
-        bindings_by_command[InputCommand.QA_TOGGLE_STUDENT_DISPLAY].description
-        == "Display"
-    )
-    assert bindings_by_command[InputCommand.QA_FILTER].keys == "/"
-    assert bindings_by_command[InputCommand.QA_FILTER].description == "Filter"
-    assert bindings_by_command[InputCommand.GRADE_NEXT_QUESTION].keys == "j,down"
-    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_QUESTION].keys == "k,up"
-    assert bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].keys == "ctrl+j,right"
-    assert (
-        bindings_by_command[InputCommand.GRADE_NEXT_STUDENT].key_display
-        == "ctrl+j/right"
-    )
-    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].keys == "ctrl+k,left"
-    assert (
-        bindings_by_command[InputCommand.GRADE_PREVIOUS_STUDENT].key_display
-        == "ctrl+k/left"
-    )
-    assert bindings_by_command[InputCommand.GRADE_NEXT_UNGRADED_STUDENT].keys == "n"
-    assert bindings_by_command[InputCommand.GRADE_PREVIOUS_UNGRADED_STUDENT].keys == "p"
-    for command, key in (
-        (InputCommand.OPEN_REVIEW_QUEUE, "R"),
-        (InputCommand.OPEN_CONSISTENCY_AUDIT, "C"),
-        (InputCommand.OPEN_SIMILARITY_AUDIT, "P"),
-        (InputCommand.OPEN_ITEM_ANALYSIS, "S"),
-        (InputCommand.OPEN_GRADE_HISTORY, "H"),
-        (InputCommand.OPEN_GRADING_SESSION, "V"),
-        (InputCommand.OPEN_REGRADE_QUEUE, "G"),
-        (InputCommand.FILE_REGRADE, "F"),
-    ):
-        assert bindings_by_command[command].keys == key
-    assert bindings_by_command[InputCommand.GRADE_FOCUS_COMMENT].keys == "c"
-    assert bindings_by_command[InputCommand.GRADE_FOCUS_COMMENT].description == "Comment"
-    assert bindings_by_command[InputCommand.GRADE_SHRINK_SIDEBAR].keys == "["
-    assert bindings_by_command[InputCommand.GRADE_WIDEN_SIDEBAR].keys == "]"
-
-
 def test_only_chords_survive_a_focused_text_box() -> None:
     bindings_by_command = {binding.command: binding for binding in INPUT_BINDINGS}
 

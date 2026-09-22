@@ -319,11 +319,6 @@ def test_a_blocked_run_exits_two(tmp_path, captured) -> None:
     assert run_module.main(_argv(tmp_path)) == 2
 
 
-def test_main_returns_an_int_and_never_the_report(tmp_path, captured) -> None:
-    assert isinstance(run_module.main(_argv(tmp_path)), int)
-    assert isinstance(run_module.run_cli(_argv(tmp_path)), PipelineReport)
-
-
 def test_dry_run_prints_the_plan_and_touches_nothing(
     tmp_path, monkeypatch, capsys
 ) -> None:

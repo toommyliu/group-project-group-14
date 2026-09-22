@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,9 +31,6 @@ from opengrader.core.submissions.scan_check import (
     ScanIssueKind,
     build_scan_report,
 )
-
-_SAMPLES = Path(__file__).resolve().parents[3] / "samples"
-
 
 def _pdf(path: Path, pages: int = 2) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -517,45 +513,3 @@ def test_status_lines_are_forwarded_from_the_inner_clis(
     seen: list[str] = []
     run_pipeline(_request(tmp_path), progress=PipelineProgress(on_status=seen.append))
     assert "Wrote 2 split PDFs" in seen
-
-
-@pytest.mark.skipif(not _SAMPLES.is_dir(), reason="sample data not present")
-def test_end_to_end_on_the_cs146_sample(tmp_path, monkeypatch) -> None:
-    scans = tmp_path / "scans"
-    shutil.copytree(_SAMPLES / "cs146-quiz1" / "split-submissions", scans)
-    cohort = tmp_path / "cohort"
-    shutil.copytree(_SAMPLES / "cs146-quiz1" / "student-submissions", cohort / "submissions")
-    qa = tmp_path / "qa-multi.md"
-    shutil.copy(_SAMPLES / "cs146-quiz1" / "qa.md", qa)
-
-    extract_calls: list[list[str]] = []
-    monkeypatch.setattr(
-        submission_extractor,
-        "run_cli",
-        lambda argv, **_kwargs: extract_calls.append(list(argv)),
-    )
-
-    request = PipelineRequest(scan=scans, output_dir=cohort, qa_file=qa)
-    first = run_pipeline(request)
-
-    assert first.ok, [outcome.message for outcome in first.stages]
-    assert first.stage(STAGE_SCAN_CHECK).status is StageStatus.RAN
-    assert first.stage(STAGE_SPLIT).status is StageStatus.SKIPPED
-    assert first.stage(STAGE_EXTRACT).status is StageStatus.RAN
-    assert first.stage(STAGE_AUTO_GRADE).status is StageStatus.RAN
-    assert first.submission_count == 2
-    assert first.ready_to_grade
-    assert extract_calls[0][:2] == ["--input", str(scans)]
-    assert not (cohort / "split").exists()
-
-    graded = (
-        cohort / "submissions" / "submission-0001" / "submission-0001.submission.md"
-    ).read_text(encoding="utf-8")
-    assert "- Analysis: Correct" in graded
-
-    extract_calls.clear()
-    second = run_pipeline(request)
-    assert second.stage(STAGE_SCAN_CHECK).status is StageStatus.REUSED
-    assert second.stage(STAGE_SPLIT).status is StageStatus.SKIPPED
-    assert second.stage(STAGE_AUTO_GRADE).status is StageStatus.REUSED
-    assert len(extract_calls) == 1

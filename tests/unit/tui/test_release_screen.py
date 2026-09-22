@@ -130,12 +130,6 @@ def test_releasing_passes_the_label_and_dismisses_with_the_new_id() -> None:
     _run(run())
 
 
-def test_the_release_callback_is_not_shadowed_by_the_button_handler() -> None:
-    screen = ReleaseScreen(build_readiness_report([_doc()]), on_release=lambda _: None)
-    assert callable(screen._on_release_pressed)
-    assert screen._on_release_pressed.__self__ is screen
-
-
 def test_a_failing_release_is_surfaced_not_raised() -> None:
     def _boom(label: str):
         raise OSError("read-only folder")

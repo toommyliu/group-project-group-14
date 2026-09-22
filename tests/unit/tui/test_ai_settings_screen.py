@@ -62,23 +62,11 @@ def fake_cloud_provider():
 
 
 def test_cancel_writes_nothing_and_dismisses_with_none() -> None:
-    async def run() -> None:
+    async def run() -> tuple[bool, AISettings | None]:
         app = _Host(AISettingsScreen())
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             app.screen.query_one("#ai-vision-model", Input).value = "typed-not-saved"
-            await pilot.pause()
-            await pilot.click("#ai-cancel")
-            await pilot.pause()
-
-    asyncio.run(run())
-    assert not app_config.settings_path().exists()
-
-
-def test_cancel_dismisses_with_none() -> None:
-    async def run() -> tuple[bool, AISettings | None]:
-        app = _Host(AISettingsScreen())
-        async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             await pilot.click("#ai-cancel")
             await pilot.pause()
@@ -87,6 +75,7 @@ def test_cancel_dismisses_with_none() -> None:
     dismissed, result = asyncio.run(run())
     assert dismissed is True
     assert result is None
+    assert not app_config.settings_path().exists()
 
 
 def test_save_persists_and_returns_the_settings() -> None:

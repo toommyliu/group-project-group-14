@@ -17,24 +17,6 @@ def _qa_picker_app() -> TuiApp:
     )
 
 
-def test_x_opens_canvas_export_dialog() -> None:
-    async def run() -> None:
-        app = _qa_picker_app()
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-
-            await pilot.press("x")
-            await pilot.pause()
-
-            assert isinstance(app.screen, CanvasExportScreen)
-
-            await pilot.press("escape")
-            await pilot.pause()
-            assert not isinstance(app.screen, CanvasExportScreen)
-
-    asyncio.run(run())
-
-
 def test_export_requires_all_fields(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(

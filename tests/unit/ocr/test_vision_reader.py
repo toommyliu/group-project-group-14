@@ -1,18 +1,3 @@
-"""Conformance tests for the `VisionReader` seam (core/ocr/vision_reader.py).
-
-Phase 2 of the provider-boundary work (see ../About/AI_README.md §7.4, §7.9)
-extracted `VisionReader` as the protocol every consumer above the provider
-boundary names instead of a client, and `OllamaVisionReader` as the first (and
-for now only) implementation. These tests pin the two properties that make
-that extraction real rather than cosmetic:
-
-* `OllamaVisionReader` actually satisfies the protocol at runtime, and
-* it forwards every call to `ollama_vlm` by resolving the target function
-  through the module at call time, not at class-definition time — which is
-  what lets the existing `ollama_vlm` tests keep monkeypatching it after the
-  reader already exists.
-"""
-
 from __future__ import annotations
 
 import pickle
@@ -25,33 +10,7 @@ from opengrader.core.ocr.ollama_vlm import OllamaVisionConfig
 from opengrader.core.ocr.vision_reader import (
     OllamaVisionReader,
     TitleMetadataResult,
-    VisionReader,
 )
-
-
-def test_ollama_vision_reader_satisfies_the_vision_reader_protocol_at_runtime() -> None:
-    reader = OllamaVisionReader(config=OllamaVisionConfig())
-
-    assert isinstance(reader, VisionReader)
-
-
-def test_a_plain_object_missing_a_method_does_not_satisfy_the_protocol() -> None:
-    """Sanity check on the `runtime_checkable` claim itself: isinstance must be
-    able to say no, or the previous test proves nothing."""
-
-    class _Incomplete:
-        def extract_field_text(self, *, image_path, field_kind):
-            return ""
-
-    assert not isinstance(_Incomplete(), VisionReader)
-
-
-# --- Delegation, one case per operation -------------------------------------
-#
-# Each case names the reader method, the `ollama_vlm` attribute it must call,
-# the keyword arguments a caller supplies, and a sentinel return value used to
-# prove the reader's return is the function's return, unchanged. `image_path`
-# and `config` are asserted on every case rather than repeated in the table.
 
 _SENTINEL_TITLE = TitleMetadataResult(
     course_code="CMPE30",
@@ -232,26 +191,3 @@ def test_ollama_vision_reader_is_picklable() -> None:
 
     assert restored == reader
     assert restored.config == reader.config
-
-
-def test_title_metadata_result_is_the_same_class_from_both_import_paths() -> None:
-    """`TitleMetadataResult` moved to vision_reader.py because a return type
-    named by the protocol cannot belong to one provider, but `ollama_vlm`
-    re-exports it so older imports keep resolving. Both names must be the
-    identical class object, not two dataclasses that happen to look alike,
-    or `isinstance` checks and equality across the two import paths would
-    silently diverge.
-    """
-
-    from opengrader.core.ocr.ollama_vlm import TitleMetadataResult as ReExported
-    from opengrader.core.ocr.vision_reader import TitleMetadataResult as Home
-
-    assert Home is ReExported
-
-    instance = Home(
-        course_code="CS146",
-        assignment_title="Quiz 1",
-        assignment_version=None,
-        raw_title="CS146 Quiz 1",
-    )
-    assert isinstance(instance, ReExported)

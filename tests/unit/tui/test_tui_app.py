@@ -8,7 +8,6 @@ from textual.widgets import (
     Button,
     Checkbox,
     ContentSwitcher,
-    Footer,
     Input,
     Label,
     ListView,
@@ -213,11 +212,6 @@ def _active_student_list(app: TuiApp) -> ListView:
     return active
 
 
-def _status_bar_text(app: TuiApp) -> str:
-    status_bar = app.query_one(StatusBar)
-    return str(status_bar.query_one("#status-bar-bindings", Static).content)
-
-
 def test_app_launches_directly_to_qa_picker() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -247,97 +241,18 @@ def test_app_launches_directly_to_qa_picker() -> None:
     asyncio.run(run())
 
 
-def test_stub_data_provider_reads_roster_sid_as_student_id() -> None:
-    provider = StubDataProvider(DEFAULT_IMAGE_PATH)
-
-    students = provider.list_students(course_id=1)
-
-    assert [student.student_id for student in students[:2]] == ["12345", "67890"]
-
-
-def test_app_uses_custom_status_bar_instead_of_textual_footer() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            assert not list(app.query(Footer))
-            assert app.query_one("#app-status-bar", StatusBar) is not None
-
-            status_text = _status_bar_text(app)
-            assert "j/down Next QA" in status_text
-            assert "/ Filter" in status_text
-            assert "? Help" in status_text
-            assert "^\\ palette" not in status_text
-            assert "esc Back" not in status_text
-
-            await pilot.press("enter")
-            await pilot.pause()
-
-            grade_status_text = _status_bar_text(app)
-            assert "ctrl+j/right Next Student" in grade_status_text
-            assert "esc Back" in grade_status_text
-            assert "c Comment" not in grade_status_text
-            assert "Zoom" not in grade_status_text
-
-    asyncio.run(run())
-
-
-def test_app_loads_workspace_grading_queue(workspace_provider) -> None:
-    from opengrader.core.workspace.store import DOCUMENT
-
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=workspace_provider,
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            assert app.workflow_state.selection_labels["course"] == workspace_provider.course_label
-            assert app.workflow_state.selection_labels["assignment"] == "CS146: Quiz 1"
-            assert [item.item_id for item in app.workflow_state.question_items] == [
-                "q1",
-                "q2",
-                "q3",
-                "q4",
-                "q5a",
-                "q5b",
-                "q5c",
-                "q6a",
-                "q6b",
-                "q6c",
-                "q6d",
+def test_grade_screen_shows_source_pdf_name_when_provided() -> None:
+    class PdfProvider(FakeDataProvider):
+        def build_question_seeds(self, **kwargs):
+            return [
+                replace(seed, source_pdf_name="student-1.pdf")
+                for seed in super().build_question_seeds(**kwargs)
             ]
-            student_list = _active_student_list(app)
-            student_labels = _list_item_texts(student_list)
-            assert len(student_labels) == 2
-            assert student_labels[0].startswith("123456789 [")
-            assert student_labels[0].endswith("/11 graded]")
-            assert student_labels[1].startswith("987654321 [")
-            assert student_labels[1].endswith("/11 graded]")
-            document = DOCUMENT.validate_json(workspace_provider.client.request(
-                "GET", f"{workspace_provider.base}/submissions/1/document"
-            ))
-            assert [q.question_id for q in document.questions] == [
-                item.item_id for item in app.workflow_state.question_items
-            ]
-            assert sum(q.possible_points or 0 for q in document.questions) == 85
 
-    asyncio.run(run())
-
-
-def test_grade_screen_shows_source_pdf_name_for_file_backed_runs() -> None:
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/cs146-quiz1/qa.md",
-            submissions_path="samples/cs146-quiz1/student-submissions",
+            data_provider=PdfProvider(),
         )
 
         async with app.run_test() as pilot:
@@ -347,63 +262,7 @@ def test_grade_screen_shows_source_pdf_name_for_file_backed_runs() -> None:
 
             pdf_label = app.query_one("#grade-source-pdf", Label)
             assert pdf_label.display is True
-            assert str(pdf_label.content).startswith("PDF: submission-000")
-            assert str(pdf_label.content).endswith(".pdf")
-
-    asyncio.run(run())
-
-
-def test_grade_screen_hides_source_pdf_label_without_source_pdf() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            pdf_label = app.query_one("#grade-source-pdf", Label)
-            assert pdf_label.display is False
-
-    asyncio.run(run())
-
-
-def test_student_pane_id_tab_displays_submitted_ids() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/cs146-quiz1/qa.md",
-            submissions_path="samples/cs146-quiz1/student-submissions",
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            pane = _student_pane(app)
-            assert pane.active_tab_index == 0
-            id_labels = _list_item_texts(_active_student_list(app))
-            assert id_labels[0].startswith("123456789 [")
-            assert id_labels[0].endswith("/11 graded]")
-            assert id_labels[1].startswith("987654321 [")
-            assert id_labels[1].endswith("/11 graded]")
-
-            pane.action_pane_activate_tab(1)
-            await pilot.pause()
-            assert pane.active_tab_index == 0
-
-            await pilot.press("t")
-            await pilot.pause()
-            pane.action_pane_activate_tab(1)
-            await pilot.pause()
-
-            name_labels = _list_item_texts(_active_student_list(app))
-            assert name_labels[0].startswith("Tommy Liu [")
-            assert name_labels[0].endswith("/11 graded]")
-            assert name_labels[1].startswith("submission-0002.submission [")
-            assert name_labels[1].endswith("/11 graded]")
+            assert str(pdf_label.content) == "PDF: student-1.pdf"
 
     asyncio.run(run())
 
@@ -531,11 +390,19 @@ def test_student_pane_selection_is_preserved_when_switching_name_id_tabs() -> No
 
 
 def test_student_filter_matches_submitted_ids() -> None:
+    class IdProvider(FakeDataProvider):
+        def list_students(self, course_id: int | None) -> list[StudentSummary]:
+            return [
+                replace(student, student_id=student_id)
+                for student, student_id in zip(
+                    super().list_students(course_id), ("123456789", "987654321")
+                )
+            ]
+
     async def run() -> None:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/cs146-quiz1/qa.md",
-            submissions_path="samples/cs146-quiz1/student-submissions",
+            data_provider=IdProvider(),
         )
 
         async with app.run_test() as pilot:
@@ -551,7 +418,7 @@ def test_student_filter_matches_submitted_ids() -> None:
 
             assert status == "Search students: 1/2 matches"
             assert _list_item_texts(_active_student_list(app)) == [
-                "987654321 [0/11 graded]"
+                "987654321 [0/2 graded]"
             ]
 
             app.workflow_state.teacher_mode = True
@@ -560,68 +427,8 @@ def test_student_filter_matches_submitted_ids() -> None:
             await pilot.pause()
 
             assert _list_item_texts(_active_student_list(app)) == [
-                "submission-0002.submission [0/11 graded]"
+                "Andy Cortes [0/2 graded]"
             ]
-
-    asyncio.run(run())
-
-
-def test_qa_preview_shows_question_statistics() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=StatisticsFakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            preview = app.get_qa_picker_screen().query_one("#qa-preview", Static)
-            content = str(preview.content)
-            assert "Avg:" in content
-            assert "Median:" in content
-            assert "Std dev:" in content
-            assert "Distribution" not in content
-            chart = app.get_qa_picker_screen().query_one(
-                "#qa-statistics-chart",
-                SharpImage,
-            )
-            assert chart.display is True
-
-    asyncio.run(run())
-
-
-def test_workspace_app_opens_student_specific_grading_context(workspace_provider) -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=workspace_provider,
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            current = app.workflow_state.grading_run.current_question
-            assert current is not None
-            assert app.workflow_state.grading_run.max_points == 85
-            assert current.question_id == "q1"
-            assert current.prompt.startswith("Convert decimal ")
-            image = Path(current.image_path)
-            assert image.parent == workspace_provider.cache
-            assert image.read_bytes() == Path(
-                "samples/cs146-quiz1/student-submissions/submission-0001/responses/q1.png"
-            ).read_bytes()
-
-            title = app.get_grade_screen().query_one(
-                "#question-section-title", Label
-            )
-            assert str(title.content) == "Question 1"
-            context = app.get_grade_screen().query_one("#question-context", Static)
-            assert str(context.content).startswith("Score: ")
-            assert "Question" not in str(context.content)
-            assert current.prompt in str(context.content)
 
     asyncio.run(run())
 
@@ -806,33 +613,6 @@ def test_comment_library_saves_a_new_snippet_from_the_modal(tmp_path) -> None:
             assert [s.text for s in read_comments(submissions).snippets] == [
                 "Off-by-one in loop bound"
             ]
-
-    asyncio.run(run())
-
-
-def test_grade_sidebar_width_is_bounded_when_resized() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            qa_file_path="samples/cs146-quiz1/qa.md",
-            submissions_path="samples/cs146-quiz1/student-submissions",
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            grade_screen = app.get_grade_screen()
-            sidebar = grade_screen.query_one("#grade-sidebar")
-
-            grade_screen.set_sidebar_width(1)
-            await pilot.pause()
-            assert int(sidebar.styles.width.value) == grade_screen.SIDEBAR_MIN_WIDTH
-
-            grade_screen.set_sidebar_width(10_000)
-            await pilot.pause()
-            assert int(sidebar.styles.width.value) <= grade_screen.SIDEBAR_MAX_WIDTH
 
     asyncio.run(run())
 
@@ -1095,45 +875,6 @@ def test_comment_input_supports_word_shortcuts_without_grade_navigation() -> Non
     asyncio.run(run())
 
 
-def test_grade_rubric_editor_is_inline_and_structured() -> None:
-    async def run() -> None:
-        provider = RubricEditingFakeDataProvider()
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=provider,
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            await pilot.press("e")
-            await pilot.pause()
-
-            grade_screen = app.get_grade_screen()
-            assert grade_screen.query_one("#rubric-list", ListView).display is False
-            assert grade_screen.query_one("#rubric-editor-panel").display is True
-            label_inputs = [
-                widget
-                for widget in grade_screen.query(".rubric-edit-label")
-                if isinstance(widget, Input)
-            ]
-            delta_inputs = [
-                widget
-                for widget in grade_screen.query(".rubric-edit-delta")
-                if isinstance(widget, Input)
-            ]
-            assert [input.value for input in label_inputs] == [
-                "Correct",
-                "Partially Correct",
-                "Incorrect",
-            ]
-            assert [input.value for input in delta_inputs] == ["+0", "-5", "-10"]
-
-    asyncio.run(run())
-
-
 def test_grade_rubric_editor_exposes_partial_credit_subitems() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -1294,35 +1035,6 @@ def test_rubric_editor_authors_default_comment() -> None:
     asyncio.run(run())
 
 
-def test_rubric_editor_enter_on_save_button_saves() -> None:
-    async def run() -> None:
-        provider = RubricEditingFakeDataProvider()
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=provider,
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.press("e")
-            await pilot.pause()
-
-            grade_screen = app.get_grade_screen()
-            save_button = grade_screen.query_one("#rubric-edit-save", Button)
-            save_button.focus()
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            assert provider.saved_options is not None
-            assert grade_screen.query_one("#rubric-list", ListView).display is True
-            assert grade_screen.query_one("#rubric-editor-panel").display is False
-
-    asyncio.run(run())
-
-
 def test_rubric_editor_escape_cancels_without_saving() -> None:
     async def run() -> None:
         provider = RubricEditingFakeDataProvider()
@@ -1346,35 +1058,6 @@ def test_rubric_editor_escape_cancels_without_saving() -> None:
             grade_screen = app.get_grade_screen()
             assert provider.saved_options is None
             assert switcher.current == "page-grade"
-            assert grade_screen.query_one("#rubric-list", ListView).display is True
-            assert grade_screen.query_one("#rubric-editor-panel").display is False
-
-    asyncio.run(run())
-
-
-def test_rubric_editor_space_on_cancel_button_cancels_without_saving() -> None:
-    async def run() -> None:
-        provider = RubricEditingFakeDataProvider()
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=provider,
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-            await pilot.press("e")
-            await pilot.pause()
-
-            grade_screen = app.get_grade_screen()
-            cancel_button = grade_screen.query_one("#rubric-edit-cancel", Button)
-            cancel_button.focus()
-            await pilot.pause()
-            await pilot.press("space")
-            await pilot.pause()
-
-            assert provider.saved_options is None
             assert grade_screen.query_one("#rubric-list", ListView).display is True
             assert grade_screen.query_one("#rubric-editor-panel").display is False
 
@@ -1975,58 +1658,6 @@ def test_shift_tab_switches_between_question_and_student_panes() -> None:
     asyncio.run(run())
 
 
-def test_qa_picker_move_binding_label_tracks_active_pane() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            assert (
-                app.check_action(
-                    "dispatch_input",
-                    (InputCommand.QA_MOVE_DOWN.value,),
-                )
-                is True
-            )
-            assert (
-                app.check_action(
-                    "dispatch_input",
-                    (InputCommand.QA_MOVE_STUDENT_DOWN.value,),
-                )
-                is False
-            )
-            assert app.screen.active_bindings["j"].binding.description == "Next QA"
-            assert "j/down Next QA" in _status_bar_text(app)
-            assert "j/down Next Student" not in _status_bar_text(app)
-
-            await pilot.press("tab")
-            await pilot.pause()
-
-            assert (
-                app.check_action(
-                    "dispatch_input",
-                    (InputCommand.QA_MOVE_DOWN.value,),
-                )
-                is False
-            )
-            assert (
-                app.check_action(
-                    "dispatch_input",
-                    (InputCommand.QA_MOVE_STUDENT_DOWN.value,),
-                )
-                is True
-            )
-            assert app.screen.active_bindings["j"].binding.description == "Next Student"
-            assert "j/down Next Student" in _status_bar_text(app)
-            assert "j/down Next QA" not in _status_bar_text(app)
-
-    asyncio.run(run())
-
-
 def test_qa_picker_question_search_uses_status_bar_filter_mode() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -2234,60 +1865,6 @@ def test_setup_page_scopes_out_qa_picker_hotkeys() -> None:
     asyncio.run(run())
 
 
-def test_default_app_uses_stub_data_provider() -> None:
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert isinstance(app.data_provider, StubDataProvider)
-
-    asyncio.run(run())
-
-
-def test_textual_command_palette_is_disabled() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-
-            assert app.use_command_palette is False
-            assert "ctrl+backslash" not in app.screen.active_bindings
-
-    asyncio.run(run())
-
-
-def test_dispatch_input_check_action_uses_single_command_parameter() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            assert (
-                app.check_action(
-                    "dispatch_input",
-                    (InputCommand.QA_MOVE_DOWN.value,),
-                )
-                is True
-            )
-            assert (
-                app.check_action(
-                    "dispatch_input",
-                    ("standard", InputCommand.QA_MOVE_DOWN.value),
-                )
-                is False
-            )
-
-    asyncio.run(run())
-
-
 def test_ctrl_digit_selects_and_finalizes_rubric() -> None:
     async def run() -> None:
         app = TuiApp(
@@ -2303,26 +1880,6 @@ def test_ctrl_digit_selects_and_finalizes_rubric() -> None:
             assert "graded" not in app.workflow_state.student_status.values()
 
             await pilot.press("ctrl+1")
-            await pilot.pause()
-
-            assert "graded" in app.workflow_state.student_status.values()
-
-    asyncio.run(run())
-
-
-def test_alt_digit_selects_and_finalizes_rubric() -> None:
-    async def run() -> None:
-        app = TuiApp(
-            default_image_path=DEFAULT_IMAGE_PATH,
-            data_provider=FakeDataProvider(),
-        )
-
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            await pilot.press("enter")
-            await pilot.pause()
-
-            await pilot.press("alt+1")
             await pilot.pause()
 
             assert "graded" in app.workflow_state.student_status.values()

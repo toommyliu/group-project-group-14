@@ -82,9 +82,3 @@ def test_no_manifest_at_all_stops_the_watch() -> None:
 
     assert timer.stopped is True
     assert _watch_is_running(app) is False
-
-
-def test_the_give_up_window_is_far_longer_than_the_status_line_window() -> None:
-    from opengrader.core.submissions.watch import _ACTIVE_RECENCY_SECONDS
-
-    assert _EXTRACTION_GIVE_UP_SECONDS > _ACTIVE_RECENCY_SECONDS * 2

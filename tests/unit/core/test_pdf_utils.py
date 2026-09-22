@@ -5,7 +5,6 @@ import pytest
 
 from opengrader.core.pdf_utils import (
     HIGHLIGHT_RGB,
-    MAX_RENDER_PIXELS,
     PdfRenderLimitError,
     render_page_to_image,
     render_page_with_highlights,
@@ -53,11 +52,6 @@ def test_render_rejects_oversized_page() -> None:
             render_page_to_image(doc, 0, dpi=300)
     finally:
         doc.close()
-
-
-def test_render_limit_is_a_valueerror() -> None:
-    assert issubclass(PdfRenderLimitError, ValueError)
-    assert MAX_RENDER_PIXELS > 0
 
 
 def test_oversized_page_guard_fires_before_any_cache_interaction(

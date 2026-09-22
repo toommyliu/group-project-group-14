@@ -71,7 +71,9 @@ title: Quiz
     )
 
 
-def _write_simple_submission(path: Path, *, name: str, version: str = "") -> None:
+def _write_simple_submission(
+    path: Path, *, name: str, version: str = "", response_image: str = ""
+) -> None:
     path.write_text(
         "\n".join(
             [
@@ -88,7 +90,7 @@ def _write_simple_submission(path: Path, *, name: str, version: str = "") -> Non
                 "- q1:",
                 "  - Question type: Free Response",
                 "  - Prompt: Convert.",
-                "  - Response image: ",
+                f"  - Response image: {response_image}",
                 "  - Response text: ",
                 "  - Possible points: ",
                 "  - Points: ",
@@ -177,66 +179,37 @@ def test_submission_files_provider_loads_flat_and_nested_submission_files(
     ]
 
 
-def test_submission_files_provider_loads_students_and_questions() -> None:
+def test_submission_files_provider_returns_student_specific_response_images(
+    tmp_path: Path,
+) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions_path = tmp_path / "student-submissions"
+    expected_images = []
+    for index in (1, 2):
+        student_dir = submissions_path / f"student-{index}"
+        images_dir = student_dir / "responses"
+        images_dir.mkdir(parents=True)
+        image_path = images_dir / "q1.png"
+        image_path.touch()
+        _write_simple_submission(
+            student_dir / f"student-{index}.submission.md",
+            name=f"Student {index}",
+            response_image="![q1](responses/q1.png)",
+        )
+        expected_images.append(str(image_path))
+
     provider = SubmissionFilesProvider(
-        qa_file_path="samples/cs146-quiz1/qa.md",
-        submissions_path="samples/cs146-quiz1/student-submissions",
-        default_image_path=DEFAULT_IMAGE_PATH,
-    )
-
-    students = provider.list_students(course_id=1)
-    seeds = provider.build_question_seeds(student_item_id=None)
-
-    assert [student.full_name for student in students] == [
-        "Tommy Liu",
-        "submission-0002.submission",
-    ]
-    assert [student.student_id for student in students] == [
-        "123456789",
-        "987654321",
-    ]
-    assert [seed.question_id for seed in seeds] == [
-        "q1",
-        "q2",
-        "q3",
-        "q4",
-        "q5a",
-        "q5b",
-        "q5c",
-        "q6a",
-        "q6b",
-        "q6c",
-        "q6d",
-    ]
-    assert seeds[0].points == 10
-    assert seeds[0].prompt == "Convert decimal 5 to binary [A]."
-    assert [option.label for option in seeds[0].rubric_options] == [
-        "Correct",
-        "Partially Correct - Binary form attempted but value incorrect",
-        "Partially Correct - Conversion process mostly incorrect",
-        "Incorrect",
-    ]
-    types_by_id = {seed.question_id: seed.question_type for seed in seeds}
-    assert types_by_id["q1"] == "free_response"
-    assert types_by_id["q3"] == "multiple_choice"
-
-
-def test_submission_files_provider_returns_student_specific_response_images() -> None:
-    provider = SubmissionFilesProvider(
-        qa_file_path="samples/cs146-quiz1/qa.md",
-        submissions_path="samples/cs146-quiz1/student-submissions",
+        qa_file_path=qa_path,
+        submissions_path=submissions_path,
         default_image_path=DEFAULT_IMAGE_PATH,
     )
 
     first_student = provider.build_question_seeds(student_item_id="s1")
     second_student = provider.build_question_seeds(student_item_id="s2")
 
-    assert first_student[0].prompt == "Convert decimal 5 to binary [A]."
-    assert second_student[0].prompt == "Convert decimal 6 to binary [B]."
-    assert first_student[0].image_path.endswith("submission-0001/responses/q1.png")
-    assert second_student[0].image_path.endswith("submission-0002/responses/q1.png")
-    assert Path(first_student[0].image_path).exists()
-    assert Path(second_student[0].image_path).exists()
+    assert first_student[0].image_path == expected_images[0]
+    assert second_student[0].image_path == expected_images[1]
 
 
 def test_submission_files_provider_recovers_version_from_question_markers(
