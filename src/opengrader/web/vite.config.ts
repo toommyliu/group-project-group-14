@@ -8,9 +8,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   server: {
-    // TODO: proxy all under /api so this becomes less fragile.
     proxy: {
-      '/api/terminals': {
+      '/api': {
         target: process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
         ws: true,
       },
