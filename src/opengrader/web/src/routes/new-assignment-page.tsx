@@ -309,7 +309,7 @@ export function AssignmentEditor({
           </Link>
         )}
         <AssignmentPanes
-          editor={
+          renderEditor={(previewToggle) => (
             <section
               className="@container min-w-0 space-y-4"
               aria-labelledby="editor-heading"
@@ -331,15 +331,17 @@ export function AssignmentEditor({
                   <h2 id="editor-heading" className="text-lg font-semibold">
                     Assignment editor
                   </h2>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={reading || saving || !!saved || visualPending}
-                    onClick={() => fileInputRef.current?.click()}
-                    className="shrink-0"
-                  >
-                    Upload
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {previewToggle}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={reading || saving || !!saved || visualPending}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Upload
+                    </Button>
+                  </div>
                 </div>
                 <span
                   role="status"
@@ -497,7 +499,7 @@ export function AssignmentEditor({
                 </div>
               </Tabs>
             </section>
-          }
+          )}
           preview={
             <AssignmentPreview
               source={source}
