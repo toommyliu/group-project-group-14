@@ -18,11 +18,13 @@ import { FileUpload } from '@/components/file-upload';
 import { EditorResizeHandle } from '@/components/editor-resize-handle';
 import { AssignmentPanes } from '@/components/assignment-panes';
 import { AssignmentPreview } from '@/components/assignment-preview';
+import { AssignmentActions } from '@/components/assignment-actions';
+import { useSidebar } from '@/components/ui/sidebar';
 import { QAOutlineRail } from '@/components/qa-outline';
 import { useMarkdownOutline } from '@/hooks/use-markdown-outline';
 import { jumpToSourceLine } from '@/lib/textarea-navigation';
 import { Button } from '@/components/ui/button';
-import { Field, FieldLabel, FieldError } from '@/components/ui/field';
+import { Field, FieldError } from '@/components/ui/field';
 import { Textarea } from '@/components/ui/textarea';
 import { schedulePreview } from '@/lib/debounced-preview';
 import {
@@ -41,6 +43,18 @@ type PreviewResult = { source: string } & (
   | { error: string; data?: never }
 );
 
+type EditorProps =
+  | { assignmentId?: never; initialSource?: never; overview?: never }
+  | {
+      assignmentId: string;
+      initialSource: string;
+      overview: {
+        assignment: Assignment;
+        qa: QAPreview;
+        editUnavailableReason?: string;
+      };
+    };
+
 export default function NewAssignmentPage() {
   return <AssignmentEditor />;
 }
@@ -48,14 +62,15 @@ export default function NewAssignmentPage() {
 export function AssignmentEditor({
   assignmentId,
   initialSource = '',
-}: {
-  assignmentId?: string;
-  initialSource?: string;
-}) {
+  overview,
+}: EditorProps) {
+  const { state: sidebarState, isMobile } = useSidebar();
   const router = useRouter();
-  const [originalSource] = useState(initialSource);
-  const [result, setResult] = useState<PreviewResult>();
-  const [outline, setOutline] = useState<QAPreview>();
+  const [originalSource, setOriginalSource] = useState(initialSource);
+  const [result, setResult] = useState<PreviewResult | undefined>(() =>
+    overview ? { source: initialSource, data: overview.qa } : undefined
+  );
+  const [outline, setOutline] = useState<QAPreview | undefined>(overview?.qa);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const visualEditorRef = useRef<VisualEditorNavigation>(null);
   const [visualOutline, setVisualOutline] = useState<OutlineEntry[]>([]);
@@ -71,9 +86,10 @@ export function AssignmentEditor({
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState('');
+  const [saveMessage, setSaveMessage] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [reading, setReading] = useState(false);
-  const [mode, setMode] = useState('visual');
+  const [mode, setMode] = useState(overview ? 'markdown' : 'visual');
   const [visualPending, setVisualPending] = useState(false);
   const [saved, setSaved] = useState<Assignment>();
   const savedRef = useRef(false);
@@ -87,6 +103,7 @@ export function AssignmentEditor({
   });
   const source = useSelector(form.store, (state) => state.values.qaMarkdown);
   const saving = useSelector(form.store, (state) => state.isSubmitting);
+  const readOnly = !!overview?.editUnavailableReason;
   const current = result?.source === source;
   const valid = current && !!result.data && !!source.trim() && !visualPending;
   const dirty =
@@ -94,6 +111,7 @@ export function AssignmentEditor({
 
   const acceptVisualEdit = useCallback(
     (edit: VisualEditResult) => {
+      setSaveMessage('');
       form.setFieldValue('qaMarkdown', edit.qa_markdown);
       if (edit.preview) setOutline(edit.preview);
       if (edit.validation_error) {
@@ -115,10 +133,23 @@ export function AssignmentEditor({
   );
 
   useBlocker({
-    shouldBlockFn: () =>
-      !savedRef.current &&
-      (savingRef.current ||
-        (dirty && !window.confirm('Discard unsaved changes?'))),
+    shouldBlockFn: () => {
+      if (savedRef.current) return false;
+      if (savingRef.current) return true;
+      if (!dirty) return false;
+      if (!window.confirm('Discard unsaved changes?')) return true;
+      if (overview) {
+        form.setFieldValue('qaMarkdown', originalSource);
+        setResult(undefined);
+        setOutline(undefined);
+        setMode('markdown');
+        setVisualPending(false);
+        setUploadedFileName('');
+        setError('');
+        setUploadError('');
+      }
+      return false;
+    },
     enableBeforeUnload: () => !savedRef.current && (dirty || savingRef.current),
   });
 
@@ -171,9 +202,18 @@ export function AssignmentEditor({
   }
 
   async function create(qaMarkdown: string) {
-    if (!valid || reading || savingRef.current || savedRef.current) return;
+    if (
+      !valid ||
+      readOnly ||
+      (overview && !dirty) ||
+      reading ||
+      savingRef.current ||
+      savedRef.current
+    )
+      return;
     savingRef.current = true;
     setError('');
+    setSaveMessage('');
     let assignment: Assignment;
     try {
       assignment = assignmentId
@@ -185,7 +225,8 @@ export function AssignmentEditor({
       return;
     }
     savedRef.current = true;
-    setSaved(assignment);
+    if (overview) setOriginalSource(qaMarkdown);
+    else setSaved(assignment);
     try {
       const queryClient = router.options.context.queryClient;
       await queryClient.cancelQueries({
@@ -204,16 +245,24 @@ export function AssignmentEditor({
         queryKey: assignmentsQuery.queryKey,
         exact: true,
       });
-      await router.navigate({
-        to: '/assignment',
-        search: { assignment: assignment.id },
-      });
+      if (overview) {
+        await router.invalidate();
+        setSaveMessage('Changes saved.');
+      } else {
+        await router.navigate({
+          to: '/assignment',
+          search: { assignment: assignment.id },
+        });
+      }
     } catch {
       setError(
-        'Assignment saved, but its page could not open. Use the link below to try again.'
+        overview
+          ? 'Assignment saved, but the overview could not refresh. Reload this page.'
+          : 'Assignment saved, but its page could not open. Use the link below to try again.'
       );
     } finally {
       savingRef.current = false;
+      if (overview) savedRef.current = false;
     }
   }
 
@@ -232,20 +281,43 @@ export function AssignmentEditor({
     mode === 'markdown' && !!valid,
     setActiveKey
   );
-  const currentVersion =
+  const visibleOutlineEntries =
     mode === 'visual'
-      ? visualVersion
-      : (outlineEntries.find((entry) => entry.key === activeKey)?.version ??
-        outlineEntries[0]?.version);
-  const visibleOutlineEntries = outlineEntries.filter(
-    (entry) => entry.version === currentVersion
-  );
+      ? outlineEntries.filter((entry) => entry.version === visualVersion)
+      : outlineEntries;
   const outlineProps = {
     entries: visibleOutlineEntries,
     activeKey,
     outdated: mode === 'markdown' && !valid,
     disabled: reading || saving || !!saved,
     editorId: mode === 'visual' ? 'visual-editor' : 'qaMarkdown',
+    showVersionHeadings: mode === 'markdown',
+    onVersionSelect: (version: string) => {
+      const editor = editorRef.current;
+      const firstQuestion = outlineEntries.find(
+        (entry) => entry.version === version
+      );
+      if (!valid || !editor || !firstQuestion || firstQuestion.line == null)
+        return;
+      const firstQuestionLine = firstQuestion.line;
+      const lines = source.split(
+        // oxlint-disable-next-line no-control-regex -- Match the QA parser's source lines.
+        /\r\n|[\n\r\v\f\u001c-\u001e\u0085\u2028\u2029]/
+      );
+      const heading = lines.findLastIndex((line, index) => {
+        if (index >= firstQuestionLine - 1) return false;
+        const match = /^\s*##\s+(.+?)\s*$/.exec(line);
+        return (
+          match?.[1]
+            .trim()
+            .replace(/^version\s+/i, '')
+            .trim() === version
+        );
+      });
+      if (heading < 0) return;
+      jumpToSourceLine(editor, heading + 1);
+      setActiveKey(firstQuestion.key);
+    },
     onSelect: (entry: OutlineEntry) => {
       if (reading || saving || saved) return;
       if (mode === 'visual') visualEditorRef.current?.navigate(entry);
@@ -255,87 +327,121 @@ export function AssignmentEditor({
       setActiveKey(entry.key);
     },
   };
+  const uploadControl = !readOnly && (
+    <FileUpload
+      compact={!!overview}
+      title={overview ? 'Replace answer key' : 'Import answer key'}
+      description={
+        overview
+          ? 'Drop a Markdown file here to replace the editor content, or select one.'
+          : 'Drop a Markdown file here or select one.'
+      }
+      buttonLabel={
+        reading
+          ? 'Reading file…'
+          : uploadError
+            ? 'Choose another file'
+            : overview
+              ? 'Replace answer key'
+              : 'Select Markdown file'
+      }
+      inputLabel="Upload QA file"
+      accept=".md,text/markdown,text/plain"
+      disabled={reading || saving || !!saved || visualPending}
+      error={uploadError}
+      onFiles={(files) => void upload(files[0])}
+    >
+      <span
+        role="status"
+        className={`block wrap-break-word text-muted-foreground empty:hidden ${overview ? 'mt-1 text-xs' : 'mt-3 text-sm'}`}
+        title={uploadedFileName || undefined}
+      >
+        {reading
+          ? 'Reading file…'
+          : uploadedFileName && `Imported ${uploadedFileName}`}
+      </span>
+    </FileUpload>
+  );
 
   return (
-    <>
+    <div
+      className={
+        overview ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : undefined
+      }
+    >
       <div className="@container">
-        <div className="mb-8 flex flex-col gap-6 @min-[40rem]:flex-row @min-[40rem]:items-start">
+        <div
+          className={
+            overview
+              ? 'mb-4'
+              : 'mb-8 flex flex-col gap-6 @min-[40rem]:flex-row @min-[40rem]:items-start'
+          }
+        >
           <PageHeading
             className="mb-0 min-w-0 flex-1"
-            title={assignmentId ? 'Edit assignment' : 'Create assignment'}
+            title={overview ? 'Overview' : 'Create assignment'}
             description={
-              assignmentId
-                ? 'Edit the assignment, then check the PDF before saving.'
+              overview
+                ? overview.assignment.title
                 : 'Start an assignment or import a Markdown answer key.'
             }
+            actions={overview ? uploadControl : undefined}
           />
-          <div className="w-full shrink-0 @min-[40rem]:w-64">
-            <FileUpload
-              title={assignmentId ? 'Replace answer key' : 'Import answer key'}
-              description={
-                assignmentId
-                  ? 'Drop a Markdown file here to replace the editor content, or select one.'
-                  : 'Drop a Markdown file here or select one.'
-              }
-              buttonLabel={
-                reading
-                  ? 'Reading file…'
-                  : uploadError
-                    ? 'Choose another file'
-                    : 'Select Markdown file'
-              }
-              inputLabel="Upload QA file"
-              accept=".md,text/markdown,text/plain"
-              disabled={reading || saving || !!saved || visualPending}
-              error={uploadError}
-              onFiles={(files) => void upload(files[0])}
-            >
-              <span
-                role="status"
-                className="mt-3 block text-sm wrap-break-word text-muted-foreground empty:hidden"
-                title={uploadedFileName || undefined}
-              >
-                {reading
-                  ? 'Reading file…'
-                  : uploadedFileName && `Imported ${uploadedFileName}`}
-              </span>
-            </FileUpload>
-          </div>
+          {!overview && uploadControl && (
+            <div className="w-full shrink-0 @min-[40rem]:w-64">
+              {uploadControl}
+            </div>
+          )}
         </div>
       </div>
       <form
+        id={overview ? 'assignment-form' : undefined}
         onSubmit={(event) => {
           event.preventDefault();
           void form.handleSubmit();
         }}
-        className="space-y-8"
+        className={
+          overview
+            ? 'flex min-h-0 flex-1 flex-col space-y-8 overflow-hidden pb-16'
+            : 'space-y-8'
+        }
       >
-        <div className="flex flex-wrap items-center gap-4">
-          <Button
-            type="submit"
-            disabled={
-              !valid ||
-              reading ||
-              saving ||
-              !!saved ||
-              (assignmentId !== undefined && !dirty)
-            }
-          >
-            {saving && (
-              <LoaderCircle
-                className="motion-safe:animate-spin"
-                aria-hidden="true"
-              />
+        {(!overview || saving || saveMessage || readOnly) && (
+          <div className="flex flex-wrap items-center gap-4">
+            {readOnly ? (
+              <p className="text-muted-foreground">
+                {overview?.editUnavailableReason}
+              </p>
+            ) : (
+              !overview && (
+                <Button
+                  type="submit"
+                  disabled={!valid || reading || saving || !!saved}
+                >
+                  {saving && (
+                    <LoaderCircle
+                      className="motion-safe:animate-spin"
+                      aria-hidden="true"
+                    />
+                  )}
+                  Create assignment
+                </Button>
+              )
             )}
-            {assignmentId ? 'Save changes' : 'Create assignment'}
-          </Button>
-          <Link to="/" className="inline-flex min-h-11 items-center underline">
-            Back to assignments
-          </Link>
-          {saving && (
-            <span role="status">Saving assignment. Keep this page open.</span>
-          )}
-        </div>
+            {!overview && (
+              <Link
+                to="/"
+                className="inline-flex min-h-11 items-center underline"
+              >
+                Back to assignments
+              </Link>
+            )}
+            {saving && (
+              <span role="status">Saving assignment. Keep this page open.</span>
+            )}
+            {saveMessage && <span role="status">{saveMessage}</span>}
+          </div>
+        )}
         {error && <ErrorAlert error={error} />}
         {saved && (
           <Link
@@ -347,39 +453,59 @@ export function AssignmentEditor({
           </Link>
         )}
         <AssignmentPanes
+          contained={!!overview}
           renderEditor={(previewToggle) => (
             <section
-              className="@container min-w-0 space-y-4"
-              aria-labelledby="editor-heading"
+              className={`@container min-w-0 space-y-4 ${overview ? 'flex h-full min-h-0 flex-col' : ''}`}
+              aria-labelledby={overview ? undefined : 'editor-heading'}
+              aria-label={overview ? 'Assignment editor' : undefined}
             >
-              <div className="flex flex-col items-start gap-3 @min-[24rem]:flex-row @min-[24rem]:items-center @min-[24rem]:justify-between">
-                <h2 id="editor-heading" className="text-lg font-semibold">
-                  Assignment editor
-                </h2>
-                {previewToggle}
-              </div>
+              {!overview && (
+                <div className="flex flex-col items-start gap-3 @min-[24rem]:flex-row @min-[24rem]:items-center @min-[24rem]:justify-between">
+                  <h2 id="editor-heading" className="text-lg font-semibold">
+                    Assignment editor
+                  </h2>
+                  {previewToggle}
+                </div>
+              )}
               <Tabs
+                className={overview ? 'min-h-0 flex-1' : undefined}
                 value={mode}
                 onValueChange={(value) => {
                   setMode(String(value));
                   setActiveKey(null);
                 }}
               >
-                <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-2 border-b bg-background">
+                <div
+                  className={`sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-2 border-b bg-background ${overview ? 'pb-2' : ''}`}
+                >
                   <TabsList aria-label="Editor mode" className="border-b-0">
                     <TabsTrigger value="visual">Visual</TabsTrigger>
                     <TabsTrigger value="markdown" disabled={visualPending}>
                       Markdown
                     </TabsTrigger>
                   </TabsList>
-                  {visibleOutlineEntries.length > 1 && (
-                    <div className="z-30 min-[65rem]:fixed min-[65rem]:inset-s-3 min-[65rem]:top-1/2 min-[65rem]:-translate-y-1/2">
+                  <div className="flex items-center gap-2">
+                    {visibleOutlineEntries.length > 1 && (
                       <QAOutlineRail {...outlineProps} />
-                    </div>
-                  )}
+                    )}
+                    {overview && previewToggle}
+                  </div>
                 </div>
-                <div>
-                  <div className="min-w-0">
+                <div
+                  className={
+                    overview
+                      ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain'
+                      : undefined
+                  }
+                >
+                  <div
+                    className={
+                      overview
+                        ? 'flex h-full min-h-0 min-w-0 flex-col'
+                        : 'min-w-0'
+                    }
+                  >
                     <TabsContent value="visual">
                       {outline ? (
                         <VisualAssignmentEditor
@@ -388,7 +514,7 @@ export function AssignmentEditor({
                           onActiveChange={setActiveKey}
                           source={source}
                           preview={outline}
-                          disabled={reading || saving || !!saved}
+                          disabled={readOnly || reading || saving || !!saved}
                           onPending={() => setVisualPending(true)}
                           onResult={acceptVisualEdit}
                         />
@@ -439,21 +565,30 @@ export function AssignmentEditor({
                         </p>
                       )}
                     </TabsContent>
-                    <TabsContent value="markdown">
+                    <TabsContent
+                      value="markdown"
+                      className={
+                        overview ? 'flex min-h-0 flex-1 flex-col' : undefined
+                      }
+                    >
                       <form.Field name="qaMarkdown">
                         {(field) => (
-                          <Field data-invalid={current && !!result.error}>
-                            <div className="flex items-center justify-between gap-3">
-                              <FieldLabel htmlFor={field.name}>
-                                QA markdown
-                              </FieldLabel>
-                            </div>
-                            <div>
+                          <Field
+                            data-invalid={current && !!result.error}
+                            className={overview ? 'min-h-0 flex-1' : undefined}
+                          >
+                            <div
+                              className={
+                                overview ? 'min-h-0 flex-1' : undefined
+                              }
+                            >
                               <Textarea
                                 ref={editorRef}
                                 id={field.name}
                                 name={field.name}
+                                aria-label="QA markdown"
                                 value={field.state.value}
+                                readOnly={readOnly}
                                 disabled={reading || saving || !!saved}
                                 onBlur={field.handleBlur}
                                 onSelect={markdownNavigation.onSelect}
@@ -461,6 +596,7 @@ export function AssignmentEditor({
                                 onChange={(event) => {
                                   field.handleChange(event.target.value);
                                   setError('');
+                                  setSaveMessage('');
                                 }}
                                 spellCheck={false}
                                 aria-invalid={current && !!result.error}
@@ -469,7 +605,7 @@ export function AssignmentEditor({
                                     ? 'qa-error'
                                     : undefined
                                 }
-                                className="field-sizing-fixed h-[min(28rem,70svh)] min-h-48 resize-none overflow-y-auto p-4 font-mono text-base leading-relaxed md:text-base"
+                                className={`field-sizing-fixed min-h-48 resize-none overflow-y-auto p-4 font-mono text-base leading-relaxed md:text-base ${overview ? 'h-[calc(100%-1.5rem)]' : 'h-[min(28rem,70svh)]'}`}
                                 placeholder={
                                   '---\ntitle: Quiz 1\n---\n\n- (2 points) What is 1 + 1?\n  - **Correct**\n    - 2'
                                 }
@@ -511,10 +647,51 @@ export function AssignmentEditor({
               preview={outline}
               current={!!valid}
               blocked={reading || saving || !!saved || visualPending}
+              showGuide={!!overview}
+              savedAssignment={
+                overview && assignmentId
+                  ? { id: assignmentId, source: originalSource }
+                  : undefined
+              }
             />
           }
         />
       </form>
-    </>
+      {overview && (
+        <footer
+          className="fixed bottom-0 z-30 flex justify-end gap-3 border-t bg-background px-4 py-3 sm:px-8"
+          style={{
+            insetInlineStart: isMobile
+              ? 0
+              : `var(--sidebar-width${sidebarState === 'collapsed' ? '-icon' : ''})`,
+            width: isMobile
+              ? '100%'
+              : `calc(100% - var(--sidebar-width${sidebarState === 'collapsed' ? '-icon' : ''}))`,
+          }}
+        >
+          {!readOnly && (
+            <Button
+              type="submit"
+              form="assignment-form"
+              disabled={!valid || reading || saving || !!saved || !dirty}
+            >
+              {saving && (
+                <LoaderCircle
+                  className="motion-safe:animate-spin"
+                  aria-hidden="true"
+                />
+              )}
+              Save changes
+            </Button>
+          )}
+          <AssignmentActions
+            assignment={overview.assignment}
+            onDeleted={() => {
+              savedRef.current = true;
+            }}
+          />
+        </footer>
+      )}
+    </div>
   );
 }

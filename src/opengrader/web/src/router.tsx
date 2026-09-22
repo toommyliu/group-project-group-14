@@ -4,6 +4,7 @@ import {
   createRouter,
   lazyRouteComponent,
   notFound,
+  redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import {
@@ -54,27 +55,13 @@ export const editAssignmentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/edit-assignment',
   validateSearch: validateAssignmentSearch,
-  loaderDeps: ({ search }) => search,
-  remountDeps: ({ search }) => search.assignment,
-  loader: async ({ context, deps }) => {
-    const [submissions, scans] = await Promise.all([
-      context.queryClient.fetchQuery({
-        ...submissionsQuery(deps.assignment),
-        staleTime: 0,
-      }),
-      context.queryClient.fetchQuery(scansQuery(deps.assignment)),
-    ]);
-    if (scans.batches.length)
-      throw new Error('Assignments with uploaded scans cannot be edited.');
-    if (submissions.length)
-      throw new Error('Assignments with submissions cannot be edited.');
-    return context.queryClient.fetchQuery(
-      assignmentSourceQuery(deps.assignment)
-    );
+  beforeLoad: ({ search }) => {
+    throw redirect({
+      to: '/assignment',
+      search: { assignment: search.assignment },
+      replace: true,
+    });
   },
-  component: lazyRouteComponent(() => import('./routes/edit-assignment-page')),
-  pendingComponent: AssignmentLoading,
-  errorComponent: RouteError,
 });
 
 export const assignmentRoute = createRoute({
@@ -133,19 +120,26 @@ export const overviewRoute = createRoute({
   loaderDeps: ({ search }) => search,
   remountDeps: ({ search }) => search.assignment,
   loader: async ({ context, deps }) => {
-    const [assignments, qa, scans, submissions] = await Promise.all([
+    const [assignments, qa, scans, submissions, source] = await Promise.all([
       context.queryClient.ensureQueryData(assignmentsQuery),
-      context.queryClient.ensureQueryData(assignmentQAQuery(deps.assignment)),
+      context.queryClient.fetchQuery({
+        ...assignmentQAQuery(deps.assignment),
+        staleTime: 0,
+      }),
       context.queryClient.fetchQuery(scansQuery(deps.assignment)),
       context.queryClient.fetchQuery({
         ...submissionsQuery(deps.assignment),
+        staleTime: 0,
+      }),
+      context.queryClient.fetchQuery({
+        ...assignmentSourceQuery(deps.assignment),
         staleTime: 0,
       }),
       OverviewPage.preload?.(),
     ]);
     const assignment = assignments.find((item) => item.id === deps.assignment);
     if (!assignment) throw notFound();
-    return { assignment, qa, scans, submissions };
+    return { assignment, qa, scans, submissions, source };
   },
   pendingComponent: AssignmentLoading,
   errorComponent: RouteError,

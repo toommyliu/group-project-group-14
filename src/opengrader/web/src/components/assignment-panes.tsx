@@ -12,16 +12,20 @@ import {
 export function AssignmentPanes({
   renderEditor,
   preview,
+  initiallyExpanded = false,
+  contained = false,
 }: {
   renderEditor: (previewToggle: ReactNode) => ReactNode;
   preview: ReactNode;
+  initiallyExpanded?: boolean;
+  contained?: boolean;
 }) {
   const wide = useWideAssignmentLayout();
   const [width, setWidth] = usePreference('editorWidth');
   const groupRef = useGroupRef();
   const previewRef = usePanelRef();
   const pointerResize = useRef(false);
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(!initiallyExpanded);
   const togglePreview = () => {
     if (wide) {
       if (collapsed) previewRef.current?.expand();
@@ -43,9 +47,21 @@ export function AssignmentPanes({
 
   if (!wide)
     return (
-      <div className="grid gap-8">
+      <div
+        className={
+          contained
+            ? collapsed
+              ? 'grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden'
+              : 'grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(0,35svh)] gap-4 overflow-hidden'
+            : 'grid gap-8'
+        }
+      >
         {renderEditor(toggle)}
-        <div id="assignment-pdf-preview" hidden={collapsed}>
+        <div
+          id="assignment-pdf-preview"
+          hidden={collapsed}
+          className={contained ? 'min-h-0 overflow-y-auto' : undefined}
+        >
           {preview}
         </div>
       </div>
@@ -60,7 +76,7 @@ export function AssignmentPanes({
         editor: collapsed ? 100 : width,
         preview: collapsed ? 0 : 100 - width,
       }}
-      className="items-stretch overflow-visible!"
+      className={`items-stretch overflow-visible! ${contained ? 'min-h-0 flex-1' : ''}`}
       onLayoutChange={(next) => {
         if (
           pointerResize.current &&
@@ -84,14 +100,18 @@ export function AssignmentPanes({
       <ResizablePanel
         id="editor"
         minSize="25%"
-        className="min-w-0 overflow-visible! pe-4"
+        className={`min-w-0 overflow-visible! ${collapsed ? '' : 'pe-4'}`}
       >
         {renderEditor(toggle)}
       </ResizablePanel>
       <ResizableHandle
         withHandle={!collapsed}
         aria-label="Resize QA file and preview"
-        className={collapsed ? 'pointer-events-none invisible' : undefined}
+        className={
+          collapsed
+            ? 'pointer-events-none invisible w-0! after:hidden'
+            : undefined
+        }
         onPointerDownCapture={() => {
           pointerResize.current = true;
         }}

@@ -1,4 +1,5 @@
 import { useState, type CSSProperties, type PropsWithChildren } from 'react';
+import { useRouterState } from '@tanstack/react-router';
 import { AppHeader } from '@/components/app-header';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { AppSidebar } from '@/components/app-sidebar';
@@ -32,6 +33,9 @@ export function App({ children }: PropsWithChildren) {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const sidebarWidth = dragWidth ?? savedSidebarWidth;
   const { assignment } = useAssignmentNavigation();
+  const overview = useRouterState({
+    select: ({ location }) => assignment && location.pathname === '/assignment',
+  });
   return (
     <TooltipProvider>
       <SidebarProvider
@@ -42,7 +46,7 @@ export function App({ children }: PropsWithChildren) {
             '--sidebar-width': `${sidebarWidth}px`,
           } as CSSProperties
         }
-        className={`${assignment ? '' : 'block'} text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none`}
+        className={`${overview ? 'h-svh min-h-0 overflow-hidden' : assignment ? '' : 'block'} text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none`}
       >
         <a
           href="#content"
@@ -64,13 +68,17 @@ export function App({ children }: PropsWithChildren) {
         )}
         <SidebarInset
           className={
-            assignment ? 'min-w-0' : 'min-h-[calc(100svh-4rem)] min-w-0'
+            overview
+              ? 'h-full min-h-0 min-w-0 overflow-hidden'
+              : assignment
+                ? 'min-w-0'
+                : 'min-h-[calc(100svh-4rem)] min-w-0'
           }
         >
           <div
             className={
               assignment
-                ? 'mx-auto w-full max-w-[90rem] px-4 pt-4 pb-16 focus:outline-none sm:px-8 md:pt-8'
+                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
                 : 'mx-auto w-full max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14'
             }
             id="content"
