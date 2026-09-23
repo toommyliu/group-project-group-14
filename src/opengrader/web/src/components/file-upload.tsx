@@ -11,6 +11,7 @@ export function FileUpload({
   inputLabel,
   accept,
   multiple = false,
+  compact = false,
   disabled = false,
   error,
   onFiles,
@@ -22,6 +23,7 @@ export function FileUpload({
   inputLabel: string;
   accept: string;
   multiple?: boolean;
+  compact?: boolean;
   disabled?: boolean;
   error?: string;
   onFiles: (files: File[]) => void;
@@ -32,10 +34,13 @@ export function FileUpload({
 
   return (
     <div
-      className={cn('min-w-0 rounded-lg border border-dashed p-4', {
-        'bg-muted': dragging && !disabled,
-        'border-solid border-destructive': !!error,
-      })}
+      className={cn(
+        compact ? 'min-w-0' : 'min-w-0 rounded-lg border border-dashed p-4',
+        {
+          'bg-muted': dragging && !disabled,
+          'border-solid border-destructive': !!error,
+        }
+      )}
       onDragOver={(event) => {
         event.preventDefault();
         if (!disabled) setDragging(true);
@@ -47,17 +52,20 @@ export function FileUpload({
         if (!disabled) onFiles(Array.from(event.dataTransfer.files));
       }}
     >
-      <div className="space-y-1">
-        <h2 className="text-sm font-medium">{title}</h2>
-        {error ? (
-          <ErrorAlert error={error} className="border-0 bg-transparent p-0" />
-        ) : (
-          <p className="text-sm text-muted-foreground">{description}</p>
-        )}
-      </div>
+      {!compact && (
+        <div className="space-y-1">
+          <h2 className="text-sm font-medium">{title}</h2>
+          {error ? (
+            <ErrorAlert error={error} className="border-0 bg-transparent p-0" />
+          ) : (
+            <p className="text-sm text-muted-foreground">{description}</p>
+          )}
+        </div>
+      )}
       <Button
         type="button"
-        className="mt-3 w-full"
+        variant={compact ? 'outline' : 'default'}
+        className={compact ? undefined : 'mt-3 w-full'}
         disabled={disabled}
         onClick={() => input.current?.click()}
       >
@@ -77,6 +85,7 @@ export function FileUpload({
           event.target.value = '';
         }}
       />
+      {compact && error && <ErrorAlert error={error} className="mt-2" />}
       {children}
     </div>
   );

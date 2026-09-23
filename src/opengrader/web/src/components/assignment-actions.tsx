@@ -1,13 +1,13 @@
 import { errorMessage } from '@/lib/error-message';
-import { useId, useRef, useState } from 'react';
-import { Link, useRouter } from '@tanstack/react-router';
+import { useRef, useState } from 'react';
+import { useRouter } from '@tanstack/react-router';
 import {
   assignmentsQuery,
   deleteAssignment,
   type Assignment,
 } from '@/api/queries';
 import { ErrorAlert } from '@/components/error-alert';
-import { Button, buttonVariants } from './ui/button';
+import { Button } from './ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,12 +21,11 @@ import {
 
 export function AssignmentActions({
   assignment,
-  editUnavailableReason,
+  onDeleted,
 }: {
   assignment: Assignment;
-  editUnavailableReason?: string;
+  onDeleted: () => void;
 }) {
-  const reasonId = useId();
   const router = useRouter();
   const pending = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -48,6 +47,7 @@ export function AssignmentActions({
       setBusy(false);
       return;
     }
+    onDeleted();
     setConfirmOpen(false);
     try {
       const client = router.options.context.queryClient;
@@ -66,24 +66,6 @@ export function AssignmentActions({
   return (
     <div className="max-w-full">
       <div className="flex flex-wrap items-center gap-2">
-        {editUnavailableReason || busy ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled
-            aria-describedby={editUnavailableReason ? reasonId : undefined}
-          >
-            Edit assignment
-          </Button>
-        ) : (
-          <Link
-            to="/edit-assignment"
-            search={{ assignment: assignment.id }}
-            className={buttonVariants({ variant: 'outline' })}
-          >
-            Edit assignment
-          </Link>
-        )}
         <Button
           ref={triggerRef}
           type="button"
@@ -97,11 +79,6 @@ export function AssignmentActions({
           {busy ? 'Deleting…' : 'Delete assignment'}
         </Button>
       </div>
-      {editUnavailableReason && (
-        <span id={reasonId} className="sr-only">
-          {editUnavailableReason}
-        </span>
-      )}
       <AlertDialog
         open={confirmOpen}
         onOpenChange={(open) => {

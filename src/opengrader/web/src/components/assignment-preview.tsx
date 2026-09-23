@@ -39,11 +39,19 @@ type Props = {
   preview?: QAPreview;
   blocked?: boolean;
 } & (
-  | { source: string; current: boolean; assignmentId?: never }
+  | {
+      source: string;
+      current: boolean;
+      assignmentId?: never;
+      showGuide?: boolean;
+      savedAssignment?: { id: string; source: string };
+    }
   | {
       assignmentId: string;
       source?: never;
       current?: never;
+      showGuide?: never;
+      savedAssignment?: never;
     }
 );
 
@@ -61,10 +69,17 @@ export function AssignmentPreview(props: Props) {
     : versions[0];
   const valid =
     !!preview && (props.assignmentId !== undefined || props.current === true);
+  const showGuide =
+    props.assignmentId !== undefined || props.showGuide === true;
+  const savedPdfAssignmentId =
+    props.assignmentId ??
+    (props.savedAssignment?.source === props.source
+      ? props.savedAssignment.id
+      : undefined);
   const { pdf, url, update, busy, current, error } = useAssignmentPdf(
     props.source ?? props.assignmentId,
     version,
-    props.assignmentId
+    savedPdfAssignmentId
   );
   const currentPdf = valid && current;
   const guideVersion = preview?.document.versions?.length ? version : '';
@@ -113,7 +128,7 @@ export function AssignmentPreview(props: Props) {
     >
       <Tabs value={view} onValueChange={(value) => setView(String(value))}>
         <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          {props.assignmentId !== undefined ? (
+          {showGuide ? (
             <TabsList aria-label="Preview view">
               <TabsTrigger value="pdf">PDF preview</TabsTrigger>
               <TabsTrigger value="guide">Grading guide</TabsTrigger>
@@ -128,7 +143,11 @@ export function AssignmentPreview(props: Props) {
                 value={version}
                 disabled={blocked || !valid}
                 onValueChange={(value) => {
-                  if (value) setSelectedVersion(value);
+                  if (value) {
+                    setSelectedVersion(value);
+                    guideRef.current?.scrollTo({ top: 0, behavior: 'instant' });
+                    setActiveGuideKey(null);
+                  }
                 }}
               >
                 <SelectTrigger id={versionId} className="max-w-full min-w-20">
@@ -200,7 +219,7 @@ export function AssignmentPreview(props: Props) {
             </Suspense>
           )}
         </TabsContent>
-        {props.assignmentId !== undefined && (
+        {showGuide && (
           <TabsContent
             value="guide"
             ref={guideRef}
@@ -223,6 +242,14 @@ export function AssignmentPreview(props: Props) {
                       outdated={!valid}
                       disabled={blocked}
                       editorId="grading-guide"
+                      showVersionHeadings
+                      onVersionSelect={() => {
+                        guideRef.current?.scrollTo({
+                          top: 0,
+                          behavior: 'instant',
+                        });
+                        setActiveGuideKey(guideEntries[0]?.key ?? null);
+                      }}
                       canSelect={() => true}
                       onSelect={(entry) => navigateToGuideQuestion(entry.key)}
                     />

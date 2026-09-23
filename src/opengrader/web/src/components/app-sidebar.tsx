@@ -106,10 +106,7 @@ export function AppSidebar({
                 <SidebarGroupContent className="mt-1">
                   <SidebarMenu>
                     {destinations.map(({ to, prefix, title, icon: Icon }) => {
-                      const active =
-                        pathname === prefix ||
-                        (title === 'Overview' &&
-                          pathname === '/edit-assignment');
+                      const active = pathname === prefix;
                       return (
                         <SidebarMenuItem key={to}>
                           <SidebarMenuButton

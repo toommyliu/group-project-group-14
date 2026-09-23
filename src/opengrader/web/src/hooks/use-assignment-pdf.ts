@@ -2,7 +2,7 @@ import { errorMessage } from '@/lib/error-message';
 import { useEffect, useRef, useState } from 'react';
 import { previewAssignmentPdf, savedAssignmentPdf } from '@/api/queries';
 
-type Snapshot = { source: string; version: string };
+type Snapshot = { source: string; version: string; assignmentId?: string };
 
 /** Retain the last PDF, but cancel delivery when its source or version changes. */
 export function useAssignmentPdf(
@@ -32,24 +32,28 @@ export function useAssignmentPdf(
   }, [pdf]);
 
   const matches = (snapshot: Snapshot | undefined) =>
-    snapshot?.source === source && snapshot.version === version;
+    snapshot?.source === source &&
+    snapshot.version === version &&
+    snapshot.assignmentId === assignmentId;
 
   async function update() {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
-    setPending({ source, version });
+    setPending({ source, version, assignmentId });
     setFailure(undefined);
     try {
       const blob = assignmentId
         ? await savedAssignmentPdf(assignmentId, version, controller.signal)
         : await previewAssignmentPdf(source, version, controller.signal);
-      if (!controller.signal.aborted) setPdf({ source, version, blob });
+      if (!controller.signal.aborted)
+        setPdf({ source, version, assignmentId, blob });
     } catch (error) {
       if (!controller.signal.aborted)
         setFailure({
           source,
           version,
+          assignmentId,
           message: errorMessage(
             error,
             'Could not generate the PDF. Try again.'

@@ -1,33 +1,25 @@
 import type { overviewRoute } from '@/router';
-import { AssignmentActions } from '@/components/assignment-actions';
-import { AssignmentPreview } from '@/components/assignment-preview';
-import { PageHeading } from '@/components/page-heading';
+import { AssignmentEditor } from './new-assignment-page';
 
 export default function AssignmentOverviewPage({
   data,
 }: {
   data: typeof overviewRoute.types.loaderData;
 }) {
-  const { assignment, qa, scans, submissions } = data;
+  const { assignment, qa, scans, submissions, source } = data;
+  // TODO: allow with confirmation
+  const editUnavailableReason =
+    scans.batches.length > 0
+      ? 'Assignments with uploaded scans cannot be edited.'
+      : submissions.length > 0
+        ? 'Assignments with submissions cannot be edited.'
+        : undefined;
   return (
-    <>
-      <PageHeading
-        title="Overview"
-        description={assignment.title}
-        actions={
-          <AssignmentActions
-            assignment={assignment}
-            editUnavailableReason={
-              scans.batches.length > 0
-                ? 'Assignments with uploaded scans cannot be edited.'
-                : submissions.length > 0
-                  ? 'Assignments with submissions cannot be edited.'
-                  : undefined
-            }
-          />
-        }
-      />
-      <AssignmentPreview assignmentId={assignment.id} preview={qa} />
-    </>
+    <AssignmentEditor
+      key={assignment.id}
+      assignmentId={assignment.id}
+      initialSource={source.qa_markdown}
+      overview={{ assignment, qa, editUnavailableReason }}
+    />
   );
 }
