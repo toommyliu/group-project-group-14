@@ -1098,6 +1098,8 @@ export interface components {
             pages: components["schemas"]["PageSelection-Output"][];
             /** Submission Id */
             submission_id: number | null;
+            /** Scan Warnings */
+            scan_warnings: string[];
             /**
              * Error
              * @default

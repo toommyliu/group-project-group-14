@@ -498,6 +498,9 @@ def _finalize_submission_document(
     markdown_path: Path,
     extra_pages: tuple[int, ...] | None,
 ) -> tuple[StudentSubmissionDocument, Path]:
+    from .splitter import read_scan_warnings
+
+    document = replace(document, scan_warnings=read_scan_warnings(pdf_path))
     document = _apply_extra_pages(document, pdf_path, extra_pages)
     markdown_path.write_text(render_student_submission_markdown(document))
     return document, markdown_path
@@ -1501,7 +1504,7 @@ def _fill_responses_with_vlm(
     escalate_floor: float | None = None,
 ) -> list[StudentSubmissionQuestion]:
     """Default reader order is math model, vision model, then OCR; escalate_floor runs OCR
-    first. Empty model output preserves the OCR reading.
+    first. A successful blank model reading remains blank.
     """
     filled: list[StudentSubmissionQuestion] = []
     for question in questions:
@@ -1521,7 +1524,6 @@ def _fill_responses_with_vlm(
                 math_latex=math_latex,
                 math_transcriber=math_transcriber,
                 escalate_floor=escalate_floor,
-                handwriting_only=question.ink_image_path is not None,
             )
             response_text, response_confidence, response_source = reading
             if len(ink_fragments) == 1:
@@ -1555,7 +1557,6 @@ def _transcribe_crop(
     math_latex: bool = False,
     math_transcriber: "MathTranscriber | None" = None,
     escalate_floor: float | None = None,
-    handwriting_only: bool = False,
 ) -> tuple[str, float | None, str | None]:
     def _read_with_ocr() -> tuple[str, float | None, str | None]:
         text, confidence = _ocr_image_with_confidence(crop_path, psm=6)
@@ -1573,36 +1574,23 @@ def _transcribe_crop(
     def _read_with_vlm() -> tuple[str, float | None, str | None] | None:
         if vision_reader is None:
             return None
-        progress_callback(f"Transcribing {question_id} with Ollama VLM...")
+        progress_callback(f"Transcribing {question_id} with the vision model...")
         try:
-            if handwriting_only:
-                answer = vision_reader.extract_handwriting_only(
-                    image_path=crop_path,
-                    math_latex=math_latex,
-                )
-            else:
-                if math_latex:
-                    _prompt, answer = vision_reader.extract_question_prompt_and_answer(
-                        image_path=crop_path,
-                        math_latex=True,
-                    )
-                else:
-                    _prompt, answer = vision_reader.extract_question_prompt_and_answer(
-                        image_path=crop_path,
-                    )
+            answer = vision_reader.extract_handwriting_only(
+                image_path=crop_path, math_latex=math_latex,
+            )
         except Exception as exc:
-            progress_callback(f"  Warning: Ollama VLM failed for {question_id}: {exc}")
+            progress_callback(f"  Warning: Vision model failed for {question_id}: {exc}")
             return None
         text = answer or ""
-        if not text.strip():
-            return None
         confidence = (
             0.0
-            if handwriting_only and "[unclear]" in text.casefold()
+            if "[unclear]" in text.casefold()
             else None
         )
         return (text, confidence, SOURCE_VISION_MODEL)
 
+    ocr_reading = None
     if escalate_floor is not None:
         ocr_reading = _read_with_ocr()
         text, confidence, _source = ocr_reading
@@ -1612,9 +1600,12 @@ def _transcribe_crop(
             f"  {question_id}: {_escalation_reason(text, confidence)}, "
             "re-reading with a model..."
         )
-        return _read_with_math() or _read_with_vlm() or ocr_reading
-
-    return _read_with_math() or _read_with_vlm() or _read_with_ocr()
+    reading = _read_with_math() or _read_with_vlm()
+    if reading is not None:
+        return reading
+    text, confidence, source = ocr_reading or _read_with_ocr()
+    # Printed text can score highly in Tesseract after a handwriting reader fails.
+    return text, 0.0 if vision_reader is not None else confidence, source
 
 
 def _escalation_reason(text: str, confidence: float | None) -> str:
@@ -1905,6 +1896,8 @@ def _build_document_from_ocr_result(
         split_subquestions=split_subquestions,
         save_layout_debug=save_layout_debug,
     )
+    if not submission_result.questions:
+        raise ValueError("No question regions were detected. Check the scan orientation and layout settings before retrying.")
 
     student_name = ""
     student_id = ""
@@ -1971,6 +1964,7 @@ def _build_document_from_ocr_result(
                 question_id=q_res.question_id,
                 prompt="",
                 possible_points=None,
+                question_type=q_res.question_type,
                 response_image_path=Path(q_res.output_path).relative_to(submission_dir).as_posix() if q_res.output_path else None,
                 response_text=response_text,
                 source_segments=q_res.source_segments,

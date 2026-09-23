@@ -554,13 +554,14 @@ class SetupScreen(Vertical):
                     yield self._field_label("Output directory")
                     yield self._path_row("Where to write per-student PDFs…", "split-output")
                     yield self._field_label(
-                        "Pages per submission", "leave blank to auto-detect by Name/ID"
+                        "Expected pages per submission", "optional when detecting boundaries"
                     )
-                    yield Input(placeholder="e.g. 6 (blank = auto-detect)", id="split-pages")
+                    yield Input(placeholder="e.g. 3", id="split-pages")
+                    yield Checkbox("Detect submission boundaries", value=True, id="split-detect-boundaries")
                     yield Static(
-                        "With no page count and no template, submissions are "
-                        "detected by the student Name/ID header on each first page "
-                        "(a cover page counts).",
+                        "Detect boundaries from page numbers and Name/ID headers. "
+                        "The expected count flags incomplete scans. Turn off detection "
+                        "to split into fixed groups of that size.",
                         classes="card-hint",
                     )
                     # Checkbox labels cannot wrap.
@@ -1732,8 +1733,12 @@ class SetupScreen(Vertical):
         input_pdf = self._clean_path(self.query_one("#split-input", Input).value)
         output_dir = self._clean_path(self.query_one("#split-output", Input).value)
         pages = self.query_one("#split-pages", Input).value
+        detect_boundaries = self.query_one("#split-detect-boundaries", Checkbox).value
         if not input_pdf or not output_dir:
             self.app.notify("Input PDF and output directory are required.", severity="error")
+            return
+        if not detect_boundaries and not pages.strip():
+            self.app.notify("Enter a page count for fixed groups, or turn on boundary detection.", severity="error")
             return
 
         use_template = self.query_one("#split-use-template", Checkbox).value
@@ -1745,6 +1750,8 @@ class SetupScreen(Vertical):
         argv = ["--input", input_pdf, "--output", output_dir]
         if pages.strip():
             argv.extend(["--pages-per-submission", pages.strip()])
+        if detect_boundaries:
+            argv.append("--detect-boundaries")
 
         if use_template and template:
             argv.extend(["--blank-template", template])

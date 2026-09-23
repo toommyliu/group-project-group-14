@@ -50,7 +50,7 @@ class VisionReader(Protocol):
     def extract_handwriting_only(
         self, *, image_path: str | Path, math_latex: bool = False
     ) -> str:
-        """Transcribe a crop that already had the printed template ink removed."""
+        """Transcribe only student handwriting or marked choices in a response crop."""
         ...
 
     def extract_page_number(self, *, image_path: str | Path) -> int | None:
@@ -132,6 +132,8 @@ class DialectVisionReader:
         raw = dialect_client.generate(
             config=self.config,
             prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            options={"temperature": 0, "think": False},
             images=[vision_prompts.image_to_base64(image_path)],
             response_format=request.response_schema,
             num_predict=request.num_predict,
@@ -147,6 +149,8 @@ class DialectVisionReader:
         raw = dialect_client.generate(
             config=self.config,
             prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            options={"temperature": 0, "think": False},
             images=[vision_prompts.image_to_base64(image_path)],
             response_format=request.response_schema,
             num_predict=request.num_predict,
@@ -164,6 +168,8 @@ class DialectVisionReader:
         raw = dialect_client.generate(
             config=self.config,
             prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            options={"temperature": 0, "think": False},
             images=[vision_prompts.image_to_base64(image_path)],
             response_format=request.response_schema,
             num_predict=request.num_predict,
@@ -181,6 +187,8 @@ class DialectVisionReader:
         raw = dialect_client.generate(
             config=self.config,
             prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            options={"temperature": 0, "think": False},
             images=[vision_prompts.image_to_base64(image_path)],
             response_format=request.response_schema,
             num_predict=request.num_predict,
@@ -196,6 +204,8 @@ class DialectVisionReader:
         raw = dialect_client.generate(
             config=self.config,
             prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            options={"temperature": 0, "think": False},
             images=[vision_prompts.image_to_base64(image_path)],
             response_format=request.response_schema,
             num_predict=request.num_predict,
@@ -211,6 +221,8 @@ class DialectVisionReader:
         raw = dialect_client.generate(
             config=self.config,
             prompt=request.prompt,
+            system_prompt=request.system_prompt,
+            options={"temperature": 0, "think": False},
             images=[vision_prompts.image_to_base64(image_path)],
             response_format=request.response_schema,
             num_predict=request.num_predict,

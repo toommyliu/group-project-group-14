@@ -39,6 +39,7 @@ _ZERO_SWEEP_MIN_GRADED = 2
 
 
 class ReviewReason(str, Enum):
+    SCAN_INCOMPLETE = "scan_incomplete"
     MISSING_STUDENT_ID = "missing_student_id"
     MALFORMED_STUDENT_ID = "malformed_student_id"
     MISSING_STUDENT_NAME = "missing_student_name"
@@ -112,7 +113,7 @@ def flag_submission(
             question_id=question_id,
         )
 
-    flags: list[ReviewFlag] = []
+    flags: list[ReviewFlag] = [_flag(ReviewReason.SCAN_INCOMPLETE, "high", warning) for warning in document.scan_warnings]
 
     if not student_id:
         flags.append(

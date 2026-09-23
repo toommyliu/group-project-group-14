@@ -119,8 +119,9 @@ def test_handwriting_only_prompt_excludes_printed_remnants(monkeypatch, image_pa
 
     body = captured["body"]
     assert body["format"]["required"] == ["text"]
-    assert "oddly spaced" in body["prompt"]
-    assert "printed remnants" in body["prompt"]
+    assert "machine-printed" in body["prompt"]
+    assert "Never answer or grade" in body["system"]
+    assert body["think"] is False
 
 
 def test_page_has_identity_field_sends_boolean_schema(monkeypatch, image_path):

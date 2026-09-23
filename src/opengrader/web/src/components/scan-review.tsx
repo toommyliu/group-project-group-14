@@ -114,6 +114,12 @@ export function ScanReview({
         Check who each page belongs to. Page numbers refer to the original scan.
         Open a page to inspect it at full size.
       </p>
+      {!dirty &&
+        batch.groups[selected]?.scan_warnings.map((warning) => (
+          <p key={warning} className="text-sm" role="status">
+            {warning}
+          </p>
+        ))}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,13rem),1fr))] gap-5">
         {group.slice(pageOffset, pageOffset + 12).map((page, offset) => {
           const index = pageOffset + offset;

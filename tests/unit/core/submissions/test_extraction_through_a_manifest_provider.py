@@ -55,7 +55,7 @@ def _reply_for(prompt: str) -> str:
         return '{"value": "Grace Hopper"}'
     if "student ID" in prompt:
         return '{"value": "987654321"}'
-    return '{"prompt": "Define recursion.", "answer": "A function that calls itself."}'
+    return '{"text": "A function that calls itself."}'
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def orbital(monkeypatch):
     def _urlopen(req, timeout=None):
         sent.append(req)
         body = json.loads(req.data)
-        prompt = body["messages"][0]["content"][0]["text"]
+        prompt = body["messages"][-1]["content"][0]["text"]
         return _Response(_reply_for(prompt))
 
     monkeypatch.setattr("urllib.request.urlopen", _urlopen)
@@ -157,8 +157,8 @@ def test_a_hand_written_manifest_completes_an_extraction(
         assert req.get_header("Authorization") == f"Bearer {KEY}"
         body = json.loads(req.data)
         assert body["model"] == "orbital-vision-large"
-        assert body["messages"][0]["content"][1]["type"] == "image_url"
+        assert body["messages"][-1]["content"][1]["type"] == "image_url"
 
-    prompts = [json.loads(r.data)["messages"][0]["content"][0]["text"] for r in orbital]
+    prompts = [json.loads(r.data)["messages"][-1]["content"][0]["text"] for r in orbital]
     identity_reads = [p for p in prompts if "student's name" in p or "student ID" in p]
     assert len(identity_reads) == 2

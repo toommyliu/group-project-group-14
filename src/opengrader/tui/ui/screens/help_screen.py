@@ -570,8 +570,8 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     (
         "3 · Get the model",
         "With that same box ticked, a step also 'ollama pull's the model it "
-        "needs on first use — a one-time download. To pre-fetch the default, "
-        "run 'ollama pull qwen2.5vl:7b' (~6 GB); 'ollama list' shows what you "
+        "needs on first use. For handwriting, run 'ollama pull qwen3.5:9b' "
+        "(~7 GB); for grading, 'ollama pull qwen2.5vl:7b' (~6 GB). 'ollama list' shows what you "
         "have, and 'Check this computer' in Tools (F3) reports whether the "
         "models AI setup names are actually installed.",
     ),
@@ -585,7 +585,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
     (
         "· vision — default",
-        "qwen2.5vl:7b   ~6 GB   — the default; reads handwriting and grades.",
+        "qwen3.5:9b   ~7 GB download. The handwriting default; qwen2.5vl:7b remains the grading default.",
     ),
     (
         "· vision — light",

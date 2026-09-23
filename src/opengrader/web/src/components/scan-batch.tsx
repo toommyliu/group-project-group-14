@@ -69,6 +69,9 @@ export function ScanBatchCard({
     Record<string, string | null>
   >({});
   const busy = pending || scanBusy(batch);
+  const hasFindings =
+    batch.findings.length > 0 ||
+    batch.groups.some((group) => group.scan_warnings.length > 0);
   const ready = batch.groups.filter(
     (group) => group.submission_id !== null
   ).length;
@@ -173,7 +176,7 @@ export function ScanBatchCard({
                   assignmentId,
                   batch,
                   mode,
-                  mode === 'fixed' ? Number(pages) : null
+                  mode !== 'individual' && pages ? Number(pages) : null
                 )
               );
             }}
@@ -205,23 +208,37 @@ export function ScanBatchCard({
                 </SelectContent>
               </Select>
             </div>
-            {mode === 'fixed' && (
+            {mode !== 'individual' && (
               <div className="grid gap-2">
                 <Label htmlFor={`pages-${batch.id}`}>
-                  Scanned pages per submission
+                  {mode === 'fixed'
+                    ? 'Scanned pages per submission'
+                    : 'Expected pages per submission'}
                 </Label>
                 <Input
                   id={`pages-${batch.id}`}
                   className="w-36"
                   type="number"
                   min="1"
-                  max={batch.page_count}
+                  max={mode === 'fixed' ? batch.page_count : undefined}
                   step="1"
-                  required
+                  required={mode === 'fixed'}
+                  aria-describedby={
+                    mode === 'automatic' ? `pages-help-${batch.id}` : undefined
+                  }
                   value={pages}
                   disabled={busy}
                   onChange={(event) => setPages(event.target.value)}
                 />
+                {mode === 'automatic' && (
+                  <p
+                    id={`pages-help-${batch.id}`}
+                    className="text-sm text-muted-foreground"
+                  >
+                    Optional. Flags incomplete scans without changing the
+                    detected groups.
+                  </p>
+                )}
               </div>
             )}
             <Button type="submit" variant="outline" disabled={busy || dirty}>
@@ -289,6 +306,11 @@ export function ScanBatchCard({
                 <p className="mt-1 text-sm break-words text-muted-foreground">
                   Scan pages {group.pages.map((page) => page.number).join(', ')}
                 </p>
+                {group.scan_warnings.map((warning) => (
+                  <p key={warning} className="mt-2 text-sm">
+                    {warning}
+                  </p>
+                ))}
                 {group.submission_id !== null ? (
                   <Link
                     to="/submissions"
@@ -421,7 +443,7 @@ export function ScanBatchCard({
                 />
                 Automatically score matching answers
               </Label>
-              {batch.findings.length > 0 && (
+              {hasFindings && (
                 <Label className="flex min-h-11 items-center gap-3">
                   <input
                     type="checkbox"

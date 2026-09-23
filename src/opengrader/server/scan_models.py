@@ -24,6 +24,7 @@ class ScanGroup(ScanModel):
     key: str
     pages: list[PageSelection]
     submission_id: int | None = None
+    scan_warnings: list[str] = Field(default_factory=list)
     error: str = ""
     assignment_version: str | None = None
 

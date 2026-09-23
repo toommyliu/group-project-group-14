@@ -1189,6 +1189,8 @@ def run_cli(
 
     settings_id = settings_fingerprint(
         {
+            "pipeline_version": 2,
+            "scan_warnings": {pdf.name: file_fingerprint(pdf.with_suffix(".scan.json")) for pdf in pdfs},
             "dpi": args.dpi,
             "lang": args.lang,
             "deskew": not args.no_deskew,

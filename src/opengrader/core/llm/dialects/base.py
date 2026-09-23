@@ -109,6 +109,7 @@ class Dialect(Protocol):
         *,
         model: str,
         prompt: str,
+        system_prompt: str | None = None,
         images: list[str] | None = None,
         response_schema: dict | None = None,
         num_predict: int | None = None,

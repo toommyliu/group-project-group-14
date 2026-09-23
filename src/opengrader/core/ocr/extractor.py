@@ -715,7 +715,6 @@ def _extract_question_crop_segments(
             x = (width - crop.width) // 2
             stitched.paste(crop, (x, y))
             y += crop.height
-        stitched = _trim_question_region(stitched, margin_px=8)
 
     out_path = sub_dir / f"{question_id}.{response_format}"
     if response_format == "pdf":

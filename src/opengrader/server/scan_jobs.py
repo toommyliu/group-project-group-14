@@ -12,7 +12,7 @@ from uuid import uuid4
 from opengrader.core.submissions.boundary import plan_boundary_ranges
 from opengrader.core.submissions.scan_check import analyze_scan_pdf
 from opengrader.core.submissions.scan_plan import ScanPage, write_scan_submissions
-from opengrader.core.submissions.splitter import plan_submission_ranges
+from opengrader.core.submissions.splitter import plan_submission_ranges, write_scan_warnings
 from opengrader.server.scan_models import PageSelection, ScanBatch, ScanFinding, ScanGroup
 from opengrader.core.submissions.intake import SubmissionIntake
 from opengrader.server.scan_store import ScanStore
@@ -120,15 +120,18 @@ class ScanJobs:
         if not report.orientation_available:
             findings.append(ScanFinding(severity="warning", detail=report.orientation_note or "Page orientation could not be checked."))
         if batch.mode == "automatic":
-            ranges, warnings = self.processing.submit(plan_boundary_ranges, source).result()
-            findings.extend(ScanFinding(severity="warning", detail=warning) for warning in warnings)
+            ranges, _warnings = self.processing.submit(
+                plan_boundary_ranges, source, expected_pages=batch.pages_per_submission,
+            ).result()
+            if ranges:
+                batch.pages_per_submission = ranges[0].expected_pages
         else:
             ranges = plan_submission_ranges(
                 total_pages=batch.page_count,
                 pages_per_submission=batch.pages_per_submission if batch.mode == "fixed" else batch.page_count,
             )
         batch.groups = [
-            ScanGroup(key=str(uuid4()), pages=[PageSelection(number=page) for page in range(group.start_page, group.end_page + 1)])
+            ScanGroup(key=str(uuid4()), pages=[PageSelection(number=page) for page in range(group.start_page, group.end_page + 1)], scan_warnings=list(group.warnings))
             for group in ranges
         ]
         batch.excluded_pages = []
@@ -161,6 +164,7 @@ class ScanJobs:
             try:
                 if not markdown.exists():
                     pdf = directory / "split" / f"{name}.pdf"
+                    write_scan_warnings(pdf, tuple(group.scan_warnings))
                     version = group.assignment_version or batch.assignment_version
                     if version not in intakes:
                         intakes[version] = SubmissionIntake(assignment / "qa.md", auto_grade=batch.auto_grade, assignment_version=version)

@@ -236,6 +236,8 @@ uv run submission-splitter \
 ```
 
 Useful `submission-splitter` options:
+- `--detect-boundaries`: Detect submission starts using QR/printed page-number restarts and identity headers. Combine with `--pages-per-submission 3` to flag short scans while keeping each student's pages together. Without an explicit page count, automatic detection is the default. A blank template supplies an expected count, not fixed groups.
+- Missing-page and duplicate-page warnings are saved beside each split PDF in `.scan.json` files and carried into extracted submissions and the review queue. Keep these sidecars with the split PDFs. Unnumbered scans with identical headers on every page may still need manual split review.
 - `--start-page <N>` and `--end-page <N>`: Split only a page range, using 1-indexed page numbers.
 - `--filename-prefix <prefix>`: Change output names from `submission-0001.pdf`.
 - `--zero-pad-width <N>`: Change output number padding.
@@ -264,11 +266,13 @@ Useful `submission-extractor` options:
 - `--lang <codes>`: Set Tesseract layout language codes. Default is `eng`.
 - `--no-deskew`: Disable automatic deskewing.
 - `--no-split-subquestions`: Keep nested subquestion boxes in one response image.
-- `--ollama-model <model>`: Set the Ollama vision model. Defaults to the saved AI settings, falling back to `qwen2.5vl:7b` if not configured.
+- `--ollama-model <model>`: Set the Ollama vision model. Defaults to the saved AI settings, falling back to `qwen3.5:9b` if not configured.
 - `--ollama-host <url>`: Set the Ollama server URL. Defaults to the saved AI settings, falling back to `http://127.0.0.1:11434` if not configured.
 - `--ollama-timeout <seconds>`: Set the Ollama request timeout. Defaults to the saved AI settings, falling back to `120` if not configured.
 - `--no-ollama-qa`: Skip Ollama question prompt/answer extraction while still using it for name, ID, and title extraction.
 - `--save-layout-debug`: Write layout JSON and overlay PNGs for each submission.
+
+Transcription uses separate system and user instructions. Student answers use an answer-only JSON schema, preserve repeated words and mistakes, and flag `[unclear]` readings for review. A valid empty model response stays empty. Invalid or truncated JSON is a failed reading, not student text.
 
 Convert an answer key PDF into a QA markdown draft:
 ```bash
@@ -320,8 +324,8 @@ Run a vision language model to extract printed and handwritten text from the pro
 
 Terminal 1: install the Ollama vision model and keep it running:
 ```bash
-# Download the model.
-ollama pull qwen2.5vl:7b
+# Download the handwriting model.
+ollama pull qwen3.5:9b
 # Start the Ollama server.
 ollama serve
 ```
@@ -331,7 +335,7 @@ Terminal 2: process the submissions with the model:
 uv run submission-extractor \
   --input samples/cs146-quiz1/split-submissions \
   --output samples/cs146-quiz1/student-submissions \
-  --ollama-model qwen2.5vl:7b
+  --ollama-model qwen3.5:9b
 ```
 
 If `ollama run` cannot connect to Ollama, start the Ollama app or run `ollama serve`
