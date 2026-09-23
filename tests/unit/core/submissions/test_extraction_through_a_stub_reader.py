@@ -226,13 +226,13 @@ def test_a_complete_extraction_runs_through_a_stub_reader_with_no_network(
     markdown_text = outcome.markdown_path.read_text()
     assert stub_reader.name_value in markdown_text
     assert stub_reader.sid_value in markdown_text
-    assert stub_reader.qa_value[1] in markdown_text  # the transcribed answer
+    assert stub_reader.handwriting_value in markdown_text  # the transcribed answer
 
     # The stub recorded exactly what the pipeline asked of it.
     called_methods = {call[0] for call in stub_reader.calls}
     assert called_methods == {
         "extract_field_text",
-        "extract_question_prompt_and_answer",
+        "extract_handwriting_only",
     }
     field_kinds_asked = {
         call[2] for call in stub_reader.calls if call[0] == "extract_field_text"
@@ -241,7 +241,7 @@ def test_a_complete_extraction_runs_through_a_stub_reader_with_no_network(
     qa_call = next(
         call
         for call in stub_reader.calls
-        if call[0] == "extract_question_prompt_and_answer"
+        if call[0] == "extract_handwriting_only"
     )
     assert qa_call[1] == question_crop
 

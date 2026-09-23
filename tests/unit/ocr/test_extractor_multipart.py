@@ -231,7 +231,11 @@ def test_detect_questions_uses_structural_boundary_when_next_marker_missing(
     assert (y + h) < 0.49
 
 
-def test_question_x_bounds_stay_tight_without_structural_box() -> None:
+def test_question_crop_preserves_marks_beyond_the_printed_indent(monkeypatch) -> None:
+    monkeypatch.setattr(layout, "classify_question_image", lambda _image: FREE_RESPONSE)
+    image = Image.new("RGB", (1000, 1400), "white")
+    image.putpixel((50, 480), (0, 0, 0))
+    image.putpixel((960, 520), (0, 0, 0))
     anchors = [
         layout._QuestionAnchor(
             page_number=1,
@@ -249,14 +253,14 @@ def test_question_x_bounds_stay_tight_without_structural_box() -> None:
         ),
     ]
 
-    x0, x1 = layout._estimate_question_x_bounds(
-        anchors,
+    questions = layout._detect_questions(
+        anchors=anchors,
+        rendered_pages={1: (image, 1000, 1400)},
         primitives_by_page={1: []},
-        dims={1: (1000, 1400)},
     )
-
-    assert 0.11 < x0 < 0.13
-    assert x1 == 0.94
+    assert [question.question_id for question in questions] == ["q1", "q2"]
+    crop = image.crop(layout.bbox_norm_to_px(questions[0].crop_bbox_norm, 1000, 1400))
+    assert crop.convert("L").histogram()[0] == 2
 
 
 def test_question_crop_expansion_adds_padding() -> None:
@@ -444,3 +448,25 @@ def test_save_layout_debug_uses_final_question_type_vote(
         MULTIPLE_CHOICE
     ]
     assert captured_question_types == [MULTIPLE_CHOICE]
+
+
+def test_photographed_continuation_survives_stitching(tmp_path):
+    import numpy as np
+    import fitz
+    from PIL import Image
+    from pathlib import Path
+    from opengrader.core.ocr.extractor import OcrConfig, process_submission_pdf
+    from opengrader.core.pdf_utils import render_page_to_image
+
+    source = Path(__file__).resolve().parents[3] / 'samples/cmpe142-midterm2/split-submissions/submission-0002.pdf'
+    result = process_submission_pdf(source, OcrConfig(), tmp_path, dpi=200)
+    question = next(question for question in result.questions if question.question_id == 'q4')
+    assert [segment.page_number for segment in question.source_segments] == [1, 2]
+    with fitz.open(source) as doc:
+        page, width, height = render_page_to_image(doc, 1, dpi=200)
+    x, y, w, h = question.source_segments[1].bbox_norm
+    continuation = np.asarray(page.convert('RGB'))[round(y*height):round((y+h)*height), round(x*width):round((x+w)*width)]
+    stitched = np.asarray(Image.open(question.output_path).convert('RGB'))
+    # The student wrote on the second page; those exact pixels must remain visible.
+    left = (stitched.shape[1] - continuation.shape[1]) // 2
+    assert np.array_equal(stitched[-continuation.shape[0]:, left:left + continuation.shape[1]], continuation)

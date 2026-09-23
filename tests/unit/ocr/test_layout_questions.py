@@ -111,3 +111,56 @@ def test_detect_questions_does_not_steal_next_question_box_at_top_of_page(
 
     assert questions[0].continuation_segments == []
     assert review_reasons == []
+
+
+def test_scanned_sample_has_only_real_leaf_questions() -> None:
+    from pathlib import Path
+
+    import fitz
+
+    from opengrader.core.ocr import OcrConfig
+    from opengrader.core.pdf_utils import render_page_to_image
+
+    sample = Path(__file__).resolve().parents[3] / "samples/cs146-quiz1/submissions.pdf"
+    with fitz.open(sample) as doc:
+        pages = {i + 1: render_page_to_image(doc, i + 3, dpi=300) for i in range(3)}
+    detected = layout.scan_submission_layout(pages, OcrConfig())
+    assert [q.question_id for q in detected.questions] == [
+        "q1", "q2", "q3", "q4", "q5a", "q5b", "q5c", "q6a", "q6b", "q6c", "q6d",
+    ]
+    whole = layout.scan_submission_layout(pages, OcrConfig(), split_subquestions=False)
+    assert [q.question_id for q in whole.questions] == ["q1", "q2", "q3", "q4", "q5", "q6"]
+
+
+def test_question_markers_require_printed_structure() -> None:
+    def line(text: str, y: int) -> layout.PageTextLine:
+        words = tuple(
+            layout.PageTextWord(token, 95, (100 + i * 80, y, 160 + i * 80, y + 25), (1, 1, y))
+            for i, token in enumerate(text.split())
+        )
+        return layout.PageTextLine(text, 95, (100, y, 850, y + 25), words)
+
+    anchors = layout._find_question_anchors(1, [
+        line("1. (10 pts) Explain", 200),
+        line("40", 300),
+        line("2 (5 points) Explain", 400),
+        line("3", 1250),
+    ], 1000, 1400)
+    assert [anchor.question_number for anchor in anchors] == [1, 2]
+
+
+def test_external_exam_continuation_starts_below_repeated_identity_header() -> None:
+    from pathlib import Path
+    import fitz
+    from opengrader.core.ocr import OcrConfig
+    from opengrader.core.pdf_utils import render_page_to_image
+
+    sample = Path(__file__).resolve().parents[3] / "samples/cmpe142-midterm2/split-submissions/submission-0001.pdf"
+    with fitz.open(sample) as doc:
+        pages = {i + 1: render_page_to_image(doc, i, dpi=150) for i in range(len(doc))}
+    detected = layout.scan_submission_layout(pages, OcrConfig())
+    assert [q.question_id for q in detected.questions] == [f"q{i}" for i in range(1, 9)]
+    page, box = detected.questions[3].continuation_segments[0]
+    assert page == 2
+    assert .12 < box[1] < .15
+    assert box[1] + box[3] > .158

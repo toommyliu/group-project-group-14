@@ -29,7 +29,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class OllamaVisionConfig:
-    model: str = "qwen2.5vl:7b"
+    model: str = "qwen3.5:9b"
     host: str = ollama_transport.DEFAULT_HOST
     timeout_seconds: float = ollama_transport.DEFAULT_TIMEOUT_SECONDS
     keep_alive: str = ollama_transport.DEFAULT_KEEP_ALIVE
@@ -75,6 +75,7 @@ def _generate_with_image(
     *,
     image_path: str | Path,
     prompt: str,
+    system_prompt: str | None = None,
     config: OllamaVisionConfig,
     response_format: dict | None = None,
     num_predict: int | None = None,
@@ -85,6 +86,8 @@ def _generate_with_image(
         host=config.host,
         model=config.model,
         prompt=prompt,
+        system_prompt=system_prompt,
+        options={"temperature": 0, "think": False},
         images=[encoded_image],
         response_format=response_format,
         keep_alive=config.keep_alive,
@@ -104,6 +107,7 @@ def extract_field_text(
     raw = _generate_with_image(
         image_path=image_path,
         prompt=request.prompt,
+        system_prompt=request.system_prompt,
         config=config,
         response_format=request.response_schema,
         num_predict=request.num_predict,
@@ -133,6 +137,7 @@ def extract_title_metadata(
     raw = _generate_with_image(
         image_path=image_path,
         prompt=request.prompt,
+        system_prompt=request.system_prompt,
         config=config,
         response_format=request.response_schema,
         num_predict=request.num_predict,
@@ -150,6 +155,7 @@ def extract_question_prompt_and_answer(
     raw = _generate_with_image(
         image_path=image_path,
         prompt=request.prompt,
+        system_prompt=request.system_prompt,
         config=config,
         response_format=request.response_schema,
         num_predict=request.num_predict,
@@ -163,12 +169,13 @@ def extract_handwriting_only(
     config: OllamaVisionConfig,
     math_latex: bool = False,
 ) -> str:
-    """Transcribe a crop that has already had all printed template ink removed."""
+    """Transcribe only student handwriting or marked choices in a response crop."""
 
     request = vision_prompts.handwriting_only_request(math_latex=math_latex)
     raw = _generate_with_image(
         image_path=image_path,
         prompt=request.prompt,
+        system_prompt=request.system_prompt,
         config=config,
         response_format=request.response_schema,
         num_predict=request.num_predict,
@@ -185,6 +192,7 @@ def extract_page_number(
     raw = _generate_with_image(
         image_path=image_path,
         prompt=request.prompt,
+        system_prompt=request.system_prompt,
         config=config,
         response_format=request.response_schema,
         num_predict=request.num_predict,
@@ -201,6 +209,7 @@ def page_has_identity_field(
     raw = _generate_with_image(
         image_path=image_path,
         prompt=request.prompt,
+        system_prompt=request.system_prompt,
         config=config,
         response_format=request.response_schema,
         num_predict=request.num_predict,

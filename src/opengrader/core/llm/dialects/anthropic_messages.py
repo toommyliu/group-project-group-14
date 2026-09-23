@@ -56,6 +56,7 @@ class AnthropicMessagesDialect:
         *,
         model: str,
         prompt: str,
+        system_prompt: str | None = None,
         images: list[str] | None = None,
         response_schema: dict | None = None,
         num_predict: int | None = None,
@@ -101,6 +102,8 @@ class AnthropicMessagesDialect:
             "temperature": temperature,
         }
         # keep_alive has no meaning against a hosted, stateless API.
+        if system_prompt:
+            body["system"] = system_prompt
         return body
 
     def reply_text(self, body: dict) -> str:

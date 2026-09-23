@@ -55,6 +55,7 @@ class OpenAIChatDialect:
         *,
         model: str,
         prompt: str,
+        system_prompt: str | None = None,
         images: list[str] | None = None,
         response_schema: dict | None = None,
         num_predict: int | None = None,
@@ -98,6 +99,8 @@ class OpenAIChatDialect:
             }
         # keep_alive is an Ollama residency knob; this shape has no equivalent
         # and a hosted service would only reject an unknown field.
+        if system_prompt:
+            body["messages"].insert(0, {"role": "system", "content": system_prompt})
         return body
 
     def reply_text(self, body: dict) -> str:

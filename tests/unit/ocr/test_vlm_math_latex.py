@@ -41,9 +41,9 @@ def test_math_flag_threads_through_fill(tmp_path):
     seen: dict[str, bool] = {}
 
     class _StubReader:
-        def extract_question_prompt_and_answer(self, *, image_path, math_latex=False):
+        def extract_handwriting_only(self, *, image_path, math_latex=False):
             seen["math_latex"] = math_latex
-            return "Q", r"$\frac{1}{2}$"
+            return r"$\frac{1}{2}$"
 
     (tmp_path / "responses").mkdir()
     (tmp_path / "responses" / "q1.png").write_bytes(b"x")

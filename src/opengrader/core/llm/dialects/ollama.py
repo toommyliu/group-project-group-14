@@ -1,17 +1,4 @@
-"""The local Ollama server's shape — `/api/generate`.
-
-This dialect is a **refactor, not a rewrite**. The body it builds is
-byte-for-byte what `ollama_transport.generate_raw` has always built, and the
-existing tests in `tests/unit/core/llm/test_ollama_client.py` are the proof:
-they were not touched when this module arrived. §7.9 makes that the exit
-criterion for the phase, so if you are tempted to improve something here,
-don't — improve it in the two hosted dialects, where there is no behaviour to
-preserve.
-
-Ollama takes no credential (it is on this machine) and reports errors in a 200
-response body rather than by status code, which is why `error_text` exists on
-the protocol at all.
-"""
+"""Requests and responses for Ollama's local /api/generate endpoint."""
 
 from __future__ import annotations
 
@@ -43,6 +30,7 @@ class OllamaDialect:
         *,
         model: str,
         prompt: str,
+        system_prompt: str | None = None,
         images: list[str] | None = None,
         response_schema: dict | None = None,
         num_predict: int | None = None,
@@ -59,12 +47,17 @@ class OllamaDialect:
             "stream": False,
             "options": merged,
         }
+        # Thinking is a request field, unlike the sampling options.
+        if "think" in merged:
+            body["think"] = merged.pop("think")
         if images is not None:
             body["images"] = images
         if response_schema is not None:
             body["format"] = response_schema
         if keep_alive is not None:
             body["keep_alive"] = keep_alive
+        if system_prompt:
+            body["system"] = system_prompt
         return body
 
     def reply_text(self, body: dict) -> str:

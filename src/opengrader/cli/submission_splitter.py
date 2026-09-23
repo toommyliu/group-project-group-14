@@ -110,9 +110,9 @@ def _build_parser() -> ArgumentParser:
         "--detect-boundaries",
         action="store_true",
         help=(
-            "Detect submission boundaries by the student Name/ID header on each "
-            "first page instead of a fixed page count. Used automatically when "
-            "neither --pages-per-submission nor --blank-template is given."
+            "Detect boundaries from printed page numbers and Name/ID headers. "
+            "Used automatically without --pages-per-submission. With this flag, "
+            "the page count or blank template checks completeness instead of fixing split sizes."
         ),
     )
     parser.add_argument(
@@ -427,9 +427,7 @@ def run_cli(
             sys.exit(1)
         blank_template_layout = _load_page_number_layout(blank_template_path)
 
-    use_boundary = args.detect_boundaries or (
-        args.pages_per_submission is None and blank_template_layout is None
-    )
+    use_boundary = args.detect_boundaries or args.pages_per_submission is None
     uses_ordering_pass = (
         args.reorder or args.blank_template or args.extra_work_pages or auto_reorder
     )
@@ -452,19 +450,17 @@ def run_cli(
 
         boundary_warnings: list[str] = []
         if use_boundary:
-            emit("Detecting submission boundaries (student Name/ID header)…")
+            emit("Detecting submission boundaries (page numbers and Name/ID headers)…")
             ranges, boundary_warnings = plan_boundary_ranges(
                 input_pdf,
                 vision_reader=vision_reader,
+                expected_pages=_expected_pages_per_submission(args),
                 filename_prefix=args.filename_prefix,
                 zero_pad_width=args.zero_pad_width,
                 progress_callback=emit,
             )
             emit(f"Detected {len(ranges)} submission(s).")
         else:
-            if pages_per_submission is None:
-                pages_per_submission = blank_template_layout.total_pages
-                emit(f"Inferred {pages_per_submission} pages per submission from blank template.")
             ranges = plan_submission_ranges(
                 total_pages=total_pages,
                 pages_per_submission=pages_per_submission,
@@ -473,6 +469,7 @@ def run_cli(
                 filename_prefix=args.filename_prefix,
                 zero_pad_width=args.zero_pad_width,
             )
+            boundary_warnings = [f"{group.name}: {warning}" for group in ranges for warning in group.warnings]
 
         emit(f"Input: {input_pdf} ({total_pages} pages)")
         emit(f"Planned student splits: {len(ranges)}")

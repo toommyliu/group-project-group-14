@@ -414,3 +414,42 @@ def test_materialized_plan_preserves_source_and_page_ownership(tmp_path):
     assert pages[0].rotation == 90
     assert "Source page 1" in pages[1].extract_text()
     assert source.read_bytes() == original
+
+
+def test_automatic_split_keeps_a_short_submission_and_preserves_its_warning(workspace, monkeypatch):
+    from opengrader.core.submissions import boundary
+    from opengrader.core.submissions.splitter import read_scan_warnings
+    from opengrader.server.scan_jobs import SubmissionIntake
+
+    client, app, assignment_id, root = workspace
+    monkeypatch.setattr(boundary, "_analyze_pages", lambda *args, **kwargs: [
+        (True, 1), (True, 3), (True, 1), (True, 2), (True, 3),
+    ])
+    batch = upload(client, assignment_id, pdf_bytes(5))
+    url = batch_url(assignment_id, batch)
+    response = client.post(url + "/analyze", json={
+        "expected_revision": batch["revision"], "mode": "automatic", "pages_per_submission": 3,
+    })
+    assert response.status_code == 202
+    drain(app)
+    batch = current(client, assignment_id, batch)
+    assert [[page["number"] for page in group["pages"]] for group in batch["groups"]] == [[1, 2], [3, 4, 5]]
+    assert "2 of 3 expected pages" in batch["groups"][0]["scan_warnings"][0]
+    assert "missing printed page(s) 2" in batch["groups"][0]["scan_warnings"][1]
+    assert batch["groups"][1]["scan_warnings"] == []
+    response = client.put(url + "/review", json={
+        "expected_revision": batch["revision"], "groups": [group["pages"] for group in batch["groups"]],
+    })
+    assert response.status_code == 200
+    batch = response.json()
+    assert "missing printed page(s) 2" in batch["groups"][0]["scan_warnings"][1]
+    seen = []
+    def extract(_self, pdf, output, **kwargs):
+        seen.append(read_scan_warnings(pdf))
+        return fake_extract(pdf, output)
+    monkeypatch.setattr(SubmissionIntake, "extract", extract)
+    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
+    drain(app)
+    assert "2 of 3 expected pages" in seen[0][0]
+    assert seen[1] == ()
+    assert current(client, assignment_id, batch)["status"] == "ready"

@@ -142,6 +142,7 @@ class StudentSubmissionDocument:
     # 1-based source PDF pages offered to every question as scratch or overflow work.
     extra_pages: tuple[int, ...] = ()
     questions: list[StudentSubmissionQuestion] = field(default_factory=list)
+    scan_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -307,6 +308,13 @@ def _parse_id_candidates(
         if student_id or name:
             candidates.append(IdentityCandidate(student_id=student_id, name=name))
     return tuple(candidates)
+
+
+def _parse_scan_warnings(frontmatter: dict[str, object]) -> tuple[str, ...]:
+    raw = frontmatter.get("scan_warnings", [])
+    if not isinstance(raw, list) or not all(isinstance(warning, str) for warning in raw):
+        raise ValueError("scan_warnings must be a list of strings")
+    return tuple(raw)
 
 
 def _parse_extra_pages(frontmatter: dict[str, object]) -> tuple[int, ...]:
@@ -661,6 +669,7 @@ def parse_student_submission_markdown(
         ),
         id_candidates=_parse_id_candidates(frontmatter),
         extra_pages=_parse_extra_pages(frontmatter),
+        scan_warnings=_parse_scan_warnings(frontmatter),
         questions=questions,
     )
 
@@ -1714,6 +1723,8 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
     if document.extra_pages:
         pages = ", ".join(str(page) for page in document.extra_pages)
         lines.append(f"extra_pages: [{pages}]")
+    if document.scan_warnings:
+        lines.append("scan_warnings: " + json.dumps(list(document.scan_warnings)))
     lines.append("---")
     lines.append("")
     lines.append("")

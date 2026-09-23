@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,8 @@ class SubmissionPageRange:
     name: str
     start_page: int
     end_page: int
+    expected_pages: int | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def _sanitize_filename(value: str) -> str:
@@ -46,6 +49,8 @@ def plan_submission_ranges(
             f"end_page ({last_page}) exceeds total pages in input PDF ({total_pages})"
         )
 
+    from .boundary import submission_warnings
+
     prefix = _sanitize_filename(filename_prefix)
     ranges: list[SubmissionPageRange] = []
 
@@ -58,6 +63,8 @@ def plan_submission_ranges(
                 name=f"{prefix}-{index:0{zero_pad_width}d}",
                 start_page=current_start,
                 end_page=current_end,
+                expected_pages=pages_per_submission,
+                warnings=submission_warnings(current_end - current_start + 1, pages_per_submission),
             )
         )
         current_start = current_end + 1
@@ -98,6 +105,22 @@ def split_scanned_submission_pdf(
         with open(destination, "wb") as f:
             writer.write(f)
 
+        write_scan_warnings(destination, page_range.warnings)
         created_files.append(destination)
 
     return created_files
+
+
+def write_scan_warnings(pdf: Path, warnings: tuple[str, ...]) -> None:
+    pdf.with_suffix(".scan.json").write_text(json.dumps({"warnings": list(warnings)}, indent=2) + "\n")
+
+
+def read_scan_warnings(pdf: Path) -> tuple[str, ...]:
+    path = pdf.with_suffix(".scan.json")
+    if not path.exists():
+        return ()
+    data = json.loads(path.read_text())
+    warnings = data.get("warnings") if isinstance(data, dict) else None
+    if not isinstance(warnings, list) or not all(isinstance(warning, str) for warning in warnings):
+        raise ValueError(f"Invalid scan warnings in {path}")
+    return tuple(warnings)

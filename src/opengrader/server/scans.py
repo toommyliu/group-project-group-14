@@ -110,7 +110,16 @@ def add_scan_routes(
                 ], request.excluded_pages)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
-            batch.groups = [ScanGroup(key=str(uuid4()), pages=group) for group in request.groups]
+            from opengrader.core.submissions.boundary import submission_warnings
+
+            previous = {tuple(page.number for page in group.pages): group for group in batch.groups}
+            batch.groups = [
+                previous[tuple(page.number for page in group)].model_copy(update={"pages": group})
+                if tuple(page.number for page in group) in previous else ScanGroup(
+                    key=str(uuid4()), pages=group,
+                    scan_warnings=list(submission_warnings(len(group), batch.pages_per_submission)),
+                ) for group in request.groups
+            ]
             batch.excluded_pages = request.excluded_pages
             batch.status = "review"
             batch.message = "Split saved. Create submissions when the page groups are correct."
@@ -123,7 +132,7 @@ def add_scan_routes(
             batch = editable(assignment_id, batch_id, request.expected_revision)
             if not batch.groups:
                 raise HTTPException(422, "Check and review the scan first.")
-            if batch.findings and not request.acknowledge_findings:
+            if (batch.findings or any(group.scan_warnings for group in batch.groups)) and not request.acknowledge_findings:
                 raise HTTPException(422, "Review the scan findings before creating submissions.")
             if request.group_versions.keys() - {group.key for group in batch.groups}:
                 raise HTTPException(422, "The page groups changed. Reload scans before choosing versions.")

@@ -95,46 +95,17 @@ def _question(qid: str, image: str | None, text: str = "") -> StudentSubmissionQ
 
 
 class _StubVisionReader:
-    """A settable `VisionReader` stub for `_fill_responses_with_vlm` tests.
-
-    Records every image path passed to `extract_question_prompt_and_answer`
-    and `extract_handwriting_only` (in `answer_calls` / `handwriting_calls`),
-    and each method's outcome is configured per-test via plain attributes
-    instead of a bespoke fake function per test.
-
-    `answer` / `handwriting_answer` may be a literal string or a
-    `Callable[[Path], str]` computed from the crop path, for tests whose
-    answer depends on which crop was read. `raise_on_answer` /
-    `raise_on_handwriting`, when set to an exception instance, is raised
-    instead of returning a value, for the VLM-failure and
-    "must never be called" tests.
-    """
-
     def __init__(self) -> None:
-        self.prompt: str = "prompt ignored"
         self.answer: str | Callable[[Path], str] = ""
-        self.handwriting_answer: str | Callable[[Path], str] = ""
         self.raise_on_answer: Exception | None = None
-        self.raise_on_handwriting: Exception | None = None
         self.answer_calls: list[Path] = []
-        self.handwriting_calls: list[Path] = []
 
-    def extract_question_prompt_and_answer(self, *, image_path, math_latex=False):
+    def extract_handwriting_only(self, *, image_path, math_latex=False):
         path = Path(image_path)
         self.answer_calls.append(path)
         if self.raise_on_answer is not None:
             raise self.raise_on_answer
-        answer = self.answer(path) if callable(self.answer) else self.answer
-        return self.prompt, answer
-
-    def extract_handwriting_only(self, *, image_path, math_latex=False):
-        path = Path(image_path)
-        self.handwriting_calls.append(path)
-        if self.raise_on_handwriting is not None:
-            raise self.raise_on_handwriting
-        if callable(self.handwriting_answer):
-            return self.handwriting_answer(path)
-        return self.handwriting_answer
+        return self.answer(path) if callable(self.answer) else self.answer
 
 
 def test_vlm_fill_transcribes_each_crop(tmp_path: Path) -> None:
@@ -184,7 +155,7 @@ def test_vlm_fill_skips_already_filled_and_imageless(tmp_path: Path) -> None:
 
 def test_verified_blank_ink_never_calls_a_model(tmp_path: Path) -> None:
     reader = _StubVisionReader()
-    reader.raise_on_handwriting = AssertionError(
+    reader.raise_on_answer = AssertionError(
         "a blank ink layer must not reach a model"
     )
 
@@ -210,7 +181,7 @@ def test_verified_blank_ink_never_calls_a_model(tmp_path: Path) -> None:
 
 def test_ink_layer_uses_the_handwriting_only_prompt(tmp_path: Path) -> None:
     reader = _StubVisionReader()
-    reader.handwriting_answer = "isolated answer"
+    reader.answer = "isolated answer"
 
     question = replace(
         _question("q1", "responses/q1.png"),
@@ -229,7 +200,7 @@ def test_ink_layer_uses_the_handwriting_only_prompt(tmp_path: Path) -> None:
         progress_callback=lambda _message: None,
     )
 
-    assert reader.handwriting_calls == [tmp_path / "responses/q1.ink.png"]
+    assert reader.answer_calls == [tmp_path / "responses/q1.ink.png"]
     assert filled[0].response_text == "isolated answer"
     assert filled[0].ink_fragments[0].text == "isolated answer"
 
@@ -254,7 +225,7 @@ def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:
         progress_callback=warnings.append,
     )
     assert filled[0].response_text == "ocr fallback text"
-    assert filled[0].response_confidence == 55.0
+    assert filled[0].response_confidence == 0.0
     assert any("Warning" in w for w in warnings)
 
 
@@ -344,7 +315,7 @@ def test_escalation_re_reads_an_empty_ocr_result(monkeypatch, tmp_path: Path) ->
     assert vlm_calls == ["q1.png"]
 
 
-def test_a_model_that_reads_nothing_cannot_cost_the_ocr_answer(
+def test_a_successful_blank_model_reading_overrides_printed_ocr(
     monkeypatch, tmp_path: Path
 ) -> None:
     filled, vlm_calls = _escalating_fill(
@@ -355,9 +326,9 @@ def test_a_model_that_reads_nothing_cannot_cost_the_ocr_answer(
         monkeypatch=monkeypatch,
     )
 
-    assert filled[0].response_text == "partial readin"
-    assert filled[0].response_confidence == 41.0
-    assert filled[0].response_source == "tesseract"
+    assert filled[0].response_text == ""
+    assert filled[0].response_confidence is None
+    assert filled[0].response_source == "vision-model"
     assert vlm_calls == ["q1.png"]
 
 
@@ -452,3 +423,34 @@ def test_escalation_ticks_progress_once_per_crop(monkeypatch, tmp_path: Path) ->
     )
 
     assert ticks == ["q1", "q2"]
+
+
+def test_successful_blank_reading_does_not_transcribe_printed_question(monkeypatch, tmp_path: Path) -> None:
+    class BlankReader:
+        def extract_handwriting_only(self, **kwargs):
+            return ""
+
+    monkeypatch.setattr(processor, "_ocr_image_with_confidence", lambda *args, **kwargs: ("Minimum score", 95.0))
+    reading = processor._transcribe_crop(
+        tmp_path / "q1.png", question_id="q1", vision_reader=BlankReader(),
+        progress_callback=lambda message: None,
+    )
+    assert reading == ("", None, "vision-model")
+    escalated = processor._transcribe_crop(
+        tmp_path / "q1.png", question_id="q1", vision_reader=BlankReader(),
+        progress_callback=lambda message: None, escalate_floor=99,
+    )
+    assert escalated == ("", None, "vision-model")
+
+
+def test_empty_layout_is_a_failed_extraction_not_an_empty_submission(monkeypatch, tmp_path):
+    import pytest
+    from opengrader.core.ocr import extractor
+    from opengrader.core.ocr.extractor import OcrConfig, SubmissionResult
+
+    monkeypatch.setattr(extractor, "process_submission_pdf", lambda **kwargs: SubmissionResult(filename="scan.pdf"))
+    with pytest.raises(ValueError, match="No question regions"):
+        processor._build_document_from_ocr_result(
+            tmp_path / "scan.pdf", tmp_path / "out", OcrConfig(), 200, True,
+            None, False, False, lambda message: None,
+        )

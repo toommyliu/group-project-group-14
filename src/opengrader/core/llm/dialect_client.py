@@ -44,6 +44,7 @@ def generate(
     *,
     config: DialectConfig,
     prompt: str,
+    system_prompt: str | None = None,
     images: list[str] | None = None,
     response_format: dict | None = None,
     num_predict: int | None = None,
@@ -55,6 +56,7 @@ def generate(
     body = dialect.build_body(
         model=config.model,
         prompt=prompt,
+        system_prompt=system_prompt,
         images=images,
         response_schema=response_format,
         num_predict=num_predict if num_predict is not None else config.num_predict,

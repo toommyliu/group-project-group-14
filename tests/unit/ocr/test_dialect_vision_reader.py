@@ -161,7 +161,7 @@ def test_every_operation_round_trips_through_the_dialect(
     req = wire["requests"][0]
     body = json.loads(req.data)
     encoded = base64.b64encode(crop.read_bytes()).decode("ascii")
-    content = body["messages"][0]["content"]
+    content = body["messages"][-1]["content"]
     if dialect == "openai-chat":
         assert req.full_url == "https://api.acme.example/v1/chat/completions"
         assert req.get_header("Authorization") == f"Bearer {_KEY}"
@@ -185,7 +185,7 @@ def test_math_latex_changes_the_prompt_the_dialect_sends(wire, crop) -> None:
     reader.extract_question_prompt_and_answer(image_path=crop, math_latex=True)
 
     plain, latex = (
-        json.loads(r.data)["messages"][0]["content"][0]["text"]
+        json.loads(r.data)["messages"][-1]["content"][0]["text"]
         for r in wire["requests"]
     )
     assert "LaTeX" not in plain

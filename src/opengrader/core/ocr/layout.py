@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from statistics import median
 from typing import TYPE_CHECKING, Any, Literal
@@ -88,6 +88,11 @@ class _QuestionAnchor:
     bbox_px: tuple[int, int, int, int]
     line_bbox_px: tuple[int, int, int, int]
     confidence: float
+    suffix: str = ""
+
+    @property
+    def question_id(self) -> str:
+        return f"q{self.question_number}{self.suffix}"
 
 
 _QUESTION_TOKEN_RE = re.compile(
@@ -484,6 +489,10 @@ def _find_question_anchors(
 
         m = _QUESTION_TOKEN_RE.fullmatch(first_text)
         if m:
+            has_delimiter = first_text.endswith((".", ")"))
+            has_points = bool(re.match(r"^\d+\s+\(?\d+\s*(?:points?|pts?)\b", line.text, re.I))
+            if not has_delimiter and not has_points:
+                continue
             number = int(m.group(1))
         else:
             q_match = _QUESTION_Q_RE.fullmatch(first_text)
@@ -527,6 +536,41 @@ def _find_question_anchors(
         best_by_key.values(),
         key=lambda a: (a.page_number, a.bbox_px[1], a.bbox_px[0]),
     )
+
+
+_SUBQUESTION_RE = re.compile(r"^([a-z])[.)]\s*\(?\d+(?:\.\d+)?\s*(?:points?|pts?)\b", re.I)
+
+
+def _split_question_anchors(
+    anchors: list[_QuestionAnchor],
+    lines_by_page: dict[int, list[PageTextLine]],
+) -> list[_QuestionAnchor]:
+    ordered = sorted(anchors, key=lambda a: (a.page_number, a.line_bbox_px[1]))
+    result: list[_QuestionAnchor] = []
+    for index, parent in enumerate(ordered):
+        start = (parent.page_number, parent.line_bbox_px[1])
+        following = ordered[index + 1] if index + 1 < len(ordered) else None
+        end = (following.page_number, following.line_bbox_px[1]) if following else (float("inf"), 0)
+        children: list[_QuestionAnchor] = []
+        for page, lines in sorted(lines_by_page.items()):
+            for line in lines:
+                if not start < (page, line.bbox_px[1]) < end:
+                    continue
+                match = _SUBQUESTION_RE.match(line.text)
+                if match is None:
+                    continue
+                suffix = match.group(1).lower()
+                if suffix != chr(ord("a") + len(children)):
+                    continue
+                children.append(replace(
+                    parent, page_number=page, suffix=suffix,
+                    bbox_px=line.words[0].bbox_px, line_bbox_px=line.bbox_px,
+                    confidence=line.confidence,
+                ))
+        if children and children[0].page_number == parent.page_number:
+            children[0] = replace(children[0], bbox_px=parent.bbox_px, line_bbox_px=parent.line_bbox_px)
+        result.extend(children if children else [parent])
+    return result
 
 
 def _field_label_bbox(
@@ -1070,33 +1114,6 @@ def _detect_title_region(
     )
 
 
-def _estimate_question_x_bounds(
-    anchors: list[_QuestionAnchor],
-    primitives_by_page: dict[int, list[LayoutPrimitive]],
-    dims: dict[int, tuple[int, int]],
-) -> tuple[float, float]:
-    x0_values: list[float] = []
-    x1_values: list[float] = []
-    for page, primitives in primitives_by_page.items():
-        page_w, _ = dims[page]
-        for primitive in primitives:
-            if primitive.kind != "box":
-                continue
-            x, y, w, h = primitive.bbox_norm
-            if y < 0.08 or w < 0.35 or h < 0.04:
-                continue
-            x0_values.append(x)
-            x1_values.append(x + w)
-    if x0_values and x1_values:
-        return max(0.02, float(median(x0_values)) - 0.01), min(
-            0.98, float(median(x1_values)) + 0.01
-        )
-    if anchors:
-        anchor_x = median([a.bbox_px[0] / dims[a.page_number][0] for a in anchors])
-        return max(0.02, anchor_x - 0.025), 0.94
-    return 0.06, 0.94
-
-
 def _matched_question_box(
     anchor: _QuestionAnchor,
     primitives: list[LayoutPrimitive],
@@ -1170,6 +1187,7 @@ def _top_continuation_box(
     column_x0: float,
     column_x1: float,
     boundary_y: float,
+    content_top: float = _QUESTION_CONTINUATION_TOP_NORM,
 ) -> list[float] | None:
     candidates: list[list[float]] = []
     for primitive in primitives:
@@ -1185,7 +1203,7 @@ def _top_continuation_box(
         box_bottom = y + h
         if box_bottom > boundary_y:
             continue
-        visible_top = max(y, _QUESTION_CONTINUATION_TOP_NORM)
+        visible_top = max(y, content_top)
         visible_height = box_bottom - visible_top
         if visible_height < _QUESTION_CONTINUATION_MIN_HEIGHT_NORM:
             continue
@@ -1241,6 +1259,7 @@ def _continuation_segment_for_next_page(
     column_x0: float,
     column_x1: float,
     review_reasons: list[str] | None,
+    content_top: float = _QUESTION_CONTINUATION_TOP_NORM,
 ) -> tuple[int, list[float]] | None:
     page_dims = dims.get(next_page_number)
     if page_dims is None:
@@ -1252,12 +1271,14 @@ def _continuation_segment_for_next_page(
         column_x0=column_x0,
         column_x1=column_x1,
         boundary_y=boundary_y,
+        content_top=content_top,
     )
     if box is not None:
         return next_page_number, box
 
-    height = boundary_y - _QUESTION_CONTINUATION_TOP_NORM
-    if height < _QUESTION_CONTINUATION_MIN_HEIGHT_NORM:
+    height = boundary_y - content_top
+    minimum_height = .015 if content_top > _QUESTION_CONTINUATION_TOP_NORM else _QUESTION_CONTINUATION_MIN_HEIGHT_NORM
+    if height < minimum_height:
         return None
 
     if review_reasons is not None:
@@ -1269,7 +1290,7 @@ def _continuation_segment_for_next_page(
         _clamp_bbox_norm(
             [
                 column_x0,
-                _QUESTION_CONTINUATION_TOP_NORM,
+                content_top,
                 max(0.05, column_x1 - column_x0),
                 height,
             ]
@@ -1282,15 +1303,14 @@ def _detect_questions(
     rendered_pages: dict[int, tuple[Image.Image, int, int]],
     primitives_by_page: dict[int, list[LayoutPrimitive]],
     review_reasons: list[str] | None = None,
+    content_top_by_page: dict[int, float] | None = None,
 ) -> list[DetectedQuestionRegion]:
     if not anchors:
         return []
     dims = {
         page: (page_w, page_h) for page, (_, page_w, page_h) in rendered_pages.items()
     }
-    x0_default, x1_default = _estimate_question_x_bounds(
-        anchors, primitives_by_page, dims
-    )
+    x0_default, x1_default = 0.02, 0.98
     sorted_anchors = sorted(
         anchors, key=lambda a: (a.page_number, a.bbox_px[1], a.bbox_px[0])
     )
@@ -1315,6 +1335,7 @@ def _detect_questions(
             if next_page_number is not None:
                 segment = _continuation_segment_for_next_page(
                     current_anchor=anchor,
+                    content_top=(content_top_by_page or {}).get(next_page_number, _QUESTION_CONTINUATION_TOP_NORM),
                     next_page_number=next_page_number,
                     anchors_by_page=anchors_by_page,
                     primitives_by_page=primitives_by_page,
@@ -1349,7 +1370,7 @@ def _detect_questions(
         crop = page_image.crop(crop_px)
         questions.append(
             DetectedQuestionRegion(
-                question_id=f"q{anchor.question_number}",
+                question_id=anchor.question_id,
                 question_number=anchor.question_number,
                 page_number=anchor.page_number,
                 crop_bbox_norm=crop_bbox,
@@ -1378,17 +1399,14 @@ def scan_submission_layout(
             review_reasons=["empty_submission"],
         )
 
-    words_by_page: dict[int, list[PageTextWord]] = {}
     lines_by_page: dict[int, list[PageTextLine]] = {}
     primitives_by_page: dict[int, list[LayoutPrimitive]] = {}
     anchors: list[_QuestionAnchor] = []
 
     for page_number in sorted(rendered_pages):
         image, page_w, page_h = rendered_pages[page_number]
-        words = _page_words(image, config)
-        lines = _group_lines(words)
+        lines = _group_lines(_page_words(image, config))
         primitives = _detect_layout_primitives(image)
-        words_by_page[page_number] = words
         lines_by_page[page_number] = lines
         primitives_by_page[page_number] = primitives
         anchors.extend(_find_question_anchors(page_number, lines, page_w, page_h))
@@ -1442,11 +1460,24 @@ def scan_submission_layout(
                 break
             previous = anchor.question_number
 
+    if split_subquestions:
+        anchors = _split_question_anchors(anchors, lines_by_page)
+
+    content_top_by_page: dict[int, float] = {}
+    for page, lines in lines_by_page.items():
+        _, _, height = rendered_pages[page]
+        first_question = min((a.line_bbox_px[1] for a in anchors if a.page_number == page), default=height)
+        header_bottom = max((line.bbox_px[3] for line in lines
+                             if line.bbox_px[1] < min(first_question, height * .25)
+                             and re.match(r"^(?:name|student\s*id|id)\b", line.text, re.I)), default=0)
+        content_top_by_page[page] = max(_QUESTION_CONTINUATION_TOP_NORM, header_bottom / height + .02)
+
     questions = _detect_questions(
         anchors,
         rendered_pages,
         primitives_by_page,
         review_reasons=review_reasons,
+        content_top_by_page=content_top_by_page,
     )
     for question in questions:
         _, _, w, h = question.crop_bbox_norm
