@@ -36,7 +36,7 @@ def serve(root: Path, *, port: int = 0) -> None:
             address.write_text(str(listener.getsockname()[1]))
             connection = ServiceConnection(
                 root=str(root),
-                url=f"http://127.0.0.1:{listener.getsockname()[1]}",
+                url=f"http://localhost:{listener.getsockname()[1]}",
                 pid=os.getpid(),
                 workspace_id=workspace.info().id,
             )

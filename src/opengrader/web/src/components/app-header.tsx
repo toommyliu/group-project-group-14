@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { ModeToggle } from './mode-toggle';
+import { AuthControl } from './auth-control';
 
 export function AppHeader() {
   return (
@@ -17,6 +18,7 @@ export function AppHeader() {
         >
           Assignments
         </Link>
+        <AuthControl />
         <ModeToggle />
       </div>
     </header>

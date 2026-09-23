@@ -7,8 +7,16 @@ import logging.config
 
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+def _load_project_env(root: Path | None = None) -> None:
+    """Load local server settings without replacing the caller's environment."""
+    load_dotenv((root or Path.cwd()) / ".env", override=False)
+
 
 def main(argv: list[str] | None = None) -> None:
+    _load_project_env()
     parser = ArgumentParser(description="Run this workspace service on localhost.")
     parser.add_argument(
         "--port", type=int, default=8000, help="Local port, default 8000."

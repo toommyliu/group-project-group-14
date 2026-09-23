@@ -5,6 +5,7 @@ import { BookOpen, Files, ScanLine } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { ModeToggle } from './mode-toggle';
 import { SidebarResizeHandle } from './sidebar-resize-handle';
+import { AuthControl } from './auth-control';
 import {
   Sidebar,
   SidebarContent,
@@ -142,7 +143,8 @@ export function AppSidebar({
             </nav>
           )}
         </SidebarContent>
-        <SidebarFooter className="items-start px-4 py-3">
+        <SidebarFooter className="items-start gap-2 px-4 py-3">
+          <AuthControl compact={!expanded} />
           <ModeToggle compact={!expanded} />
         </SidebarFooter>
         <SidebarResizeHandle
