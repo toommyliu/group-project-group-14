@@ -12,11 +12,13 @@ def add_web_routes(app: FastAPI, dist: Path) -> None:
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="web-assets")
 
+    @app.get("/statistics", include_in_schema=False, response_model=None)
     @app.get("/terminals", include_in_schema=False, response_model=None)
     @app.get("/assignment", include_in_schema=False, response_model=None)
     @app.get("/scans", include_in_schema=False, response_model=None)
     @app.get("/submissions", include_in_schema=False, response_model=None)
     @app.get("/edit-assignment", include_in_schema=False, response_model=None)
+    @app.get("/workspace", include_in_schema=False, response_model=None)
     @app.get("/new-assignment", include_in_schema=False, response_model=None)
     @app.get("/", include_in_schema=False, response_model=None)
     def index() -> FileResponse | HTMLResponse:

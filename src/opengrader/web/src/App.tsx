@@ -33,9 +33,12 @@ export function App({ children }: PropsWithChildren) {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const sidebarWidth = dragWidth ?? savedSidebarWidth;
   const { assignment } = useAssignmentNavigation();
-  const overview = useRouterState({
-    select: ({ location }) => assignment && location.pathname === '/assignment',
+  const pathname = useRouterState({
+    select: ({ location }) => location.pathname,
   });
+  const overview = assignment && pathname === '/assignment';
+  // The home page introduces the product itself, so it skips the header.
+  const home = !assignment && pathname === '/';
   return (
     <TooltipProvider>
       <SidebarProvider
@@ -64,7 +67,7 @@ export function App({ children }: PropsWithChildren) {
             }}
           />
         ) : (
-          <AppHeader />
+          !home && <AppHeader />
         )}
         <SidebarInset
           className={
@@ -72,7 +75,9 @@ export function App({ children }: PropsWithChildren) {
               ? 'h-full min-h-0 min-w-0 overflow-hidden'
               : assignment
                 ? 'min-w-0'
-                : 'min-h-[calc(100svh-4rem)] min-w-0'
+                : home
+                  ? 'min-h-svh min-w-0'
+                  : 'min-h-[calc(100svh-4rem)] min-w-0'
           }
         >
           <div

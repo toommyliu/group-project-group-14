@@ -1,12 +1,12 @@
 import { Link, useRouter, useRouterState } from '@tanstack/react-router';
 import { ArrowRight, LoaderCircle } from 'lucide-react';
 import { assignmentsQuery } from '@/api/queries';
-import { indexRoute } from '@/router';
+import { workspaceRoute } from '@/router';
 import { PageHeading } from '@/components/page-heading';
 import { Button, buttonVariants } from '@/components/ui/button';
 
 export default function AssignmentsPage() {
-  const assignments = indexRoute.useLoaderData();
+  const assignments = workspaceRoute.useLoaderData();
   const router = useRouter();
   const pendingAssignment = useRouterState({
     select: (state) =>
@@ -69,7 +69,7 @@ export default function AssignmentsPage() {
       ) : (
         <div className="min-h-80 space-y-4 border-t py-8">
           <h2 className="text-base font-semibold">No assignments yet</h2>
-          <p>Create an assignment from a QA answer key to get started.</p>
+          <p>Create an assignment from your answer key to get started.</p>
           <Button
             variant="outline"
             onClick={() => {

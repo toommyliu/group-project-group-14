@@ -23,7 +23,7 @@ export function RouteError({ error }: ErrorComponentProps) {
           Try again
         </Button>
         <Link
-          to="/"
+          to="/workspace"
           className="inline-flex min-h-11 items-center underline underline-offset-4"
         >
           All assignments
@@ -41,7 +41,7 @@ export function RouteNotFound() {
         description="This assignment or submission is no longer available."
       />
       <Link
-        to="/"
+        to="/workspace"
         className="inline-flex min-h-11 items-center underline underline-offset-4"
       >
         All assignments

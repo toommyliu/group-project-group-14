@@ -38,6 +38,13 @@ const rootRoute = createRootRouteWithContext<{
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
+  component: lazyRouteComponent(() => import('./routes/home-page')),
+  errorComponent: RouteError,
+});
+
+export const workspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workspace',
   loader: ({ context }) =>
     context.queryClient.ensureQueryData(assignmentsQuery),
   component: lazyRouteComponent(() => import('./routes/assignments-page')),
@@ -193,6 +200,7 @@ export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
+      workspaceRoute,
       newAssignmentRoute,
       editAssignmentRoute,
       assignmentRoute,
