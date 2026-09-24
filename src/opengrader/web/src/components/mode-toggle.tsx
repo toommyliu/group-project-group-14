@@ -7,12 +7,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useTheme } from '@/components/theme-provider';
+import { setPreference } from '@/stores/preferences';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { useSidebar } from './ui/sidebar';
 
 export function ModeToggle({ compact = false }: { compact?: boolean }) {
-  const { setTheme } = useTheme();
   const { open } = useSidebar();
 
   return (
@@ -37,7 +36,7 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
             <DropdownMenuItem
               nativeButton
               render={<TooltipTrigger />}
-              onClick={() => setTheme(value)}
+              onClick={() => setPreference('theme', value)}
               className={compact ? 'size-11 w-full justify-center' : 'w-full'}
             >
               {compact && <Icon aria-hidden="true" />}

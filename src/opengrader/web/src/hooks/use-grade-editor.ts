@@ -1,9 +1,8 @@
 import { errorMessage } from '@/lib/error-message';
-import { usePreference } from '@/hooks/use-preference';
 import { useEffect, useRef, useState } from 'react';
 import { useBlocker } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { useGradingHotkeys as useHotkeys } from '@/hooks/use-grading-hotkeys';
+import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
 import {
   answerQuery,
   saveAnswer,
@@ -38,7 +37,6 @@ export function useGradeEditor({
   navigating: boolean;
   onNext: (() => void) | undefined;
 }) {
-  const [shortcutsEnabled] = usePreference('gradingShortcuts');
   const client = useQueryClient();
   const [saved, setSaved] = useState(answer);
   const savedRef = useRef(answer);
@@ -355,7 +353,7 @@ export function useGradeEditor({
     }
   }
 
-  useHotkeys(
+  useGradingHotkeys(
     [
       ...question.rubric.slice(0, 9).map((_, index) => ({
         hotkey: { key: String(index + 1) },
@@ -380,7 +378,6 @@ export function useGradeEditor({
     ],
     {
       enabled:
-        shortcutsEnabled &&
         !busy &&
         !reloadOpen &&
         conflict === null &&

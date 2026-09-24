@@ -1,5 +1,5 @@
 import type { overviewRoute } from '@/router';
-import { AssignmentEditor } from './new-assignment-page';
+import { AssignmentEditor } from '@/components/assignment-editor';
 
 export default function AssignmentOverviewPage({
   data,

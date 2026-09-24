@@ -1,7 +1,6 @@
-import { usePreference } from '@/hooks/use-preference';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useGradingHotkeys as useHotkeys } from '@/hooks/use-grading-hotkeys';
+import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
 import { submissionsQuery, answerQuery } from '@/api/queries';
 import { nextUngraded } from '@/lib/grading';
 import { GradingShortcuts } from './grading-shortcuts';
@@ -42,7 +41,6 @@ export default function AssignmentView({
   const [progressFormat, setProgressFormat] = useState<'count' | 'percentage'>(
     'count'
   );
-  const [shortcutsEnabled] = usePreference('gradingShortcuts');
   const navigate = assignmentRoute.useNavigate();
   const pendingSelection = useRouterState({
     select: (state) =>
@@ -95,7 +93,7 @@ export default function AssignmentView({
     });
   }
 
-  useHotkeys(
+  useGradingHotkeys(
     [
       { hotkey: 'J', callback: () => next && selectSubmission(next.id) },
       {
@@ -120,7 +118,7 @@ export default function AssignmentView({
       },
     ],
     {
-      enabled: shortcutsEnabled && Boolean(submission) && !navigating,
+      enabled: Boolean(submission) && !navigating,
       ignoreInputs: true,
       requireReset: true,
     }

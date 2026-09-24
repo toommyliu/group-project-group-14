@@ -3,11 +3,13 @@ import {
   type UseHotkeyDefinition,
   type UseHotkeyOptions,
 } from '@tanstack/react-hotkeys';
+import { usePreferences } from '@/stores/preferences';
 
 export function useGradingHotkeys(
   definitions: UseHotkeyDefinition[],
   options: UseHotkeyOptions
 ) {
+  const enabled = usePreferences((state) => state.gradingShortcuts);
   useHotkeys(
     definitions.map((definition) => ({
       ...definition,
@@ -24,6 +26,11 @@ export function useGradingHotkeys(
         definition.callback(event, context);
       },
     })),
-    { ...options, preventDefault: false, stopPropagation: false }
+    {
+      ...options,
+      enabled: enabled && options.enabled !== false,
+      preventDefault: false,
+      stopPropagation: false,
+    }
   );
 }

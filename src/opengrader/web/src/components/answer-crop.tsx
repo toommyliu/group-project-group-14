@@ -1,6 +1,5 @@
-import { usePreference } from '@/hooks/use-preference';
 import { useState } from 'react';
-import { useGradingHotkeys as useHotkeys } from '@/hooks/use-grading-hotkeys';
+import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
 import { ExternalLink, RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
@@ -21,13 +20,12 @@ export function AnswerCrop({
   const [state, setState] = useState<'loading' | 'loaded' | 'failed'>(
     'loading'
   );
-  const [shortcutsEnabled] = usePreference('gradingShortcuts');
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const rotate = () => setRotation((value) => (value + 90) % 360);
   const zoomIn = () => setZoom((value) => Math.min(3, value + 0.25));
   const zoomOut = () => setZoom((value) => Math.max(0.5, value - 0.25));
-  useHotkeys(
+  useGradingHotkeys(
     [
       { hotkey: { key: '=', shift: true }, callback: zoomIn },
       { hotkey: '=', callback: zoomIn },
@@ -41,7 +39,7 @@ export function AnswerCrop({
       },
       { hotkey: 'R', callback: rotate },
     ],
-    { enabled: shortcutsEnabled && state === 'loaded', ignoreInputs: true }
+    { enabled: state === 'loaded', ignoreInputs: true }
   );
   const ratio = width && height ? width / height : 4 / 3;
   const sideways = rotation % 180 !== 0;

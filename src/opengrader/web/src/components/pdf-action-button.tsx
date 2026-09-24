@@ -1,4 +1,4 @@
-import { usePreference } from '@/hooks/use-preference';
+import { setPreference, usePreferences } from '@/stores/preferences';
 import { ChevronDown, Download, ExternalLink } from 'lucide-react';
 import { Button } from './ui/button';
 import {
@@ -15,7 +15,7 @@ export function PdfActionButton({
   url?: string;
   filename: string;
 }) {
-  const [action, setAction] = usePreference('pdfAction');
+  const action = usePreferences((state) => state.pdfAction);
 
   return (
     <div className="inline-flex" role="group" aria-label="PDF actions">
@@ -57,7 +57,7 @@ export function PdfActionButton({
           <DropdownMenuItem
             disabled={!url}
             render={<a href={url} download={filename} />}
-            onClick={() => setAction('download')}
+            onClick={() => setPreference('pdfAction', 'download')}
           >
             <Download aria-hidden="true" />
             Download PDF
@@ -65,7 +65,7 @@ export function PdfActionButton({
           <DropdownMenuItem
             disabled={!url}
             render={<a href={url} target="_blank" rel="noopener noreferrer" />}
-            onClick={() => setAction('open')}
+            onClick={() => setPreference('pdfAction', 'open')}
           >
             <ExternalLink aria-hidden="true" />
             Open in new tab

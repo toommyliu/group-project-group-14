@@ -1,3 +1,5 @@
+import { create } from 'zustand';
+
 export type Preferences = {
   gradingShortcuts: boolean;
   editorWidth: number;
@@ -73,12 +75,7 @@ const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
   },
 };
 
-const listeners = new Map<keyof Preferences, Set<() => void>>();
-const sessionValues: { [K in keyof Preferences]?: Preferences[K] } = {};
-
-function get<K extends keyof Preferences>(key: K): Preferences[K] {
-  const sessionValue = sessionValues[key];
-  if (sessionValue !== undefined) return sessionValue;
+function read<K extends keyof Preferences>(key: K): Preferences[K] {
   const definition = definitions[key];
   try {
     const value = localStorage.getItem(definition.storageKey);
@@ -90,43 +87,37 @@ function get<K extends keyof Preferences>(key: K): Preferences[K] {
   }
 }
 
-function set<K extends keyof Preferences>(
+function readAll(keys: (keyof Preferences)[]) {
+  return Object.fromEntries(keys.map((key) => [key, read(key)]));
+}
+
+const keys = Object.keys(definitions) as (keyof Preferences)[];
+
+export const usePreferences = create<Preferences>(
+  () => readAll(keys) as Preferences
+);
+
+export function setPreference<K extends keyof Preferences>(
   key: K,
   value: NoInfer<Preferences[K]>
-): void {
+) {
   const definition = definitions[key];
   try {
     localStorage.setItem(definition.storageKey, definition.serialize(value));
-    delete sessionValues[key];
   } catch {
-    // Share the preference within this tab even when persistence is unavailable.
-    sessionValues[key] = value;
+    // The store still holds the value for this tab.
   }
-  listeners.get(key)?.forEach((listener) => listener());
+  usePreferences.setState({ [key]: value });
 }
 
-/** Observe same-tab updates and changes or removals made in other tabs. */
-function subscribe(key: keyof Preferences, listener: () => void) {
-  const subscribers = listeners.get(key) ?? new Set<() => void>();
-  listeners.set(key, subscribers);
-  subscribers.add(listener);
-  const handleStorage = (event: StorageEvent) => {
-    try {
-      if (event.storageArea !== localStorage) return;
-    } catch {
-      return;
-    }
-    if (event.key === null || event.key === definitions[key].storageKey) {
-      delete sessionValues[key];
-      listener();
-    }
-  };
-  window.addEventListener('storage', handleStorage);
-  return () => {
-    subscribers.delete(listener);
-    if (!subscribers.size) listeners.delete(key);
-    window.removeEventListener('storage', handleStorage);
-  };
-}
-
-export const preferences = { get, set, subscribe };
+window.addEventListener('storage', (event) => {
+  try {
+    if (event.storageArea !== localStorage) return;
+  } catch {
+    return;
+  }
+  const changed = keys.filter(
+    (key) => event.key === null || event.key === definitions[key].storageKey
+  );
+  if (changed.length) usePreferences.setState(readAll(changed));
+});

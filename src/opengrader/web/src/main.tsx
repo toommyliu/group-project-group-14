@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import { RouterProvider } from '@tanstack/react-router';
 import { createAppRouter } from './router';
-import { ThemeProvider } from '@/components/theme-provider.tsx';
+import { syncTheme } from '@/lib/theme';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,17 +19,18 @@ const queryClient = new QueryClient({
   },
 });
 
+const stopTheme = syncTheme();
+import.meta.hot?.dispose(stopTheme);
+
 async function start() {
   const stop = await observeWorkspace(queryClient);
   import.meta.hot?.dispose(stop);
   const router = createAppRouter(queryClient);
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <ThemeProvider>
-        <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
-        </QueryClientProvider>
-      </ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
     </StrictMode>
   );
 }

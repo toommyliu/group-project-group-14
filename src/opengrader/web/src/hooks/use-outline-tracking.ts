@@ -1,18 +1,22 @@
 import { useEffect, type RefObject } from 'react';
 import type { OutlineEntry } from '@/lib/assignment-outline';
 
-/** Follow the question nearest the top of a scrollable document. */
-export function useScrollableOutline(
-  containerRef: RefObject<HTMLElement | null>,
-  entries: OutlineEntry[],
-  targetId: (entry: OutlineEntry) => string,
-  paused: boolean,
-  onActiveChange: (key: string) => void
-) {
+export function useOutlineTracking({
+  container: containerRef,
+  entries,
+  targetId,
+  paused,
+  onActiveChange,
+}: {
+  container?: RefObject<HTMLElement | null>;
+  entries: OutlineEntry[];
+  targetId: (entry: OutlineEntry) => string;
+  paused: boolean;
+  onActiveChange: (key: string) => void;
+}) {
   useEffect(() => {
-    const currentContainer = containerRef.current;
-    if (!currentContainer || paused) return;
-    const container: HTMLElement = currentContainer;
+    const container = containerRef?.current ?? null;
+    if (paused || (containerRef && !container)) return;
     const targets = entries.flatMap((entry) => {
       const element = document.getElementById(targetId(entry));
       return element ? [{ key: entry.key, element }] : [];
@@ -21,16 +25,19 @@ export function useScrollableOutline(
     let frame = 0;
     function update() {
       frame = 0;
-      const atEnd =
+      if (
+        container &&
         container.scrollTop > 0 &&
         container.scrollTop + container.clientHeight >=
-          container.scrollHeight - 1;
-      if (atEnd) {
+          container.scrollHeight - 1
+      ) {
         onActiveChange(targets.at(-1)!.key);
         return;
       }
-      const bounds = container.getBoundingClientRect();
-      const anchor = bounds.top + Math.min(160, container.clientHeight / 3);
+      const anchor = container
+        ? container.getBoundingClientRect().top +
+          Math.min(160, container.clientHeight / 3)
+        : Math.min(160, window.innerHeight / 3);
       let low = 0;
       let high = targets.length;
       while (low < high) {
@@ -45,13 +52,16 @@ export function useScrollableOutline(
       if (!frame) frame = requestAnimationFrame(update);
     }
     schedule();
-    container.addEventListener('scroll', schedule, { passive: true });
+    const scroller = container ?? window;
+    scroller.addEventListener('scroll', schedule, { passive: true });
     const observer = new ResizeObserver(schedule);
-    observer.observe(container);
+    if (container) observer.observe(container);
+    else window.addEventListener('resize', schedule);
     return () => {
       cancelAnimationFrame(frame);
-      container.removeEventListener('scroll', schedule);
+      scroller.removeEventListener('scroll', schedule);
       observer.disconnect();
+      window.removeEventListener('resize', schedule);
     };
   }, [containerRef, entries, targetId, paused, onActiveChange]);
 }

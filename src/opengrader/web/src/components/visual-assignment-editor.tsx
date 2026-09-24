@@ -22,7 +22,7 @@ import {
   type QuestionEdit,
   type VisualEditResult,
 } from '@/api/queries';
-import { useOutlinePosition } from '@/hooks/use-outline-position';
+import { useOutlineTracking } from '@/hooks/use-outline-tracking';
 import { schedulePreview } from '@/lib/debounced-preview';
 import { errorMessage } from '@/lib/error-message';
 import {
@@ -41,6 +41,9 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 
 type Question = QAPreview['document']['questions'][number];
+
+const questionTargetId = (entry: OutlineEntry) =>
+  `visual-question-${entry.line}`;
 
 function questionDraft(question: Question, version: string): QuestionEdit {
   return {
@@ -218,21 +221,25 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
     [entries, version, onOutlineChange]
   );
 
-  useOutlinePosition(
-    entries,
-    version,
-    compact || !!scrollElementRef,
-    onActiveChange
+  const versionEntries = useMemo(
+    () => entries.filter((entry) => entry.version === version),
+    [entries, version]
   );
+  useOutlineTracking({
+    entries: versionEntries,
+    targetId: questionTargetId,
+    paused: compact || !!scrollElementRef,
+    onActiveChange,
+  });
 
   const activeEntryKeys = useMemo(
     () =>
       new Map(
-        entries
-          .filter((entry) => entry.version === version && entry.line !== null)
+        versionEntries
+          .filter((entry) => entry.line !== null)
           .map((entry) => [entry.line, entry.key])
       ),
-    [entries, version]
+    [versionEntries]
   );
   const updateVisibleQuestion = useCallback(
     (sourceLine: number) => {

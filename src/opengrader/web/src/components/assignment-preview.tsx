@@ -11,7 +11,7 @@ import {
 import { LoaderCircle } from 'lucide-react';
 import type { QAPreview } from '@/api/queries';
 import { useAssignmentPdf } from '@/hooks/use-assignment-pdf';
-import { useScrollableOutline } from '@/hooks/use-scrollable-outline';
+import { useOutlineTracking } from '@/hooks/use-outline-tracking';
 import {
   previewOutlineGroups,
   questionOutlineEntries,
@@ -31,6 +31,9 @@ import {
   SelectValue,
 } from './ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
+
+const guideTargetId = (entry: OutlineEntry) =>
+  questionOutlineTargetId(entry.key);
 
 // Lazy load since its not needed on render.
 const AssignmentPdfViewer = lazy(() => import('./assignment-pdf-viewer'));
@@ -97,10 +100,6 @@ export function AssignmentPreview(props: Props) {
   )
     ? activeGuideKey
     : (guideEntries[0]?.key ?? null);
-  const guideTargetId = useCallback(
-    (entry: OutlineEntry) => questionOutlineTargetId(entry.key),
-    []
-  );
   const navigateToGuideQuestion = useCallback((key: string) => {
     const container = guideRef.current;
     const target = document.getElementById(questionOutlineTargetId(key));
@@ -113,13 +112,13 @@ export function AssignmentPreview(props: Props) {
     target.focus({ preventScroll: true });
     setActiveGuideKey(key);
   }, []);
-  useScrollableOutline(
-    guideRef,
-    guideEntries,
-    guideTargetId,
-    view !== 'guide' || !valid,
-    setActiveGuideKey
-  );
+  useOutlineTracking({
+    container: guideRef,
+    entries: guideEntries,
+    targetId: guideTargetId,
+    paused: view !== 'guide' || !valid,
+    onActiveChange: setActiveGuideKey,
+  });
   const versionId = useId();
   return (
     <section
