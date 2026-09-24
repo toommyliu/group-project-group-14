@@ -526,7 +526,7 @@ export function AssignmentEditor({
             )}
             {!overview && (
               <Link
-                to="/"
+                to="/workspace"
                 className="inline-flex min-h-11 items-center underline"
               >
                 Back to assignments

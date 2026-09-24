@@ -91,10 +91,8 @@ export function AppSidebar({
             aria-expanded={expanded}
           />
           <Link
-            to="/"
+            to="/workspace"
             onClick={close}
-            aria-label="Opengrader home"
-            aria-current={pathname === '/' ? 'page' : undefined}
             className="min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
           >
             Opengrader
