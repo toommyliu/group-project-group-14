@@ -21,7 +21,7 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
         <span className="sr-only">Toggle theme</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align="end"
+        align="center"
         className={compact ? 'w-11 min-w-11' : undefined}
       >
         {(
