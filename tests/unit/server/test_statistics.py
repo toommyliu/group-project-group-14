@@ -51,7 +51,7 @@ def test_statistics_distinguish_complete_partial_zero_and_missing_grades(tmp_pat
     publish(workspace, assignment, {"q1": 8})
     publish(workspace, assignment, {})
     with TestClient(create_app(tmp_path, process_jobs=False)) as client:
-        response = client.get(f"/assignments/{assignment}/statistics")
+        response = client.get(f"/api/assignments/{assignment}/statistics")
         assert response.status_code == 200, response.text
         report, = response.json()
         total = report["scores"]
@@ -73,9 +73,9 @@ def test_statistics_distinguish_complete_partial_zero_and_missing_grades(tmp_pat
         assert second["scores"]["average"] == pytest.approx(16 / 3)
         assert second["scores"]["ungraded_count"] == 2
 
-        answer = client.get(f"/assignments/{assignment}/submissions/4/answers/q2").json()
+        answer = client.get(f"/api/assignments/{assignment}/submissions/4/answers/q2").json()
         saved = client.put(
-            f"/assignments/{assignment}/submissions/4/answers/q2",
+            f"/api/assignments/{assignment}/submissions/4/answers/q2",
             json={
                 "request_id": str(uuid4()),
                 "expected_revision": answer["revision"],
@@ -86,7 +86,7 @@ def test_statistics_distinguish_complete_partial_zero_and_missing_grades(tmp_pat
             },
         )
         assert saved.status_code == 200, saved.text
-        updated, = client.get(f"/assignments/{assignment}/statistics").json()
+        updated, = client.get(f"/api/assignments/{assignment}/statistics").json()
         assert updated["scores"]["graded_count"] == 4
         assert updated["scores"]["average"] == 12
         assert updated["partial_count"] == 0
@@ -95,9 +95,9 @@ def test_statistics_distinguish_complete_partial_zero_and_missing_grades(tmp_pat
 def test_empty_statistics_and_unknown_assignment(tmp_path):
     with TestClient(create_app(tmp_path, process_jobs=False)) as client:
         assignment = client.post(
-            "/assignments", json={"qa_markdown": "- (5 points) Question\n"}
+            "/api/assignments", json={"qa_markdown": "- (5 points) Question\n"}
         ).json()["id"]
-        response = client.get(f"/assignments/{assignment}/statistics")
+        response = client.get(f"/api/assignments/{assignment}/statistics")
         assert response.status_code == 200
         report, = response.json()
         assert report["scores"]["total_submissions"] == 0
@@ -105,7 +105,7 @@ def test_empty_statistics_and_unknown_assignment(tmp_path):
         assert report["scores"]["average"] is None
         assert report["questions"][0]["prompt"] == "Question"
         assert report["questions"][0]["submission_id"] is None
-        assert client.get("/assignments/missing/statistics").status_code == 404
+        assert client.get("/api/assignments/missing/statistics").status_code == 404
 
 
 def test_zero_point_and_bonus_scores_are_not_dropped(tmp_path):
@@ -114,7 +114,7 @@ def test_zero_point_and_bonus_scores_are_not_dropped(tmp_path):
     publish(workspace, assignment, {"q1": 2})
     publish(workspace, assignment, {"q1": 0})
     with TestClient(create_app(tmp_path, process_jobs=False)) as client:
-        report, = client.get(f"/assignments/{assignment}/statistics").json()
+        report, = client.get(f"/api/assignments/{assignment}/statistics").json()
         assert report["scores"]["average"] == 1
         assert report["scores"]["average_percent"] is None
         assert report["scores"]["buckets"] == [
@@ -123,7 +123,7 @@ def test_zero_point_and_bonus_scores_are_not_dropped(tmp_path):
 
         other = workspace.create_assignment("- (10 points) Question\n").id
         publish(workspace, other, {"q1": 12})
-        bonus, = client.get(f"/assignments/{other}/statistics").json()
+        bonus, = client.get(f"/api/assignments/{other}/statistics").json()
         assert bonus["scores"]["average_percent"] == 120
         assert bonus["scores"]["std_dev"] == 0
         assert bonus["scores"]["buckets"][-1] == {"label": "100%+", "count": 1}
@@ -148,7 +148,7 @@ def test_versions_and_multipart_questions_use_their_own_points_and_cohorts(tmp_p
     publish(workspace, assignment, {"q1a": 4, "q1b": 3}, "A")
     second = publish(workspace, assignment, {"q1": 20}, "B")
     with TestClient(create_app(tmp_path, process_jobs=False)) as client:
-        response = client.get(f"/assignments/{assignment}/statistics")
+        response = client.get(f"/api/assignments/{assignment}/statistics")
         assert response.status_code == 200, response.text
         a, b, c = response.json()
         assert [a["version"], b["version"], c["version"]] == ["A", "B", "C"]

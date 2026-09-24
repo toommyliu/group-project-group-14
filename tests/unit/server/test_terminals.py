@@ -163,22 +163,22 @@ def test_terminal_catalog_defaults_to_ten_saved_sessions(tmp_path):
 def test_http_catalog_does_not_spawn_and_socket_validates_ownership(tmp_path):
     app = create_app(tmp_path)
     with TestClient(app) as client:
-        assignment_id = client.post("/assignments", json={"qa_markdown": QA}).json()[
+        assignment_id = client.post("/api/assignments", json={"qa_markdown": QA}).json()[
             "id"
         ]
         created = client.post(
-            "/api/terminals", json={"assignment_id": assignment_id, "kind": "shell"}
+            f"/api/assignments/{assignment_id}/terminals", json={"kind": "shell"}
         )
         assert created.status_code == 201
         record = created.json()
         manager = app.state.terminals
         assert manager.get(record["id"]).process is None
         assert client.get(
-            "/api/terminals", params={"assignment_id": assignment_id}
+            f"/api/assignments/{assignment_id}/terminals"
         ).json() == {"sessions": [record], "max_sessions": 10}
         assert (
             client.post(
-                "/api/terminals", json={"assignment_id": "../escape", "kind": "shell"}
+                "/api/assignments/missing/terminals", json={"kind": "shell"}
             ).status_code
             == 404
         )
@@ -203,7 +203,7 @@ def test_http_catalog_does_not_spawn_and_socket_validates_ownership(tmp_path):
             client.post(f"/api/terminals/{record['id']}/start", json={}).status_code
             == 200
         )
-        assert client.delete(f"/assignments/{assignment_id}").status_code == 409
+        assert client.delete(f"/api/assignments/{assignment_id}").status_code == 409
         with client.websocket_connect(f"/api/terminals/{record['id']}/ws") as socket:
             assert socket.receive_json()["type"] == "snapshot"
             socket.send_json(["resize", {"width": -1, "height": 20}])
@@ -221,10 +221,10 @@ def test_assignment_deletion_requires_confirmation_to_stop_terminals(tmp_path):
     app = create_app(tmp_path)
     with TestClient(app) as client:
         assignment_id = client.post(
-            "/assignments", json={"qa_markdown": QA}
+            "/api/assignments", json={"qa_markdown": QA}
         ).json()["id"]
         record = client.post(
-            "/api/terminals", json={"assignment_id": assignment_id}
+            f"/api/assignments/{assignment_id}/terminals"
         ).json()
         started = client.post(f"/api/terminals/{record['id']}/start", json={})
         assert started.status_code == 200
@@ -232,30 +232,30 @@ def test_assignment_deletion_requires_confirmation_to_stop_terminals(tmp_path):
         assert process is not None
         pid = process.process.pid
 
-        assert client.delete(f"/assignments/{assignment_id}").status_code == 409
+        assert client.delete(f"/api/assignments/{assignment_id}").status_code == 409
         assert psutil.pid_exists(pid)
 
         response = client.delete(
-            f"/assignments/{assignment_id}",
+            f"/api/assignments/{assignment_id}",
             params={"stop_terminal_sessions": True},
         )
         assert response.status_code == 204
         assert not psutil.pid_exists(pid)
         assert app.state.terminals.get(record["id"]).process is None
-        assert client.get(f"/assignments/{assignment_id}/qa").status_code == 404
+        assert client.get(f"/api/assignments/{assignment_id}/qa").status_code == 404
 
 
 def test_terminal_names_and_order_survive_restart_and_reject_stale_lists(tmp_path):
     with TestClient(create_app(tmp_path)) as client:
-        assignment_id = client.post("/assignments", json={"qa_markdown": QA}).json()["id"]
+        assignment_id = client.post("/api/assignments", json={"qa_markdown": QA}).json()["id"]
         records = [
-            client.post("/api/terminals", json={"assignment_id": assignment_id}).json()
+            client.post(f"/api/assignments/{assignment_id}/terminals").json()
             for _ in range(3)
         ]
         ids = [record["id"] for record in records]
         assert (
             client.post(
-                "/api/terminals", json={"assignment_id": assignment_id, "kind": "tui"}
+                f"/api/assignments/{assignment_id}/terminals", json={"kind": "tui"}
             ).status_code
             == 422
         )
@@ -267,22 +267,22 @@ def test_terminal_names_and_order_survive_restart_and_reject_stale_lists(tmp_pat
         assert renamed.json()["title"] == "Extraction"
         order = [ids[2], ids[0], ids[1]]
         response = client.put(
-            "/api/terminals/order", json={"assignment_id": assignment_id, "ids": order}
+            f"/api/assignments/{assignment_id}/terminals/order", json={"ids": order}
         )
         assert response.status_code == 200
         assert [record["id"] for record in response.json()] == order
         for invalid in [ids[:2], [ids[0]] * 3, [ids[0], ids[1], "f" * 32]]:
             assert (
                 client.put(
-                    "/api/terminals/order",
-                    json={"assignment_id": assignment_id, "ids": invalid},
+                    f"/api/assignments/{assignment_id}/terminals/order",
+                    json={"ids": invalid},
                 ).status_code
                 == 409
             )
         assert [
             record["id"]
             for record in client.get(
-                "/api/terminals", params={"assignment_id": assignment_id}
+                f"/api/assignments/{assignment_id}/terminals"
             ).json()["sessions"]
         ] == order
 
@@ -292,7 +292,7 @@ def test_terminal_names_and_order_survive_restart_and_reject_stale_lists(tmp_pat
     stored.append({**records[0], "id": "e" * 32, "kind": "tui"})
     catalog.write_text(json.dumps(stored))
     with TestClient(create_app(tmp_path)) as client:
-        restored = client.get("/api/terminals", params={"assignment_id": assignment_id}).json()[
+        restored = client.get(f"/api/assignments/{assignment_id}/terminals").json()[
             "sessions"
         ]
         assert [record["id"] for record in restored] == order

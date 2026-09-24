@@ -36,7 +36,7 @@ from opengrader.core.workspace.models import (
 
 
 def publish_pipeline(
-    workspace: Workspace, output: PipelineOutput
+    workspace: Workspace, assignment_id: str, output: PipelineOutput
 ) -> PipelinePublication:
     """Accept completed CLI work on the service host, preserving previous grading on retry."""
     directory = Path(output.submissions_dir)
@@ -51,7 +51,7 @@ def publish_pipeline(
             "No extracted submissions were found. Run extraction before publishing."
         )
     assignment = workspace.create_assignment(
-        output.qa_markdown, assignment_id=output.assignment_id
+        output.qa_markdown, assignment_id=assignment_id
     )
     with workspace.connect() as db:
         existing = {

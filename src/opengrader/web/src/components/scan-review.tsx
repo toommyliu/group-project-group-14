@@ -129,7 +129,7 @@ export function ScanReview({
               className="min-w-0 space-y-3 rounded-lg border p-3"
             >
               <a
-                href={`${scanUrl(assignmentId, batch.id)}/pages/${page.number}?large=true`}
+                href={`${scanUrl(assignmentId, batch.id)}/pages/${page.number}?size=large`}
                 target="_blank"
                 rel="noreferrer"
                 className="flex h-52 items-center justify-center overflow-hidden rounded bg-muted/40"

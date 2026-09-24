@@ -43,8 +43,8 @@ def workspace_provider(tmp_path):
     sample = Path("samples/cs146-quiz1")
     publication = publish_pipeline(
         workspace,
+        workspace.assignment_id_for_folder(sample),
         PipelineOutput(
-            assignment_id=workspace.assignment_id_for_folder(sample),
             qa_markdown=(sample / "qa.md").read_text(),
             submissions_dir=str((sample / "student-submissions").resolve()),
         ),

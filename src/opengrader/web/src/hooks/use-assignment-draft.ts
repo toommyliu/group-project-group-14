@@ -267,8 +267,8 @@ export function useAssignmentDraft({
           setSaveMessage('Changes saved.');
         } else {
           await router.navigate({
-            to: '/assignment',
-            search: { assignment: assignment.id },
+            to: '/assignments/$assignmentId',
+            params: { assignmentId: assignment.id },
           });
         }
       } catch {

@@ -7,7 +7,7 @@ import { GradingShortcuts } from './grading-shortcuts';
 import { useRouterState } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, LoaderCircle } from 'lucide-react';
 import { validateGradingSearch } from '@/routes/assignment-data';
-import { assignmentRoute } from '@/router';
+import { submissionsRoute } from '@/router';
 import { AnswerView } from './answer-view';
 import { PageHeading } from './page-heading';
 import { Button } from './ui/button';
@@ -24,7 +24,7 @@ import {
 export default function AssignmentView({
   data,
 }: {
-  data: typeof assignmentRoute.types.loaderData;
+  data: typeof submissionsRoute.types.loaderData;
 }) {
   const { assignment, submission, questions, question } = data;
   const { data: submissions } = useQuery({
@@ -41,15 +41,16 @@ export default function AssignmentView({
   const [progressFormat, setProgressFormat] = useState<'count' | 'percentage'>(
     'count'
   );
-  const navigate = assignmentRoute.useNavigate();
+  const navigate = submissionsRoute.useNavigate();
   const pendingSelection = useRouterState({
-    select: (state) =>
-      state.isLoading &&
-      state.location.pathname === '/submissions' &&
-      state.location.search.assignment === assignment.id &&
-      state.location.pathname === state.resolvedLocation?.pathname
+    select: (state) => {
+      const path = `/assignments/${assignment.id}/submissions`;
+      return state.isLoading &&
+        state.location.pathname === path &&
+        state.resolvedLocation?.pathname === path
         ? validateGradingSearch(state.location.search)
-        : undefined,
+        : undefined;
+    },
   });
   const loadingSubmission =
     pendingSelection !== undefined &&
@@ -84,11 +85,9 @@ export default function AssignmentView({
 
   function selectQuestion(id: string) {
     void navigate({
-      search: {
-        assignment: assignment.id,
-        submission: submission?.id,
-        question: id,
-      },
+      to: '/assignments/$assignmentId/submissions',
+      params: { assignmentId: assignment.id },
+      search: { submission: submission?.id, question: id },
       resetScroll: false,
     });
   }
@@ -126,11 +125,9 @@ export default function AssignmentView({
 
   function selectSubmission(id: number) {
     void navigate({
-      search: {
-        assignment: assignment.id,
-        submission: id,
-        question: question?.id,
-      },
+      to: '/assignments/$assignmentId/submissions',
+      params: { assignmentId: assignment.id },
+      search: { submission: id, question: question?.id },
       resetScroll: false,
     });
   }

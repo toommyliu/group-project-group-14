@@ -515,13 +515,17 @@ def _publish_results(
         if report.qa_file is None:
             raise ValueError("An answer key is required to publish submissions.")
         output = PipelineOutput(
-            assignment_id=assignment_id,
             qa_markdown=report.qa_file.read_text(encoding="utf-8"),
             submissions_dir=str(report.submissions_dir.resolve()),
         )
         client = WorkspaceClient(ensure_service(root))
         result = PipelinePublication.model_validate_json(
-            client.request("POST", "/api/pipeline-results", output, timeout=300)
+            client.request(
+                "POST",
+                f"/api/assignments/{assignment_id}/imports",
+                output,
+                timeout=300,
+            )
         )
     except (OSError, ValueError, RuntimeError) as exc:
         outcome = StageOutcome(

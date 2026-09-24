@@ -4,7 +4,6 @@ import {
   createRouter,
   lazyRouteComponent,
   notFound,
-  redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import {
@@ -12,7 +11,6 @@ import {
   ScansPage,
   SubmissionsPage,
 } from './lib/workspace-pages';
-import { validateAssignmentSearch } from './routes/assignment-search';
 import {
   assignmentsQuery,
   assignmentSourceQuery,
@@ -42,9 +40,9 @@ export const indexRoute = createRoute({
   errorComponent: RouteError,
 });
 
-export const workspaceRoute = createRoute({
+export const assignmentsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/workspace',
+  path: '/assignments',
   loader: ({ context }) =>
     context.queryClient.ensureQueryData(assignmentsQuery),
   component: lazyRouteComponent(() => import('./routes/assignments-page')),
@@ -54,36 +52,20 @@ export const workspaceRoute = createRoute({
 
 export const newAssignmentRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/new-assignment',
+  path: '/assignments/new',
   component: lazyRouteComponent(() => import('./routes/new-assignment-page')),
   errorComponent: RouteError,
 });
 
-export const editAssignmentRoute = createRoute({
+export const submissionsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/edit-assignment',
-  validateSearch: validateAssignmentSearch,
-  beforeLoad: ({ search }) => {
-    throw redirect({
-      to: '/assignment',
-      search: { assignment: search.assignment },
-      replace: true,
-    });
-  },
-});
-
-export const assignmentRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/submissions',
-  validateSearch: (search) => ({
-    ...validateAssignmentSearch(search),
-    ...validateGradingSearch(search),
-  }),
+  path: '/assignments/$assignmentId/submissions',
+  validateSearch: validateGradingSearch,
   loaderDeps: ({ search }) => search,
-  remountDeps: ({ search }) => search.assignment,
-  loader: async ({ context, deps }) => {
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params, deps }) => {
     const [data] = await Promise.all([
-      loadAssignment(context.queryClient, deps.assignment, deps),
+      loadAssignment(context.queryClient, params.assignmentId, deps),
       SubmissionsPage.preload?.(),
     ]);
     if (!data) throw notFound();
@@ -98,18 +80,16 @@ export const assignmentRoute = createRoute({
 
 export const scansRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/scans',
-  validateSearch: validateAssignmentSearch,
-  loaderDeps: ({ search }) => search,
-  remountDeps: ({ search }) => search.assignment,
-  loader: async ({ context, deps }) => {
+  path: '/assignments/$assignmentId/scans',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId } }) => {
     const [assignments, scans, qa] = await Promise.all([
       context.queryClient.ensureQueryData(assignmentsQuery),
-      context.queryClient.fetchQuery(scansQuery(deps.assignment)),
-      context.queryClient.ensureQueryData(assignmentQAQuery(deps.assignment)),
+      context.queryClient.fetchQuery(scansQuery(assignmentId)),
+      context.queryClient.ensureQueryData(assignmentQAQuery(assignmentId)),
       ScansPage.preload?.(),
     ]);
-    const assignment = assignments.find((item) => item.id === deps.assignment);
+    const assignment = assignments.find((item) => item.id === assignmentId);
     if (!assignment) throw notFound();
     return {
       assignment,
@@ -123,29 +103,27 @@ export const scansRoute = createRoute({
 
 export const overviewRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/assignment',
-  validateSearch: validateAssignmentSearch,
-  loaderDeps: ({ search }) => search,
-  remountDeps: ({ search }) => search.assignment,
-  loader: async ({ context, deps }) => {
+  path: '/assignments/$assignmentId',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId } }) => {
     const [assignments, qa, scans, submissions, source] = await Promise.all([
       context.queryClient.ensureQueryData(assignmentsQuery),
       context.queryClient.fetchQuery({
-        ...assignmentQAQuery(deps.assignment),
+        ...assignmentQAQuery(assignmentId),
         staleTime: 0,
       }),
-      context.queryClient.fetchQuery(scansQuery(deps.assignment)),
+      context.queryClient.fetchQuery(scansQuery(assignmentId)),
       context.queryClient.fetchQuery({
-        ...submissionsQuery(deps.assignment),
+        ...submissionsQuery(assignmentId),
         staleTime: 0,
       }),
       context.queryClient.fetchQuery({
-        ...assignmentSourceQuery(deps.assignment),
+        ...assignmentSourceQuery(assignmentId),
         staleTime: 0,
       }),
       OverviewPage.preload?.(),
     ]);
-    const assignment = assignments.find((item) => item.id === deps.assignment);
+    const assignment = assignments.find((item) => item.id === assignmentId);
     if (!assignment) throw notFound();
     return { assignment, qa, scans, submissions, source };
   },
@@ -155,14 +133,12 @@ export const overviewRoute = createRoute({
 
 export const terminalsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/terminals',
-  validateSearch: validateAssignmentSearch,
-  loaderDeps: ({ search }) => search,
-  remountDeps: ({ search }) => search.assignment,
-  loader: async ({ context, deps }) => {
+  path: '/assignments/$assignmentId/terminals',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId } }) => {
     const assignments =
       await context.queryClient.ensureQueryData(assignmentsQuery);
-    const assignment = assignments.find((item) => item.id === deps.assignment);
+    const assignment = assignments.find((item) => item.id === assignmentId);
     if (!assignment) throw notFound();
     return { assignment };
   },
@@ -173,19 +149,17 @@ export const terminalsRoute = createRoute({
 
 export const statisticsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/statistics',
-  validateSearch: validateAssignmentSearch,
-  loaderDeps: ({ search }) => search,
-  remountDeps: ({ search }) => search.assignment,
-  loader: async ({ context, deps }) => {
+  path: '/assignments/$assignmentId/statistics',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId } }) => {
     const [assignments, statistics] = await Promise.all([
       context.queryClient.ensureQueryData(assignmentsQuery),
       context.queryClient.fetchQuery({
-        ...assignmentStatisticsQuery(deps.assignment),
+        ...assignmentStatisticsQuery(assignmentId),
         staleTime: 0,
       }),
     ]);
-    const assignment = assignments.find((item) => item.id === deps.assignment);
+    const assignment = assignments.find((item) => item.id === assignmentId);
     if (!assignment) throw notFound();
     return { assignment, statistics };
   },
@@ -200,10 +174,9 @@ export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
-      workspaceRoute,
+      assignmentsRoute,
       newAssignmentRoute,
-      editAssignmentRoute,
-      assignmentRoute,
+      submissionsRoute,
       scansRoute,
       overviewRoute,
       terminalsRoute,
@@ -215,11 +188,8 @@ export function createAppRouter(queryClient: QueryClient) {
     defaultPendingMs: 200,
     defaultPendingMinMs: 200,
     scrollRestoration: true,
-    getScrollRestorationKey: (location) =>
-      JSON.stringify([
-        location.pathname,
-        new URLSearchParams(location.searchStr).get('assignment'),
-      ]),
+    // Search params select within a page, so they share its scroll position.
+    getScrollRestorationKey: (location) => location.pathname,
   });
 }
 

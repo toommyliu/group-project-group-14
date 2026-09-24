@@ -267,7 +267,7 @@ export function ScanBatchCard({
                       className="underline underline-offset-4"
                       target="_blank"
                       rel="noreferrer"
-                      href={`${scanUrl(assignmentId, batch.id)}/pages/${finding.page}?large=true`}
+                      href={`${scanUrl(assignmentId, batch.id)}/pages/${finding.page}?size=large`}
                     >
                       Page {finding.page}
                     </a>
@@ -313,11 +313,9 @@ export function ScanBatchCard({
                 ))}
                 {group.submission_id !== null ? (
                   <Link
-                    to="/submissions"
-                    search={{
-                      assignment: assignmentId,
-                      submission: group.submission_id,
-                    }}
+                    to="/assignments/$assignmentId/submissions"
+                    params={{ assignmentId }}
+                    search={{ submission: group.submission_id }}
                     className={buttonVariants({
                       variant: 'outline',
                       className: 'mt-3',

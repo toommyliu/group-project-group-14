@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
 
@@ -15,7 +15,6 @@ from .store import TerminalRecord
 
 
 class CreateTerminal(BaseModel):
-    assignment_id: str
     kind: Literal["shell"] = "shell"
 
 
@@ -37,7 +36,6 @@ class RenameTerminal(BaseModel):
 
 
 class ReorderTerminals(BaseModel):
-    assignment_id: str
     ids: list[str]
 
 
@@ -47,13 +45,13 @@ class TerminalCatalog(BaseModel):
 
 
 def add_terminal_routes(
-    app: FastAPI, manager: TerminalManager, assignment_for: Callable
+    app: FastAPI, api: APIRouter, manager: TerminalManager, assignment_for: Callable
 ) -> None:
     @app.exception_handler(SessionError)
     async def session_error(_request: Request, exc: SessionError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
 
-    @app.get("/api/terminals")
+    @api.get("/assignments/{assignment_id}/terminals")
     async def list_terminals(assignment_id: str) -> TerminalCatalog:
         assignment_for(assignment_id)
         return TerminalCatalog(
@@ -61,35 +59,39 @@ def add_terminal_routes(
             max_sessions=manager.max_saved,
         )
 
-    @app.post("/api/terminals", status_code=201)
-    async def create_terminal(body: CreateTerminal) -> TerminalRecord:
-        assignment_for(body.assignment_id)
-        return await manager.create(body.assignment_id)
+    @api.post("/assignments/{assignment_id}/terminals", status_code=201)
+    async def create_terminal(
+        assignment_id: str, body: CreateTerminal | None = None
+    ) -> TerminalRecord:
+        assignment_for(assignment_id)
+        return await manager.create(assignment_id)
 
-    @app.put("/api/terminals/order")
-    async def reorder_terminals(body: ReorderTerminals) -> list[TerminalRecord]:
-        assignment_for(body.assignment_id)
-        return await manager.reorder(body.assignment_id, body.ids)
+    @api.put("/assignments/{assignment_id}/terminals/order")
+    async def reorder_terminals(
+        assignment_id: str, body: ReorderTerminals
+    ) -> list[TerminalRecord]:
+        assignment_for(assignment_id)
+        return await manager.reorder(assignment_id, body.ids)
 
-    @app.patch("/api/terminals/{session_id}")
+    @api.patch("/terminals/{session_id}")
     async def rename_terminal(session_id: str, body: RenameTerminal) -> TerminalRecord:
         return await manager.rename(session_id, body.title)
 
-    @app.post("/api/terminals/{session_id}/start")
+    @api.post("/terminals/{session_id}/start")
     async def start_terminal(session_id: str, body: TerminalSize) -> TerminalRecord:
         assignment_for(manager.get(session_id).record.assignment_id)
         return await manager.start(session_id, body.cols, body.rows)
 
-    @app.post("/api/terminals/{session_id}/stop")
+    @api.post("/terminals/{session_id}/stop")
     async def stop_terminal(session_id: str) -> TerminalRecord:
         return await manager.stop(session_id)
 
-    @app.delete("/api/terminals/{session_id}", status_code=204)
+    @api.delete("/terminals/{session_id}", status_code=204)
     async def remove_terminal(session_id: str) -> Response:
         await manager.remove(session_id)
         return Response(status_code=204)
 
-    @app.websocket("/api/terminals/{session_id}/ws", name="terminal_socket")
+    @api.websocket("/terminals/{session_id}/ws", name="terminal_socket")
     async def terminal_socket(socket: WebSocket, session_id: str) -> None:
         # Block unrelated websites from attaching to a localhost terminal.
         origin = socket.headers.get("origin")

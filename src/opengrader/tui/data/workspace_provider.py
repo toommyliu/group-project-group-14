@@ -31,7 +31,7 @@ class WorkspaceProvider:
         self.assignment = assignment
         self.assignment_label = assignment.title
         self.course_label = Path(client.connection.root).name
-        self.base = f"/assignments/{assignment.id}"
+        self.base = f"/api/assignments/{assignment.id}"
         self.cache = Path(client.connection.root) / ".opengrader/client-cache"
         self.journal = DraftJournal(self.cache.parent / "drafts", assignment.id)
         self.cursor = WorkspaceInfo.model_validate_json(

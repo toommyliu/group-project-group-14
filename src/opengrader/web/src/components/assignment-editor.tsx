@@ -281,7 +281,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
             )}
             {!overview && (
               <Link
-                to="/workspace"
+                to="/assignments"
                 className="inline-flex min-h-11 items-center underline"
               >
                 Back to assignments
@@ -296,8 +296,8 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
         {error && <ErrorAlert error={error} />}
         {saved && (
           <Link
-            to="/assignment"
-            search={{ assignment: saved.id }}
+            to="/assignments/$assignmentId"
+            params={{ assignmentId: saved.id }}
             className="underline"
           >
             Open {saved.title}

@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
-import { Link } from '@tanstack/react-router';
+import { Link, useMatchRoute } from '@tanstack/react-router';
 import { BookOpen, ChartColumn, Files, ScanLine } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { ModeToggle } from './mode-toggle';
@@ -21,14 +21,16 @@ import {
 } from './ui/sidebar';
 
 export function AppSidebar() {
-  const { assignment, pathname } = useAssignmentNavigation();
+  const { assignment } = useAssignmentNavigation();
+  const matchRoute = useMatchRoute();
   const pages = useContext(WorkspacePages);
   const gradingPage = pages.find(
     (page) =>
-      page.path === '/submissions' && page.data.assignment.id === assignment?.id
+      page.path === '/assignments/$assignmentId/submissions' &&
+      page.data.assignment.id === assignment?.id
   );
   const gradingSelection =
-    gradingPage?.path === '/submissions'
+    gradingPage?.path === '/assignments/$assignmentId/submissions'
       ? {
           submission: gradingPage.data.submission?.id,
           question: gradingPage.data.question?.id,
@@ -39,32 +41,27 @@ export function AppSidebar() {
   const close = () => setOpenMobile(false);
   const destinations = [
     {
-      to: '/assignment',
-      prefix: '/assignment',
+      to: '/assignments/$assignmentId',
       title: 'Overview',
       icon: BookOpen,
     },
     {
-      to: '/scans',
-      prefix: '/scans',
+      to: '/assignments/$assignmentId/scans',
       title: 'Scans',
       icon: ScanLine,
     },
     {
-      to: '/submissions',
-      prefix: '/submissions',
+      to: '/assignments/$assignmentId/submissions',
       title: 'Submissions',
       icon: Files,
     },
     {
-      to: '/statistics',
-      prefix: '/statistics',
+      to: '/assignments/$assignmentId/statistics',
       title: 'Statistics',
       icon: ChartColumn,
     },
     // {
-    //   to: '/terminals',
-    //   prefix: '/terminals',
+    //   to: '/assignments/$assignmentId/terminals',
     //   title: 'Terminals',
     //   icon: TerminalSquare,
     // },
@@ -83,7 +80,7 @@ export function AppSidebar() {
             aria-expanded={expanded}
           />
           <Link
-            to="/workspace"
+            to="/assignments"
             onClick={close}
             className="min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
           >
@@ -102,8 +99,8 @@ export function AppSidebar() {
                 </div>
                 <SidebarGroupContent className="mt-1">
                   <SidebarMenu>
-                    {destinations.map(({ to, prefix, title, icon: Icon }) => {
-                      const active = pathname === prefix;
+                    {destinations.map(({ to, title, icon: Icon }) => {
+                      const active = Boolean(matchRoute({ to, pending: true }));
                       return (
                         <SidebarMenuItem key={to}>
                           <SidebarMenuButton
@@ -114,12 +111,13 @@ export function AppSidebar() {
                             render={
                               <Link
                                 to={to}
-                                search={{
-                                  ...(to === '/submissions'
+                                params={{ assignmentId: assignment.id }}
+                                search={
+                                  to ===
+                                  '/assignments/$assignmentId/submissions'
                                     ? gradingSelection
-                                    : {}),
-                                  assignment: assignment.id,
-                                }}
+                                    : {}
+                                }
                                 onClick={close}
                               />
                             }

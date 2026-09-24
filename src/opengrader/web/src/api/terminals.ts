@@ -10,8 +10,8 @@ export function terminalsQuery(assignmentId: string) {
     queryKey: ['terminals', assignmentId],
     queryFn: async ({ signal }) =>
       readData(
-        await client.GET('/api/terminals', {
-          params: { query: { assignment_id: assignmentId } },
+        await client.GET('/api/assignments/{assignment_id}/terminals', {
+          params: { path: { assignment_id: assignmentId } },
           signal,
         })
       ),
@@ -21,8 +21,9 @@ export function terminalsQuery(assignmentId: string) {
 
 export async function createTerminal(assignmentId: string) {
   return readData(
-    await client.POST('/api/terminals', {
-      body: { assignment_id: assignmentId, kind: 'shell' },
+    await client.POST('/api/assignments/{assignment_id}/terminals', {
+      params: { path: { assignment_id: assignmentId } },
+      body: { kind: 'shell' },
     })
   );
 }
@@ -61,8 +62,9 @@ export async function renameTerminal(id: string, title: string) {
 
 export async function reorderTerminals(assignmentId: string, ids: string[]) {
   return readData(
-    await client.PUT('/api/terminals/order', {
-      body: { assignment_id: assignmentId, ids },
+    await client.PUT('/api/assignments/{assignment_id}/terminals/order', {
+      params: { path: { assignment_id: assignmentId } },
+      body: { ids },
     })
   );
 }

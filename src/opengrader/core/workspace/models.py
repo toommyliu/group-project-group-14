@@ -43,7 +43,6 @@ class AssignmentInputs(BaseModel):
 
 
 class PipelineOutput(BaseModel):
-    assignment_id: str
     qa_markdown: str
     submissions_dir: str
 

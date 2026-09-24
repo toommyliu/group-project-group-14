@@ -1,4 +1,5 @@
 import type { CSSProperties, PropsWithChildren } from 'react';
+import { useMatchRoute } from '@tanstack/react-router';
 import { AppHeader } from '@/components/app-header';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { AppSidebar } from '@/components/app-sidebar';
@@ -30,7 +31,10 @@ export function App({ children }: PropsWithChildren) {
   const sidebarExpanded = usePreferences((state) => state.sidebarExpanded);
   const sidebarWidth = useSidebarWidth();
   const { assignment, pathname } = useAssignmentNavigation();
-  const overview = assignment && pathname === '/assignment';
+  const matchRoute = useMatchRoute();
+  const overview =
+    assignment &&
+    Boolean(matchRoute({ to: '/assignments/$assignmentId', pending: true }));
   // The home page introduces the product itself, so it skips the header.
   const home = !assignment && pathname === '/';
   return (

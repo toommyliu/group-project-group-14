@@ -81,13 +81,13 @@ def test_assignments_stay_in_creation_order_after_editing_or_deleting(tmp_path):
 
 def test_pipeline_publication_reuses_assignment_and_preserves_grades(managed):
     workspace, original, source = managed
+    url = f"/api/assignments/{workspace.assignment_id_for_folder(source.parent)}/imports"
     body = {
-        "assignment_id": workspace.assignment_id_for_folder(source.parent),
         "qa_markdown": workspace.assignment_source(original),
         "submissions_dir": str(source.parent.resolve()),
     }
     with TestClient(create_app(workspace.root, process_jobs=False)) as client:
-        first = client.post("/api/pipeline-results", json=body)
+        first = client.post(url, json=body)
         assert first.status_code == 200, first.text
         assignment = first.json()["assignment"]["id"]
         submission = workspace.submissions(assignment)[0].id
@@ -100,7 +100,7 @@ def test_pipeline_publication_reuses_assignment_and_preserves_grades(managed):
         cursor = workspace.info().event_cursor
         extracted = source.read_text()
         source.write_text("invalid output from a later run")
-        retried = client.post("/api/pipeline-results", json=body)
+        retried = client.post(url, json=body)
         assert retried.json() == first.json()
         assert workspace.info().event_cursor == cursor
         assert (
@@ -112,7 +112,7 @@ def test_pipeline_publication_reuses_assignment_and_preserves_grades(managed):
             extracted.replace("Alice", "Bob")
         )
         assert (
-            client.post("/api/pipeline-results", json=body).json()["submission_count"]
+            client.post(url, json=body).json()["submission_count"]
             == 2
         )
         assert len(workspace.submissions(assignment)) == 2
@@ -126,7 +126,7 @@ def test_pipeline_publication_reuses_assignment_and_preserves_grades(managed):
                 "First question", "Different question"
             ),
         }
-        assert client.post("/api/pipeline-results", json=changed_key).status_code == 409
+        assert client.post(url, json=changed_key).status_code == 409
         assert workspace.assignment_source(assignment) == body["qa_markdown"]
 
 
@@ -135,13 +135,13 @@ def test_pipeline_can_retry_after_partially_publishing(managed):
     extracted = source.read_text()
     broken = source.parent / "two.submission.md"
     broken.write_text("not a submission")
+    url = f"/api/assignments/{workspace.assignment_id_for_folder(source.parent)}/imports"
     body = {
-        "assignment_id": workspace.assignment_id_for_folder(source.parent),
         "qa_markdown": workspace.assignment_source(original),
         "submissions_dir": str(source.parent.resolve()),
     }
     with TestClient(create_app(workspace.root, process_jobs=False)) as client:
-        failed = client.post("/api/pipeline-results", json=body)
+        failed = client.post(url, json=body)
         assert failed.status_code == 422, failed.text
         assignment = workspace.assignments()[-1].id
         first = workspace.submissions(assignment)[0].id
@@ -149,7 +149,7 @@ def test_pipeline_can_retry_after_partially_publishing(managed):
             assignment, first, "q1", command(workspace.answer(assignment, first, "q1"))
         )
         broken.write_text(extracted)
-        retried = client.post("/api/pipeline-results", json=body)
+        retried = client.post(url, json=body)
         assert retried.status_code == 200, retried.text
         assert retried.json()["assignment"]["id"] == assignment
         assert retried.json()["submission_count"] == 2
@@ -239,7 +239,7 @@ def test_concurrent_clients_conflict_only_on_the_same_answer(
 
 def test_api_returns_current_answer_for_conflict_resolution(managed):
     workspace, assignment, _ = managed
-    path = f"/assignments/{assignment}/submissions/1/answers/q1"
+    path = f"/api/assignments/{assignment}/submissions/1/answers/q1"
     with TestClient(create_app(workspace.root, process_jobs=False)) as client:
         original = workspace.answer(assignment, 1, "q1")
         request = command(original)
@@ -452,7 +452,7 @@ def test_launchers_share_service_and_events_resume_after_restart(tmp_path):
         created = Assignment.model_validate_json(
             client.request(
                 "POST",
-                "/assignments",
+                "/api/assignments",
                 AssignmentInput(
                     qa_markdown="- (1 point) Question\n  - **Answer**\n    - Yes\n"
                 ),
@@ -468,7 +468,7 @@ def test_launchers_share_service_and_events_resume_after_restart(tmp_path):
         another = Assignment.model_validate_json(
             WorkspaceClient(restarted).request(
                 "POST",
-                "/assignments",
+                "/api/assignments",
                 AssignmentInput(qa_markdown="- (2 points) Another question\n"),
             )
         )

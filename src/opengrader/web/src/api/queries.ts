@@ -15,7 +15,7 @@ export function assignmentStatisticsQuery(assignmentId: string) {
     queryKey: ['assignments', assignmentId, 'statistics'],
     queryFn: async ({ signal }) =>
       readData(
-        await client.GET('/assignments/{assignment_id}/statistics', {
+        await client.GET('/api/assignments/{assignment_id}/statistics', {
           params: { path: { assignment_id: assignmentId } },
           signal,
         })
@@ -42,7 +42,7 @@ export async function retryFeedback(
 export const assignmentsQuery = queryOptions({
   queryKey: ['assignments'],
   // Navigation and route loaders share this request across observer unmounts.
-  queryFn: async () => readData(await client.GET('/assignments')),
+  queryFn: async () => readData(await client.GET('/api/assignments')),
 });
 
 export function submissionsQuery(assignmentId: string) {
@@ -50,7 +50,7 @@ export function submissionsQuery(assignmentId: string) {
     queryKey: ['assignments', assignmentId, 'submissions'],
     queryFn: async ({ signal }) =>
       readData(
-        await client.GET('/assignments/{assignment_id}/submissions', {
+        await client.GET('/api/assignments/{assignment_id}/submissions', {
           params: { path: { assignment_id: assignmentId } },
           signal,
         })
@@ -63,13 +63,18 @@ export function questionsQuery(assignmentId: string, submissionId: number) {
     queryKey: ['assignments', assignmentId, 'questions', submissionId],
     queryFn: async ({ signal }) =>
       readData(
-        await client.GET('/assignments/{assignment_id}/questions', {
-          params: {
-            path: { assignment_id: assignmentId },
-            query: { submission_id: submissionId },
-          },
-          signal,
-        })
+        await client.GET(
+          '/api/assignments/{assignment_id}/submissions/{submission_id}/questions',
+          {
+            params: {
+              path: {
+                assignment_id: assignmentId,
+                submission_id: submissionId,
+              },
+            },
+            signal,
+          }
+        )
       ),
   });
 }
@@ -90,7 +95,7 @@ export function answerQuery(
     queryFn: async ({ signal }) =>
       readData(
         await client.GET(
-          '/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}',
+          '/api/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}',
           {
             params: {
               path: {
@@ -120,7 +125,7 @@ export async function editAssignmentDraft(
   signal: AbortSignal
 ) {
   return readData(
-    await client.POST('/assignments/preview/edit', {
+    await client.POST('/api/drafts/edit', {
       body: { qa_markdown: qaMarkdown, edits, metadata },
       signal,
     })
@@ -132,7 +137,7 @@ export function assignmentQAQuery(assignmentId: string) {
     queryKey: ['assignments', assignmentId, 'qa'],
     queryFn: async ({ signal }) =>
       readData(
-        await client.GET('/assignments/{assignment_id}/qa', {
+        await client.GET('/api/assignments/{assignment_id}/qa', {
           params: { path: { assignment_id: assignmentId } },
           signal,
         })
@@ -145,7 +150,7 @@ export async function previewAssignment(
   signal: AbortSignal
 ) {
   return readData(
-    await client.POST('/assignments/preview', {
+    await client.POST('/api/drafts/preview', {
       body: { qa_markdown: qaMarkdown },
       signal,
     })
@@ -154,7 +159,7 @@ export async function previewAssignment(
 
 export async function createAssignment(qaMarkdown: string) {
   return readData(
-    await client.POST('/assignments', {
+    await client.POST('/api/assignments', {
       body: { qa_markdown: qaMarkdown },
     })
   );
@@ -166,7 +171,7 @@ export async function previewAssignmentPdf(
   signal: AbortSignal
 ) {
   return readData(
-    await client.POST('/assignments/preview/pdf', {
+    await client.POST('/api/drafts/pdf', {
       body: { qa_markdown: qaMarkdown, version },
       signal,
       parseAs: 'blob',
@@ -180,7 +185,7 @@ export async function savedAssignmentPdf(
   signal: AbortSignal
 ) {
   return readData(
-    await client.GET('/assignments/{assignment_id}/pdf', {
+    await client.GET('/api/assignments/{assignment_id}/pdf', {
       params: { path: { assignment_id: assignmentId }, query: { version } },
       signal,
       parseAs: 'blob',
@@ -193,7 +198,7 @@ export function assignmentSourceQuery(assignmentId: string) {
     queryKey: ['assignments', assignmentId, 'source'],
     queryFn: async ({ signal }) =>
       readData(
-        await client.GET('/assignments/{assignment_id}/source', {
+        await client.GET('/api/assignments/{assignment_id}/source', {
           params: { path: { assignment_id: assignmentId } },
           signal,
         })
@@ -207,7 +212,7 @@ export async function updateAssignment(
   expectedQaMarkdown: string
 ) {
   return readData(
-    await client.PUT('/assignments/{assignment_id}', {
+    await client.PUT('/api/assignments/{assignment_id}', {
       params: { path: { assignment_id: assignmentId } },
       body: {
         qa_markdown: qaMarkdown,
@@ -221,7 +226,7 @@ export async function deleteAssignment(
   assignmentId: string,
   stopTerminalSessions: boolean
 ) {
-  await client.DELETE('/assignments/{assignment_id}', {
+  await client.DELETE('/api/assignments/{assignment_id}', {
     params: {
       path: { assignment_id: assignmentId },
       query: { stop_terminal_sessions: stopTerminalSessions },
@@ -239,7 +244,7 @@ export async function saveAnswer(
 ) {
   return readData(
     await client.PUT(
-      '/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}',
+      '/api/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}',
       {
         params: {
           path: {
