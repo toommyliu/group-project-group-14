@@ -11,6 +11,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from opengrader.core.grading.edits import GradeEdit
+from opengrader.core.analytics.assignment_statistics import (
+    AssignmentVersionStatistics,
+)
 from opengrader.core.workspace.store import (
     DOCUMENT,
     Workspace,
@@ -265,6 +268,11 @@ def create_app(
     def submissions(assignment_id: str) -> list[Submission]:
         require_assignment(assignment_id)
         return workspace.submissions(assignment_id)
+
+    @app.get("/assignments/{assignment_id}/statistics")
+    def statistics(assignment_id: str) -> list[AssignmentVersionStatistics]:
+        require_assignment(assignment_id)
+        return workspace.statistics(assignment_id)
 
     @app.get("/assignments/{assignment_id}/questions")
     def questions(assignment_id: str, submission_id: int = 1) -> list[Question]:

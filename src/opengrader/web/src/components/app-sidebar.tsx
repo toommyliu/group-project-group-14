@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link } from '@tanstack/react-router';
-import { BookOpen, Files, ScanLine } from 'lucide-react';
+import { BookOpen, ChartColumn, Files, ScanLine } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { ModeToggle } from './mode-toggle';
 import { SidebarResizeHandle } from './sidebar-resize-handle';
@@ -63,6 +63,12 @@ export function AppSidebar({
       prefix: '/submissions',
       title: 'Submissions',
       icon: Files,
+    },
+    {
+      to: '/statistics',
+      prefix: '/statistics',
+      title: 'Statistics',
+      icon: ChartColumn,
     },
     // {
     //   to: '/terminals',
