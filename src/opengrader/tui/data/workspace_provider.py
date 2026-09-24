@@ -19,7 +19,10 @@ from opengrader.core.workspace.models import (
 from opengrader.server.workspace.client import ServiceError, WorkspaceClient
 from opengrader.server.workspace.drafts import Draft, DraftJournal
 from opengrader.tui.data.models import QuestionSeed, RubricOptionSeed, StudentSummary
-from opengrader.tui.statistics import QuestionStatistics, statistics_from_scores
+from opengrader.core.analytics.score_statistics import (
+    QuestionStatistics,
+    statistics_from_scores,
+)
 
 
 class WorkspaceProvider:

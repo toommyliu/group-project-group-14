@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from opengrader.core.analytics.score_statistics import QuestionStatistics
 from opengrader.core.claims import claim_for
 from opengrader.core.grading import (
     confirm_ai_analysis,
@@ -34,7 +35,6 @@ from opengrader.tui.state import (
     TuiWorkflowState,
 )
 from opengrader.tui.statistics import (
-    QuestionStatistics,
     compute_question_statistics,
     seed_is_graded,
     selected_option_indices_for_seed,

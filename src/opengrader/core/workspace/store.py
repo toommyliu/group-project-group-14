@@ -12,6 +12,11 @@ from uuid import UUID, uuid4, uuid5
 
 from pydantic import TypeAdapter
 
+from opengrader.core.analytics.assignment_statistics import (
+    AssignmentVersionStatistics,
+    assignment_statistics,
+)
+from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.grading.edits import GradeEdit, grade_points
 from opengrader.core.history import current_actor
 from opengrader.core.submissions.student_file import StudentSubmissionDocument
@@ -320,25 +325,40 @@ class Workspace:
 
     def submissions(self, assignment_id: str) -> list[Submission]:
         with self.connect() as db:
-            rows = db.execute(
-                """SELECT id, version, json_extract(original, '$.student_name') AS student_name,
-                   json_extract(original, '$.student_id') AS student_id
-                   FROM submissions WHERE assignment_id=? ORDER BY id""",
-                (assignment_id,),
-            ).fetchall()
-            scores: dict[int, dict[str, float | None]] = {}
-            for row in db.execute(
-                """SELECT submission_id, question_id, json_extract(value, '$.points_awarded') AS points
-                   FROM answers WHERE assignment_id=?""",
-                (assignment_id,),
-            ):
-                scores.setdefault(row["submission_id"], {})[row["question_id"]] = row[
-                    "points"
-                ]
-            return [
-                Submission(**dict(row), question_scores=scores.get(row["id"], {}))
-                for row in rows
+            return self._submissions(db, assignment_id)
+
+    def statistics(self, assignment_id: str) -> list[AssignmentVersionStatistics]:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT source FROM assignments WHERE id=?", (assignment_id,)
+            ).fetchone()
+            if row is None:
+                raise WorkspaceNotFound("Assignment not found.")
+            source = row[0]
+            submissions = self._submissions(db, assignment_id)
+        return assignment_statistics(parse_qa_markdown(source), submissions)
+
+    @staticmethod
+    def _submissions(db: sqlite3.Connection, assignment_id: str) -> list[Submission]:
+        rows = db.execute(
+            """SELECT id, version, json_extract(original, '$.student_name') AS student_name,
+               json_extract(original, '$.student_id') AS student_id
+               FROM submissions WHERE assignment_id=? ORDER BY id""",
+            (assignment_id,),
+        ).fetchall()
+        scores: dict[int, dict[str, float | None]] = {}
+        for row in db.execute(
+            """SELECT submission_id, question_id, json_extract(value, '$.points_awarded') AS points
+               FROM answers WHERE assignment_id=?""",
+            (assignment_id,),
+        ):
+            scores.setdefault(row["submission_id"], {})[row["question_id"]] = row[
+                "points"
             ]
+        return [
+            Submission(**dict(row), question_scores=scores.get(row["id"], {}))
+            for row in rows
+        ]
 
     @staticmethod
     def _answer(

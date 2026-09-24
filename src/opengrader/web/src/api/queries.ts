@@ -6,6 +6,22 @@ export type Assignment = components['schemas']['Assignment'];
 export type Answer = components['schemas']['Answer'];
 export type Question = components['schemas']['Question'];
 export type Submission = components['schemas']['Submission'];
+export type ScoreStatistics = components['schemas']['QuestionStatistics'];
+export type AssignmentVersionStatistics =
+  components['schemas']['AssignmentVersionStatistics'];
+
+export function assignmentStatisticsQuery(assignmentId: string) {
+  return queryOptions({
+    queryKey: ['assignments', assignmentId, 'statistics'],
+    queryFn: async ({ signal }) =>
+      readData(
+        await client.GET('/assignments/{assignment_id}/statistics', {
+          params: { path: { assignment_id: assignmentId } },
+          signal,
+        })
+      ),
+  });
+}
 
 export const feedbackJobsQuery = queryOptions({
   queryKey: ['feedback-jobs'],

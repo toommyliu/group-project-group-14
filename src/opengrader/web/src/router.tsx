@@ -17,6 +17,7 @@ import {
   assignmentsQuery,
   assignmentSourceQuery,
   assignmentQAQuery,
+  assignmentStatisticsQuery,
   submissionsQuery,
 } from './api/queries';
 import { scansQuery } from './api/scans';
@@ -163,6 +164,31 @@ export const terminalsRoute = createRoute({
   errorComponent: RouteError,
 });
 
+export const statisticsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/statistics',
+  validateSearch: validateAssignmentSearch,
+  loaderDeps: ({ search }) => search,
+  remountDeps: ({ search }) => search.assignment,
+  loader: async ({ context, deps }) => {
+    const [assignments, statistics] = await Promise.all([
+      context.queryClient.ensureQueryData(assignmentsQuery),
+      context.queryClient.fetchQuery({
+        ...assignmentStatisticsQuery(deps.assignment),
+        staleTime: 0,
+      }),
+    ]);
+    const assignment = assignments.find((item) => item.id === deps.assignment);
+    if (!assignment) throw notFound();
+    return { assignment, statistics };
+  },
+  component: lazyRouteComponent(
+    () => import('./routes/assignment-statistics-page')
+  ),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+});
+
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree: rootRoute.addChildren([
@@ -173,6 +199,7 @@ export function createAppRouter(queryClient: QueryClient) {
       scansRoute,
       overviewRoute,
       terminalsRoute,
+      statisticsRoute,
     ]),
     context: { queryClient },
     defaultPreload: 'intent',

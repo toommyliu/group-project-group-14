@@ -7,13 +7,13 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
+from opengrader.core.analytics.score_statistics import QuestionStatistics
 from opengrader.tui.formatting import (
     format_curve_label,
     format_hotkey_reference,
     format_question_type,
 )
 from opengrader.tui.statistics import (
-    QuestionStatistics,
     question_statistics_chart_image,
     render_question_statistics,
 )

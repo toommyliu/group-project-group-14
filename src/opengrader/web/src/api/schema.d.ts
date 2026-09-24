@@ -206,6 +206,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assignments/{assignment_id}/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Statistics */
+        get: operations["statistics_assignments__assignment_id__statistics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments/{assignment_id}/questions": {
         parameters: {
             query?: never;
@@ -670,12 +687,36 @@ export interface components {
             /** Version */
             version?: string | null;
         };
+        /** AssignmentQuestionStatistics */
+        AssignmentQuestionStatistics: {
+            /** Prompt */
+            prompt: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Parent Prompt */
+            parent_prompt: string | null;
+            /** Submission Id */
+            submission_id: number | null;
+            scores: components["schemas"]["QuestionStatistics"];
+        };
         /** AssignmentUpdate */
         AssignmentUpdate: {
             /** Qa Markdown */
             qa_markdown: string;
             /** Expected Qa Markdown */
             expected_qa_markdown: string;
+        };
+        /** AssignmentVersionStatistics */
+        AssignmentVersionStatistics: {
+            /** Version */
+            version: string | null;
+            scores: components["schemas"]["QuestionStatistics"];
+            /** Partial Count */
+            partial_count: number;
+            /** Ungraded Count */
+            ungraded_count: number;
+            /** Questions */
+            questions: components["schemas"]["AssignmentQuestionStatistics"][];
         };
         /** CreateTerminal */
         CreateTerminal: {
@@ -986,6 +1027,41 @@ export interface components {
             /** Parent Source Line */
             parent_source_line?: number | null;
         };
+        /** QuestionStatistics */
+        QuestionStatistics: {
+            /** Question Id */
+            question_id: string;
+            /** Possible Points */
+            possible_points: number;
+            /** Total Submissions */
+            total_submissions: number;
+            /** Graded Count */
+            graded_count: number;
+            /** Ungraded Count */
+            ungraded_count: number;
+            /** Average */
+            average: number | null;
+            /** Median */
+            median: number | null;
+            /** Std Dev */
+            std_dev: number | null;
+            /** Minimum */
+            minimum: number | null;
+            /** Maximum */
+            maximum: number | null;
+            /** Q1 */
+            q1: number | null;
+            /** Q3 */
+            q3: number | null;
+            /** Average Percent */
+            average_percent: number | null;
+            /** Full Credit Count */
+            full_credit_count: number;
+            /** Zero Score Count */
+            zero_score_count: number;
+            /** Buckets */
+            buckets: components["schemas"]["ScoreBucket"][];
+        };
         /** RenameTerminal */
         RenameTerminal: {
             /** Title */
@@ -1127,6 +1203,13 @@ export interface components {
         ScanRevision: {
             /** Expected Revision */
             expected_revision: number;
+        };
+        /** ScoreBucket */
+        ScoreBucket: {
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
         };
         /** Submission */
         Submission: {
@@ -1660,6 +1743,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Submission"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    statistics_assignments__assignment_id__statistics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentVersionStatistics"][];
                 };
             };
             /** @description Validation Error */
