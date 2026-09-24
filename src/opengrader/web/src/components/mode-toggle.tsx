@@ -23,7 +23,7 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
         <span className="sr-only">Toggle theme</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align={open ? "end" : "center"}
+        align={open ? 'end' : 'center'}
         className={compact ? 'w-11 min-w-11' : undefined}
       >
         {(
@@ -35,6 +35,7 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
         ).map(({ value, label, icon: Icon }) => (
           <Tooltip key={value}>
             <DropdownMenuItem
+              nativeButton
               render={<TooltipTrigger />}
               onClick={() => setTheme(value)}
               className={compact ? 'size-11 w-full justify-center' : 'w-full'}
