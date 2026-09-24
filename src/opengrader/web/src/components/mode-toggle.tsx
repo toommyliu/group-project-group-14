@@ -9,9 +9,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useTheme } from '@/components/theme-provider';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { useSidebar } from './ui/sidebar';
 
 export function ModeToggle({ compact = false }: { compact?: boolean }) {
   const { setTheme } = useTheme();
+  const { open } = useSidebar();
 
   return (
     <DropdownMenu>
@@ -21,7 +23,7 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
         <span className="sr-only">Toggle theme</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align="center"
+        align={open ? "end" : "center"}
         className={compact ? 'w-11 min-w-11' : undefined}
       >
         {(
