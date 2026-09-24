@@ -25,8 +25,15 @@ import {
 import { useOutlinePosition } from '@/hooks/use-outline-position';
 import { schedulePreview } from '@/lib/debounced-preview';
 import { errorMessage } from '@/lib/error-message';
+import {
+  validationQuestionTarget,
+  type ValidationLocation,
+} from '@/lib/validation-source-line';
 import { VersionEditor } from './version-editor';
-import { SortableQuestionList } from './sortable-question-list';
+import {
+  SortableQuestionList,
+  type QuestionListNavigation,
+} from './sortable-question-list';
 import { VisualQuestionEditor } from './visual-question-editor';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -55,6 +62,7 @@ function questionDraft(question: Question, version: string): QuestionEdit {
 
 export type VisualEditorNavigation = {
   navigate: (entry: OutlineEntry) => void;
+  navigateError: (location: ValidationLocation) => boolean;
 };
 
 export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
@@ -102,6 +110,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   const versions = metadata.versions;
   const [version, setVersion] = useState(versions[0].key);
   const [draggingParent, setDraggingParent] = useState<number | null>();
+  const questionListRef = useRef<QuestionListNavigation>(null);
   const editorHeaderRef = useRef<HTMLDivElement>(null);
   const compact = draggingParent !== undefined;
 
@@ -236,6 +245,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   const [navigation, setNavigation] = useState<{
     version: string;
     line: number | null;
+    rubricPath?: number[] | null;
   } | null>(null);
   useImperativeHandle(
     ref,
@@ -244,18 +254,51 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
         setVersion(entry.version);
         setNavigation({ ...entry });
       },
+      navigateError(location) {
+        const target = validationQuestionTarget(location, groups);
+        if (!target) return false;
+        setVersion(target.version);
+        setNavigation(target);
+        return true;
+      },
     }),
-    []
+    [groups]
   );
   useLayoutEffect(() => {
     if (!navigation || navigation.line === null) return;
-    const target = document.getElementById(
-      `visual-question-${navigation.line}`
-    );
-    if (target) {
-      target.scrollIntoView({ block: 'start', behavior: 'instant' });
-      target.querySelector('textarea')?.focus({ preventScroll: true });
+    const targetLine = navigation.line;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    function focusTarget() {
+      let target = document.getElementById(`visual-question-${targetLine}`);
+      if (!target) return false;
+      for (const index of navigation?.rubricPath ?? []) {
+        const item: HTMLElement | null = target.querySelector(
+          `[data-rubric-list] > [data-rubric-index="${index}"]`
+        );
+        if (!item) break;
+        target = item;
+      }
+      questionListRef.current?.scrollToElement(target);
+      const field = navigation?.rubricPath
+        ? (target.querySelector<HTMLInputElement>(
+            'input[type="number"]:not(:disabled)'
+          ) ??
+          target.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)'))
+        : target.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)');
+      field?.focus({ preventScroll: true });
+      setNavigation(null);
+      return true;
     }
+    firstFrame = requestAnimationFrame(() => {
+      if (focusTarget()) return;
+      questionListRef.current?.scrollTo(targetLine);
+      secondFrame = requestAnimationFrame(() => focusTarget());
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
   }, [navigation]);
 
   const activeGroup = groups.find((group) => group.key === version);
@@ -268,6 +311,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   ) {
     return (
       <SortableQuestionList
+        ref={parent === null ? questionListRef : undefined}
         questions={questions}
         disabled={disabled}
         compact={compact}

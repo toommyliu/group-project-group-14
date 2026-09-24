@@ -24,6 +24,7 @@ from opengrader.core.question_types import (
 )
 
 from .numeric import parse_numeric_answers
+from .errors import QAErrorLocation, QAParseError
 from .scoring import RubricOptionKind, RubricSelectionMode, rubric_scoring_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -85,6 +86,7 @@ class QARubricItem:
     notes: list[str] = field(default_factory=list)
     subitems: list["QARubricItem"] = field(default_factory=list)
     default_comment: str | None = None
+    source_line: int | None = field(default=None, compare=False, repr=False)
 
 
 def _is_bonus(item: QARubricItem | QARubricFlatOption) -> bool:
@@ -684,6 +686,7 @@ def _parse_rubric_subitem(item: _BulletItem) -> QARubricItem:
         notes.append(child.text.strip())
     return QARubricItem(
         label=label,
+        source_line=item.line_no,
         points_delta=points_delta,
         notes=notes,
         default_comment=default_comment,
@@ -724,6 +727,7 @@ def _parse_rubric_category(item: _BulletItem) -> QARubricItem:
 
     return QARubricItem(
         label=canonical,
+        source_line=item.line_no,
         points_delta=points_delta,
         notes=notes,
         subitems=subitems,
@@ -770,39 +774,62 @@ def _parse_rubric_section(item: _BulletItem) -> list[QARubricItem]:
     return rubric
 
 
+def _rubric_error(
+    message: str, rubric: list[QARubricItem], item: QARubricItem
+) -> QAParseError:
+    for index, parent in enumerate(rubric):
+        if parent is item:
+            return QAParseError(
+                message, QAErrorLocation(line=item.source_line, rubric_path=[index])
+            )
+        for subindex, child in enumerate(parent.subitems):
+            if child is item:
+                return QAParseError(
+                    message,
+                    QAErrorLocation(line=item.source_line, rubric_path=[index, subindex]),
+                )
+    raise AssertionError("Rubric error must refer to an item in the rubric")
+
+
 def _rubric_effective_deltas(
     rubric: list[QARubricItem], *, context: str
 ) -> list[float]:
     deltas: list[float] = []
 
     for item in rubric:
+        if _is_bonus(item):
+            continue
         if item.subitems:
             sub_deltas: list[float] = []
             for sub in item.subitems:
                 if sub.points_delta is None:
-                    raise ValueError(
-                        f"{context} rubric subitem {sub.label!r} is missing points"
+                    raise _rubric_error(
+                        f"{context} rubric subitem {sub.label!r} is missing points",
+                        rubric,
+                        sub,
                     )
                 sub_deltas.append(sub.points_delta)
 
-            if not _is_bonus(item):
-                if item.points_delta is not None:
-                    total = sum(sub_deltas)
-                    if abs(total - item.points_delta) > 1e-6:
-                        raise ValueError(
-                            f"{context} rubric item {item.label!r} has points "
-                            f"{item.points_delta:+g} but subitems sum to {total:+g}"
-                        )
+            if item.points_delta is not None:
+                total = sum(sub_deltas)
+                if abs(total - item.points_delta) > 1e-6:
+                    raise _rubric_error(
+                        f"{context} rubric item {item.label!r} has points "
+                        f"{item.points_delta:+g} but subitems sum to {total:+g}",
+                        rubric,
+                        item,
+                    )
 
-                deltas.extend(sub_deltas)
+            deltas.extend(sub_deltas)
             continue
 
-        if not _is_bonus(item):
-            if item.points_delta is None:
-                raise ValueError(
-                    f"{context} rubric item {item.label!r} must include points or weighted subitems"
-                )
-            deltas.append(item.points_delta)
+        if item.points_delta is None:
+            raise _rubric_error(
+                f"{context} rubric item {item.label!r} must include points or weighted subitems",
+                rubric,
+                item,
+            )
+        deltas.append(item.points_delta)
 
     return deltas
 
@@ -824,18 +851,26 @@ def _validate_correct_and_incorrect_shortcuts(
 
     if mode == "positive_awards":
         if abs(correct.points_delta - points) > 1e-6:
-            raise ValueError(
-                f"{context} Correct rubric item must award +{points:g} points"
+            raise _rubric_error(
+                f"{context} Correct rubric item must award +{points:g} points",
+                rubric,
+                correct,
             )
         if abs(incorrect.points_delta) > 1e-6:
-            raise ValueError(f"{context} Incorrect rubric item must award +0 points")
+            raise _rubric_error(
+                f"{context} Incorrect rubric item must award +0 points", rubric, incorrect
+            )
         return
 
     if abs(correct.points_delta) > 1e-6:
-        raise ValueError(f"{context} Correct rubric item must have +0 points")
+        raise _rubric_error(
+            f"{context} Correct rubric item must have +0 points", rubric, correct
+        )
     if abs(incorrect.points_delta + points) > 1e-6:
-        raise ValueError(
-            f"{context} Incorrect rubric item must deduct -{points:g} points"
+        raise _rubric_error(
+            f"{context} Incorrect rubric item must deduct -{points:g} points",
+            rubric,
+            incorrect,
         )
 
 
@@ -859,9 +894,11 @@ def _validate_nested_partial_exact_sum(
     if abs(total - target) <= 1e-6:
         return
 
-    raise ValueError(
+    raise _rubric_error(
         f"{context} checklist partial items must sum to {target:+g} points; "
-        f"got {total:+g}"
+        f"got {total:+g}",
+        rubric,
+        partial,
     )
 
 
@@ -872,7 +909,7 @@ def _validate_rubric_points(
         return
 
     standard_rubric = [item for item in rubric if not _is_bonus(item)]
-    deltas = _rubric_effective_deltas(standard_rubric, context=context)
+    deltas = _rubric_effective_deltas(rubric, context=context)
     if not deltas:
         return
 
@@ -880,20 +917,22 @@ def _validate_rubric_points(
         for criterion in [item, *item.subitems]:
             value = criterion.points_delta
             if value is not None and (not math.isfinite(value) or abs(value) > points):
-                raise ValueError(
+                raise _rubric_error(
                     f"{context} rubric item {criterion.label!r} must stay within "
-                    f"-{points:g} to +{points:g} points"
+                    f"-{points:g} to +{points:g} points",
+                    rubric,
+                    criterion,
                 )
 
     mode = rubric_scoring_mode(deltas)
     _validate_correct_and_incorrect_shortcuts(
-        standard_rubric,
+        rubric,
         points=points,
         mode=mode,
         context=context,
     )
     _validate_nested_partial_exact_sum(
-        standard_rubric,
+        rubric,
         points=points,
         mode=mode,
         context=context,
@@ -1056,10 +1095,17 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
             f"question {qid!r} mixes direct answers and subquestions; choose one structure"
         )
 
-    subquestions = [
-        _parse_subquestion_item(sub, parent_id=qid, index=sub_idx)
-        for sub_idx, sub in enumerate(subquestion_items)
-    ]
+    subquestions = []
+    for sub_idx, sub in enumerate(subquestion_items):
+        try:
+            subquestions.append(
+                _parse_subquestion_item(sub, parent_id=qid, index=sub_idx)
+            )
+        except ValueError as exc:
+            error = exc if isinstance(exc, QAParseError) else QAParseError(str(exc))
+            error.location.line = error.location.line or sub.line_no
+            error.location.question_path = [index - 1, sub_idx]
+            raise error from None
 
     points = inline_points or 0
     choices, correct_values = _maybe_expand_true_false(
@@ -1098,7 +1144,17 @@ def _parse_questions_from_bullets(
     lines: list[str], *, start_line: int
 ) -> list[QAQuestion]:
     items = _parse_bullet_items(lines, start_line=start_line)
-    return [_parse_question_item(item, index=i + 1) for i, item in enumerate(items)]
+    questions = []
+    for i, item in enumerate(items):
+        try:
+            questions.append(_parse_question_item(item, index=i + 1))
+        except ValueError as exc:
+            error = exc if isinstance(exc, QAParseError) else QAParseError(str(exc))
+            error.location.line = error.location.line or item.line_no
+            if not error.location.question_path:
+                error.location.question_path = [i]
+            raise error from None
+    return questions
 
 
 def _parse_frontmatter_questions_start_page(frontmatter: Frontmatter) -> int:
@@ -1151,9 +1207,13 @@ def parse_qa_markdown(content: str) -> QADocument:
             if label in version_questions:
                 raise ValueError(f"duplicate version section: {label!r}")
 
-            parsed = _parse_questions_from_bullets(
-                section_lines, start_line=section_start
-            )
+            try:
+                parsed = _parse_questions_from_bullets(
+                    section_lines, start_line=section_start
+                )
+            except QAParseError as exc:
+                exc.location.version = label
+                raise
             _validate_unique_ids(parsed, context=f"version {label}")
             version_questions[label] = parsed
             versions.append(label)

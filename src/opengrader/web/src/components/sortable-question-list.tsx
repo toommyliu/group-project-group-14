@@ -2,10 +2,12 @@ import {
   memo,
   useCallback,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from 'react';
 import { DragDropProvider, DragOverlay } from '@dnd-kit/react';
@@ -35,6 +37,11 @@ type RenderQuestion = (
   index: number,
   handle: ReactNode
 ) => ReactNode;
+
+export type QuestionListNavigation = {
+  scrollTo: (sourceLine: number) => boolean;
+  scrollToElement: (element: HTMLElement) => void;
+};
 
 const accessibility = Accessibility.configure({
   announcements: {
@@ -121,6 +128,7 @@ const SortableQuestion = memo(function SortableQuestion({
 });
 
 export function SortableQuestionList({
+  ref,
   questions,
   disabled,
   compact,
@@ -132,6 +140,7 @@ export function SortableQuestionList({
   offsetElementRef,
   onVisibleQuestionChange,
 }: {
+  ref?: Ref<QuestionListNavigation>;
   questions: Question[];
   disabled: boolean;
   compact: boolean;
@@ -222,6 +231,42 @@ export function SortableQuestionList({
       observer.disconnect();
     };
   }, [offsetElementRef, scrollElementRef, virtualized]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollTo(sourceLine) {
+        function includesLine(question: Question): boolean {
+          return (
+            question.source_line === sourceLine ||
+            !!question.subquestions?.some(includesLine)
+          );
+        }
+        const index = questions.findIndex(includesLine);
+        if (index < 0) return false;
+        if (virtualized)
+          virtualizer.scrollToIndex(index, {
+            align: 'start',
+            behavior: 'auto',
+          });
+        return true;
+      },
+      scrollToElement(element) {
+        const container = scrollElementRef?.current;
+        if (!container) {
+          element.scrollIntoView({ block: 'start', behavior: 'instant' });
+          return;
+        }
+        const offset =
+          element.getBoundingClientRect().top -
+          container.getBoundingClientRect().top +
+          container.scrollTop -
+          16;
+        virtualizer.scrollToOffset(offset);
+      },
+    }),
+    [questions, virtualized, virtualizer, scrollElementRef]
+  );
 
   const virtualItems = virtualized ? virtualizer.getVirtualItems() : [];
   const renderedIndexes = virtualized

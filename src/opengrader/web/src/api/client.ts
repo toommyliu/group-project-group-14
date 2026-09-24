@@ -1,5 +1,9 @@
 import createClient from 'openapi-fetch';
 import type { paths } from './schema';
+import {
+  parseValidationLocation,
+  type ValidationLocation,
+} from '@/lib/validation-source-line';
 
 function serverMessage(body: unknown): string | undefined {
   if (!body || typeof body !== 'object' || !('detail' in body)) return;
@@ -21,11 +25,17 @@ function serverMessage(body: unknown): string | undefined {
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly location: ValidationLocation | null;
 
   constructor(status: number, body?: unknown) {
     super(serverMessage(body) ?? `Request failed with status ${status}.`);
     this.name = 'ApiError';
     this.status = status;
+    this.location = parseValidationLocation(
+      body && typeof body === 'object' && 'location' in body
+        ? body.location
+        : null
+    );
   }
 }
 

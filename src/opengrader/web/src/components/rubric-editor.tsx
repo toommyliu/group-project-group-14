@@ -136,6 +136,7 @@ function SortableItem({
   return (
     <li
       ref={ref}
+      data-rubric-index={index}
       className={`rounded-lg border bg-background p-3 ${isDragging ? 'opacity-60' : ''} ${isDropTarget ? 'ring-2 ring-ring' : ''}`}
     >
       <div className="flex items-start gap-2">
@@ -370,7 +371,7 @@ function RubricList({
           requestAnimationFrame(() => handle.focus());
       }}
     >
-      <ul className="space-y-3">
+      <ul data-rubric-list className="space-y-3">
         {items.map((item, index) => (
           <SortableItem
             key={item.id}
