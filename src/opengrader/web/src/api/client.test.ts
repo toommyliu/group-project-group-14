@@ -35,6 +35,33 @@ it('preserves HTTP status and server detail through a query', async () => {
   cache.clear();
 });
 
+it('preserves the validation target returned by the parser', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          detail:
+            "question 'q1' rubric item 'Correct' must stay within -0 to +0 points",
+          location: {
+            line: 9,
+            version: 'B',
+            question_path: [0],
+            rubric_path: [0],
+          },
+        },
+        { status: 422 }
+      )
+    )
+  );
+  await expect(
+    queries.previewAssignment('invalid rubric', new AbortController().signal)
+  ).rejects.toMatchObject({
+    status: 422,
+    location: { line: 9, version: 'B', question_path: [0], rubric_path: [0] },
+  });
+});
+
 it('formats validation details identically for terminal and assignment mutations', async () => {
   vi.stubGlobal(
     'fetch',

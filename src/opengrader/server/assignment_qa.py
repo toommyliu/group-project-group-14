@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from opengrader.core.grading.questions import flatten_question_contexts
 from opengrader.core.qa_file import QADocument, parse_qa_markdown
 from opengrader.core.qa_file.editing import DocumentEdit, QuestionEdit, edit_qa_markdown
+from opengrader.core.qa_file.errors import QAErrorLocation, QAParseError
 
 
 class AssignmentInput(BaseModel):
@@ -24,6 +25,7 @@ class VisualEditInput(AssignmentInput):
 class VisualEditResult(AssignmentInput):
     preview: QAPreview | None
     validation_error: str | None
+    validation_location: QAErrorLocation | None = None
 
 
 def edit_assignment_draft(request: VisualEditInput) -> VisualEditResult:
@@ -31,7 +33,12 @@ def edit_assignment_draft(request: VisualEditInput) -> VisualEditResult:
     try:
         preview = _parse_preview(source)
     except ValueError as exc:
-        return VisualEditResult(qa_markdown=source, preview=None, validation_error=str(exc))
+        return VisualEditResult(
+            qa_markdown=source,
+            preview=None,
+            validation_error=str(exc),
+            validation_location=exc.location if isinstance(exc, QAParseError) else None,
+        )
     return VisualEditResult(
         qa_markdown=source,
         preview=preview,

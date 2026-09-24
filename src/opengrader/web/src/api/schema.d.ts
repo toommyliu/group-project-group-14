@@ -878,6 +878,20 @@ export interface components {
              */
             questions_start_page: number;
         };
+        /** QAErrorLocation */
+        QAErrorLocation: {
+            /** Line */
+            line?: number | null;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+            /** Question Path */
+            question_path?: number[];
+            /** Rubric Path */
+            rubric_path?: number[] | null;
+        };
         /** QAPreview */
         QAPreview: {
             document: components["schemas"]["QADocument"];
@@ -929,6 +943,8 @@ export interface components {
             subitems?: components["schemas"]["QARubricItem-Input"][];
             /** Default Comment */
             default_comment?: string | null;
+            /** Source Line */
+            source_line?: number | null;
         };
         /** QARubricItem */
         "QARubricItem-Output": {
@@ -942,6 +958,8 @@ export interface components {
             subitems?: components["schemas"]["QARubricItem-Output"][];
             /** Default Comment */
             default_comment?: string | null;
+            /** Source Line */
+            source_line?: number | null;
         };
         /** QASubquestion */
         QASubquestion: {
@@ -1322,6 +1340,7 @@ export interface components {
             preview: components["schemas"]["QAPreview"] | null;
             /** Validation Error */
             validation_error: string | null;
+            validation_location?: components["schemas"]["QAErrorLocation"] | null;
         };
         /** WorkspaceInfo */
         WorkspaceInfo: {

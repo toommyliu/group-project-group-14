@@ -4,8 +4,14 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { search, searchKeymap } from '@codemirror/search';
-import { Annotation, Compartment, EditorState } from '@codemirror/state';
 import {
+  Annotation,
+  Compartment,
+  EditorState,
+  type Extension,
+} from '@codemirror/state';
+import {
+  Decoration,
   EditorView,
   drawSelection,
   highlightActiveLine,
@@ -14,6 +20,7 @@ import {
   keymap,
   lineNumbers,
   placeholder as editorPlaceholder,
+  type DecorationSet,
 } from '@codemirror/view';
 import {
   memo,
@@ -69,8 +76,24 @@ const editorTheme = EditorView.theme({
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
     backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
   },
+  '.cm-validation-line': {
+    backgroundColor: 'color-mix(in oklab, var(--destructive) 14%, transparent)',
+    boxShadow: 'inset 3px 0 var(--destructive)',
+  },
   '.cm-placeholder': { color: 'var(--muted-foreground)' },
 });
+
+function errorLineExtension(line: number | null): Extension {
+  if (line === null) return [];
+  return EditorView.decorations.of((view): DecorationSet => {
+    if (line > view.state.doc.lines) return Decoration.none;
+    return Decoration.set([
+      Decoration.line({ class: 'cm-validation-line' }).range(
+        view.state.doc.line(line).from
+      ),
+    ]);
+  });
+}
 
 function entryAtLine(entries: OutlineEntry[], line: number) {
   let low = 0;
@@ -92,6 +115,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   disabled,
   invalid,
   describedBy,
+  errorLine,
   outlineEntries,
   active,
   navigation,
@@ -108,6 +132,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   disabled: boolean;
   invalid: boolean;
   describedBy?: string;
+  errorLine: number | null;
   outlineEntries: OutlineEntry[];
   active: boolean;
   navigation?: { line: number };
@@ -136,6 +161,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
 
   const [editable] = useState(() => new Compartment());
   const [attributes] = useState(() => new Compartment());
+  const [validationLine] = useState(() => new Compartment());
 
   function publishActive(view: EditorView, fromCursor: boolean) {
     if (!isActive.current || !entries.current.length) return;
@@ -186,6 +212,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             spellcheck: 'false',
           })
         ),
+        validationLine.of(errorLineExtension(errorLine)),
         EditorView.updateListener.of((update) => {
           if (
             update.docChanged &&
@@ -255,6 +282,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       ),
     });
   }, [invalid, describedBy, disabled, attributes]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: validationLine.reconfigure(errorLineExtension(errorLine)),
+    });
+  }, [errorLine, validationLine, value]);
 
   useEffect(() => {
     const view = viewRef.current;

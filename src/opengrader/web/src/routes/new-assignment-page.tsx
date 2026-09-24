@@ -43,6 +43,9 @@ import {
   questionOutlineEntries,
   type OutlineEntry,
 } from '@/lib/assignment-outline';
+import { validationSourceLine } from '@/lib/validation-source-line';
+import type { ValidationLocation } from '@/lib/validation-source-line';
+import { ApiError } from '@/api/client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const loadMarkdownEditor = () =>
@@ -58,7 +61,7 @@ const VisualAssignmentEditor = lazy(loadVisualEditor);
 
 type PreviewResult = { source: string } & (
   | { data: QAPreview; error?: never }
-  | { error: string; data?: never }
+  | { error: string; location?: ValidationLocation | null; data?: never }
 );
 
 type EditorProps =
@@ -116,6 +119,9 @@ export function AssignmentEditor({
     overview ? { source: initialSource, preview: overview.qa } : undefined
   );
   const editorRef = useRef<MarkdownEditorNavigation>(null);
+  const [markdownNavigation, setMarkdownNavigation] = useState<{
+    line: number;
+  }>();
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const visualEditorRef = useRef<VisualEditorNavigation>(null);
   const outlineRailRef = useRef<ActiveOutlineNavigation>(null);
@@ -166,6 +172,10 @@ export function AssignmentEditor({
   const readOnly = !!overview?.editUnavailableReason;
   const current = result?.source === source;
   const valid = current && !!result.data && !!source.trim() && !visualPending;
+  const markdownErrorLine = validationSourceLine(
+    current ? result?.error : undefined,
+    current && result?.error ? result.location : null
+  );
   const dirty =
     !saved && (source !== originalSource || reading || visualPending);
   const updateActiveKey = useCallback((key: string | null) => {
@@ -181,6 +191,7 @@ export function AssignmentEditor({
         setResult({
           source: edit.qa_markdown,
           error: edit.validation_error,
+          location: edit.validation_location,
         });
       } else if (edit.preview) {
         setResult({ source: edit.qa_markdown, data: edit.preview });
@@ -237,6 +248,10 @@ export function AssignmentEditor({
             : {
                 source,
                 error: errorMessage(response.error),
+                location:
+                  response.error instanceof ApiError
+                    ? response.error.location
+                    : null,
               }
         );
       },
@@ -578,6 +593,53 @@ export function AssignmentEditor({
                       {overview && previewToggle}
                     </div>
                   </div>
+                  {current && result.error && !visualPending && (
+                    <div id="qa-error" className="py-2">
+                      <ErrorAlert error={result.error}>
+                        <div className="flex flex-wrap gap-2">
+                          {(markdownErrorLine !== null ||
+                            !!result.location?.question_path?.length) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                if (
+                                  mode === 'visual' &&
+                                  result.location &&
+                                  visualEditorRef.current?.navigateError(
+                                    result.location
+                                  )
+                                )
+                                  return;
+                                if (markdownErrorLine !== null) {
+                                  setMarkdownNavigation({
+                                    line: markdownErrorLine,
+                                  });
+                                  openMode('markdown');
+                                }
+                              }}
+                            >
+                              Go to error
+                            </Button>
+                          )}
+                          {mode === 'markdown' && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setResult(undefined);
+                                setRetry((value) => value + 1);
+                              }}
+                            >
+                              Retry validation
+                            </Button>
+                          )}
+                        </div>
+                      </ErrorAlert>
+                    </div>
+                  )}
                 </div>
                 <div
                   className={
@@ -657,9 +719,6 @@ export function AssignmentEditor({
                               </Button>
                             </div>
                           )}
-                          {outline && current && result.error && (
-                            <ErrorAlert className="mt-4" error={result.error} />
-                          )}
                           {visualPending && (
                             <p
                               role="status"
@@ -692,66 +751,51 @@ export function AssignmentEditor({
                       >
                         <form.Field name="qaMarkdown">
                           {(field) => (
-                            <>
-                              <Field
-                                data-invalid={current && !!result.error}
+                            <Field
+                              data-invalid={current && !!result.error}
+                              className={
+                                overview ? 'min-h-0 flex-1' : undefined
+                              }
+                            >
+                              <div
                                 className={
                                   overview ? 'min-h-0 flex-1' : undefined
                                 }
                               >
-                                <div
-                                  className={
-                                    overview ? 'min-h-0 flex-1' : undefined
+                                <MarkdownEditor
+                                  ref={editorRef}
+                                  id={field.name}
+                                  value={field.state.value}
+                                  readOnly={readOnly}
+                                  disabled={reading || saving || !!saved}
+                                  onBlur={field.handleBlur}
+                                  onChange={(value) => {
+                                    field.handleChange(value);
+                                    setError('');
+                                    setSaveMessage('');
+                                  }}
+                                  invalid={current && !!result.error}
+                                  describedBy={
+                                    current && result.error
+                                      ? 'qa-error'
+                                      : undefined
                                   }
-                                >
-                                  <MarkdownEditor
-                                    ref={editorRef}
-                                    id={field.name}
-                                    value={field.state.value}
-                                    readOnly={readOnly}
-                                    disabled={reading || saving || !!saved}
-                                    onBlur={field.handleBlur}
-                                    onChange={(value) => {
-                                      field.handleChange(value);
-                                      setError('');
-                                      setSaveMessage('');
-                                    }}
-                                    invalid={current && !!result.error}
-                                    describedBy={
-                                      current && result.error
-                                        ? 'qa-error'
-                                        : undefined
-                                    }
-                                    outlineEntries={outlineEntries}
-                                    active={mode === 'markdown' && !!valid}
-                                    onActiveChange={updateActiveKey}
-                                    className={
-                                      overview
-                                        ? 'h-full min-h-0'
-                                        : 'h-[min(28rem,70svh)]'
-                                    }
-                                    placeholder={
-                                      '---\ntitle: Quiz 1\n---\n\n- (2 points) What is 1 + 1?\n  - **Correct**\n    - 2'
-                                    }
-                                  />
-                                </div>
-                              </Field>
-                              {current && result.error && (
-                                <div id="qa-error" className="mt-3 space-y-2">
-                                  <ErrorAlert error={result.error} />
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => {
-                                      setResult(undefined);
-                                      setRetry((value) => value + 1);
-                                    }}
-                                  >
-                                    Retry validation
-                                  </Button>
-                                </div>
-                              )}
-                            </>
+                                  errorLine={markdownErrorLine}
+                                  navigation={markdownNavigation}
+                                  outlineEntries={outlineEntries}
+                                  active={mode === 'markdown' && !!valid}
+                                  onActiveChange={updateActiveKey}
+                                  className={
+                                    overview
+                                      ? 'h-full min-h-0'
+                                      : 'h-[min(28rem,70svh)]'
+                                  }
+                                  placeholder={
+                                    '---\ntitle: Quiz 1\n---\n\n- (2 points) What is 1 + 1?\n  - **Correct**\n    - 2'
+                                  }
+                                />
+                              </div>
+                            </Field>
                           )}
                         </form.Field>
                       </Suspense>

@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 import shutil
 from threading import RLock
@@ -11,6 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from opengrader.core.grading.edits import GradeEdit
+from opengrader.core.qa_file.errors import QAParseError
 from opengrader.core.analytics.assignment_statistics import (
     AssignmentVersionStatistics,
 )
@@ -156,7 +158,10 @@ def create_app(
 
     @app.exception_handler(ValueError)
     async def invalid(_request: Request, exc: ValueError):
-        return JSONResponse({"detail": str(exc)}, status_code=422)
+        content: dict[str, object] = {"detail": str(exc)}
+        if isinstance(exc, QAParseError):
+            content["location"] = asdict(exc.location)
+        return JSONResponse(content, status_code=422)
 
     @app.get("/api/workspace")
     def get_workspace() -> WorkspaceInfo:
