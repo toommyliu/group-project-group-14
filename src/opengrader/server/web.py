@@ -2,26 +2,24 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+# Paths owned by the server; unknown paths under them are errors, not app pages.
+RESERVED = ("api", "auth", "assets")
+
 
 def add_web_routes(app: FastAPI, dist: Path) -> None:
+    """Register last so API and auth routes match before the app fallback."""
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="web-assets")
 
-    @app.get("/statistics", include_in_schema=False, response_model=None)
-    @app.get("/terminals", include_in_schema=False, response_model=None)
-    @app.get("/assignment", include_in_schema=False, response_model=None)
-    @app.get("/scans", include_in_schema=False, response_model=None)
-    @app.get("/submissions", include_in_schema=False, response_model=None)
-    @app.get("/edit-assignment", include_in_schema=False, response_model=None)
-    @app.get("/workspace", include_in_schema=False, response_model=None)
-    @app.get("/new-assignment", include_in_schema=False, response_model=None)
-    @app.get("/", include_in_schema=False, response_model=None)
-    def index() -> FileResponse | HTMLResponse:
+    @app.get("/{path:path}", include_in_schema=False, response_model=None)
+    def index(path: str) -> FileResponse | HTMLResponse:
+        if path.split("/", 1)[0] in RESERVED:
+            raise HTTPException(404)
         if not (dist / "index.html").is_file():
             return HTMLResponse(
                 "<html lang='en'><title>Opengrader</title>"

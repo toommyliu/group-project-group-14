@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 from threading import RLock
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
@@ -136,6 +136,7 @@ def create_app(
             workspace.on_commit = None
 
     app = FastAPI(title="Opengrader workspace", lifespan=lifespan)
+    api = APIRouter(prefix="/api")
     add_auth_routes(app, auth_settings or AuthSettings.from_env())
 
     app.state.workspace = workspace
@@ -163,43 +164,43 @@ def create_app(
             content["location"] = asdict(exc.location)
         return JSONResponse(content, status_code=422)
 
-    @app.get("/api/workspace")
+    @api.get("/workspace")
     def get_workspace() -> WorkspaceInfo:
         return workspace.info()
 
-    @app.post("/api/shutdown", status_code=204)
+    @api.post("/shutdown", status_code=204)
     def shutdown() -> Response:
         callback = getattr(app.state, "shutdown", None)
         if callback is not None:
             callback()
         return Response(status_code=204)
 
-    @app.get("/assignments")
+    @api.get("/assignments")
     def assignments() -> list[Assignment]:
         return workspace.assignments()
 
-    @app.post("/api/pipeline-results")
-    def pipeline_results(output: PipelineOutput) -> PipelinePublication:
-        result = publish_pipeline(workspace, output)
+    @api.post("/assignments/{assignment_id}/imports")
+    def import_submissions(
+        assignment_id: str, output: PipelineOutput
+    ) -> PipelinePublication:
+        result = publish_pipeline(workspace, assignment_id, output)
         with registry_lock:
             extraction_source(result.assignment.id)
         return result
 
-    @app.post("/assignments/preview")
+    @api.post("/drafts/preview")
     def preview(request: AssignmentInput) -> QAPreview:
         return preview_qa(request.qa_markdown)
 
-    @app.post("/assignments/preview/edit")
+    @api.post("/drafts/edit")
     def edit_preview(request: VisualEditInput) -> VisualEditResult:
         return edit_assignment_draft(request)
 
-    @app.post(
-        "/assignments/preview/pdf", response_class=Response, responses=PDF_RESPONSES
-    )
+    @api.post("/drafts/pdf", response_class=Response, responses=PDF_RESPONSES)
     def preview_pdf(request: AssignmentPDFInput) -> Response:
         return assignment_pdf_response(preview(request).document, request.version)
 
-    @app.post("/assignments", status_code=201)
+    @api.post("/assignments", status_code=201)
     def create_assignment(request: AssignmentInput) -> Assignment:
         preview(request)
         with registry_lock:
@@ -207,7 +208,7 @@ def create_app(
             extraction_source(assignment.id)
             return assignment
 
-    @app.put("/assignments/{assignment_id}")
+    @api.put("/assignments/{assignment_id}")
     def update_assignment(assignment_id: str, request: AssignmentUpdate) -> Assignment:
         preview(request)
         with registry_lock:
@@ -222,7 +223,7 @@ def create_app(
             extraction_source(assignment_id)
             return assignment
 
-    @app.delete("/assignments/{assignment_id}", status_code=204)
+    @api.delete("/assignments/{assignment_id}", status_code=204)
     async def delete_assignment(
         assignment_id: str, stop_terminal_sessions: bool = False
     ) -> Response:
@@ -256,31 +257,31 @@ def create_app(
                     scan_jobs.stopping.discard(assignment_id)
         return Response(status_code=204)
 
-    @app.get("/assignments/{assignment_id}/source")
+    @api.get("/assignments/{assignment_id}/source")
     def source(assignment_id: str) -> AssignmentInput:
         require_assignment(assignment_id)
         return AssignmentInput(qa_markdown=workspace.assignment_source(assignment_id))
 
-    @app.get("/assignments/{assignment_id}/qa")
+    @api.get("/assignments/{assignment_id}/qa")
     def qa(assignment_id: str) -> QAPreview:
         return preview_qa(workspace.assignment_source(assignment_id))
 
-    @app.get("/assignments/{assignment_id}/pdf")
+    @api.get("/assignments/{assignment_id}/pdf")
     def pdf(assignment_id: str, version: str | None = None) -> Response:
         return assignment_pdf_response(qa(assignment_id).document, version)
 
-    @app.get("/assignments/{assignment_id}/submissions")
+    @api.get("/assignments/{assignment_id}/submissions")
     def submissions(assignment_id: str) -> list[Submission]:
         require_assignment(assignment_id)
         return workspace.submissions(assignment_id)
 
-    @app.get("/assignments/{assignment_id}/statistics")
+    @api.get("/assignments/{assignment_id}/statistics")
     def statistics(assignment_id: str) -> list[AssignmentVersionStatistics]:
         require_assignment(assignment_id)
         return workspace.statistics(assignment_id)
 
-    @app.get("/assignments/{assignment_id}/questions")
-    def questions(assignment_id: str, submission_id: int = 1) -> list[Question]:
+    @api.get("/assignments/{assignment_id}/submissions/{submission_id}/questions")
+    def questions(assignment_id: str, submission_id: int) -> list[Question]:
         require_assignment(assignment_id)
         workspace.document(assignment_id, submission_id)
         return [
@@ -288,24 +289,24 @@ def create_app(
             for answer in workspace.answers(assignment_id, submission_id)
         ]
 
-    @app.get("/assignments/{assignment_id}/submissions/{submission_id}/answers")
+    @api.get("/assignments/{assignment_id}/submissions/{submission_id}/answers")
     def answers(assignment_id: str, submission_id: int) -> list[Answer]:
         return workspace.answers(assignment_id, submission_id)
 
-    @app.get("/assignments/{assignment_id}/submissions/{submission_id}/document")
+    @api.get("/assignments/{assignment_id}/submissions/{submission_id}/document")
     def document(assignment_id: str, submission_id: int) -> Response:
         return Response(
             DOCUMENT.dump_json(workspace.document(assignment_id, submission_id)),
             media_type="application/json",
         )
 
-    @app.get(
+    @api.get(
         "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}"
     )
     def answer(assignment_id: str, submission_id: int, question_id: str) -> Answer:
         return workspace.answer(assignment_id, submission_id, question_id)
 
-    @app.put(
+    @api.put(
         "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}"
     )
     def save(
@@ -313,15 +314,15 @@ def create_app(
     ) -> GradeSaveResult:
         return workspace.save_grade(assignment_id, submission_id, question_id, edit)
 
-    @app.get("/api/assets/{name}")
+    @api.get("/assets/{name}")
     def asset(name: str) -> FileResponse:
         return FileResponse(workspace.asset(f"assets/{name}"))
 
-    @app.get("/api/jobs")
+    @api.get("/jobs")
     def job_status() -> list[FeedbackJob]:
         return workspace.jobs()
 
-    @app.get("/assignments/{assignment_id}/submissions/{submission_id}/feedback")
+    @api.get("/assignments/{assignment_id}/submissions/{submission_id}/feedback")
     def feedback(assignment_id: str, submission_id: int) -> FileResponse:
         job = next(
             (
@@ -339,7 +340,7 @@ def create_app(
             path, media_type="application/pdf", filename=f"feedback-{submission_id}.pdf"
         )
 
-    @app.post("/api/jobs/{assignment_id}/{submission_id}/retry", status_code=204)
+    @api.post("/jobs/{assignment_id}/{submission_id}/retry", status_code=204)
     def retry(assignment_id: str, submission_id: int) -> Response:
         with workspace.connect(write=True) as db:
             db.execute(
@@ -348,7 +349,7 @@ def create_app(
             )
         return Response(status_code=204)
 
-    @app.get("/api/events")
+    @api.get("/events")
     async def events(request: Request, after: int = 0):
         try:
             cursor = int(request.headers.get("last-event-id", after))
@@ -377,7 +378,7 @@ def create_app(
         )
 
     add_scan_routes(
-        app,
+        api,
         scan_store,
         scan_jobs,
         registry_lock,
@@ -386,6 +387,8 @@ def create_app(
             assignment_id, [p.name for p in directories]
         ),
     )
-    add_terminal_routes(app, terminals, require_assignment)
+    add_terminal_routes(app, api, terminals, require_assignment)
+    # Included last: the router copies its routes at inclusion time.
+    app.include_router(api)
     add_web_routes(app, web_dist or Path(__file__).parents[2] / "web" / "dist")
     return app

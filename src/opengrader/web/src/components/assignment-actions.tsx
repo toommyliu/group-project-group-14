@@ -56,7 +56,7 @@ export function AssignmentActions({
         (previous ?? []).filter((item) => item.id !== assignment.id)
       );
       client.removeQueries({ queryKey: ['assignments', assignment.id] });
-      await router.navigate({ to: '/workspace' });
+      await router.navigate({ to: '/assignments' });
       await router.invalidate();
     } catch {
       setError('Assignment deleted. Return to the assignment list.');

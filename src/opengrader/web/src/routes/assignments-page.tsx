@@ -1,25 +1,32 @@
-import { Link, useRouter, useRouterState } from '@tanstack/react-router';
+import {
+  Link,
+  useMatchRoute,
+  useRouter,
+  useRouterState,
+} from '@tanstack/react-router';
 import { ArrowRight, LoaderCircle } from 'lucide-react';
 import { assignmentsQuery } from '@/api/queries';
-import { workspaceRoute } from '@/router';
+import { assignmentsRoute } from '@/router';
 import { PageHeading } from '@/components/page-heading';
 import { Button, buttonVariants } from '@/components/ui/button';
 
 export default function AssignmentsPage() {
-  const assignments = workspaceRoute.useLoaderData();
+  const assignments = assignmentsRoute.useLoaderData();
   const router = useRouter();
-  const pendingAssignment = useRouterState({
-    select: (state) =>
-      state.isLoading && state.location.pathname === '/assignment'
-        ? state.location.search.assignment
-        : undefined,
-  });
+  const navigating = useRouterState({ select: (state) => state.isLoading });
+  const matchRoute = useMatchRoute();
+  const pendingMatch =
+    navigating &&
+    matchRoute({ to: '/assignments/$assignmentId', pending: true });
+  const pendingAssignment = pendingMatch
+    ? pendingMatch.assignmentId
+    : undefined;
   return (
     <>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <PageHeading className="mb-0 flex-1" title="Assignments" />
         <Link
-          to="/new-assignment"
+          to="/assignments/new"
           className={buttonVariants({
             className: 'shrink-0 self-start sm:self-auto',
           })}
@@ -32,8 +39,8 @@ export default function AssignmentsPage() {
           {assignments.map((assignment) => (
             <li key={assignment.id}>
               <Link
-                to="/assignment"
-                search={{ assignment: assignment.id }}
+                to="/assignments/$assignmentId"
+                params={{ assignmentId: assignment.id }}
                 className="group flex min-h-14 items-center justify-between gap-4 border-b py-2 hover:bg-muted/40 motion-safe:transition-colors motion-safe:duration-150"
               >
                 <span className="min-w-0 break-words">

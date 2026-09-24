@@ -170,7 +170,7 @@ class WorkspaceHome(App[str | None]):
     async def action_refresh(self) -> None:
         try:
             self.assignments = TypeAdapter(list[Assignment]).validate_json(
-                self.client.request("GET", "/assignments")
+                self.client.request("GET", "/api/assignments")
             )
             listing = self.query_one(ListView)
             await listing.clear()

@@ -43,7 +43,7 @@ export function FeedbackStatus({
       {job?.status === 'ready' && (
         <a
           className="underline"
-          href={`/assignments/${encodeURIComponent(assignmentId)}/submissions/${submissionId}/feedback`}
+          href={`/api/assignments/${encodeURIComponent(assignmentId)}/submissions/${submissionId}/feedback`}
         >
           Download feedback PDF
         </a>

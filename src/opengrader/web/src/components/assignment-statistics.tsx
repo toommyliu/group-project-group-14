@@ -72,8 +72,8 @@ export function AssignmentStatistics({
           <p>
             No submissions{report.version ? ' for this version' : ''} yet.{' '}
             <Link
-              to="/scans"
-              search={{ assignment: assignmentId }}
+              to="/assignments/$assignmentId/scans"
+              params={{ assignmentId }}
               className="underline underline-offset-4"
             >
               Upload scans
@@ -84,9 +84,9 @@ export function AssignmentStatistics({
           <p>
             No fully graded submissions yet.{' '}
             <Link
-              to="/submissions"
+              to="/assignments/$assignmentId/submissions"
+              params={{ assignmentId }}
               search={{
-                assignment: assignmentId,
                 submission: questions[0]?.submission_id ?? undefined,
               }}
               className="underline underline-offset-4"
@@ -152,9 +152,9 @@ export function AssignmentStatistics({
                     >
                       {item.submission_id !== null ? (
                         <Link
-                          to="/submissions"
+                          to="/assignments/$assignmentId/submissions"
+                          params={{ assignmentId }}
                           search={{
-                            assignment: assignmentId,
                             submission: item.submission_id,
                             question: item.scores.question_id,
                           }}

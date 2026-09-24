@@ -32,8 +32,8 @@ def cls(tmp_path: Path):
     store = Workspace.create(root)
     published = publish_pipeline(
         store,
+        store.assignment_id_for_folder(root),
         PipelineOutput(
-            assignment_id=store.assignment_id_for_folder(root),
             qa_markdown=(root / "qa.md").read_text(encoding="utf-8"),
             submissions_dir=str((root / "student-submissions").resolve()),
         ),
