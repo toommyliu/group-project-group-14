@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { rescaleRubric } from '@/lib/rubric-points';
 import type { QuestionEdit } from '@/api/queries';
 import { Button } from './ui/button';
@@ -19,12 +19,18 @@ import {
   QuestionRowHeading,
 } from './question-row-heading';
 
+const deferredQuestionStyle = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 32rem',
+} satisfies CSSProperties;
+
 export function VisualQuestionEditor({
   edit,
   label,
   hasSubquestions,
   dragHandle,
   compact,
+  deferOffscreen,
   disabled,
   onChange,
   onRemove,
@@ -34,6 +40,7 @@ export function VisualQuestionEditor({
   hasSubquestions: boolean;
   dragHandle: ReactNode;
   compact: boolean;
+  deferOffscreen: boolean;
   disabled: boolean;
   onChange: (edit: QuestionEdit) => void;
   onRemove: () => void;
@@ -89,6 +96,7 @@ export function VisualQuestionEditor({
   return (
     <section
       id={`visual-question-${edit.source_line}`}
+      style={!compact && deferOffscreen ? deferredQuestionStyle : undefined}
       className={
         compact
           ? `scroll-mt-20 ${compactQuestionRowClassName}`

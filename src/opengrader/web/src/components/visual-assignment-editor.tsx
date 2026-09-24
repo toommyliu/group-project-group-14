@@ -1,5 +1,7 @@
 import { ErrorAlert } from '@/components/error-alert';
 import {
+  memo,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -7,6 +9,7 @@ import {
   useRef,
   useState,
   type Ref,
+  type RefObject,
 } from 'react';
 import {
   questionOutlineEntries,
@@ -54,13 +57,14 @@ export type VisualEditorNavigation = {
   navigate: (entry: OutlineEntry) => void;
 };
 
-export function VisualAssignmentEditor({
+export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   ref,
   onOutlineChange,
   onActiveChange,
   source,
   preview,
   disabled,
+  scrollElementRef,
   onPending,
   onResult,
 }: {
@@ -70,6 +74,7 @@ export function VisualAssignmentEditor({
   source: string;
   preview: QAPreview;
   disabled: boolean;
+  scrollElementRef?: RefObject<HTMLElement | null>;
   onPending: () => void;
   onResult: (result: VisualEditResult) => void;
 }) {
@@ -97,6 +102,7 @@ export function VisualAssignmentEditor({
   const versions = metadata.versions;
   const [version, setVersion] = useState(versions[0].key);
   const [draggingParent, setDraggingParent] = useState<number | null>();
+  const editorHeaderRef = useRef<HTMLDivElement>(null);
   const compact = draggingParent !== undefined;
 
   useEffect(() => {
@@ -203,9 +209,34 @@ export function VisualAssignmentEditor({
     [entries, version, onOutlineChange]
   );
 
-  useOutlinePosition(entries, version, compact, onActiveChange);
+  useOutlinePosition(
+    entries,
+    version,
+    compact || !!scrollElementRef,
+    onActiveChange
+  );
 
-  const [navigation, setNavigation] = useState<OutlineEntry | null>(null);
+  const activeEntryKeys = useMemo(
+    () =>
+      new Map(
+        entries
+          .filter((entry) => entry.version === version && entry.line !== null)
+          .map((entry) => [entry.line, entry.key])
+      ),
+    [entries, version]
+  );
+  const updateVisibleQuestion = useCallback(
+    (sourceLine: number) => {
+      const key = activeEntryKeys.get(sourceLine);
+      if (key) onActiveChange(key);
+    },
+    [activeEntryKeys, onActiveChange]
+  );
+
+  const [navigation, setNavigation] = useState<{
+    version: string;
+    line: number | null;
+  } | null>(null);
   useImperativeHandle(
     ref,
     () => ({
@@ -217,7 +248,7 @@ export function VisualAssignmentEditor({
     []
   );
   useLayoutEffect(() => {
-    if (!navigation) return;
+    if (!navigation || navigation.line === null) return;
     const target = document.getElementById(
       `visual-question-${navigation.line}`
     );
@@ -226,6 +257,8 @@ export function VisualAssignmentEditor({
       target.querySelector('textarea')?.focus({ preventScroll: true });
     }
   }, [navigation]);
+
+  const activeGroup = groups.find((group) => group.key === version);
 
   function renderQuestions(
     questions: Question[],
@@ -238,6 +271,11 @@ export function VisualAssignmentEditor({
         questions={questions}
         disabled={disabled}
         compact={compact}
+        scrollElementRef={parent === null ? scrollElementRef : undefined}
+        offsetElementRef={parent === null ? editorHeaderRef : undefined}
+        onVisibleQuestionChange={
+          parent === null ? updateVisibleQuestion : undefined
+        }
         labelPrefix={prefix}
         onDraggingChange={(dragging) =>
           setDraggingParent(dragging ? parent : undefined)
@@ -283,6 +321,7 @@ export function VisualAssignmentEditor({
                 hasSubquestions={!!question.subquestions?.length}
                 dragHandle={dragHandle}
                 compact={compact}
+                deferOffscreen={!scrollElementRef}
                 disabled={disabled}
                 onChange={change}
                 onRemove={() => change({ ...edit, remove: true })}
@@ -309,62 +348,63 @@ export function VisualAssignmentEditor({
 
   return (
     <div id="visual-editor" className="space-y-6">
-      <Label className="block space-y-2 text-sm leading-normal">
-        <span>Title</span>
-        <Input
-          value={metadata.title}
-          disabled={disabled}
-          onChange={(event) => {
-            revision.current += 1;
-            onPending();
-            setMetadata({ ...metadata, title: event.target.value });
-          }}
-        />
-      </Label>
-      <Label className="block space-y-2 text-sm leading-normal">
-        <span>Instructions</span>
-        <Textarea
-          value={metadata.instructions}
-          disabled={disabled}
-          onChange={(event) => {
-            revision.current += 1;
-            onPending();
-            setMetadata({ ...metadata, instructions: event.target.value });
-          }}
-        />
-      </Label>
-      <VersionEditor
-        versions={versions}
-        selected={version}
-        disabled={disabled}
-        onSelect={setVersion}
-        onChange={(versions) => {
-          revision.current += 1;
-          onPending();
-          setMetadata({ ...metadata, versions });
-        }}
-      />
-      {failure && (
-        <ErrorAlert error={failure}>
-          <p>Your visual edits are still here.</p>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
+      <div ref={editorHeaderRef} className="space-y-6">
+        <Label className="block space-y-2 text-sm leading-normal">
+          <span>Title</span>
+          <Input
+            value={metadata.title}
+            disabled={disabled}
+            onChange={(event) => {
+              revision.current += 1;
               onPending();
-              setRetry((value) => value + 1);
+              setMetadata({ ...metadata, title: event.target.value });
             }}
-          >
-            Retry updating draft
-          </Button>
-        </ErrorAlert>
-      )}
-      {/* Keep each version mounted so changing versions preserves unfinished field edits. */}
-      {groups.map(({ key, questions }) => (
-        <div key={key} hidden={key !== version} className="space-y-6">
-          {renderQuestions(questions, key)}
+          />
+        </Label>
+        <Label className="block space-y-2 text-sm leading-normal">
+          <span>Instructions</span>
+          <Textarea
+            value={metadata.instructions}
+            disabled={disabled}
+            onChange={(event) => {
+              revision.current += 1;
+              onPending();
+              setMetadata({ ...metadata, instructions: event.target.value });
+            }}
+          />
+        </Label>
+        <VersionEditor
+          versions={versions}
+          selected={version}
+          disabled={disabled}
+          onSelect={setVersion}
+          onChange={(versions) => {
+            revision.current += 1;
+            onPending();
+            setMetadata({ ...metadata, versions });
+          }}
+        />
+        {failure && (
+          <ErrorAlert error={failure}>
+            <p>Your visual edits are still here.</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                onPending();
+                setRetry((value) => value + 1);
+              }}
+            >
+              Retry updating draft
+            </Button>
+          </ErrorAlert>
+        )}
+      </div>
+      {activeGroup && (
+        <div className="space-y-6">
+          {renderQuestions(activeGroup.questions, activeGroup.key)}
         </div>
-      ))}
+      )}
       <Button
         type="button"
         variant="outline"
@@ -375,4 +415,4 @@ export function VisualAssignmentEditor({
       </Button>
     </div>
   );
-}
+});
