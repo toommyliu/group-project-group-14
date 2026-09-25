@@ -1,4 +1,4 @@
-export type TerminalLinkKind = "url" | "path";
+export type TerminalLinkKind = 'url' | 'path';
 
 export interface TerminalLinkMatch {
   kind: TerminalLinkKind;
@@ -30,7 +30,7 @@ const FILE_PATH_PATTERN =
 const TRAILING_PUNCTUATION_PATTERN = /[.,;!?]+$/;
 
 function trimClosingDelimiters(value: string): string {
-  let output = value.replace(TRAILING_PUNCTUATION_PATTERN, "");
+  let output = value.replace(TRAILING_PUNCTUATION_PATTERN, '');
   if (output.length === 0) return output;
 
   const trimUnbalanced = (open: string, close: string) => {
@@ -42,13 +42,16 @@ function trimClosingDelimiters(value: string): string {
     }
   };
 
-  trimUnbalanced("(", ")");
-  trimUnbalanced("[", "]");
-  trimUnbalanced("{", "}");
+  trimUnbalanced('(', ')');
+  trimUnbalanced('[', ']');
+  trimUnbalanced('{', '}');
   return output;
 }
 
-function overlaps(a: { start: number; end: number }, b: { start: number; end: number }): boolean {
+function overlaps(
+  a: { start: number; end: number },
+  b: { start: number; end: number }
+): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
@@ -56,7 +59,7 @@ function collectMatches(
   line: string,
   kind: TerminalLinkKind,
   pattern: RegExp,
-  existing: TerminalLinkMatch[],
+  existing: TerminalLinkMatch[]
 ): TerminalLinkMatch[] {
   const matches: TerminalLinkMatch[] = [];
   pattern.lastIndex = 0;
@@ -68,7 +71,7 @@ function collectMatches(
 
     const trimmed = trimClosingDelimiters(raw);
     if (trimmed.length === 0) continue;
-    if (kind === "path" && isTerminalUrl(trimmed)) continue;
+    if (kind === 'path' && isTerminalUrl(trimmed)) continue;
 
     const candidate: TerminalLinkMatch = {
       kind,
@@ -77,7 +80,9 @@ function collectMatches(
       end: start + trimmed.length,
     };
 
-    const collides = [...existing, ...matches].some((other) => overlaps(candidate, other));
+    const collides = [...existing, ...matches].some((other) =>
+      overlaps(candidate, other)
+    );
     if (collides) continue;
 
     matches.push(candidate);
@@ -87,8 +92,13 @@ function collectMatches(
 }
 
 export function extractTerminalLinks(line: string): TerminalLinkMatch[] {
-  const urlMatches = collectMatches(line, "url", URL_PATTERN, []);
-  const pathMatches = collectMatches(line, "path", FILE_PATH_PATTERN, urlMatches);
+  const urlMatches = collectMatches(line, 'url', URL_PATTERN, []);
+  const pathMatches = collectMatches(
+    line,
+    'path',
+    FILE_PATH_PATTERN,
+    urlMatches
+  );
   return [...urlMatches, ...pathMatches].toSorted((a, b) => a.start - b.start);
 }
 
@@ -98,7 +108,9 @@ export function isTerminalUrl(value: string): boolean {
 
 export function collectWrappedTerminalLinkLine(
   bufferLineNumber: number,
-  getLine: (bufferLineIndex: number) => TerminalBufferLineLike | null | undefined,
+  getLine: (
+    bufferLineIndex: number
+  ) => TerminalBufferLineLike | null | undefined
 ): WrappedTerminalLinkLine | null {
   const anchorLine = getLine(bufferLineNumber - 1);
   if (!anchorLine) return null;
@@ -138,7 +150,7 @@ export function collectWrappedTerminalLinkLine(
   }
 
   return {
-    text: segments.map((segment) => segment.text).join(""),
+    text: segments.map((segment) => segment.text).join(''),
     segments,
   };
 }

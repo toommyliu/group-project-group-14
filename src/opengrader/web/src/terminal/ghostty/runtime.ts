@@ -1,5 +1,5 @@
-import ghosttyWasmUrl from "./vendor/ghostty-vt.wasm?url";
-import ghosttyWritePtyWasmUrl from "./vendor/ghostty-write-pty.wasm?url&no-inline";
+import ghosttyWasmUrl from './vendor/ghostty-vt.wasm?url';
+import ghosttyWritePtyWasmUrl from './vendor/ghostty-write-pty.wasm?url&no-inline';
 
 type WasmFunction = (...args: Array<number | bigint>) => number;
 
@@ -32,15 +32,17 @@ export class GhosttyRuntime {
     this.exports = instance.exports;
     const memory = instance.exports.memory;
     if (!(memory instanceof WebAssembly.Memory)) {
-      throw new Error("libghostty-vt did not export WebAssembly memory");
+      throw new Error('libghostty-vt did not export WebAssembly memory');
     }
     this.memory = memory;
     this.memoryView = new DataView(memory.buffer);
-    const jsonPointer = this.call("ghostty_type_json");
+    const jsonPointer = this.call('ghostty_type_json');
     const bytes = new Uint8Array(memory.buffer);
     let end = jsonPointer;
     while (end < bytes.length && bytes[end] !== 0) end += 1;
-    this.layouts = JSON.parse(textDecoder.decode(bytes.subarray(jsonPointer, end))) as TypeLayouts;
+    this.layouts = JSON.parse(
+      textDecoder.decode(bytes.subarray(jsonPointer, end))
+    ) as TypeLayouts;
   }
 
   static async load(): Promise<GhosttyRuntime> {
@@ -55,12 +57,17 @@ export class GhosttyRuntime {
           if (!instance) return;
           const memory = instance.exports.memory;
           if (!(memory instanceof WebAssembly.Memory)) return;
-          const message = textDecoder.decode(new Uint8Array(memory.buffer, pointer, length));
-          console.debug("[libghostty-vt]", message);
+          const message = textDecoder.decode(
+            new Uint8Array(memory.buffer, pointer, length)
+          );
+          console.debug('[libghostty-vt]', message);
         },
       },
     };
-    const result = await WebAssembly.instantiate(await response.arrayBuffer(), imports);
+    const result = await WebAssembly.instantiate(
+      await response.arrayBuffer(),
+      imports
+    );
     instance = result.instance;
     const runtime = new GhosttyRuntime(result.instance);
     await runtime.installWritePtyTrampoline();
@@ -69,7 +76,7 @@ export class GhosttyRuntime {
 
   call(name: string, ...args: Array<number | bigint>): number {
     const fn = this.exports[name];
-    if (typeof fn !== "function") {
+    if (typeof fn !== 'function') {
       throw new Error(`libghostty-vt export is unavailable: ${name}`);
     }
     return (fn as WasmFunction)(...args);
@@ -77,24 +84,27 @@ export class GhosttyRuntime {
 
   layout(name: string): TypeLayout {
     const layout = this.layouts[name];
-    if (!layout) throw new Error(`libghostty-vt type layout is unavailable: ${name}`);
+    if (!layout)
+      throw new Error(`libghostty-vt type layout is unavailable: ${name}`);
     return layout;
   }
 
   alloc(size: number): number {
-    const pointer = this.call("ghostty_wasm_alloc_u8_array", size);
-    if (pointer === 0) throw new Error(`libghostty-vt failed to allocate ${size} bytes`);
+    const pointer = this.call('ghostty_wasm_alloc_u8_array', size);
+    if (pointer === 0)
+      throw new Error(`libghostty-vt failed to allocate ${size} bytes`);
     new Uint8Array(this.memory.buffer, pointer, size).fill(0);
     return pointer;
   }
 
   free(pointer: number, size: number): void {
-    if (pointer !== 0) this.call("ghostty_wasm_free_u8_array", pointer, size);
+    if (pointer !== 0) this.call('ghostty_wasm_free_u8_array', pointer, size);
   }
 
   allocOpaque(): number {
-    const pointer = this.call("ghostty_wasm_alloc_opaque");
-    if (pointer === 0) throw new Error("libghostty-vt failed to allocate an opaque pointer");
+    const pointer = this.call('ghostty_wasm_alloc_opaque');
+    if (pointer === 0)
+      throw new Error('libghostty-vt failed to allocate an opaque pointer');
     // The slot is uninitialized until a *_new call writes it; zero it so dispose
     // paths that run after a partial initialization never free a garbage pointer.
     new DataView(this.memory.buffer).setUint32(pointer, 0, true);
@@ -102,7 +112,7 @@ export class GhosttyRuntime {
   }
 
   freeOpaque(pointer: number): void {
-    if (pointer !== 0) this.call("ghostty_wasm_free_opaque", pointer);
+    if (pointer !== 0) this.call('ghostty_wasm_free_opaque', pointer);
   }
 
   readPointer(slot: number): number {
@@ -111,18 +121,18 @@ export class GhosttyRuntime {
 
   attachPtyWriter(terminal: number, writer: (data: string) => void): number {
     if (this.writePtyFunctionIndex === 0) {
-      throw new Error("libghostty-vt PTY callback trampoline is unavailable");
+      throw new Error('libghostty-vt PTY callback trampoline is unavailable');
     }
     const id = this.nextPtyWriterId++;
     this.ptyWriters.set(id, writer);
-    this.call("ghostty_terminal_set", terminal, 0, id);
-    this.call("ghostty_terminal_set", terminal, 1, this.writePtyFunctionIndex);
+    this.call('ghostty_terminal_set', terminal, 0, id);
+    this.call('ghostty_terminal_set', terminal, 1, this.writePtyFunctionIndex);
     return id;
   }
 
   detachPtyWriter(terminal: number, id: number): void {
-    this.call("ghostty_terminal_set", terminal, 1, 0);
-    this.call("ghostty_terminal_set", terminal, 0, 0);
+    this.call('ghostty_terminal_set', terminal, 1, 0);
+    this.call('ghostty_terminal_set', terminal, 0, 0);
     this.ptyWriters.delete(id);
   }
 
@@ -142,27 +152,35 @@ export class GhosttyRuntime {
     return this.memoryView;
   }
 
-  setField(pointer: number, structName: string, fieldName: string, value: number): void {
+  setField(
+    pointer: number,
+    structName: string,
+    fieldName: string,
+    value: number
+  ): void {
     const field = this.layout(structName).fields[fieldName];
-    if (!field) throw new Error(`libghostty-vt field is unavailable: ${structName}.${fieldName}`);
+    if (!field)
+      throw new Error(
+        `libghostty-vt field is unavailable: ${structName}.${fieldName}`
+      );
     const view = this.currentMemoryView();
     const offset = pointer + field.offset;
     switch (field.type) {
-      case "bool":
-      case "u8":
+      case 'bool':
+      case 'u8':
         view.setUint8(offset, value);
         return;
-      case "u16":
+      case 'u16':
         view.setUint16(offset, value, true);
         return;
-      case "i32":
+      case 'i32':
         view.setInt32(offset, value, true);
         return;
-      case "u32":
-      case "enum":
+      case 'u32':
+      case 'enum':
         view.setUint32(offset, value, true);
         return;
-      case "u64":
+      case 'u64':
         view.setBigUint64(offset, BigInt(value), true);
         return;
       default:
@@ -172,21 +190,24 @@ export class GhosttyRuntime {
 
   readField(pointer: number, structName: string, fieldName: string): number {
     const field = this.layout(structName).fields[fieldName];
-    if (!field) throw new Error(`libghostty-vt field is unavailable: ${structName}.${fieldName}`);
+    if (!field)
+      throw new Error(
+        `libghostty-vt field is unavailable: ${structName}.${fieldName}`
+      );
     const view = this.currentMemoryView();
     const offset = pointer + field.offset;
     switch (field.type) {
-      case "bool":
-      case "u8":
+      case 'bool':
+      case 'u8':
         return view.getUint8(offset);
-      case "u16":
+      case 'u16':
         return view.getUint16(offset, true);
-      case "i32":
+      case 'i32':
         return view.getInt32(offset, true);
-      case "u32":
-      case "enum":
+      case 'u32':
+      case 'enum':
         return view.getUint32(offset, true);
-      case "u64":
+      case 'u64':
         return Number(view.getBigUint64(offset, true));
       default:
         throw new Error(`Unsupported libghostty-vt field type: ${field.type}`);
@@ -196,21 +217,35 @@ export class GhosttyRuntime {
   private async installWritePtyTrampoline(): Promise<void> {
     const response = await fetch(ghosttyWritePtyWasmUrl);
     if (!response.ok) {
-      throw new Error(`Unable to load the libghostty-vt PTY trampoline (${response.status})`);
+      throw new Error(
+        `Unable to load the libghostty-vt PTY trampoline (${response.status})`
+      );
     }
     const result = await WebAssembly.instantiate(await response.arrayBuffer(), {
       env: {
-        og_write_pty: (_terminal: number, userdata: number, pointer: number, length: number) => {
+        og_write_pty: (
+          _terminal: number,
+          userdata: number,
+          pointer: number,
+          length: number
+        ) => {
           const writer = this.ptyWriters.get(userdata);
           if (!writer || length === 0) return;
-          writer(textDecoder.decode(new Uint8Array(this.memory.buffer, pointer, length)));
+          writer(
+            textDecoder.decode(
+              new Uint8Array(this.memory.buffer, pointer, length)
+            )
+          );
         },
       },
     });
     const trampoline = result.instance.exports.ghostty_write_pty;
     const table = this.exports.__indirect_function_table;
-    if (typeof trampoline !== "function" || !(table instanceof WebAssembly.Table)) {
-      throw new Error("libghostty-vt did not expose its callback table");
+    if (
+      typeof trampoline !== 'function' ||
+      !(table instanceof WebAssembly.Table)
+    ) {
+      throw new Error('libghostty-vt did not expose its callback table');
     }
     const index = table.length;
     // grow-then-set instead of grow(1, fn): WebKit stores a grow init value
