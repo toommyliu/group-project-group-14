@@ -86,6 +86,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignment-summaries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Assignment Summaries */
+        get: operations["assignment_summaries_api_assignment_summaries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assignments/{assignment_id}/imports": {
         parameters: {
             query?: never;
@@ -732,6 +749,29 @@ export interface components {
             /** Submission Id */
             submission_id: number | null;
             scores: components["schemas"]["QuestionStatistics"];
+        };
+        /** AssignmentSummary */
+        AssignmentSummary: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Question Count */
+            question_count: number | null;
+            /** Possible Points */
+            possible_points: number | null;
+            /** Version Count */
+            version_count: number;
+            /** Submission Count */
+            submission_count: number;
+            /** Graded Submission Count */
+            graded_submission_count: number;
+            /** Response Count */
+            response_count: number;
+            /** Graded Response Count */
+            graded_response_count: number;
+            /** Average Percent */
+            average_percent: number | null;
         };
         /** AssignmentUpdate */
         AssignmentUpdate: {
@@ -1572,6 +1612,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assignment_summaries_api_assignment_summaries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignmentSummary"][];
                 };
             };
         };

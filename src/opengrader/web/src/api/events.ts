@@ -32,6 +32,7 @@ export async function observeWorkspace(queries: QueryClient) {
         queryKey: ['assignments'],
         exact: true,
       });
+      void queries.invalidateQueries({ queryKey: ['assignment-summaries'] });
       void queries.invalidateQueries({ queryKey: ['feedback-jobs'] });
     }, 16);
   };

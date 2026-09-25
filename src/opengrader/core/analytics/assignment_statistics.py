@@ -27,6 +27,63 @@ class AssignmentVersionStatistics:
     questions: list[AssignmentQuestionStatistics]
 
 
+@dataclass(frozen=True)
+class AssignmentProgress:
+    # None when versions differ in question count or points.
+    question_count: int | None
+    possible_points: float | None
+    version_count: int
+    submission_count: int
+    graded_submission_count: int
+    response_count: int
+    graded_response_count: int
+    average_percent: float | None
+
+
+def assignment_progress(
+    document: QADocument, submissions: list[Submission]
+) -> AssignmentProgress:
+    """Count grading progress with the same completeness rules as the statistics."""
+    versions = {
+        version: flatten_question_contexts(questions)
+        for version, questions in (
+            document.version_questions or {None: document.questions}
+        ).items()
+    }
+    shapes = {
+        (len(contexts), sum(q.points for q in contexts))
+        for contexts in versions.values()
+    }
+    question_count, possible_points = (
+        shapes.pop() if len(shapes) == 1 else (None, None)
+    )
+    responses = graded_responses = complete = 0
+    percents = []
+    for submission in submissions:
+        contexts = versions.get(submission.version)
+        if contexts is None:
+            continue
+        scores = [submission.question_scores.get(q.question_id) for q in contexts]
+        graded = [score for score in scores if score is not None]
+        responses += len(scores)
+        graded_responses += len(graded)
+        if not graded or len(graded) < len(contexts):
+            continue
+        complete += 1
+        if possible := sum(q.points for q in contexts):
+            percents.append(sum(graded) / possible * 100)
+    return AssignmentProgress(
+        question_count=question_count,
+        possible_points=possible_points,
+        version_count=len(document.version_questions),
+        submission_count=len(submissions),
+        graded_submission_count=complete,
+        response_count=responses,
+        graded_response_count=graded_responses,
+        average_percent=sum(percents) / len(percents) if percents else None,
+    )
+
+
 def assignment_statistics(
     document: QADocument, submissions: list[Submission]
 ) -> list[AssignmentVersionStatistics]:

@@ -39,6 +39,7 @@ from opengrader.core.submissions import load_student_submission_markdown
 from opengrader.core.workspace.models import (
     Answer,
     Assignment,
+    AssignmentSummary,
     FeedbackJob,
     FolderSyncResult,
     GradeSaveResult,
@@ -302,6 +303,10 @@ def create_app(
     @api.get("/assignments")
     def assignments() -> list[Assignment]:
         return workspace.assignments()
+
+    @api.get("/assignment-summaries")
+    def assignment_summaries() -> list[AssignmentSummary]:
+        return workspace.assignment_summaries()
 
     @api.post("/assignments/{assignment_id}/imports")
     def import_submissions(

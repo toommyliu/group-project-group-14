@@ -14,6 +14,7 @@ import {
 } from './lib/workspace-pages';
 import {
   assignmentsQuery,
+  assignmentSummariesQuery,
   assignmentSourceQuery,
   assignmentQAQuery,
   assignmentStatisticsQuery,
@@ -68,7 +69,10 @@ export const assignmentsRoute = createRoute({
       });
   },
   loader: ({ context }) =>
-    context.queryClient.ensureQueryData(assignmentsQuery),
+    context.queryClient.fetchQuery({
+      ...assignmentSummariesQuery,
+      staleTime: 0,
+    }),
   component: lazyRouteComponent(() => import('./routes/assignments-page')),
   pendingComponent: AssignmentsLoading,
   errorComponent: RouteError,

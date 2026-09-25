@@ -163,3 +163,51 @@ def test_versions_and_multipart_questions_use_their_own_points_and_cohorts(tmp_p
         assert b["questions"][0]["submission_id"] == second
         assert c["scores"]["total_submissions"] == 0
         assert c["questions"][0]["scores"]["possible_points"] == 5
+
+
+def test_assignment_summaries_count_grading_progress(tmp_path):
+    workspace = Workspace.create(tmp_path)
+    exam = workspace.create_assignment(
+        "- (10 points) First\n- (10 points) Second\n"
+    ).id
+    publish(workspace, exam, {"q1": 10, "q2": 10})
+    publish(workspace, exam, {"q1": 4, "q2": 6})
+    publish(workspace, exam, {"q1": 8})
+    publish(workspace, exam, {})
+    versioned = workspace.create_assignment("""## Version A
+
+- (10 points) First
+
+## Version B
+
+- (4 points) First
+- (6 points) Second
+""").id
+    publish(workspace, versioned, {"q1": 5}, "A")
+    empty = workspace.create_assignment("- (0 points) Bonus\n").id
+    with TestClient(create_app(tmp_path, process_jobs=False)) as client:
+        response = client.get("/api/assignment-summaries")
+        assert response.status_code == 200, response.text
+        first, second, third = response.json()
+        assert first == {
+            "id": exam,
+            "title": first["title"],
+            "question_count": 2,
+            "possible_points": 20,
+            "version_count": 0,
+            "submission_count": 4,
+            "graded_submission_count": 2,
+            "response_count": 8,
+            "graded_response_count": 5,
+            "average_percent": 75,
+        }
+        assert second["id"] == versioned
+        assert second["version_count"] == 2
+        assert second["question_count"] is None
+        assert second["possible_points"] is None
+        assert second["graded_submission_count"] == 1
+        assert second["average_percent"] == 50
+        assert third["id"] == empty
+        assert third["submission_count"] == 0
+        assert third["response_count"] == 0
+        assert third["average_percent"] is None
