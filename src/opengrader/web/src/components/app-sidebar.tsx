@@ -139,7 +139,10 @@ export function AppSidebar() {
         </SidebarContent>
         <SidebarFooter className="items-start gap-2 px-4 py-3">
           <AuthControl compact={!expanded} />
-          <ModeToggle compact={!expanded} />
+          <ModeToggle
+            compact={!expanded}
+            align={expanded ? 'start' : 'center'}
+          />
         </SidebarFooter>
         <SidebarResizeHandle />
       </Sidebar>
