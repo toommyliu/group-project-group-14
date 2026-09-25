@@ -4,6 +4,7 @@ import {
   createRouter,
   lazyRouteComponent,
   notFound,
+  redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
 import {
@@ -19,12 +20,19 @@ import {
   submissionsQuery,
 } from './api/queries';
 import { scansQuery } from './api/scans';
+import { workspaceQuery } from './api/workspace';
 import {
   loadAssignment,
   validateGradingSearch,
 } from './routes/assignment-data';
 import { AssignmentLoading, AssignmentsLoading } from './components/loading';
 import { RouteError, RouteNotFound } from './components/route-error';
+
+/** The single assignment of an active folder session, or null in a normal workspace. */
+async function folderSessionAssignmentId(queryClient: QueryClient) {
+  const workspace = await queryClient.ensureQueryData(workspaceQuery);
+  return workspace.folder_session?.assignment_id ?? null;
+}
 
 const rootRoute = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -36,6 +44,14 @@ const rootRoute = createRootRouteWithContext<{
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
+  beforeLoad: async ({ context }) => {
+    const assignmentId = await folderSessionAssignmentId(context.queryClient);
+    if (assignmentId)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId },
+      });
+  },
   component: lazyRouteComponent(() => import('./routes/home-page')),
   errorComponent: RouteError,
 });
@@ -43,6 +59,14 @@ export const indexRoute = createRoute({
 export const assignmentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments',
+  beforeLoad: async ({ context }) => {
+    const assignmentId = await folderSessionAssignmentId(context.queryClient);
+    if (assignmentId)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId },
+      });
+  },
   loader: ({ context }) =>
     context.queryClient.ensureQueryData(assignmentsQuery),
   component: lazyRouteComponent(() => import('./routes/assignments-page')),
@@ -53,6 +77,15 @@ export const assignmentsRoute = createRoute({
 export const newAssignmentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/new',
+  beforeLoad: async ({ context }) => {
+    // A folder session grades one existing assignment; it cannot create another.
+    const assignmentId = await folderSessionAssignmentId(context.queryClient);
+    if (assignmentId)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId },
+      });
+  },
   component: lazyRouteComponent(() => import('./routes/new-assignment-page')),
   errorComponent: RouteError,
 });
@@ -82,6 +115,15 @@ export const scansRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/$assignmentId/scans',
   remountDeps: ({ params }) => params.assignmentId,
+  beforeLoad: async ({ context, params: { assignmentId } }) => {
+    // Scans cannot be added to a folder session; send bookmarks back to the overview.
+    const workspace = await context.queryClient.ensureQueryData(workspaceQuery);
+    if (workspace.folder_session)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId },
+      });
+  },
   loader: async ({ context, params: { assignmentId } }) => {
     const [assignments, scans, qa] = await Promise.all([
       context.queryClient.ensureQueryData(assignmentsQuery),
@@ -135,6 +177,15 @@ export const terminalsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/$assignmentId/terminals',
   remountDeps: ({ params }) => params.assignmentId,
+  beforeLoad: async ({ context, params: { assignmentId } }) => {
+    // Terminals aren't available in a folder session; send bookmarks back to the overview.
+    const workspace = await context.queryClient.ensureQueryData(workspaceQuery);
+    if (workspace.folder_session)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId },
+      });
+  },
   loader: async ({ context, params: { assignmentId } }) => {
     const assignments =
       await context.queryClient.ensureQueryData(assignmentsQuery);

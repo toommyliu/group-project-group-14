@@ -39,6 +39,7 @@ export type AssignmentDraftOptions =
         assignment: Assignment;
         qa: QAPreview;
         editUnavailableReason?: string;
+        hideDelete?: boolean;
       };
     };
 

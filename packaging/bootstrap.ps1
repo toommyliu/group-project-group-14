@@ -57,8 +57,14 @@ Write-Host ''
 
 if ($SyncSource) {
     Invoke-Step 'Refreshing application files' {
+        # The optional browser app may have been built here, on first use.
+        # Keep that build unless the checkout brings one of its own.
+        $keepWebDist = @()
+        if (-not (Test-Path (Join-Path $SyncSource 'src\opengrader\web\dist\index.html'))) {
+            $keepWebDist = @((Join-Path $AppDir 'src\opengrader\web\dist'))
+        }
         robocopy $SyncSource $AppDir /MIR /NFL /NDL /NJH /NJS /NP `
-            /XD .git .venv __pycache__ .pytest_cache .tui_cache out
+            /XD .git .venv __pycache__ .pytest_cache .tui_cache out node_modules @keepWebDist
         if ($LASTEXITCODE -lt 8) { $global:LASTEXITCODE = 0 }
     }
     $updatedLauncher = Join-Path $AppDir 'packaging\bootstrap.ps1'

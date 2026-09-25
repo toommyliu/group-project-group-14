@@ -5,7 +5,51 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
 OS="$(uname -s)"
 
+# --build-web: build the browser app now, from this checkout, so the first
+# "Open in browser" a user presses doesn't have to. Optional and best effort
+# — no flag, no pnpm, or a failed build all fall back to what already happens
+# without this: classic offers to build it itself, once, on first use.
+BUILD_WEB=""
+for arg in "$@"; do
+  case "$arg" in
+    --build-web) BUILD_WEB=1 ;;
+  esac
+done
+
 [[ -f "$SRC/pyproject.toml" ]] || { echo "error: run from a repo checkout"; exit 1; }
+
+_find_pnpm() {
+  if command -v pnpm >/dev/null 2>&1; then
+    command -v pnpm
+    return 0
+  fi
+  # Where a desktop-launched shell (or this script's own PATH) might not
+  # look: Homebrew, MacPorts, per-user installs.
+  for dir in /opt/homebrew/bin /usr/local/bin /opt/local/bin; do
+    if [[ -x "$dir/pnpm" ]]; then
+      echo "$dir/pnpm"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ -n "$BUILD_WEB" ]]; then
+  WEB_SRC="$SRC/src/opengrader/web"
+  if PNPM_BIN="$(_find_pnpm)"; then
+    echo "Building the browser app (needs the internet once)…"
+    # pnpm is a Node script: its own folder (MacPorts, Homebrew) holds node too.
+    export PATH="$(dirname "$PNPM_BIN"):$PATH"
+    if "$PNPM_BIN" --dir "$WEB_SRC" install --frozen-lockfile \
+        && "$PNPM_BIN" --dir "$WEB_SRC" build; then
+      echo "  ✔ Browser app built"
+    else
+      echo "  ⚠ Browser app build failed — continuing without it (classic will offer to build it later)"
+    fi
+  else
+    echo "  ⚠ --build-web given but pnpm was not found — continuing without it"
+  fi
+fi
 
 if [[ "$OS" == "Darwin" ]]; then
   ROOT="$HOME/Library/Application Support/Opengrader"
@@ -20,14 +64,20 @@ mkdir -p "$ROOT/app" 2>/dev/null || { echo "error: cannot create $ROOT (permissi
 [[ -w "$ROOT" ]] || { echo "error: $ROOT is not writable"; exit 1; }
 
 if command -v rsync >/dev/null 2>&1; then
+  # Keep a browser app built in the installed copy unless this checkout has one.
+  KEEP_WEB_DIST=""
+  [[ -f "$SRC/src/opengrader/web/dist/index.html" ]] || KEEP_WEB_DIST=1
   rsync -a --delete \
     --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
     --exclude '.pytest_cache' --exclude '.tui_cache' --exclude 'out' \
+    --exclude 'node_modules' \
+    ${KEEP_WEB_DIST:+--exclude=/src/opengrader/web/dist} \
     "$SRC/" "$ROOT/app/"
 else
   rm -rf "$ROOT/app"; mkdir -p "$ROOT/app"
   tar -C "$SRC" --exclude .git --exclude .venv --exclude __pycache__ \
-      --exclude .pytest_cache --exclude .tui_cache --exclude out -cf - . \
+      --exclude .pytest_cache --exclude .tui_cache --exclude out \
+      --exclude node_modules -cf - . \
     | tar -C "$ROOT/app" -xf -
 fi
 

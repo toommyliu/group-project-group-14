@@ -86,10 +86,16 @@ say "  Opengrader — checking environment"
 say ""
 
 if [[ -n "$SYNC_SOURCE" ]]; then
+  # The optional browser app may have been built here, on first use. Keep that
+  # build unless the checkout brings one of its own (which then replaces it).
+  KEEP_WEB_DIST=""
+  [[ -f "$SYNC_SOURCE/src/opengrader/web/dist/index.html" ]] || KEEP_WEB_DIST=1
   run_step "Refreshing application files" \
     rsync -a --delete \
       --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
       --exclude '.pytest_cache' --exclude '.tui_cache' --exclude 'out' \
+      --exclude 'node_modules' \
+      ${KEEP_WEB_DIST:+--exclude=/src/opengrader/web/dist} \
       "$SYNC_SOURCE/" "$APP_DIR/"
   if [[ -f "$APP_DIR/packaging/bootstrap.sh" ]]; then
     install -m 755 "$APP_DIR/packaging/bootstrap.sh" "$SCRIPT_DIR/.bootstrap.sh.new" &&

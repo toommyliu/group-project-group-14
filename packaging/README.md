@@ -24,7 +24,8 @@ Two different audiences, deliberately separate: the **desktop icon** above is
 for an instructor who never opens a terminal, while `opengrader` /
 `install-command.sh` below are for someone who lives in one. They also open
 different apps: the icon runs **`opengrader classic`** — Tools & Settings with
-a *Start grading* card, grading class folders in place, no workspace service —
+a *Start grading* card, grading class folders in place, no workspace service
+unless the user opts in to *Open in browser* (Tools → Browser app) —
 while `opengrader tui` in a terminal opens a **workspace** straight to its
 assignment list, shared live with the web app.
 
@@ -186,6 +187,38 @@ That's it. An **Opengrader** icon appears on the Desktop; double-clicking it
 opens a terminal window, quietly verifies/installs everything, then launches
 the classic app (`opengrader classic`). The first launch takes a minute or two (Python + dependencies);
 subsequent launches are instant.
+
+### The browser app is optional
+
+Nothing above installs Node.js or pnpm, and nothing needs them: the browser
+app is opt-in (Tools → *Browser app* → *Show Open in browser*). Ticking it
+also shows a small health panel there — whether Node.js and pnpm are found
+(path + version, or an install hint when they're not) and whether the browser
+app is built and up to date, stale (its web files changed since it was last
+built) or not built at all — with *Check again* and *Build*/*Rebuild browser
+app* buttons; nothing in it runs while the section is unticked. The first
+press of *Open in browser* on a machine without a built (or an out-of-date)
+web app offers to build it there too (`pnpm install --frozen-lockfile` +
+`vite build` inside the installed copy, logged to `web-build.log` beside the
+AI settings); with no pnpm or corepack it only says what to install, or —
+for a stale build — opens the existing one anyway and says so.
+
+To spare users that step, either pass **`--build-web`** to `install.sh` (or
+**`-BuildWeb`** to `install.ps1`) — it runs the same `pnpm install
+--frozen-lockfile && pnpm build` against this checkout before copying, best
+effort: no pnpm found, or a failed build, just prints a warning and installs
+without it — or build the web app yourself first — `pnpm --dir
+src/opengrader/web install --frozen-lockfile && pnpm --dir
+src/opengrader/web build`. Either way `web/dist/` is copied with everything
+else. `node_modules/` never is: `install.sh`/`.ps1` and the launch-time
+refresh in `bootstrap.sh`/`.ps1` exclude it. A `dist/` built in the installed
+copy is kept by both whenever the checkout has none of its own (with
+rsync/robocopy; the `tar` fallback starts clean); a checkout that does have
+one replaces it. A build made from older sources is no longer silently
+served as current — the health panel (and *Open in browser*) detect it as
+stale by comparing the sources' fingerprint against the stamp `build_web`
+writes into `dist/`, falling back to file mtimes for a `dist/` built by hand
+that carries no stamp.
 
 ## How it works
 

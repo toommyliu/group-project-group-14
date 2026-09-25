@@ -2,7 +2,9 @@ import type { CSSProperties, PropsWithChildren } from 'react';
 import { useMatchRoute } from '@tanstack/react-router';
 import { cn } from 'cn';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
+import { useFolderSession } from '@/hooks/use-folder-session';
 import { AppSidebar } from '@/components/app-sidebar';
+import { FolderSessionBanner } from '@/components/folder-session-banner';
 import {
   SidebarInset,
   SidebarProvider,
@@ -31,6 +33,7 @@ export function App({ children }: PropsWithChildren) {
   const sidebarExpanded = usePreferences((state) => state.sidebarExpanded);
   const sidebarWidth = useSidebarWidth();
   const { assignment, pathname } = useAssignmentNavigation();
+  const folderSession = useFolderSession();
   const matchRoute = useMatchRoute();
   const overview =
     assignment &&
@@ -77,6 +80,9 @@ export function App({ children }: PropsWithChildren) {
             tabIndex={-1}
           >
             {!home && <MobileSidebarTrigger />}
+            {folderSession && assignment && (
+              <FolderSessionBanner session={folderSession} />
+            )}
             {children}
           </div>
         </SidebarInset>

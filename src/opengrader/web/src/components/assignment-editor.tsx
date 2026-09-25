@@ -553,7 +553,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
           }
         />
       </form>
-      {overview && (
+      {overview && (!readOnly || !overview.hideDelete) && (
         <footer className="z-30 -mx-4 flex shrink-0 justify-end gap-3 border-t bg-background px-4 py-3 sm:-mx-8 sm:px-8">
           {!readOnly && (
             <Button
@@ -570,10 +570,12 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
               Save changes
             </Button>
           )}
-          <AssignmentActions
-            assignment={overview.assignment}
-            onDeleted={allowLeave}
-          />
+          {!overview.hideDelete && (
+            <AssignmentActions
+              assignment={overview.assignment}
+              onDeleted={allowLeave}
+            />
+          )}
         </footer>
       )}
     </div>

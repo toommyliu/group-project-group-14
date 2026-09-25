@@ -9,6 +9,7 @@ import {
   ScanLine,
 } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
+import { useFolderSession } from '@/hooks/use-folder-session';
 import { ModeToggle } from './mode-toggle';
 import { AuthControl } from './auth-control';
 import {
@@ -31,6 +32,7 @@ const menuButtonClass =
 
 export function AppSidebar() {
   const { assignment } = useAssignmentNavigation();
+  const folderSession = useFolderSession();
   const matchRoute = useMatchRoute();
   const pages = useContext(WorkspacePages);
   const gradingPage = pages.find(
@@ -51,33 +53,38 @@ export function AppSidebar() {
     Boolean(matchRoute({ to: '/assignments/new', pending: true }));
   const expanded = isMobile ? openMobile : open;
   const close = () => setOpenMobile(false);
-  const destinations = [
-    {
-      to: '/assignments/$assignmentId',
-      title: 'Overview',
-      icon: BookOpen,
-    },
-    {
-      to: '/assignments/$assignmentId/scans',
-      title: 'Scans',
-      icon: ScanLine,
-    },
-    {
-      to: '/assignments/$assignmentId/submissions',
-      title: 'Submissions',
-      icon: Files,
-    },
-    {
-      to: '/assignments/$assignmentId/statistics',
-      title: 'Statistics',
-      icon: ChartColumn,
-    },
-    // {
-    //   to: '/assignments/$assignmentId/terminals',
-    //   title: 'Terminals',
-    //   icon: TerminalSquare,
-    // },
-  ] as const;
+  const destinations = (
+    [
+      {
+        to: '/assignments/$assignmentId',
+        title: 'Overview',
+        icon: BookOpen,
+      },
+      {
+        to: '/assignments/$assignmentId/scans',
+        title: 'Scans',
+        icon: ScanLine,
+      },
+      {
+        to: '/assignments/$assignmentId/submissions',
+        title: 'Submissions',
+        icon: Files,
+      },
+      {
+        to: '/assignments/$assignmentId/statistics',
+        title: 'Statistics',
+        icon: ChartColumn,
+      },
+      // {
+      //   to: '/assignments/$assignmentId/terminals',
+      //   title: 'Terminals',
+      //   icon: TerminalSquare,
+      // },
+    ] as const
+  ).filter(
+    // A folder session grades one class folder: no scans or terminals to manage.
+    (destination) => !folderSession || destination.title !== 'Scans'
+  );
   return (
     <>
       <Sidebar
@@ -90,36 +97,49 @@ export function AppSidebar() {
             className="h-11 w-12 shrink-0 active:translate-y-0!"
             aria-expanded={expanded}
           />
-          <Link
-            to="/"
-            onClick={close}
-            className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            Opengrader
-          </Link>
+          {folderSession ? (
+            <Link
+              to="/assignments/$assignmentId"
+              params={{ assignmentId: folderSession.assignment_id }}
+              onClick={close}
+              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              Opengrader
+            </Link>
+          ) : (
+            <Link
+              to="/"
+              onClick={close}
+              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              Opengrader
+            </Link>
+          )}
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pt-2">
-          <nav aria-label="Workspace" className="w-full">
-            <SidebarGroup className="px-2 py-0">
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    className={menuButtonClass}
-                    tooltip="All assignments"
-                    aria-label="All assignments"
-                    isActive={browsing}
-                    render={<Link to="/assignments" onClick={close} />}
-                    aria-current={browsing ? 'page' : undefined}
-                  >
-                    <LayoutGrid aria-hidden="true" />
-                    <span className="group-data-[collapsible=icon]:hidden">
-                      All assignments
-                    </span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroup>
-          </nav>
+          {!folderSession && (
+            <nav aria-label="Workspace" className="w-full">
+              <SidebarGroup className="px-2 py-0">
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      className={menuButtonClass}
+                      tooltip="All assignments"
+                      aria-label="All assignments"
+                      isActive={browsing}
+                      render={<Link to="/assignments" onClick={close} />}
+                      aria-current={browsing ? 'page' : undefined}
+                    >
+                      <LayoutGrid aria-hidden="true" />
+                      <span className="group-data-[collapsible=icon]:hidden">
+                        All assignments
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroup>
+            </nav>
+          )}
           {assignment && (
             <nav aria-label={assignment.title} className="w-full">
               <SidebarGroup className="px-2 pt-2 pb-0">

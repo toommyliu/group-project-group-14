@@ -95,7 +95,9 @@ def _build_classic_parser() -> ArgumentParser:
         description=(
             "Open the classic grading app: Tools & Settings with a Start "
             "grading card, grading class folders in place. Never uses a "
-            "workspace or starts a service. This is what the desktop icon opens."
+            "workspace or starts a service, except through the opt-in Open in "
+            "browser button (Tools → Browser app). This is what the desktop "
+            "icon opens."
         ),
     )
     _add_folder_arguments(parser)

@@ -386,7 +386,26 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self.switch_to(PAGE_QA_PICKER)
         self._start_extraction_watch(submissions_path, known_active=known_active)
         self._remember_folder()
+        self._warn_if_shared_workspace(submissions_path)
         return True
+
+    def _warn_if_shared_workspace(self, submissions_path: str | Path) -> None:
+        """Say so when browser grades for this folder may not be in its files.
+
+        A folder session writes every browser grade into the files, so no
+        warning then; a normal workspace keeps them until written back.
+        """
+        from opengrader.core.workspace.folder_session import shared_workspace_for
+
+        if shared_workspace_for(submissions_path) is None:
+            return
+        self.notify(
+            "This folder is also in a workspace. Grades entered in the browser "
+            "for it live in the workspace until written back "
+            "(opengrader tui, open it, then W).",
+            severity="warning",
+            timeout=15,
+        )
 
     def _remember_folder(self) -> None:
         """List this class folder on the Start grading card next time.

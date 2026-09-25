@@ -53,34 +53,66 @@ def publish_pipeline(
     assignment = workspace.create_assignment(
         output.qa_markdown, assignment_id=assignment_id
     )
+    for path, source_key in _new_files(workspace, assignment.id, directory, paths):
+        try:
+            _publish_file(workspace, assignment.id, path, source_key)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"Could not publish {path.name}: {exc}") from exc
+    return PipelinePublication(assignment=assignment, submission_count=len(paths))
+
+
+def publish_new_files(
+    workspace: Workspace, assignment_id: str, directory: Path
+) -> tuple[int, list[str]]:
+    """Publish submission files added to a class folder since its import.
+
+    Unlike `publish_pipeline`, one unreadable file (perhaps still being
+    written) does not stop the others; it is reported and tried next time.
+    """
+    directory = directory.resolve()
+    paths = sorted(directory.rglob("*.submission.md"))
+    published = 0
+    problems: list[str] = []
+    for path, source_key in _new_files(workspace, assignment_id, directory, paths):
+        try:
+            _publish_file(workspace, assignment_id, path, source_key)
+        except (OSError, ValueError) as exc:
+            problems.append(f"Could not import {path.name}: {exc}")
+            continue
+        published += 1
+    return published, problems
+
+
+def _new_files(
+    workspace: Workspace, assignment_id: str, directory: Path, paths: list[Path]
+) -> list[tuple[Path, str]]:
     with workspace.connect() as db:
         existing = {
             row[0]
             for row in db.execute(
                 "SELECT source_key FROM submissions WHERE assignment_id=?",
-                (assignment.id,),
+                (assignment_id,),
             )
         }
-    for path in paths:
-        source_key = f"pipeline:{path.relative_to(directory).as_posix()}"
-        if source_key in existing:
-            continue
-        try:
-            document = load_student_submission_markdown(path)
-            if not document.questions:
-                raise ValueError(
-                    "The extraction contains no answers. Run extraction again."
-                )
-            publish_submission(
-                workspace,
-                assignment.id,
-                document,
-                asset_root=path.parent,
-                source_key=source_key,
-            )
-        except (OSError, ValueError) as exc:
-            raise ValueError(f"Could not publish {path.name}: {exc}") from exc
-    return PipelinePublication(assignment=assignment, submission_count=len(paths))
+    keyed = [
+        (path, f"pipeline:{path.relative_to(directory).as_posix()}") for path in paths
+    ]
+    return [(path, key) for path, key in keyed if key not in existing]
+
+
+def _publish_file(
+    workspace: Workspace, assignment_id: str, path: Path, source_key: str
+) -> None:
+    document = load_student_submission_markdown(path)
+    if not document.questions:
+        raise ValueError("The extraction contains no answers. Run extraction again.")
+    publish_submission(
+        workspace,
+        assignment_id,
+        document,
+        asset_root=path.parent,
+        source_key=source_key,
+    )
 
 
 def publish_submission(

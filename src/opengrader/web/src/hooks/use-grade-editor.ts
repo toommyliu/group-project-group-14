@@ -62,6 +62,7 @@ export function useGradeEditor({
   const feedback = useRef<HTMLTextAreaElement>(null);
   const scoreInput = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState('');
+  const [folderWarning, setFolderWarning] = useState('');
   const [error, setError] = useState('');
   const errorRef = useRef('');
   const [leaving, setLeaving] = useState(false);
@@ -150,6 +151,7 @@ export function useGradeEditor({
     if (errorRef.current) return Promise.resolve(false);
     if (!hasChanges()) return Promise.resolve(true);
     setSaving(true);
+    let lastFolderStatus: 'written' | 'unchanged' | 'failed' | null = null;
     const request = (async () => {
       while (hasChanges()) {
         const value = draftRef.current;
@@ -188,6 +190,12 @@ export function useGradeEditor({
           setSaved(result.answer);
           replaceDraft(acknowledgeDraft(draftRef.current, body, result.answer));
           cache(result.answer);
+          lastFolderStatus = result.folder?.status ?? null;
+          setFolderWarning(
+            result.folder?.status === 'failed'
+              ? result.folder.message || 'Saved here, but not in the file.'
+              : ''
+          );
           if (hasChanges()) storeDraft();
           else journal.clear();
         } catch (cause) {
@@ -208,7 +216,7 @@ export function useGradeEditor({
           return false;
         }
       }
-      setMessage('Saved');
+      setMessage(lastFolderStatus === 'written' ? 'Saved to file' : 'Saved');
       return true;
     })();
     flight.current = request;
@@ -279,6 +287,7 @@ export function useGradeEditor({
       replaceDraft(draftFor(fresh));
       cache(fresh);
       fail('');
+      setFolderWarning('');
       setMessage('Saved answer reloaded.');
     } catch (cause) {
       fail(errorMessage(cause, 'Could not reload the answer. Try again.'));
@@ -329,6 +338,7 @@ export function useGradeEditor({
       fail(errorMessage(cause, 'Could not preserve this draft.'));
       return;
     }
+    setFolderWarning('');
     fail('Recovered your draft. Review it, then retry saving.');
   }
 
@@ -346,6 +356,7 @@ export function useGradeEditor({
     }
     setConflict(null);
     fail('');
+    setFolderWarning('');
     if (keepDraft) await flush();
     else {
       journal.clear();
@@ -400,6 +411,7 @@ export function useGradeEditor({
     feedback,
     scoreInput,
     message,
+    folderWarning,
     error,
     dirty,
     validScore,

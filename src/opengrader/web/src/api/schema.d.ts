@@ -17,6 +17,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/folder-session/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync Folder Session */
+        post: operations["sync_folder_session_api_folder_session_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/folder-session/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Convert Folder Session */
+        post: operations["convert_folder_session_api_folder_session_convert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/shutdown": {
         parameters: {
             query?: never;
@@ -756,6 +790,61 @@ export interface components {
             /** Artifact */
             artifact: string | null;
         };
+        /** FolderSessionInfo */
+        FolderSessionInfo: {
+            /** Assignment Id */
+            assignment_id: string;
+            /** Assignment Title */
+            assignment_title: string;
+            /** Folder */
+            folder: string;
+        };
+        /** FolderSyncResult */
+        FolderSyncResult: {
+            /**
+             * Imported
+             * @default 0
+             */
+            imported: number;
+            /**
+             * Updated
+             * @default 0
+             */
+            updated: number;
+            /**
+             * Written
+             * @default 0
+             */
+            written: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+        };
+        /**
+         * FolderWrite
+         * @description What happened to the class folder file when a folder session saved a grade.
+         *
+         *     The grade itself is committed either way; a failed file write only means
+         *     the `.submission.md` still has the older value until the next sync.
+         */
+        FolderWrite: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "written" | "unchanged" | "failed";
+            /** Path */
+            path?: string | null;
+            /** Message */
+            message?: string | null;
+        };
         /** GradeEdit */
         GradeEdit: {
             /**
@@ -783,6 +872,7 @@ export interface components {
         /** GradeSaveResult */
         GradeSaveResult: {
             answer: components["schemas"]["Answer"];
+            folder?: components["schemas"]["FolderWrite"] | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1344,6 +1434,7 @@ export interface components {
             actor: string;
             /** Event Cursor */
             event_cursor: number;
+            folder_session?: components["schemas"]["FolderSessionInfo"] | null;
         };
     };
     responses: never;
@@ -1355,6 +1446,46 @@ export interface components {
 export type $defs = Record<string, never>;
 export interface operations {
     get_workspace_api_workspace_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInfo"];
+                };
+            };
+        };
+    };
+    sync_folder_session_api_folder_session_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderSyncResult"];
+                };
+            };
+        };
+    };
+    convert_folder_session_api_folder_session_convert_post: {
         parameters: {
             query?: never;
             header?: never;

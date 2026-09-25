@@ -1,5 +1,5 @@
 import { ErrorAlert } from '@/components/error-alert';
-import { Check, RotateCcw } from 'lucide-react';
+import { Check, RotateCcw, TriangleAlert } from 'lucide-react';
 import type { Answer, Question } from '@/api/queries';
 import { useGradeEditor } from '@/hooks/use-grade-editor';
 import { GradingText } from './grading-text';
@@ -46,6 +46,7 @@ export function GradePanel({
     feedback,
     scoreInput,
     message,
+    folderWarning,
     error,
     dirty,
     validScore,
@@ -92,6 +93,18 @@ export function GradePanel({
             / {question.possible_points}
           </span>
         </p>
+        {folderWarning && !error && (
+          <p
+            role="status"
+            className="col-span-2 flex items-start gap-1.5 text-xs text-muted-foreground"
+          >
+            <TriangleAlert
+              className="mt-0.5 size-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            <span>{folderWarning}</span>
+          </p>
+        )}
       </div>
       {recovered.length > 0 && (
         <div className="mb-4 grid gap-2">

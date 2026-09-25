@@ -1,3 +1,11 @@
+param(
+    # Build the browser app now, from this checkout, so the first "Open in
+    # browser" a user presses doesn't have to. Optional and best effort: no
+    # switch, no pnpm, or a failed build all fall back to what happens
+    # without this — classic offers to build it itself, once, on first use.
+    [switch]$BuildWeb
+)
+
 $ErrorActionPreference = 'Stop'
 
 $Src  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -8,12 +16,37 @@ if (-not (Test-Path (Join-Path $Src 'pyproject.toml'))) {
     exit 1
 }
 
+if ($BuildWeb) {
+    $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
+    if ($pnpm) {
+        $webSrc = Join-Path $Src 'src\opengrader\web'
+        Write-Host 'Building the browser app (needs the internet once)...'
+        & $pnpm.Source --dir $webSrc install --frozen-lockfile
+        if ($LASTEXITCODE -eq 0) {
+            & $pnpm.Source --dir $webSrc build
+        }
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host '  OK Browser app built'
+        } else {
+            Write-Host '  WARN Browser app build failed - continuing without it (classic will offer to build it later)' -ForegroundColor Yellow
+        }
+        $global:LASTEXITCODE = 0
+    } else {
+        Write-Host '  WARN -BuildWeb given but pnpm was not found - continuing without it' -ForegroundColor Yellow
+    }
+}
+
 Write-Host ''
 Write-Host "Installing Opengrader to: $Root"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root 'app') | Out-Null
+# Keep a browser app built in the installed copy unless this checkout has one.
+$keepWebDist = @()
+if (-not (Test-Path (Join-Path $Src 'src\opengrader\web\dist\index.html'))) {
+    $keepWebDist = @((Join-Path $Root 'app\src\opengrader\web\dist'))
+}
 robocopy $Src (Join-Path $Root 'app') /MIR /NFL /NDL /NJH /NJS /NP `
-    /XD .git .venv __pycache__ .pytest_cache .tui_cache out | Out-Null
+    /XD .git .venv __pycache__ .pytest_cache .tui_cache out node_modules @keepWebDist | Out-Null
 if ($LASTEXITCODE -ge 8) {
     Write-Host "error: file copy failed (robocopy exit $LASTEXITCODE)" -ForegroundColor Red
     exit 1

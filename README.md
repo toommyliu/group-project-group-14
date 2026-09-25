@@ -143,6 +143,18 @@ There are two ways into the terminal grading app:
   most recent class folders — press ↩ on one to reopen it, `d` to forget one
   that has moved. F2 comes back to *Start grading*, F3 moves between Tools and
   grading.
+  **Optional browser app:** tick *Show Open in browser* under Tools → *Browser
+  app* to enable the *Open in browser* button on the *Start grading* card. The
+  button opens your class folder as a folder session and shows it in your
+  browser. Every grade you save in the browser writes immediately into the
+  student's `.submission.md` file; edits made in Opengrader (classic) appear in
+  the browser when you switch back. Click **Create a workspace** to switch to
+  shared grading across several graders — after that, browser grades save into
+  the workspace instead, and you write them back to the files with `W` in the
+  TUI (`opengrader tui`, open the assignment). The Tools → *Browser app* section
+  shows a health check with **Check again** and **Build/Rebuild** buttons; a
+  build is needed only once (or run `install.sh --build-web` before handing the
+  app to others). Node.js and pnpm are only needed to build the web app, once.
   ```bash
   uv run opengrader classic
   ```

@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+import re
 import shutil
 from threading import RLock
 
@@ -21,13 +22,25 @@ from opengrader.core.workspace.store import (
     Workspace,
     WorkspaceConflict,
     WorkspaceNotFound,
+    record_event,
 )
+from opengrader.core.workspace.folder_session import (
+    active_folder_session,
+    end_folder_session,
+    folder_lock,
+    folder_session_info,
+    load_folder_session,
+    sync_folder,
+    write_through,
+)
+from opengrader.core.workspace.writeback import WriteBackError
 from opengrader.core.workspace.intake import publish_pipeline, publish_submission
 from opengrader.core.submissions import load_student_submission_markdown
 from opengrader.core.workspace.models import (
     Answer,
     Assignment,
     FeedbackJob,
+    FolderSyncResult,
     GradeSaveResult,
     PipelineOutput,
     PipelinePublication,
@@ -60,6 +73,85 @@ from opengrader.server.workspace.jobs import FeedbackJobs
 
 class AssignmentUpdate(AssignmentInput):
     expected_qa_markdown: str
+
+
+_NOT_IN_FOLDER_SESSION = "Create a workspace first to do this."
+# (method or None for any change, path, message). A folder session grades
+# one class folder whose files are the truth, so the browser hides these;
+# the service refuses them too in case an old tab or script still asks.
+_FOLDER_SESSION_REFUSALS = (
+    (
+        "POST",
+        re.compile(r"/api/assignments/?"),
+        "This browser session grades one class folder, so it cannot add "
+        "assignments. " + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        "DELETE",
+        re.compile(r"/api/assignments/[^/]+/?"),
+        "This browser session grades one class folder, so its assignment "
+        "cannot be deleted here. " + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        "PUT",
+        re.compile(r"/api/assignments/[^/]+/?"),
+        "In a folder session the answer key is the file in the class folder, "
+        "so it cannot be edited here. " + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        None,
+        re.compile(r"/api/assignments/[^/]+/scans(/.*)?"),
+        "Scans cannot be added to a folder session. " + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        None,
+        re.compile(r"/api/(assignments/[^/]+/)?terminals(/.*)?"),
+        "Terminals are not available in a folder session. " + _NOT_IN_FOLDER_SESSION,
+    ),
+)
+
+
+# Creating or starting a terminal is refused above; the socket is closed too,
+# so no shell can be attached to a folder session by any route.
+_TERMINAL_SOCKET = re.compile(r"/api/terminals/[^/]+/ws")
+
+
+def folder_session_refusal(method: str, path: str) -> str | None:
+    if method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    for wanted, pattern, message in _FOLDER_SESSION_REFUSALS:
+        if (wanted is None or wanted == method) and pattern.fullmatch(path):
+            return message
+    return None
+
+
+class FolderSessionGuard:
+    """Refuse workspace-only changes while the folder-session marker exists.
+
+    Plain ASGI rather than `BaseHTTPMiddleware`, which would wrap the event
+    stream's streaming response; everything else passes straight through.
+    """
+
+    def __init__(self, app, root: Path):  # noqa: ANN001 - ASGI app
+        self.app = app
+        self.root = root
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if (
+            scope["type"] == "websocket"
+            and _TERMINAL_SOCKET.fullmatch(scope["path"])
+            and load_folder_session(self.root) is not None
+        ):
+            # Closing before accepting answers the handshake with a 403.
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        if scope["type"] == "http":
+            message = folder_session_refusal(scope["method"], scope["path"])
+            if message is not None and load_folder_session(self.root) is not None:
+                response = JSONResponse({"detail": message}, status_code=409)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def create_app(
@@ -136,6 +228,7 @@ def create_app(
             workspace.on_commit = None
 
     app = FastAPI(title="Opengrader workspace", lifespan=lifespan)
+    app.add_middleware(FolderSessionGuard, root=root)
     api = APIRouter(prefix="/api")
     add_auth_routes(app, auth_settings or AuthSettings.from_env())
 
@@ -166,7 +259,38 @@ def create_app(
 
     @api.get("/workspace")
     def get_workspace() -> WorkspaceInfo:
-        return workspace.info()
+        return workspace.info().model_copy(
+            update={"folder_session": folder_session_info(workspace)}
+        )
+
+    def require_folder_session() -> str:
+        session = active_folder_session(workspace)
+        if session is None:
+            raise HTTPException(409, "This workspace is not a folder session.")
+        return session.assignment_id
+
+    @api.post("/folder-session/sync")
+    def sync_folder_session() -> FolderSyncResult:
+        with folder_lock(root):
+            assignment_id = require_folder_session()
+            try:
+                return sync_folder(workspace, assignment_id)
+            except WriteBackError as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/folder-session/convert")
+    def convert_folder_session() -> WorkspaceInfo:
+        with folder_lock(root):
+            assignment_id = require_folder_session()
+            try:
+                sync_folder(workspace, assignment_id)
+            except WriteBackError:
+                pass  # a moved folder: the grades are all in the workspace anyway
+            end_folder_session(root)
+            # Other open tabs reload the assignment and see the new mode.
+            with workspace.connect(write=True) as db:
+                record_event(db, assignment_id, kind="assignment")
+        return get_workspace()
 
     @api.post("/shutdown", status_code=204)
     def shutdown() -> Response:
@@ -312,7 +436,24 @@ def create_app(
     def save(
         assignment_id: str, submission_id: int, question_id: str, edit: GradeEdit
     ) -> GradeSaveResult:
-        return workspace.save_grade(assignment_id, submission_id, question_id, edit)
+        if load_folder_session(root) is None:
+            return workspace.save_grade(assignment_id, submission_id, question_id, edit)
+        # Held across the commit and the file write so a sync cannot pull
+        # this cell in between; checked again inside in case of a convert.
+        with folder_lock(root):
+            result = workspace.save_grade(
+                assignment_id, submission_id, question_id, edit
+            )
+            session = load_folder_session(root)
+            if session is None or session.assignment_id != assignment_id:
+                return result
+            return result.model_copy(
+                update={
+                    "folder": write_through(
+                        workspace, assignment_id, submission_id, question_id
+                    )
+                }
+            )
 
     @api.get("/assets/{name}")
     def asset(name: str) -> FileResponse:

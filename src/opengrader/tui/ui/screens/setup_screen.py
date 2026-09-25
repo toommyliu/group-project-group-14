@@ -22,7 +22,7 @@ from textual.widgets import (
     Collapsible,
 )
 
-from opengrader.core import app_config
+from opengrader.core import app_config, browser_app
 from opengrader.core.pipeline import (
     STAGE_EXTRACT,
     LlmOptions,
@@ -68,6 +68,8 @@ from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.provider_screen import ProviderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
+from opengrader.tui.ui.widgets.browser_health import BrowserHealth
+from opengrader.tui.ui.widgets.browser_launcher import BrowserLauncher
 from opengrader.tui.ui.widgets.recent_list import RecentList
 
 _CPU_COUNT = os.cpu_count() or 1
@@ -182,6 +184,10 @@ class SetupScreen(Vertical):
         height: auto;
         margin-top: 1;
         color: $text;
+    }
+
+    SetupScreen #browser-open-button {
+        margin-right: 1;
     }
 
     SetupScreen .card-actions {
@@ -458,9 +464,20 @@ class SetupScreen(Vertical):
                         yield self._path_row(
                             "Path to submissions directory…", "tui-sub-path"
                         )
+                    # Opt-in (Tools → Browser app): hidden until the user ticks it.
                     yield self._card_actions(
-                        Button("Launch Grading", variant="success", id="launch-button", compact=True)
+                        Button(
+                            "Open in browser",
+                            id="browser-open-button",
+                            compact=True,
+                            classes=""
+                            if browser_app.load_browser_preferences().enabled
+                            else "hidden",
+                        ),
+                        Button("Launch Grading", variant="success", id="launch-button", compact=True),
                     )
+                    # Where the browser app is running, with Open and Stop.
+                    yield BrowserLauncher(id="browser-launcher")
 
                 yield Static(
                     "[b]RUN THE WHOLE PIPELINE[/b]", id="pipeline-heading",
@@ -1044,6 +1061,39 @@ class SetupScreen(Vertical):
                     )
 
                 with Collapsible(
+                    title="Browser app (optional) — grade a class folder in a web browser",
+                    id="section-browser",
+                    collapsed=True,
+                ):
+                    yield Static(
+                        "Off by default: everything here works without it. Turn "
+                        "it on and the Start grading card gets an Open in "
+                        "browser button that opens the chosen class folder in "
+                        "your web browser. It still runs only on this computer.",
+                        classes="card-hint",
+                    )
+                    yield Checkbox(
+                        "Show Open in browser on the Start grading card",
+                        value=browser_app.load_browser_preferences().enabled,
+                        id="browser-enabled",
+                    )
+                    yield Static(
+                        "The browser grades a copy of the folder kept in a "
+                        "workspace (.opengrader/ inside the class folder), so "
+                        "grades entered there are not in the .submission.md "
+                        "files until you write them back: `opengrader tui`, "
+                        "open the assignment, press W. Grades already in the "
+                        "files come along the first time you open a folder.",
+                        classes="card-hint",
+                    )
+                    yield BrowserHealth(
+                        id="browser-health",
+                        classes=""
+                        if browser_app.load_browser_preferences().enabled
+                        else "hidden",
+                    )
+
+                with Collapsible(
                     title="Import phone photos — per-student PDFs from a folder of photos",
                     id="section-photo-import",
                     collapsed=True,
@@ -1449,6 +1499,8 @@ class SetupScreen(Vertical):
             self.query_one("#pipe-roster-row").set_class(not event.value, "hidden")
         elif event.checkbox.id == "pipe-use-template":
             self.query_one("#pipe-template-row").set_class(not event.value, "hidden")
+        elif event.checkbox.id == "browser-enabled":
+            self._set_browser_enabled(event.value)
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         if event.radio_set.id == "ext-roster-mode":
@@ -1516,6 +1568,8 @@ class SetupScreen(Vertical):
                 return
         if event.button.id == "launch-button":
             self._launch_grading()
+        elif event.button.id == "browser-open-button":
+            self._open_in_browser()
         elif event.button.id == "run-splitter":
             self._run_splitter()
         elif event.button.id == "run-extractor":
@@ -2238,7 +2292,8 @@ class SetupScreen(Vertical):
             self.query_one("#launch-files", Collapsible).collapsed = False
         return found
 
-    def _launch_grading(self) -> None:
+    def _launch_paths(self) -> tuple[str, str] | None:
+        """The card's answer key + submissions, found from the class folder if blank."""
         qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
         sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
         folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
@@ -2253,8 +2308,28 @@ class SetupScreen(Vertical):
                 "Both QA path and Submissions path are required to launch.",
                 severity="error",
             )
-            return
-        self.post_message(self.LaunchRequested(qa_path, sub_path))
+            return None
+        return qa_path, sub_path
+
+    def _launch_grading(self) -> None:
+        paths = self._launch_paths()
+        if paths is not None:
+            self.post_message(self.LaunchRequested(*paths))
+
+    def _open_in_browser(self) -> None:
+        paths = self._launch_paths()
+        if paths is not None:
+            self.query_one(BrowserLauncher).open_folder(*paths)
+
+    def _set_browser_enabled(self, enabled: bool) -> None:
+        self.query_one("#browser-open-button").set_class(not enabled, "hidden")
+        self.query_one(BrowserHealth).set_enabled(enabled)
+        try:
+            browser_app.save_browser_preferences(
+                replace(browser_app.load_browser_preferences(), enabled=enabled)
+            )
+        except OSError as exc:
+            self.app.notify(f"Could not save this choice: {exc}", severity="error")
 
     def _autofill(
         self, input_id: str, path: Path | None, *, checkbox_id: str | None = None

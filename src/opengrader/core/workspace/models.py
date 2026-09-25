@@ -77,14 +77,43 @@ class Answer(BaseModel):
     analysis: str
 
 
+class FolderWrite(BaseModel):
+    """What happened to the class folder file when a folder session saved a grade.
+
+    The grade itself is committed either way; a failed file write only means
+    the `.submission.md` still has the older value until the next sync.
+    """
+
+    status: Literal["written", "unchanged", "failed"]
+    path: str | None = None
+    message: str | None = None
+
+
 class GradeSaveResult(BaseModel):
     answer: Answer
+    # None outside a folder session: nothing is written to the class files.
+    folder: FolderWrite | None = None
+
+
+class FolderSessionInfo(BaseModel):
+    assignment_id: str
+    assignment_title: str
+    folder: str
+
+
+class FolderSyncResult(BaseModel):
+    imported: int = 0
+    updated: int = 0
+    written: int = 0
+    failed: int = 0
+    problems: list[str] = []
 
 
 class WorkspaceInfo(BaseModel):
     id: str
     actor: str
     event_cursor: int
+    folder_session: FolderSessionInfo | None = None
 
 
 class WorkspaceEvent(BaseModel):
