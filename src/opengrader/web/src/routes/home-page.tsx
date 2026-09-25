@@ -108,7 +108,7 @@ export default function HomePage() {
           </div>
         }
       />
-      <Link to="/workspace" className={buttonVariants({ size: 'lg' })}>
+      <Link to="/assignments" className={buttonVariants({ size: 'lg' })}>
         Start grading
       </Link>
       <section

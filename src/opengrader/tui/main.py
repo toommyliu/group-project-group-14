@@ -217,12 +217,13 @@ def _import_as_workspace(qa_file, submissions):
     workspace = Workspace(root)
     assignment_id = workspace.assignment_id_for_folder(root)
     output = PipelineOutput(
-        assignment_id=assignment_id,
         qa_markdown=qa.read_text(encoding="utf-8"),
         submissions_dir=str(subs),
     )
     result = PipelinePublication.model_validate_json(
-        client.request("POST", "/api/pipeline-results", output, timeout=300)
+        client.request(
+            "POST", f"/api/assignments/{assignment_id}/imports", output, timeout=300
+        )
     )
     saved = inputs_for_assignment(workspace, assignment_id)
     if saved is None:
@@ -264,7 +265,7 @@ def _run_workspace(
 
     def fetch() -> list[Assignment]:
         return TypeAdapter(list[Assignment]).validate_json(
-            client.request("GET", "/assignments")
+            client.request("GET", "/api/assignments")
         )
 
     assignments = fetch()

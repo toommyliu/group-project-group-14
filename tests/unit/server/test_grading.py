@@ -58,7 +58,7 @@ student_id: '123'
         source_key="one",
     )
     with TestClient(create_app(tmp_path, process_jobs=False)) as client:
-        url = f"/assignments/{assignment.id}/submissions/1/answers/q1"
+        url = f"/api/assignments/{assignment.id}/submissions/1/answers/q1"
         yield client, url, path, tmp_path
 
 
@@ -89,7 +89,7 @@ def test_save_scores_on_server_and_records_feedback_with_history(workspace):
     assert document.questions[1].points_awarded is None
     history = workspace.history(assignment_id)
     assert len(history) == 1
-    assert client.get(f"/assignments/{assignment_id}/submissions").json()[0][
+    assert client.get(f"/api/assignments/{assignment_id}/submissions").json()[0][
         "question_scores"
     ] == {"q1": 10, "q2": None}
     with TestClient(create_app(home)) as restarted:

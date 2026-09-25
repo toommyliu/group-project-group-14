@@ -1,11 +1,20 @@
 import { createContext } from 'react';
 import { lazyRouteComponent } from '@tanstack/react-router';
-import type { assignmentRoute, overviewRoute, scansRoute } from '@/router';
+import type { overviewRoute, scansRoute, submissionsRoute } from '@/router';
 
 export type WorkspacePage =
-  | { path: '/assignment'; data: typeof overviewRoute.types.loaderData }
-  | { path: '/scans'; data: typeof scansRoute.types.loaderData }
-  | { path: '/submissions'; data: typeof assignmentRoute.types.loaderData };
+  | {
+      path: '/assignments/$assignmentId';
+      data: typeof overviewRoute.types.loaderData;
+    }
+  | {
+      path: '/assignments/$assignmentId/scans';
+      data: typeof scansRoute.types.loaderData;
+    }
+  | {
+      path: '/assignments/$assignmentId/submissions';
+      data: typeof submissionsRoute.types.loaderData;
+    };
 
 export const WorkspacePages = createContext<WorkspacePage[]>([]);
 

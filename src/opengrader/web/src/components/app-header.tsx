@@ -13,7 +13,7 @@ export function AppHeader() {
           Opengrader
         </Link>
         <Link
-          to="/workspace"
+          to="/assignments"
           className="flex min-h-11 flex-1 items-center text-muted-foreground hover:text-foreground"
         >
           Assignments

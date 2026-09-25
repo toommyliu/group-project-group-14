@@ -80,7 +80,7 @@ it('renders summaries, real charts, partial progress, and links to the matching 
   expect(html).toContain('Assignment total score distribution');
   expect(html).toContain('<svg');
   expect(html).toContain(
-    '/submissions?assignment=exam&amp;submission=42&amp;question=q1'
+    '/assignments/exam/submissions?submission=42&amp;question=q1'
   );
   expect(html).toContain('Question statistics');
   expect(html).toContain('10 points possible');
@@ -119,5 +119,5 @@ it('shows ungraded states without manufacturing zero scores and offers the next 
     questions: [],
   });
   expect(empty).toContain('No submissions for this version yet.');
-  expect(empty).toContain('/scans?assignment=exam');
+  expect(empty).toContain('/assignments/exam/scans');
 });

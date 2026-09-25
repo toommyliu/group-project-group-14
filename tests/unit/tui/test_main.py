@@ -44,7 +44,7 @@ def service(monkeypatch, tmp_path):
     def request(self, method, path, **kwargs):
         if path == "/api/workspace":
             return workspace.info().model_dump_json().encode()
-        assert method == "GET" and path == "/assignments"
+        assert method == "GET" and path == "/api/assignments"
         return json.dumps(
             [item.model_dump() for item in workspace.assignments()]
         ).encode()
@@ -382,8 +382,10 @@ def test_home_import_records_the_source_submissions_folder(
     )
 
     def request(self, method, path, body, **kwargs):
-        assert (method, path) == ("POST", "/api/pipeline-results")
-        return publish_pipeline(workspace, body).model_dump_json().encode()
+        assert method == "POST"
+        assignment_id = path.removeprefix("/api/assignments/").removesuffix("/imports")
+        assert path == f"/api/assignments/{assignment_id}/imports"
+        return publish_pipeline(workspace, assignment_id, body).model_dump_json().encode()
 
     monkeypatch.setattr(WorkspaceClient, "request", request)
     imported_root, assignment_id = _import_as_workspace(

@@ -20,11 +20,11 @@ export default function Workspace() {
       for (const match of matches) {
         if (match.status !== 'success' || !match.loaderData) continue;
         switch (match.routeId) {
-          case '/assignment':
+          case '/assignments/$assignmentId':
             return { path: match.routeId, data: match.loaderData };
-          case '/scans':
+          case '/assignments/$assignmentId/scans':
             return { path: match.routeId, data: match.loaderData };
-          case '/submissions':
+          case '/assignments/$assignmentId/submissions':
             return { path: match.routeId, data: match.loaderData };
         }
       }
@@ -77,9 +77,9 @@ export default function Workspace() {
             mode={pageKey(page) === activeKey ? 'visible' : 'hidden'}
           >
             <Suspense fallback={<AssignmentLoading />}>
-              {page.path === '/assignment' ? (
+              {page.path === '/assignments/$assignmentId' ? (
                 <OverviewPage data={page.data} />
-              ) : page.path === '/scans' ? (
+              ) : page.path === '/assignments/$assignmentId/scans' ? (
                 <ScansPage data={page.data} />
               ) : (
                 <SubmissionsPage data={page.data} />

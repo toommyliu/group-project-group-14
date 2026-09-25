@@ -15,7 +15,7 @@ export function scansQuery(assignmentId: string) {
     // The destination loader shares this request when the scans page unmounts.
     queryFn: async () =>
       readData(
-        await client.GET('/assignments/{assignment_id}/scans', {
+        await client.GET('/api/assignments/{assignment_id}/scans', {
           params: { path: { assignment_id: assignmentId } },
         })
       ),
@@ -33,7 +33,7 @@ export function scanBusy(batch: ScanBatch) {
 }
 
 export function scanUrl(assignmentId: string, batchId: string) {
-  return `/assignments/${encodeURIComponent(assignmentId)}/scans/${encodeURIComponent(batchId)}`;
+  return `/api/assignments/${encodeURIComponent(assignmentId)}/scans/${encodeURIComponent(batchId)}`;
 }
 
 export function uploadScan(
@@ -45,7 +45,7 @@ export function uploadScan(
     const request = new XMLHttpRequest();
     request.open(
       'POST',
-      `/assignments/${encodeURIComponent(assignmentId)}/scans?filename=${encodeURIComponent(file.name)}`
+      `/api/assignments/${encodeURIComponent(assignmentId)}/scans?filename=${encodeURIComponent(file.name)}`
     );
     request.setRequestHeader('Content-Type', 'application/pdf');
     request.responseType = 'json';
@@ -74,14 +74,17 @@ export async function analyzeScan(
   pages: number | null
 ) {
   return readData(
-    await client.POST('/assignments/{assignment_id}/scans/{batch_id}/analyze', {
-      params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
-      body: {
-        expected_revision: batch.revision,
-        mode,
-        pages_per_submission: pages,
-      },
-    })
+    await client.POST(
+      '/api/assignments/{assignment_id}/scans/{batch_id}/analyze',
+      {
+        params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
+        body: {
+          expected_revision: batch.revision,
+          mode,
+          pages_per_submission: pages,
+        },
+      }
+    )
   );
 }
 
@@ -92,14 +95,17 @@ export async function reviewScan(
   excluded: number[]
 ) {
   return readData(
-    await client.PUT('/assignments/{assignment_id}/scans/{batch_id}/review', {
-      params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
-      body: {
-        expected_revision: batch.revision,
-        groups,
-        excluded_pages: excluded,
-      },
-    })
+    await client.PUT(
+      '/api/assignments/{assignment_id}/scans/{batch_id}/groups',
+      {
+        params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
+        body: {
+          expected_revision: batch.revision,
+          groups,
+          excluded_pages: excluded,
+        },
+      }
+    )
   );
 }
 
@@ -112,39 +118,48 @@ export async function processScan(
   groupVersions: Record<string, string | null> = {}
 ) {
   return readData(
-    await client.POST('/assignments/{assignment_id}/scans/{batch_id}/process', {
-      params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
-      body: {
-        expected_revision: batch.revision,
-        acknowledge_findings: acknowledge,
-        auto_grade: autoGrade,
-        assignment_version: version || null,
-        group_versions: groupVersions,
-      },
-    })
+    await client.POST(
+      '/api/assignments/{assignment_id}/scans/{batch_id}/process',
+      {
+        params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
+        body: {
+          expected_revision: batch.revision,
+          acknowledge_findings: acknowledge,
+          auto_grade: autoGrade,
+          assignment_version: version || null,
+          group_versions: groupVersions,
+        },
+      }
+    )
   );
 }
 
 export async function removeScan(assignmentId: string, batch: ScanBatch) {
   return readData(
-    await client.POST('/assignments/{assignment_id}/scans/{batch_id}/remove', {
-      params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
-      body: { expected_revision: batch.revision },
-    })
+    await client.POST(
+      '/api/assignments/{assignment_id}/scans/{batch_id}/remove',
+      {
+        params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
+        body: { expected_revision: batch.revision },
+      }
+    )
   );
 }
 
 export async function restoreScan(assignmentId: string, batch: ScanBatch) {
   return readData(
-    await client.POST('/assignments/{assignment_id}/scans/{batch_id}/restore', {
-      params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
-      body: { expected_revision: batch.revision },
-    })
+    await client.POST(
+      '/api/assignments/{assignment_id}/scans/{batch_id}/restore',
+      {
+        params: { path: { assignment_id: assignmentId, batch_id: batch.id } },
+        body: { expected_revision: batch.revision },
+      }
+    )
   );
 }
 
 export async function deleteScan(assignmentId: string, batch: ScanBatch) {
-  await client.DELETE('/assignments/{assignment_id}/scans/{batch_id}', {
+  await client.DELETE('/api/assignments/{assignment_id}/scans/{batch_id}', {
     params: {
       path: { assignment_id: assignmentId, batch_id: batch.id },
       query: { expected_revision: batch.revision },

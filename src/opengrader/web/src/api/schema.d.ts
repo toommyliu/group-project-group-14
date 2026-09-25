@@ -34,7 +34,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments": {
+    "/api/assignments": {
         parameters: {
             query?: never;
             header?: never;
@@ -42,17 +42,17 @@ export interface paths {
             cookie?: never;
         };
         /** Assignments */
-        get: operations["assignments_assignments_get"];
+        get: operations["assignments_api_assignments_get"];
         put?: never;
         /** Create Assignment */
-        post: operations["create_assignment_assignments_post"];
+        post: operations["create_assignment_api_assignments_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/pipeline-results": {
+    "/api/assignments/{assignment_id}/imports": {
         parameters: {
             query?: never;
             header?: never;
@@ -61,15 +61,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pipeline Results */
-        post: operations["pipeline_results_api_pipeline_results_post"];
+        /** Import Submissions */
+        post: operations["import_submissions_api_assignments__assignment_id__imports_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/preview": {
+    "/api/drafts/preview": {
         parameters: {
             query?: never;
             header?: never;
@@ -79,14 +79,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Preview */
-        post: operations["preview_assignments_preview_post"];
+        post: operations["preview_api_drafts_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/preview/edit": {
+    "/api/drafts/edit": {
         parameters: {
             query?: never;
             header?: never;
@@ -96,14 +96,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Edit Preview */
-        post: operations["edit_preview_assignments_preview_edit_post"];
+        post: operations["edit_preview_api_drafts_edit_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/preview/pdf": {
+    "/api/drafts/pdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -113,14 +113,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Preview Pdf */
-        post: operations["preview_pdf_assignments_preview_pdf_post"];
+        post: operations["preview_pdf_api_drafts_pdf_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}": {
+    "/api/assignments/{assignment_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -129,16 +129,16 @@ export interface paths {
         };
         get?: never;
         /** Update Assignment */
-        put: operations["update_assignment_assignments__assignment_id__put"];
+        put: operations["update_assignment_api_assignments__assignment_id__put"];
         post?: never;
         /** Delete Assignment */
-        delete: operations["delete_assignment_assignments__assignment_id__delete"];
+        delete: operations["delete_assignment_api_assignments__assignment_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/source": {
+    "/api/assignments/{assignment_id}/source": {
         parameters: {
             query?: never;
             header?: never;
@@ -146,7 +146,7 @@ export interface paths {
             cookie?: never;
         };
         /** Source */
-        get: operations["source_assignments__assignment_id__source_get"];
+        get: operations["source_api_assignments__assignment_id__source_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -155,7 +155,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/qa": {
+    "/api/assignments/{assignment_id}/qa": {
         parameters: {
             query?: never;
             header?: never;
@@ -163,7 +163,7 @@ export interface paths {
             cookie?: never;
         };
         /** Qa */
-        get: operations["qa_assignments__assignment_id__qa_get"];
+        get: operations["qa_api_assignments__assignment_id__qa_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -172,7 +172,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/pdf": {
+    "/api/assignments/{assignment_id}/pdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -180,7 +180,7 @@ export interface paths {
             cookie?: never;
         };
         /** Pdf */
-        get: operations["pdf_assignments__assignment_id__pdf_get"];
+        get: operations["pdf_api_assignments__assignment_id__pdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -189,7 +189,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/submissions": {
+    "/api/assignments/{assignment_id}/submissions": {
         parameters: {
             query?: never;
             header?: never;
@@ -197,7 +197,7 @@ export interface paths {
             cookie?: never;
         };
         /** Submissions */
-        get: operations["submissions_assignments__assignment_id__submissions_get"];
+        get: operations["submissions_api_assignments__assignment_id__submissions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -206,7 +206,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/statistics": {
+    "/api/assignments/{assignment_id}/statistics": {
         parameters: {
             query?: never;
             header?: never;
@@ -214,7 +214,7 @@ export interface paths {
             cookie?: never;
         };
         /** Statistics */
-        get: operations["statistics_assignments__assignment_id__statistics_get"];
+        get: operations["statistics_api_assignments__assignment_id__statistics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -223,7 +223,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/questions": {
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/questions": {
         parameters: {
             query?: never;
             header?: never;
@@ -231,7 +231,7 @@ export interface paths {
             cookie?: never;
         };
         /** Questions */
-        get: operations["questions_assignments__assignment_id__questions_get"];
+        get: operations["questions_api_assignments__assignment_id__submissions__submission_id__questions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -240,7 +240,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/submissions/{submission_id}/answers": {
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/answers": {
         parameters: {
             query?: never;
             header?: never;
@@ -248,7 +248,7 @@ export interface paths {
             cookie?: never;
         };
         /** Answers */
-        get: operations["answers_assignments__assignment_id__submissions__submission_id__answers_get"];
+        get: operations["answers_api_assignments__assignment_id__submissions__submission_id__answers_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -257,7 +257,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/submissions/{submission_id}/document": {
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/document": {
         parameters: {
             query?: never;
             header?: never;
@@ -265,7 +265,7 @@ export interface paths {
             cookie?: never;
         };
         /** Document */
-        get: operations["document_assignments__assignment_id__submissions__submission_id__document_get"];
+        get: operations["document_api_assignments__assignment_id__submissions__submission_id__document_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -274,7 +274,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}": {
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -282,9 +282,9 @@ export interface paths {
             cookie?: never;
         };
         /** Answer */
-        get: operations["answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get"];
+        get: operations["answer_api_assignments__assignment_id__submissions__submission_id__answers__question_id__get"];
         /** Save */
-        put: operations["save_assignments__assignment_id__submissions__submission_id__answers__question_id__put"];
+        put: operations["save_api_assignments__assignment_id__submissions__submission_id__answers__question_id__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -326,7 +326,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/submissions/{submission_id}/feedback": {
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/feedback": {
         parameters: {
             query?: never;
             header?: never;
@@ -334,7 +334,7 @@ export interface paths {
             cookie?: never;
         };
         /** Feedback */
-        get: operations["feedback_assignments__assignment_id__submissions__submission_id__feedback_get"];
+        get: operations["feedback_api_assignments__assignment_id__submissions__submission_id__feedback_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -377,7 +377,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans": {
+    "/api/assignments/{assignment_id}/scans": {
         parameters: {
             query?: never;
             header?: never;
@@ -385,17 +385,17 @@ export interface paths {
             cookie?: never;
         };
         /** List Scans */
-        get: operations["list_scans_assignments__assignment_id__scans_get"];
+        get: operations["list_scans_api_assignments__assignment_id__scans_get"];
         put?: never;
         /** Upload Scan */
-        post: operations["upload_scan_assignments__assignment_id__scans_post"];
+        post: operations["upload_scan_api_assignments__assignment_id__scans_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/analyze": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/analyze": {
         parameters: {
             query?: never;
             header?: never;
@@ -405,14 +405,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Analyze Scan */
-        post: operations["analyze_scan_assignments__assignment_id__scans__batch_id__analyze_post"];
+        post: operations["analyze_scan_api_assignments__assignment_id__scans__batch_id__analyze_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/review": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/groups": {
         parameters: {
             query?: never;
             header?: never;
@@ -421,7 +421,7 @@ export interface paths {
         };
         get?: never;
         /** Review Scan */
-        put: operations["review_scan_assignments__assignment_id__scans__batch_id__review_put"];
+        put: operations["review_scan_api_assignments__assignment_id__scans__batch_id__groups_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -429,7 +429,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/process": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/process": {
         parameters: {
             query?: never;
             header?: never;
@@ -439,14 +439,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Process Scan */
-        post: operations["process_scan_assignments__assignment_id__scans__batch_id__process_post"];
+        post: operations["process_scan_api_assignments__assignment_id__scans__batch_id__process_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/pdf": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/pdf": {
         parameters: {
             query?: never;
             header?: never;
@@ -454,7 +454,7 @@ export interface paths {
             cookie?: never;
         };
         /** Scan Pdf */
-        get: operations["scan_pdf_assignments__assignment_id__scans__batch_id__pdf_get"];
+        get: operations["scan_pdf_api_assignments__assignment_id__scans__batch_id__pdf_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -463,7 +463,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/remove": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -473,14 +473,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Remove Scan */
-        post: operations["remove_scan_assignments__assignment_id__scans__batch_id__remove_post"];
+        post: operations["remove_scan_api_assignments__assignment_id__scans__batch_id__remove_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -491,13 +491,13 @@ export interface paths {
         put?: never;
         post?: never;
         /** Delete Scan */
-        delete: operations["delete_scan_assignments__assignment_id__scans__batch_id__delete"];
+        delete: operations["delete_scan_api_assignments__assignment_id__scans__batch_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/restore": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/restore": {
         parameters: {
             query?: never;
             header?: never;
@@ -507,14 +507,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Restore Scan */
-        post: operations["restore_scan_assignments__assignment_id__scans__batch_id__restore_post"];
+        post: operations["restore_scan_api_assignments__assignment_id__scans__batch_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/assignments/{assignment_id}/scans/{batch_id}/pages/{page_number}": {
+    "/api/assignments/{assignment_id}/scans/{batch_id}/pages/{page_number}": {
         parameters: {
             query?: never;
             header?: never;
@@ -522,7 +522,7 @@ export interface paths {
             cookie?: never;
         };
         /** Scan Page */
-        get: operations["scan_page_assignments__assignment_id__scans__batch_id__pages__page_number__get"];
+        get: operations["scan_page_api_assignments__assignment_id__scans__batch_id__pages__page_number__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -531,7 +531,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/terminals": {
+    "/api/assignments/{assignment_id}/terminals": {
         parameters: {
             query?: never;
             header?: never;
@@ -539,17 +539,17 @@ export interface paths {
             cookie?: never;
         };
         /** List Terminals */
-        get: operations["list_terminals_api_terminals_get"];
+        get: operations["list_terminals_api_assignments__assignment_id__terminals_get"];
         put?: never;
         /** Create Terminal */
-        post: operations["create_terminal_api_terminals_post"];
+        post: operations["create_terminal_api_assignments__assignment_id__terminals_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/terminals/order": {
+    "/api/assignments/{assignment_id}/terminals/order": {
         parameters: {
             query?: never;
             header?: never;
@@ -558,7 +558,7 @@ export interface paths {
         };
         get?: never;
         /** Reorder Terminals */
-        put: operations["reorder_terminals_api_terminals_order_put"];
+        put: operations["reorder_terminals_api_assignments__assignment_id__terminals_order_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -720,8 +720,6 @@ export interface components {
         };
         /** CreateTerminal */
         CreateTerminal: {
-            /** Assignment Id */
-            assignment_id: string;
             /**
              * Kind
              * @default shell
@@ -815,8 +813,6 @@ export interface components {
         };
         /** PipelineOutput */
         PipelineOutput: {
-            /** Assignment Id */
-            assignment_id: string;
             /** Qa Markdown */
             qa_markdown: string;
             /** Submissions Dir */
@@ -1087,8 +1083,6 @@ export interface components {
         };
         /** ReorderTerminals */
         ReorderTerminals: {
-            /** Assignment Id */
-            assignment_id: string;
             /** Ids */
             ids: string[];
         };
@@ -1398,7 +1392,7 @@ export interface operations {
             };
         };
     };
-    assignments_assignments_get: {
+    assignments_api_assignments_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1418,7 +1412,7 @@ export interface operations {
             };
         };
     };
-    create_assignment_assignments_post: {
+    create_assignment_api_assignments_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1451,11 +1445,13 @@ export interface operations {
             };
         };
     };
-    pipeline_results_api_pipeline_results_post: {
+    import_submissions_api_assignments__assignment_id__imports_post: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                assignment_id: string;
+            };
             cookie?: never;
         };
         requestBody: {
@@ -1484,7 +1480,7 @@ export interface operations {
             };
         };
     };
-    preview_assignments_preview_post: {
+    preview_api_drafts_preview_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1517,7 +1513,7 @@ export interface operations {
             };
         };
     };
-    edit_preview_assignments_preview_edit_post: {
+    edit_preview_api_drafts_edit_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1550,7 +1546,7 @@ export interface operations {
             };
         };
     };
-    preview_pdf_assignments_preview_pdf_post: {
+    preview_pdf_api_drafts_pdf_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -1583,7 +1579,7 @@ export interface operations {
             };
         };
     };
-    update_assignment_assignments__assignment_id__put: {
+    update_assignment_api_assignments__assignment_id__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -1618,7 +1614,7 @@ export interface operations {
             };
         };
     };
-    delete_assignment_assignments__assignment_id__delete: {
+    delete_assignment_api_assignments__assignment_id__delete: {
         parameters: {
             query?: {
                 stop_terminal_sessions?: boolean;
@@ -1649,7 +1645,7 @@ export interface operations {
             };
         };
     };
-    source_assignments__assignment_id__source_get: {
+    source_api_assignments__assignment_id__source_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1680,7 +1676,7 @@ export interface operations {
             };
         };
     };
-    qa_assignments__assignment_id__qa_get: {
+    qa_api_assignments__assignment_id__qa_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1711,7 +1707,7 @@ export interface operations {
             };
         };
     };
-    pdf_assignments__assignment_id__pdf_get: {
+    pdf_api_assignments__assignment_id__pdf_get: {
         parameters: {
             query?: {
                 version?: string | null;
@@ -1744,7 +1740,7 @@ export interface operations {
             };
         };
     };
-    submissions_assignments__assignment_id__submissions_get: {
+    submissions_api_assignments__assignment_id__submissions_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1775,7 +1771,7 @@ export interface operations {
             };
         };
     };
-    statistics_assignments__assignment_id__statistics_get: {
+    statistics_api_assignments__assignment_id__statistics_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1806,14 +1802,13 @@ export interface operations {
             };
         };
     };
-    questions_assignments__assignment_id__questions_get: {
+    questions_api_assignments__assignment_id__submissions__submission_id__questions_get: {
         parameters: {
-            query?: {
-                submission_id?: number;
-            };
+            query?: never;
             header?: never;
             path: {
                 assignment_id: string;
+                submission_id: number;
             };
             cookie?: never;
         };
@@ -1839,7 +1834,7 @@ export interface operations {
             };
         };
     };
-    answers_assignments__assignment_id__submissions__submission_id__answers_get: {
+    answers_api_assignments__assignment_id__submissions__submission_id__answers_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1871,7 +1866,7 @@ export interface operations {
             };
         };
     };
-    document_assignments__assignment_id__submissions__submission_id__document_get: {
+    document_api_assignments__assignment_id__submissions__submission_id__document_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1903,7 +1898,7 @@ export interface operations {
             };
         };
     };
-    answer_assignments__assignment_id__submissions__submission_id__answers__question_id__get: {
+    answer_api_assignments__assignment_id__submissions__submission_id__answers__question_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1936,7 +1931,7 @@ export interface operations {
             };
         };
     };
-    save_assignments__assignment_id__submissions__submission_id__answers__question_id__put: {
+    save_api_assignments__assignment_id__submissions__submission_id__answers__question_id__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -2024,7 +2019,7 @@ export interface operations {
             };
         };
     };
-    feedback_assignments__assignment_id__submissions__submission_id__feedback_get: {
+    feedback_api_assignments__assignment_id__submissions__submission_id__feedback_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2117,7 +2112,7 @@ export interface operations {
             };
         };
     };
-    list_scans_assignments__assignment_id__scans_get: {
+    list_scans_api_assignments__assignment_id__scans_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2148,7 +2143,7 @@ export interface operations {
             };
         };
     };
-    upload_scan_assignments__assignment_id__scans_post: {
+    upload_scan_api_assignments__assignment_id__scans_post: {
         parameters: {
             query: {
                 filename: string;
@@ -2185,7 +2180,7 @@ export interface operations {
             };
         };
     };
-    analyze_scan_assignments__assignment_id__scans__batch_id__analyze_post: {
+    analyze_scan_api_assignments__assignment_id__scans__batch_id__analyze_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2221,7 +2216,7 @@ export interface operations {
             };
         };
     };
-    review_scan_assignments__assignment_id__scans__batch_id__review_put: {
+    review_scan_api_assignments__assignment_id__scans__batch_id__groups_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -2257,7 +2252,7 @@ export interface operations {
             };
         };
     };
-    process_scan_assignments__assignment_id__scans__batch_id__process_post: {
+    process_scan_api_assignments__assignment_id__scans__batch_id__process_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2293,7 +2288,7 @@ export interface operations {
             };
         };
     };
-    scan_pdf_assignments__assignment_id__scans__batch_id__pdf_get: {
+    scan_pdf_api_assignments__assignment_id__scans__batch_id__pdf_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2325,7 +2320,7 @@ export interface operations {
             };
         };
     };
-    remove_scan_assignments__assignment_id__scans__batch_id__remove_post: {
+    remove_scan_api_assignments__assignment_id__scans__batch_id__remove_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2361,7 +2356,7 @@ export interface operations {
             };
         };
     };
-    delete_scan_assignments__assignment_id__scans__batch_id__delete: {
+    delete_scan_api_assignments__assignment_id__scans__batch_id__delete: {
         parameters: {
             query: {
                 expected_revision: number;
@@ -2393,7 +2388,7 @@ export interface operations {
             };
         };
     };
-    restore_scan_assignments__assignment_id__scans__batch_id__restore_post: {
+    restore_scan_api_assignments__assignment_id__scans__batch_id__restore_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2429,10 +2424,10 @@ export interface operations {
             };
         };
     };
-    scan_page_assignments__assignment_id__scans__batch_id__pages__page_number__get: {
+    scan_page_api_assignments__assignment_id__scans__batch_id__pages__page_number__get: {
         parameters: {
             query?: {
-                large?: boolean;
+                size?: "small" | "large";
             };
             header?: never;
             path: {
@@ -2464,13 +2459,13 @@ export interface operations {
             };
         };
     };
-    list_terminals_api_terminals_get: {
+    list_terminals_api_assignments__assignment_id__terminals_get: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 assignment_id: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -2495,16 +2490,18 @@ export interface operations {
             };
         };
     };
-    create_terminal_api_terminals_post: {
+    create_terminal_api_assignments__assignment_id__terminals_post: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                assignment_id: string;
+            };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
-                "application/json": components["schemas"]["CreateTerminal"];
+                "application/json": components["schemas"]["CreateTerminal"] | null;
             };
         };
         responses: {
@@ -2528,11 +2525,13 @@ export interface operations {
             };
         };
     };
-    reorder_terminals_api_terminals_order_put: {
+    reorder_terminals_api_assignments__assignment_id__terminals_order_put: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                assignment_id: string;
+            };
             cookie?: never;
         };
         requestBody: {

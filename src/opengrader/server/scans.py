@@ -6,10 +6,10 @@ import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import RLock
-from typing import Callable
+from typing import Callable, Literal
 
 import fitz
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 
@@ -32,7 +32,7 @@ def render_scan_page(source: Path, page_number: int, edge: int) -> bytes:
 
 
 def add_scan_routes(
-    app: FastAPI, store: ScanStore, jobs: ScanJobs, lock: RLock,
+    api: APIRouter, store: ScanStore, jobs: ScanJobs, lock: RLock,
     require_assignment: Callable[[str], object],
     discard_submissions: Callable[[str, list[Path]], None],
 ) -> None:
@@ -48,13 +48,13 @@ def add_scan_routes(
             raise HTTPException(409, "This scan is processing or already complete.")
         return batch
 
-    @app.get("/assignments/{assignment_id}/scans")
+    @api.get("/assignments/{assignment_id}/scans")
     def list_scans(assignment_id: str) -> ScanList:
         with lock:
             require_assignment(assignment_id)
             return ScanList(batches=store.list(assignment_id))
 
-    @app.post("/assignments/{assignment_id}/scans", response_model=ScanBatch, openapi_extra={
+    @api.post("/assignments/{assignment_id}/scans", response_model=ScanBatch, openapi_extra={
         "requestBody": {"required": True, "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}}},
     })
     async def upload_scan(assignment_id: str, request: Request, filename: str = Query(min_length=1, max_length=255)) -> ScanBatch:
@@ -82,7 +82,7 @@ def add_scan_routes(
         finally:
             path.unlink(missing_ok=True)
 
-    @app.post("/assignments/{assignment_id}/scans/{batch_id}/analyze", status_code=202)
+    @api.post("/assignments/{assignment_id}/scans/{batch_id}/analyze", status_code=202)
     def analyze_scan(assignment_id: str, batch_id: str, request: AnalyzeScan) -> ScanBatch:
         with lock:
             batch = editable(assignment_id, batch_id, request.expected_revision)
@@ -98,7 +98,7 @@ def add_scan_routes(
             jobs.submit(assignment_id, batch_id, analyze=True)
             return batch
 
-    @app.put("/assignments/{assignment_id}/scans/{batch_id}/review")
+    @api.put("/assignments/{assignment_id}/scans/{batch_id}/groups")
     def review_scan(assignment_id: str, batch_id: str, request: ReviewScan) -> ScanBatch:
         with lock:
             batch = editable(assignment_id, batch_id, request.expected_revision)
@@ -126,7 +126,7 @@ def add_scan_routes(
             jobs.save(assignment_id, batch)
             return batch
 
-    @app.post("/assignments/{assignment_id}/scans/{batch_id}/process", status_code=202)
+    @api.post("/assignments/{assignment_id}/scans/{batch_id}/process", status_code=202)
     def process_scan(assignment_id: str, batch_id: str, request: ProcessScan) -> ScanBatch:
         with lock:
             batch = editable(assignment_id, batch_id, request.expected_revision)
@@ -148,12 +148,12 @@ def add_scan_routes(
             jobs.submit(assignment_id, batch_id, analyze=False)
             return batch
 
-    @app.get("/assignments/{assignment_id}/scans/{batch_id}/pdf")
+    @api.get("/assignments/{assignment_id}/scans/{batch_id}/pdf")
     def scan_pdf(assignment_id: str, batch_id: str) -> FileResponse:
         batch = batch_for(assignment_id, batch_id)
         return FileResponse(store.directory(assignment_id, batch_id) / "original.pdf", media_type="application/pdf", filename=batch.filename, content_disposition_type="inline")
 
-    @app.post("/assignments/{assignment_id}/scans/{batch_id}/remove")
+    @api.post("/assignments/{assignment_id}/scans/{batch_id}/remove")
     def remove_scan(assignment_id: str, batch_id: str, request: ScanRevision) -> ScanBatch:
         with lock:
             batch = batch_for(assignment_id, batch_id)
@@ -166,7 +166,7 @@ def add_scan_routes(
             jobs.save(assignment_id, batch)
             return batch
 
-    @app.delete("/assignments/{assignment_id}/scans/{batch_id}", status_code=204)
+    @api.delete("/assignments/{assignment_id}/scans/{batch_id}", status_code=204)
     def delete_scan(assignment_id: str, batch_id: str, expected_revision: int) -> Response:
         with lock:
             batch = batch_for(assignment_id, batch_id)
@@ -203,7 +203,7 @@ def add_scan_routes(
             logging.getLogger(__name__).exception("Could not clean deleted scan %s", deleted)
         return Response(status_code=204)
 
-    @app.post("/assignments/{assignment_id}/scans/{batch_id}/restore")
+    @api.post("/assignments/{assignment_id}/scans/{batch_id}/restore")
     def restore_scan(assignment_id: str, batch_id: str, request: ScanRevision) -> ScanBatch:
         with lock:
             batch = batch_for(assignment_id, batch_id)
@@ -218,15 +218,15 @@ def add_scan_routes(
             jobs.save(assignment_id, batch)
             return batch
 
-    @app.get("/assignments/{assignment_id}/scans/{batch_id}/pages/{page_number}")
-    def scan_page(assignment_id: str, batch_id: str, page_number: int, large: bool = False) -> Response:
+    @api.get("/assignments/{assignment_id}/scans/{batch_id}/pages/{page_number}")
+    def scan_page(assignment_id: str, batch_id: str, page_number: int, size: Literal["small", "large"] = "small") -> Response:
         batch = batch_for(assignment_id, batch_id)
         if not 1 <= page_number <= batch.page_count:
             raise HTTPException(404, "Scan page not found.")
         directory = store.directory(assignment_id, batch_id)
-        cache = directory / "thumbnails" / f"{page_number}-{'large' if large else 'small'}.png"
+        cache = directory / "thumbnails" / f"{page_number}-{size}.png"
         if not cache.exists():
-            content = jobs.previews.submit(render_scan_page, directory / "original.pdf", page_number, 1400 if large else 320).result()
+            content = jobs.previews.submit(render_scan_page, directory / "original.pdf", page_number, 1400 if size == "large" else 320).result()
             cache.parent.mkdir(exist_ok=True)
             with NamedTemporaryFile(dir=cache.parent, delete=False) as temporary:
                 temporary.write(content)
