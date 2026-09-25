@@ -1,6 +1,6 @@
 import type { CSSProperties, PropsWithChildren } from 'react';
 import { useMatchRoute } from '@tanstack/react-router';
-import { AppHeader } from '@/components/app-header';
+import { cn } from 'cn';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { AppSidebar } from '@/components/app-sidebar';
 import {
@@ -35,7 +35,6 @@ export function App({ children }: PropsWithChildren) {
   const overview =
     assignment &&
     Boolean(matchRoute({ to: '/assignments/$assignmentId', pending: true }));
-  // The home page introduces the product itself, so it skips the header.
   const home = !assignment && pathname === '/';
   return (
     <TooltipProvider>
@@ -47,7 +46,10 @@ export function App({ children }: PropsWithChildren) {
             '--sidebar-width': `${sidebarWidth}px`,
           } as CSSProperties
         }
-        className={`${overview ? 'h-svh min-h-0 overflow-hidden' : assignment ? '' : 'block'} text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none`}
+        className={cn(
+          overview ? 'h-svh min-h-0 overflow-hidden' : home ? 'block' : '',
+          'text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none'
+        )}
       >
         <a
           href="#content"
@@ -55,28 +57,26 @@ export function App({ children }: PropsWithChildren) {
         >
           Skip to content
         </a>
-        {assignment ? <AppSidebar /> : !home && <AppHeader />}
+        {!home && <AppSidebar />}
         <SidebarInset
           className={
             overview
               ? 'h-full min-h-0 min-w-0 overflow-hidden'
-              : assignment
-                ? 'min-w-0'
-                : home
-                  ? 'min-h-svh min-w-0'
-                  : 'min-h-[calc(100svh-4rem)] min-w-0'
+              : home
+                ? 'min-h-svh min-w-0'
+                : 'min-w-0'
           }
         >
           <div
             className={
-              assignment
+              !home
                 ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
                 : 'mx-auto w-full max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14'
             }
             id="content"
             tabIndex={-1}
           >
-            {assignment && <MobileSidebarTrigger />}
+            {!home && <MobileSidebarTrigger />}
             {children}
           </div>
         </SidebarInset>
