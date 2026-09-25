@@ -52,11 +52,13 @@ from opengrader.cli.automated_grading import (
 )
 from opengrader.cli.qa_file import run_cli as run_qa_file_cli
 from opengrader.core.class_folder import (
+    GRADING_ROLES,
     ClassFolderScan,
     describe_class_folder,
     scan_class_folder,
 )
 from opengrader.core.course import COURSE_FILENAME
+from opengrader.core.recents import load_recents
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
 from opengrader.tui.ui.screens.backup_screen import BackupScreen
 from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
@@ -66,8 +68,11 @@ from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.provider_screen import ProviderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
+from opengrader.tui.ui.widgets.recent_list import RecentList
 
 _CPU_COUNT = os.cpu_count() or 1
+# How many recent class folders the Start grading card lists (newest first).
+RECENT_FOLDERS_SHOWN = 5
 
 
 _PIPE_STATUS_GLYPH = {
@@ -152,6 +157,17 @@ class SetupScreen(Vertical):
         border-title-style: bold;
         padding: 0 2 1 2;
         margin-bottom: 1;
+    }
+
+    SetupScreen #launch-recents {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    SetupScreen #launch-recent-list {
+        height: auto;
+        max-height: 15;
+        background: transparent;
     }
 
     SetupScreen .card-hint {
@@ -311,6 +327,9 @@ class SetupScreen(Vertical):
         "policy-submissions": ("directory", "Choose the submissions directory"),
         "handoff-submissions": ("directory", "Choose the submissions directory"),
         "backup-submissions": ("directory", "Choose the submissions directory"),
+        "tui-class-folder": ("directory", "Choose the class folder"),
+        "tui-qa-path": ("file", "Choose the QA markdown file"),
+        "tui-sub-path": ("any", "Choose the submissions file or directory"),
         "ext-qa": ("file", "Choose the QA markdown file"),
         "pipe-scan": ("any", "Choose the scanned bundle PDF, or a folder of split PDFs"),
         "pipe-qa": ("file", "Choose the answer-key markdown file"),
@@ -393,11 +412,55 @@ class SetupScreen(Vertical):
                         id="setup-subtitle",
                     )
 
-                with Vertical(id="launch-section") as session_card:
-                    # Choosing what to grade lives on Home (tui/home.py) now;
-                    # this card only says what is open, and how to get back.
-                    session_card.border_title = "▸ Grading"
-                    yield Static("", id="setup-session", classes="card-hint", markup=False)
+                with Vertical(id="launch-section") as launch_card:
+                    # Choosing what to grade: `opengrader classic` (and the
+                    # desktop icon) start here. F2 while grading comes back.
+                    launch_card.border_title = "▸ Start grading"
+                    yield Static(
+                        "Choose a class folder (or a grader packet) — its answer "
+                        "key and submissions are found for you. New scans? Run "
+                        "the pipeline below first.",
+                        classes="card-hint",
+                    )
+                    # What is open right now; hidden while nothing is.
+                    yield Static(
+                        "", id="setup-session", classes="card-hint hidden", markup=False
+                    )
+                    # The last few class folders graded here; hidden until there
+                    # is one. Filled by `refresh_recents`.
+                    with Vertical(id="launch-recents", classes="hidden"):
+                        yield self._field_label(
+                            "Recent class folders", "↩ opens one · d forgets it"
+                        )
+                        yield RecentList(id="launch-recent-list")
+                    yield self._field_label(
+                        "Class folder", "holds the answer key and the graded submissions"
+                    )
+                    yield self._path_row("Path to the class folder…", "tui-class-folder")
+                    yield Static(
+                        "",
+                        id="tui-folder-summary",
+                        classes="card-hint hidden",
+                        markup=False,
+                    )
+                    with Collapsible(
+                        title="Answer key and submissions — filled in from the folder",
+                        id="launch-files",
+                        collapsed=True,
+                    ):
+                        yield self._field_label(
+                            "Answer key", "QA markdown file, e.g. solutions.md"
+                        )
+                        yield self._path_row("Path to QA markdown file…", "tui-qa-path")
+                        yield self._field_label(
+                            "Submissions", "directory containing .submission.md files"
+                        )
+                        yield self._path_row(
+                            "Path to submissions directory…", "tui-sub-path"
+                        )
+                    yield self._card_actions(
+                        Button("Launch Grading", variant="success", id="launch-button", compact=True)
+                    )
 
                 yield Static(
                     "[b]RUN THE WHOLE PIPELINE[/b]", id="pipeline-heading",
@@ -1415,6 +1478,8 @@ class SetupScreen(Vertical):
                 self._sync_policy_checkbox()
             elif input_id == "pipe-out":
                 self._scan_class_folder()
+            elif input_id == "tui-class-folder":
+                self._scan_launch_folder()
 
         self.app.push_screen(
             PathPickerScreen(title=title, mode=mode, start_path=start_path),
@@ -1449,7 +1514,9 @@ class SetupScreen(Vertical):
                 event.stop()
                 self._open_path_picker(input_id)
                 return
-        if event.button.id == "run-splitter":
+        if event.button.id == "launch-button":
+            self._launch_grading()
+        elif event.button.id == "run-splitter":
             self._run_splitter()
         elif event.button.id == "run-extractor":
             self._run_extractor()
@@ -2069,25 +2136,125 @@ class SetupScreen(Vertical):
         summary.remove_class("hidden")
         return found
 
-    def show_session(self, text: str) -> None:
-        """What is open for grading, as the launcher and TuiApp see it."""
-        self.query_one("#setup-session", Static).update(text)
+    def show_session(
+        self, qa_file: str | Path | None, submissions: str | Path | None
+    ) -> None:
+        """Say what is open for grading, and fill the card's fields with it.
 
-    def open_pipeline_folder(self, folder: str | Path) -> None:
-        """Arrive from Home on a folder of new scans: pipeline card filled in."""
-        self.query_one("#pipe-out", Input).value = str(folder)
-        section = self.query_one("#section-pipeline", Collapsible)
-        section.collapsed = False
-        self._scan_class_folder()
-        self.call_after_refresh(section.scroll_visible)
+        Filling the fields keeps the helper tools that fall back to "the folder
+        being graded" (`_session_paths`) pointed at the right place, and makes
+        Launch Grading re-open it after a look around Tools.
+        """
+        # Whatever was just opened is now the newest recent folder.
+        self.call_later(self.refresh_recents)
+        banner = self.query_one("#setup-session", Static)
+        if submissions is None:
+            banner.add_class("hidden")
+            return
+        banner.update(f"Grading {submissions}. F3 goes back to it.")
+        banner.remove_class("hidden")
+        if qa_file is not None:
+            self.query_one("#tui-qa-path", Input).value = str(qa_file)
+        self.query_one("#tui-sub-path", Input).value = str(submissions)
+
+    async def refresh_recents(self) -> None:
+        """Re-read the last `RECENT_FOLDERS_SHOWN` class folders from recents."""
+        folders = [item for item in load_recents() if item.kind == "folder"]
+        shown = folders[:RECENT_FOLDERS_SHOWN]
+        await self.query_one("#launch-recent-list", RecentList).set_items(shown)
+        self.query_one("#launch-recents").set_class(not shown, "hidden")
+
+    def focus_launch_card(self, *, scroll: bool = True) -> None:
+        """Land on the recent folders if there are any, else the class-folder box.
+
+        Queued behind `refresh_recents` (both go through `call_later`), so the
+        choice is made on the list as it is about to be shown. `scroll=False`
+        on first launch, where the page is already at its top (the header).
+        """
+        self.call_later(self._focus_launch_card, scroll)
+
+    def _focus_launch_card(self, scroll: bool) -> None:
+        recents = self.query_one("#launch-recent-list", RecentList)
+        target = recents if recents.items else self.query_one("#tui-class-folder", Input)
+        target.focus(scroll_visible=scroll)
+        if scroll:
+            self.call_after_refresh(
+                self.query_one("#launch-section").scroll_visible, top=True
+            )
+
+    def on_recent_list_chosen(self, event: RecentList.Chosen) -> None:
+        # Exactly what Launch Grading does, with the pair recorded last time.
+        event.stop()
+        item = event.item
+        if not item.qa_file or not item.submissions:
+            self.app.notify(
+                "That entry has no answer key on record; choose the folder above.",
+                severity="error",
+            )
+            return
+        self.post_message(self.LaunchRequested(item.qa_file, item.submissions))
+
+    def on_recent_list_forgotten(self, event: RecentList.Forgotten) -> None:
+        event.stop()
+        folders = [item for item in load_recents() if item.kind == "folder"]
+        if len(folders) > event.remaining:
+            # One that did not fit moves up into the list.
+            self.call_later(self.refresh_recents)
+        elif event.remaining == 0:
+            self.query_one("#launch-recents").add_class("hidden")
+            self.query_one("#tui-class-folder", Input).focus()
 
     def _session_paths(self) -> tuple[str, str]:
-        provider = getattr(self.app, "data_provider", None)
-        if not getattr(self.app.workflow_state, "session_open", False):
-            return "", ""
-        qa = getattr(provider, "qa_file_path", None)
-        subs = getattr(provider, "submissions_path", None)
-        return (str(qa) if qa else "", str(subs) if subs else "")
+        """The answer key and submissions the Start grading card points at."""
+        return (
+            self._clean_path(self.query_one("#tui-qa-path", Input).value),
+            self._clean_path(self.query_one("#tui-sub-path", Input).value),
+        )
+
+    def _scan_launch_folder(self) -> ClassFolderScan | None:
+        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        if not folder or not Path(folder).is_dir():
+            self.app.notify(
+                "Choose an existing class folder to open.", severity="error"
+            )
+            return None
+        try:
+            found = scan_class_folder(folder)
+        except OSError as exc:
+            self.app.notify(f"Could not read {folder}: {exc}", severity="error")
+            return None
+
+        self._autofill("tui-qa-path", found.qa_file)
+        self._autofill("tui-sub-path", found.submissions)
+
+        summary = self.query_one("#tui-folder-summary", Static)
+        summary.update(
+            "\n".join(
+                describe_class_folder(found, GRADING_ROLES, include_notes=False)
+            )
+        )
+        summary.remove_class("hidden")
+        if found.qa_file is None or found.submissions is None:
+            self.query_one("#launch-files", Collapsible).collapsed = False
+        return found
+
+    def _launch_grading(self) -> None:
+        qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
+        sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
+        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        if (not qa_path or not sub_path) and folder and Path(folder).is_dir():
+            self._scan_launch_folder()
+            qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
+            sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
+
+        if not qa_path or not sub_path:
+            self.query_one("#launch-files", Collapsible).collapsed = False
+            self.app.notify(
+                "Both QA path and Submissions path are required to launch.",
+                severity="error",
+            )
+            return
+        self.post_message(self.LaunchRequested(qa_path, sub_path))
 
     def _autofill(
         self, input_id: str, path: Path | None, *, checkbox_id: str | None = None
@@ -2389,7 +2556,7 @@ class SetupScreen(Vertical):
             self.app.notify(
                 f"{report.submission_count} submission(s) ready in "
                 f"{report.submissions_dir}. Add an answer key above, or open "
-                "open them from Home (F2)."
+                'them from "Start grading".'
             )
             return
 
@@ -2648,6 +2815,8 @@ class SetupScreen(Vertical):
             self._sync_policy_checkbox()
         elif event.input.id == "pipe-out":
             self._scan_class_folder()
+        elif event.input.id == "tui-class-folder":
+            self._scan_launch_folder()
 
     def _sync_policy_checkbox(self) -> None:
         submissions = self._clean_path(

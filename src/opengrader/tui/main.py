@@ -25,31 +25,7 @@ def _enable_textual_feature(feature: str) -> None:
     os.environ[_TEXTUAL_ENV_VAR] = ",".join(sorted(features))
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Launch the Opengrader TUI. Open an assignment folder directly, "
-            "or use Home to choose a folder, workspace, or tool."
-        )
-    )
-    parser.add_argument("folder", nargs="?", type=Path, help="Assignment or workspace folder.")
-    parser.add_argument("--qa-file", help="Path to a QA markdown file.")
-    parser.add_argument(
-        "--submissions",
-        help="Path to a .submission.md file or directory containing submission files.",
-    )
-    parser.add_argument(
-        "--workspace",
-        type=Path,
-        help=(
-            "Open this workspace directly (shared with the web app through a "
-            "local service; created if it does not exist yet)."
-        ),
-    )
-    parser.add_argument(
-        "--assignment",
-        help="Assignment ID. Required at a workspace root with several assignments.",
-    )
+def _add_graphics_arguments(parser: ArgumentParser) -> None:
     parser.add_argument(
         "--graphics",
         choices=PROTOCOL_CHOICES,
@@ -68,100 +44,143 @@ def _build_parser() -> ArgumentParser:
             "then exit. Paste this into a bug report."
         ),
     )
+
+
+def _add_folder_arguments(parser: ArgumentParser) -> None:
+    parser.add_argument("--qa-file", help="Path to a QA markdown file.")
+    parser.add_argument(
+        "--submissions",
+        help="Path to a .submission.md file or directory containing submission files.",
+    )
+
+
+def _build_parser() -> ArgumentParser:
+    parser = ArgumentParser(
+        description=(
+            "Open a workspace in the terminal grading app: its assignment list, "
+            "shared live with the web app through a local service. For Tools & "
+            "Settings and grading plain folders, use `opengrader classic`."
+        )
+    )
+    parser.add_argument(
+        "folder",
+        nargs="?",
+        type=Path,
+        help=(
+            "Assignment or workspace folder. Defaults to the workspace around "
+            "the current directory. A folder outside any workspace becomes "
+            "one; a class folder that is ready to grade is imported with the "
+            "grades already in its files."
+        ),
+    )
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        help=(
+            "Open this workspace directly (shared with the web app through a "
+            "local service; created if it does not exist yet)."
+        ),
+    )
+    parser.add_argument(
+        "--assignment",
+        help="Assignment ID. Required at a workspace root with several assignments.",
+    )
+    _add_folder_arguments(parser)
+    _add_graphics_arguments(parser)
     return parser
 
 
-def run_app(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+def _build_classic_parser() -> ArgumentParser:
+    parser = ArgumentParser(
+        description=(
+            "Open the classic grading app: Tools & Settings with a Start "
+            "grading card, grading class folders in place. Never uses a "
+            "workspace or starts a service. This is what the desktop icon opens."
+        ),
+    )
+    _add_folder_arguments(parser)
+    _add_graphics_arguments(parser)
+    return parser
 
+
+def _parse(parser: ArgumentParser, argv: list[str] | None):
+    """Parse argv and settle the image protocol, before Textual owns stdin."""
+    args = parser.parse_args(argv)
     # Probe graphics before Textual owns stdin and image widgets snapshot the protocol.
     try:
         capability = configure_graphics(args.graphics)
     except GraphicsOverrideError as exc:
         parser.error(str(exc))
-        return
-
     if args.check_graphics:
         parser.exit(0, graphics_report(capability) + "\n")
-        return
-
     if bool(args.qa_file) != bool(args.submissions):
         parser.error("--qa-file and --submissions must be provided together")
+    return args
+
+
+# What a grading session returns on F2 in a workspace: show the list again.
+SWITCH = "switch_assignment"
+
+_NO_WORKSPACE = """\
+error: no workspace in {here} or any folder above it.
+  opengrader tui FOLDER     open FOLDER as a workspace (created if needed)
+  opengrader classic        Tools & Settings, and grading folders without a workspace
+"""
+
+
+def run_app(argv: list[str] | None = None) -> None:
+    """`opengrader tui`: a workspace, straight to its assignments."""
+    parser = _build_parser()
+    args = _parse(parser, argv)
     if args.qa_file and (args.folder or args.workspace or args.assignment):
         parser.error("--qa-file/--submissions cannot be combined with a workspace selection")
 
     try:
         if args.qa_file:
-            result = _grade_folder(Path(args.qa_file), Path(args.submissions))
-            if result != SWITCH:
+            # Kept for scripts: a folder named outright is graded the classic
+            # way, in place and with no service.
+            _grade_folder(Path(args.qa_file), Path(args.submissions))
+            return
+        target = (args.folder or args.workspace or Path.cwd()).expanduser().resolve()
+        root = args.workspace or _workspace_for(target)
+        assignment = args.assignment
+        if root is None and args.folder is None:
+            # A bare `tui` never turns the current directory into a workspace
+            # behind the user's back: offer the ones already opened instead.
+            root = _choose_recent_workspace(parser, target)
+            if root is None:
                 return
-        elif args.folder or args.workspace or args.assignment or _discovered_workspace():
-            target = (args.folder or args.workspace or Path.cwd()).expanduser().resolve()
-            root = (args.workspace or _workspace_for(target) or target).resolve()
-            if _run_workspace(root, assignment=args.assignment, target=target) != HOME:
-                return
-        _home_loop()
+            target = root
+        elif root is None:
+            root, imported = _open_folder_as_workspace(target)
+            assignment = assignment or imported
+        _run_workspace(Path(root).expanduser().resolve(), assignment=assignment, target=target)
     except (OSError, ValueError, RuntimeError) as exc:
         parser.exit(2, f"error: {exc}\n")
 
 
-SWITCH = "switch_assignment"
-HOME = "home"
-
-
-def _home_loop() -> None:
-    from opengrader.tui.home import Home
-
-    start = _default_start_path()
-    message = ""
-    while True:
-        choice = Home(start_path=start, message=message).run()
-        message = ""
-        if choice is None:
-            return
-        if choice.folder is not None:
-            start = str(choice.folder)
-        if choice.kind == "folder":
-            try:
-                result = _grade_folder(
-                    choice.qa_file, choice.submissions, folder=choice.folder
-                )
-            except (OSError, ValueError) as exc:
-                message = f"Could not open that folder: {exc}"
-                continue
-        elif choice.kind in ("workspace", "new_workspace"):
-            try:
-                if choice.kind == "new_workspace":
-                    root, assignment = _import_as_workspace(
-                        choice.qa_file, choice.submissions
-                    )
-                    start = str(root)
-                else:
-                    root, assignment = choice.folder, None
-                if _run_workspace(root, assignment=assignment) == HOME:
-                    continue
-                return
-            except (OSError, ValueError, RuntimeError) as exc:
-                message = f"Could not open the workspace: {exc}"
-                continue
+def run_classic(argv: list[str] | None = None) -> None:
+    """`opengrader classic`: Tools & Settings and folder grading, no workspace."""
+    parser = _build_classic_parser()
+    args = _parse(parser, argv)
+    try:
+        if args.qa_file:
+            _grade_folder(Path(args.qa_file), Path(args.submissions))
         else:
-            result = TuiApp(pipeline_folder=choice.pipeline_folder).run()
-        if result != SWITCH:
-            return
+            TuiApp().run()
+    except (OSError, ValueError) as exc:
+        parser.exit(2, f"error: {exc}\n")
 
 
-def _default_start_path() -> str:
-    from opengrader.core.open_target import detect_target
+def _choose_recent_workspace(parser: ArgumentParser, here: Path) -> Path | None:
+    """A workspace opened before; with none on record, exit 2 with the pointer."""
+    from opengrader.core.recents import load_recents
+    from opengrader.tui.recent_workspaces import RecentWorkspaces
 
-    here = Path.cwd()
-    return str(here) if detect_target(here).openable else ""
-
-
-def _discovered_workspace() -> Path | None:
-    from opengrader.core.workspace.store import discover_workspace
-
-    return discover_workspace(Path.cwd())
+    recent = [item for item in load_recents() if item.kind == "workspace"]
+    if not recent:
+        parser.exit(2, _NO_WORKSPACE.format(here=here))
+    return RecentWorkspaces(recent, here=here).run()
 
 
 def _workspace_for(folder: Path) -> Path | None:
@@ -170,32 +189,26 @@ def _workspace_for(folder: Path) -> Path | None:
     return discover_workspace(folder)
 
 
-def _grade_folder(qa_file, submissions, *, folder: Path | None = None):
-    app = TuiApp(qa_file_path=qa_file, submissions_path=submissions)
-    _remember_folder(qa_file, submissions, folder=folder)
-    return app.run()
+def _grade_folder(qa_file: Path, submissions: Path) -> None:
+    # F2 comes back to the Start grading card inside the app, so one run
+    # covers any number of folders.
+    TuiApp(qa_file_path=qa_file, submissions_path=submissions).run()
 
 
-def _remember_folder(qa_file, submissions, *, folder: Path | None = None) -> None:
-    from opengrader.core.recents import record_recent
+def _open_folder_as_workspace(folder: Path) -> tuple[Path, str | None]:
+    """A folder outside every workspace, named on the command line.
 
-    where = Path(folder or Path(submissions).parent)
-    record_recent(
-        "folder",
-        where,
-        title=_assignment_title(qa_file) or where.name,
-        qa_file=qa_file,
-        submissions=submissions,
-    )
+    A class folder that is ready to grade (one answer key, extracted
+    submissions) is imported with its grades, and that assignment opens. Any
+    other folder simply becomes the workspace root, and the empty assignment
+    list offers to process it.
+    """
+    from opengrader.core.open_target import detect_target
 
-
-def _assignment_title(qa_file) -> str:
-    try:
-        from opengrader.core.qa_file import load_qa_markdown
-
-        return load_qa_markdown(Path(qa_file)).title or ""
-    except Exception:  # noqa: BLE001 - a title is a label, never a reason to fail
-        return ""
+    found = detect_target(folder)
+    if found.kind == "folder" and found.openable:
+        return _import_as_workspace(found.qa_file, found.submissions)
+    return folder, None
 
 
 def _import_as_workspace(qa_file, submissions):
@@ -242,17 +255,15 @@ def _import_as_workspace(qa_file, submissions):
 
 def _run_workspace(
     root: Path, *, assignment: str | None = None, target: Path | None = None
-) -> str | None:
+) -> None:
     from pydantic import TypeAdapter
-    from opengrader.core.recents import record_recent
+    from opengrader.core.recents import recent_workspace, record_recent
     from opengrader.core.workspace.context import assignment_for_directory
     from opengrader.core.workspace.models import Assignment
     from opengrader.core.workspace.store import Workspace
     from opengrader.server.workspace.client import WorkspaceClient, ensure_service
     from opengrader.tui.data.workspace_provider import WorkspaceProvider
     from opengrader.tui.workspace_home import (
-        GO_HOME,
-        OPEN_TOOLS,
         PROCESS_WORKSPACE,
         WorkspaceHome,
         process_workspace_argv,
@@ -261,7 +272,10 @@ def _run_workspace(
     target = (target or root).expanduser().resolve()
     client = WorkspaceClient(ensure_service(root))
     root = Path(client.connection.root).resolve()
+    # Listed first next time; keeps the assignment it last recorded.
     record_recent("workspace", root, title=root.name)
+    last = recent_workspace(root)
+    highlight = last.assignment if last and last.assignment else None
 
     def fetch() -> list[Assignment]:
         return TypeAdapter(list[Assignment]).validate_json(
@@ -280,18 +294,12 @@ def _run_workspace(
     if selected is not None and all(item.id != selected for item in assignments):
         selected = None
 
+    # The assignment list and grading, back and forth (F2), until one quits.
     while True:
         if selected is None:
-            selected = WorkspaceHome(client, target).run()
+            selected = WorkspaceHome(client, target, highlight=highlight).run()
             if selected is None:
-                return None
-            if selected == GO_HOME:
-                return HOME
-            if selected == OPEN_TOOLS:
-                if TuiApp().run() != SWITCH:
-                    return None
-                selected = None
-                continue
+                return
             if selected == PROCESS_WORKSPACE:
                 from opengrader.cli.run import run_cli
 
@@ -306,13 +314,21 @@ def _run_workspace(
         chosen = next((item for item in assignments if item.id == selected), None)
         if chosen is None:
             raise ValueError("Assignment not found in this workspace.")
+        record_recent(
+            "workspace",
+            root,
+            title=root.name,
+            assignment=chosen.id,
+            assignment_title=chosen.title,
+        )
+        highlight = chosen.id  # F2 comes back to the list on this one
         provider = WorkspaceProvider(client, chosen)
         try:
             result = TuiApp(data_provider=provider).run()
         finally:
             provider.close()
         if result != SWITCH:
-            return None
+            return
         selected = None
 
 

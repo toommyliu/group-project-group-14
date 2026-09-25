@@ -1854,12 +1854,12 @@ def test_setup_page_scopes_out_qa_picker_hotkeys() -> None:
                 binding.command
                 for binding in app.input_controller.visible_bindings()
             }
-            # F2 is "Home"; no "Back to grading" (F3), since nothing is open.
+            # No F2 (Tools *is* where another folder is chosen) and no
+            # "Back to grading" (F3), since nothing is open.
             assert visible == {
                 InputCommand.APP_QUIT,
                 InputCommand.APP_HELP,
                 InputCommand.OPEN_FORMAT_GUIDE,
-                InputCommand.SWITCH_ASSIGNMENT,
             }
 
     asyncio.run(run())
@@ -2284,14 +2284,14 @@ def test_a_bare_app_opens_tools_and_the_pipeline_can_open_a_folder(tmp_path) -> 
     asyncio.run(run())
 
 
-def test_f3_moves_between_tools_and_grading_and_f2_hands_back_to_home(
+def test_f3_moves_between_tools_and_grading_and_f2_returns_to_start_grading(
     tmp_path,
 ) -> None:
     from opengrader.tui.state import PAGE_SETUP
 
     qa, subs = _copy_sample(tmp_path)
 
-    async def run() -> object:
+    async def run() -> tuple[bool, str, str, str | None]:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
             qa_file_path=qa,
@@ -2308,82 +2308,28 @@ def test_f3_moves_between_tools_and_grading_and_f2_hands_back_to_home(
             await pilot.press("f3")
             await pilot.pause()
             assert app.workflow_state.current_page == PAGE_QA_PICKER
-            await pilot.press("f2")  # back to Home: the launcher's call
-            await pilot.pause()
-        return app.return_value
-
-    assert asyncio.run(run()) == "switch_assignment"
-
-
-def test_a_workspace_session_reaches_the_tools_and_f2_still_exits_to_its_chooser(
-    workspace_provider,
-) -> None:
-    from opengrader.tui.state import PAGE_SETUP
-
-    async def run() -> object:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=workspace_provider)
-        async with app.run_test(size=(140, 45)) as pilot:
-            await pilot.pause()
-            await pilot.press("f3")
-            await pilot.pause()
-            assert app.workflow_state.current_page == PAGE_SETUP
-            await pilot.press("f3")
-            await pilot.pause()
-            assert app.workflow_state.current_page == PAGE_QA_PICKER
+            # Folder mode: F2 stays in the app, on the Start grading card.
             await pilot.press("f2")
             await pilot.pause()
-        return app.return_value
-
-    assert asyncio.run(run()) == "switch_assignment"
-
-
-def test_opening_a_folder_from_a_workspace_session_stops_following_it(
-    workspace_provider, tmp_path
-) -> None:
-    from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
-
-    qa, subs = _copy_sample(tmp_path)
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=workspace_provider)
-        async with app.run_test(size=(140, 45)) as pilot:
-            await pilot.pause()
-            assert app._stop_workspace_events is not None
-            await pilot.press("f3")
-            await pilot.pause()
-            # What the pipeline card posts when a run leaves submissions.
-            setup = app.get_setup_screen()
-            setup.post_message(SetupScreen.LaunchRequested(str(qa), str(subs)))
-            await pilot.pause()
-            assert isinstance(app.data_provider, SubmissionFilesProvider)
-            assert app._stop_workspace_events is None
-
-    asyncio.run(run())
-
-
-def test_tools_opened_on_a_scans_folder_fill_the_pipeline_card(tmp_path) -> None:
-    from textual.widgets import Collapsible
-
-    folder = tmp_path / "quiz2"
-    folder.mkdir()
-    (folder / "scans.pdf").write_bytes(b"%PDF-1.4\n")
-
-    async def run() -> tuple[str, bool]:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, pipeline_folder=folder)
-        async with app.run_test(size=(140, 45)) as pilot:
-            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_SETUP
             return (
-                app.query_one("#pipe-scan", Input).value,
-                app.query_one("#section-pipeline", Collapsible).collapsed,
+                app.is_running,
+                app.query_one("#tui-qa-path", Input).value,
+                app.query_one("#tui-sub-path", Input).value,
+                app.focused.id if app.focused else None,
             )
 
-    scan, collapsed = asyncio.run(run())
-    assert scan == str(folder / "scans.pdf")
-    assert collapsed is False
+    running, qa_field, subs_field, focused = asyncio.run(run())
+    assert running
+    assert (qa_field, subs_field) == (str(qa), str(subs))  # what is open
+    # The folder just graded is now a recent one, so F2 lands on that list.
+    assert focused == "launch-recent-list"
 
 
-def test_a_folder_opened_from_the_pipeline_is_remembered_for_home(tmp_path) -> None:
-    from opengrader.core.recents import load_recents
+def test_start_grading_finds_the_answer_key_and_submissions_in_a_class_folder(
+    tmp_path,
+) -> None:
+    from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
 
     qa, subs = _copy_sample(tmp_path)
 
@@ -2391,13 +2337,191 @@ def test_a_folder_opened_from_the_pipeline_is_remembered_for_home(tmp_path) -> N
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(140, 45)) as pilot:
             await pilot.pause()
-            app.get_setup_screen().post_message(
-                SetupScreen.LaunchRequested(str(qa), str(subs))
+            app.query_one("#tui-class-folder", Input).value = str(qa.parent)
+            app.query_one("#launch-button", Button).press()
+            await pilot.pause()
+            assert isinstance(app.data_provider, SubmissionFilesProvider)
+            assert Path(app.data_provider.qa_file_path) == qa
+            assert Path(app.data_provider.submissions_path) == subs
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+
+    asyncio.run(run())
+
+
+def _record_folders(tmp_path: Path, count: int) -> list[Path]:
+    """`count` real class folders, recorded oldest first (so the last is newest)."""
+    import shutil
+
+    from opengrader.core.recents import record_recent
+
+    folders = []
+    for index in range(count):
+        folder = tmp_path / f"class-{index}"
+        shutil.copytree("samples/cs146-quiz1", folder)
+        record_recent(
+            "folder",
+            folder,
+            title=f"Class {index}",
+            qa_file=folder / "qa.md",
+            submissions=folder / "student-submissions",
+        )
+        folders.append(folder)
+    return folders
+
+
+def test_classic_lists_the_five_newest_class_folders_and_starts_on_them(tmp_path) -> None:
+    from opengrader.tui.ui.widgets.recent_list import RecentList
+
+    _record_folders(tmp_path, 7)
+
+    async def run() -> tuple[list[str], str | None, bool]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            recents = app.query_one("#launch-recent-list", RecentList)
+            return (
+                [item.title for item in recents.items],
+                app.focused.id if app.focused else None,
+                app.query_one("#launch-recents").has_class("hidden"),
             )
+
+    titles, focused, hidden = asyncio.run(run())
+    assert titles == ["Class 6", "Class 5", "Class 4", "Class 3", "Class 2"]
+    assert focused == "launch-recent-list" and not hidden
+
+
+def test_no_recent_folders_hides_the_list_and_focuses_the_folder_box() -> None:
+    async def run() -> tuple[bool, str | None]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            return (
+                app.query_one("#launch-recents").has_class("hidden"),
+                app.focused.id if app.focused else None,
+            )
+
+    assert asyncio.run(run()) == (True, "tui-class-folder")
+
+
+def test_choosing_a_recent_folder_opens_it_and_records_it_first(tmp_path) -> None:
+    from opengrader.core.recents import load_recents
+    from opengrader.tui.data.submission_files_provider import SubmissionFilesProvider
+
+    older, _newer = _record_folders(tmp_path, 2)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.press("down", "enter")  # the older of the two
+            await pilot.pause()
+            assert isinstance(app.data_provider, SubmissionFilesProvider)
+            assert Path(app.data_provider.submissions_path) == (
+                older / "student-submissions"
+            ).resolve()
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+
+    asyncio.run(run())
+    newest = load_recents()[0]
+    assert (newest.kind, newest.title) == ("folder", "CS146: Quiz 1")
+    assert Path(newest.path) == older.resolve()
+
+
+def test_d_forgets_a_recent_folder_and_the_next_one_moves_up(tmp_path) -> None:
+    from opengrader.core.recents import load_recents
+    from opengrader.tui.ui.widgets.recent_list import RecentList
+
+    _record_folders(tmp_path, 6)
+
+    async def run() -> list[str]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.press("d")  # forgets the newest, "Class 5"
+            await pilot.pause()
+            await pilot.pause()
+            return [item.title for item in app.query_one(RecentList).items]
+
+    titles = asyncio.run(run())
+    assert titles == ["Class 4", "Class 3", "Class 2", "Class 1", "Class 0"]
+    assert "Class 5" not in [item.title for item in load_recents()]
+
+
+def test_forgetting_the_last_recent_folder_hides_the_list(tmp_path) -> None:
+    _record_folders(tmp_path, 1)
+
+    async def run() -> tuple[bool, str | None]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            await pilot.press("d")
+            await pilot.pause()
+            return (
+                app.query_one("#launch-recents").has_class("hidden"),
+                app.focused.id if app.focused else None,
+            )
+
+    assert asyncio.run(run()) == (True, "tui-class-folder")
+
+
+def test_a_missing_recent_folder_is_marked_and_does_not_open(tmp_path) -> None:
+    import shutil
+
+    from opengrader.tui.ui.widgets.recent_list import RecentList
+
+    [folder] = _record_folders(tmp_path, 1)
+    shutil.rmtree(folder)
+
+    async def run() -> tuple[bool, str]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            row = app.query_one(RecentList).children[0]
+            await pilot.press("enter")
+            await pilot.pause()
+            return row.has_class("recent-missing"), app.workflow_state.current_page
+
+    missing, page = asyncio.run(run())
+    from opengrader.tui.state import PAGE_SETUP
+
+    assert missing and page == PAGE_SETUP
+
+
+def test_a_workspace_session_records_no_class_folder(workspace_provider) -> None:
+    from opengrader.core.recents import load_recents
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=workspace_provider)
+        async with app.run_test(size=(140, 45)) as pilot:
             await pilot.pause()
 
     asyncio.run(run())
-    [recent] = load_recents()
-    assert recent.kind == "folder"
-    assert recent.title == "CS146: Quiz 1"
-    assert recent.submissions == str(subs.resolve())
+    assert [item for item in load_recents() if item.kind == "folder"] == []
+
+
+def test_a_workspace_session_is_grading_only_and_f2_exits_to_its_list(
+    workspace_provider,
+) -> None:
+    async def run() -> object:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=workspace_provider)
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            assert not app.has_tools_page
+            assert not app.query(SetupScreen)  # never composed
+            visible = {b.command for b in app.input_controller.visible_bindings()
+                       if app._input_command_available(b.command)}
+            assert InputCommand.OPEN_START_PAGE not in visible
+            await pilot.press("f3")  # no Tools to go to
+            await pilot.pause()
+            assert app.workflow_state.current_page == PAGE_QA_PICKER
+            await pilot.press("f2")
+            await pilot.pause()
+        return app.return_value
+
+    assert asyncio.run(run()) == "switch_assignment"

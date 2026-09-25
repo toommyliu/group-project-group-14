@@ -69,3 +69,40 @@ def test_exists_follows_what_the_entry_needs(tmp_path: Path) -> None:
     assert folder.exists() and not workspace.exists()
     qa.unlink()
     assert not folder.exists()
+
+
+def test_a_workspace_keeps_its_last_assignment_when_merely_reopened(tmp_path: Path) -> None:
+    recents.record_recent(
+        "workspace", tmp_path, assignment="a1", assignment_title="Quiz 1"
+    )
+    recents.record_recent("workspace", tmp_path)  # reopened, nothing chosen yet
+
+    item = recents.recent_workspace(tmp_path)
+    assert item is not None
+    assert (item.assignment, item.assignment_title) == ("a1", "Quiz 1")
+
+    recents.record_recent("workspace", tmp_path, assignment="", assignment_title="")
+    assert recents.recent_workspace(tmp_path).assignment == ""  # cleared on request
+
+
+def test_recent_workspace_matches_the_resolved_path_and_only_workspaces(
+    tmp_path: Path,
+) -> None:
+    recents.record_recent("folder", tmp_path)
+    assert recents.recent_workspace(tmp_path) is None
+
+    recents.record_recent("workspace", tmp_path / "course", assignment="a2")
+    item = recents.recent_workspace(tmp_path / "course" / ".." / "course")
+    assert item is not None and item.assignment == "a2"
+
+
+def test_an_entry_written_before_assignments_were_recorded_still_loads() -> None:
+    target = recents.recents_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps({"version": 1, "recent": [{"kind": "workspace", "path": "/ws"}]}),
+        encoding="utf-8",
+    )
+
+    [item] = recents.load_recents()
+    assert (item.path, item.assignment, item.assignment_title) == ("/ws", "", "")

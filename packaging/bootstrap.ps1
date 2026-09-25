@@ -112,7 +112,9 @@ Write-Host '  Launching Opengrader...'
 Write-Host ''
 
 Set-Location $AppDir
-uv run --no-sync tui @args
+# The icon opens the classic app (Tools & Settings, plain folders, no
+# workspace service); `opengrader tui` is the workspace app for power users.
+uv run --no-sync opengrader classic @args
 $code = $LASTEXITCODE
 if ($code -ne 0) { Read-Host 'Opengrader exited with an error. Press Enter to close' }
 exit $code

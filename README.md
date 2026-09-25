@@ -99,7 +99,7 @@ bash packaging/install.sh                                        # macOS / Linux
 powershell -ExecutionPolicy Bypass -File packaging\install.ps1   # Windows
 ```
 
-The icon opens a terminal window and launches the TUI, quietly installing/repairing `uv`, Python 3.12, and dependencies on the way (first launch takes a minute or two; later launches are instant). While this checkout exists, every launch also re-syncs the installed copy from it, so the icon always runs the latest code. See [packaging/README.md](packaging/README.md) for details and uninstall steps.
+The icon opens a terminal window and launches the classic app (`opengrader classic`: Tools & Settings with a *Start grading* card, for grading class folders with no workspace), quietly installing/repairing `uv`, Python 3.12, and dependencies on the way (first launch takes a minute or two; later launches are instant). While this checkout exists, every launch also re-syncs the installed copy from it, so the icon always runs the latest code. See [packaging/README.md](packaging/README.md) for details and uninstall steps.
 
 ## Usage Guide
 
@@ -110,26 +110,51 @@ Every tool lives behind one front door:
 ```bash
 uv run opengrader <command> [arguments]
 ```
-`opengrader --help` lists every command grouped by what you're doing (Start
-here, Prepare an assignment, Take in scans, Grade, ...) instead of
-alphabetically. The standalone script names underneath it still work exactly
+`opengrader --help` lists the power-user commands grouped by what you're doing
+(Start here, Hand back, ...) instead of alphabetically: launching, the
+workspace, and exports. The tools for grading *folders* — claim, calibrate,
+grade-merge, curve, regrade, the audits and reports, and the single pipeline
+stages — are left out of that list because `opengrader classic` has a screen
+for each of them. They are hidden, not removed: typing one by name (or alias)
+still runs it, and `opengrader commands --all` lists them. The standalone script names underneath it still work exactly
 as before — `uv run submission-splitter ...` and
 `uv run opengrader submission-splitter ...` call the same function with the
 same flags — so every command in this guide keeps working; `opengrader` is
 just the one name to remember instead of thirty.
 
-Run the TUI in an assignment folder:
-```bash
-uv run opengrader tui /path/to/course/quiz-1
-```
-(`uv run tui ...` and `uv run opengrader grade ...` are the same command.)
+There are two ways into the terminal grading app:
+
+- **`opengrader tui`** — a **workspace**, straight to its assignment list,
+  shared live with the web app. Run it inside a workspace, or name a folder:
+  a folder outside any workspace becomes one, and a class folder that is
+  already ready to grade is imported with the grades in its files. There is no
+  Tools page here; F2 goes back to the assignment list, which starts on the
+  assignment you were last grading. Run it with no folder outside any
+  workspace and it lists your recent workspaces to pick from (`d` forgets one
+  that has moved or been deleted).
+  ```bash
+  uv run opengrader tui /path/to/course/quiz-1
+  ```
+  (`uv run tui ...` and `uv run opengrader grade ...` are the same command.)
+- **`opengrader classic`** — what the desktop icon opens: Tools & Settings
+  (every pipeline step and helper tool — doctor, AI setup, providers, sharing,
+  backup) with a *Start grading* card that grades class folders in place.
+  Never uses a workspace or starts a service. *Start grading* lists your 5
+  most recent class folders — press ↩ on one to reopen it, `d` to forget one
+  that has moved. F2 comes back to *Start grading*, F3 moves between Tools and
+  grading.
+  ```bash
+  uv run opengrader classic
+  ```
 
 ### Finding a command
 
 ```bash
-uv run opengrader --help              # every command, grouped by workflow step
-uv run opengrader help submission-extractor   # that tool's own --help
-uv run opengrader commands            # every command, one per line (--json for scripts)
+uv run opengrader --help              # the power-user commands, grouped by workflow step
+uv run opengrader help submission-extractor   # that tool's own --help (hidden tools too)
+uv run opengrader commands            # the same list, one per line
+uv run opengrader commands --all      # ...plus the folder tools `opengrader classic` covers
+uv run opengrader commands --json     # every command, with its folder_tool flag, for scripts
 uv run opengrader completion zsh      # shell completion for subcommand names
 ```
 
@@ -182,7 +207,8 @@ door (`uv run opengrader <name> ...`) — same code, same flags, either
 spelling.
 
 - `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
-- `tui`: Launch the TUI for an assignment folder or pass `--workspace` and `--assignment`.
+- `tui`: Open a workspace in the TUI — an assignment or workspace folder, or `--workspace` and `--assignment`. `--qa-file` + `--submissions` still grade one folder directly, the classic way.
+- `classic` (`opengrader classic`): Tools & Settings and folder grading with no workspace; what the desktop icon opens.
 - `tui-dev`: Launch the TUI with Textual devtools enabled.
 - `qa-file`: Work with QA markdown files.
   - `validate --qa-file <qa.md>`: Validate QA markdown structure.
@@ -347,7 +373,7 @@ Opengrader saves your AI configuration once in `config.json` in your user config
 
 Settings are resolved in this order: explicit command flags, saved settings, then Opengrader's built-in defaults. Provider credentials can still come from the provider's credential environment variable.
 
-Edit the settings from the TUI: launch it and open the "AI setup" tool under "Helper Tools" in the setup screen.
+Edit the settings from the TUI: run `opengrader classic` and open the "AI setup" tool under "Helper Tools".
 
 4. (Optional) Auto-score what can be matched against a solutions file:
 ```bash

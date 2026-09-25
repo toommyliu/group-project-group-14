@@ -11,8 +11,8 @@ from textual.widgets import Button, Static
 
 _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("q", "Quit Opengrader."),
-    ("F2", "Save pending feedback and go Home to open another class folder or workspace (in a workspace: its assignment list)."),
-    ("F3", "Tools: every pipeline step and helper tool (doctor, AI setup and providers, sharing, backup). F3 again goes back to grading."),
+    ("F2", "Save pending feedback and choose something else to grade: the workspace's assignment list (opengrader tui), or the Start grading card (opengrader classic)."),
+    ("F3", "Tools, in opengrader classic only: every pipeline step and helper tool (doctor, AI setup and providers, sharing, backup). F3 again goes back to grading. A workspace (opengrader tui) is grading only."),
     (
         "t",
         "Toggle teacher mode. Grading is anonymous by default — students "
@@ -90,7 +90,7 @@ _REPORT_ROWS: list[tuple[str, str]] = [
         "from a terminal. Nothing else is written; this only measures. Unlike "
         "the other reports here it takes a while (every measured answer is "
         "one model call), so there is an answer limit for a quick first look. "
-        "Also in Tools (F3).",
+        "Also in Tools (F3, classic).",
     ),
     (
         "shift+H",
@@ -381,7 +381,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "result: 'opengrader-run class/' finds the scan, answer key, roster "
         "and blank template inside the class folder and builds there "
         "('--scan bundle.pdf --qa qa.md --out class/' still works, and any "
-        "flag overrides what the folder offered). In Tools (F3) it has a "
+        "flag overrides what the folder offered). In Tools (F3, classic) it has a "
         "section of its own, RUN THE WHOLE PIPELINE, near the top: open "
         "'Run every step — one scan in, graded work out', "
         "choose the class folder and press Scan folder to fill in the rest. "
@@ -461,7 +461,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
 _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     (
         "Where you set it up",
-        "One place: 'AI setup' under Helper Tools in Tools (F3). Which "
+        "One place: 'AI setup' under Helper Tools in Tools (F3, classic). Which "
         "provider, which two models, which server, and how confident a grade "
         "suggestion has to be — answered once, saved for this computer, and "
         "read by everything: every step above, the whole-pipeline run, and the "
@@ -530,7 +530,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     (
         "Should you trust it?",
         "Don't guess. Grade some free responses by hand first, then press "
-        "shift+A (or open Calibrate AI grading in Tools, F3). It re-grades those same answers with the model and "
+        "shift+A (or open Calibrate AI grading in Tools, F3 in classic). It re-grades those same answers with the model and "
         "reports how often it agreed with you, per model and per confidence "
         "level — then names the minimum confidence the evidence supports and "
         "offers to save it into AI setup, where every tool picks it up. It "
@@ -572,7 +572,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "With that same box ticked, a step also 'ollama pull's the model it "
         "needs on first use. For handwriting, run 'ollama pull qwen3.5:9b' "
         "(~7 GB); for grading, 'ollama pull qwen2.5vl:7b' (~6 GB). 'ollama list' shows what you "
-        "have, and 'Check this computer' in Tools (F3) reports whether the "
+        "have, and 'Check this computer' in Tools (F3, classic) reports whether the "
         "models AI setup names are actually installed.",
     ),
     (
@@ -682,7 +682,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "optional Ollama server and its models, and whether this terminal can "
         "display answer crops. Run it on a new machine, and any time something "
         "misbehaves for no obvious reason. Add --smoke to build a template PDF "
-        "end to end. Read-only. CLI: doctor. Also in Tools (F3) as "
+        "end to end. Read-only. CLI: doctor. Also in Tools (F3, classic) as "
         "'Check this computer'.",
     ),
     (
@@ -694,7 +694,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "shipped example, test it, or remove it. A service that is not on "
         "this computer or your local network receives student work. Choose "
         "the provider to use in AI setup. CLI: opengrader-providers. Also in "
-        "Tools (F3) as 'AI providers'.",
+        "Tools (F3, classic) as 'AI providers'.",
     ),
     (
         "AI setup",
@@ -703,7 +703,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "and how confident a grade suggestion must be before it is offered. "
         "What you save is read by every step and every command, including "
         "ones run from a terminal — no tool asks you about a model any more. "
-        "In Tools (F3), right after 'Check this "
+        "In Tools (F3, classic), right after 'Check this "
         "computer', which is what tells you whether those models are "
         "installed. See AI SETUP above for the full detail.",
     ),
@@ -754,7 +754,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "subfolder if there is one each, otherwise by the leading part of the "
         "filename (s1234-p1.jpg, s1234-p2.jpg), or set a fixed number of photos "
         "per student. HEIC (iPhone) photos need one extra install, and it names "
-        "the command. Your photos are only ever read. In Tools (F3) as "
+        "the command. Your photos are only ever read. In Tools (F3, classic) as "
         "'Import phone photos'. CLI: photo-import.",
     ),
     (
@@ -764,7 +764,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "ago. Draw a box around each answer area once, on a blank copy, and "
         "every scan of that assignment is cropped against those boxes: no text "
         "layer needed, and nothing else in the pipeline changes. 'Draw answer "
-        "regions' in Tools (F3) opens the editor with "
+        "regions' in Tools (F3, classic) opens the editor with "
         "the boxes already proposed for you to correct — j/k select, arrows "
         "move, shift+arrows resize, and the panel on the right sets each "
         "question's number, points and type. Saving is refused while anything "
@@ -799,7 +799,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "settle one row at a time. An applied merge can be undone with "
         "grade-restore --without-actor merge:<name>. In the app: shift+E makes "
         "a copy and shift+M merges one back; also Share with another grader in "
-        "Tools (F3). CLI: grade-merge pack/list/preview/apply.",
+        "Tools (F3, classic). CLI: grade-merge pack/list/preview/apply.",
     ),
     (
         "Backup & integrity",
@@ -1035,7 +1035,7 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
     (
         "Generate template",
         "Helper: render a printable blank template PDF (one per version) from "
-        "a QA file. In Tools (F3). Tick 'Add QR codes' "
+        "a QA file. In Tools (F3, classic). Tick 'Add QR codes' "
         "for reliable auto-splitting/reordering (identical sheets), or add a "
         "roster to reveal per-student options: one anonymous QR sheet per student "
         "(prints the id, not the name) plus a teacher master key (id -> name) on "

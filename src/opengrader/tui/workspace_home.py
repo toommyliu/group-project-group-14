@@ -1,4 +1,8 @@
-"""Choose an assignment from the workspace service."""
+"""Choose an assignment from the workspace service.
+
+This is where `opengrader tui` starts: the workspace's assignments and nothing
+else. Tools, settings and folder grading live in `opengrader classic`.
+"""
 
 import shlex
 from pathlib import Path
@@ -12,10 +16,6 @@ from opengrader.core.workspace.models import Assignment
 from opengrader.server.workspace.client import WorkspaceClient
 
 PROCESS_WORKSPACE = "process_workspace"
-# Leave the chooser for the start page: every pipeline step and helper tool.
-OPEN_TOOLS = "open_tools"
-# Back to the terminal app's Home screen, to open another folder or workspace.
-GO_HOME = "go_home"
 
 
 def process_workspace_argv(folder: str, root: str) -> list[str]:
@@ -27,10 +27,7 @@ class WorkspaceHome(App[str | None]):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh assignments"),
-        ("s", "tools", "Tools & settings"),
         ("w", "write_back", "Write grades to files"),
-        ("h", "home", "Home"),
-        ("escape", "home", "Home"),
     ]
     DEFAULT_CSS = """
     #workspace-home {
@@ -55,7 +52,7 @@ class WorkspaceHome(App[str | None]):
         height: 1fr;
     }
 
-    #open-tools, #go-home, #write-back {
+    #write-back {
         margin-top: 1;
     }
 
@@ -107,11 +104,20 @@ class WorkspaceHome(App[str | None]):
     }
     """
 
-    def __init__(self, client: WorkspaceClient, folder: Path | None = None):
+    def __init__(
+        self,
+        client: WorkspaceClient,
+        folder: Path | None = None,
+        *,
+        highlight: str | None = None,
+    ):
         super().__init__()
         self.client = client
         self.folder = folder or Path(client.connection.root)
         self.assignments: list[Assignment] = []
+        # The assignment to start on: the one last opened here (core/recents),
+        # or the one just left with F2. Only highlighted, never opened.
+        self.highlight = highlight
 
     def compose(self) -> ComposeResult:
         root = self.client.connection.root
@@ -153,15 +159,6 @@ class WorkspaceHome(App[str | None]):
                     id="cli-description",
                 )
                 yield Static(command, id="cli-command", markup=False)
-            yield Button("← Home (H)", id="go-home")
-            yield Button(
-                "Tools & settings (S)",
-                id="open-tools",
-                tooltip=(
-                    "The start page: check this computer, AI setup and "
-                    "providers, sharing, backup, and every pipeline step."
-                ),
-            )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -169,15 +166,18 @@ class WorkspaceHome(App[str | None]):
 
     async def action_refresh(self) -> None:
         try:
+            listing = self.query_one(ListView)
+            # A refresh keeps the cursor on the same assignment, not the same row.
+            if self.assignments and listing.index is not None:
+                self.highlight = self.assignments[listing.index].id
             self.assignments = TypeAdapter(list[Assignment]).validate_json(
                 self.client.request("GET", "/api/assignments")
             )
-            listing = self.query_one(ListView)
             await listing.clear()
             await listing.extend(
                 [ListItem(Label(item.title)) for item in self.assignments]
             )
-            listing.index = 0 if self.assignments else None
+            listing.index = self._start_index()
             has_assignments = bool(self.assignments)
             self.query_one("#assignment-picker").display = has_assignments
             self.query_one("#empty-workspace").display = not has_assignments
@@ -189,6 +189,14 @@ class WorkspaceHome(App[str | None]):
         except RuntimeError as exc:
             self.notify(str(exc), severity="error")
 
+    def _start_index(self) -> int | None:
+        if not self.assignments:
+            return None
+        return next(
+            (i for i, item in enumerate(self.assignments) if item.id == self.highlight),
+            0,
+        )
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         index = event.list_view.index
         if index is not None:
@@ -197,15 +205,8 @@ class WorkspaceHome(App[str | None]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "process-folder":
             self.exit(PROCESS_WORKSPACE)
-        elif event.button.id == "open-tools":
-            self.exit(OPEN_TOOLS)
-        elif event.button.id == "go-home":
-            self.exit(GO_HOME)
         elif event.button.id == "write-back":
             self.action_write_back()
-
-    def action_home(self) -> None:
-        self.exit(GO_HOME)
 
     def action_write_back(self) -> None:
         from opengrader.tui.ui.screens.write_back_screen import WriteBackScreen
@@ -222,6 +223,3 @@ class WorkspaceHome(App[str | None]):
                 title=chosen.title,
             )
         )
-
-    def action_tools(self) -> None:
-        self.exit(OPEN_TOOLS)

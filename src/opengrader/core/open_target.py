@@ -1,12 +1,14 @@
-"""What a path the user typed on the Home screen can be opened as.
+"""What a folder can be opened as, from one path and no other hints.
 
-The Home screen has one path box, not a QA field and a submissions field, so
-it has to work out what a folder *is* before offering to open it:
+`opengrader tui FOLDER` names a folder and nothing else — no QA path, no
+submissions path — so it has to work out what the folder *is* before opening
+it (a class folder ready to grade is imported into a new workspace with its
+grades; see `tui/main._open_folder_as_workspace`):
 
 * a **workspace** — it holds `.opengrader/workspace.sqlite3`, and opening it
   means starting the local workspace service;
-* a **class folder ready to grade** — an answer key and extracted
-  submissions, graded in place with no service;
+* a **class folder ready to grade** — one answer key and extracted
+  submissions, whose grades an import carries over;
 * **scans not yet processed** — a scanned bundle but no submissions, which is
   the pipeline's job, not grading's;
 * or none of those, in which case the reason is the answer.

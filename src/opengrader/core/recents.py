@@ -1,8 +1,23 @@
+"""What this user opened recently, newest first — one small per-user file.
+
+Kept beside the AI settings (`recent.json`), never inside an assignment
+folder, so it can hold paths from many courses and is never shared by a
+backup or a grader packet. Every read and write is best effort: a missing,
+malformed or unwritable file costs the list, never the app.
+
+`opengrader tui` records each workspace it opens, with the assignment last
+opened in it; outside any workspace it offers them back
+(`tui/recent_workspaces.py`), and a workspace's assignment list starts on
+the assignment you were last grading. `opengrader classic` records each class
+folder it grades and lists the last few on its Start grading card. Both lists
+are the same widget (`tui/ui/widgets/recent_list.py`).
+"""
+
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -15,6 +30,8 @@ __all__ = [
     "load_recents",
     "record_recent",
     "forget_recent",
+    "recent_workspace",
+    "short_path",
 ]
 
 RecentKind = Literal["folder", "workspace"]
@@ -30,6 +47,10 @@ class RecentItem:
     qa_file: str = ""
     submissions: str = ""
     opened_at: str = ""
+    # Workspaces only: the assignment last opened there (id + title), so the
+    # assignment list can start on it and the recent list can name it.
+    assignment: str = ""
+    assignment_title: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -74,6 +95,8 @@ def load_recents(path: Path | None = None) -> list[RecentItem]:
                 qa_file=_text(entry.get("qa_file")),
                 submissions=_text(entry.get("submissions")),
                 opened_at=_text(entry.get("opened_at")),
+                assignment=_text(entry.get("assignment")),
+                assignment_title=_text(entry.get("assignment_title")),
             )
         )
     return items[:MAX_RECENTS]
@@ -86,9 +109,18 @@ def record_recent(
     title: str = "",
     qa_file: str | Path | None = None,
     submissions: str | Path | None = None,
+    assignment: str | None = None,
+    assignment_title: str | None = None,
     store: Path | None = None,
 ) -> None:
-    """Put this at the top of the list. Best effort: never raises `OSError`."""
+    """Put this at the top of the list. Best effort: never raises `OSError`.
+
+    `assignment`/`assignment_title` left as `None` keep what this entry
+    already had, so re-recording a workspace when it is merely reopened does
+    not forget which assignment was being graded there; pass `""` to clear.
+    """
+    target = store or recents_path()
+    existing = load_recents(target)
     item = RecentItem(
         kind=kind,
         path=_absolute(path),
@@ -97,9 +129,29 @@ def record_recent(
         submissions=_absolute(submissions) if submissions else "",
         opened_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
-    target = store or recents_path()
-    items = [item, *(old for old in load_recents(target) if old.key != item.key)]
+    previous = next((old for old in existing if old.key == item.key), None)
+    item = replace(
+        item,
+        assignment=_kept(assignment, previous.assignment if previous else ""),
+        assignment_title=_kept(
+            assignment_title, previous.assignment_title if previous else ""
+        ),
+    )
+    items = [item, *(old for old in existing if old.key != item.key)]
     _write(target, items[:MAX_RECENTS])
+
+
+def recent_workspace(path: str | Path, *, store: Path | None = None) -> RecentItem | None:
+    """This workspace's entry, if it has been opened before."""
+    where = _absolute(path)
+    return next(
+        (
+            item
+            for item in load_recents(store)
+            if item.kind == "workspace" and item.path == where
+        ),
+        None,
+    )
 
 
 def forget_recent(item: RecentItem, *, store: Path | None = None) -> None:
@@ -120,6 +172,19 @@ def _write(target: Path, items: list[RecentItem]) -> None:
 
 def _absolute(value: str | Path) -> str:
     return str(Path(str(value)).expanduser().resolve())
+
+
+def short_path(path: str | Path) -> str:
+    """`~/…` for a path under the home folder, as a shell would print it."""
+    text = str(path)
+    home = str(Path.home())
+    if text == home or text.startswith(home + os.sep):
+        return "~" + text[len(home):]
+    return text
+
+
+def _kept(new: str | None, old: str) -> str:
+    return old if new is None else new.strip()
 
 
 def _text(value: object) -> str:

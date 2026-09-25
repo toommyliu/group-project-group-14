@@ -190,9 +190,12 @@ def test_an_unknown_command_exits_two_and_suggests_the_near_miss() -> None:
     assert "submission-extractor" in result.output
 
 
-def test_bare_command_opens_the_tui(monkeypatch) -> None:
+def test_bare_command_inside_a_workspace_opens_the_tui(monkeypatch, tmp_path) -> None:
+    from opengrader.core.workspace.store import Workspace
     from opengrader.tui import main as tui_main
 
+    Workspace.create(tmp_path)
+    monkeypatch.chdir(tmp_path)
     opened: list[list[str]] = []
     monkeypatch.setattr(tui_main, "run_app", lambda argv: opened.append(argv))
 
@@ -200,6 +203,20 @@ def test_bare_command_opens_the_tui(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert opened == [[]]
+
+
+def test_bare_command_outside_a_workspace_shows_help(monkeypatch, tmp_path) -> None:
+    from opengrader.tui import main as tui_main
+
+    monkeypatch.chdir(tmp_path)
+    opened: list[list[str]] = []
+    monkeypatch.setattr(tui_main, "run_app", lambda argv: opened.append(argv))
+
+    result = CliRunner().invoke(cli, [])
+
+    assert result.exit_code == 0
+    assert opened == []
+    assert "classic" in result.output and "tui" in result.output
 
 
 def _row_labels(listing: str) -> list[str]:
@@ -212,7 +229,7 @@ def _row_labels(listing: str) -> list[str]:
     return labels
 
 
-def test_sectioned_help_lists_every_visible_command_once_and_hides_dev_only_ones() -> None:
+def test_sectioned_help_lists_every_listed_command_once_and_hides_the_rest() -> None:
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
 
@@ -220,7 +237,9 @@ def test_sectioned_help_lists_every_visible_command_once_and_hides_dev_only_ones
     row_counts = Counter(_row_labels(listing))
 
     for spec in COMMANDS:
-        if spec.hidden:
+        if not spec.listed:
+            # Dev-only and folder tools stay out of the power-user listing.
+            assert row_counts[spec.name] == 0, f"{spec.name!r} should not be listed"
             continue
         assert row_counts[spec.name] == 1, f"{spec.name!r} appears {row_counts[spec.name]} time(s) as a row"
         assert spec.section in SECTION_ORDER
@@ -251,3 +270,52 @@ def test_commands_json_emits_one_object_per_registry_row() -> None:
         assert row["section"] == spec.section
         assert row["summary"] == spec.summary
         assert row["target"] == spec.target
+        assert row["folder_tool"] == spec.folder_tool
+
+
+def test_the_power_user_listing_keeps_launch_workspace_and_hand_back_commands() -> None:
+    listed = {spec.name for spec in COMMANDS if spec.listed}
+    assert {
+        "run", "tui", "classic", "serve", "web", "stop", "doctor", "providers",
+        "grades-export", "return-bundle", "grade-check", "grade-release", "canvas-export",
+    } <= listed
+    assert {"claim", "calibrate", "grade-merge", "curve", "submission-splitter"}.isdisjoint(listed)
+
+
+def test_help_points_to_the_folder_tools() -> None:
+    result = CliRunner().invoke(cli, ["--help"])
+    folder_tools = sum(spec.folder_tool for spec in COMMANDS)
+
+    assert f"{folder_tools} more tools for grading folders" in result.output
+    assert "commands --all" in result.output
+
+
+def test_commands_lists_folder_tools_only_with_all() -> None:
+    plain = CliRunner().invoke(cli, ["commands"]).output
+    everything = CliRunner().invoke(cli, ["commands", "--all"]).output
+
+    assert "claim" not in plain.split() and "tui" in plain.split()
+    assert "claim" in everything.split() and "(folder tool)" in everything
+    assert "tui-dev" not in everything  # dev-only stays hidden even here
+
+
+def test_a_folder_tool_still_runs_by_name_and_alias(capsys) -> None:
+    for name in ("claim", "split"):  # canonical name, and an alias
+        result = CliRunner().invoke(cli, [name, "--help"])
+        assert result.exit_code == 0, name
+        assert "usage: opengrader" in result.output + capsys.readouterr().out
+
+
+def test_completion_offers_only_listed_commands() -> None:
+    from opengrader.cli.main import OpengraderCLI
+
+    names = OpengraderCLI().list_commands(None)  # type: ignore[arg-type]
+    assert "tui" in names and "classic" in names
+    assert "claim" not in names and "tui-dev" not in names
+
+
+def test_an_unknown_command_still_suggests_a_folder_tool() -> None:
+    result = CliRunner().invoke(cli, ["clam"])
+
+    assert result.exit_code == 2
+    assert "claim" in result.output and "commands --all" in result.output

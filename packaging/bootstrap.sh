@@ -151,4 +151,7 @@ say "  Launching Opengrader..."
 say ""
 
 cd "$APP_DIR"
-exec uv run --no-sync tui "$@"
+# The icon is for people who may never open a terminal: the classic app
+# (Tools & Settings + Start grading, plain folders, no workspace service).
+# `opengrader tui` is the workspace app for power users.
+exec uv run --no-sync opengrader classic "$@"

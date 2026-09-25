@@ -22,7 +22,11 @@ packaging/
 
 Two different audiences, deliberately separate: the **desktop icon** above is
 for an instructor who never opens a terminal, while `opengrader` /
-`install-command.sh` below are for someone who lives in one.
+`install-command.sh` below are for someone who lives in one. They also open
+different apps: the icon runs **`opengrader classic`** — Tools & Settings with
+a *Start grading* card, grading class folders in place, no workspace service —
+while `opengrader tui` in a terminal opens a **workspace** straight to its
+assignment list, shared live with the web app.
 
 ## The `opengrader` command (terminal users)
 
@@ -180,7 +184,7 @@ From a checkout of this repo:
 
 That's it. An **Opengrader** icon appears on the Desktop; double-clicking it
 opens a terminal window, quietly verifies/installs everything, then launches
-the TUI. The first launch takes a minute or two (Python + dependencies);
+the classic app (`opengrader classic`). The first launch takes a minute or two (Python + dependencies);
 subsequent launches are instant.
 
 ## How it works

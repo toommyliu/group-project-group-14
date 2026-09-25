@@ -65,6 +65,18 @@ _EXTRACTION_GIVE_UP_SECONDS = 600.0
 logger = logging.getLogger(__name__)
 
 
+def _is_workspace_provider(provider: Provider) -> bool:
+    """True for a `WorkspaceProvider`, without importing it for folder mode.
+
+    The module can only be in `sys.modules` if something (the workspace
+    launcher) already imported it, so folder mode never pays for the import.
+    """
+    import sys
+
+    module = sys.modules.get("opengrader.tui.data.workspace_provider")
+    return module is not None and isinstance(provider, module.WorkspaceProvider)
+
+
 class TuiApp(App[Literal["switch_assignment"]]):
     CSS_PATH = Path(__file__).parent / "tui.tcss"
     ENABLE_COMMAND_PALETTE = False
@@ -107,17 +119,19 @@ class TuiApp(App[Literal["switch_assignment"]]):
         data_provider: Provider | None = None,
         qa_file_path: str | Path | None = None,
         submissions_path: str | Path | None = None,
-        pipeline_folder: str | Path | None = None,
     ) -> None:
-        """Three ways in, and none of them needs the workspace service.
+        """Two apps in one class, chosen by what it is handed.
 
-        No arguments opens Tools (the start page: every pipeline step and
-        helper tool); `pipeline_folder` opens it with the pipeline card
-        filled in from a folder of scans. `qa_file_path` + `submissions_path`
-        grade a folder in place. `data_provider` is how the workspace
-        launcher hands in a `WorkspaceProvider`, which is an addition, not a
-        requirement. Choosing *what* to grade is Home's job (`tui/home.py`);
-        F2 exits back to it.
+        **Folder mode** (`opengrader classic`, and anything that is not a
+        workspace): no arguments opens Tools — the Start grading card, every
+        pipeline step and helper tool — and `qa_file_path` + `submissions_path`
+        grade a folder in place. F2 comes back to the Start grading card and
+        F3 moves between Tools and grading. Never touches the workspace service.
+
+        **Workspace mode** (`opengrader tui`): `data_provider` is a
+        `WorkspaceProvider` handed in by the launcher. Grading only — there is
+        no Tools page to reach, and F2 exits so the launcher can show the
+        workspace's assignment list again.
         """
         super().__init__()
         self.default_image_path = default_image_path or str(Path("images/Grading.jpg"))
@@ -126,11 +140,13 @@ class TuiApp(App[Literal["switch_assignment"]]):
             qa_file_path=qa_file_path,
             submissions_path=submissions_path,
         )
+        # Decided once: a session never changes mode. The Tools page (and so
+        # F3) exists only in folder mode; a workspace session is grading only.
+        self.has_tools_page = not _is_workspace_provider(self.data_provider)
         if isinstance(self.data_provider, StubDataProvider):
             self.workflow_state.current_page = PAGE_SETUP
         else:
             self.workflow_state.session_open = True
-        self._pipeline_folder = pipeline_folder
         self._workspace_events: dict[tuple[str, int, str], WorkspaceEvent] = {}
         self._workspace_retry_at = 0.0
         self.grade_controller = GradeController(
@@ -148,14 +164,17 @@ class TuiApp(App[Literal["switch_assignment"]]):
             else PAGE_QA_PICKER
         )
         with ContentSwitcher(initial=initial_page, id="workspace-switcher"):
-            # Always composed, so the helper tools stay one key away (F3)
-            # from grading, whichever way the app was opened.
-            yield SetupScreen(id=PAGE_SETUP)
+            # In folder mode Tools is always composed, so the helper tools stay
+            # one key away (F3) from grading. A workspace session never has it.
+            if self.has_tools_page:
+                yield SetupScreen(id=PAGE_SETUP)
             yield QAPickerScreen(id=PAGE_QA_PICKER)
             yield GradeScreen(self.default_image_path, id=PAGE_GRADE)
         yield StatusBar(id="app-status-bar")
 
     def on_mount(self) -> None:
+        if self.has_tools_page and self.workflow_state.session_open:
+            self._remember_folder()  # opened with --qa-file/--submissions
         if not isinstance(self.data_provider, StubDataProvider):
             self._apply_grading_policy()
             self._load_work_claims()
@@ -163,9 +182,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
             submissions_path = getattr(self.data_provider, "submissions_path", None)
             if submissions_path is not None:
                 self._start_extraction_watch(submissions_path, known_active=None)
-        from opengrader.tui.data.workspace_provider import WorkspaceProvider
-
-        if isinstance(self.data_provider, WorkspaceProvider):
+        if not self.has_tools_page:  # a workspace session: follow its events
             provider = self.data_provider
 
             def changed(event: WorkspaceEvent) -> None:
@@ -179,9 +196,11 @@ class TuiApp(App[Literal["switch_assignment"]]):
                 provider.cursor, changed
             )
             self.set_interval(0.1, self._refresh_workspace)
-        if self._pipeline_folder is not None:
-            self.get_setup_screen().open_pipeline_folder(self._pipeline_folder)
         self._show_session_on_tools_page()
+        if self.workflow_state.current_page == PAGE_SETUP:
+            # Classic with nothing open: land on the recent folders (or the
+            # class-folder box), so a returning user can start with ↩.
+            self.get_setup_screen().focus_launch_card(scroll=False)
         self.refresh_bindings()
         self._announce_graphics_capability()
 
@@ -207,24 +226,17 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self.refresh_bindings()
 
     def _show_session_on_tools_page(self) -> None:
-        from opengrader.tui.data.workspace_provider import WorkspaceProvider
-
+        """Tell the Start grading card what is open, so it can say so."""
+        if not self.has_tools_page:
+            return
         provider = self.data_provider
-        if isinstance(provider, WorkspaceProvider):
-            text = (
-                f"Grading {provider.assignment.title} in a workspace. "
-                "F3 back to grading · F2 its assignment list."
-            )
-        elif self.workflow_state.session_open:
-            where = getattr(provider, "submissions_path", "")
-            text = f"Grading {where}. F3 back to grading · F2 Home."
-        else:
-            text = (
-                "Nothing is open for grading. Press F2 for Home to open a "
-                "class folder, or run the pipeline below on new scans."
-            )
+        qa = getattr(provider, "qa_file_path", None)
+        subs = getattr(provider, "submissions_path", None)
         try:
-            self.get_setup_screen().show_session(text)
+            self.get_setup_screen().show_session(
+                qa if self.workflow_state.session_open else None,
+                subs if self.workflow_state.session_open else None,
+            )
         except Exception:  # noqa: BLE001 - the banner is a courtesy
             pass
 
@@ -353,7 +365,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
         *,
         known_active: Callable[[], bool] | None,
     ) -> bool:
-        """Grade a folder from the start page, with no service involved."""
+        """Grade a folder from the Start grading card or the pipeline, with no service."""
         try:
             provider = SubmissionFilesProvider(
                 qa_file_path=qa_path,
@@ -363,10 +375,6 @@ class TuiApp(App[Literal["switch_assignment"]]):
         except Exception as exc:  # noqa: BLE001 - shown to the user, app stays up
             self.notify(f"Error loading files: {exc}", severity="error")
             return False
-        # Opened from a workspace session: stop following that workspace, or
-        # its events would be applied to a folder they do not describe. The
-        # launcher still owns the WorkspaceProvider and closes it on exit.
-        self._stop_following_workspace()
         self.workflow_state = TuiWorkflowState(session_open=True)
         self.data_provider = provider
         self.grade_controller = GradeController(self, self.workflow_state, provider)
@@ -377,34 +385,43 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self._load_grading_queue()
         self.switch_to(PAGE_QA_PICKER)
         self._start_extraction_watch(submissions_path, known_active=known_active)
-        self._remember_folder(qa_path, submissions_path)
+        self._remember_folder()
         return True
 
-    @staticmethod
-    def _remember_folder(qa_path: str | Path, submissions_path: str | Path) -> None:
-        """Opened from the pipeline: list it on Home next time."""
+    def _remember_folder(self) -> None:
+        """List this class folder on the Start grading card next time.
+
+        The entry points at the class folder — the common parent of answer
+        key and submissions — and keeps both paths, so choosing it later
+        reopens exactly this pair. Best effort, like everything in recents.
+        """
+        import os
+
         from opengrader.core.recents import record_recent
 
+        qa = getattr(self.data_provider, "qa_file_path", None)
+        submissions = getattr(self.data_provider, "submissions_path", None)
+        if qa is None or submissions is None:
+            return
+        qa, submissions = Path(qa), Path(submissions)
         try:
             from opengrader.core.qa_file import load_qa_markdown
 
-            title = load_qa_markdown(Path(qa_path)).title or ""
+            title = load_qa_markdown(qa).title or ""
         except Exception:  # noqa: BLE001 - a title is only a label
             title = ""
-        folder = Path(submissions_path).expanduser().parent
+        try:
+            folder = Path(os.path.commonpath([qa.parent, submissions]))
+        except ValueError:  # different drives (Windows): no common parent
+            folder = submissions.parent
         record_recent(
-            "folder", folder, title=title, qa_file=qa_path, submissions=submissions_path
+            "folder", folder, title=title, qa_file=qa, submissions=submissions
         )
 
-    def _stop_following_workspace(self) -> None:
-        stop = getattr(self, "_stop_workspace_events", None)
-        self._stop_workspace_events = None
-        self._workspace_events.clear()
-        if stop:
-            stop()
-
     def _toggle_start_page(self) -> None:
-        """F3: the start page and its helper tools, and back again."""
+        """F3 (folder mode only): Tools and its helper tools, and back again."""
+        if not self.has_tools_page:
+            return
         if self.workflow_state.current_page != PAGE_SETUP:
             if self.grade_controller.commit_pending_comment():
                 return
@@ -1144,9 +1161,16 @@ class TuiApp(App[Literal["switch_assignment"]]):
             grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
 
     def _switch_assignment(self) -> None:
-        # The launcher decides where F2 leads: Home, or a workspace's list.
+        # Save a half-typed comment first; if that fails, stay put.
         if self.grade_controller.commit_pending_comment():
             return
+        if self.has_tools_page:
+            # Folder mode: choosing another folder is the Start grading card's
+            # job, and it lives in this app — no need to exit and relaunch.
+            self.switch_to(PAGE_SETUP)
+            self.get_setup_screen().focus_launch_card()
+            return
+        # Workspace mode: the launcher shows the assignment list again.
         self.exit("switch_assignment")
 
     def _input_command_available(self, command: InputCommand | str) -> bool:
@@ -1160,6 +1184,12 @@ class TuiApp(App[Literal["switch_assignment"]]):
             return False
 
         normalized_command = InputController._coerce_command(command)
+
+        if (
+            normalized_command is InputCommand.OPEN_START_PAGE
+            and not self.has_tools_page
+        ):
+            return False
 
         if (
             self.workflow_state.current_page == PAGE_GRADE
@@ -1229,6 +1259,13 @@ class TuiApp(App[Literal["switch_assignment"]]):
 
     def on_unmount(self) -> None:
         self._stop_following_workspace()
+
+    def _stop_following_workspace(self) -> None:
+        stop = getattr(self, "_stop_workspace_events", None)
+        self._stop_workspace_events = None
+        self._workspace_events.clear()
+        if stop:
+            stop()
 
     def _workspace_changed(self, event: WorkspaceEvent) -> None:
         self._workspace_events[(event.kind, event.submission_id, event.question_id)] = (

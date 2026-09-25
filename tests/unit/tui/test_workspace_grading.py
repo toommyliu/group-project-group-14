@@ -23,7 +23,7 @@ from opengrader.server.workspace.client import (
 from opengrader.tui.data.workspace_provider import WorkspaceProvider
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens.grade_conflict_screen import GradeConflictScreen
-from opengrader.tui.workspace_home import OPEN_TOOLS, PROCESS_WORKSPACE, WorkspaceHome
+from opengrader.tui.workspace_home import PROCESS_WORKSPACE, WorkspaceHome
 
 
 @pytest.fixture
@@ -196,22 +196,59 @@ def test_empty_workspace_can_process_its_folder(grading_workspace):
     asyncio.run(set_up())
 
 
-@pytest.mark.parametrize("how", ["key", "button"])
-def test_home_opens_the_tools_with_or_without_assignments(grading_workspace, how):
+def test_the_assignment_list_has_no_home_or_tools_way_out(grading_workspace):
+    # `opengrader tui` is the workspace and nothing else: Tools & Settings
+    # belong to `opengrader classic`, and there is no Home to go back to.
     _store, _assignment, provider, _ = grading_workspace
 
     async def run():
         home = WorkspaceHome(provider.client)
         async with home.run_test(size=(100, 35)) as pilot:
             await pilot.pause()
-            if how == "key":
-                await pilot.press("s")
-            else:
-                home.query_one("#open-tools", Button).press()
+            buttons = {button.id for button in home.query(Button)}
+            await pilot.press("s", "h", "escape")
             await pilot.pause()
-        return home.return_value
+            return buttons, home.is_running
 
-    assert asyncio.run(run()) == OPEN_TOOLS
+    buttons, still_open = asyncio.run(run())
+
+    assert "open-tools" not in buttons and "go-home" not in buttons
+    assert still_open  # s, h and escape no longer leave the list
+
+
+def test_the_list_starts_on_the_highlighted_assignment_and_refresh_keeps_it(
+    grading_workspace,
+):
+    store, first, provider, _ = grading_workspace
+    second = store.create_assignment("---\ntitle: Second\n---\n- (1 point) Why?\n")
+
+    async def run():
+        home = WorkspaceHome(provider.client, highlight=second.id)
+        async with home.run_test(size=(100, 35)) as pilot:
+            await pilot.pause()
+            listing = home.query_one("#assignments", ListView)
+            started = listing.index
+            listing.index = 0  # the user moves to the first one
+            await pilot.press("r")
+            await pilot.pause()
+            return started, listing.index
+
+    started, after_refresh = asyncio.run(run())
+    ids = [item.id for item in store.assignments()]
+    assert started == ids.index(second.id)
+    assert after_refresh == ids.index(first.id)  # same assignment, not reset
+
+
+def test_an_unknown_highlight_falls_back_to_the_first_assignment(grading_workspace):
+    _store, _assignment, provider, _ = grading_workspace
+
+    async def run():
+        home = WorkspaceHome(provider.client, highlight="deleted-assignment")
+        async with home.run_test(size=(100, 35)) as pilot:
+            await pilot.pause()
+            return home.query_one("#assignments", ListView).index
+
+    assert asyncio.run(run()) == 0
 
 
 def test_w_opens_write_back_for_the_highlighted_assignment(grading_workspace):
