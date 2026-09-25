@@ -73,6 +73,8 @@ const editorTheme = EditorView.theme({
   '.cm-activeLine, .cm-activeLineGutter': {
     backgroundColor: 'color-mix(in oklab, var(--accent) 65%, transparent)',
   },
+  '&:has(.cm-placeholder) .cm-activeLine, &:has(.cm-placeholder) .cm-activeLineGutter':
+    { backgroundColor: 'transparent' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
     backgroundColor: 'color-mix(in oklab, var(--primary) 25%, transparent)',
   },
