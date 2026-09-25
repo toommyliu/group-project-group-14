@@ -29,12 +29,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Kbd } from '@/components/ui/kbd';
+import { PanelLeft } from 'lucide-react';
+import { formatForDisplay, useHotkey } from '@tanstack/react-hotkeys';
 
 const SIDEBAR_WIDTH = '16rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';
 const SIDEBAR_WIDTH_ICON = '4rem';
-const SIDEBAR_KEYBOARD_SHORTCUT = 'b';
+const SIDEBAR_HOTKEY = 'Mod+B';
 
 type SidebarContextProps = {
   state: 'expanded' | 'collapsed';
@@ -91,25 +93,7 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
   }, [isMobile, setOpen, setOpenMobile]);
 
-  React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-        (event.metaKey || event.ctrlKey) &&
-        !(
-          event.target instanceof HTMLElement &&
-          (event.target.isContentEditable ||
-            event.target.closest('input, textarea, select'))
-        )
-      ) {
-        event.preventDefault();
-        toggleSidebar();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleSidebar]);
+  useHotkey(SIDEBAR_HOTKEY, toggleSidebar, { ignoreInputs: true });
 
   const state = open ? 'expanded' : 'collapsed';
 
@@ -196,9 +180,9 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Assignment navigation</SheetTitle>
+            <SheetTitle>Navigation</SheetTitle>
             <SheetDescription>
-              Navigate this assignment or return to all assignments.
+              Go to all assignments or a page of this assignment.
             </SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
@@ -258,29 +242,39 @@ function SidebarTrigger({
 }: React.ComponentProps<typeof Button>) {
   const { toggleSidebar, open, isMobile, openMobile } = useSidebar();
   const expanded = isMobile ? openMobile : open;
+  const label = expanded ? 'Collapse navigation' : 'Expand navigation';
 
+  // The trigger keeps its place and icon in both states, so it can be clicked
+  // repeatedly without moving the pointer.
   return (
-    <Button
-      data-sidebar="trigger"
-      data-slot="sidebar-trigger"
-      variant="link"
-      size="icon-sm"
-      className={cn(className)}
-      onClick={(event) => {
-        onClick?.(event);
-        toggleSidebar();
-      }}
-      {...props}
-    >
-      {expanded ? (
-        <PanelLeftClose aria-hidden="true" />
-      ) : (
-        <PanelLeftOpen aria-hidden="true" />
-      )}
-      <span className="sr-only">
-        {expanded ? 'Collapse navigation' : 'Expand navigation'}
-      </span>
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            data-sidebar="trigger"
+            data-slot="sidebar-trigger"
+            variant="link"
+            size="icon-sm"
+            className={cn(
+              // Hover and focus draw on a square centered on the icon, whatever the hit area's shape.
+              'relative isolate text-sidebar-foreground before:absolute before:top-1/2 before:left-1/2 before:-z-10 before:size-7 before:-translate-1/2 hover:text-sidebar-accent-foreground hover:before:bg-sidebar-accent focus-visible:border-transparent focus-visible:outline-none focus-visible:before:outline-2 focus-visible:before:outline-foreground',
+              className
+            )}
+            onClick={(event) => {
+              onClick?.(event);
+              toggleSidebar();
+            }}
+            {...props}
+          />
+        }
+      >
+        <PanelLeft aria-hidden="true" />
+        <span className="sr-only">{label}</span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" hidden={isMobile}>
+        {label} <Kbd>{formatForDisplay(SIDEBAR_HOTKEY)}</Kbd>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -358,7 +352,7 @@ function SidebarResizeHandle() {
     <div
       role="separator"
       tabIndex={0}
-      aria-label="Resize assignment navigation"
+      aria-label="Resize navigation"
       aria-description="Use arrow keys to resize, Enter to collapse or expand, and Home to reset."
       aria-orientation="vertical"
       aria-controls="assignment-sidebar"

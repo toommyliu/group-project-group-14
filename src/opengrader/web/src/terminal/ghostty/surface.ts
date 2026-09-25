@@ -1,21 +1,21 @@
-import { isMacPlatform } from "./host";
-import { SELECTION_MULTI_CLICK_INTERVAL_MS } from "./host";
-import { collectWrappedTerminalLinkLine, extractTerminalLinks } from "./links";
+import { isMacPlatform } from './host';
+import { SELECTION_MULTI_CLICK_INTERVAL_MS } from './host';
+import { collectWrappedTerminalLinkLine, extractTerminalLinks } from './links';
 import {
   GhosttyTerminalCore,
   type GhosttyScrollbar,
   type GhosttySnapshot,
   type GhosttyTheme,
-} from "./core";
+} from './core';
 import {
   measureGhosttyCell,
   renderGhosttySnapshot,
   terminalGridSize,
   type GhosttyCellRange,
   type GhosttyCellMetrics,
-} from "./renderer";
-import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
-import { isMonospaceFamily } from "./host";
+} from './renderer';
+import symbolsFontUrl from './fonts/SymbolsNerdFontMono-Regular.woff2?url';
+import { isMonospaceFamily } from './host';
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 12;
 const MIN_TERMINAL_FONT_SIZE = 6;
@@ -32,17 +32,18 @@ const TERMINAL_GLYPH_FALLBACKS =
 // unknown keyword (like ui-monospace) makes canvas font shorthand parsing
 // reject the whole string.
 export const DEFAULT_TERMINAL_FONT_FAMILY =
-  '"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", ' + TERMINAL_GLYPH_FALLBACKS;
+  '"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", ' +
+  TERMINAL_GLYPH_FALLBACKS;
 const CONTENT_PADDING = 4;
 const MIN_SCROLLBAR_THUMB_HEIGHT = 18;
 /** Half a blink cycle: the visible and hidden phases are equally long. */
 const CURSOR_BLINK_INTERVAL_MS = 500;
-const TERMINAL_FONT_LOAD_TEXT = "iMW0@# .";
+const TERMINAL_FONT_LOAD_TEXT = 'iMW0@# .';
 const TERMINAL_FONT_LOAD_VARIANTS = [
-  "normal 400",
-  "normal 700",
-  "italic 400",
-  "italic 700",
+  'normal 400',
+  'normal 700',
+  'italic 400',
+  'italic 700',
 ] as const;
 
 /** Requested terminal font; omitted fields fall back to the defaults. */
@@ -63,7 +64,10 @@ function ensureTerminalSymbolsFont(): Promise<void> {
   if (symbolsFontLoad !== null) return symbolsFontLoad;
   symbolsFontLoad = (async () => {
     try {
-      const face = new FontFace("Symbols Nerd Font Mono", `url(${symbolsFontUrl})`);
+      const face = new FontFace(
+        'Symbols Nerd Font Mono',
+        `url(${symbolsFontUrl})`
+      );
       document.fonts.add(await face.load());
     } catch {
       // Locally installed fallback faces still apply.
@@ -74,20 +78,20 @@ function ensureTerminalSymbolsFont(): Promise<void> {
 
 function quoteTerminalFontFamilies(list: string): string {
   return list
-    .split(",")
+    .split(',')
     .map((name) => {
       const bare = name.trim();
-      if (bare.length === 0) return "";
+      if (bare.length === 0) return '';
       if (/^(['"]).*\1$/.test(bare)) return bare;
       if (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(bare)) return bare;
-      return `"${bare.replaceAll('"', "")}"`;
+      return `"${bare.replaceAll('"', '')}"`;
     })
     .filter((name) => name.length > 0)
-    .join(", ");
+    .join(', ');
 }
 
 function uncheckedTerminalFontFamily(family?: string): string {
-  const custom = family === undefined ? "" : quoteTerminalFontFamilies(family);
+  const custom = family === undefined ? '' : quoteTerminalFontFamilies(family);
   return custom.length === 0
     ? DEFAULT_TERMINAL_FONT_FAMILY
     : `${custom}, ${TERMINAL_GLYPH_FALLBACKS}`;
@@ -96,7 +100,7 @@ function uncheckedTerminalFontFamily(family?: string): string {
 export function terminalFontFamily(family?: string): string {
   // Quote non-ident names ("3270 Nerd Font", "M+ 1m"): an unquoted one makes
   // the whole canvas font string invalid and the assignment silently no-ops.
-  const custom = family === undefined ? "" : quoteTerminalFontFamilies(family);
+  const custom = family === undefined ? '' : quoteTerminalFontFamilies(family);
   if (custom.length === 0) return DEFAULT_TERMINAL_FONT_FAMILY;
   // The grid places the cursor and selection on one cell advance, so a
   // proportional face would draw its text narrower than its own cells. Refuse
@@ -113,16 +117,17 @@ export async function loadTerminalFontFamily(
   environment?: {
     readonly load: (font: string, text: string) => Promise<unknown>;
     readonly resolve: (family: string | undefined) => string;
-  },
+  }
 ): Promise<string> {
   const candidate = uncheckedTerminalFontFamily(family);
   const load =
-    environment?.load ?? ((font: string, text: string) => document.fonts.load(font, text));
+    environment?.load ??
+    ((font: string, text: string) => document.fonts.load(font, text));
   try {
     await Promise.all(
       TERMINAL_FONT_LOAD_VARIANTS.map((variant) =>
-        load(`${variant} ${size}px ${candidate}`, TERMINAL_FONT_LOAD_TEXT),
-      ),
+        load(`${variant} ${size}px ${candidate}`, TERMINAL_FONT_LOAD_TEXT)
+      )
     );
   } catch {
     // The fixed-width fallback stack remains available if a face cannot load.
@@ -131,8 +136,12 @@ export async function loadTerminalFontFamily(
 }
 
 export function terminalFontSize(size?: number): number {
-  if (size === undefined || !Number.isFinite(size)) return DEFAULT_TERMINAL_FONT_SIZE;
-  return Math.max(MIN_TERMINAL_FONT_SIZE, Math.min(MAX_TERMINAL_FONT_SIZE, Math.round(size)));
+  if (size === undefined || !Number.isFinite(size))
+    return DEFAULT_TERMINAL_FONT_SIZE;
+  return Math.max(
+    MIN_TERMINAL_FONT_SIZE,
+    Math.min(MAX_TERMINAL_FONT_SIZE, Math.round(size))
+  );
 }
 
 /**
@@ -146,7 +155,12 @@ export function shouldBlinkTerminalCursor(state: {
   readonly cursorVisible: boolean;
   readonly reducedMotion: boolean;
 }): boolean {
-  return state.focused && state.cursorBlinking && state.cursorVisible && !state.reducedMotion;
+  return (
+    state.focused &&
+    state.cursorBlinking &&
+    state.cursorVisible &&
+    !state.reducedMotion
+  );
 }
 
 /**
@@ -161,7 +175,7 @@ export function terminalContentOriginY(
   padding: number,
   rows: number,
   cellHeight: number,
-  anchorBottom: boolean,
+  anchorBottom: boolean
 ): number {
   if (!anchorBottom) return padding;
   const slack = mountHeight - padding * 2 - rows * cellHeight;
@@ -176,7 +190,7 @@ export interface TerminalScrollbarGeometry {
 
 export function terminalScrollbarGeometry(
   state: GhosttyScrollbar,
-  trackHeight: number,
+  trackHeight: number
 ): TerminalScrollbarGeometry | null {
   const total = Math.max(0, state.total);
   const len = Math.max(0, Math.min(state.len, total));
@@ -184,7 +198,7 @@ export function terminalScrollbarGeometry(
   if (trackHeight <= 0 || len <= 0 || maxOffset === 0) return null;
   const thumbHeight = Math.min(
     trackHeight,
-    Math.max(MIN_SCROLLBAR_THUMB_HEIGHT, (trackHeight * len) / total),
+    Math.max(MIN_SCROLLBAR_THUMB_HEIGHT, (trackHeight * len) / total)
   );
   const travel = Math.max(0, trackHeight - thumbHeight);
   const offset = Math.max(0, Math.min(state.offset, maxOffset));
@@ -199,7 +213,7 @@ export function terminalScrollbarOffsetAtPointer(
   state: GhosttyScrollbar,
   trackHeight: number,
   pointerY: number,
-  pointerOffset: number,
+  pointerOffset: number
 ): number {
   const geometry = terminalScrollbarGeometry(state, trackHeight);
   if (geometry === null) return 0;
@@ -215,14 +229,20 @@ export function terminalGridCellAt(options: {
   clientY: number;
   cols: number;
   rows: number;
-  metrics: Pick<GhosttyCellMetrics, "width" | "height">;
+  metrics: Pick<GhosttyCellMetrics, 'width' | 'height'>;
   padding: number;
   originY: number;
 }): { x: number; y: number } | null {
-  const { bounds, clientX, clientY, cols, rows, metrics, padding, originY } = options;
+  const { bounds, clientX, clientY, cols, rows, metrics, padding, originY } =
+    options;
   const gridX = clientX - bounds.left - padding;
   const gridY = clientY - bounds.top - originY;
-  if (gridX < 0 || gridY < 0 || gridX >= cols * metrics.width || gridY >= rows * metrics.height) {
+  if (
+    gridX < 0 ||
+    gridY < 0 ||
+    gridX >= cols * metrics.width ||
+    gridY >= rows * metrics.height
+  ) {
     return null;
   }
   return {
@@ -231,12 +251,18 @@ export function terminalGridCellAt(options: {
   };
 }
 
-function terminalRowText(row: GhosttySnapshot["rowData"][number], trimRight: boolean): string {
-  const text = row.cells.map((cell) => cell.text || " ").join("");
+function terminalRowText(
+  row: GhosttySnapshot['rowData'][number],
+  trimRight: boolean
+): string {
+  const text = row.cells.map((cell) => cell.text || ' ').join('');
   return trimRight ? text.trimEnd() : text;
 }
 
-function terminalColumnOffset(row: GhosttySnapshot["rowData"][number], column: number): number {
+function terminalColumnOffset(
+  row: GhosttySnapshot['rowData'][number],
+  column: number
+): number {
   let offset = 0;
   for (let cellIndex = 0; cellIndex < column; cellIndex += 1) {
     offset += row.cells[cellIndex]?.text.length || 1;
@@ -251,7 +277,7 @@ export interface TerminalLinkWithRange {
 
 function isSameTerminalLink(
   left: TerminalLinkWithRange,
-  right: TerminalLinkWithRange | null,
+  right: TerminalLinkWithRange | null
 ): boolean {
   return (
     right?.text === left.text &&
@@ -262,7 +288,10 @@ function isSameTerminalLink(
   );
 }
 
-function terminalColumnAtOffset(row: GhosttySnapshot["rowData"][number], offset: number): number {
+function terminalColumnAtOffset(
+  row: GhosttySnapshot['rowData'][number],
+  offset: number
+): number {
   for (let column = 0; column < row.cells.length; column += 1) {
     const nextOffset = terminalColumnOffset(row, column + 1);
     if (offset < nextOffset) return column;
@@ -271,9 +300,9 @@ function terminalColumnAtOffset(row: GhosttySnapshot["rowData"][number], offset:
 }
 
 export function terminalLinkAtPositionWithRange(
-  rows: GhosttySnapshot["rowData"],
+  rows: GhosttySnapshot['rowData'],
   rowIndex: number,
-  column: number,
+  column: number
 ): TerminalLinkWithRange | null {
   const wrappedLine = collectWrappedTerminalLinkLine(rowIndex + 1, (index) => {
     const row = rows[index];
@@ -287,14 +316,21 @@ export function terminalLinkAtPositionWithRange(
   // Only viewport rows are available: a wrapped line whose head scrolled above
   // the viewport would resolve a truncated match into a wrong link.
   const firstSegment = wrappedLine.segments[0];
-  if (firstSegment && rows[firstSegment.bufferLineNumber - 1]?.isWrapContinuation) {
+  if (
+    firstSegment &&
+    rows[firstSegment.bufferLineNumber - 1]?.isWrapContinuation
+  ) {
     return null;
   }
-  const segment = wrappedLine.segments.find((value) => value.bufferLineNumber === rowIndex + 1);
+  const segment = wrappedLine.segments.find(
+    (value) => value.bufferLineNumber === rowIndex + 1
+  );
   const row = rows[rowIndex];
   if (!segment || !row) return null;
   const lastSegment = wrappedLine.segments.at(-1);
-  const lastRow = lastSegment ? rows[lastSegment.bufferLineNumber - 1] : undefined;
+  const lastRow = lastSegment
+    ? rows[lastSegment.bufferLineNumber - 1]
+    : undefined;
   // Ghostty's soft-wrap flag is authoritative: when the last collected row
   // still wraps onward, its continuation is outside the viewport.
   const continuesBelowViewport = lastRow !== undefined && lastRow.wrapsToNext;
@@ -302,25 +338,38 @@ export function terminalLinkAtPositionWithRange(
   for (const match of extractTerminalLinks(wrappedLine.text)) {
     if (offset >= match.start && offset < match.end) {
       // A truncated tail must not activate as a complete link.
-      if (match.end === wrappedLine.text.length && continuesBelowViewport) return null;
+      if (match.end === wrappedLine.text.length && continuesBelowViewport)
+        return null;
       const startSegment = wrappedLine.segments.find(
-        (value) => match.start >= value.startIndex && match.start < value.endIndex,
+        (value) =>
+          match.start >= value.startIndex && match.start < value.endIndex
       );
       const endSegment = wrappedLine.segments.find(
-        (value) => match.end - 1 >= value.startIndex && match.end - 1 < value.endIndex,
+        (value) =>
+          match.end - 1 >= value.startIndex && match.end - 1 < value.endIndex
       );
-      const startRow = startSegment ? rows[startSegment.bufferLineNumber - 1] : undefined;
-      const endRow = endSegment ? rows[endSegment.bufferLineNumber - 1] : undefined;
+      const startRow = startSegment
+        ? rows[startSegment.bufferLineNumber - 1]
+        : undefined;
+      const endRow = endSegment
+        ? rows[endSegment.bufferLineNumber - 1]
+        : undefined;
       if (!startSegment || !endSegment || !startRow || !endRow) return null;
       return {
         text: match.text,
         range: {
           start: {
-            x: terminalColumnAtOffset(startRow, match.start - startSegment.startIndex),
+            x: terminalColumnAtOffset(
+              startRow,
+              match.start - startSegment.startIndex
+            ),
             y: startSegment.bufferLineNumber - 1,
           },
           end: {
-            x: terminalColumnAtOffset(endRow, match.end - 1 - endSegment.startIndex),
+            x: terminalColumnAtOffset(
+              endRow,
+              match.end - 1 - endSegment.startIndex
+            ),
             y: endSegment.bufferLineNumber - 1,
           },
         },
@@ -331,14 +380,14 @@ export function terminalLinkAtPositionWithRange(
 }
 
 export function isTerminalCopyShortcut(
-  event: Pick<KeyboardEvent, "ctrlKey" | "key" | "metaKey" | "shiftKey">,
-  platform = navigator.platform,
+  event: Pick<KeyboardEvent, 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
+  platform = navigator.platform
 ) {
   const key = event.key.toLowerCase();
-  if (key === "insert" && !isMacPlatform(platform)) {
+  if (key === 'insert' && !isMacPlatform(platform)) {
     return event.ctrlKey && !event.shiftKey && !event.metaKey;
   }
-  if (key !== "c") return false;
+  if (key !== 'c') return false;
   return isMacPlatform(platform) ? event.metaKey : event.ctrlKey;
 }
 
@@ -348,8 +397,8 @@ export function isTerminalCopyShortcut(
  * writes blankness to the clipboard. Park the Ghostty selection there first.
  */
 export function primeTerminalCopyInput(
-  input: Pick<HTMLTextAreaElement, "value" | "select">,
-  selection: string,
+  input: Pick<HTMLTextAreaElement, 'value' | 'select'>,
+  selection: string
 ): void {
   input.value = selection;
   if (selection.length === 0) return;
@@ -357,13 +406,13 @@ export function primeTerminalCopyInput(
 }
 
 export function clearPrimedTerminalCopyInput(
-  input: Pick<HTMLTextAreaElement, "value">,
-  primedSelection: string,
+  input: Pick<HTMLTextAreaElement, 'value'>,
+  primedSelection: string
 ): void {
   // Only blank the copy we parked. The same textarea holds the IME candidate;
   // wiping whatever is there would cancel CJK composition.
   if (primedSelection.length === 0 || input.value !== primedSelection) return;
-  input.value = "";
+  input.value = '';
 }
 
 /**
@@ -374,25 +423,30 @@ export function clearPrimedTerminalCopyInput(
  */
 export function applyTerminalCopyEvent(
   selection: string,
-  clipboardData: { setData: (type: string, data: string) => void } | null | undefined,
+  clipboardData:
+    | { setData: (type: string, data: string) => void }
+    | null
+    | undefined
 ): { preventDefault: boolean; claimWriteFallback: boolean } {
   if (selection.length === 0 || !clipboardData) {
     return { preventDefault: false, claimWriteFallback: false };
   }
-  clipboardData.setData("text/plain", selection);
+  clipboardData.setData('text/plain', selection);
   return { preventDefault: true, claimWriteFallback: true };
 }
 
 export function isTerminalPasteShortcut(
-  event: Pick<KeyboardEvent, "ctrlKey" | "key" | "metaKey" | "shiftKey">,
-  platform = navigator.platform,
+  event: Pick<KeyboardEvent, 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
+  platform = navigator.platform
 ) {
   const key = event.key.toLowerCase();
-  if (key === "insert" && !isMacPlatform(platform)) {
+  if (key === 'insert' && !isMacPlatform(platform)) {
     return event.shiftKey && !event.ctrlKey && !event.metaKey;
   }
-  if (key !== "v") return false;
-  return isMacPlatform(platform) ? event.metaKey : event.ctrlKey && event.shiftKey;
+  if (key !== 'v') return false;
+  return isMacPlatform(platform)
+    ? event.metaKey
+    : event.ctrlKey && event.shiftKey;
 }
 
 /**
@@ -404,45 +458,53 @@ function isMiddleClickPastePlatform(): boolean {
   return /linux|bsd/i.test(navigator.platform);
 }
 
-export function isTerminalCompositionCommitInput(event: Pick<InputEvent, "inputType">): boolean {
+export function isTerminalCompositionCommitInput(
+  event: Pick<InputEvent, 'inputType'>
+): boolean {
   return (
-    event.inputType === "" ||
-    event.inputType === "insertCompositionText" ||
-    event.inputType === "insertFromComposition"
+    event.inputType === '' ||
+    event.inputType === 'insertCompositionText' ||
+    event.inputType === 'insertFromComposition'
   );
 }
 
 /** IME keydowns must not touch the hidden textarea; it holds the candidate. */
 export function isTerminalCompositionKey(
-  event: Pick<KeyboardEvent, "isComposing" | "key" | "keyCode">,
-  composing: boolean,
+  event: Pick<KeyboardEvent, 'isComposing' | 'key' | 'keyCode'>,
+  composing: boolean
 ): boolean {
-  return event.isComposing || composing || event.key === "Process" || event.keyCode === 229;
+  return (
+    event.isComposing ||
+    composing ||
+    event.key === 'Process' ||
+    event.keyCode === 229
+  );
 }
 
 export function isTerminalAltGraphText(
-  event: Pick<KeyboardEvent, "getModifierState" | "key">,
+  event: Pick<KeyboardEvent, 'getModifierState' | 'key'>
 ): boolean {
-  return event.getModifierState("AltGraph") && [...event.key].length === 1;
+  return event.getModifierState('AltGraph') && [...event.key].length === 1;
 }
 
 export function shouldReportTerminalMouse(
   tracking: boolean,
-  event: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
+  event: Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'shiftKey'>
 ): boolean {
   return tracking && !event.shiftKey && !event.ctrlKey && !event.metaKey;
 }
 
-type TerminalMouseAction = "press" | "release" | "motion";
+type TerminalMouseAction = 'press' | 'release' | 'motion';
 
 export function resolveTerminalMouseData(
   action: TerminalMouseAction,
   data: string,
-  previousMotionData: string,
+  previousMotionData: string
 ): { readonly send: boolean; readonly nextMotionData: string } {
-  const nextMotionData = action === "motion" ? data : "";
+  const nextMotionData = action === 'motion' ? data : '';
   return {
-    send: data.length > 0 && (action !== "motion" || data !== previousMotionData),
+    send:
+      data.length > 0 && (action !== 'motion' || data !== previousMotionData),
     nextMotionData,
   };
 }
@@ -450,19 +512,19 @@ export function resolveTerminalMouseData(
 export function resolveTerminalMouseTrackingState(
   previousTracking: boolean,
   tracking: boolean,
-  motionData: string,
+  motionData: string
 ): { readonly tracking: boolean; readonly motionData: string } {
   return {
     tracking,
-    motionData: previousTracking === tracking ? motionData : "",
+    motionData: previousTracking === tracking ? motionData : '',
   };
 }
 
 export function terminalWheelDeltaRows(
-  event: Pick<WheelEvent, "deltaY" | "deltaMode">,
+  event: Pick<WheelEvent, 'deltaY' | 'deltaMode'>,
   cellHeight: number,
   viewportRows: number,
-  remainder: number,
+  remainder: number
 ): { readonly rows: number; readonly remainder: number } {
   // deltaMode: 0 pixels, 1 lines, 2 pages.
   const pixels =
@@ -476,16 +538,19 @@ export function terminalWheelDeltaRows(
   return { rows, remainder: total - rows };
 }
 
-export function terminalWheelArrowData(rows: number, applicationCursorKeys: boolean): string {
-  if (rows === 0) return "";
+export function terminalWheelArrowData(
+  rows: number,
+  applicationCursorKeys: boolean
+): string {
+  if (rows === 0) return '';
   const sequence =
     rows < 0
       ? applicationCursorKeys
-        ? "\u001bOA"
-        : "\u001b[A"
+        ? '\u001bOA'
+        : '\u001b[A'
       : applicationCursorKeys
-        ? "\u001bOB"
-        : "\u001b[B";
+        ? '\u001bOB'
+        : '\u001b[B';
   return sequence.repeat(Math.abs(rows));
 }
 
@@ -517,7 +582,7 @@ const TERMINAL_LINK_DRAG_THRESHOLD_PX = 4;
 
 export function advanceTerminalSelectionClickSequence(
   previous: TerminalSelectionClickSequence | null,
-  event: Pick<PointerEvent, "clientX" | "clientY" | "timeStamp">,
+  event: Pick<PointerEvent, 'clientX' | 'clientY' | 'timeStamp'>
 ): TerminalSelectionClickSequence {
   const repeats =
     previous !== null &&
@@ -595,7 +660,7 @@ export class GhosttyTerminalSurface {
   private selectionEnd: { x: number; y: number } | null = null;
   private selectionAnchorScreen: { x: number; y: number } | null = null;
   private selectionEndScreen: { x: number; y: number } | null = null;
-  private selectionMode: "cell" | "word" | "line" = "cell";
+  private selectionMode: 'cell' | 'word' | 'line' = 'cell';
   // Word/line selection base in screen coordinates so streaming output cannot
   // shift the origin of a drag selection.
   private selectionBase: {
@@ -627,14 +692,16 @@ export class GhosttyTerminalSurface {
   private pasteShortcutToken = 0;
   private copyShortcutToken = 0;
   private clearSelectionAfterCopy = false;
-  private primedCopySelection = "";
+  private primedCopySelection = '';
   private wheelRemainder = 0;
-  private lastMouseMotionData = "";
+  private lastMouseMotionData = '';
   private mouseAnyEventTracking = false;
   private dprMedia: MediaQueryList | null = null;
   // Read live on every blink decision, and watched so that dropping the
   // preference restarts a blink cycle that has no timer left to notice it.
-  private readonly reducedMotionMedia = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  private readonly reducedMotionMedia = window.matchMedia?.(
+    '(prefers-reduced-motion: reduce)'
+  );
   private inputLeft = -1;
   private inputTop = -1;
 
@@ -648,7 +715,7 @@ export class GhosttyTerminalSurface {
     core: GhosttyTerminalCore,
     metrics: GhosttyCellMetrics,
     fontFamily: string,
-    options: GhosttyTerminalSurfaceOptions,
+    options: GhosttyTerminalSurfaceOptions
   ) {
     this.mount = mount;
     this.canvas = canvas;
@@ -668,44 +735,47 @@ export class GhosttyTerminalSurface {
     this.resizeObserver = new ResizeObserver(() => this.fit());
     this.installEvents();
     this.watchDevicePixelRatio();
-    this.reducedMotionMedia?.addEventListener("change", this.onReducedMotionChange);
-    document.fonts.addEventListener("loadingdone", this.onFontsLoaded);
+    this.reducedMotionMedia?.addEventListener(
+      'change',
+      this.onReducedMotionChange
+    );
+    document.fonts.addEventListener('loadingdone', this.onFontsLoaded);
     this.resizeObserver.observe(mount);
   }
 
   static async create(
     mount: HTMLElement,
-    options: GhosttyTerminalSurfaceOptions,
+    options: GhosttyTerminalSurfaceOptions
   ): Promise<GhosttyTerminalSurface> {
-    const canvas = document.createElement("canvas");
-    canvas.className = "block size-full cursor-text";
-    canvas.setAttribute("aria-hidden", "true");
+    const canvas = document.createElement('canvas');
+    canvas.className = 'block size-full cursor-text';
+    canvas.setAttribute('aria-hidden', 'true');
 
-    const input = document.createElement("textarea");
-    input.className = "og-ghostty-input";
-    input.setAttribute("aria-label", "Terminal input");
-    input.autocapitalize = "off";
-    input.autocomplete = "off";
+    const input = document.createElement('textarea');
+    input.className = 'og-ghostty-input';
+    input.setAttribute('aria-label', 'Terminal input');
+    input.autocapitalize = 'off';
+    input.autocomplete = 'off';
     input.spellcheck = false;
     input.style.cssText =
-      "position:absolute;left:4px;top:4px;width:1px;height:1px;opacity:0;padding:0;border:0;resize:none;pointer-events:none;";
+      'position:absolute;left:4px;top:4px;width:1px;height:1px;opacity:0;padding:0;border:0;resize:none;pointer-events:none;';
 
-    const scrollbar = document.createElement("div");
+    const scrollbar = document.createElement('div');
     scrollbar.className =
-      "group absolute top-1 right-px bottom-1 z-1 w-[var(--app-scrollbar-width)] cursor-default touch-none";
-    scrollbar.setAttribute("role", "scrollbar");
-    scrollbar.setAttribute("aria-label", "Terminal scrollback");
-    scrollbar.setAttribute("aria-orientation", "vertical");
+      'group absolute top-1 right-px bottom-1 z-1 w-[var(--app-scrollbar-width)] cursor-default touch-none';
+    scrollbar.setAttribute('role', 'scrollbar');
+    scrollbar.setAttribute('aria-label', 'Terminal scrollback');
+    scrollbar.setAttribute('aria-orientation', 'vertical');
     scrollbar.tabIndex = 0;
     scrollbar.hidden = true;
-    const scrollbarThumb = document.createElement("div");
+    const scrollbarThumb = document.createElement('div');
     scrollbarThumb.className =
-      "absolute inset-x-px top-0 rounded-[3px] bg-[var(--app-scrollbar-thumb)] transition-[background-color] duration-[120ms] ease-[ease-out] group-hover:bg-[var(--app-scrollbar-thumb-hover)] group-focus-visible:bg-[var(--app-scrollbar-thumb-hover)]";
+      'absolute inset-x-px top-0 rounded-[3px] bg-[var(--app-scrollbar-thumb)] transition-[background-color] duration-[120ms] ease-[ease-out] group-hover:bg-[var(--app-scrollbar-thumb-hover)] group-focus-visible:bg-[var(--app-scrollbar-thumb-hover)]';
     scrollbar.append(scrollbarThumb);
     mount.replaceChildren(canvas, input, scrollbar);
 
-    const context = canvas.getContext("2d", { alpha: false });
-    if (!context) throw new Error("Canvas 2D is unavailable");
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('Canvas 2D is unavailable');
     // An opaque canvas backing store initializes to solid black, and the font
     // and WASM loads below leave it on screen for the whole setup window; paint
     // the theme background first so the mount never flashes a black box.
@@ -719,16 +789,24 @@ export class GhosttyTerminalSurface {
     } catch {
       // Metrics fall back to whichever faces are already available.
     }
-    const fontFamily = await loadTerminalFontFamily(options.font?.family, fontSize);
+    const fontFamily = await loadTerminalFontFamily(
+      options.font?.family,
+      fontSize
+    );
     const metrics = measureGhosttyCell(context, fontSize, fontFamily);
-    const grid = terminalGridSize(mount.clientWidth, mount.clientHeight, metrics, CONTENT_PADDING);
+    const grid = terminalGridSize(
+      mount.clientWidth,
+      mount.clientHeight,
+      metrics,
+      CONTENT_PADDING
+    );
     const core = await GhosttyTerminalCore.create(
       grid.cols,
       grid.rows,
       metrics.width,
       metrics.height,
       options.theme,
-      options.onData,
+      options.onData
     );
     const surface = new GhosttyTerminalSurface(
       mount,
@@ -740,7 +818,7 @@ export class GhosttyTerminalSurface {
       core,
       metrics,
       fontFamily,
-      options,
+      options
     );
     surface.fit();
     return surface;
@@ -774,7 +852,7 @@ export class GhosttyTerminalSurface {
 
   resetAndWrite(data: string | Uint8Array): void {
     if (this.disposed) return;
-    this.lastMouseMotionData = "";
+    this.lastMouseMotionData = '';
     this.core.resetAndWrite(data);
     this.synchronizeMouseTrackingState();
     // A replayed session starts from the visible phase like any other write:
@@ -810,8 +888,17 @@ export class GhosttyTerminalSurface {
   }
 
   private applyFontMetrics(): void {
-    this.metrics = measureGhosttyCell(this.context, this.fontSize, this.fontFamily);
-    this.core.resize(this.cols, this.rows, this.metrics.width, this.metrics.height);
+    this.metrics = measureGhosttyCell(
+      this.context,
+      this.fontSize,
+      this.fontFamily
+    );
+    this.core.resize(
+      this.cols,
+      this.rows,
+      this.metrics.width,
+      this.metrics.height
+    );
     // Cached IME textarea coordinates are stale in the new cell geometry.
     this.inputLeft = -1;
     this.inputTop = -1;
@@ -844,7 +931,11 @@ export class GhosttyTerminalSurface {
     }
     // A face that finished loading after the initial measurement changes glyph
     // advances; re-measure and refit so the grid matches what actually renders.
-    const metrics = measureGhosttyCell(this.context, this.fontSize, this.fontFamily);
+    const metrics = measureGhosttyCell(
+      this.context,
+      this.fontSize,
+      this.fontFamily
+    );
     if (
       metrics.width === this.metrics.width &&
       metrics.height === this.metrics.height &&
@@ -890,10 +981,19 @@ export class GhosttyTerminalSurface {
     this.mountHeight = height;
     // onResize is the only PTY resize channel, so the first successful fit must
     // notify even when the measured grid equals the 1x1 construction sentinel.
-    if (grid.cols !== this.cols || grid.rows !== this.rows || !this.resizeNotified) {
+    if (
+      grid.cols !== this.cols ||
+      grid.rows !== this.rows ||
+      !this.resizeNotified
+    ) {
       this.cols = grid.cols;
       this.rows = grid.rows;
-      this.core.resize(grid.cols, grid.rows, this.metrics.width, this.metrics.height);
+      this.core.resize(
+        grid.cols,
+        grid.rows,
+        this.metrics.width,
+        this.metrics.height
+      );
       this.notifyResize();
       this.forceFullRender = true;
       this.scrollbarDirty = true;
@@ -913,7 +1013,8 @@ export class GhosttyTerminalSurface {
    */
   private notifyResize(): void {
     this.resizeNotified = true;
-    if (this.resizeNotifyTimer !== null) window.clearTimeout(this.resizeNotifyTimer);
+    if (this.resizeNotifyTimer !== null)
+      window.clearTimeout(this.resizeNotifyTimer);
     this.resizeNotifyTimer = window.setTimeout(() => {
       this.resizeNotifyTimer = null;
       if (!this.disposed) this.options.onResize(this.cols, this.rows);
@@ -934,11 +1035,12 @@ export class GhosttyTerminalSurface {
    */
   async pasteFromClipboard(
     readText: () => Promise<string>,
-    isCurrent: () => boolean = () => true,
+    isCurrent: () => boolean = () => true
   ): Promise<void> {
     const token = ++this.pasteShortcutToken;
     const text = await readText();
-    if (this.disposed || this.pasteShortcutToken !== token || !isCurrent()) return;
+    if (this.disposed || this.pasteShortcutToken !== token || !isCurrent())
+      return;
     // As in every paste path, delivering bumps the token so a clipboard read
     // still in flight cannot land after this text reaches the shell.
     this.pasteShortcutToken += 1;
@@ -970,7 +1072,11 @@ export class GhosttyTerminalSurface {
   }
 
   getSelectionPosition(): GhosttySelectionPosition | null {
-    if (!this.selectionAnchorScreen || !this.selectionEndScreen || !this.hasSelection())
+    if (
+      !this.selectionAnchorScreen ||
+      !this.selectionEndScreen ||
+      !this.hasSelection()
+    )
       return null;
     const before =
       this.selectionAnchorScreen.y < this.selectionEndScreen.y ||
@@ -981,15 +1087,25 @@ export class GhosttyTerminalSurface {
       : { start: this.selectionEndScreen, end: this.selectionAnchorScreen };
   }
 
-  getSelectionEndClientRect(): { readonly right: number; readonly bottom: number } | null {
+  getSelectionEndClientRect(): {
+    readonly right: number;
+    readonly bottom: number;
+  } | null {
     const position = this.getSelectionPosition();
     if (!position) return null;
-    const viewportEnd = this.core.screenPointToViewport(position.end.x, position.end.y);
+    const viewportEnd = this.core.screenPointToViewport(
+      position.end.x,
+      position.end.y
+    );
     if (!viewportEnd) return null;
     const bounds = this.canvas.getBoundingClientRect();
     return {
-      right: bounds.left + CONTENT_PADDING + (viewportEnd.x + 1) * this.metrics.width,
-      bottom: bounds.top + this.originY + (viewportEnd.y + 1) * this.metrics.height,
+      right:
+        bounds.left +
+        CONTENT_PADDING +
+        (viewportEnd.x + 1) * this.metrics.width,
+      bottom:
+        bounds.top + this.originY + (viewportEnd.y + 1) * this.metrics.height,
     };
   }
 
@@ -999,7 +1115,7 @@ export class GhosttyTerminalSurface {
     this.selectionEnd = null;
     this.selectionAnchorScreen = null;
     this.selectionEndScreen = null;
-    this.selectionMode = "cell";
+    this.selectionMode = 'cell';
     this.selectionBase = null;
     this.setSelectionAutoscroll(0);
     this.options.onSelectionChange();
@@ -1023,11 +1139,15 @@ export class GhosttyTerminalSurface {
     if (this.disposed) return;
     this.disposed = true;
     this.resizeObserver.disconnect();
-    document.fonts.removeEventListener("loadingdone", this.onFontsLoaded);
-    this.dprMedia?.removeEventListener("change", this.onDevicePixelRatioChange);
+    document.fonts.removeEventListener('loadingdone', this.onFontsLoaded);
+    this.dprMedia?.removeEventListener('change', this.onDevicePixelRatioChange);
     this.dprMedia = null;
-    this.reducedMotionMedia?.removeEventListener("change", this.onReducedMotionChange);
-    if (this.selectionScrollTimer !== null) window.clearInterval(this.selectionScrollTimer);
+    this.reducedMotionMedia?.removeEventListener(
+      'change',
+      this.onReducedMotionChange
+    );
+    if (this.selectionScrollTimer !== null)
+      window.clearInterval(this.selectionScrollTimer);
     if (this.resizeNotifyTimer !== null) {
       window.clearTimeout(this.resizeNotifyTimer);
       this.resizeNotifyTimer = null;
@@ -1070,18 +1190,19 @@ export class GhosttyTerminalSurface {
       // inspect), so synthesize one with execCommand("copy").
       const selection = this.getSelection();
       this.primeCopy(selection);
-      if (event.shiftKey || event.key.toLowerCase() === "insert") {
+      if (event.shiftKey || event.key.toLowerCase() === 'insert') {
         event.preventDefault();
-        document.execCommand("copy");
+        document.execCommand('copy');
       } else {
         // A plain Ctrl+C is also SIGINT on non-mac: clear the selection once
         // it copies so the next Ctrl+C reaches the shell. The Shift chord and
         // Cmd+C are copy-only, so they keep the selection; resetting the flag
         // up front also drops any clear owed by an earlier gesture that never
         // completed.
-        this.clearSelectionAfterCopy = !event.shiftKey && !isMacPlatform(navigator.platform);
+        this.clearSelectionAfterCopy =
+          !event.shiftKey && !isMacPlatform(navigator.platform);
         const clipboard = navigator.clipboard;
-        if (typeof clipboard?.writeText === "function") {
+        if (typeof clipboard?.writeText === 'function') {
           // Defer the write past the default action: the native copy event
           // (dispatched synchronously with the default action) claims the
           // token first when it actually writes, and the write covers browsers
@@ -1108,7 +1229,7 @@ export class GhosttyTerminalSurface {
                 if (this.copyShortcutToken === token) {
                   this.clearSelectionAfterCopy = false;
                 }
-              },
+              }
             );
           });
         }
@@ -1119,7 +1240,7 @@ export class GhosttyTerminalSurface {
     if (isTerminalPasteShortcut(event)) {
       this.suppressedKeyCodes.add(event.code);
       const clipboard = navigator.clipboard;
-      if (typeof clipboard?.readText === "function") {
+      if (typeof clipboard?.readText === 'function') {
         // Race the async clipboard read against the browser's own paste event:
         // the native event (dispatched synchronously with the default action)
         // always claims the token first when it fires, and the read covers
@@ -1130,11 +1251,12 @@ export class GhosttyTerminalSurface {
           (text) => {
             if (this.disposed || this.pasteShortcutToken !== token) return;
             this.pasteShortcutToken += 1;
-            if (text.length > 0) this.options.onData(this.core.encodePaste(text));
+            if (text.length > 0)
+              this.options.onData(this.core.encodePaste(text));
           },
           () => {
             // Clipboard read denied; the native paste event remains the path.
-          },
+          }
         );
       }
       return;
@@ -1161,7 +1283,7 @@ export class GhosttyTerminalSurface {
     }
     // Ghostty's encoder only emits release codes when the terminal enabled the
     // Kitty report-event-types flag, so legacy sessions send nothing here.
-    const data = this.core.encodeKey(event, "release");
+    const data = this.core.encodeKey(event, 'release');
     if (data.length === 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1192,11 +1314,13 @@ export class GhosttyTerminalSurface {
   };
 
   private watchDevicePixelRatio(): void {
-    this.dprMedia?.removeEventListener("change", this.onDevicePixelRatioChange);
+    this.dprMedia?.removeEventListener('change', this.onDevicePixelRatioChange);
     // A resolution media query only fires once for the ratio it was created at,
     // so re-arm it after every change (monitor moves, browser zoom).
-    this.dprMedia = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-    this.dprMedia.addEventListener("change", this.onDevicePixelRatioChange);
+    this.dprMedia = window.matchMedia(
+      `(resolution: ${window.devicePixelRatio}dppx)`
+    );
+    this.dprMedia.addEventListener('change', this.onDevicePixelRatioChange);
   }
 
   private primeCopy(selection: string): void {
@@ -1206,11 +1330,13 @@ export class GhosttyTerminalSurface {
 
   private clearPrimedCopy(): void {
     clearPrimedTerminalCopyInput(this.input, this.primedCopySelection);
-    this.primedCopySelection = "";
+    this.primedCopySelection = '';
   }
 
   private readonly onCopyEvent = (event: ClipboardEvent) => {
-    const selection = this.hasSelection() ? this.getSelection() : this.input.value;
+    const selection = this.hasSelection()
+      ? this.getSelection()
+      : this.input.value;
     // Menu-role Copy never hits the keydown primer. The native action reads
     // this.input, so park the current selection first — including when
     // clipboardData is missing and we must not preventDefault.
@@ -1233,7 +1359,7 @@ export class GhosttyTerminalSurface {
     // would receive (for example an html-only clipboard converted to text)
     // leaks through onInput without bracketed-paste encoding.
     event.preventDefault();
-    const data = event.clipboardData?.getData("text/plain") ?? "";
+    const data = event.clipboardData?.getData('text/plain') ?? '';
     if (data.length === 0) return;
     // The native paste won the race with actual text; a pending clipboard read
     // must not double. An empty native paste leaves the read as the only path.
@@ -1251,7 +1377,7 @@ export class GhosttyTerminalSurface {
     this.composing = false;
     const data = this.input.value || event.data;
     if (data.length > 0) this.options.onData(data);
-    this.input.value = "";
+    this.input.value = '';
     this.compositionInputToSuppress = data;
     this.compositionSuppressionTimer = window.setTimeout(() => {
       this.compositionInputToSuppress = null;
@@ -1262,15 +1388,18 @@ export class GhosttyTerminalSurface {
   private readonly onInput = (event: Event) => {
     const inputEvent = event as InputEvent;
     if (this.composing || inputEvent.isComposing) return;
-    const data = this.input.value || inputEvent.data || "";
-    if (data === this.compositionInputToSuppress && isTerminalCompositionCommitInput(inputEvent)) {
+    const data = this.input.value || inputEvent.data || '';
+    if (
+      data === this.compositionInputToSuppress &&
+      isTerminalCompositionCommitInput(inputEvent)
+    ) {
       this.clearCompositionInputSuppression();
-      this.input.value = "";
+      this.input.value = '';
       return;
     }
     this.clearCompositionInputSuppression();
     if (data.length > 0) this.options.onData(data);
-    this.input.value = "";
+    this.input.value = '';
   };
 
   private clearCompositionInputSuppression(): void {
@@ -1288,10 +1417,10 @@ export class GhosttyTerminalSurface {
       if (button === null) return;
       event.preventDefault();
       event.stopPropagation();
-      this.clearHoveredLink("default");
+      this.clearHoveredLink('default');
       this.mouseReportingPointerId = event.pointerId;
       this.mouseReportingButton = button;
-      this.sendMouse("press", button, event);
+      this.sendMouse('press', button, event);
       this.canvas.setPointerCapture(event.pointerId);
       return;
     }
@@ -1323,23 +1452,27 @@ export class GhosttyTerminalSurface {
   };
 
   private recordSelectionClick(
-    event: Pick<PointerEvent, "clientX" | "clientY" | "timeStamp">,
+    event: Pick<PointerEvent, 'clientX' | 'clientY' | 'timeStamp'>
   ): number {
     this.selectionClickSequence = advanceTerminalSelectionClickSequence(
       this.selectionClickSequence,
-      event,
+      event
     );
     return this.selectionClickSequence.count;
   }
 
-  private beginSelection(event: { clientX: number; clientY: number }, clickCount: number): void {
+  private beginSelection(
+    event: { clientX: number; clientY: number },
+    clickCount: number
+  ): void {
     const cell = this.cellAt(event.clientX, event.clientY);
     this.selectionMoved = false;
-    this.selectionMode = clickCount >= 3 ? "line" : clickCount === 2 ? "word" : "cell";
+    this.selectionMode =
+      clickCount >= 3 ? 'line' : clickCount === 2 ? 'word' : 'cell';
     const range =
-      this.selectionMode === "line"
+      this.selectionMode === 'line'
         ? this.core.selectLine(cell.x, cell.y)
-        : this.selectionMode === "word"
+        : this.selectionMode === 'word'
           ? this.core.selectWord(cell.x, cell.y)
           : null;
     if (range) {
@@ -1349,7 +1482,7 @@ export class GhosttyTerminalSurface {
       this.selectionEndScreen = range.screen.end;
       this.options.onSelectionChange();
     } else {
-      this.selectionMode = "cell";
+      this.selectionMode = 'cell';
       this.selectionBase = null;
       this.selectionEnd = cell;
       const screen = this.core.viewportPointToScreen(cell.x, cell.y);
@@ -1384,7 +1517,7 @@ export class GhosttyTerminalSurface {
           clientX: origin.x,
           clientY: origin.y,
         },
-        origin.clickCount,
+        origin.clickCount
       );
     }
     // Hover motion is only reportable in any-event tracking (DEC 1003); normal and
@@ -1399,12 +1532,15 @@ export class GhosttyTerminalSurface {
       // A drag whose press was already sent to the terminal application cannot
       // turn into link activation midway through, so link feedback would lie.
       this.setHoveredLink(null);
-      this.canvas.style.cursor = "default";
-      this.sendMouse("motion", this.buttonFromButtons(event.buttons), event);
+      this.canvas.style.cursor = 'default';
+      this.sendMouse('motion', this.buttonFromButtons(event.buttons), event);
       return;
     }
-    this.lastMouseMotionData = "";
-    if (!this.selectionAnchorScreen || !this.canvas.hasPointerCapture(event.pointerId)) {
+    this.lastMouseMotionData = '';
+    if (
+      !this.selectionAnchorScreen ||
+      !this.canvas.hasPointerCapture(event.pointerId)
+    ) {
       this.updateHoverCursor(event);
       return;
     }
@@ -1412,10 +1548,11 @@ export class GhosttyTerminalSurface {
     this.selectionPointer = { x: event.clientX, y: event.clientY };
     const bounds = this.canvas.getBoundingClientRect();
     this.setSelectionAutoscroll(
-      event.clientY < bounds.top ? -1 : event.clientY > bounds.bottom ? 1 : 0,
+      event.clientY < bounds.top ? -1 : event.clientY > bounds.bottom ? 1 : 0
     );
     const cell = this.cellAt(event.clientX, event.clientY);
-    if (cell.x === this.selectionEnd?.x && cell.y === this.selectionEnd.y) return;
+    if (cell.x === this.selectionEnd?.x && cell.y === this.selectionEnd.y)
+      return;
     this.extendSelectionTo(event.clientX, event.clientY);
   };
 
@@ -1426,9 +1563,9 @@ export class GhosttyTerminalSurface {
     this.selectionMoved = true;
     this.selectionEnd = cell;
     const range =
-      this.selectionMode === "line"
+      this.selectionMode === 'line'
         ? this.core.selectLine(cell.x, cell.y)
-        : this.selectionMode === "word"
+        : this.selectionMode === 'word'
           ? this.core.selectWord(cell.x, cell.y)
           : null;
     const cellScreen = this.core.viewportPointToScreen(cell.x, cell.y);
@@ -1438,8 +1575,14 @@ export class GhosttyTerminalSurface {
       base !== null &&
       (cellScreen.y < base.start.y ||
         (cellScreen.y === base.start.y && cellScreen.x < base.start.x));
-    const anchor = base === null ? anchorScreen : beforeBase ? base.end : base.start;
-    const end = range === null ? cellScreen : beforeBase ? range.screen.start : range.screen.end;
+    const anchor =
+      base === null ? anchorScreen : beforeBase ? base.end : base.start;
+    const end =
+      range === null
+        ? cellScreen
+        : beforeBase
+          ? range.screen.start
+          : range.screen.end;
     this.selectionAnchorScreen = anchor;
     this.selectionEndScreen = end;
     this.core.setSelection({ ...anchor, tag: 2 }, { ...end, tag: 2 });
@@ -1474,11 +1617,11 @@ export class GhosttyTerminalSurface {
   }
 
   private readonly onPointerLeave = () => {
-    this.lastMouseMotionData = "";
+    this.lastMouseMotionData = '';
     this.clearHoveredLink();
   };
 
-  private clearHoveredLink(cursor = ""): void {
+  private clearHoveredLink(cursor = ''): void {
     this.hoverPointer = null;
     this.setHoveredLink(null);
     this.canvas.style.cursor = cursor;
@@ -1498,7 +1641,7 @@ export class GhosttyTerminalSurface {
       previous?.range.start.y === link?.range.start.y &&
       previous?.range.end.x === link?.range.end.x &&
       previous?.range.end.y === link?.range.end.y;
-    this.canvas.style.cursor = link ? "pointer" : "";
+    this.canvas.style.cursor = link ? 'pointer' : '';
     if (unchanged) return;
     this.hoveredLink = link;
     this.forceFullRender = true;
@@ -1517,8 +1660,11 @@ export class GhosttyTerminalSurface {
       if (this.canvas.hasPointerCapture(event.pointerId)) {
         this.canvas.releasePointerCapture(event.pointerId);
       }
-      if (event.type !== "pointercancel") {
-        if (link && isSameTerminalLink(link, this.linkAt(event.clientX, event.clientY))) {
+      if (event.type !== 'pointercancel') {
+        if (
+          link &&
+          isSameTerminalLink(link, this.linkAt(event.clientX, event.clientY))
+        ) {
           this.options.onLinkActivate(link.text, event);
         }
       }
@@ -1527,13 +1673,13 @@ export class GhosttyTerminalSurface {
     if (this.mouseReportingPointerId === event.pointerId) {
       event.preventDefault();
       event.stopPropagation();
-      this.sendMouse("release", this.mouseReportingButton, event);
+      this.sendMouse('release', this.mouseReportingButton, event);
       this.mouseReportingPointerId = null;
       this.mouseReportingButton = null;
       if (this.canvas.hasPointerCapture(event.pointerId)) {
         this.canvas.releasePointerCapture(event.pointerId);
       }
-      if (event.type === "pointercancel") {
+      if (event.type === 'pointercancel') {
         this.clearHoveredLink();
       } else {
         this.hoverPointer = { x: event.clientX, y: event.clientY };
@@ -1549,7 +1695,7 @@ export class GhosttyTerminalSurface {
       return;
     }
     if (event.button !== 0) return;
-    if (!this.selectionMoved && this.selectionMode === "cell") {
+    if (!this.selectionMoved && this.selectionMode === 'cell') {
       this.clearSelection();
     }
     this.options.onSelectionChange();
@@ -1562,7 +1708,7 @@ export class GhosttyTerminalSurface {
       event,
       this.metrics.height,
       this.rows,
-      this.wheelRemainder,
+      this.wheelRemainder
     );
     this.wheelRemainder = delta.remainder;
     if (delta.rows === 0) return;
@@ -1570,14 +1716,16 @@ export class GhosttyTerminalSurface {
     if (shouldReportTerminalMouse(this.core.isMouseTracking(), event)) {
       const button = delta.rows < 0 ? 4 : 5;
       for (let index = 0; index < magnitude; index += 1) {
-        this.sendMouse("press", button, event);
+        this.sendMouse('press', button, event);
       }
       return;
     }
     if (this.core.isAlternateScreen()) {
       // The alternate screen has no scrollback: translate wheel motion into
       // arrow keys so full-screen apps like vim and less scroll, matching xterm.
-      this.options.onData(terminalWheelArrowData(delta.rows, this.core.isApplicationCursorKeys()));
+      this.options.onData(
+        terminalWheelArrowData(delta.rows, this.core.isApplicationCursorKeys())
+      );
       return;
     }
     this.scrollViewport(delta.rows);
@@ -1586,7 +1734,10 @@ export class GhosttyTerminalSurface {
   private readonly onMouseDown = (event: MouseEvent) => {
     // Cancelling the middle button here stops autoscroll while still letting
     // the event bubble to the drawer handler that activates a split pane.
-    if (event.button === 0 || (event.button === 1 && isMiddleClickPastePlatform())) {
+    if (
+      event.button === 0 ||
+      (event.button === 1 && isMiddleClickPastePlatform())
+    ) {
       event.preventDefault();
     }
     this.focus();
@@ -1598,7 +1749,8 @@ export class GhosttyTerminalSurface {
    * a second paste through onPaste on top of the one onPointerDown sent.
    */
   private readonly onMouseUp = (event: MouseEvent) => {
-    if (event.button === 1 && isMiddleClickPastePlatform()) event.preventDefault();
+    if (event.button === 1 && isMiddleClickPastePlatform())
+      event.preventDefault();
   };
 
   private readonly onContextMenu = (event: MouseEvent) => {
@@ -1628,9 +1780,16 @@ export class GhosttyTerminalSurface {
   };
 
   private readonly onScrollbarPointerMove = (event: PointerEvent) => {
-    if (event.pointerId !== this.scrollbarPointerId || this.scrollbarState === null) return;
+    if (
+      event.pointerId !== this.scrollbarPointerId ||
+      this.scrollbarState === null
+    )
+      return;
     event.preventDefault();
-    this.scrollbarToPointer(event.clientY, this.scrollbar.getBoundingClientRect());
+    this.scrollbarToPointer(
+      event.clientY,
+      this.scrollbar.getBoundingClientRect()
+    );
   };
 
   private readonly onScrollbarPointerUp = (event: PointerEvent) => {
@@ -1647,22 +1806,22 @@ export class GhosttyTerminalSurface {
     if (state === null) return;
     let delta = 0;
     switch (event.key) {
-      case "ArrowUp":
+      case 'ArrowUp':
         delta = -1;
         break;
-      case "ArrowDown":
+      case 'ArrowDown':
         delta = 1;
         break;
-      case "PageUp":
+      case 'PageUp':
         delta = -Math.max(1, state.len);
         break;
-      case "PageDown":
+      case 'PageDown':
         delta = Math.max(1, state.len);
         break;
-      case "Home":
+      case 'Home':
         delta = -state.offset;
         break;
-      case "End":
+      case 'End':
         delta = state.total - state.len - state.offset;
         break;
       default:
@@ -1674,55 +1833,64 @@ export class GhosttyTerminalSurface {
   };
 
   private installEvents(): void {
-    this.input.addEventListener("keydown", this.onKeyDown);
-    this.input.addEventListener("keyup", this.onKeyUp);
-    this.input.addEventListener("focus", this.onFocus);
-    this.input.addEventListener("blur", this.onBlur);
-    this.input.addEventListener("input", this.onInput);
-    this.input.addEventListener("paste", this.onPaste);
-    this.input.addEventListener("copy", this.onCopyEvent);
-    this.input.addEventListener("compositionstart", this.onCompositionStart);
-    this.input.addEventListener("compositionend", this.onCompositionEnd);
-    this.canvas.addEventListener("pointerdown", this.onPointerDown);
-    this.canvas.addEventListener("pointermove", this.onPointerMove);
-    this.canvas.addEventListener("pointerleave", this.onPointerLeave);
-    this.canvas.addEventListener("pointerup", this.onPointerUp);
-    this.canvas.addEventListener("pointercancel", this.onPointerUp);
-    this.canvas.addEventListener("wheel", this.onWheel, { passive: false });
-    this.canvas.addEventListener("mousedown", this.onMouseDown);
-    this.canvas.addEventListener("mouseup", this.onMouseUp);
-    this.canvas.addEventListener("contextmenu", this.onContextMenu);
-    this.scrollbar.addEventListener("pointerdown", this.onScrollbarPointerDown);
-    this.scrollbar.addEventListener("pointermove", this.onScrollbarPointerMove);
-    this.scrollbar.addEventListener("pointerup", this.onScrollbarPointerUp);
-    this.scrollbar.addEventListener("pointercancel", this.onScrollbarPointerUp);
-    this.scrollbar.addEventListener("keydown", this.onScrollbarKeyDown);
+    this.input.addEventListener('keydown', this.onKeyDown);
+    this.input.addEventListener('keyup', this.onKeyUp);
+    this.input.addEventListener('focus', this.onFocus);
+    this.input.addEventListener('blur', this.onBlur);
+    this.input.addEventListener('input', this.onInput);
+    this.input.addEventListener('paste', this.onPaste);
+    this.input.addEventListener('copy', this.onCopyEvent);
+    this.input.addEventListener('compositionstart', this.onCompositionStart);
+    this.input.addEventListener('compositionend', this.onCompositionEnd);
+    this.canvas.addEventListener('pointerdown', this.onPointerDown);
+    this.canvas.addEventListener('pointermove', this.onPointerMove);
+    this.canvas.addEventListener('pointerleave', this.onPointerLeave);
+    this.canvas.addEventListener('pointerup', this.onPointerUp);
+    this.canvas.addEventListener('pointercancel', this.onPointerUp);
+    this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    this.canvas.addEventListener('mousedown', this.onMouseDown);
+    this.canvas.addEventListener('mouseup', this.onMouseUp);
+    this.canvas.addEventListener('contextmenu', this.onContextMenu);
+    this.scrollbar.addEventListener('pointerdown', this.onScrollbarPointerDown);
+    this.scrollbar.addEventListener('pointermove', this.onScrollbarPointerMove);
+    this.scrollbar.addEventListener('pointerup', this.onScrollbarPointerUp);
+    this.scrollbar.addEventListener('pointercancel', this.onScrollbarPointerUp);
+    this.scrollbar.addEventListener('keydown', this.onScrollbarKeyDown);
   }
 
   private removeEvents(): void {
-    this.input.removeEventListener("keydown", this.onKeyDown);
-    this.input.removeEventListener("keyup", this.onKeyUp);
-    this.input.removeEventListener("focus", this.onFocus);
-    this.input.removeEventListener("blur", this.onBlur);
-    this.input.removeEventListener("input", this.onInput);
-    this.input.removeEventListener("paste", this.onPaste);
-    this.input.removeEventListener("copy", this.onCopyEvent);
-    this.input.removeEventListener("compositionstart", this.onCompositionStart);
-    this.input.removeEventListener("compositionend", this.onCompositionEnd);
-    this.canvas.removeEventListener("pointerdown", this.onPointerDown);
-    this.canvas.removeEventListener("pointermove", this.onPointerMove);
-    this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
-    this.canvas.removeEventListener("pointerup", this.onPointerUp);
-    this.canvas.removeEventListener("pointercancel", this.onPointerUp);
-    this.canvas.removeEventListener("wheel", this.onWheel);
-    this.canvas.removeEventListener("mousedown", this.onMouseDown);
-    this.canvas.removeEventListener("mouseup", this.onMouseUp);
-    this.canvas.removeEventListener("contextmenu", this.onContextMenu);
-    this.scrollbar.removeEventListener("pointerdown", this.onScrollbarPointerDown);
-    this.scrollbar.removeEventListener("pointermove", this.onScrollbarPointerMove);
-    this.scrollbar.removeEventListener("pointerup", this.onScrollbarPointerUp);
-    this.scrollbar.removeEventListener("pointercancel", this.onScrollbarPointerUp);
-    this.scrollbar.removeEventListener("keydown", this.onScrollbarKeyDown);
+    this.input.removeEventListener('keydown', this.onKeyDown);
+    this.input.removeEventListener('keyup', this.onKeyUp);
+    this.input.removeEventListener('focus', this.onFocus);
+    this.input.removeEventListener('blur', this.onBlur);
+    this.input.removeEventListener('input', this.onInput);
+    this.input.removeEventListener('paste', this.onPaste);
+    this.input.removeEventListener('copy', this.onCopyEvent);
+    this.input.removeEventListener('compositionstart', this.onCompositionStart);
+    this.input.removeEventListener('compositionend', this.onCompositionEnd);
+    this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.canvas.removeEventListener('pointermove', this.onPointerMove);
+    this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
+    this.canvas.removeEventListener('pointerup', this.onPointerUp);
+    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    this.canvas.removeEventListener('wheel', this.onWheel);
+    this.canvas.removeEventListener('mousedown', this.onMouseDown);
+    this.canvas.removeEventListener('mouseup', this.onMouseUp);
+    this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.scrollbar.removeEventListener(
+      'pointerdown',
+      this.onScrollbarPointerDown
+    );
+    this.scrollbar.removeEventListener(
+      'pointermove',
+      this.onScrollbarPointerMove
+    );
+    this.scrollbar.removeEventListener('pointerup', this.onScrollbarPointerUp);
+    this.scrollbar.removeEventListener(
+      'pointercancel',
+      this.onScrollbarPointerUp
+    );
+    this.scrollbar.removeEventListener('keydown', this.onScrollbarKeyDown);
   }
 
   private scrollViewport(deltaRows: number): void {
@@ -1748,7 +1916,7 @@ export class GhosttyTerminalSurface {
       state,
       bounds.height,
       clientY - bounds.top,
-      this.scrollbarPointerOffset,
+      this.scrollbarPointerOffset
     );
     this.scrollViewport(offset - state.offset);
   }
@@ -1760,15 +1928,15 @@ export class GhosttyTerminalSurface {
         ? null
         : terminalScrollbarGeometry(
             state,
-            Math.max(0, this.mount.clientHeight - CONTENT_PADDING * 2),
+            Math.max(0, this.mount.clientHeight - CONTENT_PADDING * 2)
           );
     this.scrollbar.hidden = geometry === null;
     if (state === null || geometry === null) return;
-    this.scrollbar.setAttribute("aria-valuemin", "0");
-    this.scrollbar.setAttribute("aria-valuemax", String(geometry.maxOffset));
+    this.scrollbar.setAttribute('aria-valuemin', '0');
+    this.scrollbar.setAttribute('aria-valuemax', String(geometry.maxOffset));
     this.scrollbar.setAttribute(
-      "aria-valuenow",
-      String(Math.max(0, Math.min(state.offset, geometry.maxOffset))),
+      'aria-valuenow',
+      String(Math.max(0, Math.min(state.offset, geometry.maxOffset)))
     );
     this.scrollbarThumb.style.height = `${geometry.thumbHeight}px`;
     this.scrollbarThumb.style.transform = `translateY(${geometry.thumbTop}px)`;
@@ -1781,7 +1949,8 @@ export class GhosttyTerminalSurface {
   }
 
   private requestRender(): void {
-    if (this.disposed || !this.visible || !this.hasSize || this.frame !== 0) return;
+    if (this.disposed || !this.visible || !this.hasSize || this.frame !== 0)
+      return;
     this.frame = window.requestAnimationFrame(() => {
       this.frame = 0;
       this.renderFrame();
@@ -1823,13 +1992,14 @@ export class GhosttyTerminalSurface {
     // rows painted at the previous one. Bottom anchoring starts once
     // scrollback exists, i.e. when the prompt actually lives at the bottom.
     const scrollState = this.readScrollbarState();
-    const anchorBottom = scrollState !== null && scrollState.total > scrollState.len;
+    const anchorBottom =
+      scrollState !== null && scrollState.total > scrollState.len;
     const nextOriginY = terminalContentOriginY(
       this.mountHeight,
       CONTENT_PADDING,
       this.rows,
       this.metrics.height,
-      anchorBottom,
+      anchorBottom
     );
     if (nextOriginY !== this.originY) {
       this.originY = nextOriginY;
@@ -1890,7 +2060,12 @@ export class GhosttyTerminalSurface {
 
   private positionInput(): void {
     const snapshot = this.snapshot;
-    if (!snapshot || !snapshot.cursorVisible || snapshot.cursorX < 0 || snapshot.cursorY < 0) {
+    if (
+      !snapshot ||
+      !snapshot.cursorVisible ||
+      snapshot.cursorX < 0 ||
+      snapshot.cursorY < 0
+    ) {
       return;
     }
     // The IME candidate window anchors to the textarea, so it must follow the
@@ -1912,20 +2087,27 @@ export class GhosttyTerminalSurface {
         0,
         Math.min(
           this.cols - 1,
-          Math.floor((clientX - bounds.left - CONTENT_PADDING) / this.metrics.width),
-        ),
+          Math.floor(
+            (clientX - bounds.left - CONTENT_PADDING) / this.metrics.width
+          )
+        )
       ),
       y: Math.max(
         0,
         Math.min(
           this.rows - 1,
-          Math.floor((clientY - bounds.top - this.originY) / this.metrics.height),
-        ),
+          Math.floor(
+            (clientY - bounds.top - this.originY) / this.metrics.height
+          )
+        )
       ),
     };
   }
 
-  private linkAt(clientX: number, clientY: number): TerminalLinkWithRange | null {
+  private linkAt(
+    clientX: number,
+    clientY: number
+  ): TerminalLinkWithRange | null {
     if (!this.snapshot) return null;
     const cell = terminalGridCellAt({
       bounds: this.canvas.getBoundingClientRect(),
@@ -1949,7 +2131,11 @@ export class GhosttyTerminalSurface {
             : start.y > 0 && this.snapshot.rowData[start.y]?.isWrapContinuation
               ? { x: this.cols - 1, y: start.y - 1 }
               : null;
-        if (!previous || this.core.hyperlinkAt(previous.x, previous.y) !== explicitHyperlink) break;
+        if (
+          !previous ||
+          this.core.hyperlinkAt(previous.x, previous.y) !== explicitHyperlink
+        )
+          break;
         start.x = previous.x;
         start.y = previous.y;
       }
@@ -1960,7 +2146,11 @@ export class GhosttyTerminalSurface {
             : end.y + 1 < this.rows && this.snapshot.rowData[end.y]?.wrapsToNext
               ? { x: 0, y: end.y + 1 }
               : null;
-        if (!next || this.core.hyperlinkAt(next.x, next.y) !== explicitHyperlink) break;
+        if (
+          !next ||
+          this.core.hyperlinkAt(next.x, next.y) !== explicitHyperlink
+        )
+          break;
         end.x = next.x;
         end.y = next.y;
       }
@@ -1969,10 +2159,18 @@ export class GhosttyTerminalSurface {
         range: { start, end },
       };
     }
-    return terminalLinkAtPositionWithRange(this.snapshot.rowData, cell.y, cell.x);
+    return terminalLinkAtPositionWithRange(
+      this.snapshot.rowData,
+      cell.y,
+      cell.x
+    );
   }
 
-  private sendMouse(action: TerminalMouseAction, button: number | null, event: MouseEvent): void {
+  private sendMouse(
+    action: TerminalMouseAction,
+    button: number | null,
+    event: MouseEvent
+  ): void {
     const bounds = this.canvas.getBoundingClientRect();
     const data = this.core.encodeMouse({
       action,
@@ -1991,10 +2189,17 @@ export class GhosttyTerminalSurface {
       paddingLeft: CONTENT_PADDING,
       paddingRight: CONTENT_PADDING,
       paddingTop: this.originY,
-      paddingBottom: Math.max(0, bounds.height - this.originY - this.rows * this.metrics.height),
+      paddingBottom: Math.max(
+        0,
+        bounds.height - this.originY - this.rows * this.metrics.height
+      ),
       anyButtonPressed: event.buttons !== 0,
     });
-    const resolution = resolveTerminalMouseData(action, data, this.lastMouseMotionData);
+    const resolution = resolveTerminalMouseData(
+      action,
+      data,
+      this.lastMouseMotionData
+    );
     this.lastMouseMotionData = resolution.nextMotionData;
     if (resolution.send) this.options.onData(data);
   }
@@ -2006,7 +2211,7 @@ export class GhosttyTerminalSurface {
     const state = resolveTerminalMouseTrackingState(
       this.mouseAnyEventTracking,
       tracking,
-      this.lastMouseMotionData,
+      this.lastMouseMotionData
     );
     this.mouseAnyEventTracking = state.tracking;
     this.lastMouseMotionData = state.motionData;

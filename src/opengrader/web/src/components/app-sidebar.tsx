@@ -1,7 +1,13 @@
 import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link, useMatchRoute } from '@tanstack/react-router';
-import { BookOpen, ChartColumn, Files, ScanLine } from 'lucide-react';
+import {
+  BookOpen,
+  ChartColumn,
+  Files,
+  LayoutGrid,
+  ScanLine,
+} from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { ModeToggle } from './mode-toggle';
 import { AuthControl } from './auth-control';
@@ -20,6 +26,9 @@ import {
   SidebarTrigger,
 } from './ui/sidebar';
 
+const menuButtonClass =
+  'min-h-11 px-4 text-sm transition-none group-data-[collapsible=icon]:h-11! group-data-[collapsible=icon]:w-12! group-data-[collapsible=icon]:px-4! focus-visible:ring-2 focus-visible:ring-inset';
+
 export function AppSidebar() {
   const { assignment } = useAssignmentNavigation();
   const matchRoute = useMatchRoute();
@@ -37,6 +46,9 @@ export function AppSidebar() {
         }
       : {};
   const { setOpenMobile, isMobile, open, openMobile } = useSidebar();
+  const browsing =
+    Boolean(matchRoute({ to: '/assignments', pending: true })) ||
+    Boolean(matchRoute({ to: '/assignments/new', pending: true }));
   const expanded = isMobile ? openMobile : open;
   const close = () => setOpenMobile(false);
   const destinations = [
@@ -71,31 +83,58 @@ export function AppSidebar() {
       <Sidebar
         id="assignment-sidebar"
         collapsible="icon"
-        aria-label="Assignment navigation"
+        aria-label="Navigation"
       >
         <SidebarHeader className="h-14 shrink-0 flex-row items-center gap-0 overflow-hidden border-b border-sidebar-border px-2">
           <SidebarTrigger
             className="h-11 w-12 shrink-0 active:translate-y-0!"
-            aria-label={expanded ? 'Collapse navigation' : 'Expand navigation'}
             aria-expanded={expanded}
           />
           <Link
-            to="/assignments"
+            to="/"
             onClick={close}
-            className="min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
           >
             Opengrader
           </Link>
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pt-2">
+          <nav aria-label="Workspace" className="w-full">
+            <SidebarGroup className="px-2 py-0">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    className={menuButtonClass}
+                    tooltip="All assignments"
+                    aria-label="All assignments"
+                    isActive={browsing}
+                    render={<Link to="/assignments" onClick={close} />}
+                    aria-current={browsing ? 'page' : undefined}
+                  >
+                    <LayoutGrid aria-hidden="true" />
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      All assignments
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroup>
+          </nav>
           {assignment && (
             <nav aria-label={assignment.title} className="w-full">
-              <SidebarGroup className="px-2 py-0">
+              <SidebarGroup className="px-2 pt-2 pb-0">
+                {/* Keep the slot's height in both states so the icons below never move. */}
                 <div
                   title={assignment.title}
-                  className="flex h-6 shrink-0 items-center px-4 text-xs font-medium text-sidebar-foreground/70 select-none group-data-[collapsible=icon]:invisible"
+                  className="flex h-6 shrink-0 items-center px-4 text-xs font-medium text-sidebar-foreground/70 select-none group-data-[collapsible=icon]:px-2"
                 >
-                  <span className="truncate">{assignment.title}</span>
+                  <span className="truncate group-data-[collapsible=icon]:hidden">
+                    {assignment.title}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="hidden h-px w-full bg-sidebar-border group-data-[collapsible=icon]:block"
+                  />
                 </div>
                 <SidebarGroupContent className="mt-1">
                   <SidebarMenu>
@@ -104,7 +143,7 @@ export function AppSidebar() {
                       return (
                         <SidebarMenuItem key={to}>
                           <SidebarMenuButton
-                            className="min-h-11 px-4 text-sm transition-none group-data-[collapsible=icon]:h-11! group-data-[collapsible=icon]:w-12! group-data-[collapsible=icon]:px-4! focus-visible:ring-2 focus-visible:ring-inset"
+                            className={menuButtonClass}
                             tooltip={title}
                             aria-label={title}
                             isActive={active}
@@ -138,7 +177,7 @@ export function AppSidebar() {
           )}
         </SidebarContent>
         <SidebarFooter className="items-start gap-2 px-4 py-3">
-          <AuthControl compact={!expanded} />
+          <AuthControl variant="sidebar" compact={!expanded} />
           <ModeToggle
             compact={!expanded}
             align={expanded ? 'start' : 'center'}

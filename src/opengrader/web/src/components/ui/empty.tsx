@@ -53,8 +53,7 @@ function EmptyMedia({
   variant = 'default',
   children,
   ...props
-}: React.ComponentProps<'div'> &
-  VariantProps<typeof emptyMediaVariants>) {
+}: React.ComponentProps<'div'> & VariantProps<typeof emptyMediaVariants>) {
   return (
     <div
       data-slot="empty-icon"
@@ -69,7 +68,7 @@ function EmptyMedia({
             className={cn(
               emptyMediaVariants({ variant }),
               className,
-              'pointer-events-none absolute bottom-px origin-bottom-left -translate-x-0.5 -rotate-10 scale-84 shadow-none'
+              'pointer-events-none absolute bottom-px origin-bottom-left -translate-x-0.5 scale-84 -rotate-10 shadow-none'
             )}
           />
 
@@ -78,14 +77,12 @@ function EmptyMedia({
             className={cn(
               emptyMediaVariants({ variant }),
               className,
-              'pointer-events-none absolute bottom-px origin-bottom-right translate-x-0.5 rotate-10 scale-84 shadow-none'
+              'pointer-events-none absolute bottom-px origin-bottom-right translate-x-0.5 scale-84 rotate-10 shadow-none'
             )}
           />
         </>
       )}
-      <div
-        className={cn(emptyMediaVariants({ variant }), className)}
-      >
+      <div className={cn(emptyMediaVariants({ variant }), className)}>
         {children}
       </div>
     </div>
