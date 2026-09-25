@@ -1,5 +1,4 @@
-import { useState, type CSSProperties, type PropsWithChildren } from 'react';
-import { useRouterState } from '@tanstack/react-router';
+import type { CSSProperties, PropsWithChildren } from 'react';
 import { AppHeader } from '@/components/app-header';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { AppSidebar } from '@/components/app-sidebar';
@@ -10,7 +9,8 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { usePreference } from '@/hooks/use-preference';
+import { setPreference, usePreferences } from '@/stores/preferences';
+import { useSidebarWidth } from '@/stores/sidebar';
 
 function MobileSidebarTrigger() {
   const { openMobile } = useSidebar();
@@ -27,15 +27,9 @@ function MobileSidebarTrigger() {
 }
 
 export function App({ children }: PropsWithChildren) {
-  const [sidebarExpanded, setSidebarExpanded] =
-    usePreference('sidebarExpanded');
-  const [savedSidebarWidth, saveSidebarWidth] = usePreference('sidebarWidth');
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const sidebarWidth = dragWidth ?? savedSidebarWidth;
-  const { assignment } = useAssignmentNavigation();
-  const pathname = useRouterState({
-    select: ({ location }) => location.pathname,
-  });
+  const sidebarExpanded = usePreferences((state) => state.sidebarExpanded);
+  const sidebarWidth = useSidebarWidth();
+  const { assignment, pathname } = useAssignmentNavigation();
   const overview = assignment && pathname === '/assignment';
   // The home page introduces the product itself, so it skips the header.
   const home = !assignment && pathname === '/';
@@ -43,7 +37,7 @@ export function App({ children }: PropsWithChildren) {
     <TooltipProvider>
       <SidebarProvider
         open={sidebarExpanded}
-        onOpenChange={setSidebarExpanded}
+        onOpenChange={(open) => setPreference('sidebarExpanded', open)}
         style={
           {
             '--sidebar-width': `${sidebarWidth}px`,
@@ -57,18 +51,7 @@ export function App({ children }: PropsWithChildren) {
         >
           Skip to content
         </a>
-        {assignment ? (
-          <AppSidebar
-            width={sidebarWidth}
-            onWidthChange={setDragWidth}
-            onResizeEnd={(width) => {
-              saveSidebarWidth(width);
-              setDragWidth(null);
-            }}
-          />
-        ) : (
-          !home && <AppHeader />
-        )}
+        {assignment ? <AppSidebar /> : !home && <AppHeader />}
         <SidebarInset
           className={
             overview

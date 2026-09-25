@@ -81,3 +81,25 @@ export function questionOutlineEntries(groups: OutlineGroup[]): OutlineEntry[] {
     return entries(group.questions);
   });
 }
+
+export function versionHeadingLineNumber(
+  source: string,
+  version: string,
+  beforeLine: number
+) {
+  const lines = source.split(
+    // oxlint-disable-next-line no-control-regex -- Match the QA parser's source lines.
+    /\r\n|[\n\r\v\f\u001c-\u001e\u0085\u2028\u2029]/
+  );
+  const heading = lines.findLastIndex((line, index) => {
+    if (index >= beforeLine - 1) return false;
+    const match = /^\s*##\s+(.+?)\s*$/.exec(line);
+    return (
+      match?.[1]
+        .trim()
+        .replace(/^version\s+/i, '')
+        .trim() === version
+    );
+  });
+  return heading < 0 ? null : heading + 1;
+}

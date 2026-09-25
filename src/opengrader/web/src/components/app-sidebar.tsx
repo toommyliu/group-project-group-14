@@ -4,7 +4,6 @@ import { Link } from '@tanstack/react-router';
 import { BookOpen, ChartColumn, Files, ScanLine } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { ModeToggle } from './mode-toggle';
-import { SidebarResizeHandle } from './sidebar-resize-handle';
 import { AuthControl } from './auth-control';
 import {
   Sidebar,
@@ -16,19 +15,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarResizeHandle,
   useSidebar,
   SidebarTrigger,
 } from './ui/sidebar';
 
-export function AppSidebar({
-  width,
-  onWidthChange,
-  onResizeEnd,
-}: {
-  width: number;
-  onWidthChange: (width: number | null) => void;
-  onResizeEnd: (width: number) => void;
-}) {
+export function AppSidebar() {
   const { assignment, pathname } = useAssignmentNavigation();
   const pages = useContext(WorkspacePages);
   const gradingPage = pages.find(
@@ -151,11 +143,7 @@ export function AppSidebar({
           <AuthControl compact={!expanded} />
           <ModeToggle compact={!expanded} />
         </SidebarFooter>
-        <SidebarResizeHandle
-          width={width}
-          onWidthChange={onWidthChange}
-          onResizeEnd={onResizeEnd}
-        />
+        <SidebarResizeHandle />
       </Sidebar>
     </>
   );

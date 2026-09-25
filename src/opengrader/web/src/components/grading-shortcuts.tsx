@@ -1,4 +1,4 @@
-import { usePreference } from '@/hooks/use-preference';
+import { setPreference, usePreferences } from '@/stores/preferences';
 import { useState } from 'react';
 import { formatForDisplay, useHotkey } from '@tanstack/react-hotkeys';
 import { Keyboard } from 'lucide-react';
@@ -47,7 +47,7 @@ function ShortcutKeys({
 }
 
 export function GradingShortcuts() {
-  const [enabled, setEnabled] = usePreference('gradingShortcuts');
+  const enabled = usePreferences((state) => state.gradingShortcuts);
   const [open, setOpen] = useState(false);
   useHotkey({ key: '/', shift: true }, () => setOpen((value) => !value), {
     enabled,
@@ -63,7 +63,12 @@ export function GradingShortcuts() {
         </PopoverTitle>
         <Label className="mb-2 grid min-h-8 grid-cols-[minmax(0,1fr)_auto] gap-x-6 text-sm leading-normal">
           <span>Enable grading shortcuts</span>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
+          <Switch
+            checked={enabled}
+            onCheckedChange={(checked) =>
+              setPreference('gradingShortcuts', checked)
+            }
+          />
         </Label>
         <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 text-xs">
           {[

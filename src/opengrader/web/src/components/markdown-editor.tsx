@@ -122,7 +122,6 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   className,
   placeholder,
   onChange,
-  onBlur,
   onActiveChange,
 }: {
   ref?: Ref<MarkdownEditorNavigation>;
@@ -139,16 +138,15 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   className?: string;
   placeholder: string;
   onChange: (value: string) => void;
-  onBlur: () => void;
   onActiveChange: (key: string | null) => void;
 }) {
   const mountRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView>(null);
-  const callbacks = useRef({ onChange, onBlur, onActiveChange });
+  const callbacks = useRef({ onChange, onActiveChange });
   const entries = useRef(outlineEntries);
   const isActive = useRef(active);
   const lastActiveKey = useRef<string | null>(null);
-  callbacks.current = { onChange, onBlur, onActiveChange };
+  callbacks.current = { onChange, onActiveChange };
   const sortedEntries = useMemo(
     () =>
       outlineEntries
@@ -225,10 +223,6 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             publishActive(update.view, update.selectionSet);
         }),
         EditorView.domEventHandlers({
-          blur: () => {
-            callbacks.current.onBlur();
-            return false;
-          },
           focus: (_event, view) => {
             requestAnimationFrame(() => publishActive(view, true));
             return false;

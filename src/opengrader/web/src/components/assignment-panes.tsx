@@ -1,5 +1,5 @@
-import { useWideAssignmentLayout } from '@/hooks/use-wide-assignment-layout';
-import { usePreference } from '@/hooks/use-preference';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import { setPreference, usePreferences } from '@/stores/preferences';
 import { useGroupRef, usePanelRef } from 'react-resizable-panels';
 import { useRef, useState, type ReactNode } from 'react';
 import { Button } from './ui/button';
@@ -20,8 +20,9 @@ export function AssignmentPanes({
   initiallyExpanded?: boolean;
   contained?: boolean;
 }) {
-  const wide = useWideAssignmentLayout();
-  const [width, setWidth] = usePreference('editorWidth');
+  // Keep in sync with the editor's min-[65rem] navigation styles.
+  const wide = useMediaQuery('(min-width: 65rem)');
+  const width = usePreferences((state) => state.editorWidth);
   const groupRef = useGroupRef();
   const previewRef = usePanelRef();
   const pointerResize = useRef(false);
@@ -94,7 +95,7 @@ export function AssignmentPanes({
           ? { editor: 50, preview: 50 }
           : { editor: next.editor, preview: next.preview };
         if (snap) groupRef.current?.setLayout(value);
-        if (value.preview > 0) setWidth(value.editor);
+        if (value.preview > 0) setPreference('editorWidth', value.editor);
       }}
     >
       <ResizablePanel
