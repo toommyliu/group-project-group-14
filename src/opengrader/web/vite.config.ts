@@ -8,6 +8,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   assetsInclude: ['**/*.wasm'],
   server: {
+    // Allow Tailscale MagicDNS / Serve hostnames for testing on other devices.
+    allowedHosts: ['.ts.net'],
     proxy: {
       '/api': {
         target: process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
