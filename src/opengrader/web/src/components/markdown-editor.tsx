@@ -49,8 +49,7 @@ const editorTheme = EditorView.theme({
     fontSize: '1rem',
   },
   '&.cm-focused': {
-    outline: '2px solid var(--ring)',
-    outlineOffset: '-1px',
+    outline: 'none',
   },
   '.cm-scroller': {
     overflow: 'auto',
@@ -317,7 +316,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   return (
     <div
       className={cn(
-        'flex min-h-48 flex-col overflow-hidden rounded-md border border-input bg-background',
+        'flex min-h-48 flex-col overflow-hidden rounded-md border border-input bg-background has-[.cm-content:focus-visible]:border-transparent has-[.cm-content:focus-visible]:outline-2 has-[.cm-content:focus-visible]:-outline-offset-2 has-[.cm-content:focus-visible]:outline-ring',
         invalid && 'border-destructive',
         disabled && 'opacity-50',
         className
