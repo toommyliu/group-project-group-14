@@ -1,0 +1,7 @@
+- (6 points) Recursion
+  - (3 points) Define recursion.
+    - **Correct**
+      - A function that calls itself
+  - (3 points) Give an example.
+    - **Correct**
+      - Factorial

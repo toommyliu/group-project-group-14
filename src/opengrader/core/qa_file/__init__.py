@@ -1,6 +1,7 @@
 from .markdown import (
     QAChoice,
     QADocument,
+    QALineNote,
     QAQuestion,
     QARubricFlatOption,
     QARubricItem,
@@ -11,6 +12,7 @@ from .markdown import (
     possible_points_by_question,
     load_qa_markdown,
     parse_qa_markdown,
+    qa_line_notes,
     qa_question_type,
     qa_rubric_options_for_question,
     qa_to_template_questions,
@@ -30,6 +32,7 @@ from .numeric import (
 __all__ = [
     "QAChoice",
     "QADocument",
+    "QALineNote",
     "QAQuestion",
     "QARubricFlatOption",
     "QARubricItem",

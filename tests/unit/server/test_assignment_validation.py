@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from opengrader.server.auth import AuthSettings
@@ -96,4 +97,65 @@ def test_question_errors_keep_a_navigation_target(tmp_path):
         "version": "",
         "question_path": [0],
         "rubric_path": None,
+    }
+
+
+def test_preview_explains_ignored_settings_sections_and_continuation_lines(tmp_path):
+    source = """---
+title: Quiz
+unsupported: value
+---
+
+- (2 points) Name the process.
+  Keep the explanation brief.
+  - **Answer**
+    - Scheduling
+  - **Expected**
+    - This is not an accepted answer.
+"""
+    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    with TestClient(app) as client:
+        response = client.post("/api/drafts/preview", json={"qa_markdown": source})
+    assert response.status_code == 200
+    preview = response.json()
+    assert preview["notes"] == [
+        {
+            "line": 3,
+            "kind": "ignored",
+            "message": "Ignored: 'unsupported' is not a supported setting.",
+        },
+        {
+            "line": 7,
+            "kind": "continuation",
+            "message": "Joined to line 6. Start it with '- ' to make a new item.",
+        },
+        {
+            "line": 10,
+            "kind": "ignored",
+            "message": "Ignored: 'Expected' sections are not used for grading.",
+        },
+    ]
+    question = preview["document"]["questions"][0]
+    assert question["prompt"] == "Name the process.\nKeep the explanation brief."
+    assert question["answers"] == ["Scheduling"]
+
+
+@pytest.mark.parametrize("value", ["1.5", "3", "invalid", "nan"])
+def test_invalid_start_page_points_to_the_frontmatter_setting(tmp_path, value):
+    source = (
+        f"---\ntitle: Quiz\nquestions_start_page: {value}\n---\n"
+        "- (2 points) Name the process.\n  - **Answer**\n    - Scheduling\n"
+    )
+    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    with TestClient(app) as client:
+        response = client.post("/api/drafts/preview", json={"qa_markdown": source})
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": f"questions_start_page must be 1 or 2, got {value!r}",
+        "location": {
+            "line": 3,
+            "version": "",
+            "question_path": [],
+            "rubric_path": None,
+        },
     }

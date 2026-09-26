@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from opengrader.core.bubble_sheet import (
     DEFAULT_CHOICE_LABELS as DEFAULT_BUBBLE_CHOICE_LABELS,
@@ -180,6 +180,20 @@ class _BulletItem:
     indent: int
     line_no: int
     children: list["_BulletItem"] = field(default_factory=list)
+    continuation_lines: list[int] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class QALineNote:
+
+    line: int
+    kind: Literal["continuation", "ignored"]
+    message: str
+
+
+_ANSWER_SECTIONS = frozenset({"correct", "answer", "answers"})
+_IGNORED_SECTIONS = frozenset({"expected", "partial", "wrong", "ungraded"})
+_QUESTION_SECTIONS = _ANSWER_SECTIONS | {"choices", "type", "image", "rubric"}
 
 
 def _indent_width(prefix: str) -> int:
@@ -295,19 +309,6 @@ def _render_frontmatter(document: QADocument) -> str:
     lines.append("---")
     lines.append("")
     return "\n".join(lines)
-
-
-def _parse_points(raw: str | None) -> int | None:
-    if raw is None:
-        return None
-    text = raw.strip()
-    if not text:
-        return None
-    try:
-        return int(float(text))
-    except ValueError as exc:
-        raise ValueError(f"invalid points value: {raw!r}") from exc
-
 
 def _strip_inline_points(prompt: str) -> tuple[str, int | None]:
     text = prompt.strip()
@@ -426,6 +427,7 @@ def _parse_bullet_items(lines: list[str], *, start_line: int) -> list[_BulletIte
 
         continuation = raw_line.strip()
         if continuation:
+            stack[-1].continuation_lines.append(line_no)
             if stack[-1].text:
                 stack[-1].text += "\n" + continuation
             else:
@@ -963,7 +965,7 @@ def _parse_subquestion_item(
                     outcomes.append(outcome)
             continue
 
-        if section_name in {"correct", "answer", "answers"}:
+        if section_name in _ANSWER_SECTIONS:
             correct_values.extend(_section_values(child))
             continue
 
@@ -986,7 +988,7 @@ def _parse_subquestion_item(
             rubric.extend(_parse_rubric_section(child))
             continue
 
-        if section_name in {"expected", "partial", "wrong", "ungraded"}:
+        if section_name in _IGNORED_SECTIONS:
             continue
 
         unknown_nested.append(child)
@@ -1058,7 +1060,7 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
                     outcomes.append(outcome)
             continue
 
-        if section_name in {"correct", "answer", "answers"}:
+        if section_name in _ANSWER_SECTIONS:
             correct_values.extend(_section_values(child))
             continue
 
@@ -1081,7 +1083,7 @@ def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
             rubric.extend(_parse_rubric_section(child))
             continue
 
-        if section_name in {"expected", "partial", "wrong", "ungraded"}:
+        if section_name in _IGNORED_SECTIONS:
             continue
 
         subquestion_items.append(child)
@@ -1157,12 +1159,25 @@ def _parse_questions_from_bullets(
     return questions
 
 
-def _parse_frontmatter_questions_start_page(frontmatter: Frontmatter) -> int:
-    raw_value = frontmatter.get(FrontmatterMarker.QUESTIONS_START_PAGE, 1)
-    points = _parse_points(str(raw_value))
-    if points is None or points not in (1, 2):
-        raise ValueError("questions_start_page must be 1 or 2")
-    return points
+def _parse_frontmatter_questions_start_page(
+    frontmatter: Frontmatter, lines: list[str]
+) -> int:
+    raw_value = str(frontmatter.get(FrontmatterMarker.QUESTIONS_START_PAGE, 1)).strip()
+    try:
+        page = float(raw_value)
+    except ValueError:
+        page = None
+    if page not in (1, 2):
+        key = FrontmatterMarker.QUESTIONS_START_PAGE.value
+        line = next(
+            (index + 1 for index, text in enumerate(lines) if text.startswith(f"{key}:")),
+            None,
+        )
+        raise QAParseError(
+            f"questions_start_page must be 1 or 2, got {raw_value!r}",
+            QAErrorLocation(line=line),
+        )
+    return int(page)
 
 
 def _validate_unique_ids(
@@ -1193,7 +1208,7 @@ def parse_qa_markdown(content: str) -> QADocument:
     title = frontmatter.get(FrontmatterMarker.TITLE)
     instructions = frontmatter.get(FrontmatterMarker.INSTRUCTIONS)
     continued_page_header = frontmatter.get(FrontmatterMarker.CONTINUED_PAGE_HEADER)
-    questions_start_page = _parse_frontmatter_questions_start_page(frontmatter)
+    questions_start_page = _parse_frontmatter_questions_start_page(frontmatter, lines[:i])
 
     sections, has_version_headers = _split_version_sections(lines[i:], start_line=i + 1)
 
@@ -1242,6 +1257,70 @@ def parse_qa_markdown(content: str) -> QADocument:
         continued_page_header=continued_page_header,
         questions_start_page=questions_start_page,
     )
+
+
+def qa_line_notes(content: str) -> list[QALineNote]:
+    lines = content.splitlines()
+    notes: list[QALineNote] = []
+    _, body_start = _parse_frontmatter(lines)
+    known_settings = {marker.value for marker in FrontmatterMarker}
+    for index in range(1, body_start - 1):
+        line = lines[index]
+        if line != line.lstrip() or ":" not in line:
+            continue
+        name = line.split(":", 1)[0].strip()
+        if name and name not in known_settings:
+            notes.append(
+                QALineNote(
+                    index + 1, "ignored", f"Ignored: {name!r} is not a supported setting."
+                )
+            )
+
+    sections, _ = _split_version_sections(lines[body_start:], start_line=body_start + 1)
+    for _, section_lines, section_start in sections:
+        for item in _parse_bullet_items(section_lines, start_line=section_start):
+            _collect_question_notes(item, notes, nested=False)
+    return sorted(notes, key=lambda note: note.line)
+
+
+def _continuation_notes(item: _BulletItem) -> list[QALineNote]:
+    return [
+        QALineNote(
+            line,
+            "continuation",
+            f"Joined to line {item.line_no}. Start it with '- ' to make a new item.",
+        )
+        for line in item.continuation_lines
+    ]
+
+
+def _collect_continuation_notes(item: _BulletItem, notes: list[QALineNote]) -> None:
+    notes.extend(_continuation_notes(item))
+    for child in item.children:
+        _collect_continuation_notes(child, notes)
+
+
+def _collect_question_notes(
+    item: _BulletItem, notes: list[QALineNote], *, nested: bool
+) -> None:
+    notes.extend(_continuation_notes(item))
+    for child in item.children:
+        section_name = _normalize_section_name(child.text)
+        if section_name in _IGNORED_SECTIONS:
+            notes.append(
+                QALineNote(
+                    child.line_no,
+                    "ignored",
+                    f"Ignored: {_strip_bold(child.text)!r} sections are not used for grading.",
+                )
+            )
+        elif (
+            section_name in _QUESTION_SECTIONS
+            or _OUTCOME_SECTION_RE.match(child.text.strip()) is not None
+        ):
+            _collect_continuation_notes(child, notes)
+        elif not nested:
+            _collect_question_notes(child, notes, nested=True)
 
 
 def load_qa_markdown(path: str | Path) -> QADocument:

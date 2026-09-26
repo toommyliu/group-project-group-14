@@ -15,11 +15,14 @@ import {
   type Ref,
 } from 'react';
 import { Link } from '@tanstack/react-router';
-import { FileText, LoaderCircle, Plus, Upload } from 'lucide-react';
+import { CircleHelp, FileText, LoaderCircle, Plus, Upload } from 'lucide-react';
 import { PageHeading } from '@/components/page-heading';
 import { PaneLoading } from '@/components/loading';
 import { AssignmentPanes, sidePanelId } from '@/components/assignment-panes';
-import { AssignmentPreview } from '@/components/assignment-preview';
+import {
+  AssignmentPreview,
+  type SidePanelView,
+} from '@/components/assignment-preview';
 import { AssignmentActions } from '@/components/assignment-actions';
 import { AnswerKeyView } from '@/components/answer-key-view';
 import {
@@ -41,6 +44,7 @@ import {
   versionHeadingLineNumber,
   type OutlineEntry,
 } from '@/lib/assignment-outline';
+import { markdownLineHints } from '@/lib/markdown-hints';
 import { withoutSourceLines } from '@/lib/validation-source-line';
 import {
   useAssignmentDraft,
@@ -147,6 +151,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
   const [visualOutline, setVisualOutline] = useState<OutlineEntry[]>([]);
   const [visualVersion, setVisualVersion] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
+  const [panelView, setPanelView] = useState<SidePanelView>('pdf');
   const [dragging, setDragging] = useState(false);
   const canImport = !readOnly && !busy && !visualPending;
   const acceptOutline = useCallback(
@@ -189,7 +194,28 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
           : [],
     [mode, visualOutline, outline]
   );
+  const lineHints = useMemo(
+    () => (outline ? markdownLineHints(outline) : []),
+    [outline]
+  );
   const latestError = latestResult?.error;
+  const editorHints = useMemo(
+    () =>
+      valid
+        ? lineHints
+        : latestError
+          ? markdownErrorLine === null
+            ? []
+            : [
+                {
+                  line: markdownErrorLine,
+                  text: latestError,
+                  tone: 'error' as const,
+                },
+              ]
+          : null,
+    [valid, lineHints, latestError, markdownErrorLine]
+  );
   const visibleOutlineEntries = useMemo(
     () =>
       mode === 'visual'
@@ -278,6 +304,15 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     },
   };
 
+  const sideView: SidePanelView =
+    mode === 'markdown' && !readOnly ? panelView : 'pdf';
+  function togglePanel(view: SidePanelView) {
+    if (panelOpen && sideView === view) setPanelOpen(false);
+    else {
+      setPanelView(view);
+      setPanelOpen(true);
+    }
+  }
   const canAddQuestion = mode === 'visual' && !readOnly && !!visualBaseline;
   const showRail = visibleOutlineEntries.length > 0 || canAddQuestion;
   const importLabel = overview ? 'Replace answer key' : 'Import answer key';
@@ -415,6 +450,8 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                   if (value === 'visual' || value === 'markdown') {
                     openMode(value);
                     setPreference('editorMode', value);
+                    if (value === 'visual' && sideView === 'format')
+                      setPanelOpen(false);
                   }
                   updateActiveKey(null);
                 }}
@@ -456,9 +493,9 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                       <Button
                         type="button"
                         variant="ghost"
-                        aria-expanded={panelOpen}
+                        aria-expanded={panelOpen && sideView === 'pdf'}
                         aria-controls={sidePanelId}
-                        onClick={() => setPanelOpen((open) => !open)}
+                        onClick={() => togglePanel('pdf')}
                       >
                         <FileText aria-hidden="true" />
                         PDF
@@ -605,6 +642,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                                 errorLine={markdownErrorLine}
                                 navigation={markdownNavigation}
                                 outlineEntries={outlineEntries}
+                                lineHints={editorHints}
                                 active={mode === 'markdown' && valid}
                                 onActiveChange={updateActiveKey}
                                 className="h-full min-h-0"
@@ -613,6 +651,23 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                                 }
                               />
                             </div>
+                            {!readOnly && (
+                              <div className="flex justify-end">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="xs"
+                                  aria-expanded={
+                                    panelOpen && sideView === 'format'
+                                  }
+                                  aria-controls={sidePanelId}
+                                  onClick={() => togglePanel('format')}
+                                >
+                                  <CircleHelp aria-hidden="true" />
+                                  Format guide
+                                </Button>
+                              </div>
+                            )}
                           </Field>
                         </Suspense>
                       )}
@@ -642,6 +697,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                   ? { id: assignmentId, source: originalSource }
                   : undefined
               }
+              view={sideView}
               onClose={() => setPanelOpen(false)}
             />
           }

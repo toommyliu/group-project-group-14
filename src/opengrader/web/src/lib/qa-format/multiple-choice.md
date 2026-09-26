@@ -1,0 +1,8 @@
+- (2 points) Which numbers are even?
+  - **Choices**
+    - A) 3
+    - B) 4
+    - C) 6
+  - **Correct**
+    - B
+    - C

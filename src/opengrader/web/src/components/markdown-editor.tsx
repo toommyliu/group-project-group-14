@@ -8,7 +8,10 @@ import {
   Annotation,
   Compartment,
   EditorState,
+  StateEffect,
+  StateField,
   type Extension,
+  type Text,
 } from '@codemirror/state';
 import {
   Decoration,
@@ -20,6 +23,7 @@ import {
   keymap,
   lineNumbers,
   placeholder as editorPlaceholder,
+  WidgetType,
   type DecorationSet,
 } from '@codemirror/view';
 import {
@@ -32,6 +36,7 @@ import {
   type Ref,
 } from 'react';
 import type { OutlineEntry } from '@/lib/assignment-outline';
+import type { LineHint } from '@/lib/markdown-hints';
 import { cn } from '@/lib/utils';
 
 export type MarkdownEditorNavigation = {
@@ -82,6 +87,69 @@ const editorTheme = EditorView.theme({
     boxShadow: 'inset 3px 0 var(--destructive)',
   },
   '.cm-placeholder': { color: 'var(--muted-foreground)' },
+  '.cm-line-hint': {
+    marginInlineStart: '2ch',
+    color: 'var(--muted-foreground)',
+    fontFamily: 'var(--font-sans)',
+    fontSize: '0.8125rem',
+    userSelect: 'none',
+    pointerEvents: 'none',
+  },
+  '.cm-line-hint-error': { color: 'var(--destructive)' },
+  '.cm-line-hint-warning': {
+    color:
+      'color-mix(in oklab, var(--destructive) 75%, var(--muted-foreground))',
+  },
+});
+
+class LineHintWidget extends WidgetType {
+  readonly hint: LineHint;
+
+  constructor(hint: LineHint) {
+    super();
+    this.hint = hint;
+  }
+
+  eq(other: LineHintWidget) {
+    return (
+      other.hint.text === this.hint.text && other.hint.tone === this.hint.tone
+    );
+  }
+
+  toDOM() {
+    const element = document.createElement('span');
+    element.className = `cm-line-hint cm-line-hint-${this.hint.tone}`;
+    element.textContent = this.hint.text;
+    return element;
+  }
+}
+
+const setLineHints = StateEffect.define<LineHint[]>();
+
+function lineHintDecorations(doc: Text, hints: LineHint[]) {
+  return Decoration.set(
+    hints
+      .filter((hint) => hint.line >= 1 && hint.line <= doc.lines)
+      .map((hint) =>
+        Decoration.widget({
+          widget: new LineHintWidget(hint),
+          side: 1,
+        }).range(doc.line(hint.line).to)
+      ),
+    true
+  );
+}
+
+const lineHintField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decorations, transaction) {
+    let next = decorations.map(transaction.changes);
+    for (const effect of transaction.effects)
+      if (effect.is(setLineHints))
+        next = lineHintDecorations(transaction.state.doc, effect.value);
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
 });
 
 function errorLineExtension(line: number | null): Extension {
@@ -118,6 +186,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   describedBy,
   errorLine,
   outlineEntries,
+  lineHints,
   active,
   navigation,
   className,
@@ -134,6 +203,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
   describedBy?: string;
   errorLine: number | null;
   outlineEntries: OutlineEntry[];
+  lineHints: LineHint[] | null;
   active: boolean;
   navigation?: { line: number };
   className?: string;
@@ -218,6 +288,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({
           })
         ),
         validationLine.of(errorLineExtension(errorLine)),
+        lineHintField,
         EditorView.updateListener.of((update) => {
           if (
             update.docChanged &&
@@ -295,6 +366,12 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       effects: validationLine.reconfigure(errorLineExtension(errorLine)),
     });
   }, [errorLine, validationLine, value]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || lineHints === null) return;
+    view.dispatch({ effects: setLineHints.of(lineHints) });
+  }, [lineHints]);
 
   useEffect(() => {
     const view = viewRef.current;

@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 
 from opengrader.core.grading.questions import flatten_question_contexts
-from opengrader.core.qa_file import QADocument, parse_qa_markdown
+from opengrader.core.qa_file import QADocument, QALineNote, parse_qa_markdown, qa_line_notes
 from opengrader.core.qa_file.editing import DocumentEdit, QuestionEdit, edit_qa_markdown
 from opengrader.core.qa_file.errors import QAErrorLocation, QAParseError
 
@@ -15,6 +15,7 @@ class AssignmentInput(BaseModel):
 class QAPreview(BaseModel):
     document: QADocument
     warnings: list[str]
+    notes: list[QALineNote]
 
 
 class VisualEditInput(AssignmentInput):
@@ -71,4 +72,4 @@ def _parse_preview(content: str) -> QAPreview:
             "Referenced images are unavailable in this preview. "
             "Their references will be preserved in the saved QA file."
         )
-    return QAPreview(document=document, warnings=warnings)
+    return QAPreview(document=document, warnings=warnings, notes=qa_line_notes(content))
