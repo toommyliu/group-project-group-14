@@ -56,7 +56,7 @@ it('renders the actual TanStack SVG with accessible names, score ranges, and int
   expect(html).toMatch(/<svg[^>]*tabindex="-1"/);
   expect(html).not.toMatch(/<svg[^>]*tabindex="0"/);
   expect(html).toContain('Image actions for assignment score distribution');
-  expect(html).toContain('var(--primary)');
+  expect(html).toContain('var(--chart-1)');
 });
 
 it('shows hover details only inside a painted bar, excluding gaps, zero bars, and empty column space', () => {
@@ -79,4 +79,40 @@ it('shows hover details only inside a painted bar, excluding gaps, zero bars, an
   expect(index.findNearest(bar.x + 49, (bar.y + baseline) / 2)).toBeNull();
   expect(index.findNearest(bar.x, baseline + 1)).toBeNull();
   expect(index.findNearest(scene.points[1].x, baseline)).toBeNull();
+});
+
+it('draws the mean line with a legend and shows its detail on hover, over bars too', () => {
+  const rows = [
+    { label: '1', value: 40, detail: '40%' },
+    { label: '2', value: 90, detail: '90%' },
+  ];
+  const reference = { value: 65, detail: 'Assignment mean: 65%' };
+  const definition = statisticsChartDefinition(
+    rows,
+    'percent',
+    false,
+    reference
+  );
+  const scene = createChartScene(definition, { width: 640, height: 280 });
+  const index = definition.spatialIndex!(scene.points, { scene });
+  const line = scene.scales.y.map(65);
+  const bars = scene.points.filter((point) => !('reference' in point.datum));
+  const [short, tall] = bars;
+  expect(index.findNearest(short.x, line)?.datum.detail).toBe(reference.detail);
+  expect(index.findNearest(tall.x, line + 4)?.datum.detail).toBe(
+    reference.detail
+  );
+  // Away from the line, bars keep their own details.
+  expect(index.findNearest(tall.x, line + 20)?.datum.detail).toBe('90%');
+  expect(index.findNearest(short.x, line - 20)).toBeNull();
+  const html = renderToStaticMarkup(
+    <StatisticsChart
+      rows={rows}
+      unit="percent"
+      label="Mean score by question"
+      reference={{ ...reference, label: 'Assignment mean' }}
+    />
+  );
+  expect(html).toContain('ts-chart__rule-y');
+  expect(html).toContain('Assignment mean</p>');
 });

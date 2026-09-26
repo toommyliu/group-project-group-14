@@ -1,10 +1,12 @@
-import { Fragment, useId, useState } from 'react';
+import { Fragment, useId, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
+import { ChartColumn } from 'lucide-react';
 import type {
   AssignmentVersionStatistics,
   ScoreStatistics,
 } from '@/api/queries';
 import { StatisticsChart } from './statistics-chart';
+import { Button } from './ui/button';
 import { Label } from './ui/label';
 import {
   Select,
@@ -13,8 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const percent = new Intl.NumberFormat(undefined, {
+  style: 'percent',
+  maximumFractionDigits: 0,
+});
 const questionLabel = (id: string) => id.replace(/^q/i, '');
 
 function scoreValue(value: number | null, possible: number) {
@@ -34,6 +41,7 @@ export function AssignmentStatistics({
   const { scores, questions } = report;
   const [distributionId, setDistributionId] = useState('total');
   const selectId = useId();
+  const distributionHeading = useRef<HTMLHeadingElement>(null);
   const distribution =
     questions.find((item) => item.scores.question_id === distributionId)
       ?.scores ?? scores;
@@ -44,25 +52,7 @@ export function AssignmentStatistics({
   return (
     <div className="space-y-10">
       <section aria-label="Assignment summary" className="space-y-5">
-        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
-          <p className="font-medium tabular-nums">
-            {number.format(scores.possible_points)} points possible
-          </p>
-          <p className="text-muted-foreground tabular-nums">
-            {scores.graded_count} of {scores.total_submissions} submissions
-            fully graded
-          </p>
-          {report.partial_count > 0 && (
-            <p className="text-muted-foreground">
-              {report.partial_count} partially graded
-            </p>
-          )}
-          {report.ungraded_count > 0 && (
-            <p className="text-muted-foreground">
-              {report.ungraded_count} ungraded
-            </p>
-          )}
-        </div>
+        <GradingProgress report={report} />
         <ScoreSummary scores={scores} />
         <p className="max-w-prose text-sm text-muted-foreground">
           Assignment totals include fully graded submissions only. Question
@@ -105,6 +95,15 @@ export function AssignmentStatistics({
         <StatisticsChart
           label="Mean score by question"
           unit="percent"
+          reference={
+            scores.average_percent === null
+              ? undefined
+              : {
+                  value: scores.average_percent,
+                  label: 'Assignment mean',
+                  detail: `Assignment mean: ${number.format(scores.average_percent)}%`,
+                }
+          }
           rows={questions.map(({ scores: item }) => ({
             label: questionLabel(item.question_id),
             value: item.average_percent,
@@ -125,8 +124,17 @@ export function AssignmentStatistics({
                 <th scope="col" className="px-3 py-3 text-end font-medium">
                   Graded
                 </th>
-                <th scope="col" className="py-3 ps-3 text-end font-medium">
+                <th scope="col" className="px-3 py-3 text-end font-medium">
                   Mean
+                </th>
+                <th scope="col" className="px-3 py-3 text-end font-medium">
+                  Full credit
+                </th>
+                <th scope="col" className="px-3 py-3 text-end font-medium">
+                  Zero points
+                </th>
+                <th scope="col" className="py-3 ps-3">
+                  <span className="sr-only">Distribution</span>
                 </th>
               </tr>
             </thead>
@@ -137,7 +145,7 @@ export function AssignmentStatistics({
                     questions[index - 1]?.parent_id !== item.parent_id && (
                       <tr>
                         <th
-                          colSpan={4}
+                          colSpan={7}
                           scope="row"
                           className="pt-5 pb-2 text-start font-medium"
                         >
@@ -179,7 +187,7 @@ export function AssignmentStatistics({
                       {item.scores.graded_count} /{' '}
                       {item.scores.total_submissions}
                     </td>
-                    <td className="py-4 ps-3 text-end whitespace-nowrap tabular-nums">
+                    <td className="px-3 py-4 text-end whitespace-nowrap tabular-nums">
                       {scoreValue(
                         item.scores.average,
                         item.scores.possible_points
@@ -191,6 +199,45 @@ export function AssignmentStatistics({
                           </span>
                         )}
                     </td>
+                    <td className="px-3 py-4 text-end whitespace-nowrap tabular-nums">
+                      <ShareCell
+                        count={item.scores.full_credit_count}
+                        total={item.scores.graded_count}
+                        applies={item.scores.possible_points > 0}
+                      />
+                    </td>
+                    <td className="px-3 py-4 text-end whitespace-nowrap tabular-nums">
+                      <ShareCell
+                        count={item.scores.zero_score_count}
+                        total={item.scores.graded_count}
+                      />
+                    </td>
+                    <td className="py-4 ps-3 text-end">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-muted-foreground"
+                              aria-label={`Show score distribution for question ${questionLabel(item.scores.question_id)}`}
+                              onClick={() => {
+                                setDistributionId(item.scores.question_id);
+                                const heading = distributionHeading.current;
+                                heading?.scrollIntoView({
+                                  block: 'start',
+                                  behavior: 'instant',
+                                });
+                                heading?.focus({ preventScroll: true });
+                              }}
+                            />
+                          }
+                        >
+                          <ChartColumn aria-hidden="true" />
+                        </TooltipTrigger>
+                        <TooltipContent>Show distribution</TooltipContent>
+                      </Tooltip>
+                    </td>
                   </tr>
                 </Fragment>
               ))}
@@ -201,7 +248,12 @@ export function AssignmentStatistics({
 
       <section aria-labelledby="distribution-heading" className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <h2 id="distribution-heading" className="text-xl font-semibold">
+          <h2
+            id="distribution-heading"
+            ref={distributionHeading}
+            tabIndex={-1}
+            className="scroll-mt-6 text-xl font-semibold outline-none"
+          >
             Score distribution
           </h2>
           <div className="flex flex-wrap items-center gap-3">
@@ -247,39 +299,31 @@ export function AssignmentStatistics({
             <p className="text-sm text-muted-foreground">
               {distribution.graded_count} graded submissions.{' '}
               {distribution.possible_points > 0
-                ? 'Each range includes its lower bound. Scores of 100% or more are in the final bar.'
+                ? 'Each range includes its lower bound.'
                 : 'Scores are shown in points.'}
             </p>
-            <details className="text-sm">
-              <summary className="w-fit cursor-pointer py-2 underline underline-offset-4">
-                View distribution data
-              </summary>
-              <table className="mt-2 w-full max-w-sm tabular-nums">
-                <caption className="sr-only">
-                  {distributionLabel} score distribution
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col" className="py-2 text-start">
-                      Score
-                    </th>
-                    <th scope="col" className="py-2 text-end">
-                      Submissions
-                    </th>
+            {/* The chart is hover-only, so screen readers get the data here. */}
+            <table className="sr-only">
+              <caption>{distributionLabel} score distribution</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Score</th>
+                  <th scope="col">Submissions</th>
+                  <th scope="col">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {distribution.buckets.map((bucket) => (
+                  <tr key={bucket.label}>
+                    <th scope="row">{bucket.label}</th>
+                    <td>{bucket.count}</td>
+                    <td>
+                      {percent.format(bucket.count / distribution.graded_count)}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {distribution.buckets.map((bucket) => (
-                    <tr key={bucket.label} className="border-t">
-                      <th scope="row" className="py-2 text-start font-normal">
-                        {bucket.label}
-                      </th>
-                      <td className="py-2 text-end">{bucket.count}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </details>
+                ))}
+              </tbody>
+            </table>
           </>
         ) : (
           <p className="text-muted-foreground">
@@ -293,6 +337,88 @@ export function AssignmentStatistics({
   );
 }
 
+function GradingProgress({ report }: { report: AssignmentVersionStatistics }) {
+  const { scores, partial_count, ungraded_count } = report;
+  const total = scores.total_submissions;
+  const segments = [
+    {
+      label: `${scores.graded_count} of ${total} submissions fully graded`,
+      count: scores.graded_count,
+      className: 'bg-chart-1',
+    },
+    {
+      label: `${partial_count} partially graded`,
+      count: partial_count,
+      className: 'bg-chart-1/45',
+    },
+    {
+      label: `${ungraded_count} ungraded`,
+      count: ungraded_count,
+      className: 'bg-chart-1/15',
+    },
+  ];
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 tabular-nums">
+        <p className="font-medium">
+          {number.format(scores.possible_points)} points possible
+        </p>
+        {total > 0 &&
+          segments.map(
+            (segment, index) =>
+              (index === 0 || segment.count > 0) && (
+                <p
+                  key={segment.className}
+                  className="flex items-center gap-2 text-muted-foreground"
+                >
+                  <span
+                    className={`size-2.5 shrink-0 rounded-full ${segment.className}`}
+                    aria-hidden="true"
+                  />
+                  {segment.label}
+                </p>
+              )
+          )}
+      </div>
+      {total > 0 && (
+        <div
+          className="flex h-1.5 overflow-hidden rounded-full bg-chart-1/15"
+          aria-hidden="true"
+        >
+          {segments.slice(0, 2).map((segment) => (
+            <div
+              key={segment.className}
+              className={segment.className}
+              style={{ width: `${(segment.count / total) * 100}%` }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShareCell({
+  count,
+  total,
+  applies = true,
+}: {
+  count: number;
+  total: number;
+  applies?: boolean;
+}) {
+  if (!applies || total === 0)
+    return <span className="text-muted-foreground">—</span>;
+  return (
+    <>
+      {percent.format(count / total)}
+      <span className="block text-xs text-muted-foreground">
+        {count} of {total}
+      </span>
+    </>
+  );
+}
+
 function ScoreSummary({ scores }: { scores: ScoreStatistics }) {
   const metrics = [
     ['Minimum', scores.minimum],
@@ -301,20 +427,49 @@ function ScoreSummary({ scores }: { scores: ScoreStatistics }) {
     ['Mean', scores.average],
     ['Standard deviation', scores.std_dev],
   ] as const;
+  const graded = scores.graded_count;
+  const details = [
+    scores.q1 !== null &&
+      scores.q3 !== null && [
+        'Middle 50%',
+        `${scoreValue(scores.q1, scores.possible_points)} – ${scoreValue(scores.q3, scores.possible_points)}`,
+      ],
+    graded > 0 &&
+      scores.possible_points > 0 && [
+        'Full credit',
+        `${scores.full_credit_count} (${percent.format(scores.full_credit_count / graded)})`,
+      ],
+    graded > 0 && [
+      'Zero points',
+      `${scores.zero_score_count} (${percent.format(scores.zero_score_count / graded)})`,
+    ],
+  ].filter((detail) => detail !== false);
   return (
-    <dl className="grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 sm:grid-cols-3 xl:grid-cols-5">
-      {metrics.map(([label, value]) => (
-        <div key={label}>
-          <dt className="text-sm text-muted-foreground">{label}</dt>
-          <dd className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
-            {value === null ? (
-              <span className="text-base font-normal">Not graded</span>
-            ) : (
-              scoreValue(value, scores.possible_points)
-            )}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <div className="space-y-4 border-y py-5">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 xl:grid-cols-5">
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-sm text-muted-foreground">{label}</dt>
+            <dd className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+              {value === null ? (
+                <span className="text-base font-normal">Not graded</span>
+              ) : (
+                scoreValue(value, scores.possible_points)
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {details.length > 0 && (
+        <dl className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+          {details.map(([label, value]) => (
+            <div key={label} className="flex gap-2">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   );
 }

@@ -4,6 +4,7 @@ import { Copy, Ellipsis, ExternalLink } from 'lucide-react';
 import {
   statisticsChartDefinition,
   type StatisticsBar,
+  type StatisticsReference,
 } from '@/lib/statistics-chart';
 import { copyChartImage, openChartImage } from '@/lib/chart-image';
 import { Button } from './ui/button';
@@ -21,19 +22,31 @@ export function StatisticsChart({
   unit,
   label,
   histogram = false,
+  reference,
 }: {
   rows: StatisticsBar[];
   unit: 'percent' | 'submissions';
   label: string;
   histogram?: boolean;
+  reference?: StatisticsReference & { label: string };
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const referenceValue = reference?.value;
+  const referenceDetail = reference?.detail;
   const definition = useMemo(
-    () => statisticsChartDefinition(rows, unit, histogram),
-    [rows, unit, histogram]
+    () =>
+      statisticsChartDefinition(
+        rows,
+        unit,
+        histogram,
+        referenceValue === undefined || referenceDetail === undefined
+          ? null
+          : { value: referenceValue, detail: referenceDetail }
+      ),
+    [rows, unit, histogram, referenceValue, referenceDetail]
   );
 
   async function exportImage(action: 'copy' | 'open') {
@@ -111,6 +124,27 @@ export function StatisticsChart({
           />
         </div>
       </div>
+      {reference && (
+        <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+          <svg
+            width="24"
+            height="2"
+            className="shrink-0 overflow-visible text-foreground/70"
+            aria-hidden="true"
+          >
+            <line
+              x1="0"
+              x2="24"
+              y1="1"
+              y2="1"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+            />
+          </svg>
+          {reference.label}
+        </p>
+      )}
       {error && <ErrorAlert error={error} className="mt-3" />}
     </div>
   );

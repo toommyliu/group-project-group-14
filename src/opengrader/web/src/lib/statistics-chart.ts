@@ -1,4 +1,4 @@
-import { barY, defineChart } from '@tanstack/charts';
+import { barY, defineChart, dot, ruleY } from '@tanstack/charts';
 import { scaleBand } from '@tanstack/charts/scales/band';
 import { scaleLinear } from '@tanstack/charts/scales/linear';
 import { tooltip } from '@tanstack/charts/tooltip';
@@ -9,26 +9,51 @@ export type StatisticsBar = {
   detail: string;
 };
 
+export type StatisticsReference = { value: number; detail: string };
+
+// Hovering within this many pixels of the reference line shows its detail.
+const REFERENCE_HOVER_DISTANCE = 6;
+
 export function statisticsChartDefinition(
   rows: StatisticsBar[],
   unit: 'percent' | 'submissions',
-  histogram = false
+  histogram = false,
+  reference: StatisticsReference | null = null
 ) {
   const maxThickness = histogram ? undefined : 96;
   const maximum = rows.reduce(
     (largest, row) => Math.max(largest, row.value ?? 0),
-    unit === 'percent' ? 100 : 1
+    Math.max(unit === 'percent' ? 100 : 1, reference?.value ?? 0)
   );
+  // Tooltips need a chart point, so invisible anchors sit on the line in
+  // every column and the one nearest the pointer carries the detail.
+  const anchors = reference
+    ? rows.map((row) => ({ ...reference, label: row.label, reference: true }))
+    : [];
   return defineChart({
     marks: [
       barY(rows, {
         x: 'label',
         y: 'value',
-        fill: 'var(--primary)',
+        fill: 'var(--chart-1)',
         maxThickness,
         inset: 0,
         stroke: histogram ? 'var(--background)' : undefined,
         strokeWidth: histogram ? 1 : undefined,
+      }),
+      // Drawn after the bars so the line stays visible across them.
+      ruleY(reference ? [reference.value] : [], {
+        stroke: 'var(--foreground)',
+        strokeOpacity: 0.7,
+        strokeWidth: 1.5,
+        strokeDasharray: '4 4',
+      }),
+      dot(anchors, {
+        x: 'label',
+        y: 'value',
+        r: 0,
+        fillOpacity: 0,
+        strokeOpacity: 0,
       }),
     ],
     scales: {
@@ -61,15 +86,33 @@ export function statisticsChartDefinition(
       const baseline = scene.scales.y.map(0);
       const halfWidth =
         Math.min(scene.scales.x.bandwidth, maxThickness ?? Infinity) / 2;
+      const isReference = (point: (typeof points)[number]) =>
+        'reference' in point.datum;
       return {
-        findNearest: (x, y) =>
-          points.find(
-            (point) =>
-              point.y !== baseline &&
-              Math.abs(point.x - x) <= halfWidth &&
-              y >= Math.min(point.y, baseline) &&
-              y <= Math.max(point.y, baseline)
-          ) ?? null,
+        // The line is drawn over the bars, so it wins where they overlap.
+        findNearest: (x, y) => {
+          let nearest = null;
+          for (const point of points) {
+            if (
+              isReference(point) &&
+              Math.abs(point.y - y) <= REFERENCE_HOVER_DISTANCE &&
+              (!nearest || Math.abs(point.x - x) < Math.abs(nearest.x - x))
+            )
+              nearest = point;
+          }
+          return (
+            nearest ??
+            points.find(
+              (point) =>
+                !isReference(point) &&
+                point.y !== baseline &&
+                Math.abs(point.x - x) <= halfWidth &&
+                y >= Math.min(point.y, baseline) &&
+                y <= Math.max(point.y, baseline)
+            ) ??
+            null
+          );
+        },
       };
     },
     tooltip: {
