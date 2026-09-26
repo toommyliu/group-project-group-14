@@ -3,6 +3,7 @@ import {
   parseValidationLocation,
   validationQuestionTarget,
   validationSourceLine,
+  withoutSourceLines,
 } from './validation-source-line';
 import type { OutlineGroup } from './assignment-outline';
 
@@ -114,5 +115,33 @@ describe('validationSourceLine', () => {
         groups
       )
     ).toBeNull();
+  });
+});
+
+describe('withoutSourceLines', () => {
+  it('removes parser line references for the Visual builder', () => {
+    expect(withoutSourceLines('choice at line 12 is missing option text')).toBe(
+      'Choice is missing option text'
+    );
+    expect(
+      withoutSourceLines(
+        "invalid rubric option at line 5: 'Close'. Use 'Label (+/-N)' or 'Label: +/-N'."
+      )
+    ).toBe(
+      "Invalid rubric option: 'Close'. Use 'Label (+/-N)' or 'Label: +/-N'."
+    );
+    expect(
+      withoutSourceLines('nested subquestions are not supported (line 7)')
+    ).toBe('Nested subquestions are not supported');
+  });
+
+  it('keeps messages without line references', () => {
+    expect(
+      withoutSourceLines(
+        "question '2' rubric item 'Partially Correct' has points -3 but subitems sum to -5"
+      )
+    ).toBe(
+      "Question '2' rubric item 'Partially Correct' has points -3 but subitems sum to -5"
+    );
   });
 });

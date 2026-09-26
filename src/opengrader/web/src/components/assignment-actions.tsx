@@ -7,7 +7,15 @@ import {
   type Assignment,
 } from '@/api/queries';
 import { ErrorAlert } from '@/components/error-alert';
+import { ChevronDown } from 'lucide-react';
 import { Button } from './ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,9 +29,13 @@ import {
 
 export function AssignmentActions({
   assignment,
+  disabled,
+  onReplace,
   onDeleted,
 }: {
   assignment: Assignment;
+  disabled: boolean;
+  onReplace?: () => void;
   onDeleted: () => void;
 }) {
   const router = useRouter();
@@ -64,21 +76,39 @@ export function AssignmentActions({
   }
 
   return (
-    <div className="max-w-full">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
           ref={triggerRef}
-          type="button"
-          variant="destructive"
-          disabled={busy}
-          onClick={() => {
-            setError('');
-            setConfirmOpen(true);
-          }}
+          disabled={busy || disabled}
+          render={<Button type="button" variant="outline" />}
         >
-          {busy ? 'Deleting…' : 'Delete assignment'}
-        </Button>
-      </div>
+          {busy ? 'Deleting…' : 'More'} <ChevronDown aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-56"
+          finalFocus={confirmOpen ? false : undefined}
+        >
+          {onReplace && (
+            <>
+              <DropdownMenuItem onClick={onReplace}>
+                Replace answer key…
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              setError('');
+              setConfirmOpen(true);
+            }}
+          >
+            Delete assignment…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <AlertDialog
         open={confirmOpen}
         onOpenChange={(open) => {
@@ -108,7 +138,7 @@ export function AssignmentActions({
           </AlertDialogHeader>
           {error && (
             <ErrorAlert
-              className="items-center [&>svg]:row-span-1"
+              className="items-center [&>svg]:row-span-1 [&>svg]:translate-y-0"
               error={error}
             />
           )}
@@ -127,6 +157,6 @@ export function AssignmentActions({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

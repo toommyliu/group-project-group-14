@@ -99,3 +99,18 @@ export function LoadingIndicator({
     </span>
   );
 }
+
+export function PaneLoading({ label }: { label: string }) {
+  return (
+    <p
+      role="status"
+      className="flex min-h-48 flex-1 items-center justify-center gap-2 text-muted-foreground"
+    >
+      <LoaderCircle
+        className="size-4 motion-safe:animate-spin"
+        aria-hidden="true"
+      />
+      {label}
+    </p>
+  );
+}

@@ -68,7 +68,7 @@ function QuestionContent({
       className="min-w-0 space-y-4 focus-visible:outline-2 focus-visible:-outline-offset-2"
     >
       <div
-        className="sticky top-11 flex min-h-11 min-w-0 items-center gap-3 overflow-hidden border-b bg-background px-2 min-[65rem]:top-0"
+        className="sticky top-0 flex min-h-11 min-w-0 items-center gap-3 overflow-hidden border-b bg-background px-2"
         style={{
           zIndex: 10 + depth,
           marginInlineStart: `calc(-0.5rem - ${depth}rem)`,

@@ -1,27 +1,12 @@
 import { useId, useState } from 'react';
-import { Popover } from '@base-ui/react/popover';
 import { DragDropProvider } from '@dnd-kit/react';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
 import {
   Accessibility,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/dom';
 import { isSortable, useSortable } from '@dnd-kit/react/sortable';
-import {
-  ArrowDown,
-  ArrowUp,
-  GripVertical,
-  Plus,
-  Settings2,
-  Trash2,
-} from 'lucide-react';
+import { GripVertical, Plus, X } from 'lucide-react';
 import type { QuestionEdit } from '@/api/queries';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -33,12 +18,13 @@ type DraftItem = Omit<RubricItem, 'subitems'> & {
   id: string;
   subitems: DraftItem[];
 };
+type Bounds = { min: number; max?: number };
 
-const rubricAccessibility = Accessibility.configure({
+const criterionAccessibility = Accessibility.configure({
   announcements: {
     dragstart: ({ operation: { source } }: DragStartEvent) =>
       source
-        ? `Picked up ${source.handle?.getAttribute('aria-label')?.replace(/^Move /, '') ?? 'rubric item'}.`
+        ? `Picked up ${source.handle?.getAttribute('aria-label')?.replace(/^Move /, '') ?? 'criterion'}. Use arrow keys to reorder, then Space to drop.`
         : undefined,
     dragover: () => undefined,
     dragend: ({ canceled }: DragEndEvent) =>
@@ -74,70 +60,134 @@ function defaultRubric(points: number): DraftItem[] {
   ].map(draftItem);
 }
 
-function SortableItem({
+const round = (value: number) => Math.round(value * 100) / 100;
+const total = (items: DraftItem[]) =>
+  round(items.reduce((sum, item) => sum + (item.points_delta ?? 0), 0));
+const signed = (value: number) => `${value > 0 ? '+' : ''}${value}`;
+
+function PointsInput({
+  label,
+  value,
+  bounds,
+  bonus,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number | null | undefined;
+  bounds: Bounds;
+  bonus: boolean;
+  disabled: boolean;
+  onChange: (value: number | null) => void;
+}) {
+  const [error, setError] = useState('');
+  const errorId = useId();
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
+      <Label className="flex items-center gap-1.5 text-sm leading-normal">
+        <span className="sr-only">{label} points</span>
+        <Input
+          className="w-20 text-end tabular-nums"
+          type="number"
+          step="any"
+          min={bounds.min}
+          max={bounds.max}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          value={value ?? ''}
+          disabled={disabled}
+          onChange={(event) => {
+            const next = event.target.valueAsNumber;
+            if (
+              event.target.value &&
+              (!Number.isFinite(next) ||
+                next < bounds.min ||
+                (bounds.max !== undefined && next > bounds.max))
+            ) {
+              setError(
+                bonus
+                  ? 'Bonus points must be zero or greater.'
+                  : `Use a value from ${bounds.min} to ${bounds.max}.`
+              );
+              return;
+            }
+            setError('');
+            onChange(Number.isFinite(next) ? next : null);
+          }}
+          onBlur={() => setError('')}
+        />
+        <span aria-hidden="true" className="text-muted-foreground">
+          pts
+        </span>
+      </Label>
+      {error && (
+        <p id={errorId} role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FeedbackInput({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string | null | undefined;
+  disabled: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  return (
+    <Label className="block text-sm leading-normal">
+      <span className="sr-only">Feedback for {label}</span>
+      <Textarea
+        value={value ?? ''}
+        disabled={disabled}
+        placeholder="Feedback shown with this score (optional)"
+        className="min-h-8"
+        onChange={(event) => onChange(event.target.value || null)}
+      />
+    </Label>
+  );
+}
+
+function Criterion({
   item,
   index,
   count,
   group,
-  nested,
-  points,
-  positive,
+  bounds,
   bonus,
   disabled,
   onChange,
-  onMove,
   onRemove,
 }: {
   item: DraftItem;
   index: number;
   count: number;
   group: string;
-  nested: boolean;
-  points: number;
-  positive: boolean;
+  bounds: Bounds;
   bonus: boolean;
   disabled: boolean;
   onChange: (item: DraftItem) => void;
-  onMove: (from: number, to: number) => void;
-  onRemove?: () => void;
+  onRemove: () => void;
 }) {
-  const [pointsError, setPointsError] = useState('');
-  const fullCredit =
-    !nested &&
-    (positive ? item.label === 'Correct' : item.label === 'Incorrect');
-  const fixedZero =
-    !nested &&
-    (positive ? item.label === 'Incorrect' : item.label === 'Correct');
-  const minimum = fixedZero
-    ? 0
-    : bonus || positive
-      ? 0
-      : fullCredit
-        ? undefined
-        : -points;
-  const maximum = fixedZero
-    ? 0
-    : bonus
-      ? undefined
-      : positive
-        ? fullCredit
-          ? undefined
-          : points
-        : 0;
-  const errorId = useId();
   const { ref, handleRef, isDragging, isDropTarget } = useSortable({
     id: item.id,
     index,
     group,
     type: group,
     accept: group,
-    disabled,
+    disabled: disabled || count < 2,
   });
   return (
     <li
       ref={ref}
       data-rubric-index={index}
-      className={`rounded-lg border bg-background p-3 ${isDragging ? 'opacity-60' : ''} ${isDropTarget ? 'ring-2 ring-ring' : ''}`}
+      className={`space-y-2 bg-background py-2 ${isDragging ? 'opacity-60' : ''} ${isDropTarget ? 'ring-2 ring-ring' : ''}`}
     >
       <div className="flex items-start gap-2">
         <Button
@@ -146,254 +196,114 @@ function SortableItem({
           variant="ghost"
           size="icon"
           disabled={disabled || count < 2}
-          className="h-10 shrink-0 cursor-grab touch-none active:cursor-grabbing"
+          className="shrink-0 cursor-grab touch-none active:cursor-grabbing"
           aria-label={`Move ${item.label}`}
         >
           <GripVertical aria-hidden="true" />
         </Button>
-        <div className="min-w-0 flex-1 space-y-3">
-          <div className="flex min-h-10 flex-wrap items-center gap-3">
-            {nested ? (
-              <Label className="block min-w-0 flex-[1_1_10rem] text-sm leading-normal">
-                <span className="sr-only">Criterion</span>
-                <Input
-                  value={item.label}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    onChange({ ...item, label: event.target.value })
-                  }
-                />
-              </Label>
-            ) : (
-              <h4 className="min-w-0 flex-1 font-medium">{item.label}</h4>
-            )}
-            {!item.subitems.length && (
-              <Label className="ms-auto flex shrink-0 items-center gap-2 text-sm leading-normal">
-                <span className="sr-only">Points</span>
-                <Input
-                  className="w-20 tabular-nums"
-                  type="number"
-                  step={fullCredit ? 1 : 'any'}
-                  min={minimum}
-                  max={maximum}
-                  readOnly={fixedZero}
-                  aria-invalid={!!pointsError}
-                  aria-describedby={pointsError ? errorId : undefined}
-                  value={item.points_delta ?? ''}
-                  disabled={disabled}
-                  onChange={(event) => {
-                    const value = event.target.valueAsNumber;
-                    if (
-                      event.target.value &&
-                      (!Number.isFinite(value) ||
-                        (minimum !== undefined && value < minimum) ||
-                        (maximum !== undefined && value > maximum) ||
-                        (fullCredit && !Number.isSafeInteger(value)))
-                    ) {
-                      setPointsError(
-                        fullCredit
-                          ? 'Use a whole number of points with the current scoring sign.'
-                          : bonus
-                            ? 'Bonus points must be zero or greater.'
-                            : `Use a value from ${minimum} to ${maximum} points.`
-                      );
-                      return;
-                    }
-                    setPointsError('');
-                    onChange({
-                      ...item,
-                      points_delta: Number.isFinite(value) ? value : null,
-                    });
-                  }}
-                  onBlur={() => setPointsError('')}
-                />
-                <span aria-hidden="true" className="text-muted-foreground">
-                  pts
-                </span>
-              </Label>
-            )}
-          </div>
-          {pointsError && (
-            <p id={errorId} role="alert" className="text-sm text-destructive">
-              {pointsError}
-            </p>
-          )}
-          <Label className="block space-y-1 text-sm leading-normal">
-            <span>Feedback</span>
-            <Textarea
-              value={item.default_comment ?? ''}
-              disabled={disabled}
-              className="min-h-16"
-              onChange={(event) =>
-                onChange({
-                  ...item,
-                  default_comment: event.target.value || null,
-                })
-              }
-            />
-          </Label>
-          {!!item.notes?.length && (
-            <p className="text-sm whitespace-pre-wrap text-muted-foreground">
-              {item.notes.join('\n')}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled || index === 0}
-              aria-label={`Move ${item.label} up`}
-              onClick={() => onMove(index, index - 1)}
-            >
-              <ArrowUp aria-hidden="true" /> Up
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled || index === count - 1}
-              aria-label={`Move ${item.label} down`}
-              onClick={() => onMove(index, index + 1)}
-            >
-              <ArrowDown aria-hidden="true" /> Down
-            </Button>
-            {onRemove && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={disabled}
-                onClick={onRemove}
-                aria-label={`Remove ${item.label}`}
-              >
-                <Trash2 aria-hidden="true" /> Remove
-              </Button>
-            )}
-          </div>
-          {!!item.subitems.length && (
-            <RubricList
-              items={item.subitems}
-              nested
-              points={points}
-              positive={positive}
-              bonus={bonus}
-              disabled={disabled}
-              onChange={(subitems) =>
-                onChange({ ...item, points_delta: null, subitems })
-              }
-            />
-          )}
-          {(item.label === 'Partially Correct' || item.label === 'Bonus') &&
-            !nested && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={disabled}
-                onClick={() => {
-                  const subitems = item.subitems.length
-                    ? item.subitems
-                    : [
-                        draftItem({
-                          label: 'Criterion 1',
-                          points_delta: item.points_delta ?? 0,
-                          default_comment: item.default_comment,
-                        }),
-                      ];
-                  onChange({
-                    ...item,
-                    points_delta: null,
-                    subitems: [
-                      ...subitems,
-                      draftItem({
-                        label: `Criterion ${subitems.length + 1}`,
-                        points_delta: 0,
-                      }),
-                    ],
-                  });
-                }}
-              >
-                <Plus aria-hidden="true" /> Add criterion
-              </Button>
-            )}
-        </div>
+        <Label className="block min-w-0 flex-1 text-sm leading-normal">
+          <span className="sr-only">Criterion {index + 1}</span>
+          <Input
+            value={item.label}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({ ...item, label: event.target.value })
+            }
+          />
+        </Label>
+        <PointsInput
+          label={item.label}
+          value={item.points_delta}
+          bounds={bounds}
+          bonus={bonus}
+          disabled={disabled}
+          onChange={(points_delta) => onChange({ ...item, points_delta })}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={disabled}
+          aria-label={`Remove ${item.label}`}
+          title="Remove criterion"
+          onClick={onRemove}
+        >
+          <X aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="ps-10">
+        <FeedbackInput
+          label={item.label}
+          value={item.default_comment}
+          disabled={disabled}
+          onChange={(default_comment) => onChange({ ...item, default_comment })}
+        />
       </div>
     </li>
   );
 }
 
-function RubricList({
+function CriteriaList({
   items,
-  nested = false,
-  points,
-  positive,
-  bonus = false,
+  bounds,
+  bonus,
   disabled,
   onChange,
 }: {
   items: DraftItem[];
-  nested?: boolean;
-  points: number;
-  positive: boolean;
-  bonus?: boolean;
+  bounds: Bounds;
+  bonus: boolean;
   disabled: boolean;
   onChange: (items: DraftItem[]) => void;
 }) {
   const group = useId();
   const [announcement, setAnnouncement] = useState('');
-  function move(from: number, to: number) {
-    if (disabled || from === to || to < 0 || to >= items.length) return;
-    const next = [...items];
-    const [item] = next.splice(from, 1);
-    next.splice(to, 0, item);
-    onChange(next);
-    setAnnouncement(
-      `Moved ${item.label} to position ${to + 1} of ${items.length}.`
-    );
-  }
   return (
     <DragDropProvider
       plugins={(defaults) =>
         defaults.map((plugin) =>
-          plugin === Accessibility ? rubricAccessibility : plugin
+          plugin === Accessibility ? criterionAccessibility : plugin
         )
       }
       onDragEnd={(event) => {
-        const handle = event.operation.source?.handle;
-        if (!event.canceled && isSortable(event.operation.source)) {
-          move(
-            event.operation.source.initialIndex,
-            event.operation.source.index
+        const source = event.operation.source;
+        if (
+          !disabled &&
+          !event.canceled &&
+          isSortable(source) &&
+          source.initialIndex !== source.index
+        ) {
+          const next = [...items];
+          const [item] = next.splice(source.initialIndex, 1);
+          next.splice(source.index, 0, item);
+          onChange(next);
+          setAnnouncement(
+            `Moved ${item.label} to position ${source.index + 1} of ${items.length}.`
           );
         }
+        const handle = source?.handle;
         if (handle instanceof HTMLElement)
           requestAnimationFrame(() => handle.focus());
       }}
     >
-      <ul data-rubric-list className="space-y-3">
+      <ul data-rubric-list className="divide-y border-s ps-2">
         {items.map((item, index) => (
-          <SortableItem
+          <Criterion
             key={item.id}
             item={item}
             index={index}
             count={items.length}
             group={group}
-            nested={nested}
-            points={points}
-            positive={positive}
-            bonus={bonus || (!nested && item.label === 'Bonus')}
+            bounds={bounds}
+            bonus={bonus}
             disabled={disabled}
-            onMove={move}
             onChange={(updated) =>
               onChange(
                 items.map((value) => (value.id === item.id ? updated : value))
               )
             }
-            onRemove={
-              nested || item.label === 'Bonus'
-                ? () => onChange(items.filter((value) => value.id !== item.id))
-                : undefined
+            onRemove={() =>
+              onChange(items.filter((value) => value.id !== item.id))
             }
           />
         ))}
@@ -402,6 +312,145 @@ function RubricList({
         {announcement}
       </span>
     </DragDropProvider>
+  );
+}
+
+function RubricLevel({
+  item,
+  index,
+  points,
+  positive,
+  disabled,
+  onChange,
+  onRemove,
+}: {
+  item: DraftItem;
+  index: number;
+  points: number;
+  positive: boolean;
+  disabled: boolean;
+  onChange: (item: DraftItem) => void;
+  onRemove?: () => void;
+}) {
+  const bonus = item.label === 'Bonus';
+  const fixed = item.label === 'Correct' || item.label === 'Incorrect';
+  const bounds: Bounds = bonus
+    ? { min: 0 }
+    : positive
+      ? { min: 0, max: points }
+      : { min: -points, max: 0 };
+  const criteria = item.subitems;
+  const criteriaTotal = total(criteria);
+  const target = positive ? points : -points;
+  const canSplit = bonus || item.label === 'Partially Correct';
+  function changeCriteria(subitems: DraftItem[]) {
+    onChange({
+      ...item,
+      points_delta: subitems.length ? null : criteriaTotal,
+      subitems,
+    });
+  }
+  return (
+    <li data-rubric-index={index} className="space-y-2 p-3">
+      <div className="flex min-h-8 flex-wrap items-center gap-2">
+        <h5 className="min-w-0 flex-1 font-medium">{item.label}</h5>
+        {criteria.length ? (
+          <span className="text-muted-foreground tabular-nums">
+            {signed(criteriaTotal)} pts total
+          </span>
+        ) : fixed ? (
+          <span
+            className="text-muted-foreground tabular-nums"
+            title="Set by the question's points and scoring method"
+          >
+            {signed(item.points_delta ?? 0)} pts
+          </span>
+        ) : (
+          <PointsInput
+            label={item.label}
+            value={item.points_delta}
+            bounds={bounds}
+            bonus={bonus}
+            disabled={disabled}
+            onChange={(points_delta) => onChange({ ...item, points_delta })}
+          />
+        )}
+        {onRemove && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={disabled}
+            aria-label={`Remove ${item.label}`}
+            title={`Remove ${item.label.toLowerCase()}`}
+            onClick={onRemove}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        )}
+      </div>
+      <FeedbackInput
+        label={item.label}
+        value={item.default_comment}
+        disabled={disabled}
+        onChange={(default_comment) => onChange({ ...item, default_comment })}
+      />
+      {!!item.notes?.length && (
+        <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+          {item.notes.join('\n')}
+        </p>
+      )}
+      {!!criteria.length && (
+        <CriteriaList
+          items={criteria}
+          bounds={bounds}
+          bonus={bonus}
+          disabled={disabled}
+          onChange={changeCriteria}
+        />
+      )}
+      {item.label === 'Partially Correct' &&
+        !!criteria.length &&
+        criteriaTotal !== target && (
+          <p className="text-sm text-destructive">
+            Criteria must add up to {signed(target)} pts. They add up to{' '}
+            {signed(criteriaTotal)} now.
+          </p>
+        )}
+      {canSplit && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={() => {
+            const subitems = criteria.length
+              ? criteria
+              : [
+                  draftItem({
+                    label: 'Criterion 1',
+                    points_delta: item.points_delta ?? 0,
+                    default_comment: item.default_comment,
+                  }),
+                ];
+            onChange({
+              ...item,
+              points_delta: null,
+              subitems: [
+                ...subitems,
+                draftItem({
+                  label: `Criterion ${subitems.length + 1}`,
+                  points_delta: 0,
+                }),
+              ],
+            });
+          }}
+        >
+          <Plus aria-hidden="true" />
+          {criteria.length ? 'Add criterion' : 'Split into criteria'}
+        </Button>
+      )}
+    </li>
   );
 }
 
@@ -418,6 +467,7 @@ export function RubricEditor({
 }) {
   const [items, setItems] = useState(() => rubric.map(draftItem));
   const [receivedRubric, setReceivedRubric] = useState(rubric);
+  const headingId = useId();
   if (rubric !== receivedRubric) {
     setReceivedRubric(rubric);
     // Retain drag identities and input focus when the question rescales points.
@@ -427,170 +477,152 @@ export function RubricEditor({
     setItems(next);
     onChange(next.map(rubricValue));
   }
-  const base = items.filter((item) => item.label !== 'Bonus');
-  const values = base.flatMap((item) =>
-    item.subitems.length
-      ? item.subitems.map((child) => child.points_delta ?? 0)
-      : [item.points_delta ?? 0]
-  );
+  const values = items
+    .filter((item) => item.label !== 'Bonus')
+    .flatMap((item) =>
+      item.subitems.length
+        ? item.subitems.map((child) => child.points_delta ?? 0)
+        : [item.points_delta ?? 0]
+    );
   const positive =
     !values.some((value) => value < 0) && values.some((value) => value > 0);
-  return (
-    <section className="space-y-4" aria-label="Rubric editor">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold">Rubric</h3>
-        {!!items.length && (
-          <Popover.Root>
-            <Popover.Trigger
-              render={<Button type="button" variant="ghost" size="sm" />}
-              disabled={disabled}
-            >
-              <Settings2 aria-hidden="true" />
-              Rubric settings
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Positioner
-                side="bottom"
-                align="end"
-                sideOffset={8}
-                className="z-50"
-              >
-                <Popover.Popup className="max-h-(--available-height) w-80 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain border bg-popover p-4 text-popover-foreground shadow-md">
-                  <Popover.Title className="font-semibold">
-                    Rubric settings
-                  </Popover.Title>
-                  <Label className="mt-3 block space-y-2 text-sm leading-normal">
-                    <span>Scoring method</span>
-                    <Select
-                      items={[
-                        {
-                          value: 'negative',
-                          label: `Subtract points, starting from ${points}`,
-                        },
-                        {
-                          value: 'positive',
-                          label: 'Add points, starting from 0',
-                        },
-                      ]}
-                      value={positive ? 'positive' : 'negative'}
-                      disabled={disabled}
-                      onValueChange={(value) => {
-                        if (
-                          !value ||
-                          value === (positive ? 'positive' : 'negative')
-                        )
-                          return;
-                        const award = value === 'positive';
-                        update(
-                          items.map((item) => {
-                            if (item.label === 'Bonus') return item;
-                            if (item.label === 'Correct')
-                              return {
-                                ...item,
-                                points_delta: award ? points : 0,
-                              };
-                            if (item.label === 'Incorrect')
-                              return {
-                                ...item,
-                                points_delta: award ? 0 : -points,
-                              };
-                            if (item.subitems.length)
-                              return {
-                                ...item,
-                                points_delta: null,
-                                subitems: item.subitems.map((child) => ({
-                                  ...child,
-                                  points_delta: -(child.points_delta ?? 0),
-                                })),
-                              };
-                            return {
-                              ...item,
-                              points_delta:
-                                (item.points_delta ?? 0) +
-                                (award ? points : -points),
-                            };
-                          })
-                        );
-                      }}
-                    >
-                      <SelectTrigger
-                        aria-label="Scoring method"
-                        className="w-full"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="negative">
-                          Subtract points, starting from {points}
-                        </SelectItem>
-                        <SelectItem value="positive">
-                          Add points, starting from 0
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Label>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Changing the method converts point values. Review criterion
-                    descriptions to match awards or deductions.
-                  </p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Scores are limited to 0–{points}. Bonus points are added
-                    afterward.
-                  </p>
-                </Popover.Popup>
-              </Popover.Positioner>
-            </Popover.Portal>
-          </Popover.Root>
-        )}
-      </div>
-      {items.length ? (
-        <>
-          <RubricList
-            items={items}
-            points={points}
-            positive={positive}
-            disabled={disabled}
-            onChange={update}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            {!items.some((item) => item.label === 'Bonus') && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={disabled}
-                onClick={() =>
-                  update([
-                    ...items,
-                    draftItem({
-                      label: 'Bonus',
-                      subitems: [{ label: 'Bonus criterion', points_delta: 1 }],
-                    }),
-                  ])
-                }
-              >
-                Add bonus criterion
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={disabled}
-              onClick={() => update([])}
-            >
-              Remove rubric
-            </Button>
-          </div>
-        </>
-      ) : (
+
+  function setScoring(award: boolean) {
+    if (award === positive) return;
+    update(
+      items.map((item) => {
+        if (item.label === 'Bonus') return item;
+        if (item.label === 'Correct')
+          return { ...item, points_delta: award ? points : 0 };
+        if (item.label === 'Incorrect')
+          return { ...item, points_delta: award ? 0 : -points };
+        if (item.subitems.length)
+          return {
+            ...item,
+            points_delta: null,
+            subitems: item.subitems.map((child) => ({
+              ...child,
+              points_delta: -(child.points_delta ?? 0),
+            })),
+          };
+        return {
+          ...item,
+          points_delta: (item.points_delta ?? 0) + (award ? points : -points),
+        };
+      })
+    );
+  }
+
+  if (!items.length)
+    return (
+      <section
+        aria-labelledby={headingId}
+        className="flex flex-wrap items-center gap-x-4 gap-y-2"
+      >
+        <div className="min-w-0 flex-1">
+          <h4 id={headingId} className="font-medium">
+            Rubric
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            Optional. Gives graders preset scores and feedback.
+          </p>
+        </div>
         <Button
           type="button"
           variant="outline"
+          size="sm"
           disabled={disabled}
           onClick={() => update(defaultRubric(points))}
         >
-          <Plus aria-hidden="true" /> Add rubric
+          <Plus aria-hidden="true" />
+          Add rubric
+        </Button>
+      </section>
+    );
+
+  return (
+    <section aria-labelledby={headingId} className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h4 id={headingId} className="font-medium">
+          Rubric
+        </h4>
+        <div
+          role="group"
+          aria-label="Scoring method"
+          className="flex border border-border"
+        >
+          {[
+            { award: false, label: `Deduct from ${points}` },
+            { award: true, label: 'Award from 0' },
+          ].map((option) => (
+            <Button
+              key={option.label}
+              type="button"
+              size="sm"
+              variant={option.award === positive ? 'secondary' : 'ghost'}
+              aria-pressed={option.award === positive}
+              disabled={disabled}
+              onClick={() => setScoring(option.award)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ms-auto"
+          disabled={disabled}
+          onClick={() => update([])}
+        >
+          Remove rubric
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Scores stay between 0 and {points}. Changing the question&rsquo;s points
+        rescales these values; bonus points stay fixed and are added last.
+      </p>
+      <ul data-rubric-list className="divide-y border">
+        {items.map((item, index) => (
+          <RubricLevel
+            key={item.id}
+            item={item}
+            index={index}
+            points={points}
+            positive={positive}
+            disabled={disabled}
+            onChange={(updated) =>
+              update(
+                items.map((value) => (value.id === item.id ? updated : value))
+              )
+            }
+            onRemove={
+              item.label === 'Bonus'
+                ? () => update(items.filter((value) => value.id !== item.id))
+                : undefined
+            }
+          />
+        ))}
+      </ul>
+      {!items.some((item) => item.label === 'Bonus') && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={disabled}
+          onClick={() =>
+            update([
+              ...items,
+              draftItem({
+                label: 'Bonus',
+                subitems: [{ label: 'Bonus criterion', points_delta: 1 }],
+              }),
+            ])
+          }
+        >
+          <Plus aria-hidden="true" />
+          Add bonus
         </Button>
       )}
     </section>

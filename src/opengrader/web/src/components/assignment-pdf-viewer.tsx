@@ -1,5 +1,5 @@
 import { ErrorAlert } from '@/components/error-alert';
-import { LoadingIndicator } from './loading';
+import { LoadingIndicator, PaneLoading } from './loading';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   GlobalWorkerOptions,
@@ -40,7 +40,6 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
   const [renderedPage, setRenderedPage] = useState<number>();
-  const [text, setText] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
   const container = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef(
@@ -139,7 +138,6 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
     const nextCanvas = window.document.createElement('canvas');
     setRendering(true);
     setError('');
-    setText('');
     void (async () => {
       const page = await document.getPage(pageNumber);
       if (!active) return;
@@ -164,15 +162,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
       if (!context) throw new Error('Could not create PDF canvas context');
       context.drawImage(nextCanvas, 0, 0);
       setRenderedPage(pageNumber);
-      const content = await page.getTextContent();
-      if (active) {
-        setText(
-          content.items
-            .flatMap((item) => ('str' in item ? [item.str] : []))
-            .join(' ')
-        );
-        setRendering(false);
-      }
+      setRendering(false);
     })().catch(() => {
       if (active) {
         setError(
@@ -187,9 +177,11 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
     };
   }, [document, pageNumber, zoom, width]);
 
+  const pageHidden = (renderedPage !== pageNumber && rendering) || !!error;
+
   return (
-    <div className="min-w-0 space-y-3">
-      <div className="flex h-[36rem] max-h-[70svh] min-h-48 flex-col overflow-hidden border bg-muted">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-48 flex-1 flex-col overflow-hidden border bg-muted">
         <div
           role="group"
           aria-label="PDF controls"
@@ -244,7 +236,7 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
               </SelectContent>
             </Select>
             <LoadingIndicator
-              loading={rendering && !error}
+              loading={rendering && !error && !pageHidden}
               label={!document ? 'Opening PDF…' : 'Rendering page…'}
             />
           </div>
@@ -252,24 +244,27 @@ export default function AssignmentPdfViewer({ blob }: { blob: Blob }) {
         {error && <ErrorAlert error={error} />}
         <div
           ref={container}
-          className="custom-scrollbar min-h-0 flex-1 overflow-auto"
+          className="custom-scrollbar relative min-h-0 flex-1 overflow-auto"
           tabIndex={0}
           role="region"
           aria-label="Assignment PDF page"
           aria-busy={rendering && !error}
         >
+          {pageHidden && rendering && !error && (
+            <div className="absolute inset-0 flex">
+              <PaneLoading
+                label={!document ? 'Opening PDF…' : 'Rendering page…'}
+              />
+            </div>
+          )}
           <canvas
             ref={canvas}
             role="img"
             aria-label={`Assignment PDF page ${pageNumber}`}
-            className={`mx-auto my-3 bg-white outline outline-black/10 ${(renderedPage !== pageNumber && rendering) || error ? 'invisible' : ''}`}
+            className={`mx-auto my-3 bg-white outline outline-black/10 ${pageHidden ? 'invisible' : ''}`}
           />
         </div>
       </div>
-      <details hidden={!text}>
-        <summary className="min-h-11 cursor-pointer py-3">Page text</summary>
-        <p className="break-words whitespace-pre-wrap">{text}</p>
-      </details>
     </div>
   );
 }

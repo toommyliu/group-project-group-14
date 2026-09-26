@@ -36,8 +36,8 @@ export function App({ children }: PropsWithChildren) {
   const folderSession = useFolderSession();
   const matchRoute = useMatchRoute();
   const overview =
-    assignment &&
-    Boolean(matchRoute({ to: '/assignments/$assignmentId', pending: true }));
+    Boolean(matchRoute({ to: '/assignments/new' })) ||
+    (assignment && Boolean(matchRoute({ to: '/assignments/$assignmentId' })));
   const home = !assignment && pathname === '/';
   return (
     <TooltipProvider>
