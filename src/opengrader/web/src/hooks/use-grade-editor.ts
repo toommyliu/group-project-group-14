@@ -51,7 +51,18 @@ export function useGradeEditor({
         question.id
       )
   );
-  const [recovered, setRecovered] = useState(() => journal.candidates());
+  const [recovered, setRecovered] = useState(() => {
+    const current = draftFor(answer);
+    const records = journal.candidates();
+    const empty = records.filter(
+      ({ value }) =>
+        sameDraft(value.draft, current) ||
+        (value.pending === null && sameDraft(value.draft, value.base))
+    );
+    journal.discard(empty.map(({ key }) => key));
+    return records.filter((record) => !empty.includes(record));
+  });
+  const offered = useRef(recovered.map(({ key }) => key));
   const pending = useRef<GradeEdit | null>(null);
   const [conflict, setConflict] = useState<Answer | null>(null);
   const [saving, setSaving] = useState(false);
@@ -149,7 +160,10 @@ export function useGradeEditor({
     cancelTimer();
     if (flight.current) return flight.current;
     if (errorRef.current) return Promise.resolve(false);
-    if (!hasChanges()) return Promise.resolve(true);
+    if (!hasChanges()) {
+      journal.clear();
+      return Promise.resolve(true);
+    }
     setSaving(true);
     let lastFolderStatus: 'written' | 'unchanged' | 'failed' | null = null;
     const request = (async () => {
@@ -198,6 +212,11 @@ export function useGradeEditor({
           );
           if (hasChanges()) storeDraft();
           else journal.clear();
+          if (offered.current.length) {
+            journal.discard(offered.current);
+            offered.current = [];
+            setRecovered([]);
+          }
         } catch (cause) {
           if (cause instanceof ApiError && cause.status === 422)
             pending.current = null;

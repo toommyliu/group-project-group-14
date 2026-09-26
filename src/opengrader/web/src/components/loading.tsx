@@ -77,6 +77,45 @@ export function AssignmentLoading() {
   );
 }
 
+export function GradeLoading() {
+  return (
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      aria-busy="true"
+      aria-label="Loading grading"
+    >
+      <PageHeading
+        className="mb-4"
+        title="Grade"
+        description={<Skeleton className="h-5 w-48 max-w-full" />}
+      />
+      <div
+        className="grid gap-8 border-t pt-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)] lg:grid-rows-[minmax(0,1fr)] lg:gap-0"
+        aria-hidden="true"
+      >
+        <div className="space-y-4 lg:pe-6">
+          <Skeleton className="h-11 w-full" />
+          <Skeleton className="h-96 w-full" />
+        </div>
+        <div className="space-y-3 lg:border-s lg:ps-6">
+          <Skeleton className="h-11 w-full" />
+          <Skeleton className="mb-6 h-8 w-full" />
+          {[0, 1, 2].map((item) => (
+            <Skeleton key={item} className="h-16 w-full" />
+          ))}
+        </div>
+      </div>
+      <div
+        className="flex items-center gap-3 border-t py-3 lg:pb-0"
+        aria-hidden="true"
+      >
+        <Skeleton className="h-11 w-60" />
+        <Skeleton className="ms-auto h-11 w-72" />
+      </div>
+    </div>
+  );
+}
+
 /** Reserve the icon's space so loading does not shift nearby controls. */
 export function LoadingIndicator({
   loading,

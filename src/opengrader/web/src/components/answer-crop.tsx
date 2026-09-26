@@ -3,6 +3,7 @@ import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
 import { ExternalLink, RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
+import { usePreferences } from '@/stores/preferences';
 
 export function AnswerCrop({
   url,
@@ -22,6 +23,9 @@ export function AnswerCrop({
   );
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
+  const shortcuts = usePreferences((state) => state.gradingShortcuts);
+  const hint = (label: string, key: string) =>
+    shortcuts ? `${label} (${key})` : label;
   const rotate = () => setRotation((value) => (value + 90) % 360);
   const zoomIn = () => setZoom((value) => Math.min(3, value + 0.25));
   const zoomOut = () => setZoom((value) => Math.max(0.5, value - 0.25));
@@ -44,13 +48,13 @@ export function AnswerCrop({
   const ratio = width && height ? width / height : 4 / 3;
   const sideways = rotation % 180 !== 0;
   return (
-    <div className="overflow-hidden rounded-lg border bg-muted/30">
+    <div className="overflow-hidden border bg-muted/30">
       <div className="flex flex-wrap items-center gap-2 border-b p-2">
         <Button
           variant="ghost"
           size="icon"
           aria-label="Zoom out"
-          title="Zoom out (−)"
+          title={hint('Zoom out', '−')}
           disabled={zoom <= 0.5}
           onClick={zoomOut}
         >
@@ -62,7 +66,7 @@ export function AnswerCrop({
             setZoom(1);
             setRotation(0);
           }}
-          title="Fit image (0)"
+          title={hint('Fit image', '0')}
         >
           {Math.round(zoom * 100)}% · Fit
         </Button>
@@ -70,7 +74,7 @@ export function AnswerCrop({
           variant="ghost"
           size="icon"
           aria-label="Zoom in"
-          title="Zoom in (+)"
+          title={hint('Zoom in', '+')}
           disabled={zoom >= 3}
           onClick={zoomIn}
         >
@@ -80,7 +84,7 @@ export function AnswerCrop({
           variant="ghost"
           size="icon"
           aria-label="Rotate image"
-          title="Rotate image (R)"
+          title={hint('Rotate image', 'R')}
           onClick={rotate}
         >
           <RotateCw />
@@ -95,7 +99,7 @@ export function AnswerCrop({
         </a>
       </div>
       <div
-        className="max-h-[65svh] overflow-auto overscroll-contain p-4"
+        className="max-h-[65svh] overflow-auto overscroll-contain p-4 outline-none focus-visible:ring-1 focus-visible:ring-ring/50 focus-visible:ring-inset"
         tabIndex={0}
         aria-label="Answer image. Scroll to inspect zoomed work."
         aria-busy={state === 'loading'}
