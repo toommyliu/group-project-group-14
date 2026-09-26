@@ -31,6 +31,7 @@ it('reads saved preferences and falls back to defaults for invalid values', asyn
   expect(usePreferences.getState()).toEqual({
     gradingShortcuts: true,
     editorWidth: 50,
+    editorMode: 'visual',
     sidebarWidth: 256,
     sidebarExpanded: true,
     pdfAction: 'open',

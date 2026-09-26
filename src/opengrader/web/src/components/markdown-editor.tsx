@@ -169,8 +169,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({
       : view.lineBlockAtHeight(
           view.scrollDOM.scrollTop + view.scrollDOM.clientHeight / 3
         ).from;
-    const line = view.state.doc.lineAt(position).number;
-    const entry = entryAtLine(entries.current, line);
+    const { scrollTop, clientHeight, scrollHeight } = view.scrollDOM;
+    const atBottom =
+      !fromCursor &&
+      scrollTop > 0 &&
+      scrollTop + clientHeight >= scrollHeight - 1;
+    const entry = atBottom
+      ? entries.current.at(-1)
+      : entryAtLine(entries.current, view.state.doc.lineAt(position).number);
     const key = entry?.key ?? null;
     if (key !== lastActiveKey.current) {
       lastActiveKey.current = key;
@@ -224,6 +230,10 @@ export const MarkdownEditor = memo(function MarkdownEditor({
             publishActive(update.view, update.selectionSet);
         }),
         EditorView.domEventHandlers({
+          scroll: (_event, view) => {
+            publishActive(view, false);
+            return false;
+          },
           focus: (_event, view) => {
             requestAnimationFrame(() => publishActive(view, true));
             return false;
@@ -302,7 +312,10 @@ export const MarkdownEditor = memo(function MarkdownEditor({
     const position = view.state.doc.line(boundedLine).from;
     view.dispatch({
       selection: { anchor: position },
-      effects: EditorView.scrollIntoView(position, { y: 'center' }),
+      effects: EditorView.scrollIntoView(position, {
+        y: 'start',
+        yMargin: Math.floor(view.scrollDOM.clientHeight / 3),
+      }),
     });
     view.focus();
   }

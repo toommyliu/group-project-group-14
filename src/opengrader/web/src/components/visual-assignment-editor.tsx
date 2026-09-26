@@ -1,4 +1,3 @@
-import { ErrorAlert } from '@/components/error-alert';
 import {
   memo,
   useCallback,
@@ -13,6 +12,7 @@ import {
 } from 'react';
 import {
   questionOutlineEntries,
+  questionOutlineKey,
   type OutlineEntry,
 } from '@/lib/assignment-outline';
 import {
@@ -29,12 +29,13 @@ import {
   validationQuestionTarget,
   type ValidationLocation,
 } from '@/lib/validation-source-line';
-import { VersionEditor } from './version-editor';
+import { VersionBar } from './version-editor';
 import {
   SortableQuestionList,
   type QuestionListNavigation,
 } from './sortable-question-list';
 import { VisualQuestionEditor } from './visual-question-editor';
+import { Plus } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -66,6 +67,8 @@ function questionDraft(question: Question, version: string): QuestionEdit {
 export type VisualEditorNavigation = {
   navigate: (entry: OutlineEntry) => void;
   navigateError: (location: ValidationLocation) => boolean;
+  addQuestion: () => void;
+  retry: () => void;
 };
 
 export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
@@ -78,6 +81,9 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   scrollElementRef,
   onPending,
   onResult,
+  onFailure,
+  errorKey,
+  validationError,
 }: {
   ref?: Ref<VisualEditorNavigation>;
   onOutlineChange: (entries: OutlineEntry[], version: string) => void;
@@ -88,6 +94,9 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   scrollElementRef?: RefObject<HTMLElement | null>;
   onPending: () => void;
   onResult: (result: VisualEditResult) => void;
+  onFailure: (message: string) => void;
+  errorKey?: string;
+  validationError?: string;
 }) {
   // All patches share this baseline until the user switches representation.
   const [baseline] = useState(() => ({ source, preview }));
@@ -108,13 +117,13 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
     })),
   } satisfies DocumentEdit);
   const [retry, setRetry] = useState(0);
-  const [failure, setFailure] = useState('');
   const revision = useRef(0);
   const versions = metadata.versions;
   const [version, setVersion] = useState(versions[0].key);
   const [draggingParent, setDraggingParent] = useState<number | null>();
   const questionListRef = useRef<QuestionListNavigation>(null);
   const editorHeaderRef = useRef<HTMLDivElement>(null);
+  const versionBarRef = useRef<HTMLDivElement>(null);
   const compact = draggingParent !== undefined;
 
   useEffect(() => {
@@ -130,13 +139,11 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
         ),
       (result) => {
         if (revision.current !== currentRevision) return;
-        if ('data' in result) {
-          setFailure('');
-          onResult(result.data);
-        } else setFailure(errorMessage(result.error));
+        if ('data' in result) onResult(result.data);
+        else onFailure(errorMessage(result.error));
       }
     );
-  }, [baseline.source, edits, metadata, retry, onResult]);
+  }, [baseline.source, edits, metadata, retry, onResult, onFailure]);
 
   function change(edit: QuestionEdit) {
     revision.current += 1;
@@ -161,6 +168,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
       [version]: [...(previous[version] ?? []), question],
     }));
     change(questionDraft(question, version));
+    setNavigation({ version, line });
   }
 
   const groups = useMemo(() => {
@@ -268,8 +276,14 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
         setNavigation(target);
         return true;
       },
+      addQuestion,
+      retry() {
+        onPending();
+        setRetry((value) => value + 1);
+      },
     }),
-    [groups]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, version]
   );
   useLayoutEffect(() => {
     if (!navigation || navigation.line === null) return;
@@ -309,6 +323,13 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   }, [navigation]);
 
   const activeGroup = groups.find((group) => group.key === version);
+  const questionCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        groups.map((group) => [group.key, group.questions.length])
+      ),
+    [groups]
+  );
 
   function renderQuestions(
     questions: Question[],
@@ -324,6 +345,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
         compact={compact}
         scrollElementRef={parent === null ? scrollElementRef : undefined}
         offsetElementRef={parent === null ? editorHeaderRef : undefined}
+        stickyElementRef={parent === null ? versionBarRef : undefined}
         onVisibleQuestionChange={
           parent === null ? updateVisibleQuestion : undefined
         }
@@ -350,46 +372,46 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
           const edit =
             edits[question.source_line!] ?? questionDraft(question, version);
           const number = `${prefix}${index + 1}`;
+          const label = `Question ${number}`;
+          const outlineKey = questionOutlineKey(version, question);
           return (
             <div
-              className={`flex flex-col ${compact ? 'gap-2' : 'gap-6'}`}
               onFocusCapture={(event) => {
                 if (
                   event.target.closest('section')?.id ===
                   `visual-question-${question.source_line}`
                 )
-                  onActiveChange(
-                    JSON.stringify([
-                      version,
-                      question.source_line ?? question.id,
-                    ])
-                  );
+                  onActiveChange(outlineKey);
               }}
             >
               <VisualQuestionEditor
                 edit={edit}
-                label={`Question ${number}`}
-                hasSubquestions={!!question.subquestions?.length}
+                label={label}
+                error={outlineKey === errorKey ? validationError : undefined}
+                parts={
+                  question.subquestions?.length ? (
+                    <div
+                      hidden={
+                        compact && draggingParent !== question.source_line
+                      }
+                      className={compact ? 'pt-2' : undefined}
+                    >
+                      {renderQuestions(
+                        question.subquestions,
+                        version,
+                        question.source_line!,
+                        `${number}.`
+                      )}
+                    </div>
+                  ) : undefined
+                }
                 dragHandle={dragHandle}
                 compact={compact}
-                deferOffscreen={!scrollElementRef}
+                deferOffscreen={!scrollElementRef && parent === null}
                 disabled={disabled}
                 onChange={change}
                 onRemove={() => change({ ...edit, remove: true })}
               />
-              {!!question.subquestions?.length && (
-                <div
-                  className="ps-4"
-                  hidden={compact && draggingParent !== question.source_line}
-                >
-                  {renderQuestions(
-                    question.subquestions,
-                    version,
-                    question.source_line!,
-                    `${number}.`
-                  )}
-                </div>
-              )}
             </div>
           );
         }}
@@ -424,46 +446,53 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
             }}
           />
         </Label>
-        <VersionEditor
-          versions={versions}
-          selected={version}
-          disabled={disabled}
-          onSelect={setVersion}
-          onChange={(versions) => {
-            revision.current += 1;
-            onPending();
-            setMetadata({ ...metadata, versions });
-          }}
-        />
-        {failure && (
-          <ErrorAlert error={failure}>
-            <p>Your visual edits are still here.</p>
+      </div>
+      <VersionBar
+        ref={versionBarRef}
+        versions={versions}
+        questionCounts={questionCounts}
+        selected={version}
+        disabled={disabled}
+        onSelect={setVersion}
+        onChange={(versions) => {
+          revision.current += 1;
+          onPending();
+          setMetadata({ ...metadata, versions });
+        }}
+      />
+      {activeGroup &&
+        (activeGroup.questions.length ? (
+          <div className="space-y-4">
+            {renderQuestions(activeGroup.questions, activeGroup.key)}
             <Button
               type="button"
               variant="outline"
-              onClick={() => {
-                onPending();
-                setRetry((value) => value + 1);
-              }}
+              className="w-full border-dashed"
+              disabled={disabled}
+              onClick={addQuestion}
             >
-              Retry updating draft
+              <Plus aria-hidden="true" />
+              Add question
             </Button>
-          </ErrorAlert>
-        )}
-      </div>
-      {activeGroup && (
-        <div className="space-y-6">
-          {renderQuestions(activeGroup.questions, activeGroup.key)}
-        </div>
-      )}
-      <Button
-        type="button"
-        variant="outline"
-        disabled={disabled}
-        onClick={addQuestion}
-      >
-        Add question
-      </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+            <p>
+              {activeGroup.label
+                ? `Version ${activeGroup.label} has no questions yet.`
+                : 'This answer key has no questions yet.'}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={disabled}
+              onClick={addQuestion}
+            >
+              <Plus aria-hidden="true" />
+              Add question
+            </Button>
+          </div>
+        ))}
     </div>
   );
 });

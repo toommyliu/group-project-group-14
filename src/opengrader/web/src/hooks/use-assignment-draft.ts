@@ -17,6 +17,7 @@ import {
 } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { schedulePreview } from '@/lib/debounced-preview';
+import { usePreferences } from '@/stores/preferences';
 import { errorMessage } from '@/lib/error-message';
 import {
   validationSourceLine,
@@ -24,7 +25,7 @@ import {
 } from '@/lib/validation-source-line';
 
 type PreviewResult = { source: string } & (
-  | { data: QAPreview; error?: never }
+  | { data: QAPreview; error?: never; location?: never }
   | { error: string; location?: ValidationLocation | null; data?: never }
 );
 
@@ -62,13 +63,15 @@ export function useAssignmentDraft({
   );
   const [retry, setRetry] = useState(0);
   const [mode, setMode] = useState<EditorMode>(
-    overview ? 'markdown' : 'visual'
+    () => usePreferences.getState().editorMode
   );
   const [openedModes, setOpenedModes] = useState(() => ({
-    markdown: !!overview,
-    visual: !overview,
+    markdown: mode === 'markdown',
+    visual: mode === 'visual',
   }));
   const [visualPending, setVisualPending] = useState(false);
+  const [visualChecking, setVisualChecking] = useState(false);
+  const [visualFailure, setVisualFailure] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [reading, setReading] = useState(false);
   const [uploadError, setUploadError] = useState('');
@@ -83,10 +86,14 @@ export function useAssignmentDraft({
   const readOnly = !!overview?.editUnavailableReason;
   const current = result?.source === source;
   const valid = current && !!result.data && !!source.trim() && !visualPending;
-  const markdownErrorLine = validationSourceLine(
-    current ? result?.error : undefined,
-    current && result?.error ? result.location : null
-  );
+  const latestResult = source.trim() ? result : undefined;
+  const checking = visualChecking || (!!source.trim() && !current);
+  const markdownErrorLine = visualFailure
+    ? null
+    : validationSourceLine(
+        latestResult?.error,
+        latestResult?.error ? latestResult.location : null
+      );
   const dirty =
     !saved && (source !== originalSource || reading || visualPending);
   const busy = reading || saving || !!saved;
@@ -97,7 +104,14 @@ export function useAssignmentDraft({
     );
     setMode(nextMode);
   }, []);
-  const markVisualPending = useCallback(() => setVisualPending(true), []);
+  const markVisualPending = useCallback(() => {
+    setVisualPending(true);
+    setVisualChecking(true);
+  }, []);
+  const failVisualEdit = useCallback((message: string) => {
+    setVisualFailure(message);
+    setVisualChecking(false);
+  }, []);
 
   function edit(value: string) {
     setSource(value);
@@ -124,6 +138,8 @@ export function useAssignmentDraft({
       });
     }
     setVisualPending(false);
+    setVisualChecking(false);
+    setVisualFailure('');
   }, []);
 
   function retryValidation() {
@@ -143,6 +159,8 @@ export function useAssignmentDraft({
         setOutline(undefined);
         openMode('markdown');
         setVisualPending(false);
+        setVisualChecking(false);
+        setVisualFailure('');
         setUploadedFileName('');
         setError('');
         setUploadError('');
@@ -181,7 +199,7 @@ export function useAssignmentDraft({
               }
         );
       },
-      150
+      400
     );
   }, [source, retry, current, outline]);
 
@@ -203,6 +221,8 @@ export function useAssignmentDraft({
       );
       if (id === fileRead.current) {
         setResult(undefined);
+        setOutline(undefined);
+        setVisualBaseline(undefined);
         openMode('markdown');
         setSource(text);
         setUploadedFileName(file.name);
@@ -291,18 +311,22 @@ export function useAssignmentDraft({
     source,
     originalSource,
     result: current ? result : undefined,
+    latestResult,
+    checking,
     outline,
     visualBaseline,
     valid,
     dirty,
     readOnly,
     markdownErrorLine,
+    visualFailure,
     mode,
     openedModes,
     openMode,
     visualPending,
     markVisualPending,
     acceptVisualEdit,
+    failVisualEdit,
     edit,
     retryValidation,
     reading,

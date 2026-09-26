@@ -11,17 +11,26 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
+  type ReactNode,
   type Ref,
 } from 'react';
 import { Link } from '@tanstack/react-router';
-import { LoaderCircle } from 'lucide-react';
+import { FileText, LoaderCircle, Plus, Upload } from 'lucide-react';
 import { PageHeading } from '@/components/page-heading';
-import { FileUpload } from '@/components/file-upload';
-import { AssignmentPanes } from '@/components/assignment-panes';
+import { PaneLoading } from '@/components/loading';
+import { AssignmentPanes, sidePanelId } from '@/components/assignment-panes';
 import { AssignmentPreview } from '@/components/assignment-preview';
 import { AssignmentActions } from '@/components/assignment-actions';
-import { QAOutlineRail } from '@/components/qa-outline';
+import { AnswerKeyView } from '@/components/answer-key-view';
+import {
+  QAOutlinePopover,
+  QAOutlineRail,
+  type OutlineProps,
+} from '@/components/qa-outline';
+import {
+  ValidationStatus,
+  validationMessageId,
+} from '@/components/validation-status';
 import { Button } from '@/components/ui/button';
 import { Field } from '@/components/ui/field';
 import type { MarkdownEditorNavigation } from '@/components/markdown-editor';
@@ -32,11 +41,17 @@ import {
   versionHeadingLineNumber,
   type OutlineEntry,
 } from '@/lib/assignment-outline';
+import { withoutSourceLines } from '@/lib/validation-source-line';
 import {
   useAssignmentDraft,
   type AssignmentDraftOptions,
 } from '@/hooks/use-assignment-draft';
+import { setPreference } from '@/stores/preferences';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+
+const railShownClassName = 'hidden @min-[46rem]:flex';
+const railHiddenClassName = '@min-[46rem]:hidden';
+const railGutterClassName = '@min-[46rem]:ps-4';
 
 const loadMarkdownEditor = () =>
   import('@/components/markdown-editor').then(({ MarkdownEditor }) => ({
@@ -53,11 +68,15 @@ type ActiveOutlineNavigation = {
   setActiveKey: (key: string | null) => void;
 };
 
-const ActiveQAOutlineRail = memo(function ActiveQAOutlineRail({
+const ActiveQAOutline = memo(function ActiveQAOutline({
   ref,
+  variant,
+  footer,
   ...props
-}: Omit<ComponentProps<typeof QAOutlineRail>, 'activeKey'> & {
+}: Omit<OutlineProps, 'activeKey'> & {
   ref?: Ref<ActiveOutlineNavigation>;
+  variant: 'popover' | 'rail';
+  footer?: ReactNode;
 }) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const updateActiveKey = useCallback((key: string | null) => {
@@ -68,7 +87,11 @@ const ActiveQAOutlineRail = memo(function ActiveQAOutlineRail({
   useImperativeHandle(ref, () => ({ setActiveKey: updateActiveKey }), [
     updateActiveKey,
   ]);
-  return <QAOutlineRail {...props} activeKey={activeKey} />;
+  return variant === 'rail' ? (
+    <QAOutlineRail {...props} activeKey={activeKey} footer={footer} />
+  ) : (
+    <QAOutlinePopover {...props} activeKey={activeKey} />
+  );
 });
 
 export function AssignmentEditor(props: AssignmentDraftOptions) {
@@ -77,6 +100,8 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     source,
     originalSource,
     result,
+    latestResult,
+    checking,
     outline,
     visualBaseline,
     valid,
@@ -89,6 +114,8 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     visualPending,
     markVisualPending,
     acceptVisualEdit,
+    failVisualEdit,
+    visualFailure,
     edit,
     retryValidation,
     reading,
@@ -108,10 +135,20 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     line: number;
   }>();
   const editorScrollRef = useRef<HTMLDivElement>(null);
+  const [scrollReady, setScrollReady] = useState(false);
+  const attachEditorScroll = useCallback((element: HTMLDivElement | null) => {
+    editorScrollRef.current = element;
+    setScrollReady(!!element);
+  }, []);
   const visualEditorRef = useRef<VisualEditorNavigation>(null);
   const outlineRailRef = useRef<ActiveOutlineNavigation>(null);
+  const outlinePopoverRef = useRef<ActiveOutlineNavigation>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [visualOutline, setVisualOutline] = useState<OutlineEntry[]>([]);
   const [visualVersion, setVisualVersion] = useState('');
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const canImport = !readOnly && !busy && !visualPending;
   const acceptOutline = useCallback(
     (entries: OutlineEntry[], version: string) => {
       startTransition(() => {
@@ -123,10 +160,13 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
   );
   const updateActiveKey = useCallback((key: string | null) => {
     outlineRailRef.current?.setActiveKey(key);
+    outlinePopoverRef.current?.setActiveKey(key);
   }, []);
 
+  const [initialMode] = useState(mode);
   useEffect(() => {
-    const preload = overview ? loadVisualEditor : loadMarkdownEditor;
+    const preload =
+      initialMode === 'markdown' ? loadVisualEditor : loadMarkdownEditor;
     const preloadInactiveEditor = () => {
       void preload().catch(() => undefined);
     };
@@ -138,7 +178,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     }
     const timer = globalThis.setTimeout(preloadInactiveEditor, 1000);
     return () => globalThis.clearTimeout(timer);
-  }, [overview]);
+  }, [initialMode]);
 
   const outlineEntries = useMemo(
     () =>
@@ -149,6 +189,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
           : [],
     [mode, visualOutline, outline]
   );
+  const latestError = latestResult?.error;
   const visibleOutlineEntries = useMemo(
     () =>
       mode === 'visual'
@@ -156,9 +197,60 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
         : outlineEntries,
     [mode, outlineEntries, visualVersion]
   );
+  const errorLocation = latestError ? latestResult?.location : null;
+  const errorEntry = useMemo(() => {
+    if (mode !== 'visual' || !errorLocation?.question_path?.length)
+      return undefined;
+    const number = errorLocation.question_path
+      .map((index) => index + 1)
+      .join('.');
+    return outlineEntries.find(
+      (entry) =>
+        entry.versionLabel.trim() === errorLocation.version &&
+        entry.number === number
+    );
+  }, [mode, errorLocation, outlineEntries]);
+  const errorPlace =
+    mode === 'markdown'
+      ? markdownErrorLine === null
+        ? null
+        : `Line ${markdownErrorLine}`
+      : errorEntry
+        ? `${errorEntry.versionLabel ? `Version ${errorEntry.versionLabel}, question` : 'Question'} ${errorEntry.number}${errorLocation?.rubric_path ? ', rubric' : ''}`
+        : null;
+  const shownError =
+    latestError && mode === 'visual'
+      ? withoutSourceLines(latestError)
+      : latestError;
+  const errorGoTo = visualFailure
+    ? undefined
+    : errorEntry
+      ? { label: 'Show question', onSelect: goToError }
+      : markdownErrorLine !== null && !visualPending
+        ? {
+            label:
+              mode === 'visual'
+                ? 'Show in Markdown'
+                : `Go to line ${markdownErrorLine}`,
+            onSelect: goToError,
+          }
+        : undefined;
+  function goToError() {
+    if (
+      mode === 'visual' &&
+      latestResult?.location &&
+      visualEditorRef.current?.navigateError(latestResult.location)
+    )
+      return;
+    if (markdownErrorLine !== null && !visualPending) {
+      setMarkdownNavigation({ line: markdownErrorLine });
+      openMode('markdown');
+    }
+  }
   const outlineProps = {
     entries: visibleOutlineEntries,
-    outdated: mode === 'markdown' && !valid,
+    errorKey: errorEntry?.key ?? null,
+    outdated: mode === 'markdown' && !!latestError,
     disabled: busy,
     editorId: mode === 'visual' ? 'visual-editor' : 'qaMarkdown',
     showVersionHeadings: mode === 'markdown',
@@ -166,7 +258,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
       const firstQuestion = outlineEntries.find(
         (entry) => entry.version === version
       );
-      if (!valid || !firstQuestion || firstQuestion.line == null) return;
+      if (latestError || !firstQuestion || firstQuestion.line == null) return;
       const heading = versionHeadingLineNumber(
         source,
         version,
@@ -179,120 +271,116 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     onSelect: (entry: OutlineEntry) => {
       if (busy) return;
       if (mode === 'visual') visualEditorRef.current?.navigate(entry);
-      else if (valid && entry.line !== null)
+      else if (!latestError && entry.line !== null)
         editorRef.current?.focusLine(entry.line);
       else return;
       updateActiveKey(entry.key);
     },
   };
-  const uploadControl = !readOnly && (
-    <FileUpload
-      compact={!!overview}
-      title={overview ? 'Replace answer key' : 'Import answer key'}
-      description={
-        overview
-          ? 'Drop a Markdown file here to replace the editor content, or select one.'
-          : 'Drop a Markdown file here or select one.'
-      }
-      buttonLabel={
-        reading
-          ? 'Reading file…'
-          : uploadError
-            ? 'Choose another file'
-            : overview
-              ? 'Replace answer key'
-              : 'Select Markdown file'
-      }
-      inputLabel="Upload QA file"
-      accept=".md,text/markdown,text/plain"
-      disabled={busy || visualPending}
-      error={uploadError}
-      onFiles={(files) => void upload(files[0])}
-    >
-      <span
-        role="status"
-        className={`block wrap-break-word text-muted-foreground empty:hidden ${overview ? 'mt-1 text-xs' : 'mt-3 text-sm'}`}
-        title={uploadedFileName || undefined}
-      >
-        {reading
-          ? 'Reading file…'
-          : uploadedFileName && `Imported ${uploadedFileName}`}
-      </span>
-    </FileUpload>
-  );
+
+  const canAddQuestion = mode === 'visual' && !readOnly && !!visualBaseline;
+  const showRail = visibleOutlineEntries.length > 0 || canAddQuestion;
+  const importLabel = overview ? 'Replace answer key' : 'Import answer key';
 
   return (
-    <div className={overview ? 'flex min-h-0 flex-1 flex-col' : undefined}>
-      <div className="@container">
-        <div
-          className={
-            overview
-              ? 'mb-8'
-              : 'mb-8 flex flex-col gap-6 @min-[40rem]:flex-row @min-[40rem]:items-start'
-          }
-        >
-          <PageHeading
-            className="mb-0 min-w-0 flex-1"
-            title={overview ? 'Overview' : 'Create assignment'}
-            description={
-              overview
-                ? overview.assignment.title
-                : 'Start an assignment or import a Markdown answer key.'
-            }
-            actions={overview ? uploadControl : undefined}
-          />
-          {!overview && uploadControl && (
-            <div className="w-full shrink-0 @min-[40rem]:w-64">
-              {uploadControl}
-            </div>
-          )}
-        </div>
-      </div>
-      <form
-        id={overview ? 'assignment-form' : undefined}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-        className={
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      onDragOver={(event) => {
+        if (!canImport || !event.dataTransfer.types.includes('Files')) return;
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+          setDragging(false);
+      }}
+      onDropCapture={(event) => {
+        if (!event.dataTransfer.types.includes('Files')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDragging(false);
+        if (canImport) void upload(event.dataTransfer.files[0]);
+      }}
+    >
+      <PageHeading
+        className="mb-8"
+        title={overview ? 'Overview' : 'Create assignment'}
+        description={
           overview
-            ? 'flex min-h-0 flex-1 flex-col space-y-8 overflow-hidden pb-4'
-            : 'space-y-8'
+            ? overview.assignment.title
+            : 'Build questions visually or write Markdown. You can also drop in an existing answer key.'
         }
-      >
-        {(!overview || saving || saveMessage || readOnly) && (
-          <div className="flex flex-wrap items-center gap-4">
-            {readOnly ? (
-              <p className="text-muted-foreground">
-                {overview?.editUnavailableReason}
-              </p>
-            ) : (
-              !overview && (
-                <Button type="submit" disabled={!valid || busy}>
-                  {saving && (
-                    <LoaderCircle
-                      className="motion-safe:animate-spin"
-                      aria-hidden="true"
-                    />
-                  )}
-                  Create assignment
-                </Button>
-              )
-            )}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
             {!overview && (
-              <Link
-                to="/assignments"
-                className="inline-flex min-h-11 items-center underline"
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!canImport}
+                onClick={() => fileInputRef.current?.click()}
               >
-                Back to assignments
-              </Link>
+                <Upload aria-hidden="true" />
+                {reading ? 'Reading file…' : importLabel}
+              </Button>
             )}
-            {saving && (
-              <span role="status">Saving assignment. Keep this page open.</span>
+            {!readOnly && (
+              <Button
+                type="submit"
+                form="assignment-form"
+                disabled={!valid || busy || (!!overview && !dirty)}
+              >
+                {saving && (
+                  <LoaderCircle
+                    className="motion-safe:animate-spin"
+                    aria-hidden="true"
+                  />
+                )}
+                {overview ? 'Save changes' : 'Create assignment'}
+              </Button>
             )}
-            {saveMessage && <span role="status">{saveMessage}</span>}
+            {overview && !overview.hideDelete && (
+              <AssignmentActions
+                assignment={overview.assignment}
+                disabled={saving}
+                onReplace={
+                  readOnly ? undefined : () => fileInputRef.current?.click()
+                }
+                onDeleted={allowLeave}
+              />
+            )}
           </div>
+        }
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".md,text/markdown,text/plain"
+        disabled={!canImport}
+        className="hidden"
+        aria-label={importLabel}
+        onChange={(event) => {
+          void upload(event.target.files?.[0]);
+          event.target.value = '';
+        }}
+      />
+      <div className="space-y-3 empty:hidden">
+        {readOnly && (
+          <p className="text-muted-foreground">
+            {overview?.editUnavailableReason} Showing the answer key as graders
+            see it.
+          </p>
         )}
+        {(saving || saveMessage || reading || uploadedFileName) && (
+          <p role="status" className="text-muted-foreground">
+            {saving
+              ? 'Saving assignment. Keep this page open.'
+              : reading
+                ? 'Reading file…'
+                : saveMessage ||
+                  `Imported ${uploadedFileName}. Review it, then ${overview ? 'save your changes' : 'create the assignment'}.`}
+          </p>
+        )}
+        {uploadError && <ErrorAlert error={uploadError} />}
         {error && <ErrorAlert error={error} />}
         {saved && (
           <Link
@@ -303,281 +391,262 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
             Open {saved.title}
           </Link>
         )}
+      </div>
+      <form
+        id="assignment-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+        className="mt-4 flex min-h-0 flex-1 flex-col pb-4"
+      >
         <AssignmentPanes
-          contained={!!overview}
-          renderEditor={(previewToggle) => (
+          open={panelOpen}
+          onOpenChange={setPanelOpen}
+          editor={
             <section
-              className={`@container min-w-0 space-y-4 ${overview ? 'flex h-full min-h-0 flex-col' : ''}`}
-              aria-labelledby={overview ? undefined : 'editor-heading'}
-              aria-label={overview ? 'Assignment editor' : undefined}
+              className="@container flex h-full min-h-0 min-w-0 flex-col"
+              aria-label="Assignment editor"
             >
-              {!overview && (
-                <div className="flex flex-col items-start gap-3 @min-[24rem]:flex-row @min-[24rem]:items-center @min-[24rem]:justify-between">
-                  <h2 id="editor-heading" className="text-lg font-semibold">
-                    Assignment editor
-                  </h2>
-                  {previewToggle}
-                </div>
-              )}
               <Tabs
-                className={overview ? 'min-h-0 flex-1' : undefined}
+                className="min-h-0 flex-1"
                 value={mode}
                 onValueChange={(value) => {
-                  if (value === 'visual' || value === 'markdown')
+                  if (value === 'visual' || value === 'markdown') {
                     openMode(value);
+                    setPreference('editorMode', value);
+                  }
                   updateActiveKey(null);
                 }}
               >
-                <div className="sticky top-0 z-20 shrink-0 bg-background">
-                  <div
-                    className={`flex flex-wrap items-center justify-between gap-x-2 border-b ${overview ? 'pb-2' : ''}`}
-                  >
+                <div className="shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 border-b pb-2">
                     <TabsList aria-label="Editor mode" className="border-b-0">
                       <TabsTrigger value="visual">Visual</TabsTrigger>
                       <TabsTrigger value="markdown" disabled={visualPending}>
                         Markdown
                       </TabsTrigger>
                     </TabsList>
-                    <div className="flex items-center gap-2">
-                      {visibleOutlineEntries.length > 1 && (
-                        <ActiveQAOutlineRail
-                          ref={outlineRailRef}
-                          {...outlineProps}
-                        />
+                    {!readOnly && (
+                      <ValidationStatus
+                        checking={checking}
+                        error={visualFailure || shownError}
+                        place={visualFailure ? null : errorPlace}
+                        preview={latestResult?.data}
+                        goTo={errorGoTo}
+                        onRetry={
+                          visualFailure
+                            ? () => visualEditorRef.current?.retry()
+                            : mode === 'markdown'
+                              ? retryValidation
+                              : undefined
+                        }
+                      />
+                    )}
+                    <div className="ms-auto flex flex-wrap items-center gap-1">
+                      {visibleOutlineEntries.length > 0 && (
+                        <div className={showRail ? railHiddenClassName : ''}>
+                          <ActiveQAOutline
+                            ref={outlinePopoverRef}
+                            variant="popover"
+                            {...outlineProps}
+                          />
+                        </div>
                       )}
-                      {overview && previewToggle}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        aria-expanded={panelOpen}
+                        aria-controls={sidePanelId}
+                        onClick={() => setPanelOpen((open) => !open)}
+                      >
+                        <FileText aria-hidden="true" />
+                        PDF
+                      </Button>
                     </div>
                   </div>
-                  {result?.error && !visualPending && (
-                    <div id="qa-error" className="py-2">
-                      <ErrorAlert error={result.error}>
-                        <div className="flex flex-wrap gap-2">
-                          {(markdownErrorLine !== null ||
-                            !!result.location?.question_path?.length) && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                if (
-                                  mode === 'visual' &&
-                                  result.location &&
-                                  visualEditorRef.current?.navigateError(
-                                    result.location
-                                  )
-                                )
-                                  return;
-                                if (markdownErrorLine !== null) {
-                                  setMarkdownNavigation({
-                                    line: markdownErrorLine,
-                                  });
-                                  openMode('markdown');
-                                }
-                              }}
-                            >
-                              Go to error
-                            </Button>
-                          )}
-                          {mode === 'markdown' && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={retryValidation}
-                            >
-                              Retry validation
-                            </Button>
-                          )}
-                        </div>
-                      </ErrorAlert>
-                    </div>
-                  )}
                 </div>
-                <div
-                  className={
-                    overview ? 'flex min-h-0 flex-1 flex-col' : undefined
-                  }
-                >
-                  <TabsContent
-                    value="visual"
-                    keepMounted
-                    ref={editorScrollRef}
-                    className={
-                      overview
-                        ? 'min-h-0 overflow-y-auto overscroll-contain'
-                        : undefined
-                    }
-                  >
-                    {openedModes.visual && (
-                      <Suspense
-                        fallback={
-                          <p role="status" className="py-8">
-                            Loading Visual editor…
-                          </p>
-                        }
-                      >
-                        <Activity
-                          mode={mode === 'visual' ? 'visible' : 'hidden'}
-                        >
-                          {visualBaseline ? (
-                            <VisualAssignmentEditor
-                              key={visualBaseline.source}
-                              ref={visualEditorRef}
-                              onOutlineChange={acceptOutline}
-                              onActiveChange={updateActiveKey}
-                              source={visualBaseline.source}
-                              preview={visualBaseline.preview}
-                              disabled={readOnly || busy}
-                              scrollElementRef={
-                                overview ? editorScrollRef : undefined
-                              }
-                              onPending={markVisualPending}
-                              onResult={acceptVisualEdit}
-                            />
-                          ) : source.trim() ? (
-                            <div className="space-y-3">
-                              <p role="status">
-                                {result?.error || 'Reading assignment...'}
-                              </p>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => openMode('markdown')}
-                              >
-                                Open Markdown
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="space-y-4 py-8">
-                              <p>
-                                Create your first question, or import an
-                                existing answer key.
-                              </p>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() =>
-                                  edit(
-                                    '---\ntitle: Untitled assignment\n---\n\n- (10 points) New question\n  - **Answer**\n    - Expected answer\n'
-                                  )
-                                }
-                              >
-                                Start assignment
-                              </Button>
-                            </div>
-                          )}
-                          {visualPending && (
-                            <p
-                              role="status"
-                              className="mt-4 text-sm text-muted-foreground"
-                            >
-                              Updating draft...
-                            </p>
-                          )}
-                        </Activity>
-                      </Suspense>
-                    )}
-                  </TabsContent>
-                  <TabsContent
-                    value="markdown"
-                    keepMounted
-                    className={
-                      overview ? 'flex min-h-0 flex-1 flex-col' : undefined
-                    }
-                  >
-                    {openedModes.markdown && (
-                      <Suspense
-                        fallback={
-                          <p
-                            role="status"
-                            className="min-h-48 rounded-md border border-input p-4"
-                          >
-                            Loading Markdown editor…
-                          </p>
-                        }
-                      >
-                        <Field
-                          data-invalid={!!result?.error}
-                          className={overview ? 'min-h-0 flex-1' : undefined}
-                        >
-                          <div
-                            className={overview ? 'min-h-0 flex-1' : undefined}
-                          >
-                            <MarkdownEditor
-                              ref={editorRef}
-                              id="qaMarkdown"
-                              value={source}
-                              readOnly={readOnly}
+                <div className="flex min-h-0 flex-1">
+                  {showRail && (
+                    <aside
+                      aria-label="Question outline"
+                      className={`${railShownClassName} w-56 shrink-0 flex-col border-e pe-2 pb-2`}
+                    >
+                      <ActiveQAOutline
+                        ref={outlineRailRef}
+                        variant="rail"
+                        {...outlineProps}
+                        footer={
+                          canAddQuestion && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="w-full justify-start"
                               disabled={busy}
-                              onChange={edit}
-                              invalid={!!result?.error}
-                              describedBy={
-                                result?.error ? 'qa-error' : undefined
+                              onClick={() =>
+                                visualEditorRef.current?.addQuestion()
                               }
-                              errorLine={markdownErrorLine}
-                              navigation={markdownNavigation}
-                              outlineEntries={outlineEntries}
-                              active={mode === 'markdown' && valid}
-                              onActiveChange={updateActiveKey}
-                              className={
-                                overview
-                                  ? 'h-full min-h-0'
-                                  : 'h-[min(28rem,70svh)]'
-                              }
-                              placeholder={
-                                '---\ntitle: Quiz 1\n---\n\n- (2 points) What is 1 + 1?\n  - **Correct**\n    - 2'
-                              }
-                            />
-                          </div>
-                        </Field>
-                      </Suspense>
+                            >
+                              <Plus aria-hidden="true" />
+                              Add question
+                            </Button>
+                          )
+                        }
+                      />
+                    </aside>
+                  )}
+                  <div
+                    className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${showRail ? railGutterClassName : ''}`}
+                  >
+                    <TabsContent
+                      value="visual"
+                      keepMounted
+                      ref={attachEditorScroll}
+                      className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pe-4"
+                    >
+                      {openedModes.visual &&
+                        scrollReady &&
+                        (readOnly && outline ? (
+                          <AnswerKeyView
+                            ref={visualEditorRef}
+                            preview={outline}
+                            active={mode === 'visual'}
+                            scrollElementRef={editorScrollRef}
+                            onOutlineChange={acceptOutline}
+                            onActiveChange={updateActiveKey}
+                          />
+                        ) : (
+                          <Suspense
+                            fallback={
+                              <PaneLoading label="Loading Visual editor…" />
+                            }
+                          >
+                            <Activity
+                              mode={mode === 'visual' ? 'visible' : 'hidden'}
+                            >
+                              {visualBaseline ? (
+                                <VisualAssignmentEditor
+                                  key={visualBaseline.source}
+                                  ref={visualEditorRef}
+                                  onOutlineChange={acceptOutline}
+                                  onActiveChange={updateActiveKey}
+                                  source={visualBaseline.source}
+                                  preview={visualBaseline.preview}
+                                  disabled={readOnly || busy}
+                                  scrollElementRef={editorScrollRef}
+                                  onPending={markVisualPending}
+                                  onResult={acceptVisualEdit}
+                                  onFailure={failVisualEdit}
+                                  errorKey={errorEntry?.key}
+                                  validationError={shownError}
+                                />
+                              ) : source.trim() ? (
+                                <div className="space-y-3 py-4">
+                                  <p role="status">
+                                    {result?.error || 'Reading assignment…'}
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => openMode('markdown')}
+                                  >
+                                    Open Markdown
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="space-y-4 py-8">
+                                  <p>
+                                    Start with a blank question, or import an
+                                    existing Markdown answer key.
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    onClick={() =>
+                                      edit(
+                                        '---\ntitle: Untitled assignment\n---\n\n- (10 points) New question\n  - **Answer**\n    - Expected answer\n'
+                                      )
+                                    }
+                                  >
+                                    Start assignment
+                                  </Button>
+                                </div>
+                              )}
+                            </Activity>
+                          </Suspense>
+                        ))}
+                    </TabsContent>
+                    <TabsContent
+                      value="markdown"
+                      keepMounted
+                      className="flex min-h-0 flex-1 flex-col"
+                    >
+                      {openedModes.markdown && (
+                        <Suspense
+                          fallback={
+                            <PaneLoading label="Loading Markdown editor…" />
+                          }
+                        >
+                          <Field
+                            data-invalid={!!latestError}
+                            className="min-h-0 flex-1"
+                          >
+                            <div className="min-h-0 flex-1">
+                              <MarkdownEditor
+                                ref={editorRef}
+                                id="qaMarkdown"
+                                value={source}
+                                readOnly={readOnly}
+                                disabled={busy}
+                                onChange={edit}
+                                invalid={!!latestError}
+                                describedBy={
+                                  latestError ? validationMessageId : undefined
+                                }
+                                errorLine={markdownErrorLine}
+                                navigation={markdownNavigation}
+                                outlineEntries={outlineEntries}
+                                active={mode === 'markdown' && valid}
+                                onActiveChange={updateActiveKey}
+                                className="h-full min-h-0"
+                                placeholder={
+                                  '---\ntitle: Quiz 1\n---\n\n- (2 points) What is 1 + 1?\n  - **Correct**\n    - 2'
+                                }
+                              />
+                            </div>
+                          </Field>
+                        </Suspense>
+                      )}
+                    </TabsContent>
+                    {dragging && (
+                      <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-ring bg-background/90 text-base font-medium"
+                      >
+                        Drop to {overview ? 'replace the' : 'import an'} answer
+                        key
+                      </div>
                     )}
-                  </TabsContent>
+                  </div>
                 </div>
               </Tabs>
             </section>
-          )}
-          preview={
+          }
+          panel={
             <AssignmentPreview
               source={source}
               preview={outline}
               current={valid}
               blocked={busy || visualPending}
-              showGuide={!!overview}
               savedAssignment={
                 overview && assignmentId
                   ? { id: assignmentId, source: originalSource }
                   : undefined
               }
+              onClose={() => setPanelOpen(false)}
             />
           }
         />
       </form>
-      {overview && (!readOnly || !overview.hideDelete) && (
-        <footer className="z-30 -mx-4 flex shrink-0 justify-end gap-3 border-t bg-background px-4 py-3 sm:-mx-8 sm:px-8">
-          {!readOnly && (
-            <Button
-              type="submit"
-              form="assignment-form"
-              disabled={!valid || busy || !dirty}
-            >
-              {saving && (
-                <LoaderCircle
-                  className="motion-safe:animate-spin"
-                  aria-hidden="true"
-                />
-              )}
-              Save changes
-            </Button>
-          )}
-          {!overview.hideDelete && (
-            <AssignmentActions
-              assignment={overview.assignment}
-              onDeleted={allowLeave}
-            />
-          )}
-        </footer>
-      )}
     </div>
   );
 }

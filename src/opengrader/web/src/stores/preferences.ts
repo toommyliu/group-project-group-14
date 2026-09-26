@@ -3,6 +3,7 @@ import { create } from 'zustand';
 export type Preferences = {
   gradingShortcuts: boolean;
   editorWidth: number;
+  editorMode: 'visual' | 'markdown';
   sidebarWidth: number;
   sidebarExpanded: boolean;
   pdfAction: 'download' | 'open';
@@ -56,6 +57,13 @@ const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
         : undefined;
     },
     serialize: String,
+  },
+  editorMode: {
+    storageKey: 'opengrader.assignment-editor-mode',
+    defaultValue: 'visual',
+    parse: (value) =>
+      value === 'visual' || value === 'markdown' ? value : undefined,
+    serialize: (value) => value,
   },
   pdfAction: {
     storageKey: 'opengrader.pdf-action',

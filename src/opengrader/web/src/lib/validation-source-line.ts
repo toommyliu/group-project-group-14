@@ -67,3 +67,10 @@ export function validationSourceLine(
   const line = Number.parseInt(match[1], 10);
   return Number.isSafeInteger(line) && line > 0 ? line : null;
 }
+
+export function withoutSourceLines(message: string) {
+  const text = message
+    .replace(/\s*\(line \d+\)/gi, '')
+    .replace(/\s+(?:at|on) line \d+/gi, '');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
