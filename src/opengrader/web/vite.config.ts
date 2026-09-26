@@ -15,7 +15,10 @@ export default defineConfig({
         target: process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
         ws: true,
       },
-      '/auth': process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
+      '/auth': {
+        target: process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
+        changeOrigin: false,
+      },
     },
   },
   plugins: [

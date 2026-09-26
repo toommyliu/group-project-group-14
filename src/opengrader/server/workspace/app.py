@@ -62,7 +62,8 @@ from opengrader.server.assignment_qa import (
     preview_qa,
     edit_assignment_draft,
 )
-from opengrader.server.auth import AuthSettings, add_auth_routes
+from opengrader.server.auth import add_auth_routes
+from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
 from opengrader.server.scan_jobs import ScanJobs
 from opengrader.server.scans import add_scan_routes
@@ -160,7 +161,7 @@ def create_app(
     *,
     web_dist: Path | None = None,
     process_jobs: bool = True,
-    auth_settings: AuthSettings | None = None,
+    settings: ServerSettings | None = None,
 ) -> FastAPI:
     root = root.resolve()
     from opengrader.core.workspace.store import DATABASE
@@ -231,7 +232,7 @@ def create_app(
     app = FastAPI(title="Opengrader workspace", lifespan=lifespan)
     app.add_middleware(FolderSessionGuard, root=root)
     api = APIRouter(prefix="/api")
-    add_auth_routes(app, auth_settings or AuthSettings.from_env())
+    add_auth_routes(app, settings or ServerSettings(_env_file=None))
 
     app.state.workspace = workspace
     app.state.scan_jobs = scan_jobs

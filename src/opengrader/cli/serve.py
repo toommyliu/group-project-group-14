@@ -7,16 +7,8 @@ import logging.config
 
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-
-def _load_project_env(root: Path | None = None) -> None:
-    """Load local server settings without replacing the caller's environment."""
-    load_dotenv((root or Path.cwd()) / ".env", override=False)
-
 
 def main(argv: list[str] | None = None) -> None:
-    _load_project_env()
     parser = ArgumentParser(description="Run this workspace service on localhost.")
     parser.add_argument(
         "--port", type=int, default=8000, help="Local port, default 8000."
@@ -32,6 +24,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Workspace directory. Defaults to the current workspace.",
     )
     args = parser.parse_args(argv)
+    from opengrader.server.settings import ServerSettings
+
+    try:
+        ServerSettings()
+    except ValueError as exc:
+        parser.error(str(exc))
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
 

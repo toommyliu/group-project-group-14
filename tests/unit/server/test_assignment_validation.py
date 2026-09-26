@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from opengrader.server.auth import AuthSettings
+from opengrader.server.settings import ServerSettings
 from opengrader.server.workspace.app import create_app
 
 
@@ -18,7 +18,7 @@ def test_preview_locates_rubric_errors_in_the_correct_version(tmp_path):
     - Partially Correct (0)
     - Incorrect (0)
 """
-    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     with TestClient(app) as client:
         response = client.post("/api/drafts/preview", json={"qa_markdown": source})
     assert response.status_code == 422
@@ -45,7 +45,7 @@ def test_visual_edit_locates_nested_rubric_item_after_source_lines_shift(tmp_pat
         - Another step (-6)
       - Incorrect (-10)
 """
-    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     with TestClient(app) as client:
         preview = client.post(
             "/api/drafts/preview", json={"qa_markdown": source}
@@ -81,7 +81,7 @@ def test_visual_edit_locates_nested_rubric_item_after_source_lines_shift(tmp_pat
 
 
 def test_question_errors_keep_a_navigation_target(tmp_path):
-    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     with TestClient(app) as client:
         response = client.post(
             "/api/drafts/preview",
@@ -113,7 +113,7 @@ unsupported: value
   - **Expected**
     - This is not an accepted answer.
 """
-    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     with TestClient(app) as client:
         response = client.post("/api/drafts/preview", json={"qa_markdown": source})
     assert response.status_code == 200
@@ -146,7 +146,7 @@ def test_invalid_start_page_points_to_the_frontmatter_setting(tmp_path, value):
         f"---\ntitle: Quiz\nquestions_start_page: {value}\n---\n"
         "- (2 points) Name the process.\n  - **Answer**\n    - Scheduling\n"
     )
-    app = create_app(tmp_path, auth_settings=AuthSettings(), process_jobs=False)
+    app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     with TestClient(app) as client:
         response = client.post("/api/drafts/preview", json={"qa_markdown": source})
     assert response.status_code == 422
