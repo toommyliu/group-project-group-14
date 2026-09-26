@@ -14,6 +14,10 @@ export type StatisticsReference = { value: number; detail: string };
 // Hovering within this many pixels of the reference line shows its detail.
 const REFERENCE_HOVER_DISTANCE = 6;
 
+function axisNumber(value: number) {
+  return Math.abs(value) >= 1e6 ? value.toExponential(1) : String(value);
+}
+
 export function statisticsChartDefinition(
   rows: StatisticsBar[],
   unit: 'percent' | 'submissions',
@@ -70,7 +74,8 @@ export function statisticsChartDefinition(
           label: unit === 'percent' ? 'Mean score' : 'Submissions',
           ticks: {
             count: Math.min(5, maximum),
-            format: (value) => (unit === 'percent' ? `${value}%` : `${value}`),
+            format: (value) =>
+              unit === 'percent' ? `${axisNumber(value)}%` : axisNumber(value),
           },
         },
       },

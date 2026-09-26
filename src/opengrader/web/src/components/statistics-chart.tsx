@@ -34,6 +34,10 @@ export function StatisticsChart({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const columnWidth = rows.reduce(
+    (width, row) => Math.max(width, row.label.length * 0.5 + 1),
+    4
+  );
   const referenceValue = reference?.value;
   const referenceDetail = reference?.detail;
   const definition = useMemo(
@@ -112,7 +116,7 @@ export function StatisticsChart({
       <div className="max-w-full overflow-x-auto">
         <div
           ref={chartRef}
-          style={{ minWidth: `${Math.max(18, rows.length * 4)}rem` }}
+          style={{ minWidth: `${Math.max(18, rows.length * columnWidth)}rem` }}
         >
           <Chart
             definition={definition}

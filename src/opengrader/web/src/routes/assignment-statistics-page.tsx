@@ -41,13 +41,24 @@ export default function AssignmentStatisticsPage() {
                   if (value !== null) setSelectedVersion(value);
                 }}
               >
-                <SelectTrigger id={versionId} className="min-w-20">
-                  <SelectValue>{report.version}</SelectValue>
+                <SelectTrigger
+                  id={versionId}
+                  className="max-w-full min-w-20"
+                  title={report.version ?? undefined}
+                >
+                  <SelectValue className="min-w-0">
+                    <span className="truncate">{report.version}</span>
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent align="end">
+                <SelectContent
+                  align="end"
+                  className="max-w-(--available-width)"
+                >
                   {reports.map((item) => (
                     <SelectItem key={item.version} value={item.version ?? ''}>
-                      {item.version}
+                      <span className="[overflow-wrap:anywhere] whitespace-normal">
+                        {item.version}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

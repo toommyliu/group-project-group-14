@@ -110,7 +110,7 @@ export function AssignmentStatistics({
             detail: `Question ${questionLabel(item.question_id)}: ${scoreValue(item.average, item.possible_points)} mean, ${item.graded_count} of ${item.total_submissions} graded`,
           }))}
         />
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-start text-sm">
             <caption className="sr-only">Question statistics</caption>
             <thead className="border-b text-muted-foreground">
@@ -147,7 +147,7 @@ export function AssignmentStatistics({
                         <th
                           colSpan={7}
                           scope="row"
-                          className="pt-5 pb-2 text-start font-medium"
+                          className="pt-5 pb-2 text-start font-medium [overflow-wrap:anywhere]"
                         >
                           {questionLabel(item.parent_id)}. {item.parent_prompt}
                         </th>
@@ -156,7 +156,7 @@ export function AssignmentStatistics({
                   <tr className="border-b">
                     <th
                       scope="row"
-                      className={`py-4 pe-4 text-start font-normal ${item.parent_id ? 'ps-4' : ''}`}
+                      className={`max-w-md min-w-64 py-4 pe-4 text-start font-normal [overflow-wrap:anywhere] ${item.parent_id ? 'ps-4' : ''}`}
                     >
                       {item.submission_id !== null ? (
                         <Link
@@ -303,27 +303,31 @@ export function AssignmentStatistics({
                 : 'Scores are shown in points.'}
             </p>
             {/* The chart is hover-only, so screen readers get the data here. */}
-            <table className="sr-only">
-              <caption>{distributionLabel} score distribution</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Score</th>
-                  <th scope="col">Submissions</th>
-                  <th scope="col">Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {distribution.buckets.map((bucket) => (
-                  <tr key={bucket.label}>
-                    <th scope="row">{bucket.label}</th>
-                    <td>{bucket.count}</td>
-                    <td>
-                      {percent.format(bucket.count / distribution.graded_count)}
-                    </td>
+            <div className="sr-only">
+              <table>
+                <caption>{distributionLabel} score distribution</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Score</th>
+                    <th scope="col">Submissions</th>
+                    <th scope="col">Share</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {distribution.buckets.map((bucket) => (
+                    <tr key={bucket.label}>
+                      <th scope="row">{bucket.label}</th>
+                      <td>{bucket.count}</td>
+                      <td>
+                        {percent.format(
+                          bucket.count / distribution.graded_count
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         ) : (
           <p className="text-muted-foreground">
@@ -380,20 +384,29 @@ function GradingProgress({ report }: { report: AssignmentVersionStatistics }) {
               )
           )}
       </div>
-      {total > 0 && (
-        <div
-          className="flex h-1.5 overflow-hidden rounded-full bg-chart-1/15"
-          aria-hidden="true"
-        >
-          {segments.slice(0, 2).map((segment) => (
-            <div
-              key={segment.className}
-              className={segment.className}
-              style={{ width: `${(segment.count / total) * 100}%` }}
-            />
-          ))}
-        </div>
-      )}
+      <div
+        className={`flex h-2 overflow-hidden rounded-full ${total === 0 ? 'bg-chart-1/10 text-chart-1/35' : 'bg-chart-1/15'}`}
+        style={
+          total === 0
+            ? {
+                backgroundImage:
+                  'repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 8px)',
+              }
+            : undefined
+        }
+        aria-hidden="true"
+      >
+        {total > 0 &&
+          segments
+            .slice(0, 2)
+            .map((segment) => (
+              <div
+                key={segment.className}
+                className={segment.className}
+                style={{ width: `${(segment.count / total) * 100}%` }}
+              />
+            ))}
+      </div>
     </div>
   );
 }
@@ -446,11 +459,14 @@ function ScoreSummary({ scores }: { scores: ScoreStatistics }) {
   ].filter((detail) => detail !== false);
   return (
     <div className="space-y-4 border-y py-5">
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 xl:grid-cols-5">
+      <dl className="flex flex-wrap gap-x-6 gap-y-5">
         {metrics.map(([label, value]) => (
-          <div key={label}>
+          <div
+            key={label}
+            className="max-w-full min-w-[min(100%,8rem)] flex-1 basis-auto"
+          >
             <dt className="text-sm text-muted-foreground">{label}</dt>
-            <dd className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+            <dd className="mt-2 text-2xl font-semibold tracking-tight [overflow-wrap:anywhere] tabular-nums">
               {value === null ? (
                 <span className="text-base font-normal">Not graded</span>
               ) : (
@@ -463,9 +479,14 @@ function ScoreSummary({ scores }: { scores: ScoreStatistics }) {
       {details.length > 0 && (
         <dl className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
           {details.map(([label, value]) => (
-            <div key={label} className="flex gap-2">
+            <div
+              key={label}
+              className="flex max-w-full min-w-0 flex-wrap gap-x-2"
+            >
               <dt className="text-muted-foreground">{label}</dt>
-              <dd className="tabular-nums">{value}</dd>
+              <dd className="min-w-0 [overflow-wrap:anywhere] tabular-nums">
+                {value}
+              </dd>
             </div>
           ))}
         </dl>

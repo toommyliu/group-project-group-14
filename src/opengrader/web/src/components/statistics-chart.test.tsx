@@ -116,3 +116,23 @@ it('draws the mean line with a legend and shows its detail on hover, over bars t
   expect(html).toContain('ts-chart__rule-y');
   expect(html).toContain('Assignment mean</p>');
 });
+
+it('keeps large score values exact while formatting readable axis ticks', () => {
+  const rows = [
+    {
+      label: '1',
+      value: 37037037000,
+      detail: 'Question 1: 37,037,037,000% mean',
+    },
+  ];
+  const scene = createChartScene(statisticsChartDefinition(rows, 'percent'), {
+    width: 320,
+    height: 280,
+  });
+  expect(scene.points[0].yValue).toBe(37037037000);
+  const html = renderToStaticMarkup(
+    <StatisticsChart rows={rows} unit="percent" label="Large scores" />
+  );
+  expect(html).toContain('2.0e+10%');
+  expect(html).not.toContain('20000000000%');
+});
