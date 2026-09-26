@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -102,7 +102,7 @@ def add_auth_routes(app: FastAPI, settings: ServerSettings) -> None:
             client_kwargs={"scope": "openid email profile"},
         )
 
-    @app.get("/auth/me", include_in_schema=False)
+    @app.get("/auth/me")
     def auth_status(request: Request) -> AuthStatus:
         user = request.session.get("user") if settings.auth_enabled else None
         return AuthStatus(enabled=settings.auth_enabled, user=user)
@@ -133,8 +133,8 @@ def add_auth_routes(app: FastAPI, settings: ServerSettings) -> None:
         request.session["user"] = user.model_dump()
         return RedirectResponse("/", status_code=303)
 
-    @app.post("/auth/logout", include_in_schema=False, response_model=None)
-    def logout(request: Request) -> RedirectResponse:
+    @app.post("/auth/logout", status_code=204)
+    def logout(request: Request) -> Response:
         if settings.auth_enabled:
             request.session.clear()
-        return RedirectResponse("/", status_code=303)
+        return Response(status_code=204)

@@ -1,5 +1,39 @@
 // Generated from FastAPI. Run pnpm generate:api to update.
 export interface paths {
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Status */
+        get: operations["auth_status_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspace": {
         parameters: {
             query?: never;
@@ -792,6 +826,21 @@ export interface components {
             /** Questions */
             questions: components["schemas"]["AssignmentQuestionStatistics"][];
         };
+        /** AuthStatus */
+        AuthStatus: {
+            /** Enabled */
+            enabled: boolean;
+            user?: components["schemas"]["AuthUser"] | null;
+        };
+        /** AuthUser */
+        AuthUser: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name: string;
+        };
         /** CreateTerminal */
         CreateTerminal: {
             /**
@@ -1499,6 +1548,44 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    auth_status_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatus"];
+                };
+            };
+        };
+    };
+    logout_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_workspace_api_workspace_get: {
         parameters: {
             query?: never;

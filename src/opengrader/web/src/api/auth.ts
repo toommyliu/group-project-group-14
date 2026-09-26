@@ -1,26 +1,12 @@
-export type AuthUser = {
-  id: string;
-  email: string;
-  name: string;
-};
+import { queryOptions } from '@tanstack/react-query';
+import { client, readData } from './client';
 
-export type AuthStatus = {
-  enabled: boolean;
-  user: AuthUser | null;
-};
-
-export const authQuery = {
+export const authQuery = queryOptions({
   queryKey: ['auth'],
-  queryFn: getAuthStatus,
-};
+  queryFn: async ({ signal }) =>
+    readData(await client.GET('/auth/me', { signal })),
+});
 
-export async function getAuthStatus(): Promise<AuthStatus> {
-  const response = await fetch('/auth/me');
-  if (!response.ok) throw new Error('Could not check sign-in status.');
-  return response.json() as Promise<AuthStatus>;
-}
-
-export async function logout(): Promise<void> {
-  const response = await fetch('/auth/logout', { method: 'POST' });
-  if (!response.ok) throw new Error('Could not sign out.');
+export async function logout() {
+  await client.POST('/auth/logout');
 }
