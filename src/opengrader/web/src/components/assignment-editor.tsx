@@ -227,7 +227,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
         <div
           className={
             overview
-              ? 'mb-4'
+              ? 'mb-8'
               : 'mb-8 flex flex-col gap-6 @min-[40rem]:flex-row @min-[40rem]:items-start'
           }
         >

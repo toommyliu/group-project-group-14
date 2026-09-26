@@ -19,9 +19,10 @@ export function PageHeading({
         className
       )}
     >
-      {/* Size to the title so actions share its row until they no longer fit. */}
+      {/* Size to the title so actions share its row until they no longer fit.
+          Reserve a control's height so the title doesn't move between pages. */}
       <h1
-        className="min-h-9 min-w-0 flex-1 basis-auto truncate text-3xl leading-9 font-semibold tracking-tight"
+        className="min-h-11 min-w-0 flex-1 basis-auto truncate py-1 text-3xl leading-9 font-semibold tracking-tight"
         title={typeof title === 'string' ? title : undefined}
       >
         {title}

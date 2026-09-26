@@ -116,11 +116,7 @@ export default function TerminalsPage() {
   const hasError = !confirmation && Boolean(error || action.error);
   return (
     <>
-      <PageHeading
-        title="Terminals"
-        description={assignmentData.title}
-        className={hasError ? 'mb-6' : undefined}
-      />
+      <PageHeading title="Terminals" description={assignmentData.title} />
       {hasError && (
         <ErrorAlert
           className="mb-6"
