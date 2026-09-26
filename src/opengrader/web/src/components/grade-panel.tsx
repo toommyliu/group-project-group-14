@@ -54,6 +54,7 @@ export function GradePanel({
     busy,
     change,
     choose,
+    clearScore,
     reload,
     requestReload,
     reloadOpen,
@@ -102,6 +103,8 @@ export function GradePanel({
             className="field-sizing-content h-11 max-w-28 min-w-16 [appearance:textfield] text-end text-lg font-semibold tabular-nums md:text-lg [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             value={draft.manual ? draft.score : (score?.toString() ?? '')}
             disabled={busy}
+            title={shortcuts ? 'Focus score (S)' : undefined}
+            aria-keyshortcuts={shortcuts ? 'S' : undefined}
             aria-invalid={!validScore}
             aria-describedby={draft.manual ? 'score-hint' : undefined}
             onFocus={(event) => event.currentTarget.select()}
@@ -121,11 +124,10 @@ export function GradePanel({
             variant="ghost"
             className="size-11"
             aria-label="Clear grade"
-            title="Clear grade"
+            title={shortcuts ? 'Clear grade (Shift+S)' : 'Clear grade'}
+            aria-keyshortcuts={shortcuts ? 'Shift+S' : undefined}
             disabled={busy || (score === null && !draft.manual)}
-            onClick={() =>
-              change({ ...draft, labels: [], manual: false, score: '' })
-            }
+            onClick={clearScore}
           >
             <Eraser aria-hidden="true" />
           </Button>

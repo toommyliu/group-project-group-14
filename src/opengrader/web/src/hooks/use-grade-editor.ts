@@ -268,6 +268,9 @@ export function useGradeEditor({
       labels: selectRubric(question, draftRef.current.labels, index),
     });
   }
+  function clearScore() {
+    change({ ...draftRef.current, labels: [], manual: false, score: '' });
+  }
 
   const blocker = useBlocker({
     withResolver: true,
@@ -390,6 +393,15 @@ export function useGradeEditor({
         callback: () => choose(index),
       })),
       {
+        hotkey: 'S',
+        callback: () => scoreInput.current?.focus(),
+        options: { requireReset: false },
+      },
+      {
+        hotkey: 'Shift+S',
+        callback: clearScore,
+      },
+      {
         hotkey: 'C',
         callback: () => feedback.current?.focus(),
         // Focusing the textarea makes TanStack ignore the keyup needed to reset.
@@ -438,6 +450,7 @@ export function useGradeEditor({
     busy,
     change,
     choose,
+    clearScore,
     requestReload,
     reload,
     reloadOpen,

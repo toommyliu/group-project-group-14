@@ -93,6 +93,16 @@ export function GradingShortcuts() {
               label: 'Select rubric item',
             },
             {
+              keys: ['S'],
+              accessibleKeys: 'S',
+              label: 'Focus score',
+            },
+            {
+              keys: formatForDisplay('Shift+S').split(/\s+/),
+              accessibleKeys: 'Shift and S',
+              label: 'Clear grade',
+            },
+            {
               keys: ['C'],
               accessibleKeys: 'C',
               label: 'Write feedback',
