@@ -196,11 +196,14 @@ export function AppSidebar() {
             </nav>
           )}
         </SidebarContent>
-        <SidebarFooter className="items-start gap-2 px-4 py-3">
-          <AuthControl variant="sidebar" compact={!expanded} />
+        <SidebarFooter className="flex-row items-center gap-1 border-t border-sidebar-border px-2 py-2 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-start">
+          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:flex-none">
+            <AuthControl variant="sidebar" compact={!expanded} />
+          </div>
           <ModeToggle
-            compact={!expanded}
-            align={expanded ? 'start' : 'center'}
+            side={expanded ? 'top' : 'right'}
+            align="end"
+            className="h-11 w-12 shrink-0 border-0 hover:bg-sidebar-accent aria-expanded:bg-sidebar-accent"
           />
         </SidebarFooter>
         <SidebarResizeHandle />

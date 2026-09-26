@@ -4,52 +4,61 @@ import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { setPreference } from '@/stores/preferences';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { setPreference, usePreferences } from '@/stores/preferences';
+
+const themes = [
+  { value: 'light', label: 'Light', icon: Sun },
+  { value: 'dark', label: 'Dark', icon: Moon },
+  { value: 'system', label: 'System', icon: Monitor },
+] as const;
 
 export function ModeToggle({
-  compact = false,
+  side = 'bottom',
   align = 'end',
+  className,
 }: {
-  compact?: boolean;
+  side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
+  className?: string;
 }) {
+  const theme = usePreferences((state) => state.theme);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="ghost" size="icon" />}>
+      <DropdownMenuTrigger
+        render={<Button variant="ghost" size="icon" className={className} />}
+        title="Theme"
+      >
         <Sun className="h-[1.2rem] w-[1.2rem] scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
         <Moon className="absolute h-[1.2rem] w-[1.2rem] scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0" />
-        <span className="sr-only">Toggle theme</span>
+        <span className="sr-only">Theme</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={align}
-        className={compact ? 'w-11 min-w-11' : undefined}
-      >
-        {(
-          [
-            { value: 'light', label: 'Light', icon: Sun },
-            { value: 'dark', label: 'Dark', icon: Moon },
-            { value: 'system', label: 'System', icon: Monitor },
-          ] as const
-        ).map(({ value, label, icon: Icon }) => (
-          <Tooltip key={value}>
-            <DropdownMenuItem
-              nativeButton
-              render={<TooltipTrigger />}
-              onClick={() => setPreference('theme', value)}
-              className={compact ? 'size-11 w-full justify-center' : 'w-full'}
-            >
-              {compact && <Icon aria-hidden="true" />}
-              <span className={compact ? 'sr-only' : undefined}>{label}</span>
-            </DropdownMenuItem>
-            <TooltipContent side="right" hidden={!compact}>
-              {label}
-            </TooltipContent>
-          </Tooltip>
-        ))}
+      <DropdownMenuContent side={side} align={align} className="w-40">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Theme</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={theme}
+            onValueChange={(value) =>
+              setPreference('theme', value as (typeof themes)[number]['value'])
+            }
+          >
+            {themes.map(({ value, label, icon: Icon }) => (
+              <DropdownMenuRadioItem
+                key={value}
+                value={value}
+                className="min-h-9 text-sm"
+              >
+                <Icon aria-hidden="true" />
+                {label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
