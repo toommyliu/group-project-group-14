@@ -29,6 +29,17 @@ class Assignment(BaseModel):
     title: str
 
 
+class AssignmentSummary(Assignment):
+    question_count: int | None
+    possible_points: float | None
+    version_count: int
+    submission_count: int
+    graded_submission_count: int
+    response_count: int
+    graded_response_count: int
+    average_percent: float | None
+
+
 class AssignmentInputs(BaseModel):
     id: str
     folder: str

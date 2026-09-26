@@ -1,7 +1,7 @@
 """Authoritative assignment and grading state."""
 
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import json
 import os
@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 
 from opengrader.core.analytics.assignment_statistics import (
     AssignmentVersionStatistics,
+    assignment_progress,
     assignment_statistics,
 )
 from opengrader.core.qa_file import parse_qa_markdown
@@ -24,6 +25,7 @@ from opengrader.core.workspace.models import (
     Answer,
     Assignment,
     AssignmentInputs,
+    AssignmentSummary,
     FeedbackJob,
     GradeSaveResult,
     Submission,
@@ -179,6 +181,26 @@ class Workspace:
                     "SELECT id, title FROM assignments ORDER BY rowid"
                 )
             ]
+
+    def assignment_summaries(self) -> list[AssignmentSummary]:
+        """Summarize each assignment's grading progress, oldest first."""
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT id, title, source FROM assignments ORDER BY rowid"
+            ).fetchall()
+            submissions = {row["id"]: self._submissions(db, row["id"]) for row in rows}
+        return [
+            AssignmentSummary(
+                id=row["id"],
+                title=row["title"],
+                **asdict(
+                    assignment_progress(
+                        parse_qa_markdown(row["source"]), submissions[row["id"]]
+                    )
+                ),
+            )
+            for row in rows
+        ]
 
     def assignment_inputs(self) -> list[AssignmentInputs]:
         with self.connect() as db:

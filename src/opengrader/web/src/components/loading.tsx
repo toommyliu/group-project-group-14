@@ -5,20 +5,29 @@ import { Skeleton } from './ui/skeleton';
 export function AssignmentsLoading() {
   return (
     <div aria-busy="true" aria-label="Loading assignments">
-      <PageHeading
-        title="Assignments"
-        description="Choose an assignment to review its responses."
-      />
-      <div className="border-t" aria-hidden="true">
-        {[0, 1, 2].map((item) => (
-          <div
-            key={item}
-            className="flex min-h-25 flex-col justify-center gap-2 border-b py-6"
-          >
-            <Skeleton className="h-6 w-56 max-w-full" />
-            <Skeleton className="h-5 w-32" />
-          </div>
-        ))}
+      <PageHeading className="mb-6" title="Assignments" />
+      <div className="@container" aria-hidden="true">
+        <div className="mb-8 grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 @lg:grid-cols-3">
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="space-y-2">
+              <Skeleton className="h-5 w-24" />
+              <Skeleton className="h-8 w-16" />
+              <Skeleton className="h-5 w-32 max-w-full" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 @xl:grid-cols-2 @5xl:grid-cols-3">
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="space-y-5 rounded-lg border p-5">
+              <div className="space-y-2">
+                <Skeleton className="h-6 w-56 max-w-full" />
+                <Skeleton className="h-5 w-40 max-w-full" />
+              </div>
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-11 w-full" />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

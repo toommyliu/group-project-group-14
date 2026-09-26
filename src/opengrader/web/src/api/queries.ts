@@ -39,6 +39,14 @@ export async function retryFeedback(
   });
 }
 
+export type AssignmentSummary = components['schemas']['AssignmentSummary'];
+
+export const assignmentSummariesQuery = queryOptions({
+  queryKey: ['assignment-summaries'],
+  queryFn: async ({ signal }) =>
+    readData(await client.GET('/api/assignment-summaries', { signal })),
+});
+
 export const assignmentsQuery = queryOptions({
   queryKey: ['assignments'],
   // Navigation and route loaders share this request across observer unmounts.
