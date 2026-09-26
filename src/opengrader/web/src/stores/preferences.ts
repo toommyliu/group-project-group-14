@@ -1,7 +1,12 @@
 import { create } from 'zustand';
+import {
+  parseGradingBindings,
+  type GradingBindings,
+} from '@/lib/grading-shortcuts';
 
 export type Preferences = {
   gradingShortcuts: boolean;
+  gradingBindings: GradingBindings;
   editorWidth: number;
   editorMode: 'visual' | 'markdown';
   sidebarWidth: number;
@@ -20,6 +25,12 @@ type Definition<T> = {
 };
 
 const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
+  gradingBindings: {
+    storageKey: 'opengrader.grading-bindings',
+    defaultValue: {},
+    parse: parseGradingBindings,
+    serialize: JSON.stringify,
+  },
   gradingShortcuts: {
     storageKey: 'opengrader.grading-shortcuts',
     defaultValue: true,

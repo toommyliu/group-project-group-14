@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useBlocker } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
+import { rubricActions } from '@/lib/grading-shortcuts';
 import {
   answerQuery,
   saveAnswer,
@@ -268,6 +269,9 @@ export function useGradeEditor({
       labels: selectRubric(question, draftRef.current.labels, index),
     });
   }
+  function clearScore() {
+    change({ ...draftRef.current, labels: [], manual: false, score: '' });
+  }
 
   const blocker = useBlocker({
     withResolver: true,
@@ -385,25 +389,34 @@ export function useGradeEditor({
 
   useGradingHotkeys(
     [
-      ...question.rubric.slice(0, 9).map((_, index) => ({
-        hotkey: { key: String(index + 1) },
-        callback: () => choose(index),
-      })),
+      ...rubricActions
+        .slice(0, question.rubric.length)
+        .map((action, index) => ({
+          action,
+          callback: () => choose(index),
+        })),
       {
-        hotkey: 'C',
+        action: 'focusScore',
+        callback: () => scoreInput.current?.focus(),
+        options: { requireReset: false },
+      },
+      {
+        action: 'clearGrade',
+        callback: clearScore,
+      },
+      {
+        action: 'focusFeedback',
         callback: () => feedback.current?.focus(),
         // Focusing the textarea makes TanStack ignore the keyup needed to reset.
         options: { requireReset: false },
       },
       {
-        hotkey: 'Mod+S',
+        action: 'save',
         callback: () => void persist(),
-        options: { ignoreInputs: false },
       },
       {
-        hotkey: 'Mod+Enter',
+        action: 'saveAndNext',
         callback: () => void persist(true),
-        options: { ignoreInputs: false },
       },
     ],
     {
@@ -438,6 +451,7 @@ export function useGradeEditor({
     busy,
     change,
     choose,
+    clearScore,
     requestReload,
     reload,
     reloadOpen,

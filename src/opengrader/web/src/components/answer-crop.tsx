@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
+import {
+  useGradingShortcutHints,
+  useGradingHotkeys,
+} from '@/hooks/use-grading-hotkeys';
 import { ExternalLink, RotateCw, ZoomIn, ZoomOut } from 'lucide-react';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
-import { usePreferences } from '@/stores/preferences';
+import type { GradingAction } from '@/lib/grading-shortcuts';
 
 export function AnswerCrop({
   url,
@@ -23,25 +26,24 @@ export function AnswerCrop({
   );
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const shortcuts = usePreferences((state) => state.gradingShortcuts);
-  const hint = (label: string, key: string) =>
-    shortcuts ? `${label} (${key})` : label;
+  const { shortcut, shortcutAria } = useGradingShortcutHints();
+  const hint = (label: string, action: GradingAction) =>
+    shortcut(action) ? `${label} (${shortcut(action)})` : label;
   const rotate = () => setRotation((value) => (value + 90) % 360);
   const zoomIn = () => setZoom((value) => Math.min(3, value + 0.25));
   const zoomOut = () => setZoom((value) => Math.max(0.5, value - 0.25));
   useGradingHotkeys(
     [
-      { hotkey: { key: '=', shift: true }, callback: zoomIn },
-      { hotkey: '=', callback: zoomIn },
-      { hotkey: '-', callback: zoomOut },
+      { action: 'zoomIn', callback: zoomIn },
+      { action: 'zoomOut', callback: zoomOut },
       {
-        hotkey: '0',
+        action: 'fitImage',
         callback: () => {
           setZoom(1);
           setRotation(0);
         },
       },
-      { hotkey: 'R', callback: rotate },
+      { action: 'rotateImage', callback: rotate },
     ],
     { enabled: state === 'loaded', ignoreInputs: true }
   );
@@ -54,7 +56,8 @@ export function AnswerCrop({
           variant="ghost"
           size="icon"
           aria-label="Zoom out"
-          title={hint('Zoom out', '−')}
+          title={hint('Zoom out', 'zoomOut')}
+          aria-keyshortcuts={shortcutAria('zoomOut')}
           disabled={zoom <= 0.5}
           onClick={zoomOut}
         >
@@ -66,7 +69,8 @@ export function AnswerCrop({
             setZoom(1);
             setRotation(0);
           }}
-          title={hint('Fit image', '0')}
+          title={hint('Fit image', 'fitImage')}
+          aria-keyshortcuts={shortcutAria('fitImage')}
         >
           {Math.round(zoom * 100)}% · Fit
         </Button>
@@ -74,7 +78,8 @@ export function AnswerCrop({
           variant="ghost"
           size="icon"
           aria-label="Zoom in"
-          title={hint('Zoom in', '+')}
+          title={hint('Zoom in', 'zoomIn')}
+          aria-keyshortcuts={shortcutAria('zoomIn')}
           disabled={zoom >= 3}
           onClick={zoomIn}
         >
@@ -84,7 +89,8 @@ export function AnswerCrop({
           variant="ghost"
           size="icon"
           aria-label="Rotate image"
-          title={hint('Rotate image', 'R')}
+          title={hint('Rotate image', 'rotateImage')}
+          aria-keyshortcuts={shortcutAria('rotateImage')}
           onClick={rotate}
         >
           <RotateCw />
