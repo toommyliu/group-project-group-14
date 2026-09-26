@@ -1,11 +1,11 @@
-import { Fragment, useId, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useId, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ChartColumn } from 'lucide-react';
 import type {
   AssignmentVersionStatistics,
   ScoreStatistics,
 } from '@/api/queries';
-import { StatisticsChart } from './statistics-chart';
+import { PaneLoading } from './loading';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
 import {
@@ -16,6 +16,12 @@ import {
   SelectValue,
 } from './ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+
+const StatisticsChart = lazy(() =>
+  import('./statistics-chart').then(({ StatisticsChart }) => ({
+    default: StatisticsChart,
+  }))
+);
 
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const percent = new Intl.NumberFormat(undefined, {
@@ -92,24 +98,32 @@ export function AssignmentStatistics({
         <h2 id="question-means-heading" className="text-xl font-semibold">
           Mean score by question
         </h2>
-        <StatisticsChart
-          label="Mean score by question"
-          unit="percent"
-          reference={
-            scores.average_percent === null
-              ? undefined
-              : {
-                  value: scores.average_percent,
-                  label: 'Assignment mean',
-                  detail: `Assignment mean: ${number.format(scores.average_percent)}%`,
-                }
+        <Suspense
+          fallback={
+            <div className="flex min-h-[340px]">
+              <PaneLoading label="Loading chart…" />
+            </div>
           }
-          rows={questions.map(({ scores: item }) => ({
-            label: questionLabel(item.question_id),
-            value: item.average_percent,
-            detail: `Question ${questionLabel(item.question_id)}: ${scoreValue(item.average, item.possible_points)} mean, ${item.graded_count} of ${item.total_submissions} graded`,
-          }))}
-        />
+        >
+          <StatisticsChart
+            label="Mean score by question"
+            unit="percent"
+            reference={
+              scores.average_percent === null
+                ? undefined
+                : {
+                    value: scores.average_percent,
+                    label: 'Assignment mean',
+                    detail: `Assignment mean: ${number.format(scores.average_percent)}%`,
+                  }
+            }
+            rows={questions.map(({ scores: item }) => ({
+              label: questionLabel(item.question_id),
+              value: item.average_percent,
+              detail: `Question ${questionLabel(item.question_id)}: ${scoreValue(item.average, item.possible_points)} mean, ${item.graded_count} of ${item.total_submissions} graded`,
+            }))}
+          />
+        </Suspense>
         <div className="relative overflow-x-auto">
           <table className="w-full text-start text-sm">
             <caption className="sr-only">Question statistics</caption>
@@ -286,16 +300,24 @@ export function AssignmentStatistics({
         )}
         {distribution.graded_count > 0 ? (
           <>
-            <StatisticsChart
-              label={`${distributionLabel} score distribution`}
-              unit="submissions"
-              histogram={distribution.possible_points > 0}
-              rows={distribution.buckets.map((bucket) => ({
-                label: bucket.label,
-                value: bucket.count,
-                detail: `${bucket.label}: ${bucket.count} ${bucket.count === 1 ? 'submission' : 'submissions'}`,
-              }))}
-            />
+            <Suspense
+              fallback={
+                <div className="flex min-h-[312px]">
+                  <PaneLoading label="Loading chart…" />
+                </div>
+              }
+            >
+              <StatisticsChart
+                label={`${distributionLabel} score distribution`}
+                unit="submissions"
+                histogram={distribution.possible_points > 0}
+                rows={distribution.buckets.map((bucket) => ({
+                  label: bucket.label,
+                  value: bucket.count,
+                  detail: `${bucket.label}: ${bucket.count} ${bucket.count === 1 ? 'submission' : 'submissions'}`,
+                }))}
+              />
+            </Suspense>
             <p className="text-sm text-muted-foreground">
               {distribution.graded_count} graded submissions.{' '}
               {distribution.possible_points > 0
