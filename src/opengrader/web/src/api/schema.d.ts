@@ -1018,11 +1018,25 @@ export interface components {
             /** Rubric Path */
             rubric_path?: number[] | null;
         };
+        /** QALineNote */
+        QALineNote: {
+            /** Line */
+            line: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "continuation" | "ignored";
+            /** Message */
+            message: string;
+        };
         /** QAPreview */
         QAPreview: {
             document: components["schemas"]["QADocument"];
             /** Warnings */
             warnings: string[];
+            /** Notes */
+            notes: components["schemas"]["QALineNote"][];
         };
         /** QAQuestion */
         QAQuestion: {

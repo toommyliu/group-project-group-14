@@ -1,0 +1,7 @@
+- (5 points) Convert 5 to binary.
+  - **Correct**
+    - 101
+  - **Rubric**
+    - Correct (+5)
+    - Partially Correct (+3)
+    - Incorrect (+0)

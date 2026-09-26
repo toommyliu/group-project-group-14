@@ -3,6 +3,7 @@ import { lazy, Suspense, useId, useState } from 'react';
 import { LoaderCircle, X } from 'lucide-react';
 import type { QAPreview } from '@/api/queries';
 import { useAssignmentPdf } from '@/hooks/use-assignment-pdf';
+import { QAFormatGuide } from './qa-format-guide';
 import { PaneLoading } from './loading';
 import { PdfActionButton } from './pdf-action-button';
 import { Button } from './ui/button';
@@ -15,6 +16,13 @@ import {
   SelectValue,
 } from './ui/select';
 
+export type SidePanelView = 'format' | 'pdf';
+
+const viewLabels: Record<SidePanelView, string> = {
+  format: 'Format guide',
+  pdf: 'PDF preview',
+};
+
 // Lazy load since its not needed on render.
 const AssignmentPdfViewer = lazy(() => import('./assignment-pdf-viewer'));
 
@@ -24,6 +32,7 @@ export function AssignmentPreview({
   current: sourceCurrent,
   blocked = false,
   savedAssignment,
+  view,
   onClose,
 }: {
   source: string;
@@ -31,6 +40,7 @@ export function AssignmentPreview({
   current: boolean;
   blocked?: boolean;
   savedAssignment?: { id: string; source: string };
+  view: SidePanelView;
   onClose: () => void;
 }) {
   const [selectedVersion, setSelectedVersion] = useState('');
@@ -58,10 +68,10 @@ export function AssignmentPreview({
     >
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b pb-2">
         <h2 id={headingId} className="flex min-h-11 items-center font-medium">
-          PDF preview
+          {viewLabels[view]}
         </h2>
         <div className="ms-auto flex items-center gap-2">
-          {versions.length > 1 && (
+          {view === 'pdf' && versions.length > 1 && (
             <>
               <Label htmlFor={versionId} className="text-sm">
                 Version
@@ -98,7 +108,15 @@ export function AssignmentPreview({
           </Button>
         </div>
       </div>
-      <div className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pe-2 pt-2">
+      {view === 'format' && (
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto pe-2 pt-2">
+          <QAFormatGuide />
+        </div>
+      )}
+      <div
+        hidden={view !== 'pdf'}
+        className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pe-2 pt-2"
+      >
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             <Button
