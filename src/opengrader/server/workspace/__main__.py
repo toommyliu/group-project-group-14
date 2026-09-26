@@ -10,18 +10,24 @@ from opengrader.server.workspace.client import ServiceConnection, exclusive_lock
 
 def serve(root: Path, *, port: int = 0) -> None:
     import uvicorn
+    from opengrader.server.auth import RemoteAuthGuard
+    from opengrader.server.settings import ServerSettings
     from opengrader.server.workspace.app import create_app
 
     root = root.resolve()
     with exclusive_lock(root / ".opengrader/service.lock"):
-        app = create_app(root)
+        settings = ServerSettings()
+        app = create_app(root, settings=settings)
+        if not settings.auth_enabled:
+            app.add_middleware(RemoteAuthGuard, enabled=False)
         workspace = app.state.workspace
         server = uvicorn.Server(
             uvicorn.Config(
                 app,
                 host="127.0.0.1",
                 port=0,
-                proxy_headers=False,
+                proxy_headers=True,
+                forwarded_allow_ips="127.0.0.1",
                 timeout_graceful_shutdown=3,
             )
         )
