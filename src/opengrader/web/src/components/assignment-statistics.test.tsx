@@ -88,6 +88,48 @@ it('renders summaries, real charts, partial progress, and links to the matching 
   expect(summary.match(/<dd\b/g)).toHaveLength(5);
   expect(summary).not.toContain('8 pts');
   expect(html).toContain('data-slot="select-trigger"');
+  expect(html).toContain('Assignment mean</p>');
+  expect(html).toContain('Show score distribution for question 1');
+  expect(html).toContain('Middle 50%');
+  expect(html).toContain('Zero points');
+});
+
+it('reports full-credit and zero-point shares against graded answers', () => {
+  const scores: ScoreStatistics = {
+    ...graded,
+    question_id: 'q2',
+    total_submissions: 5,
+    graded_count: 4,
+    ungraded_count: 1,
+    full_credit_count: 1,
+    zero_score_count: 2,
+    buckets: [
+      { label: '0-20%', count: 2 },
+      { label: '80-100%', count: 2 },
+    ],
+  };
+  const html = render({
+    version: null,
+    scores: { ...graded, total_submissions: 5, graded_count: 4 },
+    partial_count: 0,
+    ungraded_count: 1,
+    questions: [
+      {
+        prompt: 'Prove it',
+        parent_id: null,
+        parent_prompt: null,
+        submission_id: 1,
+        scores,
+      },
+    ],
+  });
+  const row = html.slice(html.indexOf('Prove it'));
+  expect(row).toContain(
+    '25%<span class="block text-xs text-muted-foreground">1 of 4</span>'
+  );
+  expect(row).toContain(
+    '50%<span class="block text-xs text-muted-foreground">2 of 4</span>'
+  );
 });
 
 it('shows ungraded states without manufacturing zero scores and offers the next action', () => {
