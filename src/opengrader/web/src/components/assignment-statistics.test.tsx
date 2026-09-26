@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToReadableStream } from 'react-dom/server';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -45,20 +45,22 @@ const ungraded: ScoreStatistics = {
   buckets: [],
 };
 
-function render(report: AssignmentVersionStatistics) {
+async function render(report: AssignmentVersionStatistics) {
   const router = createRouter({
     routeTree: createRootRoute(),
     history: createMemoryHistory(),
   });
-  return renderToStaticMarkup(
+  const stream = await renderToReadableStream(
     <RouterContextProvider router={router}>
       <AssignmentStatistics assignmentId="exam" report={report} />
     </RouterContextProvider>
   );
+  await stream.allReady;
+  return (await new Response(stream).text()).replace(/<!--.*?-->/g, '');
 }
 
-it('renders summaries, real charts, partial progress, and links to the matching version submission', () => {
-  const html = render({
+it('renders summaries, real charts, partial progress, and links to the matching version submission', async () => {
+  const html = await render({
     version: 'B',
     scores: graded,
     partial_count: 1,
@@ -94,7 +96,7 @@ it('renders summaries, real charts, partial progress, and links to the matching 
   expect(html).toContain('Zero points');
 });
 
-it('reports full-credit and zero-point shares against graded answers', () => {
+it('reports full-credit and zero-point shares against graded answers', async () => {
   const scores: ScoreStatistics = {
     ...graded,
     question_id: 'q2',
@@ -108,7 +110,7 @@ it('reports full-credit and zero-point shares against graded answers', () => {
       { label: '80-100%', count: 2 },
     ],
   };
-  const html = render({
+  const html = await render({
     version: null,
     scores: { ...graded, total_submissions: 5, graded_count: 4 },
     partial_count: 0,
@@ -132,8 +134,8 @@ it('reports full-credit and zero-point shares against graded answers', () => {
   );
 });
 
-it('shows ungraded states without manufacturing zero scores and offers the next action', () => {
-  const html = render({
+it('shows ungraded states without manufacturing zero scores and offers the next action', async () => {
+  const html = await render({
     version: null,
     scores: ungraded,
     partial_count: 0,
@@ -153,7 +155,7 @@ it('shows ungraded states without manufacturing zero scores and offers the next 
   expect(html).toContain('Not graded');
   expect(html).toContain('Finish grading a submission');
   expect(html).not.toContain('Assignment total score distribution');
-  const empty = render({
+  const empty = await render({
     version: 'A',
     scores: { ...ungraded, total_submissions: 0, ungraded_count: 0 },
     partial_count: 0,
