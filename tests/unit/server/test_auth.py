@@ -75,8 +75,8 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
             "name": "Test Grader",
         }
         assert client.get("/api/assignments").status_code == 200
-        response = client.post("/auth/logout", follow_redirects=False)
-        assert response.status_code == 303
+        response = client.post("/auth/logout")
+        assert response.status_code == 204
         assert 'opengrader_session=null' in response.headers["set-cookie"]
         assert client.get("/api/assignments").status_code == 401
 

@@ -25,7 +25,8 @@ export function AuthControl({
   const { data } = useQuery(authQuery);
   const signOut = useMutation({
     mutationFn: logout,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['auth'] }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: authQuery.queryKey }),
   });
 
   if (!data?.enabled) return null;
