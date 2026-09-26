@@ -93,6 +93,7 @@ def _start_vite(node: str, web: Path, port: int) -> subprocess.Popen:
             str(web / "node_modules" / "vite" / "bin" / "vite.js"),
             "--host",
             "127.0.0.1",
+            "--strictPort",
         ],
         cwd=web,
         env={**os.environ, "OPENGRADER_API_URL": f"http://127.0.0.1:{port}"},
@@ -135,12 +136,11 @@ def run_dev(port: int, *, workspace: Path | None = None) -> int:
             if api is not None:
                 code = api.poll()
                 if code is not None:
-                    _stop(api)
-                    api = None
                     logger.error(
-                        "API exited with status %s; waiting for a Python edit to restart.",
+                        "API exited with status %s; stopping development servers.",
                         code,
                     )
+                    return code if code > 0 else 1
             updated = _python_snapshot(source)
             if updated != snapshot:
                 snapshot = updated
