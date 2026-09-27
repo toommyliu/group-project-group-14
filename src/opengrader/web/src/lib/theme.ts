@@ -1,4 +1,4 @@
-import { setPreference, usePreferences } from '@/stores/preferences';
+import { usePreferences } from '@/stores/preferences';
 
 const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -25,14 +25,6 @@ function disableTransitionsTemporarily() {
   };
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable ||
-    target.closest("input, textarea, select, [contenteditable='true']") !== null
-  );
-}
-
 function applyTheme() {
   const { theme } = usePreferences.getState();
   const restoreTransitions = disableTransitionsTemporarily();
@@ -40,15 +32,6 @@ function applyTheme() {
   root.classList.remove('light', 'dark');
   root.classList.add(theme === 'system' ? systemTheme() : theme);
   restoreTransitions();
-}
-
-// TODO: migrate
-function toggleTheme(event: KeyboardEvent) {
-  if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (isEditableTarget(event.target) || event.key.toLowerCase() !== 'd') return;
-  const { theme } = usePreferences.getState();
-  const resolved = theme === 'system' ? systemTheme() : theme;
-  setPreference('theme', resolved === 'dark' ? 'light' : 'dark');
 }
 
 function followSystemTheme() {
@@ -61,10 +44,8 @@ export function syncTheme() {
     if (state.theme !== previous.theme) applyTheme();
   });
   darkScheme.addEventListener('change', followSystemTheme);
-  window.addEventListener('keydown', toggleTheme);
   return () => {
     unsubscribe();
     darkScheme.removeEventListener('change', followSystemTheme);
-    window.removeEventListener('keydown', toggleTheme);
   };
 }

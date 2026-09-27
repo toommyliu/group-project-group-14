@@ -9,7 +9,8 @@ import { Kbd } from './ui/kbd';
 import { Textarea } from './ui/textarea';
 import { Input } from './ui/input';
 import { GradeRecoveryDialog } from './grade-recovery-dialog';
-import { usePreferences } from '@/stores/preferences';
+import { useGradingShortcutHints } from '@/hooks/use-grading-hotkeys';
+import { rubricActions } from '@/lib/grading-shortcuts';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -54,6 +55,7 @@ export function GradePanel({
     busy,
     change,
     choose,
+    clearScore,
     reload,
     requestReload,
     reloadOpen,
@@ -62,7 +64,7 @@ export function GradePanel({
     discardAndLeave,
     retryAndLeave,
   } = useGradeEditor({ assignmentId, question, answer, navigating, onNext });
-  const shortcuts = usePreferences((state) => state.gradingShortcuts);
+  const { shortcut, shortcutAria } = useGradingShortcutHints();
   return (
     <section
       className="min-w-0"
@@ -102,6 +104,12 @@ export function GradePanel({
             className="field-sizing-content h-11 max-w-28 min-w-16 [appearance:textfield] text-end text-lg font-semibold tabular-nums md:text-lg [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             value={draft.manual ? draft.score : (score?.toString() ?? '')}
             disabled={busy}
+            title={
+              shortcut('focusScore')
+                ? `Focus score (${shortcut('focusScore')})`
+                : undefined
+            }
+            aria-keyshortcuts={shortcutAria('focusScore')}
             aria-invalid={!validScore}
             aria-describedby={draft.manual ? 'score-hint' : undefined}
             onFocus={(event) => event.currentTarget.select()}
@@ -121,11 +129,14 @@ export function GradePanel({
             variant="ghost"
             className="size-11"
             aria-label="Clear grade"
-            title="Clear grade"
-            disabled={busy || (score === null && !draft.manual)}
-            onClick={() =>
-              change({ ...draft, labels: [], manual: false, score: '' })
+            title={
+              shortcut('clearGrade')
+                ? `Clear grade (${shortcut('clearGrade')})`
+                : 'Clear grade'
             }
+            disabled={busy || (score === null && !draft.manual)}
+            aria-keyshortcuts={shortcutAria('clearGrade')}
+            onClick={clearScore}
           >
             <Eraser aria-hidden="true" />
           </Button>
@@ -181,19 +192,24 @@ export function GradePanel({
               <Button
                 variant="ghost"
                 type="button"
+                aria-keyshortcuts={
+                  rubricActions[index]
+                    ? shortcutAria(rubricActions[index])
+                    : undefined
+                }
                 aria-pressed={selected}
                 onClick={() => choose(index)}
                 className="block h-auto w-full px-3 py-2.5 text-start whitespace-normal focus-visible:border-transparent focus-visible:ring-0"
               >
                 <span className="flex items-start gap-3">
                   <span
-                    className="flex size-6 shrink-0 items-center justify-center border text-xs"
+                    className="flex min-h-6 min-w-6 shrink-0 items-center justify-center border px-1 text-xs"
                     aria-hidden="true"
                   >
                     {selected ? (
                       <Check size={14} />
-                    ) : shortcuts && index < 9 ? (
-                      index + 1
+                    ) : rubricActions[index] ? (
+                      shortcut(rubricActions[index])
                     ) : null}
                   </span>
                   <span className="min-w-0 flex-1 wrap-anywhere">
@@ -232,12 +248,14 @@ export function GradePanel({
           htmlFor="grading-feedback"
           className="text-base leading-normal font-medium"
         >
-          Feedback {shortcuts && <Kbd>C</Kbd>}
+          Feedback{' '}
+          {shortcut('focusFeedback') && <Kbd>{shortcut('focusFeedback')}</Kbd>}
         </Label>
         <Textarea
           ref={feedback}
           className="field-sizing-fixed resize-y text-base md:text-sm"
           id="grading-feedback"
+          aria-keyshortcuts={shortcutAria('focusFeedback')}
           rows={3}
           value={draft.analysis}
           maxLength={50000}

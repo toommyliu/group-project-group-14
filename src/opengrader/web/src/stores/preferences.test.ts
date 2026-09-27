@@ -9,10 +9,11 @@ const storage = {
     stored.set(key, value);
   },
 };
-const target = new EventTarget();
+let target = new EventTarget();
 
 async function load() {
   vi.resetModules();
+  target = new EventTarget();
   vi.stubGlobal('localStorage', storage);
   vi.stubGlobal('window', target);
   return import('./preferences');
@@ -30,6 +31,7 @@ it('reads saved preferences and falls back to defaults for invalid values', asyn
   const { usePreferences } = await load();
   expect(usePreferences.getState()).toEqual({
     gradingShortcuts: true,
+    gradingBindings: {},
     editorWidth: 50,
     editorMode: 'visual',
     sidebarWidth: 256,
@@ -72,4 +74,52 @@ it('follows changes and removals from other tabs', async () => {
     Object.assign(new Event('storage'), { key: null, storageArea: storage })
   );
   expect(usePreferences.getState().sidebarExpanded).toBe(true);
+});
+
+it('restores custom shortcuts and disabled actions after reloading', async () => {
+  const { setPreference } = await load();
+  setPreference('gradingBindings', { nextSubmission: 'J', clearGrade: null });
+  const { usePreferences } = await load();
+  expect(usePreferences.getState().gradingBindings).toEqual({
+    nextSubmission: 'J',
+    clearGrade: null,
+  });
+});
+
+it.each([
+  '{broken',
+  '[]',
+  '{"nextSubmission":123}',
+  '{"nextSubmission":"ArrowLeft"}',
+  '{"nextSubmission":"Mod+L"}',
+  '{"nextSubmission":"Teleport"}',
+])(
+  'falls back safely for invalid or conflicting stored shortcuts: %s',
+  async (value) => {
+    stored.set('opengrader.grading-bindings', value);
+    const { usePreferences } = await load();
+    expect(usePreferences.getState().gradingBindings).toEqual({});
+  }
+);
+
+it('restores swapped bindings together and follows shortcut changes across tabs', async () => {
+  stored.set(
+    'opengrader.grading-bindings',
+    '{"nextSubmission":"ArrowLeft","previousSubmission":"ArrowRight"}'
+  );
+  const { usePreferences } = await load();
+  expect(usePreferences.getState().gradingBindings).toEqual({
+    nextSubmission: 'ArrowLeft',
+    previousSubmission: 'ArrowRight',
+  });
+  stored.set('opengrader.grading-bindings', '{"nextSubmission":"J"}');
+  target.dispatchEvent(
+    Object.assign(new Event('storage'), {
+      key: 'opengrader.grading-bindings',
+      storageArea: storage,
+    })
+  );
+  expect(usePreferences.getState().gradingBindings).toEqual({
+    nextSubmission: 'J',
+  });
 });

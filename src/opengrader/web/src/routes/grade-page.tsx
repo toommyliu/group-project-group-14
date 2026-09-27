@@ -2,7 +2,10 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, CircleCheck } from 'lucide-react';
-import { useGradingHotkeys } from '@/hooks/use-grading-hotkeys';
+import {
+  useGradingShortcutHints,
+  useGradingHotkeys,
+} from '@/hooks/use-grading-hotkeys';
 import { submissionsQuery, answerQuery, type Submission } from '@/api/queries';
 import { nextUngraded } from '@/lib/grading';
 import { validateGradingSearch } from '@/routes/assignment-data';
@@ -14,7 +17,7 @@ import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Kbd } from '@/components/ui/kbd';
-import { usePreferences } from '@/stores/preferences';
+import type { GradingAction } from '@/lib/grading-shortcuts';
 import {
   Select,
   SelectTrigger,
@@ -44,9 +47,9 @@ export default function GradePage({
     refetchOnWindowFocus: false,
   });
   const navigating = useRouterState({ select: (state) => state.isLoading });
-  const shortcuts = usePreferences((state) => state.gradingShortcuts);
-  const hint = (label: string, key: string) =>
-    shortcuts ? `${label} (${key})` : label;
+  const { shortcut, shortcutAria } = useGradingShortcutHints();
+  const hint = (label: string, action: GradingAction) =>
+    shortcut(action) ? `${label} (${shortcut(action)})` : label;
   const navigate = gradeRoute.useNavigate();
   const pendingSelection = useRouterState({
     select: (state) => {
@@ -119,21 +122,24 @@ export default function GradePage({
 
   useGradingHotkeys(
     [
-      { hotkey: 'J', callback: () => next && selectSubmission(next.id) },
       {
-        hotkey: 'K',
+        action: 'nextSubmission',
+        callback: () => next && selectSubmission(next.id),
+      },
+      {
+        action: 'previousSubmission',
         callback: () => previous && selectSubmission(previous.id),
       },
       {
-        hotkey: 'N',
+        action: 'nextUngraded',
         callback: () => ungraded && selectSubmission(ungraded.id),
       },
       {
-        hotkey: '[',
+        action: 'previousQuestion',
         callback: () => previousQuestion && selectQuestion(previousQuestion.id),
       },
       {
-        hotkey: ']',
+        action: 'nextQuestion',
         callback: () => nextQuestion && selectQuestion(nextQuestion.id),
       },
     ],
@@ -149,8 +155,10 @@ export default function GradePage({
       className="max-sm:flex-1"
       disabled={navigating}
       onClick={() => selectSubmission(ungraded.id)}
+      aria-keyshortcuts={shortcutAria('nextUngraded')}
     >
-      Next ungraded {shortcuts && <Kbd>N</Kbd>}
+      Next ungraded{' '}
+      {shortcut('nextUngraded') && <Kbd>{shortcut('nextUngraded')}</Kbd>}
     </Button>
   ) : graded === total && nextQuestion ? (
     <Button
@@ -158,7 +166,8 @@ export default function GradePage({
       disabled={navigating}
       onClick={() => selectQuestion(nextQuestion.id)}
     >
-      Next question {shortcuts && <Kbd>]</Kbd>}
+      Next question{' '}
+      {shortcut('nextQuestion') && <Kbd>{shortcut('nextQuestion')}</Kbd>}
     </Button>
   ) : (
     <Button
@@ -221,7 +230,8 @@ export default function GradePage({
           variant="ghost"
           className="size-11"
           aria-label="Previous question"
-          title={hint('Previous question', '[')}
+          title={hint('Previous question', 'previousQuestion')}
+          aria-keyshortcuts={shortcutAria('previousQuestion')}
           disabled={!previousQuestion || navigating}
           onClick={() =>
             previousQuestion && selectQuestion(previousQuestion.id)
@@ -233,7 +243,8 @@ export default function GradePage({
           variant="ghost"
           className="size-11"
           aria-label="Next question"
-          title={hint('Next question', ']')}
+          title={hint('Next question', 'nextQuestion')}
+          aria-keyshortcuts={shortcutAria('nextQuestion')}
           disabled={!nextQuestion || navigating}
           onClick={() => nextQuestion && selectQuestion(nextQuestion.id)}
         >
@@ -356,7 +367,8 @@ export default function GradePage({
               <Button
                 variant="outline"
                 className="max-sm:w-11 max-sm:px-0"
-                title={hint('Previous submission', 'K')}
+                title={hint('Previous submission', 'previousSubmission')}
+                aria-keyshortcuts={shortcutAria('previousSubmission')}
                 disabled={!previous || navigating}
                 onClick={() => previous && selectSubmission(previous.id)}
               >
@@ -366,7 +378,8 @@ export default function GradePage({
               <Button
                 variant="outline"
                 className="max-sm:w-11 max-sm:px-0"
-                title={hint('Next submission', 'J')}
+                title={hint('Next submission', 'nextSubmission')}
+                aria-keyshortcuts={shortcutAria('nextSubmission')}
                 disabled={!next || navigating}
                 onClick={() => next && selectSubmission(next.id)}
               >
