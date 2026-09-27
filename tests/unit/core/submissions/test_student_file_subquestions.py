@@ -35,6 +35,14 @@ def test_parse_assignment_metadata_extracts_colon_compact_suffix_version() -> No
     assert metadata.assignment_version == "5A"
 
 
+def test_parse_assignment_metadata_skips_a_term_and_a_form_marker_after_the_version() -> None:
+    metadata = student_file.parse_assignment_metadata_from_title("SP26 CMPE 142 Exam 2B_j")
+
+    assert metadata.course_code == "CMPE142"
+    assert metadata.assignment_title == "Exam 2"
+    assert metadata.assignment_version == "B"
+
+
 def test_parse_assignment_metadata_preserves_existing_version_forms() -> None:
     canonical = student_file.parse_assignment_metadata_from_title("CS146: Quiz 1 (A)")
     explicit = student_file.parse_assignment_metadata_from_title("Quiz 1 Version B")

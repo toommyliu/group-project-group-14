@@ -34,8 +34,9 @@ _TITLE_VERSION_EXPLICIT_RE = re.compile(r"(?i)\bversion\s*([A-Z0-9]+)\b")
 _TITLE_COMPACT_VERSION_RE = re.compile(
     r"(?i)\b(?P<title>"
     r"(?:quiz|midterm|exam|final|assignment|hw|homework|lab|project)\s+\d+)"
-    r"\s*[_-]\s*(?P<version>[A-Z0-9]+)\b"
+    r"(?P<letter>[A-Z])?\s*[_-]\s*(?P<version>[A-Z0-9]+)\b"
 )
+_TITLE_TERM_RE = re.compile(r"(?i)^(?:SP|SU|FA|WI|SPR|SUM|FALL|WIN)\d{2}$")
 _TITLE_VERSION_SUFFIX_RE = re.compile(
     r"(?i)\b(?:midterm|exam|quiz|final|assignment|hw|homework)\s*\d*\s*([A-Z])\b"
 )
@@ -1051,7 +1052,7 @@ def _looks_like_course_code(raw: str | None) -> bool:
     if normalized is None:
         return False
     matched_prefix = re.match(r"[A-Z]+", normalized)
-    if matched_prefix is None:
+    if matched_prefix is None or _TITLE_TERM_RE.match(raw.strip()):
         return False
     return matched_prefix.group(0).lower() not in _TITLE_ASSIGNMENT_WORDS
 
@@ -1114,8 +1115,8 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
         left, right = assignment_line.split(":", 1)
         if _find_course_match(left):
             assignment_line = right.strip()
-    elif matched_course is not None and not first_line[: matched_course.start()].strip(
-        " :-"
+    elif matched_course is not None and not _TITLE_TERM_RE.sub(
+        "", first_line[: matched_course.start()].strip(" :-")
     ):
         assignment_line = first_line[matched_course.end() :].strip(" :-")
 
@@ -1135,7 +1136,8 @@ def parse_assignment_metadata_from_title(raw_title: str) -> AssignmentTitleMetad
             if matched_compact_version is not None:
                 assignment_line = matched_compact_version.group("title")
                 assignment_version = _normalize_assignment_version(
-                    matched_compact_version.group("version")
+                    matched_compact_version.group("letter")
+                    or matched_compact_version.group("version")
                 )
             else:
                 matched_suffix_version = _TITLE_VERSION_SUFFIX_RE.search(
