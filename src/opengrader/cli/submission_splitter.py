@@ -44,7 +44,7 @@ Examples:
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --blank-template templates/blank.pdf
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder --auto-ollama
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --blank-template templates/blank.pdf --extra-work-pages --auto-ollama
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/   # no page count → detect boundaries by Name/ID header
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/   # no page count → match pages to each other, flag missing pages
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --detect-boundaries --auto-ollama --dry-run
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation --fix-order
@@ -242,6 +242,66 @@ def _resolve_auto_reorder(
     return False
 
 
+def _is_scan(pdf: Path) -> bool:
+    from opengrader.core.pages.catalog import is_scan
+
+    return is_scan(pdf)
+
+
+def _split_by_page_catalog(
+    input_pdf: Path,
+    emit: Callable[[str], None],
+    *,
+    output: Path,
+    dry_run: bool,
+    filename_prefix: str,
+    zero_pad_width: int,
+    pages_per_submission: int | None,
+    extra_work_pages: bool,
+) -> None:
+    import os
+
+    from opengrader.core.pages.catalog import CATALOG_DIRNAME, build_catalog, scan_pages
+    from opengrader.core.pages.split import plan_submissions, write_sidecar, write_split_pdf
+    from opengrader.core.submissions.splitter import write_scan_warnings
+
+    emit("Matching scanned pages to each other…")
+    catalog = build_catalog(
+        scan_pages([input_pdf]),
+        None if dry_run else output / CATALOG_DIRNAME,
+        workers=min(8, os.cpu_count() or 4),
+        emit=emit,
+    )
+    planned = plan_submissions(catalog, prefix=filename_prefix, pad=zero_pad_width,
+                               expected_count=pages_per_submission)
+    expected = catalog.expected_pages
+    if pages_per_submission and expected and len(expected) != pages_per_submission:
+        print(f"Warning: the scan shows {len(expected)} printed page(s) per submission, but "
+              f"--pages-per-submission is {pages_per_submission}; check the page count.", file=sys.stderr)
+    emit(f"Input: {input_pdf} ({len(catalog.matches)} pages, {len(expected)} printed page(s) per submission)")
+    emit(f"Planned student splits: {len(planned)}")
+    for submission in planned:
+        pages = ", ".join(str(m.page.index + 1) for m in submission.pages)
+        emit(f"  - {submission.name}: scan pages {pages}")
+        for warning in submission.warnings:
+            print(f"Warning: {submission.name}: {warning}", file=sys.stderr)
+    if dry_run:
+        emit("Dry run complete. No files written.")
+        return
+
+    output.mkdir(parents=True, exist_ok=True)
+    extra_pages: dict[str, tuple[int, ...]] = {}
+    for submission in planned:
+        pdf = write_split_pdf(submission, output / f"{submission.name}.pdf")
+        write_scan_warnings(pdf, tuple(submission.warnings))
+        write_sidecar(pdf, submission, catalog)
+        extra_pages[pdf.stem] = tuple(i for i, m in enumerate(submission.pages, start=1) if m.group is None)
+    if extra_work_pages:
+        write_extra_pages_map(output, extra_pages)
+    flagged = sum(1 for submission in planned if submission.warnings)
+    emit(f"Wrote {len(planned)} split PDFs to: {output}" + (f" ({flagged} flagged for review)" if flagged else ""))
+
+
 @click.command("submission-splitter", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
 @click.option("--input", "input_path", required=True, help="Path to scanned input PDF.")
 @click.option(
@@ -252,7 +312,9 @@ def _resolve_auto_reorder(
 @click.option(
     "--pages-per-submission",
     type=int,
-    help="Fixed number of pages per student submission.",
+    help=("Pages per student submission. For scans this checks the split (a submission of "
+          "another length is flagged); pages are still matched to decide it. For typed PDFs, "
+          "or with --detect-boundaries, it is a fixed split size."),
 )
 @click.option(
     "--start-page",
@@ -295,9 +357,12 @@ def _resolve_auto_reorder(
     "--detect-boundaries",
     is_flag=True,
     help=(
-        "Detect boundaries from printed page numbers and Name/ID headers. "
-        "Used automatically without --pages-per-submission. With this flag, "
-        "the page count or blank template checks completeness instead of fixing split sizes."
+        "Legacy boundary detection from printed page numbers and Name/ID headers read "
+        "with Tesseract. Without --pages-per-submission (and without this flag), pages "
+        "are instead matched to each other: each student starts at a copy of page 1, "
+        "pages are turned upright and put in order, and missing pages are flagged. "
+        "With this flag, the page count or blank template checks completeness instead "
+        "of fixing split sizes."
     ),
 )
 @click.option(
@@ -448,6 +513,19 @@ def command(
     from opengrader.core import egress
 
     egress.activate(Path(output))
+
+    if not detect_boundaries and (pages_per_submission is None or _is_scan(input_pdf)):
+        _split_by_page_catalog(
+            input_pdf,
+            emit,
+            output=Path(output),
+            dry_run=dry_run,
+            filename_prefix=filename_prefix,
+            zero_pad_width=zero_pad_width,
+            pages_per_submission=pages_per_submission,
+            extra_work_pages=extra_work_pages,
+        )
+        return
 
     auto_reorder = False
     if scan_check or fix_rotation or fix_order:

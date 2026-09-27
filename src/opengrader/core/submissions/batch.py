@@ -23,6 +23,7 @@ from .student_file import StudentSubmissionDocument
 from .transcription import tally_reading_sources
 
 if TYPE_CHECKING:  # pragma: no cover
+    from opengrader.core.pages.catalog import PageCatalog
     from opengrader.core.bubble_sheet import BubbleSheetLayout
     from opengrader.core.ocr import OcrConfig
     from opengrader.core.ocr.vision_reader import VisionReader
@@ -59,6 +60,7 @@ class ExtractionJob:
     bubble_shuffled: bool = False
     bubble_form_key: str | None = None
     source_sha256: str = ""
+    page_catalog: "PageCatalog | None" = None
 
     @property
     def key(self) -> str:
@@ -173,6 +175,7 @@ def _execute_job(
             skip_ollama_qa=job.skip_ollama_qa,
             save_layout_debug=job.save_layout_debug,
             blank_assignment_template=job.blank_assignment_template,
+            page_catalog=job.page_catalog,
             roster=job.roster,
             update=job.update,
             refresh_layout=job.refresh_layout,
@@ -340,6 +343,7 @@ def _execute_job_inline(
             skip_ollama_qa=job.skip_ollama_qa,
             save_layout_debug=job.save_layout_debug,
             blank_assignment_template=job.blank_assignment_template,
+            page_catalog=job.page_catalog,
             roster=job.roster,
             update=job.update,
             refresh_layout=job.refresh_layout,
@@ -394,6 +398,16 @@ def _worker_render_cache_bytes(workers: int) -> int:
 
 
 def _init_worker(render_cache_bytes: int, ai_calls_in_flight: int = 1) -> None:
+    import os
+
+    import cv2
+
+    from opengrader.core.pages.printed import limit_threads
+
+    cv2.setNumThreads(1)
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+    limit_threads(1)
+
     from opengrader.core.render_cache import configure_render_cache
 
     configure_render_cache(max_bytes=render_cache_bytes)

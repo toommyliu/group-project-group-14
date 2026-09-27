@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -94,6 +95,9 @@ from opengrader.core.history import (
     journal_payload,
     resolve_history_dir,
 )
+
+if TYPE_CHECKING:
+    from opengrader.core.pages.catalog import PageCatalog
 
 
 def _prompt_for_duplicate_name(
@@ -251,6 +255,37 @@ def _bubble_layout_fingerprint(layout) -> str:  # noqa: ANN001
         for row in layout.rows
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _resolve_page_catalog(input_path: str, pdfs: list[Path], output_dir: Path, emit: Callable[[str], None]):
+    import os
+
+    from opengrader.core.pages.catalog import CATALOG_DIRNAME, build_catalog, is_scan, load_catalog, scan_pages
+
+    scanned = [pdf for pdf in pdfs if is_scan(pdf)]
+    if not scanned:
+        return None
+    input_dir = Path(input_path) if Path(input_path).is_dir() else Path(input_path).parent
+    for directory in (input_dir / CATALOG_DIRNAME, output_dir / CATALOG_DIRNAME):
+        if (directory / "catalog.json").exists():
+            try:
+                catalog = load_catalog(directory)
+            except (OSError, ValueError, KeyError) as exc:
+                emit(f"note: ignoring page catalog at {directory}: {exc}")
+                continue
+            if all(g.reference.pdf.exists() for g in catalog.groups.values()):
+                emit(f"Using the page catalog from {directory}")
+                return catalog
+    emit(f"Matching {len(scanned)} scanned submission(s) to each other to learn the printed pages…")
+    return build_catalog(
+        scan_pages(scanned), output_dir / CATALOG_DIRNAME, workers=min(8, os.cpu_count() or 4), emit=emit
+    )
+
+
+def _catalog_fingerprint(catalog: PageCatalog | None) -> str:
+    if catalog is None or catalog.directory is None:
+        return ""
+    return file_fingerprint(catalog.directory / "catalog.json")
 
 
 def _parse_roster_arg(value: str) -> tuple[Path, str | None]:
@@ -626,12 +661,13 @@ class _Hooks:
     default=ai_default("read_handwriting"),
     show_default="from AI Setup",
     help=(
-        "With --blank-template, also transcribe each question's response "
-        "from the isolated student-ink image using the Ollama vision model "
-        "(Tesseract fallback). Without it, template mode still saves the "
-        "ink image and every detected fragment but leaves Response text "
-        "empty. Ignored for text-layer PDFs, whose typed answers are read "
-        "straight from the text layer."
+        "Also transcribe each question's response using the Ollama vision "
+        "model (Tesseract fallback), for automated grading. Without it, "
+        "scans are still cropped (with --blank-template, the ink image and "
+        "every detected fragment are saved too) and names, IDs and titles "
+        "are still read, but Response text is left empty. Ignored for "
+        "text-layer PDFs, whose typed answers are read straight from the "
+        "text layer."
     ),
 )
 @click.option(
@@ -685,9 +721,21 @@ class _Hooks:
     ),
 )
 @click.option(
-    "--save-layout-debug",
+    "--legacy-layout",
     is_flag=True,
-    help="Write detected layout JSON and overlay PNGs for each submission.",
+    help=(
+        "Detect each scan's layout on its own (the behaviour before page catalogs). "
+        "By default, scans without a text layer are matched to each other and cut "
+        "along the questions printed on them, the same way for every student."
+    ),
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    help=(
+        "Write <submission>/layout_debug/: each scanned page with every crop's "
+        "outline drawn on it, and the layout as JSON."
+    ),
 )
 @click.option(
     "--refresh-layout",
@@ -831,7 +879,8 @@ def command(
     escalate_confidence: float,
     llm_math: bool,
     math_backend: str,
-    save_layout_debug: bool,
+    legacy_layout: bool,
+    debug: bool,
     refresh_layout: bool,
     update: bool,
     requested_jobs: int | None,
@@ -1027,6 +1076,10 @@ def command(
                 "own form key."
             )
 
+
+    page_catalog = None
+    if blank_assignment_template is None and bubble_sheet_layout is None and not legacy_layout:
+        page_catalog = _resolve_page_catalog(input_path, pdfs, output_dir, print)
 
     roster: list | None = None
     default_section: str | None = section
@@ -1312,9 +1365,10 @@ def command(
             "math_backend": math_backend,
             "skip_ollama_qa": no_ollama_qa,
             "vlm_model": effective_ai.vision_model if vision_reader else "",
-            "save_layout_debug": save_layout_debug,
+            "save_layout_debug": debug,
             "update": update,
             "refresh_layout": refresh_layout,
+            "page_catalog": _catalog_fingerprint(page_catalog),
         }
     )
     ledger = read_manifest(output_dir) if resume else {}
@@ -1371,7 +1425,7 @@ def command(
                 split_subquestions=not no_split_subquestions,
                 vision_reader=vision_reader,
                 skip_ollama_qa=no_ollama_qa,
-                save_layout_debug=save_layout_debug,
+                save_layout_debug=debug,
                 blank_assignment_template=blank_assignment_template,
                 roster=roster,
                 update=performing_update,
@@ -1386,6 +1440,7 @@ def command(
                 bubble_shuffled=bubble_shuffled,
                 bubble_form_key=bubble_form,
                 source_sha256=source_sha256,
+                page_catalog=page_catalog,
             )
         )
 

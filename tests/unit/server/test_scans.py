@@ -453,3 +453,52 @@ def test_automatic_split_keeps_a_short_submission_and_preserves_its_warning(work
     assert "2 of 3 expected pages" in seen[0][0]
     assert seen[1] == ()
     assert current(client, assignment_id, batch)["status"] == "ready"
+
+
+def scanned_pdf_bytes(pages: int = 5) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw
+
+    with fitz.open() as document:
+        for index in range(pages):
+            image = Image.new("RGB", (850, 1100), "white")
+            ImageDraw.Draw(image).text((80, 80), f"Scanned page {index + 1}", fill="black")
+            buffer = BytesIO()
+            image.save(buffer, "PNG")
+            page = document.new_page()
+            page.insert_image(page.rect, stream=buffer.getvalue())
+        return document.tobytes()
+
+
+def test_automatic_split_of_a_scan_groups_by_page_matching_and_extracts_with_its_catalog(workspace, monkeypatch):
+    from opengrader.core.pages.catalog import PageCatalog
+    from opengrader.core.pages.split import ScanGroupPlan
+    from opengrader.server import scan_jobs
+
+    client, app, assignment_id, root = workspace
+    monkeypatch.setattr(scan_jobs, "plan_scan", lambda source, directory, expected_count=None: ([
+        ScanGroupPlan(((1, 0), (2, 180), (3, 0)), ()),
+        ScanGroupPlan(((4, 0), (5, 0)), ("Missing page(s) 2: this submission has 2 of 3 printed pages.",)),
+    ], 3))
+    catalog = PageCatalog(groups={}, matches=[])
+    monkeypatch.setattr(scan_jobs, "ensure_catalog", lambda source, directory: directory)
+    monkeypatch.setattr(scan_jobs, "load_catalog", lambda directory: catalog)
+    batch = upload(client, assignment_id, scanned_pdf_bytes(5))
+    url = batch_url(assignment_id, batch)
+
+    assert client.post(url + "/analyze", json={"expected_revision": batch["revision"], "mode": "automatic"}).status_code == 202
+    drain(app)
+    batch = current(client, assignment_id, batch)
+    assert [[(p["number"], p["rotation"]) for p in g["pages"]] for g in batch["groups"]] == [[(1, 0), (2, 180), (3, 0)], [(4, 0), (5, 0)]]
+    assert batch["groups"][1]["scan_warnings"] == ["Missing page(s) 2: this submission has 2 of 3 printed pages."]
+    assert batch["pages_per_submission"] == 3
+
+    catalogs = []
+    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda self, *a, assignment_version, page_catalog=None, **k: (
+        catalogs.append(page_catalog), setattr(self, "assignment_version", assignment_version))[-1])
+    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", lambda self, pdf, output, **k: fake_extract(pdf, output))
+    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
+    drain(app)
+    assert catalogs and all(c is catalog for c in catalogs)
+    assert current(client, assignment_id, batch)["status"] == "ready"

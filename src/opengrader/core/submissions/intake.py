@@ -18,8 +18,9 @@ from opengrader.core.submissions.student_file import (
 class SubmissionIntake:
     """Resolve assignment and model settings once for a batch of reviewed PDFs."""
 
-    def __init__(self, qa_file: Path, *, auto_grade: bool, assignment_version: str | None):
+    def __init__(self, qa_file: Path, *, auto_grade: bool, assignment_version: str | None, page_catalog=None):
         self.qa = parse_qa_markdown(qa_file.read_text())
+        self.page_catalog = page_catalog
         self.auto_grade = auto_grade
         self.assignment_version = assignment_version
         self.ai = app_config.resolve()
@@ -59,6 +60,7 @@ class SubmissionIntake:
                 llm_responses=self.ai.read_handwriting or self.ai.escalate_only,
                 llm_math=self.ai.transcribe_math, math_backend=self.ai.math_backend,
                 escalate_floor=DEFAULT_ESCALATION_FLOOR if self.ai.escalate_only else None,
+                page_catalog=self.page_catalog,
             )],
             workers=1,
         )
