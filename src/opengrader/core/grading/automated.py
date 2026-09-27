@@ -112,6 +112,7 @@ def grade_student_file(
     llm_generate: GenerateFn | None = None,
     llm_min_confidence: float = DEFAULT_LLM_MIN_CONFIDENCE,
     llm_model: str = "",
+    llm_provider: str = "",
     min_transcription_confidence: float = MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
     answer_cache: AnswerGradeCache | None = None,
     dry_run: bool = False,
@@ -182,7 +183,9 @@ def grade_student_file(
             elif suggestion.confidence >= llm_min_confidence:
                 points_awarded = suggestion.points_awarded
                 rubric_labels = suggestion.rubric_labels
-                analysis = format_ai_analysis(suggestion, model=llm_model)
+                analysis = format_ai_analysis(
+                    suggestion, model=llm_model, provider=llm_provider
+                )
                 ai_applied.append(
                     f"{question.question_id}: {', '.join(rubric_labels)} "
                     f"= {points_awarded:g}/{entry.points:g} "

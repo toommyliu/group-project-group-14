@@ -307,6 +307,17 @@ def _build_parser() -> ArgumentParser:
         dest="as_json",
         help="Print the report as JSON instead of prose.",
     )
+    parser.add_argument(
+        "--yes-send-to-cloud",
+        action="store_true",
+        dest="yes_send_to_cloud",
+        help=(
+            "Confirm sending this run's data to a cloud AI provider — the scale "
+            "and destination are shown first (see the pre-flight statement) and "
+            "nothing is sent without this or an interactive yes. Never implied "
+            "by --llm or any other AI toggle."
+        ),
+    )
     return parser
 
 
@@ -338,6 +349,7 @@ def _build_request(
         auto_grade=args.auto_grade,
         force=args.force,
         fresh=args.fresh,
+        send_to_cloud_confirmed=args.yes_send_to_cloud,
     )
 
 
@@ -353,6 +365,32 @@ def _print_plan(request: PipelineRequest) -> None:
     print(f"\n  cohort folder: {request.output_dir}")
 
 
+def _print_egress_summary(report: PipelineReport) -> None:
+    """What THIS run actually sent to a cloud provider — never a lifetime total.
+
+    Silent for a local-only run (egress_summary is set but total_calls is 0,
+    or the run never reached the point where a summary could be taken).
+    """
+    summary = report.egress_summary
+    if summary is None or not summary.total_calls:
+        return
+    print(f"\nSent to the cloud ({summary.total_calls} call(s)):")
+    for category, count in sorted(summary.calls_by_category.items()):
+        print(f"  {category:<16} {count}")
+    for host in sorted(summary.calls_by_host):
+        print(f"  destination: {host}")
+    if summary.calls_with_tokens:
+        print(
+            f"  tokens: {summary.total_input_tokens} in / "
+            f"{summary.total_output_tokens} out"
+        )
+    if report.egress_cost is not None:
+        print(f"  estimated cost: ${report.egress_cost:,.2f} ({report.egress_cost_basis})")
+    else:
+        basis = report.egress_cost_basis or "provider pricing not stated"
+        print(f"  estimated cost: could not be estimated ({basis})")
+
+
 def _print_summary(report: PipelineReport) -> None:
     print("\nSummary")
     for outcome in report.stages:
@@ -364,11 +402,18 @@ def _print_summary(report: PipelineReport) -> None:
     if not_reached:
         print(f"  · {'not reached':<12} {'':<8} {', '.join(not_reached)}")
 
+    _print_egress_summary(report)
+
     if report.ready_to_grade:
         print(
             f"\n{report.submission_count} submission(s) ready in "
             f"{report.submissions_dir}"
         )
+
+    if report.cloud_confirmation_needed:
+        # The pre-flight statement and how to confirm were already printed
+        # by _resolve_cloud_confirmation before this summary ran.
+        return
 
     blocked = next((o for o in report.stages if o.status is StageStatus.BLOCKED), None)
     if blocked is not None:
@@ -407,6 +452,15 @@ def _print_summary(report: PipelineReport) -> None:
             )
 
 
+def _egress_summary_to_dict(report: PipelineReport) -> dict[str, object] | None:
+    if report.egress_summary is None:
+        return None
+    body = report.egress_summary.to_dict()
+    body["estimated_cost"] = report.egress_cost
+    body["estimated_cost_basis"] = report.egress_cost_basis
+    return body
+
+
 def _report_to_dict(report: PipelineReport) -> dict[str, object]:
     return {
         "ok": report.ok,
@@ -416,6 +470,11 @@ def _report_to_dict(report: PipelineReport) -> dict[str, object]:
         "qa_file": str(report.qa_file) if report.qa_file is not None else None,
         "workspace": str(report.workspace) if report.workspace is not None else None,
         "assignment_id": report.assignment_id,
+        "cloud_confirmation_needed": report.cloud_confirmation_needed,
+        "cloud_preflight": (
+            report.cloud_preflight.to_dict() if report.cloud_preflight is not None else None
+        ),
+        "egress": _egress_summary_to_dict(report),
         "stages": [
             {
                 "stage": outcome.stage,
@@ -503,6 +562,58 @@ def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
         )
     if not args.out:
         args.out = str(found.folder)
+
+
+def _resolve_cloud_confirmation(
+    request: PipelineRequest,
+    report: PipelineReport,
+    narrator: "_Narrator",
+    args,
+) -> tuple[PipelineRequest, PipelineReport]:
+    """`report` is the refusal run_pipeline returns for an unconfirmed cloud
+    run. Show the pre-flight statement and either get a yes and re-run, or
+    refuse and leave the BLOCKED report as-is (exit_code() maps it to 2).
+
+    A TTY without --json is asked interactively; anything else (a script, a
+    redirected run, or --json for machine consumption) only gets the
+    statement and the flag that would confirm it, then refuses.
+    """
+    stream = sys.stderr if args.as_json else sys.stdout
+    preflight = report.cloud_preflight
+    statement = preflight.statement() if preflight is not None else report.stages[0].detail
+    stream.write(f"\n{statement}\n")
+
+    interactive = sys.stdin.isatty() and not args.as_json
+    if not interactive:
+        stream.write(
+            "\nRe-run with --yes-send-to-cloud to confirm, or turn off the AI "
+            "feature that needs it.\n"
+        )
+        stream.flush()
+        return request, report
+
+    stream.flush()
+    try:
+        answer = input("Send this to the cloud? [y/N]: ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer not in ("y", "yes"):
+        stream.write("Not confirmed; nothing was sent.\n")
+        stream.flush()
+        return request, report
+
+    confirmed_request = replace(request, send_to_cloud_confirmed=True)
+    new_report = _run_pipeline(confirmed_request, narrator, args)
+    return confirmed_request, new_report
+
+
+def _run_pipeline(
+    request: PipelineRequest, narrator: "_Narrator", args
+) -> PipelineReport:
+    if args.as_json:
+        with redirect_stdout(sys.stderr):
+            return run_pipeline(request, progress=narrator.as_progress())
+    return run_pipeline(request, progress=narrator.as_progress())
 
 
 def _publish_results(
@@ -691,11 +802,9 @@ def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
         parser.error(str(exc))
 
     narrator = _Narrator(stream=sys.stderr if args.as_json else sys.stdout)
-    if args.as_json:
-        with redirect_stdout(sys.stderr):
-            report = run_pipeline(request, progress=narrator.as_progress())
-    else:
-        report = run_pipeline(request, progress=narrator.as_progress())
+    report = _run_pipeline(request, narrator, args)
+    if report.cloud_confirmation_needed:
+        request, report = _resolve_cloud_confirmation(request, report, narrator, args)
 
     report = replace(report, workspace=root)
     if report.ok and report.ready_to_grade and request.qa_file is not None:

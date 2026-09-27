@@ -93,6 +93,16 @@ def _build_parser() -> ArgumentParser:
             "never touch it either way. (default: %(default)s, from AI Setup)"
         ),
     )
+    pdf_group.add_argument(
+        "--yes-send-to-cloud",
+        action="store_true",
+        dest="yes_send_to_cloud",
+        help=(
+            "Confirm sending the scanned answer key to a cloud AI provider "
+            "for --llm-read-scans. The scale and destination are shown first; "
+            "nothing is sent without this or an interactive yes."
+        ),
+    )
     return parser
 
 
@@ -144,11 +154,23 @@ def _start_ollama_server_if_needed(args, emit: Callable[[str], None]):
     return proc, log_file
 
 
+def _answer_key_pages_phrase(path: Path) -> str:
+    try:
+        from pypdf import PdfReader
+
+        pages = len(PdfReader(str(path)).pages)
+    except Exception:  # noqa: BLE001 - the wording falls back, the send is still stated
+        return "the answer key"
+    return f"the {pages}-page answer key"
+
+
 def _qa_from_pdf(
     input_path: Path,
     args,
     emit: Callable[[str], None],
     progress: "Callable[[int, int], None] | None" = None,
+    *,
+    prompt_cloud_send: bool = True,
 ) -> str:
     from opengrader.core.qa_file.pdf_answer_key import extract_qa_markdown_from_pdf
 
@@ -182,9 +204,42 @@ def _qa_from_pdf(
                 or args.ollama_model != resolved_default.vision_model
                 or args.ollama_host != resolved_default.host
             ):
-                vision_reader = app_config.vision_reader(resolved)
+                if resolved.kind == "cloud":
+                    from opengrader.core.cloud_preflight import (
+                        CloudPreflight,
+                        cli_confirm_cloud_send,
+                    )
+
+                    cli_confirm_cloud_send(
+                        resolved,
+                        CloudPreflight(
+                            provider_label=resolved.provider.label,
+                            host=resolved.host,
+                            # Up to one image per question the reader finds
+                            # (only where OCR reads it badly), and the
+                            # questions are only found while the key is read
+                            # — so no number is claimed.
+                            uncounted={
+                                "answer-image": (
+                                    "up to one image per question found in "
+                                    + _answer_key_pages_phrase(input_path)
+                                )
+                            },
+                        ),
+                        yes_send_to_cloud=args.yes_send_to_cloud,
+                        emit=emit,
+                        interactive=prompt_cloud_send,
+                    )
                 try:
+                    vision_reader = app_config.vision_reader(resolved)
                     app_config.ensure_ready(resolved, purpose="vision")
+                except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
+                    emit(f"Error: {exc}")
+                    emit(
+                        f"Fix: run 'opengrader providers consent {resolved.provider.name}' "
+                        "(or open AI Setup), then retry."
+                    )
+                    sys.exit(2)
                 except Exception as exc:
                     emit(f"Warning: Ollama vision model unavailable ({exc}); using Tesseract only.")
                     vision_reader = None
@@ -210,7 +265,10 @@ def run_cli(
     *,
     status_callback: "Callable[[str], None] | None" = None,
     progress_callback: "Callable[[int, int], None] | None" = None,
+    prompt_cloud_send: bool = True,
 ) -> None:
+    # prompt_cloud_send=False: a caller that owns the terminal (the TUI) gets
+    # CloudConfirmationNeeded instead of an input() prompt; see cli_confirm_cloud_send.
     def emit(message: str) -> None:
         if status_callback is not None:
             status_callback(message)
@@ -225,6 +283,12 @@ def run_cli(
         print(f"error: input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
+    # Scoped to this process; the answer key has no submissions folder of its
+    # own, so a cloud call here is recorded next to where the key is written.
+    from opengrader.core import egress
+
+    egress.activate(Path(args.output).parent)
+
     suffix = input_path.suffix.lower()
     try:
         if suffix in _TEXT_SUFFIXES:
@@ -232,7 +296,10 @@ def run_cli(
         elif suffix == ".docx":
             qa_markdown = _qa_from_text(_read_docx_text(input_path), args)
         elif suffix == ".pdf":
-            qa_markdown = _qa_from_pdf(input_path, args, emit, progress_callback)
+            qa_markdown = _qa_from_pdf(
+                input_path, args, emit, progress_callback,
+                prompt_cloud_send=prompt_cloud_send,
+            )
         else:
             print(
                 f"error: unsupported input type '{suffix or input_path.name}'. "

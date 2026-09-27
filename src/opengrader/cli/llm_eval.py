@@ -573,6 +573,16 @@ def _build_parser() -> ArgumentParser:
         action="store_true",
         help="Do not print per-answer progress to stderr.",
     )
+    parser.add_argument(
+        "--yes-send-to-cloud",
+        action="store_true",
+        dest="yes_send_to_cloud",
+        help=(
+            "Confirm sending these already-graded answers to a cloud AI "
+            "provider for evaluation. The scale and destination are shown "
+            "first; nothing is sent without this or an interactive yes."
+        ),
+    )
     return parser
 
 
@@ -630,7 +640,16 @@ def _default_generate_factory(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        app_config.ensure_ready(resolved, purpose="text")
+        try:
+            app_config.ensure_ready(resolved, purpose="text")
+        except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            print(
+                f"Fix: run 'opengrader providers consent {resolved.provider.name}' "
+                "(or open AI Setup), then retry.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         return app_config.text_generate(resolved, response_format=GRADE_SUGGESTION_SCHEMA)
 
     return factory
@@ -690,11 +709,35 @@ def run_cli(
             print_report(report)
         sys.exit(1)
 
+    from opengrader.core import egress
+
+    # Scoped to this process; recorded next to the first input folder given.
+    egress.activate(roots[0])
+
+    calls = len(targets) * len(models)
+
+    if generate_factory is None:
+        probe = app_config.with_overrides(
+            host=args.llm_host, text_model=models[0], timeout_seconds=args.llm_timeout
+        )
+        if probe.kind == "cloud":
+            from opengrader.core.cloud_preflight import CloudPreflight, cli_confirm_cloud_send
+
+            cli_confirm_cloud_send(
+                probe,
+                CloudPreflight(
+                    provider_label=probe.provider.label,
+                    host=probe.host,
+                    counts={"graded-text": calls} if calls else {},
+                    students=len(targets),
+                ),
+                yes_send_to_cloud=args.yes_send_to_cloud,
+                emit=lambda message: print(message, file=sys.stderr),
+            )
+
     factory = generate_factory or _default_generate_factory(
         args.llm_host, args.llm_timeout, auto_ollama=args.auto_ollama
     )
-
-    calls = len(targets) * len(models)
     print(
         f"Evaluating {len(models)} model(s) over {len(targets)} human-graded "
         f"answer(s) — {calls} model call(s). This takes a while.",

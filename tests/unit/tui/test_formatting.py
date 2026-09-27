@@ -323,3 +323,21 @@ def test_page_context_label_distinguishes_source_and_extra_pages() -> None:
     )
     assert "extra work page" in extra.plain
     assert "(3/3)" in extra.plain
+
+
+def test_confidence_chip_names_the_provider_that_read_the_answer() -> None:
+    chip = format_confidence_chip(88.0, has_response=True, provider="Claude")
+    assert chip is not None
+    assert chip.plain.endswith("88% · read by Claude")
+
+    chip = format_confidence_chip(None, has_response=True, provider="Claude")
+    assert chip is not None
+    assert "unverified · read by Claude" in chip.plain
+
+
+def test_confidence_chip_without_a_recorded_provider_is_unchanged() -> None:
+    for provider in (None, "", "  "):
+        chip = format_confidence_chip(88.0, has_response=True, provider=provider)
+        assert chip is not None
+        assert chip.plain == "OCR confidence: 88%"
+    assert format_confidence_chip(None, has_response=False, provider="Claude") is None

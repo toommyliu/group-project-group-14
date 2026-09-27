@@ -16,10 +16,36 @@ from opengrader.core.submissions.transcription import (
     SOURCE_VISION_MODEL,
     ReadingTally,
     describe_reading_source,
+    format_reading_source,
     is_model_reading,
+    parse_reading_source,
     should_escalate,
     tally_reading_sources,
 )
+
+
+def test_format_reading_source_appends_the_provider_in_parens():
+    assert format_reading_source(SOURCE_VISION_MODEL, "openai") == "vision-model (openai)"
+
+
+def test_format_reading_source_with_no_provider_is_unchanged():
+    assert format_reading_source(SOURCE_VISION_MODEL, None) == SOURCE_VISION_MODEL
+    assert format_reading_source(SOURCE_VISION_MODEL, "") == SOURCE_VISION_MODEL
+
+
+def test_format_reading_source_with_no_source_is_blank_either_way():
+    assert format_reading_source(None) == ""
+    assert format_reading_source(None, "openai") == ""
+
+
+def test_parse_reading_source_splits_the_suffix():
+    assert parse_reading_source("vision-model (openai)") == (SOURCE_VISION_MODEL, "openai")
+
+
+def test_parse_reading_source_without_a_suffix_is_an_old_file():
+    assert parse_reading_source(SOURCE_TESSERACT) == (SOURCE_TESSERACT, None)
+    assert parse_reading_source(None) == (None, None)
+    assert parse_reading_source("") == (None, None)
 
 
 def test_a_confident_reading_is_left_alone():
@@ -133,6 +159,47 @@ def test_an_unknown_source_survives_a_round_trip():
     assert parse_student_submission_markdown(rendered).questions[0].response_source == (
         "future-reader"
     )
+
+
+def test_the_provider_rides_the_read_by_line_as_a_suffix():
+    rendered = render_student_submission_markdown(
+        _document(response_source=SOURCE_VISION_MODEL, response_provider="openai")
+    )
+
+    assert "  - Read by: vision-model (openai)" in rendered
+    parsed = parse_student_submission_markdown(rendered)
+    assert parsed.questions[0].response_source == SOURCE_VISION_MODEL
+    assert parsed.questions[0].response_provider == "openai"
+    assert render_student_submission_markdown(parsed) == rendered
+
+
+def test_a_source_with_no_provider_stays_byte_identical():
+    """The common case (Tesseract, a human edit, an old vision reading with no
+    provider on record) must render and round-trip exactly as it did before
+    providers existed.
+    """
+    rendered = render_student_submission_markdown(
+        _document(response_source=SOURCE_TESSERACT, response_confidence=42.0)
+    )
+
+    assert "(" not in rendered.splitlines()[
+        next(i for i, line in enumerate(rendered.splitlines()) if "Read by" in line)
+    ]
+    parsed = parse_student_submission_markdown(rendered)
+    assert parsed.questions[0].response_provider is None
+    assert render_student_submission_markdown(parsed) == rendered
+
+
+def test_an_old_file_written_before_providers_existed_parses_cleanly():
+    """A hand-authored `Read by` line with no parenthetical, exactly what every
+    file written before this feature looks like.
+    """
+    rendered = render_student_submission_markdown(_document(response_source=SOURCE_HUMAN))
+    assert "Read by: human" in rendered
+
+    parsed = parse_student_submission_markdown(rendered)
+    assert parsed.questions[0].response_source == SOURCE_HUMAN
+    assert parsed.questions[0].response_provider is None
 
 
 def test_the_source_line_sits_above_its_confidence():

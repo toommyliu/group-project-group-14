@@ -264,9 +264,18 @@ def _verified_vision_reader(args, emit: "Callable[[str], None]") -> "VisionReade
         vision_model=args.ollama_model,
         timeout_seconds=args.ollama_timeout,
     )
-    reader = app_config.vision_reader(resolved)
     try:
+        reader = app_config.vision_reader(resolved)
         app_config.ensure_ready(resolved, purpose="vision")
+    except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        print(
+            f"Fix: run 'opengrader providers consent {resolved.provider.name}' "
+            "(or open AI Setup), then retry — or pass --no-llm-page-numbers to "
+            "skip this fallback tier.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     except Exception as exc:
         emit(f"Ollama vision fallback unavailable ({exc}); using Tesseract only.")
         return None
@@ -415,6 +424,13 @@ def run_cli(
     if total_pages <= 0:
         raise ValueError(f"input PDF has no pages: {input_pdf}")
 
+    # Scoped to this process; when run_cli is invoked in-process by the
+    # pipeline, args.output is the split/ folder under the same cohort the
+    # pipeline itself is already recording into.
+    from opengrader.core import egress
+
+    egress.activate(Path(args.output))
+
     auto_reorder = False
     if args.scan_check or args.fix_rotation or args.fix_order:
         input_pdf, auto_reorder = _run_scan_preflight(args, input_pdf, emit)
@@ -438,14 +454,22 @@ def run_cli(
     ollama_server_proc = None
     ollama_log_file = None
     try:
-        if args.auto_ollama and may_use_vlm:
-            provider_kind = app_config.with_overrides(
+        if may_use_vlm:
+            resolved_for_reorder = app_config.with_overrides(
                 host=args.ollama_host,
                 vision_model=args.ollama_model,
                 timeout_seconds=args.ollama_timeout,
-            ).provider.kind
-            if provider_kind == "local":
+            )
+            if args.auto_ollama and resolved_for_reorder.provider.kind == "local":
                 ollama_server_proc, ollama_log_file = _start_ollama_server(args, emit)
+            # No cloud pre-flight here: every vision call the splitter makes
+            # (page-number footers and Name/ID headers, used only to detect
+            # boundaries and reorder pages) is a whole-page read, and
+            # GuardedVisionReader (core/ocr/vision_reader.py) always redirects
+            # those to a local reader instead of a cloud host. A splitter run
+            # never sends anything to the cloud, so there is nothing to
+            # confirm — see _verified_vision_reader below, which still exits
+            # 2 if a cloud provider is selected without consent.
         vision_reader = _verified_vision_reader(args, emit) if may_use_vlm else None
 
         boundary_warnings: list[str] = []

@@ -415,13 +415,21 @@ _CONFIDENCE_HIGH = 80.0
 _CONFIDENCE_LOW = 60.0
 
 
-def format_confidence_chip(confidence: float | None, *, has_response: bool) -> Text | None:
+def format_confidence_chip(
+    confidence: float | None,
+    *,
+    has_response: bool,
+    provider: str | None = None,
+) -> Text | None:
+    # `provider` is the service recorded on the answer's `Read by` line — who
+    # read *this* answer, not whichever provider AI setup names today.
     if confidence is None:
         if not has_response:
             return None
         text = Text(no_wrap=True, overflow="ellipsis")
         text.append("Transcription: ", style="dim")
         text.append("AI · unverified", style="dim italic")
+        _append_provider(text, provider)
         return text
 
     if confidence >= _CONFIDENCE_HIGH:
@@ -436,7 +444,13 @@ def format_confidence_chip(confidence: float | None, *, has_response: bool) -> T
     text = Text(no_wrap=True, overflow="ellipsis")
     text.append("OCR confidence: ", style="dim")
     text.append(f"{confidence:.0f}%{suffix}", style=style)
+    _append_provider(text, provider)
     return text
+
+
+def _append_provider(text: Text, provider: str | None) -> None:
+    if provider and provider.strip():
+        text.append(f" · read by {provider.strip()}", style="dim")
 
 
 def format_page_context_label(

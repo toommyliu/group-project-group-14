@@ -422,6 +422,7 @@ class GradeController:
             response_text=previous_text,
             response_confidence=current_question.response_confidence,
             response_source=current_question.response_source,
+            response_provider=current_question.response_provider,
         )
         self._state.grading_run.update_response_text(response_text)
         error = self._persist_current_transcription(response_text)
@@ -1626,6 +1627,7 @@ class GradeController:
                     response_text=revert.response_text or "",
                     response_confidence=revert.response_confidence,
                     response_source=revert.response_source,
+                    response_provider=revert.response_provider,
                 )
             except Exception as exc:
                 return f"Could not undo transcription: {exc}"
@@ -2304,6 +2306,7 @@ class GradeController:
                 question_type=seed.question_type,
                 response_confidence=seed.response_confidence,
                 response_source=seed.response_source,
+                response_provider=seed.response_provider,
                 source_pdf_path=seed.source_pdf_path,
                 page_context=seed.page_context,
             )

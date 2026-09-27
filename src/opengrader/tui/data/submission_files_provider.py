@@ -285,6 +285,9 @@ class SubmissionFilesProvider:
                     response_source=(
                         response.response_source if response is not None else None
                     ),
+                    response_provider=(
+                        response.response_provider if response is not None else None
+                    ),
                     source_pdf_path=str(source_pdf_path) if has_source_pdf else "",
                     page_context=page_context,
                 )
@@ -379,6 +382,7 @@ class SubmissionFilesProvider:
         response_text: str,
         response_confidence: float | None = 100.0,
         response_source: str | None = SOURCE_HUMAN,
+        response_provider: str | None = None,
     ) -> None:
         with self._edit_submission(student_item_id) as grading:
             grading.save_transcription(
@@ -386,6 +390,7 @@ class SubmissionFilesProvider:
                 response_text=response_text,
                 response_confidence=response_confidence,
                 response_source=response_source,
+                response_provider=response_provider,
             )
 
     def save_question_comment_annotation(

@@ -435,12 +435,12 @@ def test_successful_blank_reading_does_not_transcribe_printed_question(monkeypat
         tmp_path / "q1.png", question_id="q1", vision_reader=BlankReader(),
         progress_callback=lambda message: None,
     )
-    assert reading == ("", None, "vision-model")
+    assert reading == ("", None, "vision-model", None)
     escalated = processor._transcribe_crop(
         tmp_path / "q1.png", question_id="q1", vision_reader=BlankReader(),
         progress_callback=lambda message: None, escalate_floor=99,
     )
-    assert escalated == ("", None, "vision-model")
+    assert escalated == ("", None, "vision-model", None)
 
 
 def test_empty_layout_is_a_failed_extraction_not_an_empty_submission(monkeypatch, tmp_path):

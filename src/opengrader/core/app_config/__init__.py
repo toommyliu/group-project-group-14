@@ -1,16 +1,62 @@
+"""Which AI provider Opengrader talks to, and on what terms — the provider seam.
+
+Settings resolve flag > env > file > default, with ONE deliberate exception:
+the kill switch `OPENGRADER_AI_ALLOW_CLOUD` (see `consent.py`) is the only
+place the environment *forbids* rather than overrides, so that a department
+can set it machine-wide without a per-user `config.json` defeating it.
+
+Safeguards live here structurally, not in the screens:
+
+* A cloud provider (kind derived from the ACTUAL request host) cannot produce a
+  vision reader or a text generator without a matching cloud consent
+  (`CloudConsentRequired`). There is no path to a saved cloud provider that
+  does not pass through consent.
+* Every reader `vision_reader()` hands out is wrapped in
+  `ocr.vision_reader.GuardedVisionReader`, which never sends a student's name
+  or ID to a cloud host — for a cloud provider those reads are redirected to
+  a local Ollama reader instead — and writes one egress line per cloud call
+  that is not an identity read.
+* `credential_command` runs only after its own consent.
+
+No client or SDK is imported at module scope: this module is imported at TUI
+startup and by every CLI parser (tests/unit/tui/test_startup_imports.py).
+API keys are read from the environment (or a consented credential command)
+and never persisted.
+"""
+
 from __future__ import annotations
 
 import json
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from . import consent as consent  # stdlib-only; re-exported as app_config.consent
+from .consent import (
+    ALLOW_CLOUD_ENV,
+    ConsentRecord,
+    cloud_allowed,
+)
+
 __all__ = [
     "AISettings",
     "AIUnavailableError",
+    "CloudConsentRequired",
+    "CloudDisabledError",
+    "IdentityFieldBlocked",
+    "ConsentRecord",
+    "ALLOW_CLOUD_ENV",
+    "cloud_allowed",
+    "clear_credential_cache",
+    "consent",
+    "egress_statement",
+    "data_flow_report",
+    "GuardedGenerate",
+    "CREDENTIAL_COMMAND_TIMEOUT_SECONDS",
     "ProviderSpec",
     "ProviderPricing",
     "ResolvedAI",
@@ -129,7 +175,8 @@ class ProviderSpec:
     source: Literal["builtin", "user"] = "builtin"
     manifest_path: str = ""
     pricing: ProviderPricing | None = None
-    # Parsed from manifests but never executed.
+    # Executed by resolve_api_key only after the user has approved this
+    # exact command (credential consent), and only when api_key_env is unset.
     credential_command: tuple[str, ...] = ()
 
     @property
@@ -140,13 +187,27 @@ class ProviderSpec:
     def sends_data_off_machine(self) -> bool:
         return self.kind != "local"
 
-    @property
-    def allows_identity_fields(self) -> bool:
-        return self.kind == "local"
-
 
 class AIUnavailableError(RuntimeError):
     """The selected provider failed its readiness check."""
+
+
+class CloudConsentRequired(AIUnavailableError):
+    """A cloud provider was asked for a client without a matching cloud consent."""
+
+
+class CloudDisabledError(AIUnavailableError):
+    """`OPENGRADER_AI_ALLOW_CLOUD=0` forbids the cloud provider that was asked for."""
+
+
+def __getattr__(name: str) -> Any:
+    # IdentityFieldBlocked lives with the guard that raises it; resolve lazily
+    # so importing app_config never imports the OCR package.
+    if name == "IdentityFieldBlocked":
+        from opengrader.core.ocr.vision_reader import IdentityFieldBlocked
+
+        return IdentityFieldBlocked
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _ollama_text_config(resolved: "ResolvedAI") -> Any:
@@ -275,9 +336,16 @@ def register_provider(spec: ProviderSpec) -> None:
 
 
 def _ensure_manifests_loaded() -> None:
-    """Load manifests on first use; invalid files do not prevent startup."""
+    """Load manifests on first use; invalid files do not prevent startup.
+
+    While `OPENGRADER_AI_ALLOW_CLOUD` forbids cloud providers, user
+    manifests are not read at all — and the "loaded" flag is left unset, so
+    that lifting the switch later loads them then.
+    """
     global _manifests_loaded, _manifest_problems
     if _manifests_loaded:
+        return
+    if not cloud_allowed():
         return
     _manifests_loaded = True
     try:
@@ -300,6 +368,17 @@ def _ensure_manifests_loaded() -> None:
     _manifest_problems = (*problems, *skipped)
 
 
+def _selectable(spec: ProviderSpec, environ: dict[str, str] | None = None) -> bool:
+    """With cloud forbidden, only built-in local providers can be chosen.
+
+    Checked on every lookup, not only at load time, because the environment
+    can change after the first load and the manifest cache must not defeat it.
+    """
+    if cloud_allowed(environ):
+        return True
+    return spec.source == "builtin" and spec.kind == "local"
+
+
 def reload_manifests() -> tuple[str, ...]:
     global _manifests_loaded, _manifest_problems
     for name, spec in list(_REGISTRY.items()):
@@ -313,6 +392,8 @@ def reload_manifests() -> tuple[str, ...]:
 
 def manifest_problems() -> tuple[str, ...]:
     _ensure_manifests_loaded()
+    if not cloud_allowed():
+        return ()
     return _manifest_problems
 
 
@@ -326,14 +407,20 @@ def dialect_names() -> tuple[str, ...]:
     return DIALECT_NAMES
 
 
-def registered_providers() -> tuple[ProviderSpec, ...]:
+def registered_providers(
+    *, environ: dict[str, str] | None = None
+) -> tuple[ProviderSpec, ...]:
+    """Selectable providers, Ollama first. Filtered by the cloud kill switch."""
     _ensure_manifests_loaded()
-    return tuple(_REGISTRY.values())
+    return tuple(spec for spec in _REGISTRY.values() if _selectable(spec, environ))
 
 
-def get_provider(name: str) -> ProviderSpec:
+def get_provider(name: str, *, environ: dict[str, str] | None = None) -> ProviderSpec:
     _ensure_manifests_loaded()
-    return _REGISTRY.get(name.strip()) or _REGISTRY[DEFAULT_PROVIDER]
+    spec = _REGISTRY.get(name.strip())
+    if spec is not None and _selectable(spec, environ):
+        return spec
+    return _REGISTRY[DEFAULT_PROVIDER]
 
 
 @dataclass(frozen=True)
@@ -347,12 +434,26 @@ class AISettings:
     min_confidence: float | None = None
     auto_start: bool = True
     read_handwriting: bool = False
-    escalate_only: bool = False
+    # None = never chosen: resolve() turns it ON for a cloud host (the largest
+    # single cost reduction) and OFF for a local one. An explicit
+    # True/False always wins.
+    escalate_only: bool | None = None
     transcribe_math: bool = False
     grade_written: bool = False
     auto_grade: bool = True
     require_calibration: bool = False
     min_confidence_measured: bool = False
+    # Whether a LOCAL AI model may read a student's name or ID off a crop.
+    # True (the default, so a fresh install behaves exactly as before this
+    # setting existed) means a local model is tried before falling back to
+    # Tesseract; False means those crops go straight to Tesseract (and, if
+    # that fails, to the review queue) without any model ever seeing them.
+    # This is about a LOCAL model only — a cloud model never reads a name or
+    # ID regardless of this setting; see GuardedVisionReader.
+    read_identity_locally: bool = True
+    # Consent acknowledgements (cloud, credential). Never secret; managed
+    # through app_config.consent's grant_*/revoke_* functions.
+    consents: tuple[ConsentRecord, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         blank = AISettings()
@@ -376,10 +477,13 @@ class AISettings:
             "auto_grade",
             "require_calibration",
             "min_confidence_measured",
+            "read_identity_locally",
         ):
             value = getattr(self, name)
             if value != getattr(blank, name):
                 body[name] = value
+        if self.consents:
+            body["consents"] = [record.to_dict() for record in self.consents]
         return body
 
     @classmethod
@@ -396,7 +500,7 @@ class AISettings:
             min_confidence=_as_unit_float(data.get("min_confidence")),
             auto_start=_as_bool(data.get("auto_start"), True),
             read_handwriting=_as_bool(data.get("read_handwriting"), False),
-            escalate_only=_as_bool(data.get("escalate_only"), False),
+            escalate_only=_as_optional_bool(data.get("escalate_only")),
             transcribe_math=_as_bool(data.get("transcribe_math"), False),
             grade_written=_as_bool(data.get("grade_written"), False),
             auto_grade=_as_bool(data.get("auto_grade"), True),
@@ -404,6 +508,8 @@ class AISettings:
             min_confidence_measured=_as_bool(
                 data.get("min_confidence_measured"), False
             ),
+            read_identity_locally=_as_bool(data.get("read_identity_locally"), True),
+            consents=_as_consents(data.get("consents")),
         )
 
 
@@ -442,6 +548,26 @@ def _as_bool(value: Any, fallback: bool) -> bool:
         if lowered in {"0", "false", "no", "off"}:
             return False
     return fallback
+
+
+def _as_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
+def _as_consents(value: Any) -> tuple[ConsentRecord, ...]:
+    """Malformed entries are dropped: a broken record costs a consent, never a launch."""
+    if not isinstance(value, list):
+        return ()
+    parsed = (ConsentRecord.from_dict(item) for item in value)
+    return tuple(record for record in parsed if record is not None)
 
 
 def _config_dir() -> Path:
@@ -511,14 +637,27 @@ class ResolvedAI:
     timeout_seconds: float
     min_confidence: float
     auto_start: bool
-    api_key: str | None
+    # Kept out of repr: a ResolvedAI printed in a message or a log must not
+    # carry the key with it.
+    api_key: str | None = field(repr=False)
     read_handwriting: bool
     escalate_only: bool
     transcribe_math: bool
     grade_written: bool
     auto_grade: bool
     require_calibration: bool
+    read_identity_locally: bool
     settings: AISettings = field(repr=False, default_factory=AISettings)
+    # True for `for_provider()` resolutions: a probe may send the fixed
+    # connection-test prompt without cloud consent (it carries no student
+    # data) and nothing else. Never exempts a vision reader.
+    probe: bool = False
+    # The kill switch as seen by the `environ` resolve() was given. The live
+    # process environment is consulted as well by every property below.
+    cloud_forbidden: bool = False
+    # Things resolve()/with_overrides() refused to do (e.g. a cloud host
+    # override under the cloud kill switch); surfaced by problems().
+    refusals: tuple[str, ...] = ()
 
     @property
     def kind(self) -> Literal["local", "cloud"]:
@@ -530,8 +669,28 @@ class ResolvedAI:
         return self.kind != "local"
 
     @property
-    def allows_identity_fields(self) -> bool:
-        return self.kind == "local"
+    def cloud_allowed(self) -> bool:
+        """False while `OPENGRADER_AI_ALLOW_CLOUD` forbids cloud providers."""
+        return not self.cloud_forbidden and cloud_allowed()
+
+    @property
+    def cloud_consent_given(self) -> bool:
+        """True for a local host, or a cloud host with a matching, current consent."""
+        if self.kind == "local":
+            return True
+        return self.cloud_allowed and consent.has_cloud_consent(self.settings, self)
+
+    @property
+    def cloud_consent_required(self) -> bool:
+        """A cloud host with no matching consent: the TUI must show its consent modal."""
+        return self.kind == "cloud" and not self.cloud_consent_given
+
+    @property
+    def credential_consent_required(self) -> bool:
+        """The provider names a credential_command the user has not approved."""
+        return bool(self.provider.credential_command) and not consent.has_credential_consent(
+            self.settings, self.provider
+        )
 
     @property
     def uses_ai(self) -> bool:
@@ -541,12 +700,31 @@ class ResolvedAI:
         found: list[str] = list(manifest_problems())
         chosen = self.settings.provider.strip()
         if chosen and chosen != self.provider.name:
-            known = ", ".join(spec.name for spec in registered_providers())
-            found.append(
-                f"Unknown AI provider {chosen!r} — falling back to "
-                f"{self.provider.name!r}. Known providers: {known}."
-            )
-        if self.provider.requires_api_key and not self.api_key:
+            if not self.cloud_allowed:
+                found.append(
+                    f"{ALLOW_CLOUD_ENV}=0 is set on this machine, so cloud and "
+                    f"user-added AI providers are turned off: {chosen!r} is not "
+                    f"available and {self.provider.name!r} is used instead."
+                )
+            else:
+                known = ", ".join(spec.name for spec in registered_providers())
+                found.append(
+                    f"Unknown AI provider {chosen!r} — falling back to "
+                    f"{self.provider.name!r}. Known providers: {known}."
+                )
+        found.extend(self.refusals)
+        if self.kind == "cloud" and not self.cloud_allowed:
+            found.append(_cloud_disabled_message(self))
+        elif self.cloud_consent_required:
+            found.append(_consent_required_message(self))
+        credential_problem = _credential_problem(self)
+        if credential_problem:
+            found.append(credential_problem)
+        if (
+            self.provider.requires_api_key
+            and not self.api_key
+            and not credential_problem
+        ):
             found.append(
                 f"{self.provider.label} needs an API key. Set the "
                 f"{self.provider.api_key_env} environment variable, then "
@@ -567,25 +745,173 @@ class ResolvedAI:
         return tuple(found)
 
 
-def resolve_api_key(
-    provider: ProviderSpec,
-    *,
-    environ: dict[str, str] | None = None,
-) -> str | None:
-    """Read a provider key from the environment and register it for redaction."""
-    if not provider.api_key_env:
-        return None
-    env = os.environ if environ is None else environ
-    value = env.get(provider.api_key_env, "").strip()
-    if not value:
-        return None
+def _consent_required_message(resolved: ResolvedAI) -> str:
+    status = consent.consent_status(resolved.settings, resolved, "cloud")
+    reason = {
+        "changed": (
+            "its host, wire format, key variable or credential command changed "
+            "since you agreed to send student work to it"
+        ),
+        "outdated": "the consent wording changed since you agreed to send student work to it",
+    }.get(status, "you have not agreed to send student work to it")
+    return (
+        f"{resolved.provider.label} is a cloud service at "
+        f"{consent.hostname_of(resolved.host)}, and {reason}. Nothing has been "
+        "sent. Confirm it in Helper Tools → AI setup, or choose a local provider."
+    )
+
+
+def _cloud_disabled_message(resolved: ResolvedAI) -> str:
+    return (
+        f"{ALLOW_CLOUD_ENV}=0 is set on this machine, so cloud AI providers are "
+        f"turned off: {resolved.provider.label} at "
+        f"{consent.hostname_of(resolved.host)} cannot be used. Choose a local "
+        "provider, or ask whoever manages this computer."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credentials
+# ---------------------------------------------------------------------------
+
+CREDENTIAL_COMMAND_TIMEOUT_SECONDS = 15.0
+
+# argv -> (key or None, redacted error). Per process: a credential command
+# runs at most once per session, and a failure is not retried on every
+# resolve() (a TUI resolves often) until clear_credential_cache().
+_CREDENTIAL_CACHE: dict[tuple[str, ...], tuple[str | None, str]] = {}
+_CREDENTIAL_LOCK = threading.Lock()
+
+
+def clear_credential_cache() -> None:
+    """Forget credential-command results, so the next resolve runs them again."""
+    with _CREDENTIAL_LOCK:
+        _CREDENTIAL_CACHE.clear()
+
+
+def _redact(text: str) -> str:
+    try:
+        from opengrader.core.llm.transport import redact
+
+        return redact(text)
+    except Exception:  # noqa: BLE001 - never let redaction failure leak the text
+        return "[details withheld]"
+
+
+def _register_secret(value: str) -> None:
     try:
         from opengrader.core.llm.transport import register_secret
 
         register_secret(value)
     except Exception:  # noqa: BLE001 - redaction is a safety net, not a gate
         pass
+
+
+def _run_credential_command(provider: ProviderSpec) -> str | None:
+    """Run a consented credential_command: no shell, short timeout, stdout stripped."""
+    argv = tuple(provider.credential_command)
+    with _CREDENTIAL_LOCK:
+        cached = _CREDENTIAL_CACHE.get(argv)
+    if cached is not None:
+        return cached[0]
+
+    import subprocess
+
+    where = f"{provider.label}'s credential_command"
+    value: str | None = None
+    error = ""
+    try:
+        proc = subprocess.run(
+            list(argv),
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=CREDENTIAL_COMMAND_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except FileNotFoundError:
+        error = f"{where} could not start: {argv[0]!r} was not found."
+    except subprocess.TimeoutExpired:
+        error = (
+            f"{where} did not finish within {CREDENTIAL_COMMAND_TIMEOUT_SECONDS:g} s."
+        )
+    except (OSError, ValueError) as exc:
+        error = f"{where} could not start: {exc}"
+    else:
+        output = (proc.stdout or "").strip()
+        if output:
+            _register_secret(output)
+        if proc.returncode != 0:
+            # Redacted before it is cut short: a cut key would no longer match
+            # the registered secret, and its first half would survive.
+            detail = _redact((proc.stderr or "").strip()).splitlines()
+            error = f"{where} exited with status {proc.returncode}" + (
+                f": {detail[0][:200]}" if detail else "."
+            )
+        elif not output:
+            error = f"{where} printed nothing, so there is no key to use."
+        else:
+            value = output
+    entry = (value, _redact(error) if error else "")
+    with _CREDENTIAL_LOCK:
+        _CREDENTIAL_CACHE[argv] = entry
     return value
+
+
+def _credential_problem(resolved: ResolvedAI) -> str:
+    provider = resolved.provider
+    if not provider.credential_command or resolved.api_key:
+        return ""
+    if provider.api_key_env and os.environ.get(provider.api_key_env, "").strip():
+        return ""
+    if not consent.has_credential_consent(resolved.settings, provider):
+        return (
+            f"{provider.label} fetches its API key by running a command "
+            "(credential_command), which will not run until you approve the exact "
+            "command in Helper Tools → AI providers"
+            + (
+                f", or set {provider.api_key_env} instead."
+                if provider.api_key_env
+                else "."
+            )
+        )
+    with _CREDENTIAL_LOCK:
+        cached = _CREDENTIAL_CACHE.get(tuple(provider.credential_command))
+    if cached is not None and cached[1]:
+        return cached[1]
+    return ""
+
+
+def resolve_api_key(
+    provider: ProviderSpec,
+    *,
+    environ: dict[str, str] | None = None,
+    settings: AISettings | None = None,
+) -> str | None:
+    """The provider's key, registered for redaction. Never read from or written to disk.
+
+    Order: the `api_key_env` variable if set and non-blank; otherwise the
+    provider's `credential_command`, but ONLY when `settings` holds a
+    credential consent for exactly that argv, and the cloud kill switch does
+    not forbid the provider. Without `settings`, no command ever runs. A failed
+    command returns None and is reported, redacted, by `ResolvedAI.problems()`
+    — never raised.
+    """
+    env = os.environ if environ is None else environ
+    if provider.api_key_env:
+        value = env.get(provider.api_key_env, "").strip()
+        if value:
+            _register_secret(value)
+            return value
+    if (
+        provider.credential_command
+        and settings is not None
+        and _selectable(provider, environ)
+        and consent.has_credential_consent(settings, provider)
+    ):
+        return _run_credential_command(provider)
+    return None
 
 
 def resolve(
@@ -596,9 +922,24 @@ def resolve(
 ) -> ResolvedAI:
     env = os.environ if environ is None else environ
     base = settings if settings is not None else load_settings(path)
+    allowed = cloud_allowed(env)
 
-    provider = get_provider(base.provider)
+    provider = get_provider(base.provider, environ=env)
     host = base.host or provider.default_host
+    refusals: list[str] = []
+    if not allowed and host_kind(host) == "cloud":
+        fallback = (
+            provider.default_host
+            if host_kind(provider.default_host) == "local"
+            else DEFAULT_HOST
+        )
+        refusals.append(
+            f"{ALLOW_CLOUD_ENV}=0 is set on this machine, so the saved host "
+            f"{host} (not on this computer) is ignored and {fallback} is used."
+        )
+        host = fallback
+    kind = host_kind(host)
+    escalate = base.escalate_only if base.escalate_only is not None else kind == "cloud"
     return ResolvedAI(
         provider=provider,
         host=host,
@@ -615,15 +956,18 @@ def resolve(
             if base.min_confidence is not None
             else DEFAULT_MIN_CONFIDENCE
         ),
-        auto_start=base.auto_start and host_kind(host) == "local",
-        api_key=resolve_api_key(provider, environ=env),
+        auto_start=base.auto_start and kind == "local",
+        api_key=resolve_api_key(provider, environ=env, settings=base),
         read_handwriting=base.read_handwriting,
-        escalate_only=base.escalate_only and base.read_handwriting,
+        escalate_only=escalate and base.read_handwriting,
         transcribe_math=base.transcribe_math and base.read_handwriting,
         grade_written=base.grade_written,
         auto_grade=base.auto_grade,
         require_calibration=base.require_calibration,
+        read_identity_locally=base.read_identity_locally,
         settings=base,
+        cloud_forbidden=not allowed,
+        refusals=tuple(refusals),
     )
 
 
@@ -642,7 +986,88 @@ def _factory(
     )
 
 
+def _require_clearance(current: ResolvedAI, *, allow_probe: bool) -> bool:
+    """Raise unless `current` may reach its host. Returns True for a restricted probe.
+
+    Local host: always clear. Cloud host: forbidden by the kill switch → CloudDisabledError;
+    consented → clear; an unconsented `for_provider()` probe where
+    `allow_probe` → clear but restricted to the connection-test prompt;
+    otherwise → CloudConsentRequired.
+    """
+    if current.kind != "cloud":
+        return False
+    if not current.cloud_allowed:
+        raise CloudDisabledError(_cloud_disabled_message(current))
+    if current.cloud_consent_given:
+        return False
+    if allow_probe and current.probe:
+        return True
+    raise CloudConsentRequired(_consent_required_message(current))
+
+
+def _connection_test_prompt() -> str:
+    from .manifests import CONNECTION_TEST_PROMPT
+
+    return CONNECTION_TEST_PROMPT
+
+
+def _record_call(*, provider: str, host: str, cloud: bool, category: str) -> None:
+    """One egress line per cloud call; for a local call just clear the usage slot."""
+    try:
+        from opengrader.core.llm import usage
+
+        input_tokens, output_tokens = usage.take_last()
+    except Exception:  # noqa: BLE001 - accounting must never fail a call
+        input_tokens = output_tokens = None
+    if not cloud:
+        return
+    from opengrader.core import egress
+
+    egress.record(
+        provider=provider,
+        host=host,
+        category=category,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+@dataclass(frozen=True)
+class GuardedGenerate:
+    """The callable `text_generate()` returns: the provider's own, plus egress logging.
+
+    `restricted` is set for an unconsented probe: then only the fixed
+    connection-test prompt may be sent, and any other prompt raises
+    CloudConsentRequired before anything leaves the machine.
+    """
+
+    call: Callable[..., str]
+    provider: str
+    host: str
+    cloud: bool
+    restricted: bool = False
+
+    def __call__(self, prompt: str, *args: Any, **kwargs: Any) -> str:
+        is_test = prompt == _connection_test_prompt()
+        if self.restricted and not is_test:
+            raise CloudConsentRequired(
+                f"Only the connection test may be sent to {self.host} before you "
+                "consent to sending student work there."
+            )
+        try:
+            return self.call(prompt, *args, **kwargs)
+        finally:
+            _record_call(
+                provider=self.provider,
+                host=self.host,
+                cloud=self.cloud,
+                category="connection-test" if is_test else "graded-text",
+            )
+
+
 def text_config(resolved: ResolvedAI | None = None) -> Any:
+    """A client config object. Performs no network call, so it is not consent-gated;
+    every path that sends with it (text_generate, measure_generate_latency) is."""
     current = resolved if resolved is not None else resolve()
     return _factory(
         current, "text_config_factory", _dialect_text_config, "text client"
@@ -652,25 +1077,71 @@ def text_config(resolved: ResolvedAI | None = None) -> Any:
 def text_generate(
     resolved: ResolvedAI | None = None, *, response_format: dict | None = None
 ) -> Callable[[str], str]:
+    """A `GenerateFn` for grading. Raises CloudConsentRequired / CloudDisabledError
+    for a cloud host without consent, or while the cloud kill switch is set."""
     current = resolved if resolved is not None else resolve()
+    restricted = _require_clearance(current, allow_probe=True)
     factory = _factory(
         current, "text_generate_factory", _dialect_text_generate, "text client"
     )
-    return factory(current, response_format=response_format)
+    return GuardedGenerate(
+        call=factory(current, response_format=response_format),
+        provider=current.provider.name,
+        host=current.host,
+        cloud=current.kind == "cloud",
+        restricted=restricted,
+    )
 
 
 def vision_config(resolved: ResolvedAI | None = None) -> Any:
+    """A client config object; no network call, not consent-gated (see text_config)."""
     current = resolved if resolved is not None else resolve()
     return _factory(
         current, "vision_config_factory", _dialect_vision_config, "vision client"
     )(current)
 
 
+def _local_identity_config() -> Any:
+    """The plain config a cloud reader's guard uses to build a throwaway
+    local Ollama reader for identity crops (name, ID, title, whole pages).
+
+    Built from `for_provider("ollama")` — the same standard local resolution
+    `doctor` and the AI Setup "Test" button use — never from the currently
+    active cloud provider's own host or model. Constructing a config performs
+    no network call; whether a local Ollama server is actually reachable is
+    only discovered when a read is attempted.
+    """
+    return _ollama_vision_config(for_provider("ollama"))
+
+
 def vision_reader(resolved: ResolvedAI | None = None) -> Any:
+    """The provider's VisionReader, always wrapped in GuardedVisionReader.
+
+    Raises CloudConsentRequired / CloudDisabledError for a cloud host without
+    consent, or while the cloud kill switch is set. Probes are never exempt.
+    A student's name or ID is never handed to a cloud provider's own reader:
+    for a cloud host, the guard is given a local Ollama config to redirect
+    those reads to instead (see `ocr.vision_reader.GuardedVisionReader`). The
+    `read_identity_locally` setting is carried onto the guard as
+    `identity_reads_allowed`; when it is False, `extract_field_text` (the
+    name/ID crops) is blocked outright, on a local or a cloud provider alike.
+    """
+    from opengrader.core.ocr.vision_reader import GuardedVisionReader
+
     current = resolved if resolved is not None else resolve()
-    return _factory(
+    _require_clearance(current, allow_probe=False)
+    inner = _factory(
         current, "vision_reader_factory", _dialect_vision_reader, "vision reader"
     )(current)
+    is_cloud = current.kind == "cloud"
+    return GuardedVisionReader(
+        inner=inner,
+        provider=current.provider.name,
+        host=current.host,
+        cloud=is_cloud,
+        local_identity_config=_local_identity_config() if is_cloud else None,
+        identity_reads_allowed=current.read_identity_locally,
+    )
 
 
 def with_overrides(
@@ -681,11 +1152,27 @@ def with_overrides(
     text_model: str | None = None,
     timeout_seconds: float | None = None,
 ) -> ResolvedAI:
-    """Apply explicit host, model, and timeout flags to resolved settings."""
+    """Apply explicit host, model, and timeout flags to resolved settings.
+
+    While the cloud kill switch is set, a host override to a non-local host is refused:
+    the current host is kept and the refusal is reported by problems().
+    """
     current = resolved if resolved is not None else resolve()
+    new_host = _override_text(host, current.host)
+    refusals = current.refusals
+    if new_host != current.host and host_kind(new_host) == "cloud" and not current.cloud_allowed:
+        refusals = (
+            *refusals,
+            f"{ALLOW_CLOUD_ENV}=0 is set on this machine, so the host override "
+            f"{new_host} (not on this computer) was refused; {current.host} is used.",
+        )
+        new_host = current.host
+    escalate = current.escalate_only
+    if current.settings.escalate_only is None:
+        escalate = host_kind(new_host) == "cloud" and current.read_handwriting
     return replace(
         current,
-        host=_override_text(host, current.host),
+        host=new_host,
         vision_model=_override_text(vision_model, current.vision_model),
         text_model=_override_text(text_model, current.text_model),
         timeout_seconds=(
@@ -693,6 +1180,8 @@ def with_overrides(
             if timeout_seconds is not None and timeout_seconds > 0
             else current.timeout_seconds
         ),
+        escalate_only=escalate,
+        refusals=refusals,
     )
 
 
@@ -711,11 +1200,17 @@ def for_provider(
     timeout_seconds: float | None = None,
     environ: dict[str, str] | None = None,
 ) -> ResolvedAI:
-    """Resolve a named provider from its defaults and credential environment."""
-    base = resolve(AISettings(provider=name), environ={})
-    base = replace(base, api_key=resolve_api_key(base.provider, environ=environ))
+    """Resolve a named provider from its defaults, for a probe (doctor, Test).
+
+    Ignores the saved provider choice, host, models and toggles, but carries
+    the saved consent records so a probe knows what the user agreed to. The
+    result has `probe=True`: `text_generate` may send the fixed
+    connection-test prompt to an unconsented cloud host, and nothing else.
+    """
+    saved = load_settings()
+    base = resolve(AISettings(provider=name, consents=saved.consents), environ=environ)
     return with_overrides(
-        base,
+        replace(base, probe=True),
         host=host,
         vision_model=vision_model,
         text_model=text_model,
@@ -740,11 +1235,20 @@ def ensure_ready(
     *,
     purpose: Literal["vision", "text"] = "vision",
 ) -> None:
-    """Check credentials and, when supported, model availability before a run."""
+    """Check consent, credentials and, when supported, model availability before a run.
+
+    Raises CloudDisabledError / CloudConsentRequired (both AIUnavailableError)
+    first, so a CLI that already catches AIUnavailableError refuses cleanly.
+    A `for_provider()` probe is not refused for missing consent.
+    """
     current = resolved if resolved is not None else resolve()
     provider = current.provider
+    _require_clearance(current, allow_probe=True)
 
     if provider.requires_api_key and not current.api_key:
+        credential_problem = _credential_problem(current)
+        if credential_problem:
+            raise AIUnavailableError(credential_problem)
         raise AIUnavailableError(
             f"{provider.label} needs an API key. Set the "
             f"{provider.api_key_env} environment variable. {provider.setup_hint}"
@@ -824,6 +1328,12 @@ def _generate_for(config: Any) -> Callable[..., str]:
         from opengrader.core.llm.dialect_client import generate as dialect_generate
 
         return dialect_generate
+    if type(config).__name__ == "PydanticAIConfig":
+        # Matched by name so the optional backend's module is imported only
+        # when its config is actually in hand.
+        from opengrader.core.llm.pydantic_ai_client import generate as sdk_generate
+
+        return sdk_generate
     from opengrader.core.llm import generate as ollama_generate
 
     return ollama_generate
@@ -836,8 +1346,45 @@ def measure_generate_latency(
     prompt: str = "Reply with the single word: ready",
     generate: Callable[..., str] | None = None,
 ) -> LatencyMeasurement:
+    """Time one short call. Never raises.
+
+    For a cloud host, the fixed connection-test prompt may be sent without
+    cloud consent (it carries no student data); any other prompt needs
+    consent. Nothing is sent while the cloud kill switch is set. Each cloud call writes
+    one egress line.
+    """
     model = resolved.vision_model if role == "handwriting" else resolved.text_model
-    cfg = replace(text_config(resolved), model=model)
+    is_test = prompt == _connection_test_prompt()
+    cloud = resolved.kind == "cloud"
+    if cloud and not resolved.cloud_allowed:
+        return LatencyMeasurement(
+            role=role,
+            model=model,
+            limit=resolved.timeout_seconds,
+            error=_cloud_disabled_message(resolved),
+        )
+    if cloud and not is_test and not resolved.cloud_consent_given:
+        return LatencyMeasurement(
+            role=role,
+            model=model,
+            limit=resolved.timeout_seconds,
+            error=_consent_required_message(resolved),
+        )
+    try:
+        cfg = text_config(resolved)
+        if type(cfg).__name__ == "PydanticAIConfig":
+            # Rebuilt for the model actually timed, not copied from the text
+            # model's: where this backend sends a request depends on the
+            # model id, and it is checked against the host when built.
+            from .manifests import _pydantic_ai_config
+
+            cfg = _pydantic_ai_config(resolved, model=model)
+        else:
+            cfg = replace(cfg, model=model)
+    except Exception as exc:  # noqa: BLE001 - this function never raises
+        return LatencyMeasurement(
+            role=role, model=model, limit=resolved.timeout_seconds, error=str(exc)
+        )
     call = generate if generate is not None else _generate_for(cfg)
 
     start = time.perf_counter()
@@ -848,6 +1395,23 @@ def measure_generate_latency(
         return LatencyMeasurement(
             role=role, model=model, limit=resolved.timeout_seconds, error=str(exc)
         )
+    finally:
+        _record_call(
+            provider=resolved.provider.name,
+            host=resolved.host,
+            cloud=cloud,
+            category="connection-test" if is_test else "graded-text",
+        )
     return LatencyMeasurement(
         role=role, model=model, limit=resolved.timeout_seconds, seconds=elapsed
     )
+
+
+def egress_statement(resolved: ResolvedAI | None = None) -> str:
+    """The one sentence every surface uses. See consent.egress_statement."""
+    return consent.egress_statement(resolved if resolved is not None else resolve())
+
+
+def data_flow_report(resolved: ResolvedAI | None = None) -> "consent.DataFlowReport":
+    """Which data would leave this machine, and to which host."""
+    return consent.data_flow_report(resolved if resolved is not None else resolve())

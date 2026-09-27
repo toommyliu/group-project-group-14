@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -47,6 +48,49 @@ def describe_reading_source(source: str | None) -> str:
 
 def is_model_reading(source: str | None) -> bool:
     return source in MODEL_READING_SOURCES
+
+
+# `Read by` carries the provider so "which service read this answer" stays
+# answerable months later. The provider rides as a " (provider)" suffix on the
+# existing value rather than a new field or a renamed one — `response_source`
+# itself (and every comparison against KNOWN_READING_SOURCES /
+# MODEL_READING_SOURCES) stays exactly the bare token it always was; only
+# `format_reading_source`/`parse_reading_source`, called from student_file.py's
+# render/parse of the `Read by` line, ever see the suffix. A file written
+# before this change has no suffix, `parse_reading_source` returns
+# `provider=None` for it, and it round-trips byte-identically.
+_PROVIDER_SUFFIX_RE = re.compile(r"^(.*\S)\s+\(([^()]+)\)$")
+
+
+def format_reading_source(source: str | None, provider: str | None = None) -> str:
+    """Render a `Read by` value, appending the provider in parentheses.
+
+    `provider=None` (or blank) renders exactly as before every source has
+    always been rendered — the change is additive.
+    """
+    if not source:
+        return ""
+    provider = (provider or "").strip()
+    return f"{source} ({provider})" if provider else source
+
+
+def parse_reading_source(raw: str | None) -> tuple[str | None, str | None]:
+    """Split a `Read by` value into (source, provider).
+
+    A value with no trailing parenthetical is an old file (or a source with no
+    known provider) and returns `(value, None)` — identical to what plain
+    stripping always returned. `KNOWN_READING_SOURCES` never contain spaces or
+    parentheses, so the split is unambiguous.
+    """
+    if raw is None:
+        return None, None
+    text = raw.strip()
+    if not text:
+        return None, None
+    match = _PROVIDER_SUFFIX_RE.match(text)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return text, None
 
 
 DEFAULT_ESCALATION_FLOOR: float = float(DEFAULT_OCR_CONFIDENCE_FLOOR)

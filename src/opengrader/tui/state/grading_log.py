@@ -21,6 +21,7 @@ class GradeRevert:
     response_text: str | None = None
     response_confidence: float | None = None
     response_source: str | None = None
+    response_provider: str | None = None
 
 
 @dataclass(frozen=True)

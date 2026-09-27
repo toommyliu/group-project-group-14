@@ -5,7 +5,7 @@ The request/response shape used to live here; it now lives in
 This module is what is left: the same four names `ollama_client.py` and
 `core/ocr/ollama_vlm.py` have always called, implemented over the shared
 transport with `transport.NO_RETRY` so a local server that is not answering
-still fails on the first try, exactly as it did before the split (§7.3).
+still fails on the first try, exactly as it did before the split.
 
 `request` is imported and kept as a module attribute, unused directly, purely
 because `tests/unit/core/llm/test_ollama_client.py` and

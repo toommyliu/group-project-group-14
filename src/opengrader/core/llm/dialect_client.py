@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import transport
+from . import transport, usage
 from .dialects import get_dialect
 from .errors import LLMError
 
@@ -75,6 +75,7 @@ def generate(
     reported = dialect.error_text(parsed)
     if reported:
         raise error_factory(transport.redact(reported))
+    usage.record_last(*dialect.reply_usage(parsed))
     return dialect.reply_text(parsed)
 
 

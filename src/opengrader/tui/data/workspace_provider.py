@@ -165,6 +165,7 @@ class WorkspaceProvider:
                     source_pdf_name=Path(document.source_pdf).name,
                     response_confidence=response.response_confidence,
                     response_source=response.response_source,
+                    response_provider=response.response_provider,
                     page_context=build_page_context(
                         response.source_segments, document.extra_pages
                     )

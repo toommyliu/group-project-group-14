@@ -23,9 +23,25 @@ class SubmissionIntake:
         self.auto_grade = auto_grade
         self.assignment_version = assignment_version
         self.ai = app_config.resolve()
-        self.vision = app_config.vision_reader(self.ai)
+        self.vision = None
+        if self.ai.kind == "cloud" and not (self.ai.read_handwriting or self.ai.escalate_only):
+            # Extraction without a blank template hands every answer crop to
+            # whatever reader it is given. With handwriting reading off, a
+            # cloud provider must receive none of them — AI setup and the
+            # data-flow report both say so — so no reader is built at all
+            # and the answers are read by OCR.
+            return
         try:
+            self.vision = app_config.vision_reader(self.ai)
             app_config.ensure_ready(self.ai, purpose="vision")
+        except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
+            if self.ai.read_handwriting or self.ai.escalate_only:
+                raise ValueError(
+                    f"{exc} Run 'opengrader providers consent {self.ai.provider.name}' "
+                    "(or open AI Setup) to allow it, or turn off handwriting "
+                    "reading, and retry."
+                ) from exc
+            self.vision = None
         except Exception as exc:
             if self.ai.read_handwriting or self.ai.escalate_only:
                 raise ValueError(

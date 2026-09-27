@@ -51,6 +51,7 @@ from opengrader.cli.automated_grading import (
     run_cli as run_grading_cli,
 )
 from opengrader.cli.qa_file import run_cli as run_qa_file_cli
+from opengrader.core.cloud_preflight import CloudConfirmationNeeded
 from opengrader.core.class_folder import (
     GRADING_ROLES,
     ClassFolderScan,
@@ -61,6 +62,7 @@ from opengrader.core.course import COURSE_FILENAME
 from opengrader.core.recents import load_recents
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
 from opengrader.tui.ui.screens.backup_screen import BackupScreen
+from opengrader.tui.ui.screens.cloud_consent_screen import CloudPreflightConfirmScreen
 from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
 from opengrader.tui.ui.screens.course_grades_screen import CourseGradesScreen
 from opengrader.tui.ui.screens.handoff_screen import GraderPacketScreen, MergeScreen
@@ -1782,6 +1784,8 @@ class SetupScreen(Vertical):
         else:
             raise ValueError(f"unknown AI status step {step!r}")
 
+        if current.kind == "cloud":
+            body = f"{body} {app_config.consent.egress_statement(current)}"
         return f"{body} {change_here}"
 
     def _refresh_ai_displays(self) -> None:
@@ -1791,6 +1795,10 @@ class SetupScreen(Vertical):
         self.query_one("#ak-ai-status", Static).update(self._ai_status_text("ak"))
         self.query_one("#grade-ai-status", Static).update(self._ai_status_text("grade"))
         self.query_one("#pipe-ai-status", Static).update(self._ai_status_text("pipe"))
+        # Avoid importing TuiApp here — it would import this module back in.
+        refresh_banner = getattr(self.app, "refresh_ai_banner", None)
+        if refresh_banner is not None:
+            refresh_banner()
 
     def _open_ai_settings(self) -> None:
         def _refresh(saved: app_config.AISettings | None) -> None:
@@ -2120,9 +2128,28 @@ class SetupScreen(Vertical):
 
         progress = ExtractionProgress(on_file_start=on_file_start, on_response=on_response)
         try:
-            run_extractor_cli(argv, progress=progress, status_callback=on_status)
+            run_extractor_cli(
+                argv,
+                progress=progress,
+                status_callback=on_status,
+                prompt_cloud_send=False,
+            )
             if lock_anon:
                 write_policy(output_dir, GradingPolicy(mode="multi", anonymity_locked=True))
+        except CloudConfirmationNeeded as needed:
+            app.call_from_thread(
+                self._confirm_tool_cloud_send,
+                needed,
+                "#ext-progress-status",
+                lambda: self._extractor_worker(
+                    [*argv, "--yes-send-to-cloud"], output_dir, lock_anon
+                ),
+                lambda message: self._ext_finish(message, False),
+            )
+            return
+        except SystemExit as exc:
+            app.call_from_thread(self._ext_finish, f"Extractor failed (exit {exc.code}).", True)
+            return
         except Exception as exc:
             app.call_from_thread(self._ext_finish, f"Extractor error: {exc}", True)
             return
@@ -2543,7 +2570,9 @@ class SetupScreen(Vertical):
             app.call_from_thread(self._pipe_finish_error, f"Pipeline error: {exc}")
             return
 
-        app.call_from_thread(self._pipe_finish, report, state["launched_early"], qa_path)
+        app.call_from_thread(
+            self._pipe_finish, report, state["launched_early"], qa_path, request, asap
+        )
 
     def _pipe_stage_start(self, stage: str) -> None:
         self.query_one("#pipe-progress-status", Static).update(f"▸ {stage}…")
@@ -2585,9 +2614,18 @@ class SetupScreen(Vertical):
         self.app.notify(message, severity="error")
 
     def _pipe_finish(
-        self, report: PipelineReport, launched_early: bool, qa_path: str
+        self,
+        report: PipelineReport,
+        launched_early: bool,
+        qa_path: str,
+        request: PipelineRequest,
+        asap: bool,
     ) -> None:
         self._pipe_reset_buttons()
+
+        if report.cloud_confirmation_needed:
+            self._confirm_cloud_and_rerun(report, request, asap, qa_path)
+            return
 
         blocked = next(
             (o for o in report.stages if o.status is StageStatus.BLOCKED), None
@@ -2640,6 +2678,112 @@ class SetupScreen(Vertical):
             severity="warning",
         )
 
+    @staticmethod
+    def _cloud_preflight_statement(report: PipelineReport) -> tuple[str, str]:
+        """The scale-and-cost sentence for the run that just refused to send anything.
+
+        Prefers a `cloud_preflight` field on the report when the core carries
+        one; otherwise falls back to the BLOCKED outcome's detail, which is
+        the same statement with a "cloud-preflight:\\n" marker in front of it.
+        """
+        preflight = getattr(report, "cloud_preflight", None)
+        if preflight is not None:
+            return preflight.statement(), preflight.host
+        marker = "cloud-preflight:\n"
+        blocked = next(
+            (
+                o
+                for o in report.stages
+                if o.status is StageStatus.BLOCKED and o.detail.startswith(marker)
+            ),
+            None,
+        )
+        statement = blocked.detail[len(marker):] if blocked is not None else (
+            "This run would send student work to the configured AI provider."
+        )
+        return statement, ""
+
+    def _confirm_cloud_and_rerun(
+        self,
+        report: PipelineReport,
+        request: PipelineRequest,
+        asap: bool,
+        qa_path: str,
+    ) -> None:
+        statement, host = self._cloud_preflight_statement(report)
+        self.query_one("#pipe-progress-status", Static).update(
+            "Waiting for you to confirm the cloud send…"
+        )
+        self.run_worker(
+            self._ask_cloud_confirmation(statement, host, request, asap, qa_path),
+            exclusive=True,
+            group="pipeline-cloud-confirm",
+        )
+
+    async def _ask_cloud_confirmation(
+        self,
+        statement: str,
+        host: str,
+        request: PipelineRequest,
+        asap: bool,
+        qa_path: str,
+    ) -> None:
+        confirmed = await self.app.push_screen_wait(
+            CloudPreflightConfirmScreen(statement, host)
+        )
+        if not confirmed:
+            self._pipe_reset_buttons()
+            self.query_one("#pipe-progress").add_class("hidden")
+            self.query_one("#pipe-progress-status", Static).update(
+                "Not sent — the cloud send was declined. Nothing left this "
+                "computer; re-run when you're ready."
+            )
+            return
+        confirmed_request = replace(request, send_to_cloud_confirmed=True)
+        self.query_one("#pipe-progress").remove_class("hidden")
+        self.query_one("#pipe-progress-status", Static).update("Starting…")
+        self.query_one("#pipe-run", Button).disabled = True
+        self.query_one("#pipe-preview", Button).disabled = True
+        self.extraction_in_progress = True
+        self._pipeline_worker(confirmed_request, asap, qa_path)
+
+    def _confirm_tool_cloud_send(
+        self,
+        needed: CloudConfirmationNeeded,
+        status_selector: str,
+        rerun_confirmed,
+        finish,
+    ) -> None:
+        """Ask before a tool run sends to the cloud; the tool itself stopped first.
+
+        The Extractor and Answer key run their CLI in-process with
+        `prompt_cloud_send=False`, so instead of an `input()` prompt the
+        Textual worker cannot answer, the CLI raises before sending anything.
+        Confirming re-runs it with `--yes-send-to-cloud`; declining calls
+        `finish` with a message and nothing is sent.
+        """
+        self.query_one(status_selector, Static).update(
+            "Waiting for you to confirm the cloud send…"
+        )
+        self.run_worker(
+            self._ask_tool_cloud_confirmation(needed, rerun_confirmed, finish),
+            exclusive=True,
+            group="tool-cloud-confirm",
+        )
+
+    async def _ask_tool_cloud_confirmation(
+        self, needed: CloudConfirmationNeeded, rerun_confirmed, finish
+    ) -> None:
+        confirmed = await self.app.push_screen_wait(
+            CloudPreflightConfirmScreen(needed.statement(), needed.preflight.host)
+        )
+        if confirmed:
+            rerun_confirmed()
+        else:
+            finish(
+                "Not sent — the cloud send was declined. Nothing left this computer."
+            )
+
     def _run_answer_key(self) -> None:
         input_file = self._clean_path(self.query_one("#ak-input", Input).value)
         output_md = self._clean_path(self.query_one("#ak-output", Input).value)
@@ -2677,8 +2821,20 @@ class SetupScreen(Vertical):
 
         try:
             run_answer_key_cli(
-                argv, status_callback=on_status, progress_callback=on_progress
+                argv,
+                status_callback=on_status,
+                progress_callback=on_progress,
+                prompt_cloud_send=False,
             )
+        except CloudConfirmationNeeded as needed:
+            app.call_from_thread(
+                self._confirm_tool_cloud_send,
+                needed,
+                "#ak-progress-status",
+                lambda: self._answer_key_worker([*argv, "--yes-send-to-cloud"]),
+                lambda message: self._ak_finish(message, False),
+            )
+            return
         except SystemExit as exc:
             app.call_from_thread(self._ak_finish, f"Answer key failed (exit {exc.code}).", True)
             return

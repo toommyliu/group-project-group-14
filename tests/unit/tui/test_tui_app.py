@@ -2525,3 +2525,40 @@ def test_a_workspace_session_is_grading_only_and_f2_exits_to_its_list(
         return app.return_value
 
     assert asyncio.run(run()) == "switch_assignment"
+
+
+def test_grade_screen_names_the_provider_and_undo_keeps_it(tmp_path) -> None:
+    import shutil
+
+    submissions = tmp_path / "student-submissions"
+    shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
+    first = submissions / "submission-0001" / "submission-0001.submission.md"
+    original = first.read_text()
+    first.write_text(
+        original.replace("  - Read by: tesseract\n", "  - Read by: tesseract (Test Cloud)\n", 1)
+    )
+
+    async def run() -> tuple[str, str, str]:
+        app = TuiApp(
+            default_image_path=DEFAULT_IMAGE_PATH,
+            qa_file_path="samples/cs146-quiz1/qa.md",
+            submissions_path=str(submissions),
+        )
+        async with app.run_test(size=(140, 45)) as pilot:
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            chip = str(app.get_grade_screen().query_one("#question-confidence").render())
+
+            app.grade_controller.on_transcription_updated("corrected by a grader")
+            await pilot.pause()
+            after_edit = first.read_text()
+
+            app.grade_controller.undo_last_grade_change()
+            await pilot.pause()
+            return chip, after_edit, first.read_text()
+
+    chip, after_edit, after_undo = asyncio.run(run())
+    assert "72% · read by Test Cloud" in chip
+    assert "  - Read by: human\n" in after_edit
+    assert "  - Read by: tesseract (Test Cloud)\n" in after_undo

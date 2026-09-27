@@ -112,6 +112,10 @@ class StudentSubmissionQuestion:
     # 0-100; None means unverified, including model output.
     response_confidence: float | None = None
     response_source: str | None = None
+    # Which service produced response_source when it is a model reading (e.g.
+    # the vision provider name). None for OCR/text-layer/human readings and for
+    # files written before this field existed.
+    response_provider: str | None = None
 
     @property
     def rubric_label(self) -> str:
@@ -165,6 +169,10 @@ class StudentSubmissionGradeUpdate:
     clear_response_confidence: bool = False
     response_source: str | None = None
     clear_response_source: bool = False
+    # Rendered onto the same `Read by` line as response_source (a suffix, not a
+    # separate field); only meaningful when response_source is also set on this
+    # update. clear_response_source drops both.
+    response_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -331,13 +339,6 @@ def _parse_extra_pages(frontmatter: dict[str, object]) -> tuple[int, ...]:
 
 def _format_confidence(value: float) -> str:
     return f"{value:g}"
-
-
-def _parse_reading_source(raw: str | None) -> str | None:
-    if raw is None:
-        return None
-    text = raw.strip()
-    return text or None
 
 
 def _parse_optional_float(raw: str | None) -> float | None:
@@ -605,11 +606,18 @@ def parse_student_submission_markdown(
     *,
     base_path: Path | None = None,
 ) -> StudentSubmissionDocument:
+    # Deferred: transcription.py imports review.py, which imports this module,
+    # so a module-level import here would be circular at package init time.
+    from opengrader.core.submissions.transcription import parse_reading_source
+
     frontmatter, body_lines = _parse_submission_frontmatter(content)
     questions: list[StudentSubmissionQuestion] = []
 
     for question_id, question_lines in _submission_question_blocks(body_lines):
         fields = _parse_submission_question_fields(question_lines)
+        response_source, response_provider = parse_reading_source(
+            fields.values.get("Read by")
+        )
         prompt_raw = fields.values.get("Prompt", "")
         possible_points = _parse_optional_float(fields.values.get("Possible points"))
         prompt = prompt_raw.strip()
@@ -646,7 +654,8 @@ def parse_student_submission_markdown(
                     fields.values.get("Ink fragments")
                 ),
                 response_confidence=_parse_optional_float(fields.values.get("Confidence")),
-                response_source=_parse_reading_source(fields.values.get("Read by")),
+                response_source=response_source,
+                response_provider=response_provider,
             )
         )
 
@@ -803,6 +812,8 @@ def update_student_submission_markdown(
     content: str,
     update: StudentSubmissionGradeUpdate,
 ) -> str:
+    from opengrader.core.submissions.transcription import format_reading_source
+
     had_trailing_newline = content.endswith("\n")
     lines = content.splitlines()
     block_range = _find_submission_question_block(lines, update.question_id)
@@ -817,7 +828,7 @@ def update_student_submission_markdown(
         _upsert_question_field(
             block,
             field_name="Read by",
-            value=update.response_source,
+            value=format_reading_source(update.response_source, update.response_provider),
             after_fields=("Source segments", "Response image", "Prompt"),
         )
     if update.clear_response_confidence:
@@ -1704,6 +1715,10 @@ def _format_question_type(question_type: QuestionType) -> str:
 
 
 def render_student_submission_markdown(document: StudentSubmissionDocument) -> str:
+    # Deferred for the same reason as the parse side: transcription.py -> review.py
+    # -> this module would be circular at module-import time.
+    from opengrader.core.submissions.transcription import format_reading_source
+
     lines: list[str] = ["---"]
     _yaml_field(lines, "student_name", document.student_name)
     _yaml_field(lines, "student_id", document.student_id)
@@ -1759,7 +1774,10 @@ def render_student_submission_markdown(document: StudentSubmissionDocument) -> s
                 f"  - Ink fragments: {_format_ink_fragments(question.ink_fragments)}"
             )
         if question.response_source:
-            lines.append(f"  - Read by: {question.response_source}")
+            lines.append(
+                "  - Read by: "
+                + format_reading_source(question.response_source, question.response_provider)
+            )
         if question.response_confidence is not None:
             lines.append(f"  - Confidence: {_format_confidence(question.response_confidence)}")
 
@@ -1823,11 +1841,16 @@ def build_student_submission_document(
         if field.crop_path
     }
 
-    active_vision_reader = vision_reader or app_config.vision_reader()
+    active_vision_reader = vision_reader
+    if active_vision_reader is None:
+        try:
+            active_vision_reader = app_config.vision_reader()
+        except Exception as exc:  # noqa: BLE001 - e.g. no cloud consent: OCR only
+            _emit_progress(progress_callback, f"Vision model unavailable ({exc})")
 
     for field_id, field_kind in (("student_name", "name"), ("student_id", "sid")):
         crop_path = field_crop_by_id.get(field_id)
-        if crop_path is None or not crop_path.exists():
+        if active_vision_reader is None or crop_path is None or not crop_path.exists():
             continue
         _emit_progress(progress_callback, f"Ollama field OCR: {field_id}")
         extracted = _extract_best_vision_field_text(
@@ -1848,7 +1871,11 @@ def build_student_submission_document(
         if extraction_result.title_crop_path
         else None
     )
-    if title_crop_path is not None and title_crop_path.exists():
+    if (
+        active_vision_reader is not None
+        and title_crop_path is not None
+        and title_crop_path.exists()
+    ):
         _emit_progress(progress_callback, "Ollama title OCR")
         try:
             title_meta = _assignment_metadata_from_title_result(
@@ -1914,6 +1941,15 @@ def build_student_submission_document(
 
         question_jobs.extend(question_images)
 
+    # Deferred: processor.py imports this module, so importing it back at module
+    # level here would be circular; it is only needed for the Tesseract fallback
+    # below, and only ever called once that fallback is actually reached.
+    from opengrader.core.submissions.processor import _ocr_image_with_confidence
+    from opengrader.core.submissions.transcription import (
+        SOURCE_TESSERACT,
+        SOURCE_VISION_MODEL,
+    )
+
     total_question_jobs = len(question_jobs)
     for index, (question_id, image_path, question_type, source_segments) in enumerate(
         question_jobs, start=1
@@ -1921,6 +1957,9 @@ def build_student_submission_document(
         response_image_path: str | None = None
         prompt_text = ""
         response_text = ""
+        response_confidence: float | None = None
+        response_source: str | None = None
+        response_provider: str | None = None
 
         if image_path is not None:
             try:
@@ -1928,7 +1967,9 @@ def build_student_submission_document(
             except ValueError:
                 response_image_path = str(image_path)
 
-            if not skip_ollama_qa:
+            vlm_answered = False
+            vlm_failed = False
+            if not skip_ollama_qa and active_vision_reader is not None:
                 _emit_progress(
                     progress_callback,
                     f"Ollama QA [{index}/{total_question_jobs}]: {question_id}",
@@ -1938,11 +1979,30 @@ def build_student_submission_document(
                         image_path=image_path,
                     )
                 except Exception as exc:
+                    # A failed cloud/vision call (a raised exception of any kind —
+                    # a timeout, an auth error, a blocked call) must never lose the
+                    # answer: fall through to Tesseract below rather than leaving
+                    # response_text blank. Forcing the confidence to 0 even when
+                    # Tesseract itself reads cleanly puts this answer in the same
+                    # low-confidence review queue (core/submissions/review.py) a
+                    # weak OCR reading would land in — the reader we trusted more
+                    # never got a say, so a human should double-check it too.
                     _emit_progress(
                         progress_callback,
                         f"Ollama QA [{index}/{total_question_jobs}]: {question_id} failed ({exc})",
                     )
                     prompt_text, response_text = "", ""
+                    vlm_failed = True
+                else:
+                    vlm_answered = True
+                    response_source = SOURCE_VISION_MODEL
+                    response_provider = getattr(active_vision_reader, "provider", None)
+
+            if not vlm_answered and not response_text.strip():
+                ocr_text, ocr_confidence = _ocr_image_with_confidence(image_path, psm=6)
+                response_text = ocr_text
+                response_confidence = 0.0 if vlm_failed else ocr_confidence
+                response_source = SOURCE_TESSERACT if ocr_text.strip() else None
 
         questions.append(
             StudentSubmissionQuestion(
@@ -1951,6 +2011,9 @@ def build_student_submission_document(
                 possible_points=None,
                 response_image_path=response_image_path,
                 response_text=response_text,
+                response_confidence=response_confidence,
+                response_source=response_source,
+                response_provider=response_provider,
                 question_type=question_type,
                 source_segments=source_segments,
             )

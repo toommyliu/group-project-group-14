@@ -1,18 +1,18 @@
-"""Golden request/response shapes for each wire dialect (§7.10 test map).
+"""Golden request/response shapes for each wire dialect.
 
 Three services, three shapes, one contract (`core/llm/dialects/base.Dialect`).
 These tests pin the shape of each dialect's request body literally — a golden
 body is only golden if a reviewer can read it in the diff — and check the
-handful of properties the design document calls out by name: that `ollama`
+handful of properties the provider layer depends on: that `ollama`
 never gets a credential, that a fourth dialect could not skip `build_body`
 without the conformance loop noticing, and that no dialect module reaches for
-HTTP or the grading domain itself (§7.2).
+HTTP or the grading domain itself.
 
 The `ollama` dialect additionally gets a *behaviour pin*: it is driven through
 `ollama_transport.generate_raw`'s own fake-HTTP path, and the body that comes
 out over the wire is asserted equal to what `OllamaDialect.build_body` builds
-for the same arguments. §7.9 makes "the ollama dialect is a refactor, not a
-rewrite" the exit criterion for this phase, and this is the test that says so.
+for the same arguments: moving Ollama onto the shared transport was a
+refactor, not a rewrite, and this is the test that says so.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from opengrader.core.llm.dialects.openai_chat import DIALECT as OPENAI_CHAT
 # Shared fixtures for golden bodies
 # ---------------------------------------------------------------------------
 
-# Real magic-byte prefixes (§base.py's `_MAGIC_PREFIXES`), padded out so the
+# Real magic-byte prefixes (base.py's `_MAGIC_PREFIXES`), padded out so the
 # 16-character sniff window `media_type_for` reads always has enough to look at.
 IMG_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 IMG_JPEG = "/9j/4AAQSkZJRgABAQEAAAAAAAAA//4AL0FkbyMwPjs9"
@@ -85,7 +85,7 @@ class TestOllamaDialect:
     def test_generate_raw_body_is_exactly_what_build_body_would_produce(
         self, monkeypatch
     ) -> None:
-        """Behaviour pin (§7.9): the ollama dialect is a refactor, not a rewrite.
+        """Behaviour pin: the ollama dialect is a refactor, not a rewrite.
 
         `generate_raw` must put exactly the body `OllamaDialect.build_body`
         would build onto the wire — this is the test that would fail if
@@ -185,6 +185,24 @@ class TestOllamaDialect:
         assert OLLAMA.models_endpoint("http://127.0.0.1:11434/api/tags") == (
             "http://127.0.0.1:11434/api/tags"
         )
+
+    def test_reply_usage_happy_path(self) -> None:
+        body = {"prompt_eval_count": 150, "eval_count": 50}
+        assert OLLAMA.reply_usage(body) == (150, 50)
+
+    def test_reply_usage_missing_fields_returns_none(self) -> None:
+        assert OLLAMA.reply_usage({}) == (None, None)
+        assert OLLAMA.reply_usage({"prompt_eval_count": 100}) == (100, None)
+        assert OLLAMA.reply_usage({"eval_count": 50}) == (None, 50)
+
+    def test_reply_usage_zero_fields_returns_none(self) -> None:
+        assert OLLAMA.reply_usage({"prompt_eval_count": 0, "eval_count": 0}) == (None, None)
+        assert OLLAMA.reply_usage({"prompt_eval_count": 100, "eval_count": 0}) == (100, None)
+
+    def test_reply_usage_malformed_fields_never_raises(self) -> None:
+        assert OLLAMA.reply_usage({"prompt_eval_count": "not-a-number"}) == (None, None)
+        assert OLLAMA.reply_usage({"eval_count": None}) == (None, None)
+        assert OLLAMA.reply_usage({"prompt_eval_count": 100.5, "eval_count": 50.3}) == (100, 50)
 
 
 class _FakeOkResponse:
@@ -333,6 +351,26 @@ class TestOpenAIChatDialect:
             "https://api.openai.com/v1/models"
         )
 
+    def test_reply_usage_happy_path(self) -> None:
+        body = {"usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+        assert OPENAI_CHAT.reply_usage(body) == (100, 50)
+
+    def test_reply_usage_missing_usage_field(self) -> None:
+        assert OPENAI_CHAT.reply_usage({}) == (None, None)
+
+    def test_reply_usage_missing_token_fields(self) -> None:
+        assert OPENAI_CHAT.reply_usage({"usage": {}}) == (None, None)
+        assert OPENAI_CHAT.reply_usage({"usage": {"prompt_tokens": 100}}) == (100, None)
+        assert OPENAI_CHAT.reply_usage({"usage": {"completion_tokens": 50}}) == (None, 50)
+
+    def test_reply_usage_zero_tokens_returns_none(self) -> None:
+        assert OPENAI_CHAT.reply_usage({"usage": {"prompt_tokens": 0, "completion_tokens": 0}}) == (None, None)
+        assert OPENAI_CHAT.reply_usage({"usage": {"prompt_tokens": 100, "completion_tokens": 0}}) == (100, None)
+
+    def test_reply_usage_malformed_never_raises(self) -> None:
+        assert OPENAI_CHAT.reply_usage({"usage": "not-a-dict"}) == (None, None)
+        assert OPENAI_CHAT.reply_usage({"usage": {"prompt_tokens": "not-a-number"}}) == (None, None)
+
 
 # ---------------------------------------------------------------------------
 # Anthropic-messages
@@ -453,6 +491,26 @@ class TestAnthropicMessagesDialect:
             "https://api.anthropic.com/v1/models"
         )
 
+    def test_reply_usage_happy_path(self) -> None:
+        body = {"usage": {"input_tokens": 150, "output_tokens": 75}}
+        assert ANTHROPIC.reply_usage(body) == (150, 75)
+
+    def test_reply_usage_missing_usage_field(self) -> None:
+        assert ANTHROPIC.reply_usage({}) == (None, None)
+
+    def test_reply_usage_missing_token_fields(self) -> None:
+        assert ANTHROPIC.reply_usage({"usage": {}}) == (None, None)
+        assert ANTHROPIC.reply_usage({"usage": {"input_tokens": 100}}) == (100, None)
+        assert ANTHROPIC.reply_usage({"usage": {"output_tokens": 50}}) == (None, 50)
+
+    def test_reply_usage_zero_tokens_returns_none(self) -> None:
+        assert ANTHROPIC.reply_usage({"usage": {"input_tokens": 0, "output_tokens": 0}}) == (None, None)
+        assert ANTHROPIC.reply_usage({"usage": {"input_tokens": 100, "output_tokens": 0}}) == (100, None)
+
+    def test_reply_usage_malformed_never_raises(self) -> None:
+        assert ANTHROPIC.reply_usage({"usage": "not-a-dict"}) == (None, None)
+        assert ANTHROPIC.reply_usage({"usage": {"input_tokens": "not-a-number"}}) == (None, None)
+
 
 # ---------------------------------------------------------------------------
 # Cross-cutting: media_type_for, get_dialect, conformance, structural pins
@@ -518,15 +576,15 @@ class TestConformance:
 
 
 # ---------------------------------------------------------------------------
-# Structural pin: a dialect performs no HTTP and knows no grading domain (§7.2)
+# Structural pin: a dialect performs no HTTP and knows no grading domain
 # ---------------------------------------------------------------------------
 
 _DIALECTS_DIR = Path(dialects_pkg.__file__).parent
 
-# §7.2: "A dialect performs no HTTP."
+# A dialect performs no HTTP; that belongs to core/llm/transport.py.
 _FORBIDDEN_HTTP_ROOTS = {"urllib", "http", "requests", "httpx"}
 
-# §7.2: "A dialect knows nothing about grading, OCR, rubrics or submissions."
+# A dialect knows nothing about grading, OCR, rubrics or submissions.
 _FORBIDDEN_DOMAIN_PARTS = {"grading", "submissions", "qa_file"}
 
 
@@ -548,18 +606,18 @@ def _imported_module_names(path: Path) -> list[str]:
 
 @pytest.mark.parametrize("path", _dialect_modules(), ids=lambda p: p.name)
 def test_no_dialect_module_performs_http_or_names_the_grading_domain(path: Path) -> None:
-    """§7.2's two hard constraints, enforced as a test rather than a promise in prose."""
+    """The two hard constraints in dialects/base.py, enforced as a test rather than a promise in prose."""
     for module_name in _imported_module_names(path):
         root = module_name.split(".")[0]
         assert root not in _FORBIDDEN_HTTP_ROOTS, (
             f"{path.name} imports {module_name!r} — a dialect performs no HTTP; "
-            "that belongs in core/llm/transport.py (§7.2)."
+            "that belongs in core/llm/transport.py."
         )
         parts = set(module_name.split("."))
         offending = parts & _FORBIDDEN_DOMAIN_PARTS
         assert not offending, (
             f"{path.name} imports {module_name!r}, naming {offending}; a dialect "
-            "is the wire, not the domain (§7.2)."
+            "is the wire, not the domain."
         )
 
 

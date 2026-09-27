@@ -639,6 +639,7 @@ class GradeScreen(Vertical):
         chip = format_confidence_chip(
             getattr(current, "response_confidence", None),
             has_response=bool(current.response_text),
+            provider=getattr(current, "response_provider", None),
         )
         if chip is None:
             label.update("")

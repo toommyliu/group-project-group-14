@@ -432,7 +432,10 @@ def run_cli(
     *,
     progress: ExtractionProgress | None = None,
     status_callback: "Callable[[str], None] | None" = None,
+    prompt_cloud_send: bool = True,
 ) -> None:
+    # prompt_cloud_send=False: a caller that owns the terminal (the TUI) gets
+    # CloudConfirmationNeeded instead of an input() prompt; see cli_confirm_cloud_send.
     ai = app_config.resolve()
     parser = ArgumentParser(
         description=(
@@ -803,6 +806,16 @@ def run_cli(
             "but write nothing back into the submissions."
         ),
     )
+    parser.add_argument(
+        "--yes-send-to-cloud",
+        action="store_true",
+        dest="yes_send_to_cloud",
+        help=(
+            "Confirm sending response images to a cloud AI provider for "
+            "handwriting transcription. The scale and destination are shown "
+            "first; nothing is sent without this or an interactive yes."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.refine:
@@ -862,6 +875,13 @@ def run_cli(
     pdfs = _collect_input_pdfs(args.input)
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    from opengrader.core import egress
+
+    # Scoped to this process; when run_cli is invoked in-process by the
+    # pipeline, output_dir is the same submissions folder the pipeline itself
+    # is already recording into, so this is a no-op there.
+    egress.activate(output_dir)
 
     if args.refine and args.refine_model:
         args.llm_responses = True
@@ -1115,11 +1135,62 @@ def run_cli(
             confidence_threshold=args.confidence_threshold,
         )
 
-    if not omr_mode and (not args.blank_template or args.llm_responses):
+    # Without a blank template the extractor has always asked the vision
+    # model to read answers even when handwriting reading is off. A cloud
+    # provider only gets answer images when it is on (--llm-responses, the
+    # AI setup toggle): that is what AI setup, the data-flow report and the
+    # pipeline's pre-flight all promise. With it off, answers are read by
+    # Tesseract here, and the model is not used at all.
+    wants_reader = not omr_mode and (not args.blank_template or args.llm_responses)
+    if wants_reader and resolved_ai.kind == "cloud" and not args.llm_responses:
+        print(
+            f"Handwriting reading is off, so no answer images are sent to "
+            f"{resolved_ai.provider.label}; answers are read with OCR only.",
+            file=sys.stderr,
+        )
+        wants_reader = False
+    if wants_reader:
+        if resolved_ai.kind == "cloud":
+            from opengrader.core.cloud_preflight import CloudPreflight, cli_confirm_cloud_send
+
+            documents = f"{len(pdfs)} submission PDF{'' if len(pdfs) == 1 else 's'}"
+            preflight = CloudPreflight(
+                provider_label=resolved_ai.provider.label,
+                host=resolved_ai.host,
+                # How many answers each scan holds is only found while it is
+                # read, so the statement names what is sent per answer
+                # rather than a number.
+                uncounted=(
+                    {
+                        "answer-image": (
+                            ("up to " if args.llm_escalate else "")
+                            + f"one answer image per answer found in {documents}"
+                        )
+                    }
+                    if pdfs
+                    else {}
+                ),
+                students=len(pdfs),
+            )
+            cli_confirm_cloud_send(
+                resolved_ai,
+                preflight,
+                yes_send_to_cloud=args.yes_send_to_cloud,
+                emit=lambda message: print(message, file=sys.stderr),
+                interactive=prompt_cloud_send,
+            )
         print(f"Using Ollama vision model: {args.ollama_model}")
-        vision_reader = app_config.vision_reader(resolved_ai)
         try:
+            vision_reader = app_config.vision_reader(resolved_ai)
             app_config.ensure_ready(resolved_ai, purpose="vision")
+        except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            print(
+                f"Fix: run 'opengrader providers consent {resolved_ai.provider.name}' "
+                "(or open AI Setup), then retry.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         except Exception as exc:
             print(f"Warning: Ollama model not available ({exc}). Proceeding without VLM for text extraction.", file=sys.stderr)
             vision_reader = None

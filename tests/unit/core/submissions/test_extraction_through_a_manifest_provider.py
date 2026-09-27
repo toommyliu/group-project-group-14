@@ -7,7 +7,7 @@ import fitz
 import pytest
 from PIL import Image
 
-from opengrader.core import app_config
+from opengrader.core import app_config, egress
 from opengrader.core.ocr import extractor as ocr_extractor
 from opengrader.core.ocr.extractor import (
     FieldExtractionResult,
@@ -64,8 +64,13 @@ def orbital(monkeypatch):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "orbital.toml").write_text(MANIFEST, encoding="utf-8")
     app_config.reload_manifests()
-    app_config.save_settings(app_config.AISettings(provider="orbital-ocr"))
     monkeypatch.setenv("ORBITAL_KEY", KEY)
+    settings = app_config.AISettings(provider="orbital-ocr")
+    # The user consented to sending student work to this exact host.
+    settings = app_config.consent.grant_cloud_consent(
+        settings, app_config.resolve(settings)
+    )
+    app_config.save_settings(settings)
 
     sent: list = []
 
@@ -89,15 +94,7 @@ def _crop(path: Path) -> None:
     Image.new("RGB", (40, 20), color="white").save(path)
 
 
-def test_a_hand_written_manifest_completes_an_extraction(
-    orbital, tmp_path, monkeypatch
-) -> None:
-    resolved = app_config.resolve()
-    assert resolved.provider.name == "orbital-ocr"
-    assert resolved.provider.source == "user"
-    assert resolved.problems() == ()
-    app_config.ensure_ready(resolved)  # no listing, key present: passes offline
-
+def _run_extraction(resolved, tmp_path: Path, monkeypatch):
     scans = tmp_path / "scans"
     out = tmp_path / "out"
     scans.mkdir()
@@ -142,15 +139,50 @@ def test_a_hand_written_manifest_completes_an_extraction(
         ocr_config=OcrConfig(),
         vision_reader=app_config.vision_reader(resolved),
     )
-    report = run_extraction_batch([job], workers=1)
+    with egress.recording(out) as log_path:
+        report = run_extraction_batch([job], workers=1)
+    lines = (
+        [json.loads(line) for line in log_path.read_text().splitlines()]
+        if log_path.exists()
+        else []
+    )
+    return report.outcomes[0], lines
 
-    outcome = report.outcomes[0]
+
+def _prompts(sent) -> list[str]:
+    return [json.loads(r.data)["messages"][-1]["content"][0]["text"] for r in sent]
+
+
+def _is_identity(prompt: str) -> bool:
+    return "student's name" in prompt or "student ID" in prompt
+
+
+def test_a_hand_written_manifest_completes_an_extraction(
+    orbital, tmp_path, monkeypatch
+) -> None:
+    resolved = app_config.resolve()
+    assert resolved.provider.name == "orbital-ocr"
+    assert resolved.provider.source == "user"
+    assert resolved.problems() == ()
+    app_config.ensure_ready(resolved)  # no listing, key present: passes offline
+
+    # No local Ollama server is running in this test, so the identity route
+    # this manifest's reader is never offered fails exactly like a real
+    # missing server would, and the caller falls back to the local OCR value.
+    from opengrader.core.ocr import ollama_vlm
+
+    def _no_local_model(**_kwargs):
+        raise ConnectionError("no Ollama server on this machine")
+
+    monkeypatch.setattr(ollama_vlm, "extract_field_text", _no_local_model)
+
+    outcome, egress_lines = _run_extraction(resolved, tmp_path, monkeypatch)
+
     assert outcome.status == "extracted"
-    assert outcome.student_name == "Grace Hopper"
-    assert outcome.student_id == "987654321"
     assert "A function that calls itself." in outcome.markdown_path.read_text()
 
-    # Every call went where the manifest said, in the shape its dialect speaks.
+    # Every call that reached the manifest's cloud service went where the
+    # manifest said, in the shape its dialect speaks.
     assert orbital, "the reader never called the service"
     for req in orbital:
         assert req.full_url == "https://api.orbital-ocr.example/v2/chat/completions"
@@ -159,6 +191,41 @@ def test_a_hand_written_manifest_completes_an_extraction(
         assert body["model"] == "orbital-vision-large"
         assert body["messages"][-1]["content"][1]["type"] == "image_url"
 
-    prompts = [json.loads(r.data)["messages"][-1]["content"][0]["text"] for r in orbital]
-    identity_reads = [p for p in prompts if "student's name" in p or "student ID" in p]
-    assert len(identity_reads) == 2
+    # THE safeguard: the cloud service was never asked for a name or ID —
+    # not now, not under any setting.
+    assert [p for p in _prompts(orbital) if _is_identity(p)] == []
+    assert outcome.student_name != "Grace Hopper"
+    assert outcome.student_id != "987654321"
+
+    # One egress line per call that actually reached the cloud service —
+    # category only, never content or key.
+    assert egress_lines and len(egress_lines) == len(orbital)
+    assert {line["category"] for line in egress_lines} == {"answer-image"}
+    assert all(line["host"] == resolved.host for line in egress_lines)
+    raw = json.dumps(egress_lines)
+    assert KEY not in raw and "function that calls itself" not in raw
+
+
+def test_identity_crops_are_read_by_a_local_reader_not_the_cloud_service(
+    orbital, tmp_path, monkeypatch
+) -> None:
+    """Student names and IDs are never sent to a cloud service, under any
+    setting. When the active provider is a cloud host, they are read by a
+    local Ollama model instead — the manifest's own reader never sees them."""
+    from opengrader.core.ocr import ollama_vlm
+
+    def _local_identity(*, image_path, field_kind, config):
+        return "Grace Hopper" if field_kind == "name" else "987654321"
+
+    monkeypatch.setattr(ollama_vlm, "extract_field_text", _local_identity)
+
+    resolved = app_config.resolve()
+    outcome, egress_lines = _run_extraction(resolved, tmp_path, monkeypatch)
+
+    # The cloud service still never sees a name or ID...
+    assert [p for p in _prompts(orbital) if _is_identity(p)] == []
+    # ...yet the identity fields were filled in, by the local model.
+    assert outcome.student_name == "Grace Hopper"
+    assert outcome.student_id == "987654321"
+    # And nothing about that local read appears in the cloud egress log.
+    assert "identity-image" not in {line["category"] for line in egress_lines}

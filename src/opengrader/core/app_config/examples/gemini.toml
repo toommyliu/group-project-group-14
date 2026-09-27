@@ -1,0 +1,27 @@
+# Install with: opengrader-providers add --example gemini
+#
+# The Gemini Developer API is reached through the optional "pydantic-ai"
+# backend (dialect = "pydantic-ai") rather than one of the three raw-HTTP
+# dialects, so its request/response shape does not have to be hand-written
+# here. Install the backend with: uv sync --extra pydantic-ai
+#
+# The "google" prefix is the Gemini Developer API (a plain API key — no
+# Google Cloud project needed). For Vertex AI (a GCP project, billed to it,
+# authenticated with Application Default Credentials) see the "vertex"
+# example instead — same model names, different prefix and auth.
+#
+# api_key_env names a variable; keep the key out of this file.
+
+name         = "gemini"
+label        = "Gemini"
+summary      = "Google's Gemini models over the Gemini Developer API."
+dialect      = "pydantic-ai"
+vision_model = "google:gemini-2.5-flash"
+text_model   = "google:gemini-2.5-flash"
+api_key_env  = "GEMINI_API_KEY"
+setup_hint   = "Create a key at https://aistudio.google.com/apikey, then set GEMINI_API_KEY."
+
+# Example pricing in dollars per million tokens. Check current rates before use.
+[pricing]
+input_per_mtok  = 0.30
+output_per_mtok = 2.50

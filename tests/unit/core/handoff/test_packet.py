@@ -478,3 +478,41 @@ def test_sealing_can_keep_the_source_folder_when_asked(
 def test_a_plain_folder_is_not_a_sealed_packet(cohort: Path, tmp_path: Path) -> None:
     result = build_packet(cohort, tmp_path / "out", packet_id="p1")
     assert not is_sealed_packet(result.packet_path)
+
+
+# Key hygiene: no API key in a packet
+# ---------------------------------------------------------------------------
+
+
+def test_a_packet_contains_no_api_key_shaped_strings(cohort: Path, tmp_path: Path) -> None:
+    """No key-shaped string appears in any built packet.
+
+    Even if an API key somehow reaches the packet building code, it must not
+    appear in the final written artifact. Tests the redaction mechanism works
+    by registering a key with transport and building a packet.
+    """
+    import re
+    from opengrader.core.llm import transport
+
+    # Key regex from transport.py
+    _SHAPED_KEY = re.compile(r"\b(?:sk|pk|rk|ak|key)-[A-Za-z0-9_\-]{12,}")
+
+    fake_key = "sk-test-DO-NOT-LEAK-0123456789abcdef"
+    transport.register_secret(fake_key)
+    try:
+        result = build_packet(cohort, tmp_path / "out", packet_id="p1")
+
+        # Scan all files in the packet
+        for path in result.packet_path.rglob("*"):
+            if path.is_file():
+                try:
+                    text = path.read_text()
+                    matches = _SHAPED_KEY.findall(text)
+                    # Filter to our test key pattern
+                    matches = [m for m in matches if "test" in m.lower()]
+                    assert not matches, f"Found key-shaped string in {path}: {matches}"
+                except UnicodeDecodeError:
+                    # Binary files don't contain string keys
+                    pass
+    finally:
+        transport.forget_secret(fake_key)

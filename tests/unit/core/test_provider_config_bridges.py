@@ -47,7 +47,12 @@ def _make_spec(
 def _resolve(registry, spec: app_config.ProviderSpec, **settings_kwargs) -> app_config.ResolvedAI:
     registry(spec)
     settings = app_config.AISettings(provider=spec.name, **settings_kwargs)
-    return app_config.resolve(settings, environ={})
+    resolved = app_config.resolve(settings, environ={})
+    if resolved.kind == "cloud":
+        # These tests exercise the pre-flight itself, past the cloud consent check.
+        settings = app_config.consent.grant_cloud_consent(settings, resolved)
+        resolved = app_config.resolve(settings, environ={})
+    return resolved
 
 
 # with_overrides

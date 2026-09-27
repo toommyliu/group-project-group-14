@@ -513,3 +513,121 @@ def test_status_lines_are_forwarded_from_the_inner_clis(
     seen: list[str] = []
     run_pipeline(_request(tmp_path), progress=PipelineProgress(on_status=seen.append))
     assert "Wrote 2 split PDFs" in seen
+
+
+# ---------------------------------------------------------------------------
+# There is no identity override left in the core: student names and IDs are
+# never sent to the cloud, and there is no flag that changes that.
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_request_has_no_identity_override_field() -> None:
+    assert "send_identity_confirmed" not in PipelineRequest.__dataclass_fields__
+    with pytest.raises(TypeError):
+        PipelineRequest(  # type: ignore[call-arg]
+            scan=Path("scan.pdf"),
+            output_dir=Path("out"),
+            send_identity_confirmed=True,
+        )
+
+
+def test_split_and_extract_argv_never_carry_the_identity_flag(tmp_path) -> None:
+    request = _request(
+        tmp_path,
+        send_to_cloud_confirmed=True,
+        llm=LlmOptions(read_handwriting=True),
+    )
+    split_argv = plan_pipeline(request)[1].argv
+    extract_argv = plan_pipeline(request)[2].argv
+    # The splitter's own vision calls are whole-page reads (page numbers,
+    # Name/ID headers) that GuardedVisionReader always keeps local, so a
+    # split run never sends anything to the cloud — the pipeline doesn't
+    # pass --yes-send-to-cloud to it, and the splitter's parser doesn't
+    # accept it at all (see cli/submission_splitter.py).
+    assert "--yes-send-to-cloud" not in split_argv
+    assert "--yes-send-identity-to-cloud" not in split_argv
+    assert "--yes-send-to-cloud" in extract_argv
+    assert "--yes-send-identity-to-cloud" not in extract_argv
+
+
+# ---------------------------------------------------------------------------
+# The single cloud confirmation gate in run_pipeline, and the CloudPreflight
+# it now exposes on the report for a caller (the TUI in particular) to read
+# directly instead of parsing a BLOCKED outcome's detail text.
+# ---------------------------------------------------------------------------
+
+_CLOUD_HOST = "https://api.pipeline-cloud.example/v1"
+
+
+@pytest.fixture
+def cloud_spec():
+    from opengrader.core import app_config
+
+    original = app_config.registered_providers()
+    spec = app_config.ProviderSpec(
+        name="pipeline-cloud",
+        label="Pipeline Cloud",
+        summary="Test-only cloud provider.",
+        default_host=_CLOUD_HOST,
+        default_vision_model="v",
+        default_text_model="t",
+        setup_hint="",
+        api_key_env="PIPELINE_CLOUD_KEY",
+        supports_model_listing=False,
+        dialect="openai-chat",
+    )
+    app_config.register_provider(spec)
+    try:
+        yield spec
+    finally:
+        app_config._REGISTRY.clear()
+        for spec_ in original:
+            app_config.register_provider(spec_)
+
+
+def _consent_to_send(spec) -> None:
+    from opengrader.core import app_config
+    from opengrader.core.app_config import consent
+
+    settings = app_config.AISettings(provider=spec.name, read_handwriting=True)
+    resolved = app_config.resolve(settings, environ={})
+    settings = consent.grant_cloud_consent(settings, resolved)
+    app_config.save_settings(settings)
+
+
+def test_cloud_run_without_confirmation_is_blocked_and_carries_the_preflight(
+    tmp_path, stages, cloud_spec
+) -> None:
+    _consent_to_send(cloud_spec)
+    split_dir = tmp_path / "already-split"
+    _pdf(split_dir / "submission-0001.pdf")
+    request = _request(tmp_path, scan=split_dir, llm=LlmOptions(read_handwriting=True))
+
+    report = run_pipeline(request)
+
+    assert report.cloud_confirmation_needed is True
+    assert report.cloud_preflight is not None
+    assert report.cloud_preflight.host == _CLOUD_HOST
+    assert report.cloud_preflight.sends_anything is True
+    assert stages.calls == []
+
+
+def test_a_confirmed_cloud_run_actually_runs_and_still_carries_the_preflight(
+    tmp_path, stages, clean_scan, cloud_spec
+) -> None:
+    _consent_to_send(cloud_spec)
+    split_dir = tmp_path / "already-split"
+    _pdf(split_dir / "submission-0001.pdf")
+    request = _request(
+        tmp_path,
+        scan=split_dir,
+        llm=LlmOptions(read_handwriting=True),
+        send_to_cloud_confirmed=True,
+    )
+
+    report = run_pipeline(request)
+
+    assert report.cloud_confirmation_needed is False
+    assert report.cloud_preflight is not None
+    assert report.cloud_preflight.sends_anything is True
+    assert stages.calls  # the extract stage actually ran

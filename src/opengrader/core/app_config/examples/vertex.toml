@@ -1,0 +1,33 @@
+# Install with: opengrader-providers add --example vertex
+#
+# Google Vertex AI authenticates with Application Default Credentials (ADC)
+# or a service account, not an API-key header, so this manifest uses the
+# optional "pydantic-ai" backend (dialect = "pydantic-ai") instead of one of
+# the three raw-HTTP dialects. Install the backend with:
+#   uv sync --extra pydantic-ai
+#
+# The "google-cloud" prefix is Vertex AI. For the Gemini Developer API (a
+# plain API key, no Google Cloud project) see the "gemini" example instead —
+# same model names, different prefix and auth.
+#
+# `host` is deliberately left out: Vertex's endpoint is regional and chosen
+# by the Google Cloud SDK, not a single URL a manifest could name. Leaving
+# `host` out is what keeps this provider's `kind` correctly derived as
+# "cloud" — see `core/app_config/manifests.py`'s `PYDANTIC_AI_PREFIXES` table.
+
+name         = "vertex"
+label        = "Google Vertex AI"
+summary      = "Gemini models on Google Cloud, billed to your GCP project."
+dialect      = "pydantic-ai"
+vision_model = "google-cloud:gemini-2.5-flash"
+text_model   = "google-cloud:gemini-2.5-flash"
+setup_hint   = "Run `gcloud auth application-default login`, or set GOOGLE_APPLICATION_CREDENTIALS to a service-account key file. No api_key_env is needed unless your project uses Vertex's API-key auth path."
+
+# Uncomment if your project authenticates Vertex with an API key instead of
+# Application Default Credentials:
+# api_key_env = "VERTEX_API_KEY"
+
+# Example pricing in dollars per million tokens. Check current rates before use.
+[pricing]
+input_per_mtok  = 0.30
+output_per_mtok = 2.50

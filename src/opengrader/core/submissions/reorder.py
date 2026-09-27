@@ -390,7 +390,10 @@ def reorder_pdf_pages(
                 if num is None and vision_reader:
                     img_file = tmp_path / f"p{i}.png"
                     img.save(img_file)
-                    num = vision_reader.extract_page_number(image_path=img_file)
+                    try:
+                        num = vision_reader.extract_page_number(image_path=img_file)
+                    except Exception:  # noqa: BLE001 - blocked or failed: no number
+                        num = None
 
             detected.append(num)
 

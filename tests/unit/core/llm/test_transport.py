@@ -1,13 +1,12 @@
 """Retry, backoff, `Retry-After`, and redaction — driven by a fake HTTP layer.
 
-§7.9's exit criterion for this phase is explicit: "no live service in the
-suite." Every test here monkeypatches `urllib.request.urlopen` with a scripted
+No test here talks to a live service. Every test here monkeypatches `urllib.request.urlopen` with a scripted
 fake and injects `sleep`/`rand` into `send_json`, so nothing here opens a
 socket and nothing here really sleeps for a retry backoff — nothing but the
 handful of genuine thread-concurrency tests, which use a short real wait
 purely to let threads rendezvous, never as a stand-in for a backoff delay.
 
-Redaction (L8, §7.7) gets the most attention. The property under test is not
+Redaction gets the most attention, because it is a security control. The property under test is not
 "redact() matches a regex" — it is "a secret that reaches this module by any
 path (registered, echoed back by a service, embedded in a token shape, an
 answer image quoted in an error body) never reaches the exception message a
@@ -309,7 +308,7 @@ def test_connection_error_raises_through_error_factory_when_policy_disallows(mon
 
 
 # ---------------------------------------------------------------------------
-# Redaction — L8
+# Redaction
 # ---------------------------------------------------------------------------
 
 
@@ -525,3 +524,98 @@ def test_concurrency_limit_none_restores_unbounded(_reset_concurrency_limit) -> 
 # ---------------------------------------------------------------------------
 # parse_json_object
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Redirects must not carry the key to another host
+# ---------------------------------------------------------------------------
+
+
+def test_a_redirect_to_another_host_does_not_carry_the_api_key() -> None:
+    """A provider that answers 302 must not get urllib to replay our key elsewhere.
+
+    Two throwaway HTTP servers on 127.0.0.1 (no AI service is involved): the
+    first redirects every POST to the second, which records the headers it
+    receives. Before the fix, urllib copied the Authorization header onto the
+    redirected request.
+    """
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    received: dict[str, str | None] = {}
+
+    class _Collector(BaseHTTPRequestHandler):
+        def log_message(self, *args) -> None:  # keep test output quiet
+            pass
+
+        def do_GET(self) -> None:  # noqa: N802 - http.server's naming
+            received["authorization"] = self.headers.get("Authorization")
+            received["x-api-key"] = self.headers.get("x-api-key")
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    collector = HTTPServer(("127.0.0.1", 0), _Collector)
+
+    class _Redirector(BaseHTTPRequestHandler):
+        def log_message(self, *args) -> None:
+            pass
+
+        def do_POST(self) -> None:  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(302)
+            # "localhost" rather than 127.0.0.1: a different host name.
+            self.send_header("Location", f"http://localhost:{collector.server_port}/elsewhere")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    redirector = HTTPServer(("127.0.0.1", 0), _Redirector)
+    threads = [
+        threading.Thread(target=server.serve_forever, daemon=True)
+        for server in (collector, redirector)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        key = "sk-redirect-test-" + "q" * 24
+        try:
+            transport.send_json(
+                url=f"http://127.0.0.1:{redirector.server_port}/v1/chat/completions",
+                payload={"prompt": "hello"},
+                headers={"Authorization": f"Bearer {key}", "x-api-key": key},
+                timeout_seconds=5,
+            )
+        except TransportError:
+            pass
+        assert "authorization" in received, "the redirect was not followed at all"
+        assert received["authorization"] is None
+        assert received["x-api-key"] is None
+    finally:
+        for server in (collector, redirector):
+            server.shutdown()
+            server.server_close()
+
+
+def test_the_key_header_is_still_sent_to_the_host_that_was_asked(monkeypatch) -> None:
+    seen = []
+
+    def _capture(req, timeout=None):
+        seen.append(req)
+        return _FakeResponse(200, "{}")
+
+    monkeypatch.setattr(transport.request, "urlopen", _capture)
+    transport.send_json(url=URL, payload={}, headers={"Authorization": "Bearer abcdefghijkl"})
+    assert seen[0].get_header("Authorization") == "Bearer abcdefghijkl"
+    assert seen[0].get_header("Content-type") == "application/json"
+
+
+def test_a_password_in_the_host_url_never_reaches_the_raised_message(monkeypatch) -> None:
+    def _refuse(req, timeout=None):
+        raise URLError("connection refused")
+
+    monkeypatch.setattr(transport.request, "urlopen", _refuse)
+    with pytest.raises(TransportError) as excinfo:
+        transport.send_json(url="https://alice:hunter2pass@gw.example/v1/x", payload={})
+    assert "hunter2pass" not in str(excinfo.value)
+    assert "gw.example" in str(excinfo.value)

@@ -1,9 +1,8 @@
 """The single HTTP layer every provider call passes through.
 
-§7.3 of `About/AI_README.md` asks for exactly one of these, and the reason is
-not tidiness. Retry policy, backoff, concurrency and — above all — *redaction*
+There is exactly one of these, and the reason is not tidiness. Retry policy, backoff, concurrency and — above all — *redaction*
 are the kind of thing that is wrong the third time you write it. Redaction in
-particular is a security control (L8): an API key must not reach the AI
+particular is a security control: an API key must not reach the AI
 settings screen's connection-test log, `run-ledger.jsonl`, or any exception
 text `doctor` prints. One transport means one place that can be true.
 
@@ -108,7 +107,7 @@ CLOUD_RETRY = RetryPolicy(max_attempts=4, retry_on_connection_error=True)
 
 
 # ---------------------------------------------------------------------------
-# Redaction — L8. The one place a key can be scrubbed.
+# Redaction. The one place a key can be scrubbed.
 # ---------------------------------------------------------------------------
 
 REDACTED = "[redacted]"
@@ -132,6 +131,10 @@ _LABELLED_KEY = re.compile(
 _BARE_BEARER = re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._\-~+/=]{8,})")
 
 _BASE64_BLOB = re.compile(r"[A-Za-z0-9+/=]{%d,}" % _BLOB_THRESHOLD)
+
+# `https://user:secret@gateway.example/...`: a password pasted into a host URL
+# is quoted back in every "failed to reach <url>" message.
+_URL_USERINFO = re.compile(r"(?i)(\b[a-z][a-z0-9+.\-]*://)[^/@\s]+@")
 
 
 def register_secret(value: str | None) -> None:
@@ -179,6 +182,7 @@ def redact(text: str) -> str:
     for value in known:
         text = text.replace(value, REDACTED)
 
+    text = _URL_USERINFO.sub(lambda m: f"{m.group(1)}{REDACTED}@", text)
     text = _BARE_BEARER.sub(lambda m: m.group(0)[: m.start(1) - m.start(0)] + REDACTED, text)
     text = _LABELLED_KEY.sub(lambda m: f"{m.group(1)}{REDACTED}", text)
     text = _SHAPED_KEY.sub(REDACTED, text)
@@ -345,15 +349,22 @@ def send_json(
     """
     where = f"{service} at {url}" if service else url
     body = json.dumps(payload).encode("utf-8") if payload is not None else None
-    sent_headers = {"Content-Type": "application/json", **(dict(headers) if headers else {})}
-    if body is None:
-        sent_headers.pop("Content-Type", None)
+    content_headers = {"Content-Type": "application/json"} if body is not None else {}
 
     attempts = max(1, retry.max_attempts)
     last: str = f"{where} did not answer"
 
     for attempt in range(1, attempts + 1):
-        req = request.Request(url, data=body, headers=sent_headers, method=method)
+        req = request.Request(url, data=body, headers=content_headers, method=method)
+        # The caller's headers carry the API key. urllib follows a 30x
+        # redirect by copying the ordinary headers onto a new request to
+        # wherever the Location points — another host, or plain http — so a
+        # key attached the ordinary way would go along with it. Headers
+        # added as "unredirected" stay on this one request only. (The body is
+        # never re-sent on a redirect: urllib turns a redirected POST into a
+        # GET without it.)
+        for name, value in (headers or {}).items():
+            req.add_unredirected_header(name, value)
         retry_after: float | None = None
         try:
             with concurrency_slot():

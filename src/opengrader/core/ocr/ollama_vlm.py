@@ -9,7 +9,7 @@ from opengrader.core.llm.errors import LLMError
 from opengrader.core.llm.ollama_transport import parse_json_object as _parse_json_from_response
 
 from . import vision_prompts
-from .vision_reader import TitleMetadataResult
+from .vision_reader import IdentityFieldBlocked, TitleMetadataResult
 
 __all__ = [
     "OllamaVisionConfig",
@@ -18,7 +18,6 @@ __all__ = [
     "ensure_model_available",
     "list_available_models",
     "extract_field_text",
-    "extract_student_field",
     "extract_title_metadata",
     "extract_question_prompt_and_answer",
     "extract_handwriting_only",
@@ -97,12 +96,33 @@ def _generate_with_image(
     )
 
 
+def _identity_read_stays_local(config: OllamaVisionConfig, what: str) -> None:
+    """Refuse to send a crop that may show a student's identity off this network.
+
+    The functions below that read a name, ID, title or whole page are
+    normally reached through `GuardedVisionReader`, which only ever hands them
+    a local host. Checking here as well means calling one of them directly —
+    with the built-in Ollama provider pointed at a remote server, say — cannot
+    send a name or ID anywhere either.
+    """
+    from opengrader.core.app_config import host_kind
+
+    if host_kind(config.host) != "local":
+        raise IdentityFieldBlocked(
+            f"{what} is only ever read on this computer or its local network; "
+            f"{config.host} is neither, so nothing was sent."
+        )
+
+
 def extract_field_text(
     *,
     image_path: str | Path,
     field_kind: Literal["name", "sid"],
     config: OllamaVisionConfig,
 ) -> str:
+    _identity_read_stays_local(
+        config, "A student ID" if field_kind == "sid" else "A student name"
+    )
     request = vision_prompts.field_text_request(field_kind)
     raw = _generate_with_image(
         image_path=image_path,
@@ -115,24 +135,12 @@ def extract_field_text(
     return vision_prompts.parse_field_text(raw, field_kind=field_kind)
 
 
-def extract_student_field(
-    *,
-    image_path: str | Path,
-    field_kind: Literal["name", "sid"],
-    config: OllamaVisionConfig,
-) -> str:
-    return extract_field_text(
-        image_path=image_path,
-        field_kind=field_kind,
-        config=config,
-    )
-
-
 def extract_title_metadata(
     *,
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> TitleMetadataResult:
+    _identity_read_stays_local(config, "The cover-page title")
     request = vision_prompts.title_metadata_request()
     raw = _generate_with_image(
         image_path=image_path,
@@ -188,6 +196,7 @@ def extract_page_number(
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> int | None:
+    _identity_read_stays_local(config, "A whole scanned page")
     request = vision_prompts.page_number_request()
     raw = _generate_with_image(
         image_path=image_path,
@@ -205,6 +214,7 @@ def page_has_identity_field(
     image_path: str | Path,
     config: OllamaVisionConfig,
 ) -> bool:
+    _identity_read_stays_local(config, "A whole scanned page")
     request = vision_prompts.identity_field_request()
     raw = _generate_with_image(
         image_path=image_path,

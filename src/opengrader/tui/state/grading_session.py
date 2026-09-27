@@ -25,6 +25,7 @@ class QuestionGrade:
     question_type: QuestionType = FREE_RESPONSE
     response_confidence: float | None = None
     response_source: str | None = None
+    response_provider: str | None = None
     source_pdf_path: str = ""
     page_context: tuple[PageContextEntry, ...] = ()
 
@@ -188,6 +189,7 @@ class StudentGradingRun:
         *,
         confidence: float | None = 100.0,
         source: str | None = SOURCE_HUMAN,
+        provider: str | None = None,
     ) -> None:
         question = self.current_question
         if question is None:
@@ -196,3 +198,4 @@ class StudentGradingRun:
         if confidence is not None:
             question.response_confidence = confidence
         question.response_source = source
+        question.response_provider = provider

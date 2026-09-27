@@ -45,7 +45,7 @@ def _print_check(check: EnvironmentCheck) -> None:
         print(f"           Fix: {check.fix}")
 
 
-def _print_human(report: EnvironmentReport) -> None:
+def _print_human(report: EnvironmentReport, *, ai: "app_config.ResolvedAI | None" = None) -> None:
     print("Opengrader environment check")
     print()
     for check in report.checks:
@@ -53,6 +53,13 @@ def _print_human(report: EnvironmentReport) -> None:
 
     print()
     print(_VERDICTS[report.status])
+
+    # One sentence, one source (consent.egress_statement) — it already
+    # says when names and IDs are included, so nothing else composes its
+    # own wording here (see AIEgressBanner, the TUI's version of this line).
+    if ai is not None and ai.kind == "cloud":
+        print()
+        print(f"Data flow: {app_config.egress_statement(ai)}")
 
     attention = report.attention
     if attention:
@@ -63,8 +70,8 @@ def _print_human(report: EnvironmentReport) -> None:
             print(f"  {index}. {check.name}: {action}")
 
 
-def _report_to_json(report: EnvironmentReport) -> dict:
-    return {
+def _report_to_json(report: EnvironmentReport, *, ai: "app_config.ResolvedAI | None" = None) -> dict:
+    result = {
         "status": report.status,
         "checks": [
             {
@@ -77,6 +84,12 @@ def _report_to_json(report: EnvironmentReport) -> dict:
             for check in report.checks
         ],
     }
+    
+    # Same sentence as the human output.
+    if ai is not None and ai.kind == "cloud":
+        result["data_flow"] = app_config.egress_statement(ai)
+
+    return result
 
 
 def build_parser() -> ArgumentParser:
@@ -140,9 +153,9 @@ def run_cli(argv: list[str] | None = None) -> int:
     )
 
     if args.json:
-        print(json.dumps(_report_to_json(report), indent=2))
+        print(json.dumps(_report_to_json(report, ai=ai), indent=2))
     else:
-        _print_human(report)
+        _print_human(report, ai=ai)
 
     if args.fail_on_problem and report.broken:
         return 2

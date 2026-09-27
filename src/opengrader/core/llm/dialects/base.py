@@ -1,6 +1,6 @@
 """What a wire dialect is, and what it is forbidden from being.
 
-§7.2 of `About/AI_README.md` makes the central bet of this design: there are
+The provider layer makes one central bet: there are
 hundreds of services an instructor might plausibly be handed and roughly three
 *shapes* they speak, so ship the shapes and let the service be data. A dialect
 is one of those shapes.
@@ -133,4 +133,12 @@ class Dialect(Protocol):
 
     def model_names(self, body: dict) -> list[str]:
         """Model ids out of a parsed model-list response."""
+        ...
+
+    def reply_usage(self, body: dict) -> tuple[int | None, int | None]:
+        """Extract token counts from a reply body.
+
+        Returns a tuple of (input_tokens, output_tokens), or (None, None) if
+        the counts are missing or malformed. Never raises.
+        """
         ...

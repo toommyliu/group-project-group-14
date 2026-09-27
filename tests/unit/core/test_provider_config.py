@@ -229,10 +229,17 @@ def test_cloud_provider_sends_data_off_machine(fake_cloud_provider) -> None:
     assert resolved.sends_data_off_machine is True
 
 
+def _consented(spec: app_config.ProviderSpec, **environ: str) -> app_config.AISettings:
+    settings = app_config.AISettings(provider=spec.name)
+    return app_config.consent.grant_cloud_consent(
+        settings, app_config.resolve(settings, environ=dict(environ))
+    )
+
+
 def test_missing_api_key_is_reported_by_name(fake_cloud_provider) -> None:
     spec, _text, _vision, _calls = fake_cloud_provider
 
-    resolved = app_config.resolve(app_config.AISettings(provider=spec.name), environ={})
+    resolved = app_config.resolve(_consented(spec), environ={})
     problems = resolved.problems()
 
     assert len(problems) == 1
@@ -243,7 +250,7 @@ def test_supplying_the_key_via_environ_clears_the_problem(fake_cloud_provider) -
     spec, _text, _vision, _calls = fake_cloud_provider
 
     resolved = app_config.resolve(
-        app_config.AISettings(provider=spec.name),
+        _consented(spec),
         environ={"FAKE_KEY": "sekrit-value"},
     )
 
@@ -358,7 +365,6 @@ def test_deliberate_feature_choices_round_trip() -> None:
     "field_name",
     [
         "read_handwriting",
-        "escalate_only",
         "transcribe_math",
         "grade_written",
         "require_calibration",
@@ -387,6 +393,54 @@ def test_from_dict_auto_grade_falls_back_to_true_on_rubbish(
     settings = app_config.AISettings.from_dict({"auto_grade": raw})
 
     assert settings.auto_grade is expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(True, True), (False, False), ("yes", True), ("off", False), ("garbage", True)],
+)
+def test_from_dict_read_identity_locally_falls_back_to_true_on_rubbish(
+    raw: object, expected: bool
+) -> None:
+    settings = app_config.AISettings.from_dict({"read_identity_locally": raw})
+
+    assert settings.read_identity_locally is expected
+
+
+def test_read_identity_locally_round_trips_and_is_omitted_when_default() -> None:
+    default = app_config.AISettings()
+    assert "read_identity_locally" not in default.to_dict()
+
+    off = app_config.AISettings(read_identity_locally=False)
+    body = off.to_dict()
+    assert body["read_identity_locally"] is False
+    assert app_config.AISettings.from_dict(body) == off
+
+
+def test_read_identity_locally_carries_onto_resolved_ai() -> None:
+    assert app_config.resolve(app_config.AISettings(), environ={}).read_identity_locally is True
+    assert app_config.resolve(
+        app_config.AISettings(read_identity_locally=False), environ={}
+    ).read_identity_locally is False
+
+
+def test_read_identity_locally_is_in_the_generated_schema(tmp_path: Path) -> None:
+    app_config.save_settings(app_config.AISettings(), tmp_path / "config.json")
+    schema = json.loads((tmp_path / "config.schema.json").read_text(encoding="utf-8"))
+
+    assert schema["properties"]["read_identity_locally"]["type"] == "boolean"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(True, True), (False, False), ("yes", True), ("off", False), ("garbage", None), (None, None)],
+)
+def test_from_dict_escalate_only_is_tri_state_falling_back_to_unset(
+    raw: object, expected: bool | None
+) -> None:
+    settings = app_config.AISettings.from_dict({"escalate_only": raw})
+
+    assert settings.escalate_only is expected
 
 
 def test_min_confidence_measured_has_no_environment_override() -> None:
@@ -564,20 +618,27 @@ def test_vision_reader_routes_through_the_provider_not_through_ollama(
     fake_cloud_provider,
 ) -> None:
     spec, _text, _vision, calls = fake_cloud_provider
-    resolved = app_config.resolve(app_config.AISettings(provider=spec.name), environ={})
+    resolved = app_config.resolve(_consented(spec), environ={})
 
-    assert app_config.vision_reader(resolved) is _READER_SENTINEL
+    reader = app_config.vision_reader(resolved)
+    assert reader.inner is _READER_SENTINEL  # wrapped by GuardedVisionReader
     assert calls["vision_reader"] is resolved
 
 
 def test_the_local_provider_hands_back_a_real_vision_reader() -> None:
-    from opengrader.core.ocr.vision_reader import OllamaVisionReader, VisionReader
+    from opengrader.core.ocr.vision_reader import (
+        GuardedVisionReader,
+        OllamaVisionReader,
+        VisionReader,
+    )
 
     reader = app_config.vision_reader(app_config.for_provider("ollama"))
 
-    assert isinstance(reader, OllamaVisionReader)
+    assert isinstance(reader, GuardedVisionReader)
     assert isinstance(reader, VisionReader)
-    assert reader.config.model == app_config.DEFAULT_VISION_MODEL
+    assert isinstance(reader.inner, OllamaVisionReader)
+    assert reader.inner.config.model == app_config.DEFAULT_VISION_MODEL
+    assert reader.cloud is False and reader.local_identity_config is None
 
 
 def test_a_vision_reader_survives_the_process_boundary() -> None:

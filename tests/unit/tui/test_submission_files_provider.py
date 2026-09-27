@@ -2224,3 +2224,62 @@ def test_review_queue_notices_another_process_writing_the_journal(
 
     provider.build_review_items()
     assert len(calls) > after_first, "an outside journal write must invalidate the cache"
+
+
+def _write_submission_read_by(path: Path, read_by: str) -> None:
+    _write_simple_submission(path, name="Student 1")
+    path.write_text(
+        path.read_text().replace(
+            "  - Response text: ",
+            f"  - Read by: {read_by}\n  - Response text: two",
+        )
+    )
+
+
+def test_question_seeds_carry_the_provider_that_read_the_answer(tmp_path: Path) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions = tmp_path / "subs"
+    submissions.mkdir()
+    _write_submission_read_by(submissions / "s1.submission.md", "vision-model (Claude)")
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    (seed,) = provider.build_question_seeds(student_item_id="s1")
+
+    assert seed.response_source == "vision-model"
+    assert seed.response_provider == "Claude"
+
+
+def test_saving_a_transcription_keeps_or_drops_the_provider(tmp_path: Path) -> None:
+    qa_path = tmp_path / "qa.md"
+    _write_simple_qa(qa_path)
+    submissions = tmp_path / "subs"
+    submissions.mkdir()
+    submission_path = submissions / "s1.submission.md"
+    _write_submission_read_by(submission_path, "vision-model (Claude)")
+    provider = SubmissionFilesProvider(
+        qa_file_path=qa_path,
+        submissions_path=submissions,
+        default_image_path=DEFAULT_IMAGE_PATH,
+    )
+
+    # A grader's correction: the reading is theirs now, no provider.
+    provider.save_question_transcription(
+        student_item_id="s1", question_id="q1", response_text="three"
+    )
+    assert "  - Read by: human\n" in submission_path.read_text()
+
+    # Undo restores the machine reading with the provider that made it.
+    provider.save_question_transcription(
+        student_item_id="s1",
+        question_id="q1",
+        response_text="two",
+        response_confidence=None,
+        response_source="vision-model",
+        response_provider="Claude",
+    )
+    assert "  - Read by: vision-model (Claude)\n" in submission_path.read_text()

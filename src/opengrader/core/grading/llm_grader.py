@@ -48,11 +48,19 @@ _CONFIDENCE_FIELD_RE = re.compile(r"^(\d{1,3})\s*%$")
 _MODEL_NAME_FORBIDDEN = re.compile(r"[\[\]·\r\n]+")
 _MODEL_NAME_MAX_LENGTH = 40
 
+# The provider rides on the model field as a " (provider)" suffix, the same
+# additive trick core/submissions/transcription.py uses for `Read by`: no new
+# tag field, no change to how a bare model name has always been split out, and
+# a tag written before providers existed has no suffix and round-trips
+# byte-identically.
+_MODEL_PROVIDER_RE = re.compile(r"^(.*\S)\s+\(([^()]+)\)$")
+
 
 @dataclass(frozen=True)
 class AiAnalysisTag:
     confidence: int | None = None
     model: str = ""
+    provider: str = ""
     confirmed: bool = False
     overridden: bool = False
     rationale: str = ""
@@ -68,19 +76,39 @@ def _sanitize_model_name(model: str) -> str:
     return cleaned[:_MODEL_NAME_MAX_LENGTH].strip()
 
 
+def _model_field_with_provider(model: str, provider: str) -> str:
+    """Render the model field, appending the provider in parentheses.
+
+    A blank provider (the default) renders exactly as the tag always has.
+    """
+    safe_model = _sanitize_model_name(model)
+    provider = (provider or "").strip()
+    if not safe_model or not provider:
+        return safe_model
+    return f"{safe_model} ({provider})"
+
+
+def _split_model_field(value: str) -> tuple[str, str]:
+    match = _MODEL_PROVIDER_RE.match(value)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return value, ""
+
+
 def _render_tag(
     *,
     confidence: float | int | None,
     model: str,
+    provider: str = "",
     confirmed: bool = False,
     overridden: bool = False,
 ) -> str:
     fields = [AI_ANALYSIS_TAG]
     if confidence is not None:
         fields.append(f"{round(confidence)}%")
-    safe_model = _sanitize_model_name(model)
-    if safe_model:
-        fields.append(safe_model)
+    model_field = _model_field_with_provider(model, provider)
+    if model_field:
+        fields.append(model_field)
     if overridden:
         fields.append(_OVERRIDDEN_FIELD)
     elif confirmed:
@@ -95,6 +123,7 @@ def parse_ai_analysis(analysis: str) -> AiAnalysisTag | None:
 
     confidence: int | None = None
     model = ""
+    provider = ""
     confirmed = False
     overridden = False
     for field in match.group(1).split("·"):
@@ -109,11 +138,12 @@ def parse_ai_analysis(analysis: str) -> AiAnalysisTag | None:
         elif value.casefold() == _OVERRIDDEN_FIELD:
             overridden = True
         elif not model:
-            model = value
+            model, provider = _split_model_field(value)
 
     return AiAnalysisTag(
         confidence=confidence,
         model=model,
+        provider=provider,
         confirmed=confirmed,
         overridden=overridden,
         rationale=(analysis[match.end() :]).strip(),
@@ -124,11 +154,15 @@ def format_ai_analysis(
     suggestion: "GradeSuggestion",
     *,
     model: str = "",
+    provider: str = "",
     confirmed: bool = False,
 ) -> str:
     rationale = suggestion.rationale.strip()
     tag = _render_tag(
-        confidence=suggestion.confidence * 100, model=model, confirmed=confirmed
+        confidence=suggestion.confidence * 100,
+        model=model,
+        provider=provider,
+        confirmed=confirmed,
     )
     return f"{tag} {rationale}".strip() if rationale else tag
 
@@ -141,6 +175,11 @@ def ai_analysis_confidence(analysis: str) -> int | None:
 def ai_analysis_model(analysis: str) -> str:
     tag = parse_ai_analysis(analysis)
     return "" if tag is None else tag.model
+
+
+def ai_analysis_provider(analysis: str) -> str:
+    tag = parse_ai_analysis(analysis)
+    return "" if tag is None else tag.provider
 
 
 def ai_analysis_is_confirmed(analysis: str) -> bool:
@@ -163,7 +202,7 @@ def confirm_ai_analysis(analysis: str) -> str:
     if tag is None or tag.reviewed:
         return analysis
     rendered = _render_tag(
-        confidence=tag.confidence, model=tag.model, confirmed=True
+        confidence=tag.confidence, model=tag.model, provider=tag.provider, confirmed=True
     )
     return f"{rendered} {tag.rationale}".strip() if tag.rationale else rendered
 
@@ -173,7 +212,7 @@ def override_ai_analysis(analysis: str) -> str:
     if tag is None or tag.overridden:
         return analysis
     return _render_tag(
-        confidence=tag.confidence, model=tag.model, overridden=True
+        confidence=tag.confidence, model=tag.model, provider=tag.provider, overridden=True
     )
 
 

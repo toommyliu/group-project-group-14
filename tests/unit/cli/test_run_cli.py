@@ -717,3 +717,184 @@ def test_json_keeps_the_folder_summary_off_stdout(tmp_path, captured, capsys) ->
     streams = capsys.readouterr()
     assert json.loads(streams.out)["ok"] is True
     assert "Class folder" in streams.err
+
+
+# ---------------------------------------------------------------------------
+# --yes-send-to-cloud / the interactive and non-interactive confirmation gate
+# ---------------------------------------------------------------------------
+
+
+def _cloud_preflight(tmp_path: Path):
+    from opengrader.core.cloud_preflight import CloudPreflight
+
+    return CloudPreflight(
+        provider_label="Test Cloud",
+        host="ai.example.edu",
+        counts={"answer-image": 847},
+        students=141,
+        estimated_cost=3.40,
+        cost_basis="measured from previous calls",
+    )
+
+
+def _cloud_refusal_report(tmp_path: Path, preflight=None) -> PipelineReport:
+    preflight = preflight if preflight is not None else _cloud_preflight(tmp_path)
+    outcome = StageOutcome(
+        stage=STAGE_SCAN_CHECK,
+        status=StageStatus.BLOCKED,
+        message=(
+            f"this run would send data to {preflight.host} — re-run with "
+            "--yes-send-to-cloud to confirm, or turn off the AI feature that needs it"
+        ),
+        detail="cloud-preflight:\n" + preflight.statement(),
+    )
+    return PipelineReport(
+        stages=(outcome,),
+        submissions_dir=_cohort(tmp_path, 0),
+        qa_file=None,
+        cloud_preflight=preflight,
+    )
+
+
+class _FakeStdin:
+    def isatty(self) -> bool:
+        return True
+
+
+def test_flag_confirmed_run_is_never_refused(tmp_path, monkeypatch) -> None:
+    calls: list[bool] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request.send_to_cloud_confirmed)
+        return _report(tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.RAN, "ok"))
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    report = run_module.run_cli(_argv(tmp_path, "--yes-send-to-cloud"))
+    assert calls == [True]
+    assert report.ok
+
+
+def test_tty_confirmation_yes_reruns_confirmed(tmp_path, monkeypatch, capsys) -> None:
+    calls: list[bool] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request.send_to_cloud_confirmed)
+        if not request.send_to_cloud_confirmed:
+            return _cloud_refusal_report(tmp_path)
+        return _report(tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.RAN, "ok"))
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+
+    report = run_module.run_cli(_argv(tmp_path))
+
+    assert calls == [False, True]
+    assert report.ok
+    out = capsys.readouterr().out
+    assert "ai.example.edu" in out
+
+
+def test_tty_confirmation_no_stays_refused_and_exits_two(tmp_path, monkeypatch, capsys) -> None:
+    def fake_run(request: PipelineRequest, *, progress=None):
+        if not request.send_to_cloud_confirmed:
+            return _cloud_refusal_report(tmp_path)
+        raise AssertionError("should not have re-run without a yes")
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
+
+    assert run_module.main(_argv(tmp_path)) == 2
+    assert "Not confirmed" in capsys.readouterr().out
+
+
+def test_non_interactive_without_the_flag_prints_statement_and_exits_two(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    def fake_run(request: PipelineRequest, *, progress=None):
+        assert request.send_to_cloud_confirmed is False
+        return _cloud_refusal_report(tmp_path)
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    # The default captured stdin under pytest already reports isatty() as
+    # False; no monkeypatch needed to simulate a script/redirected run.
+
+    assert run_module.main(_argv(tmp_path)) == 2
+    out = capsys.readouterr().out
+    assert "847" in out and "ai.example.edu" in out
+    assert "--yes-send-to-cloud" in out
+
+
+def test_json_output_carries_the_refusal_and_statement_by_field(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    def fake_run(request: PipelineRequest, *, progress=None):
+        return _cloud_refusal_report(tmp_path)
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+
+    assert run_module.main(_argv(tmp_path, "--json")) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cloud_confirmation_needed"] is True
+    assert payload["cloud_preflight"]["host"] == "ai.example.edu"
+    assert payload["cloud_preflight"]["counts"]["answer-image"] == 847
+    assert payload["cloud_preflight"]["sends_anything"] is True
+
+
+# ---------------------------------------------------------------------------
+# The egress summary in the human report and in --json
+# ---------------------------------------------------------------------------
+
+
+def _report_with_egress(tmp_path: Path) -> PipelineReport:
+    from opengrader.core.egress import EgressSummary
+
+    summary = EgressSummary(
+        total_calls=3,
+        calls_by_category={"answer-image": 3},
+        calls_by_host={"ai.example.edu": 3},
+        total_input_tokens=900,
+        total_output_tokens=45,
+        calls_with_tokens=3,
+        first_at="2026-01-01T00:00:00Z",
+        last_at="2026-01-01T00:00:05Z",
+    )
+    report = _report(tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.RAN, "ok"))
+    return replace(
+        report, egress_summary=summary, egress_cost=0.12, egress_cost_basis="measured"
+    )
+
+
+def test_the_summary_reports_what_this_run_sent(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        run_module, "run_pipeline", lambda request, **kw: _report_with_egress(tmp_path)
+    )
+    run_module.run_cli(_argv(tmp_path))
+    out = capsys.readouterr().out
+    assert "Sent to the cloud" in out
+    assert "answer-image" in out
+    assert "ai.example.edu" in out
+    assert "$0.12" in out
+
+
+def test_a_local_only_run_prints_no_egress_section(tmp_path, captured, capsys) -> None:
+    run_module.run_cli(_argv(tmp_path))
+    assert "Sent to the cloud" not in capsys.readouterr().out
+
+
+def test_json_egress_field_carries_counts_and_cost(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        run_module, "run_pipeline", lambda request, **kw: _report_with_egress(tmp_path)
+    )
+    run_module.run_cli(_argv(tmp_path, "--json"))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["egress"]["total_calls"] == 3
+    assert payload["egress"]["calls_by_category"]["answer-image"] == 3
+    assert payload["egress"]["estimated_cost"] == 0.12
+
+
+def test_json_egress_field_is_null_for_a_local_only_run(tmp_path, captured, capsys) -> None:
+    run_module.run_cli(_argv(tmp_path, "--json"))
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["egress"] is None

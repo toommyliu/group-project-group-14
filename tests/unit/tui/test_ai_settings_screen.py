@@ -85,10 +85,16 @@ def test_save_persists_and_returns_the_settings() -> None:
             await pilot.pause()
             screen = app.screen
             screen.query_one("#ai-vision-model", Input).value = "llama-vision:9b"
+            # "box" isn't a recognized local address, so this host resolves
+            # as cloud and Save must pass the consent modal before it writes
+            # anything — see test_an_unrecognized_host_needs_consent_at_save.
             screen.query_one("#ai-host", Input).value = "http://box:11434"
             await pilot.pause()
             await pilot.click("#ai-save")
-            await pilot.pause()
+            await _settle(pilot, lambda: app.dismissed)
+            if not app.dismissed:
+                await pilot.click("#consent-accept")
+                await _settle(pilot, lambda: app.dismissed)
         return app.result
 
     result = asyncio.run(run())
@@ -162,14 +168,23 @@ def test_existing_settings_prefill_the_form_and_resaving_is_a_no_op() -> None:
                 screen.query_one("#ai-auto-start", Checkbox).value,
             )
             await pilot.click("#ai-save")
-            await pilot.pause()
+            await _settle(pilot, lambda: app.dismissed)
+            if not app.dismissed:
+                # "h" isn't a recognized local address, so this host resolves
+                # as cloud; with no consent on file yet (it was written
+                # directly by save_settings() above, bypassing the screen),
+                # Save must pass the modal before it can go through.
+                await pilot.click("#consent-accept")
+                await _settle(pilot, lambda: app.dismissed)
         return values
 
     values = asyncio.run(run())
     assert values == ("my-vision", "my-text", "http://h:1", "0.55", False)
 
-    after = path.read_text(encoding="utf-8")
-    assert after == before
+    after = json.loads(path.read_text(encoding="utf-8"))
+    consents = after.pop("consents", None)
+    assert after == json.loads(before)
+    assert consents and consents[0]["kind"] == "cloud"
 
 
 def test_connection_test_resolves_the_typed_values_and_writes_nothing(
@@ -264,6 +279,10 @@ def test_an_api_key_is_never_written_to_the_settings_file(
             await pilot.pause()
             screen = app.screen
             screen.query_one("#ai-provider", Select).value = fake_cloud_provider.name
+            await pilot.pause()
+            # Choosing a cloud provider opens the consent modal before the
+            # choice sticks.
+            await pilot.click("#consent-accept")
             await pilot.pause()
             await pilot.click("#ai-save")
             await pilot.pause()

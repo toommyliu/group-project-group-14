@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Callable
 
 from textual import on
 from textual.app import ComposeResult
@@ -10,11 +11,15 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
 from opengrader.core import app_config
-from opengrader.core.app_config import AISettings, ResolvedAI
+from opengrader.core.app_config import AISettings, ResolvedAI, consent
 from opengrader.core.ocr.math_ocr import (
     DEFAULT_MATH_BACKEND,
     MATH_BACKEND_NAMES,
     describe_backend,
+)
+from opengrader.tui.ui.screens.cloud_consent_screen import (
+    CloudConsentScreen,
+    CredentialConsentScreen,
 )
 
 _MATH_BACKEND_LABELS = {
@@ -110,6 +115,13 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         super().__init__()
         self._settings = settings if settings is not None else app_config.load_settings()
         self._timeout_recommendation: float | None = None
+        # escalate_only is None until the user explicitly flips the checkbox
+        # in this session. While it stays None, the checkbox only *displays*
+        # the provider's effective default (on for cloud, off for local) —
+        # collect() keeps writing None so a later provider change keeps
+        # following whichever default is current, instead of pinning
+        # whatever happened to be on screen when Save was pressed.
+        self._escalate_touched = False
 
 
     @staticmethod
@@ -122,6 +134,13 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
     @staticmethod
     def _hidden_unless(shown: bool) -> str:
         return "" if shown else "hidden"
+
+    @staticmethod
+    def _effective_escalate_only(settings: AISettings, current: ResolvedAI) -> bool:
+        """What the checkbox should show: the stored choice, or the live default."""
+        if settings.escalate_only is not None:
+            return settings.escalate_only
+        return current.kind == "cloud"
 
     def compose(self) -> ComposeResult:
         current = app_config.resolve(self._settings)
@@ -167,7 +186,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                 ):
                     yield Checkbox(
                         "Only re-read what the text recognition read badly",
-                        value=self._settings.escalate_only,
+                        value=self._effective_escalate_only(self._settings, current),
                         id="ai-escalate-only",
                     )
                     yield Static(
@@ -232,6 +251,23 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                     "can settle on its own the moment extraction is done, "
                     "leaving only the genuinely uncertain ones for you. "
                     "Turn it off to stop after extraction. On by default.",
+                    classes="ai-note",
+                )
+
+                yield Checkbox(
+                    "Let the local AI read student names and IDs (never "
+                    "sent to a cloud service)",
+                    value=self._settings.read_identity_locally,
+                    id="ai-read-identity-locally",
+                )
+                yield Static(
+                    "A local model reads the Name and Student ID boxes so "
+                    "more of them come through automatically, even while a "
+                    "cloud provider is the active AI — that reading always "
+                    "stays on this computer. Turn it off and those boxes are "
+                    "read by Tesseract's text recognition only; anything it "
+                    "cannot read clearly is left blank for the review queue "
+                    "instead of a guess.",
                     classes="ai-note",
                 )
 
@@ -450,6 +486,15 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             else False
         )
 
+        # Only record an explicit True/False once the user has actually
+        # touched the checkbox; otherwise keep None so resolve() keeps
+        # choosing the default for whichever provider ends up saved.
+        escalate_only = (
+            self.query_one("#ai-escalate-only", Checkbox).value
+            if self._escalate_touched
+            else self._settings.escalate_only
+        )
+
         math_backend = str(self.query_one("#ai-math-backend", Select).value)
         return AISettings(
             provider=str(self.query_one("#ai-provider", Select).value),
@@ -461,7 +506,7 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             min_confidence=confidence,
             auto_start=self.query_one("#ai-auto-start", Checkbox).value,
             read_handwriting=self.query_one("#ai-read-handwriting", Checkbox).value,
-            escalate_only=self.query_one("#ai-escalate-only", Checkbox).value,
+            escalate_only=escalate_only,
             transcribe_math=self.query_one("#ai-transcribe-math", Checkbox).value,
             grade_written=self.query_one("#ai-grade-written", Checkbox).value,
             auto_grade=self.query_one("#ai-auto-grade", Checkbox).value,
@@ -469,6 +514,14 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                 "#ai-require-calibration", Checkbox
             ).value,
             min_confidence_measured=min_confidence_measured,
+            read_identity_locally=self.query_one(
+                "#ai-read-identity-locally", Checkbox
+            ).value,
+            # Carry over any cloud/credential consent already granted in this
+            # session (the provider picker below can grant one immediately,
+            # before Save is pressed) — otherwise this fresh AISettings would
+            # silently drop it.
+            consents=self._settings.consents,
         )
 
 
@@ -484,12 +537,15 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         event.stop()
         self.query_one("#ai-grading-options").set_class(not event.value, "hidden")
 
-    @on(Select.Changed, "#ai-provider")
-    def _on_provider_changed(self, event: Select.Changed) -> None:
+    @on(Checkbox.Changed, "#ai-escalate-only")
+    def _on_escalate_only_changed(self, event: Checkbox.Changed) -> None:
         event.stop()
-        provider = app_config.get_provider(str(event.value))
-        preview = app_config.resolve(replace(self._settings, provider=provider.name))
+        self._escalate_touched = True
 
+    def _apply_provider_preview(
+        self, provider: app_config.ProviderSpec, preview: ResolvedAI
+    ) -> None:
+        """Refresh every widget that previews the chosen provider — never a commitment."""
         self.query_one("#ai-vision-model", Input).placeholder = (
             provider.default_vision_model
         )
@@ -502,6 +558,73 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             not provider.requires_api_key, "hidden"
         )
         self.query_one("#ai-key-status", Static).update(self._key_status(preview))
+        if self._settings.escalate_only is None:
+            # Still following the default — let it track the newly chosen
+            # provider's kind. This is a display refresh only: prevent()
+            # keeps it from being mistaken for the user touching the box.
+            checkbox = self.query_one("#ai-escalate-only", Checkbox)
+            with checkbox.prevent(Checkbox.Changed):
+                checkbox.value = preview.kind == "cloud"
+
+    @on(Select.Changed, "#ai-provider")
+    def _on_provider_changed(self, event: Select.Changed) -> None:
+        event.stop()
+        previous_provider = self._settings.provider
+        chosen = str(event.value)
+        if chosen == previous_provider:
+            # The initial value the Select mounts with (compose() already
+            # rendered the matching preview), or reselecting what is already
+            # active — either way, nothing changed and there is nothing to
+            # gate: an already-saved cloud provider still gets consent
+            # enforced at Save, without a modal appearing just from opening
+            # AI setup to look at something else.
+            return
+        provider = app_config.get_provider(chosen)
+        preview = app_config.resolve(replace(self._settings, provider=provider.name))
+        self._apply_provider_preview(provider, preview)
+
+        if preview.cloud_consent_required:
+            # Showing the modal needs a worker (push_screen_wait only works
+            # from inside one); the preview above already happened, so the
+            # dropdown and its summary are honest even while this is pending.
+            self.run_worker(
+                self._gate_cloud_consent(preview, previous_provider),
+                exclusive=True,
+                group="ai-provider-consent",
+            )
+
+    async def _gate_cloud_consent(
+        self, preview: ResolvedAI, previous_provider: str
+    ) -> None:
+        """Choosing a cloud provider must pass CloudConsentScreen before it sticks.
+
+        Accepting records the consent immediately (so it survives even if the
+        dialog is later cancelled without pressing Save); declining reverts
+        the dropdown to the provider that was active before this choice.
+        """
+        accepted = await self.app.push_screen_wait(CloudConsentScreen(preview))
+        if accepted:
+            updated = consent.grant_cloud_consent(self._settings, preview)
+            try:
+                app_config.save_settings(updated)
+            except OSError as exc:
+                self.app.notify(f"Could not save cloud consent: {exc}", severity="error")
+                accepted = False
+            else:
+                self._settings = updated
+        if not accepted:
+            select = self.query_one("#ai-provider", Select)
+            # prevent(): reverting the value should not re-run this same
+            # gate (previous_provider was, by definition, already accepted).
+            # Restore the preview by hand instead, since nothing will fire to
+            # do it automatically.
+            with select.prevent(Select.Changed):
+                select.value = previous_provider
+            provider = app_config.get_provider(previous_provider)
+            restored = app_config.resolve(
+                replace(self._settings, provider=previous_provider)
+            )
+            self._apply_provider_preview(provider, restored)
 
     @on(Select.Changed, "#ai-math-backend")
     def _on_math_backend_changed(self, event: Select.Changed) -> None:
@@ -517,14 +640,46 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         pending = self.collect()
         if pending is None:
             return
+        resolved = app_config.resolve(pending)
+        if resolved.credential_consent_required:
+            # A worker, because approving needs a modal and this button
+            # handler is not one itself.
+            self.run_worker(
+                self._gate_credential_consent(pending, resolved),
+                exclusive=True,
+                group="ai-test-flow",
+            )
+            return
+        self._start_test(resolved)
+
+    async def _gate_credential_consent(
+        self, pending: AISettings, resolved: ResolvedAI
+    ) -> None:
+        accepted = await self.app.push_screen_wait(
+            CredentialConsentScreen(resolved.provider)
+        )
+        if not accepted:
+            self.app.notify(
+                "Test cancelled — the credential command was not approved.",
+                severity="warning",
+            )
+            return
+        pending = consent.grant_credential_consent(pending, resolved.provider)
+        try:
+            app_config.save_settings(pending)
+        except OSError as exc:
+            self.app.notify(f"Could not save credential consent: {exc}", severity="error")
+            return
+        self._settings = pending
+        self._start_test(app_config.resolve(pending))
+
+    def _start_test(self, resolved: ResolvedAI) -> None:
         for button in self.query(Button):
             button.disabled = True
         log = self.query_one("#ai-log", RichLog)
         log.clear()
         log.write("Testing…")
-        self.run_worker(
-            lambda: self._test(app_config.resolve(pending)), thread=True, exclusive=True
-        )
+        self.run_worker(lambda: self._test(resolved), thread=True, exclusive=True)
 
     def _test(self, current: ResolvedAI) -> None:
         lines: list[str] = list(current.problems())
@@ -616,6 +771,32 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         pending = self.collect()
         if pending is None:
             return
+        resolved = app_config.resolve(pending)
+        if resolved.cloud_consent_required:
+            # Belt and braces: the provider picker above already gates this
+            # for a plain provider switch, so this only fires when something
+            # else — the host, dialect, key variable — changed enough that
+            # the consent on file no longer matches what is about to be
+            # saved. Needs a worker to show the modal and wait for it.
+            self.run_worker(
+                self._save_after_cloud_consent(pending, resolved),
+                exclusive=True,
+                group="ai-save-flow",
+            )
+            return
+        self._finish_save(pending)
+
+    async def _save_after_cloud_consent(
+        self, pending: AISettings, resolved: ResolvedAI
+    ) -> None:
+        accepted = await self.app.push_screen_wait(CloudConsentScreen(resolved))
+        if not accepted:
+            self.app.notify("Not saved — cloud consent was not given.", severity="warning")
+            return
+        pending = consent.grant_cloud_consent(pending, resolved)
+        self._finish_save(pending)
+
+    def _finish_save(self, pending: AISettings) -> None:
         try:
             destination = app_config.save_settings(pending)
         except OSError as exc:

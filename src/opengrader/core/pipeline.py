@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
+from opengrader.core import egress
 from opengrader.core.submissions.manifest import (
     RUN_LEDGER_FILENAME,
     ExtractionRecord,
@@ -21,6 +22,9 @@ from opengrader.core.submissions.manifest import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover
+    from opengrader.core.app_config import ResolvedAI
+    from opengrader.core.cloud_preflight import CloudPreflight
+    from opengrader.core.egress import EgressSummary
     from opengrader.core.submissions.scan_check import ScanReport
 
 STAGE_SCAN_CHECK = "scan-check"
@@ -78,6 +82,12 @@ class PipelineRequest:
     auto_grade: bool = True
     force: bool = False
     fresh: bool = False
+    # A run that would send anything to the cloud refuses unless this is True
+    # (interactively confirmed, or --yes-send-to-cloud). Never defaulted true
+    # by anything else, and never implied by turning on an AI feature. Student
+    # names and IDs are never sent to the cloud — there is no separate
+    # override for that, and none should be added here.
+    send_to_cloud_confirmed: bool = False
 
     @property
     def split_dir(self) -> Path:
@@ -126,6 +136,27 @@ class PipelineReport:
     qa_file: Path | None
     workspace: Path | None = None
     assignment_id: str | None = None
+    # What this run itself sent, never a lifetime total —
+    # egress.summarize(folder, since=<this run's start>). None when the run
+    # never got past the cloud pre-flight check (see
+    # PipelineReport.cloud_confirmation_needed) or otherwise never started.
+    egress_summary: "EgressSummary | None" = None
+    egress_cost: float | None = None
+    egress_cost_basis: str = ""
+    # Set only on the cloud-confirmation refusal below, so a caller (the TUI's
+    # pipeline card, in particular) can show the scale/destination/cost
+    # statement without parsing it back out of a BLOCKED outcome's detail text.
+    cloud_preflight: "CloudPreflight | None" = None
+
+    @property
+    def cloud_confirmation_needed(self) -> bool:
+        """True when this report is the refusal run_pipeline returns because a
+        cloud run had not been confirmed, rather than the result of a run that
+        actually executed any stage."""
+        return any(
+            outcome.status is StageStatus.BLOCKED and outcome.detail.startswith("cloud-preflight:")
+            for outcome in self.stages
+        )
 
     @property
     def ok(self) -> bool:
@@ -275,6 +306,11 @@ def _split_argv(request: PipelineRequest) -> tuple[str, ...]:
         argv += ["--pages-per-submission", str(request.pages_per_submission)]
     if request.blank_template is not None:
         argv += ["--blank-template", str(request.blank_template)]
+    # No --yes-send-to-cloud here: the splitter's only vision calls are
+    # whole-page reads (page numbers, Name/ID headers), which
+    # GuardedVisionReader always routes to a local reader — a split run
+    # never sends anything to the cloud, so the splitter doesn't accept the
+    # flag at all (see cli/submission_splitter.py).
     return tuple(argv)
 
 
@@ -301,6 +337,8 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv += ["--ollama-host", request.llm.host]
         if request.llm.auto_ollama:
             argv.append("--auto-ollama")
+    if request.send_to_cloud_confirmed:
+        argv.append("--yes-send-to-cloud")
     return tuple(argv)
 
 
@@ -322,6 +360,8 @@ def _auto_grade_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv.append("--auto-ollama")
         if request.llm.min_confidence is not None:
             argv += ["--llm-min-confidence", str(request.llm.min_confidence)]
+        if request.send_to_cloud_confirmed:
+            argv.append("--yes-send-to-cloud")
     return tuple(argv)
 
 
@@ -456,48 +496,110 @@ def _run_reason(request: PipelineRequest, record: ExtractionRecord | None) -> st
     return "the input or the settings changed since the last run"
 
 
+def _cloud_refusal(request: PipelineRequest, preflight: "CloudPreflight") -> PipelineReport:
+    """A clear refusal, in the same shape (StageStatus.BLOCKED) the scan-check
+    high-severity block already uses — the CLI already maps BLOCKED to exit 2, and
+    the TUI can show it the same way it shows any other blocked stage."""
+    message = (
+        f"this run would send data to {preflight.host} — re-run with "
+        "--yes-send-to-cloud to confirm, or turn off the AI feature that needs it"
+    )
+    outcome = StageOutcome(
+        stage=PIPELINE_STAGES[0],
+        status=StageStatus.BLOCKED,
+        message=message,
+        # The "cloud-preflight:" prefix is how PipelineReport.cloud_confirmation_needed
+        # tells this refusal apart from an ordinary scan-check block.
+        detail="cloud-preflight:\n" + preflight.statement(),
+    )
+    return PipelineReport(
+        stages=(outcome,),
+        submissions_dir=request.submissions_dir,
+        qa_file=request.qa_file,
+        cloud_preflight=preflight,
+    )
+
+
+def _resolved_for_request(request: PipelineRequest) -> "ResolvedAI":
+    from opengrader.core import app_config
+
+    return app_config.with_overrides(
+        app_config.resolve(),
+        host=request.llm.host or None,
+        vision_model=request.llm.vision_model or None,
+        text_model=request.llm.text_model or None,
+    )
+
+
 def run_pipeline(
     request: PipelineRequest, *, progress: PipelineProgress | None = None
 ) -> PipelineReport:
+    from opengrader.core.cloud_preflight import plan_cloud_egress
+
     reporter = progress or PipelineProgress()
     request.output_dir.mkdir(parents=True, exist_ok=True)
 
-    outcomes: list[StageOutcome] = []
-    for stage in PIPELINE_STAGES:
-        plan = _plan_stage(request, stage, _read_ledger(request))
-        reporter.stage_start(stage)
-        started = time.monotonic()
+    resolved = _resolved_for_request(request)
+    preflight = plan_cloud_egress(request, resolved)
+    if preflight is not None:
+        if preflight.sends_anything and not request.send_to_cloud_confirmed:
+            return _cloud_refusal(request, preflight)
 
-        if not plan.will_run:
-            outcome = StageOutcome(
-                stage=stage,
-                status=plan.status,
-                message=plan.reason,
-                outputs=_recorded_outputs(request, stage, plan),
-            )
-        else:
-            try:
-                outcome = _execute(request, plan, reporter, started)
-            except KeyboardInterrupt:
-                raise
-            except (SystemExit, Exception) as exc:  # noqa: BLE001
+    run_start = utc_timestamp()
+    with egress.recording(request.submissions_dir):
+        outcomes: list[StageOutcome] = []
+        for stage in PIPELINE_STAGES:
+            plan = _plan_stage(request, stage, _read_ledger(request))
+            reporter.stage_start(stage)
+            started = time.monotonic()
+
+            if not plan.will_run:
                 outcome = StageOutcome(
                     stage=stage,
-                    status=StageStatus.FAILED,
-                    message=_failure_message(exc),
-                    detail=plan.command,
-                    duration_seconds=time.monotonic() - started,
+                    status=plan.status,
+                    message=plan.reason,
+                    outputs=_recorded_outputs(request, stage, plan),
                 )
+            else:
+                try:
+                    outcome = _execute(request, plan, reporter, started)
+                except KeyboardInterrupt:
+                    raise
+                except (SystemExit, Exception) as exc:  # noqa: BLE001
+                    outcome = StageOutcome(
+                        stage=stage,
+                        status=StageStatus.FAILED,
+                        message=_failure_message(exc),
+                        detail=plan.command,
+                        duration_seconds=time.monotonic() - started,
+                    )
 
-        outcomes.append(outcome)
-        reporter.stage_finish(outcome)
-        if outcome.status in (StageStatus.FAILED, StageStatus.BLOCKED):
-            break
+            outcomes.append(outcome)
+            reporter.stage_finish(outcome)
+            if outcome.status in (StageStatus.FAILED, StageStatus.BLOCKED):
+                break
+
+        # What THIS run sent — never a lifetime total — plus its cost.
+        summary = egress.summarize(request.submissions_dir, since=run_start)
+        cost, cost_basis = (None, "")
+        if summary.total_calls:
+            cost = egress.estimate_cost(
+                summary.total_input_tokens, summary.total_output_tokens, resolved.provider.pricing
+            )
+            cost_basis = (
+                "measured from this run's own calls"
+                if cost is not None
+                else "provider pricing not stated"
+            )
 
     return PipelineReport(
         stages=tuple(outcomes),
         submissions_dir=request.submissions_dir,
         qa_file=request.qa_file,
+        egress_summary=summary,
+        egress_cost=cost,
+        egress_cost_basis=cost_basis,
+        cloud_preflight=preflight,
     )
 
 

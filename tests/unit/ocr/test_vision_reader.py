@@ -71,9 +71,6 @@ _DELEGATION_CASES = [
 def test_reader_forwards_the_call_to_ollama_vlm_with_its_own_config_and_returns_unchanged(
     monkeypatch, method_name, ollama_vlm_attr, extra_kwargs, sentinel
 ) -> None:
-    """`extract_student_field` is deliberately not in this table: it is an
-    alias of `extract_field_text` with no caller anywhere in the tree (see the
-    module docstring of vision_reader.py), so the protocol does not carry it."""
 
     config = OllamaVisionConfig(model="delegation-test-model")
     reader = OllamaVisionReader(config=config)

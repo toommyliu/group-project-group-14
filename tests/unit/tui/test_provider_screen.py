@@ -93,6 +93,9 @@ def test_a_hand_written_manifest_is_offered_and_saved_by_ai_setup(no_network) ->
             options = list(picker._options)
             picker.value = "zephyr-labs"
             await pilot.pause()
+            # A cloud provider must pass the consent modal before it sticks.
+            await pilot.click("#consent-accept")
+            await pilot.pause()
             await pilot.click("#ai-save")
             await _settle(pilot, lambda: app.dismissed)
         return options, app.result

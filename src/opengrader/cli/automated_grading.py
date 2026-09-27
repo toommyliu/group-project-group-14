@@ -170,6 +170,16 @@ def setup_args() -> ArgumentParser:
             "journalling is what lets 'grade-restore' undo a bad batch."
         ),
     )
+    parser.add_argument(
+        "--yes-send-to-cloud",
+        action="store_true",
+        dest="yes_send_to_cloud",
+        help=(
+            "Confirm sending free-response answers to a cloud AI provider for "
+            "--llm grading. The scale and destination are shown first; nothing "
+            "is sent without this or an interactive yes. Never implied by --llm."
+        ),
+    )
     return parser
 
 
@@ -236,8 +246,11 @@ def run_cli(
         print(f"Error: Input path '{args.input}' is not a file or directory.")
         sys.exit(1)
 
+    paths = _submission_paths(input_path)
+
     llm_generate: GenerateFn | None = None
     llm_model = ""
+    llm_provider = ""
     if args.llm:
         resolved = app_config.with_overrides(
             resolved_ai,
@@ -261,8 +274,46 @@ def run_cli(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+        if resolved.kind == "cloud":
+            from opengrader.core.cloud_preflight import CloudPreflight, cli_confirm_cloud_send
+
+            # A call per written answer AI grades, not per student: the
+            # ceiling is every question in the key for every submission.
+            ceiling = len(paths) * max(1, len(qa_doc.questions))
+            preflight = CloudPreflight(
+                provider_label=resolved.provider.label,
+                host=resolved.host,
+                counts={"graded-text": ceiling} if paths else {},
+                uncounted=(
+                    {
+                        "graded-text": (
+                            f"up to {ceiling} graded-text call"
+                            f"{'' if ceiling == 1 else 's'} (one per written answer "
+                            f"AI grades, across {len(paths)} submission"
+                            f"{'' if len(paths) == 1 else 's'})"
+                        )
+                    }
+                    if paths
+                    else {}
+                ),
+                students=len(paths),
+            )
+            cli_confirm_cloud_send(
+                resolved,
+                preflight,
+                yes_send_to_cloud=args.yes_send_to_cloud,
+                emit=lambda message: print(message, file=sys.stderr),
+            )
         try:
             app_config.ensure_ready(resolved, purpose="text")
+        except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            print(
+                f"Fix: run 'opengrader providers consent {resolved.provider.name}' "
+                "(or open AI Setup), then retry.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
         except app_config.AIUnavailableError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
@@ -270,12 +321,12 @@ def run_cli(
             resolved, response_format=GRADE_SUGGESTION_SCHEMA
         )
         llm_model = resolved.text_model
+        llm_provider = resolved.provider.name
         emit(
             f"LLM free-response grading enabled (model={resolved.text_model}, "
             f"min confidence={args.llm_min_confidence:g})."
         )
 
-    paths = _submission_paths(input_path)
     total = len(paths)
     failures = 0
 
@@ -285,26 +336,30 @@ def run_cli(
 
     answer_cache = AnswerGradeCache()
 
-    for index, md_file in enumerate(paths, start=1):
-        progress.file_start(md_file.name, index, total)
-        try:
-            grade_student_file(
-                md_file,
-                qa_doc,
-                llm_generate=llm_generate,
-                llm_min_confidence=args.llm_min_confidence,
-                llm_model=llm_model,
-                min_transcription_confidence=args.llm_min_transcription_confidence,
-                answer_cache=answer_cache,
-                dry_run=args.dry_run,
-                question_callback=lambda qid, name=md_file.name: progress.question(
-                    name, qid
-                ),
-                journal=run_journal,
-            )
-        except ValueError as exc:
-            failures += 1
-            print(f"Error grading {md_file}: {exc}", file=sys.stderr)
+    from opengrader.core import egress
+
+    with egress.recording(input_path):
+        for index, md_file in enumerate(paths, start=1):
+            progress.file_start(md_file.name, index, total)
+            try:
+                grade_student_file(
+                    md_file,
+                    qa_doc,
+                    llm_generate=llm_generate,
+                    llm_min_confidence=args.llm_min_confidence,
+                    llm_model=llm_model,
+                    llm_provider=llm_provider,
+                    min_transcription_confidence=args.llm_min_transcription_confidence,
+                    answer_cache=answer_cache,
+                    dry_run=args.dry_run,
+                    question_callback=lambda qid, name=md_file.name: progress.question(
+                        name, qid
+                    ),
+                    journal=run_journal,
+                )
+            except ValueError as exc:
+                failures += 1
+                print(f"Error grading {md_file}: {exc}", file=sys.stderr)
 
     grouping_summary = answer_cache.summary_line()
     if grouping_summary:

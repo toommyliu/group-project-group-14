@@ -8,6 +8,7 @@ from opengrader.core.grading.llm_grader import (
     ai_analysis_is_overridden,
     ai_analysis_is_reviewed,
     ai_analysis_model,
+    ai_analysis_provider,
     build_grading_prompt,
     confirm_ai_analysis,
     format_ai_analysis,
@@ -252,6 +253,49 @@ def test_a_model_name_cannot_break_the_tag() -> None:
     analysis = format_ai_analysis(_tagged(), model="evil]name·with[delims")
     assert ai_analysis_confidence(analysis) == 82
     assert "]" not in ai_analysis_model(analysis)
+
+
+def test_tag_records_the_provider_that_produced_the_suggestion() -> None:
+    analysis = format_ai_analysis(_tagged(), model="gpt-4o", provider="openai")
+    assert analysis.startswith("[AI · 82% · gpt-4o (openai)]")
+    assert ai_analysis_model(analysis) == "gpt-4o"
+    assert ai_analysis_provider(analysis) == "openai"
+    assert ai_analysis_confidence(analysis) == 82
+
+
+def test_a_provider_with_no_model_never_appears_on_its_own() -> None:
+    # There is never a suggestion without a model attached in practice, but a
+    # blank model must not leave a bare "(provider)" field in the tag.
+    analysis = format_ai_analysis(_tagged(), model="", provider="openai")
+    assert analysis.startswith("[AI · 82%]")
+    assert ai_analysis_provider(analysis) == ""
+
+
+def test_tag_without_a_provider_is_unchanged() -> None:
+    analysis = format_ai_analysis(_tagged(), model="llama3.1")
+    assert analysis == "[AI · 82% · llama3.1] Names two properties."
+    assert ai_analysis_provider(analysis) == ""
+
+
+def test_provider_is_empty_rather_than_unknown_when_unrecorded() -> None:
+    assert ai_analysis_provider("[AI · 82% · llama3.1] Old style") == ""
+    assert ai_analysis_provider("Nice work") == ""
+
+
+def test_confirming_a_provider_tagged_grade_keeps_the_provider() -> None:
+    analysis = format_ai_analysis(_tagged(), model="gpt-4o", provider="openai")
+    confirmed = confirm_ai_analysis(analysis)
+    assert ai_analysis_model(confirmed) == "gpt-4o"
+    assert ai_analysis_provider(confirmed) == "openai"
+    assert ai_analysis_is_confirmed(confirmed)
+
+
+def test_overriding_a_provider_tagged_grade_keeps_the_provider() -> None:
+    analysis = format_ai_analysis(_tagged(), model="gpt-4o", provider="openai")
+    overridden = override_ai_analysis(analysis)
+    assert ai_analysis_model(overridden) == "gpt-4o"
+    assert ai_analysis_provider(overridden) == "openai"
+    assert ai_analysis_is_overridden(overridden)
 
 
 def test_confirming_keeps_the_grade_and_the_rationale() -> None:

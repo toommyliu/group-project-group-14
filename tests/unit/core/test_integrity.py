@@ -371,3 +371,66 @@ def test_an_unencrypted_backup_is_unchanged_by_the_feature(
 def test_the_default_name_says_when_a_passphrase_is_needed(folder: Path) -> None:
     assert default_backup_path(folder, encrypted=True).name.endswith(".zip.enc")
     assert default_backup_path(folder).name.endswith(".zip")
+
+
+# Key hygiene: no API key in a backup
+# ---------------------------------------------------------------------------
+
+
+def test_a_backup_archive_contains_no_api_key_shaped_strings(folder: Path, tmp_path: Path) -> None:
+    """No key-shaped string appears in a backup archive.
+
+    Tests that backup archives do not leak API keys, even if they somehow
+    reach the backup building code.
+    """
+    import re
+    import zipfile
+    from opengrader.core.llm import transport
+
+    # Key regex from transport.py
+    _SHAPED_KEY = re.compile(r"\b(?:sk|pk|rk|ak|key)-[A-Za-z0-9_\-]{12,}")
+
+    fake_key = "sk-test-DO-NOT-LEAK-0123456789abcdef"
+    transport.register_secret(fake_key)
+    try:
+        result = create_backup(folder, tmp_path / "backup.zip")
+
+        # Scan all files in the archive
+        with zipfile.ZipFile(tmp_path / "backup.zip") as z:
+            for name in z.namelist():
+                data = z.read(name)
+                try:
+                    text = data.decode("utf-8", errors="replace")
+                    matches = _SHAPED_KEY.findall(text)
+                    # Filter to our test key pattern
+                    matches = [m for m in matches if "test" in m.lower()]
+                    assert not matches, f"Found key-shaped string in {name}: {matches}"
+                except UnicodeDecodeError:
+                    # Binary files don't contain string keys
+                    pass
+    finally:
+        transport.forget_secret(fake_key)
+
+
+def test_an_encrypted_backup_contains_no_plaintext_key(folder: Path, tmp_path: Path) -> None:
+    """An encrypted backup archive contains no plaintext API key.
+
+    The encryption should prevent plaintext keys from appearing in the
+    archive, even in error cases.
+    """
+    from opengrader.core.llm import transport
+
+    fake_key = "sk-test-DO-NOT-LEAK-0123456789abcdef"
+    transport.register_secret(fake_key)
+    try:
+        create_backup(folder, tmp_path / "backup.zip.enc", passphrase="test")
+
+        # Verify the encrypted file doesn't contain the plaintext key
+        data = (tmp_path / "backup.zip.enc").read_bytes()
+        assert fake_key.encode() not in data
+
+        # Also check the decoded-with-errors version
+        text = data.decode("utf-8", errors="replace")
+        assert fake_key not in text
+    finally:
+        transport.forget_secret(fake_key)

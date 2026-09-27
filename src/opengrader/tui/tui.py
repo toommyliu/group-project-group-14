@@ -7,6 +7,7 @@ from typing import Literal
 from textual.app import App, ComposeResult
 from textual.widgets import ContentSwitcher, Input, TextArea
 
+from opengrader.core import app_config
 from opengrader.core.claims import ClaimConflictError
 from opengrader.core.policy import read_policy
 from opengrader.core.workspace.models import WorkspaceEvent
@@ -57,6 +58,7 @@ from opengrader.tui.ui.screens import (
     UnifyAnswersScreen,
 )
 from opengrader.tui.ui.widgets import StatusBar, StatusBarBinding
+from opengrader.tui.ui.widgets.ai_egress_banner import AIEgressBanner
 from opengrader.tui.ui.widgets.grading_log_pane import GradingLogPane
 
 _EXTRACTION_POLL_SECONDS = 3.0
@@ -163,6 +165,10 @@ class TuiApp(App[Literal["switch_assignment"]]):
             if isinstance(self.data_provider, StubDataProvider)
             else PAGE_QA_PICKER
         )
+        # Above every page, not inside any one of them, so it is one banner
+        # that stays put across Tools, the picker and grading, rather than a
+        # copy each screen would have to remember to mount and refresh.
+        yield AIEgressBanner(id="ai-egress-banner")
         with ContentSwitcher(initial=initial_page, id="workspace-switcher"):
             # In folder mode Tools is always composed, so the helper tools stay
             # one key away (F3) from grading. A workspace session never has it.
@@ -203,6 +209,20 @@ class TuiApp(App[Literal["switch_assignment"]]):
             self.get_setup_screen().focus_launch_card(scroll=False)
         self.refresh_bindings()
         self._announce_graphics_capability()
+        self.refresh_ai_banner()
+
+    def refresh_ai_banner(self) -> None:
+        """Re-read AI setup and show/hide the egress banner to match.
+
+        Call this whenever the saved AI configuration might have changed —
+        AI setup or the providers screen closing, most notably — so the
+        banner never lags behind what will actually happen on the next call.
+        """
+        try:
+            banner = self.query_one("#ai-egress-banner", AIEgressBanner)
+        except Exception:  # noqa: BLE001 - the banner is a courtesy
+            return
+        banner.update_for(app_config.resolve())
 
     def _announce_graphics_capability(self) -> None:
         capability = active_graphics()

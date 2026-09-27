@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import pytest
+from dataclasses import dataclass, field, replace
 
+from opengrader.core import app_config
 from opengrader.core.environment import (
     EnvironmentCheck,
     EnvironmentReport,
@@ -15,6 +17,7 @@ from opengrader.core.environment import (
     evaluate_imports,
     evaluate_ollama,
     evaluate_optional_import,
+    evaluate_provider,
     evaluate_python,
     evaluate_smoke_test,
     evaluate_tesseract,
@@ -24,11 +27,31 @@ from opengrader.core.environment import (
 
 
 @dataclass(frozen=True)
+class FakeProviderSpec:
+    name: str = "ollama"
+    label: str = "Ollama (local)"
+    requires_api_key: bool = False
+    api_key_env: str = ""
+    credential_command: tuple[str, ...] = ()
+    supports_model_listing: bool = True
+
+
+@dataclass(frozen=True)
 class FakeResolvedAI:
     read_handwriting: bool = False
     escalate_only: bool = False
     transcribe_math: bool = False
     grade_written: bool = False
+    read_identity_locally: bool = True
+    kind: str = "local"
+    host: str = "http://127.0.0.1:11434"
+    vision_model: str = "qwen2.5vl:7b"
+    text_model: str = "llama3.1:8b"
+    provider: FakeProviderSpec = field(default_factory=FakeProviderSpec)
+    api_key: str | None = None
+    cloud_allowed: bool = True
+    cloud_consent_required: bool = False
+    credential_consent_required: bool = False
 
     @property
     def uses_ai(self) -> bool:
@@ -295,6 +318,26 @@ def test_math_transcription_is_reported() -> None:
     assert "transcribing maths" in check.detail
 
 
+def test_read_identity_locally_off_is_noted_even_with_ai_off() -> None:
+    resolved = FakeResolvedAI(read_identity_locally=False)
+    check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
+    assert check.status == "ready"
+    assert "Tesseract only" in check.detail
+
+
+def test_read_identity_locally_off_is_noted_alongside_other_features() -> None:
+    resolved = FakeResolvedAI(read_handwriting=True, read_identity_locally=False)
+    check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
+    assert "reading handwriting" in check.detail
+    assert "Tesseract only" in check.detail
+
+
+def test_read_identity_locally_on_by_default_adds_no_note() -> None:
+    resolved = FakeResolvedAI(read_handwriting=True)
+    check = evaluate_ai_features(resolved)  # type: ignore[arg-type]
+    assert "Tesseract" not in check.detail
+
+
 def test_latency_not_measured_is_unknown() -> None:
     check = evaluate_ai_latency(None)
     assert check.status == "unknown"
@@ -381,3 +424,239 @@ def test_build_report_without_ai_has_no_ai_checks() -> None:
     check_names = [check.name for check in report.checks]
     assert "AI features" not in check_names
     assert "AI response time" not in check_names
+
+
+# ---------------------------------------------------------------------------
+# evaluate_provider branches on kind, cloud never probes Ollama
+# ---------------------------------------------------------------------------
+
+
+def _cloud(**overrides) -> FakeResolvedAI:
+    defaults = dict(
+        kind="cloud",
+        host="https://ai.example.edu/v1",
+        provider=FakeProviderSpec(
+            name="acme",
+            label="Acme Grading Service",
+            requires_api_key=True,
+            api_key_env="ACME_API_KEY",
+        ),
+        api_key="sk-real-secret-do-not-leak",
+        cloud_allowed=True,
+        cloud_consent_required=False,
+        credential_consent_required=False,
+    )
+    defaults.update(overrides)
+    return FakeResolvedAI(**defaults)
+
+
+def test_kill_switch_is_reported_clearly_not_broken(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("must not touch the network under the kill switch")
+
+    monkeypatch.setattr(app_config, "available_models", _boom)
+
+    checks = evaluate_provider(_cloud(cloud_allowed=False))  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "degraded"
+    assert check.status != "broken"
+    assert "OPENGRADER_AI_ALLOW_CLOUD" in check.detail or "OPENGRADER_AI_ALLOW_CLOUD" in check.fix
+
+
+def test_cloud_without_consent_is_a_consent_needed_check_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("must not probe an unconsented cloud provider")
+
+    monkeypatch.setattr(app_config, "available_models", _boom)
+
+    checks = evaluate_provider(_cloud(cloud_consent_required=True))  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "degraded"
+    assert "consent" in check.detail.lower() or "consent" in check.fix.lower()
+    assert "AI setup" in check.fix or "AI setup" in check.detail
+
+
+def test_cloud_credential_command_not_approved_is_a_consent_needed_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("must not probe before the credential command is approved")
+
+    monkeypatch.setattr(app_config, "available_models", _boom)
+
+    checks = evaluate_provider(_cloud(credential_consent_required=True))  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "degraded"
+    assert "approved" in check.detail.lower() or "approved" in check.fix.lower()
+
+
+def test_cloud_without_a_key_names_the_environment_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("must not probe without a key")
+
+    monkeypatch.setattr(app_config, "available_models", _boom)
+
+    checks = evaluate_provider(_cloud(api_key=None))  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "degraded"
+    assert "ACME_API_KEY" in check.detail or "ACME_API_KEY" in check.fix
+
+
+def test_cloud_without_model_listing_says_what_was_verified_not_a_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("a provider that cannot list models must not be probed")
+
+    monkeypatch.setattr(app_config, "available_models", _boom)
+
+    resolved = _cloud(provider=FakeProviderSpec(
+        name="acme",
+        label="Acme Grading Service",
+        requires_api_key=True,
+        api_key_env="ACME_API_KEY",
+        supports_model_listing=False,
+    ))
+    checks = evaluate_provider(resolved)  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "ready"
+    assert "does not list models" in check.detail
+    assert "Connected" not in check.detail
+
+
+def test_cloud_model_listing_failure_is_degraded_and_never_leaks_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail(_resolved):
+        raise RuntimeError("<urlopen error [Errno 61] Connection refused>")
+
+    monkeypatch.setattr(app_config, "available_models", _fail)
+
+    resolved = _cloud()
+    checks = evaluate_provider(resolved)  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "degraded"
+    for text in (check.detail, check.impact, check.fix):
+        assert resolved.api_key not in text
+
+
+def test_cloud_ready_when_consented_keyed_and_listing_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_config, "available_models", lambda _resolved: ["model-a", "model-b"])
+
+    checks = evaluate_provider(_cloud())  # type: ignore[arg-type]
+    assert len(checks) == 1
+    check = checks[0]
+    assert check.status == "ready"
+    assert "2" in check.detail
+
+
+def test_evaluate_provider_never_calls_probe_ollama_for_a_cloud_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import opengrader.core.environment as environment
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("evaluate_provider must not probe Ollama for a cloud provider")
+
+    monkeypatch.setattr(environment, "probe_ollama", _boom)
+    monkeypatch.setattr(app_config, "available_models", lambda _resolved: [])
+
+    evaluate_provider(_cloud())  # type: ignore[arg-type]
+
+
+def test_the_exit_criterion_a_ready_cloud_provider_reports_ready_without_ollama(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cloud provider, fully configured, with NO Ollama installed reports
+    `ready`, not `broken` — and never asks whether Ollama is installed."""
+    import opengrader.core.environment as environment
+    from opengrader.core.environment import build_environment_report
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("a cloud-configured doctor run must never probe Ollama")
+
+    monkeypatch.setattr(environment, "probe_ollama", _boom)
+    monkeypatch.setattr(environment, "probe_python", lambda: (3, 12, 4))
+    monkeypatch.setattr(
+        environment, "probe_import", lambda module: ImportProbe(module=module, importable=True)
+    )
+    monkeypatch.setattr(
+        environment,
+        "probe_tesseract",
+        lambda: ToolProbe(found=True, version=(5, 5, 0), version_text="5.5.0", path="/usr/bin/tesseract"),
+    )
+    monkeypatch.setattr(
+        environment,
+        "probe_optional_import",
+        lambda module: ImportProbe(module=module, importable=True),
+    )
+    monkeypatch.setattr(environment, "encryption_available", lambda: True)
+    monkeypatch.setattr(
+        environment, "probe_canvas_sak", lambda: ToolProbe(found=True, path="/usr/local/bin/canvas-sak")
+    )
+    monkeypatch.setattr(app_config, "available_models", lambda _resolved: ["model-a"])
+
+    ai = _cloud()
+    report = build_environment_report(
+        vision_model="unused",
+        text_model="unused",
+        ollama_host="unused",
+        check_graphics=False,
+        smoke_test=False,
+        ai=ai,  # type: ignore[arg-type]
+        time_ai=False,
+    )
+
+    assert report.status == "ready"
+    assert report.broken == ()
+
+
+def test_local_provider_probes_the_ollama_host_argument_not_the_resolved_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: `build_environment_report`'s local path must keep using its
+    own `ollama_host`/`vision_model`/`text_model` arguments (what doctor's
+    `--ollama-host`/`--ollama-model`/`--llm-model` flags feed it), exactly as
+    before the cloud branch was added — not fields read off the resolved AI."""
+    import opengrader.core.environment as environment
+    from opengrader.core.environment import build_environment_report
+
+    seen: dict = {}
+
+    def fake_probe_ollama(host: str, **kwargs) -> OllamaProbe:
+        seen["host"] = host
+        return OllamaProbe(host=host, reachable=True, models=())
+
+    monkeypatch.setattr(environment, "probe_ollama", fake_probe_ollama)
+
+    resolved = FakeResolvedAI(
+        kind="local",
+        host="http://this-should-not-be-used:11434",
+        vision_model="resolved-vision-model",
+        text_model="resolved-text-model",
+    )
+
+    report = build_environment_report(
+        vision_model="argument-vision-model",
+        text_model="argument-text-model",
+        ollama_host="http://argument-host:11434",
+        check_graphics=False,
+        ai=resolved,  # type: ignore[arg-type]
+        time_ai=False,
+    )
+
+    assert seen["host"] == "http://argument-host:11434"
+    by_name = {check.name: check for check in report.checks}
+    assert by_name["Ollama vision model"].fix == "ollama pull argument-vision-model"

@@ -32,7 +32,19 @@ def _error(message: str) -> None:
     print(f"Error: {message}", file=sys.stderr)
 
 
+def _consent_summary(spec: app_config.ProviderSpec) -> dict[str, str]:
+    """Consent status, for `list`."""
+    resolved = app_config.for_provider(spec.name)
+    return {
+        "cloud_consent": app_config.consent.consent_status(resolved.settings, resolved, "cloud"),
+        "credential_consent": app_config.consent.consent_status(
+            resolved.settings, resolved, "credential"
+        ),
+    }
+
+
 def _provider_to_dict(spec: app_config.ProviderSpec) -> dict:
+    consent_info = _consent_summary(spec)
     return {
         "name": spec.name,
         "label": spec.label,
@@ -48,6 +60,8 @@ def _provider_to_dict(spec: app_config.ProviderSpec) -> dict:
         "supports_model_listing": spec.supports_model_listing,
         "source": spec.source,
         "manifest_path": spec.manifest_path,
+        "cloud_consent": consent_info["cloud_consent"],
+        "credential_consent": consent_info["credential_consent"],
     }
 
 
@@ -55,6 +69,18 @@ def _print_provider(spec: app_config.ProviderSpec) -> None:
     print(f"{spec.label}  [{spec.name}]")
     for label, value in ai_manifests.describe_provider(spec):
         print(f"  {label + ':':<15}{value}")
+    if spec.kind == "cloud":
+        info = _consent_summary(spec)
+        print(
+            f"  {'Consent:':<15}{info['cloud_consent']} (cloud)"
+            + (
+                f", credential command {info['credential_consent']}"
+                if spec.credential_command
+                else ""
+            )
+        )
+    else:
+        print(f"  {'Consent:':<15}not-needed (runs on this computer)")
 
 
 def _cmd_list(args: Namespace) -> None:
@@ -120,9 +146,8 @@ def _confirm_add(dest: Path, name: str) -> None:
             )
         if spec.credential_command:
             print(
-                "credential_command is set but Opengrader will not run it "
-                "automatically yet — that needs a consent step that does not "
-                "exist yet."
+                f"credential_command is set: Opengrader will run it only after you "
+                f"approve it with 'opengrader-providers allow-credential-command {name}'."
             )
     else:
         reason = next((p for p in problems if str(dest) in p), None)
@@ -170,12 +195,16 @@ def _cmd_add(args: Namespace) -> None:
         for flag, value in (
             ("--label", args.label),
             ("--dialect", args.dialect),
-            ("--host", args.host),
             ("--vision-model", args.vision_model),
             ("--text-model", args.text_model),
         )
         if not value
     ]
+    # host is the one required field the pydantic-ai backend does not need:
+    # a prefix with no caller-supplied endpoint (Bedrock, Vertex, ...) uses
+    # the SDK's own — see manifests.parse_manifest / _parse_pydantic_ai_manifest.
+    if not args.host and args.dialect != ai_manifests.PYDANTIC_AI_DIALECT:
+        missing.append("--host")
     if missing:
         _error(f"--name also needs: {', '.join(missing)}.")
         sys.exit(1)
@@ -337,6 +366,100 @@ def _cmd_test(args: Namespace) -> None:
     print(f"{resolved.provider.label} is reachable and working.")
 
 
+def _known_provider(name: str) -> app_config.ProviderSpec:
+    spec = next((s for s in app_config.registered_providers() if s.name == name), None)
+    if spec is None:
+        known = ", ".join(sorted(s.name for s in app_config.registered_providers()))
+        _error(f"no provider named {name!r}. Known providers: {known}.")
+        sys.exit(2)
+    return spec
+
+
+def _require_tty(purpose: str) -> None:
+    if not sys.stdin.isatty():
+        _error(
+            f"{purpose} needs an interactive terminal to type a confirmation; "
+            "refusing rather than guessing. Run this command directly in a terminal."
+        )
+        sys.exit(2)
+
+
+def _typed_yes(prompt: str) -> bool:
+    try:
+        answer = input(prompt).strip().lower()
+    except EOFError:
+        answer = ""
+    return answer == "yes"
+
+
+def _cmd_consent(args: Namespace) -> None:
+    _known_provider(args.provider)
+    resolved = app_config.for_provider(args.provider)
+    if resolved.kind == "local":
+        _error(
+            f"{resolved.provider.label} runs on this computer; there is nothing to "
+            "consent to."
+        )
+        sys.exit(2)
+    _require_tty("granting cloud consent")
+    print(app_config.consent.cloud_consent_text(resolved).as_text())
+    if not _typed_yes('Type "yes" to send student work to this service: '):
+        _error("not confirmed; nothing was saved.")
+        sys.exit(2)
+    settings = app_config.load_settings()
+    try:
+        settings = app_config.consent.grant_cloud_consent(settings, resolved)
+    except ValueError as exc:
+        _error(str(exc))
+        sys.exit(2)
+    app_config.save_settings(settings)
+    print(
+        f"Consent recorded: student work may now be sent to {resolved.host} "
+        f"using {resolved.provider.label}."
+    )
+    print(f"Revoke at any time: opengrader-providers revoke {resolved.provider.name}")
+
+
+def _cmd_revoke(args: Namespace) -> None:
+    _known_provider(args.provider)
+    settings = app_config.load_settings()
+    settings = app_config.consent.revoke_cloud_consent(settings, args.provider)
+    app_config.save_settings(settings)
+    print(f"Cloud consent for {args.provider!r} revoked.")
+
+
+def _cmd_allow_credential_command(args: Namespace) -> None:
+    spec = _known_provider(args.provider)
+    if not spec.credential_command:
+        _error(f"{spec.label} names no credential_command.")
+        sys.exit(2)
+    _require_tty("approving a credential command")
+    print(app_config.consent.credential_consent_text(spec).as_text())
+    if not _typed_yes('Type "yes" to allow this exact command to run: '):
+        _error("not confirmed; nothing was saved.")
+        sys.exit(2)
+    settings = app_config.load_settings()
+    try:
+        settings = app_config.consent.grant_credential_consent(settings, spec)
+    except ValueError as exc:
+        _error(str(exc))
+        sys.exit(2)
+    app_config.save_settings(settings)
+    print(f"Approved: {spec.label}'s credential_command may now run to fetch its key.")
+    print(
+        "Revoke at any time: "
+        f"opengrader-providers revoke-credential-command {spec.name}"
+    )
+
+
+def _cmd_revoke_credential_command(args: Namespace) -> None:
+    _known_provider(args.provider)
+    settings = app_config.load_settings()
+    settings = app_config.consent.revoke_credential_consent(settings, args.provider)
+    app_config.save_settings(settings)
+    print(f"credential_command approval for {args.provider!r} revoked.")
+
+
 def _cmd_remove(args: Namespace) -> None:
     name = args.provider
     spec = next(
@@ -407,8 +530,19 @@ def _add_add_parser(subparsers) -> None:
     )
     add.add_argument("--name", default="", help="Provider id (flags mode).")
     add.add_argument("--label", default="", help="What the dropdown shows.")
-    add.add_argument("--dialect", default="", choices=(*app_config.dialect_names(), ""))
-    add.add_argument("--host", default="", help="API base, e.g. https://host/v1")
+    add.add_argument(
+        "--dialect",
+        default="",
+        choices=(*app_config.dialect_names(), ai_manifests.PYDANTIC_AI_DIALECT, ""),
+    )
+    add.add_argument(
+        "--host",
+        default="",
+        help=(
+            "API base, e.g. https://host/v1. Optional for --dialect pydantic-ai "
+            "when the provider prefix (e.g. bedrock:, vertexai:) has no caller-set URL."
+        ),
+    )
     add.add_argument("--vision-model", default="")
     add.add_argument("--text-model", default="")
     add.add_argument(
@@ -428,7 +562,8 @@ def _add_add_parser(subparsers) -> None:
         nargs="+",
         default=(),
         help=(
-            "Command whose stdout would be the key. Stored but not executed."
+            "Command whose stdout would be the key. Stored, but never run until "
+            "'opengrader-providers allow-credential-command NAME' approves it."
         ),
     )
     add.add_argument("--input-per-mtok", type=float, default=None)
@@ -474,6 +609,28 @@ def _build_parser() -> ArgumentParser:
         "--yes", action="store_true", help="Skip the confirmation prompt."
     )
 
+    # Consent commands: interactive, TTY-only,
+    # and no flag anywhere below skips the typed confirmation — that is the
+    # entire point of them being their own commands instead of a --yes flag.
+    consent = subparsers.add_parser(
+        "consent", help="Grant cloud consent: read what leaves, then type yes."
+    )
+    consent.add_argument("provider", help="A registered cloud provider's name.")
+
+    revoke = subparsers.add_parser("revoke", help="Revoke a provider's cloud consent.")
+    revoke.add_argument("provider", help="A provider's name.")
+
+    allow_credential = subparsers.add_parser(
+        "allow-credential-command",
+        help="Approve running a manifest's credential_command.",
+    )
+    allow_credential.add_argument("provider", help="A registered provider's name.")
+
+    revoke_credential = subparsers.add_parser(
+        "revoke-credential-command", help="Revoke a provider's credential_command approval."
+    )
+    revoke_credential.add_argument("provider", help="A provider's name.")
+
     return parser
 
 
@@ -481,6 +638,10 @@ _COMMANDS = {
     "list": _cmd_list,
     "add": _cmd_add,
     "validate": _cmd_validate,
+    "consent": _cmd_consent,
+    "revoke": _cmd_revoke,
+    "allow-credential-command": _cmd_allow_credential_command,
+    "revoke-credential-command": _cmd_revoke_credential_command,
     "test": _cmd_test,
     "remove": _cmd_remove,
 }

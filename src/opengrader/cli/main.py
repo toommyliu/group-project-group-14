@@ -14,7 +14,9 @@ PROGRAM_NAME = "opengrader"
 
 EXIT_INTERRUPTED = 130
 
-UNADVERTISED_ALIASES = frozenset({"opengrader-run", "opengrader-providers"})
+UNADVERTISED_ALIASES = frozenset(
+    {"opengrader-run", "opengrader-providers", "opengrader-data-flow"}
+)
 
 
 SECTION_START = "Start here"
@@ -111,6 +113,13 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="add, test or remove an AI service of your own",
         section=SECTION_START,
         aliases=("opengrader-providers",),
+    ),
+    Subcommand(
+        name="data-flow",
+        target="opengrader.cli.data_flow:run_cli",
+        summary="which student data would leave this machine, and to where (FERPA)",
+        section=SECTION_START,
+        aliases=("opengrader-data-flow",),
     ),
     Subcommand(
         name="create-answer-key",

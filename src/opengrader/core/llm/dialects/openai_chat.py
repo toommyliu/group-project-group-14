@@ -146,5 +146,16 @@ class OpenAIChatDialect:
                     names.append(name)
         return sorted(set(names))
 
+    def reply_usage(self, body: dict) -> tuple[int | None, int | None]:
+        usage = body.get("usage")
+        if not isinstance(usage, dict):
+            return (None, None)
+        try:
+            input_tokens = int(usage.get("prompt_tokens", 0)) or None
+            output_tokens = int(usage.get("completion_tokens", 0)) or None
+            return (input_tokens, output_tokens)
+        except (TypeError, ValueError):
+            return (None, None)
+
 
 DIALECT = OpenAIChatDialect()

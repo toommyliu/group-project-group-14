@@ -1,0 +1,28 @@
+# Install with: opengrader-providers add --example bedrock
+#
+# AWS Bedrock authenticates with SigV4 and the AWS credential chain, not an
+# API-key header, so this manifest uses the optional "pydantic-ai" backend
+# (dialect = "pydantic-ai") instead of one of the three raw-HTTP dialects.
+# Install the backend with: uv sync --extra pydantic-ai
+#
+# `host` is deliberately left out: Bedrock's endpoint is regional and chosen
+# by the AWS SDK, not a single URL a manifest could name. Leaving `host` out
+# is what keeps this provider's `kind` correctly derived as "cloud" — see
+# `core/app_config/manifests.py`'s `PYDANTIC_AI_PREFIXES` table.
+
+name         = "bedrock"
+label        = "AWS Bedrock"
+summary      = "Anthropic models on AWS Bedrock, billed to your AWS account."
+dialect      = "pydantic-ai"
+vision_model = "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
+text_model   = "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
+setup_hint   = "Uses the AWS credential chain: run `aws configure`, set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, or use an instance role. No api_key_env is needed unless your account uses Bedrock API key auth."
+
+# Uncomment if your account authenticates Bedrock with an API key (bearer
+# token) instead of the standard AWS credential chain:
+# api_key_env = "AWS_BEARER_TOKEN_BEDROCK"
+
+# Example pricing in dollars per million tokens. Check current rates before use.
+[pricing]
+input_per_mtok  = 1.0
+output_per_mtok = 5.0

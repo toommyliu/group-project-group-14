@@ -227,5 +227,7 @@ class QuestionSeed:
     # 0-100 confidence; None means unverified.
     response_confidence: float | None = None
     response_source: str | None = None
+    # The service that read this answer, from its `Read by` line; None when unrecorded.
+    response_provider: str | None = None
     source_pdf_path: str = ""
     page_context: tuple[PageContextEntry, ...] = ()

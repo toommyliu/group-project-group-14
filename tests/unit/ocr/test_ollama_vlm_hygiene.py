@@ -186,3 +186,41 @@ def test_page_number_prompt_asks_for_empty_string_not_null(monkeypatch):
     assert result is None
     assert "null" not in prompts[0]
     assert "empty string" in prompts[0]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda path, config: extract_field_text(image_path=path, field_kind="name", config=config),
+        lambda path, config: extract_field_text(image_path=path, field_kind="sid", config=config),
+        lambda path, config: extract_title_metadata(image_path=path, config=config),
+        lambda path, config: page_has_identity_field(image_path=path, config=config),
+        lambda path, config: ollama_vlm.extract_page_number(image_path=path, config=config),
+    ],
+    ids=["name", "sid", "title", "identity-page", "page-number"],
+)
+def test_a_direct_identity_read_never_goes_to_a_remote_host(monkeypatch, image_path, call):
+    """These helpers are unguarded functions; called directly with the Ollama
+    provider pointed at a remote server, they must still not send a crop
+    that may show a student's name or ID."""
+    from opengrader.core.ocr.vision_reader import IdentityFieldBlocked
+
+    sent: list = []
+    monkeypatch.setattr(
+        ollama_vlm.ollama_transport.request,
+        "urlopen",
+        lambda req, timeout=None: sent.append(req) or _FakeResponse({"response": "{}"}),
+    )
+
+    with pytest.raises(IdentityFieldBlocked):
+        call(image_path, OllamaVisionConfig(host="https://ollama.cloud.example"))
+    assert sent == []
+
+
+def test_the_unguarded_student_field_alias_is_gone() -> None:
+    import opengrader.core.ocr as ocr
+
+    assert not hasattr(ollama_vlm, "extract_student_field")
+    assert "extract_student_field" not in ocr.__all__
+    with pytest.raises(AttributeError):
+        ocr.extract_student_field  # noqa: B018

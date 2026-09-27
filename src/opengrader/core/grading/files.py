@@ -140,8 +140,13 @@ class FileGradingSession:
         response_text: str,
         response_confidence: float | None = 100.0,
         response_source: str | None = SOURCE_HUMAN,
+        response_provider: str | None = None,
     ) -> None:
-        """Save a reading and its history; None clears confidence or reader metadata."""
+        """Save a reading and its history; None clears confidence or reader metadata.
+
+        `response_provider` rides on the `Read by` line with `response_source`
+        (undo restores both); a human edit leaves it None, dropping the provider.
+        """
         old_question = self.questions_by_id.get(question_id)
         self._update(
             StudentSubmissionGradeUpdate(
@@ -151,6 +156,7 @@ class FileGradingSession:
                 clear_response_confidence=response_confidence is None,
                 response_source=response_source,
                 clear_response_source=response_source is None,
+                response_provider=response_provider,
             )
         )
         old_value = AspectValue(

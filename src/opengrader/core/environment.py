@@ -302,12 +302,138 @@ def evaluate_smoke_test(*, ok: bool, detail: str) -> EnvironmentCheck:
     )
 
 
+def evaluate_provider(resolved: "ResolvedAI") -> tuple[EnvironmentCheck, ...]:
+    """Pre-flight for the configured AI provider.
+
+    `build_environment_report` only calls this for a cloud-kind `ResolvedAI`;
+    a local one keeps probing Ollama directly with the caller's own
+    host/model arguments (see the branch there) so that path is unchanged
+    byte-for-byte. This function therefore never touches Ollama.
+
+    For a cloud provider, every guard below is checked BEFORE any network
+    call — an unconsented, kill-switched or unkeyed provider must never be
+    probed. Only once every guard passes does it ask the provider to list
+    its models, or, for a provider that cannot list models, say only that a
+    credential resolves (never that a connection was verified, because it
+    was not).
+    """
+    from opengrader.core import app_config
+
+    if resolved.kind != "cloud":
+        # Defensive fallback for a direct call with a local ResolvedAI; the
+        # real caller (build_environment_report) never takes this path.
+        return evaluate_ollama(
+            probe_ollama(resolved.host),
+            vision_model=resolved.vision_model,
+            text_model=resolved.text_model,
+        )
+
+    provider = resolved.provider
+    name = "AI provider"
+    consent_fix = f"opengrader-providers consent {provider.name}   (or Helper Tools → AI setup)"
+
+    if not resolved.cloud_allowed:
+        return (
+            EnvironmentCheck(
+                name=name,
+                status="degraded",
+                detail=(
+                    f"{provider.label} is a cloud service, but "
+                    f"{app_config.ALLOW_CLOUD_ENV}=0 forbids cloud AI providers on "
+                    "this machine."
+                ),
+                impact="AI features fall back to the local provider; nothing is sent off this machine.",
+                fix=f"Unset {app_config.ALLOW_CLOUD_ENV}, or choose a local provider in AI setup.",
+            ),
+        )
+
+    if resolved.cloud_consent_required:
+        return (
+            EnvironmentCheck(
+                name=name,
+                status="degraded",
+                detail=(
+                    f"{provider.label} is a cloud service at "
+                    f"{app_config.consent.hostname_of(resolved.host)}; you have not "
+                    "consented to send student work to it. Nothing has been sent."
+                ),
+                impact="AI features are unavailable until consent is given.",
+                fix=consent_fix,
+            ),
+        )
+
+    if resolved.credential_consent_required:
+        return (
+            EnvironmentCheck(
+                name=name,
+                status="degraded",
+                detail=f"{provider.label}'s credential command has not been approved.",
+                impact="AI features are unavailable until the command is approved.",
+                fix=consent_fix,
+            ),
+        )
+
+    if provider.requires_api_key and not resolved.api_key:
+        return (
+            EnvironmentCheck(
+                name=name,
+                status="degraded",
+                detail=f"{provider.label} needs an API key.",
+                impact="AI features are unavailable until a key is set.",
+                fix=f"Set the {provider.api_key_env} environment variable, then re-run doctor.",
+            ),
+        )
+
+    if not provider.supports_model_listing:
+        return (
+            EnvironmentCheck(
+                name=name,
+                status="ready",
+                detail=(
+                    f"{provider.label}: credential resolves; connection not tested "
+                    "— this service does not list models."
+                ),
+            ),
+        )
+
+    try:
+        models = app_config.available_models(resolved)
+    except Exception as exc:  # provider client errors are provider-specific, and already redacted
+        return (
+            EnvironmentCheck(
+                name=name,
+                status="degraded",
+                detail=f"{provider.label}: could not list models ({summarize_connection_error(str(exc))}).",
+                impact="AI features may fail at runtime.",
+                fix="Check the network connection and the API key, then re-run doctor.",
+            ),
+        )
+
+    return (
+        EnvironmentCheck(
+            name=name,
+            status="ready",
+            detail=f"{provider.label}: connected, {len(models)} model(s) available.",
+        ),
+    )
+
+
 def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
+    # Reading a name/ID with a local model is independent of the toggles
+    # below (it happens whenever a vision reader exists, not only when
+    # handwriting reading or AI grading are on), so it is noted here even
+    # when nothing else about the AI setup is worth reporting.
+    identity_note = (
+        ""
+        if resolved.read_identity_locally
+        else " (student names/IDs are read by Tesseract only; local AI reading of them is turned off)"
+    )
+
     if not resolved.uses_ai:
         return EnvironmentCheck(
             name="AI features",
             status="ready",
-            detail="nothing — the AI is switched off (a legitimate choice)",
+            detail="nothing — the AI is switched off (a legitimate choice)" + identity_note,
         )
 
     features: list[str] = []
@@ -335,7 +461,7 @@ def evaluate_ai_features(resolved: "ResolvedAI") -> EnvironmentCheck:
     return EnvironmentCheck(
         name="AI features",
         status="ready",
-        detail=detail,
+        detail=detail + identity_note,
     )
 
 
@@ -550,13 +676,21 @@ def build_environment_report(
     )
 
     checks.append(evaluate_tesseract(probe_tesseract()))
-    checks.extend(
-        evaluate_ollama(
-            probe_ollama(ollama_host),
-            vision_model=vision_model,
-            text_model=text_model,
+
+    # A cloud provider is checked on its own terms and never probed as if it
+    # were Ollama, so a cloud-only machine without Ollama can still be ready.
+    # A local provider, or no AI configured at all, probes Ollama with the
+    # caller's own host/model arguments.
+    if ai is not None and ai.kind == "cloud":
+        checks.extend(evaluate_provider(ai))
+    else:
+        checks.extend(
+            evaluate_ollama(
+                probe_ollama(ollama_host),
+                vision_model=vision_model,
+                text_model=text_model,
+            )
         )
-    )
     checks.append(
         evaluate_optional_import(
             probe_optional_import("pix2tex"),

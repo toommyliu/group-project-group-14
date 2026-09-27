@@ -697,6 +697,13 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "Tools (F3, classic) as 'AI providers'.",
     ),
     (
+        "Data-flow report",
+        "States, for the current AI setup, which kinds of student data would "
+        "leave this computer and which host would receive them. Student names "
+        "and IDs are never sent to a cloud service. Printable, to hand to a "
+        "department that asks. Read-only. CLI: opengrader-data-flow.",
+    ),
+    (
         "AI setup",
         "The one place the optional AI is configured: provider, the "
         "handwriting model, the grading model, the server, the maths reader, "

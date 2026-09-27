@@ -9,6 +9,7 @@ from textual.widgets import Button, RichLog, Select, Static
 
 from opengrader.core import app_config
 from opengrader.core.app_config import manifests as ai_manifests
+from opengrader.tui.ui.screens.cloud_consent_screen import CredentialConsentScreen
 
 
 class ProviderScreen(ModalScreen[bool]):
@@ -301,6 +302,34 @@ class ProviderScreen(ModalScreen[bool]):
             )
             return
         self._armed = None
+        if spec.credential_command and not app_config.consent.has_credential_consent(
+            app_config.load_settings(), spec
+        ):
+            # The literal command must be approved before it can run —
+            # needs a worker, since showing that modal and waiting for it
+            # can't happen from a plain button handler.
+            self.run_worker(
+                self._gate_credential_then_test(spec), exclusive=True
+            )
+            return
+        self._start_test(spec)
+
+    async def _gate_credential_then_test(self, spec: app_config.ProviderSpec) -> None:
+        accepted = await self.app.push_screen_wait(CredentialConsentScreen(spec))
+        if not accepted:
+            self._log("Test cancelled — the credential command was not approved.")
+            return
+        settings = app_config.consent.grant_credential_consent(
+            app_config.load_settings(), spec
+        )
+        try:
+            app_config.save_settings(settings)
+        except OSError as exc:
+            self._log(f"Could not save credential consent: {exc}")
+            return
+        self._start_test(spec)
+
+    def _start_test(self, spec: app_config.ProviderSpec) -> None:
         for button in self.query(Button):
             button.disabled = True
         self._log(f"Testing {spec.label}…")

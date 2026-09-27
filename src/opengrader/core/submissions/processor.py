@@ -1511,6 +1511,7 @@ def _fill_responses_with_vlm(
         response_text = question.response_text
         response_confidence = question.response_confidence
         response_source = question.response_source
+        response_provider = question.response_provider
         ink_fragments = question.ink_fragments
         transcription_path = question.ink_image_path or question.response_image_path
         ink_is_blank = question.ink_image_path is not None and not ink_fragments
@@ -1525,7 +1526,7 @@ def _fill_responses_with_vlm(
                 math_transcriber=math_transcriber,
                 escalate_floor=escalate_floor,
             )
-            response_text, response_confidence, response_source = reading
+            response_text, response_confidence, response_source, response_provider = reading
             if len(ink_fragments) == 1:
                 ink_fragments = (
                     replace(
@@ -1542,6 +1543,7 @@ def _fill_responses_with_vlm(
                 response_text=response_text,
                 response_confidence=response_confidence,
                 response_source=response_source,
+                response_provider=response_provider,
                 ink_fragments=ink_fragments,
             )
         )
@@ -1557,7 +1559,7 @@ def _transcribe_crop(
     math_latex: bool = False,
     math_transcriber: "MathTranscriber | None" = None,
     escalate_floor: float | None = None,
-) -> tuple[str, float | None, str | None]:
+) -> tuple[str, float | None, str | None, str | None]:
     def _read_with_ocr() -> tuple[str, float | None, str | None]:
         text, confidence = _ocr_image_with_confidence(crop_path, psm=6)
         return (text, confidence, SOURCE_TESSERACT if text.strip() else None)
@@ -1580,6 +1582,11 @@ def _transcribe_crop(
                 image_path=crop_path, math_latex=math_latex,
             )
         except Exception as exc:
+            # Any failure from the vision call (timeout, auth error, a blocked
+            # cloud call, ...) is caught here so a network hiccup on one crop
+            # never aborts the rest of the cohort — the caller falls back to
+            # OCR below and forces its confidence down so this answer still
+            # lands in the review queue.
             progress_callback(f"  Warning: Vision model failed for {question_id}: {exc}")
             return None
         text = answer or ""
@@ -1595,17 +1602,23 @@ def _transcribe_crop(
         ocr_reading = _read_with_ocr()
         text, confidence, _source = ocr_reading
         if not should_escalate(text, confidence, floor=escalate_floor):
-            return ocr_reading
+            return (*ocr_reading, None)
         progress_callback(
             f"  {question_id}: {_escalation_reason(text, confidence)}, "
             "re-reading with a model..."
         )
     reading = _read_with_math() or _read_with_vlm()
     if reading is not None:
-        return reading
+        text, confidence, source = reading
+        provider = (
+            getattr(vision_reader, "provider", None)
+            if source == SOURCE_VISION_MODEL
+            else None
+        )
+        return text, confidence, source, provider
     text, confidence, source = ocr_reading or _read_with_ocr()
     # Printed text can score highly in Tesseract after a handwriting reader fails.
-    return text, 0.0 if vision_reader is not None else confidence, source
+    return text, 0.0 if vision_reader is not None else confidence, source, None
 
 
 def _escalation_reason(text: str, confidence: float | None) -> str:
@@ -1945,16 +1958,19 @@ def _build_document_from_ocr_result(
         response_text = ""
         response_confidence: float | None = None
         response_source: str | None = None
+        response_provider: str | None = None
         if q_res.output_path:
             crop_path = Path(q_res.output_path)
-            response_text, response_confidence, response_source = _transcribe_crop(
-                crop_path,
-                question_id=q_res.question_id,
-                vision_reader=None if skip_ollama_qa else vision_reader,
-                progress_callback=progress_callback,
-                math_latex=llm_math,
-                math_transcriber=math_transcriber,
-                escalate_floor=escalate_floor,
+            response_text, response_confidence, response_source, response_provider = (
+                _transcribe_crop(
+                    crop_path,
+                    question_id=q_res.question_id,
+                    vision_reader=None if skip_ollama_qa else vision_reader,
+                    progress_callback=progress_callback,
+                    math_latex=llm_math,
+                    math_transcriber=math_transcriber,
+                    escalate_floor=escalate_floor,
+                )
             )
             if vlm_active:
                 progress.response(pdf_path.name, q_res.question_id)
@@ -1970,6 +1986,7 @@ def _build_document_from_ocr_result(
                 source_segments=q_res.source_segments,
                 response_confidence=response_confidence,
                 response_source=response_source,
+                response_provider=response_provider,
             )
         )
 

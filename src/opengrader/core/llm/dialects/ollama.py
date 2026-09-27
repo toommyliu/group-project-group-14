@@ -79,5 +79,13 @@ class OllamaDialect:
                     names.append(name)
         return sorted(set(names))
 
+    def reply_usage(self, body: dict) -> tuple[int | None, int | None]:
+        try:
+            input_tokens = int(body.get("prompt_eval_count", 0)) or None
+            output_tokens = int(body.get("eval_count", 0)) or None
+            return (input_tokens, output_tokens)
+        except (TypeError, ValueError):
+            return (None, None)
+
 
 DIALECT = OllamaDialect()
