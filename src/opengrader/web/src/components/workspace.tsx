@@ -7,7 +7,7 @@ import {
   WorkspacePages,
   OverviewPage,
   ScansPage,
-  SubmissionsPage,
+  GradePage,
   pageKey,
   type WorkspacePage,
 } from '@/lib/workspace-pages';
@@ -24,7 +24,7 @@ export default function Workspace() {
             return { path: match.routeId, data: match.loaderData };
           case '/assignments/$assignmentId/scans':
             return { path: match.routeId, data: match.loaderData };
-          case '/assignments/$assignmentId/submissions':
+          case '/assignments/$assignmentId/grade':
             return { path: match.routeId, data: match.loaderData };
         }
       }
@@ -82,7 +82,7 @@ export default function Workspace() {
               ) : page.path === '/assignments/$assignmentId/scans' ? (
                 <ScansPage data={page.data} />
               ) : (
-                <SubmissionsPage data={page.data} />
+                <GradePage data={page.data} />
               )}
             </Suspense>
           </Activity>

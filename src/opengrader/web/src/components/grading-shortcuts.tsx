@@ -55,9 +55,9 @@ export function GradingShortcuts() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant="outline" />}>
-        <Keyboard aria-hidden="true" /> Shortcuts <Kbd>?</Kbd>
+        <Keyboard aria-hidden="true" /> Shortcuts {enabled && <Kbd>?</Kbd>}
       </PopoverTrigger>
-      <PopoverContent align="start" collisionAvoidance={{ align: 'flip' }}>
+      <PopoverContent align="end" collisionAvoidance={{ align: 'flip' }}>
         <PopoverTitle className="mb-1 font-semibold">
           Keyboard shortcuts
         </PopoverTitle>

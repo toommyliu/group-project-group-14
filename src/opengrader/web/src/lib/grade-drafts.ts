@@ -140,4 +140,8 @@ export class GradeDrafts {
   clear() {
     this.storage.removeItem(this.key);
   }
+  discard(keys: string[]) {
+    for (const key of keys)
+      if (key.startsWith(this.prefix)) this.storage.removeItem(key);
+  }
 }

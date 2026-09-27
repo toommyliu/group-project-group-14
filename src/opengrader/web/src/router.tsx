@@ -7,11 +7,7 @@ import {
   redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
-import {
-  OverviewPage,
-  ScansPage,
-  SubmissionsPage,
-} from './lib/workspace-pages';
+import { OverviewPage, ScansPage, GradePage } from './lib/workspace-pages';
 import {
   assignmentsQuery,
   assignmentSummariesQuery,
@@ -26,7 +22,11 @@ import {
   loadAssignment,
   validateGradingSearch,
 } from './routes/assignment-data';
-import { AssignmentLoading, AssignmentsLoading } from './components/loading';
+import {
+  AssignmentLoading,
+  AssignmentsLoading,
+  GradeLoading,
+} from './components/loading';
 import { RouteError, RouteNotFound } from './components/route-error';
 
 /** The single assignment of an active folder session, or null in a normal workspace. */
@@ -94,21 +94,21 @@ export const newAssignmentRoute = createRoute({
   errorComponent: RouteError,
 });
 
-export const submissionsRoute = createRoute({
+export const gradeRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/assignments/$assignmentId/submissions',
+  path: '/assignments/$assignmentId/grade',
   validateSearch: validateGradingSearch,
   loaderDeps: ({ search }) => search,
   remountDeps: ({ params }) => params.assignmentId,
   loader: async ({ context, params, deps }) => {
     const [data] = await Promise.all([
       loadAssignment(context.queryClient, params.assignmentId, deps),
-      SubmissionsPage.preload?.(),
+      GradePage.preload?.(),
     ]);
     if (!data) throw notFound();
     return data;
   },
-  pendingComponent: AssignmentLoading,
+  pendingComponent: GradeLoading,
   // Keep the current response and controls usable until navigation finishes.
   pendingMs: Infinity,
   errorComponent: RouteError,
@@ -231,7 +231,7 @@ export function createAppRouter(queryClient: QueryClient) {
       indexRoute,
       assignmentsRoute,
       newAssignmentRoute,
-      submissionsRoute,
+      gradeRoute,
       scansRoute,
       overviewRoute,
       terminalsRoute,

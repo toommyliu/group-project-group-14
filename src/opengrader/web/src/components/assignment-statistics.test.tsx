@@ -82,7 +82,7 @@ it('renders summaries, real charts, partial progress, and links to the matching 
   expect(html).toContain('Assignment total score distribution');
   expect(html).toContain('<svg');
   expect(html).toContain(
-    '/assignments/exam/submissions?submission=42&amp;question=q1'
+    '/assignments/exam/grade?submission=42&amp;question=q1'
   );
   expect(html).toContain('Question statistics');
   expect(html).toContain('10 points possible');

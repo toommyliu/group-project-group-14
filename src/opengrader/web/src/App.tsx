@@ -38,6 +38,9 @@ export function App({ children }: PropsWithChildren) {
   const overview =
     Boolean(matchRoute({ to: '/assignments/new' })) ||
     (assignment && Boolean(matchRoute({ to: '/assignments/$assignmentId' })));
+  const grading =
+    assignment &&
+    Boolean(matchRoute({ to: '/assignments/$assignmentId/grade' }));
   const home = !assignment && pathname === '/';
   return (
     <TooltipProvider>
@@ -50,7 +53,13 @@ export function App({ children }: PropsWithChildren) {
           } as CSSProperties
         }
         className={cn(
-          overview ? 'h-svh min-h-0 overflow-hidden' : home ? 'block' : '',
+          overview
+            ? 'h-svh min-h-0 overflow-hidden'
+            : grading
+              ? 'lg:h-svh lg:min-h-0 lg:overflow-hidden'
+              : home
+                ? 'block'
+                : '',
           'text-sm leading-normal antialiased has-data-[resizing=true]:select-none has-data-[resizing=true]:[&_[data-slot=sidebar-container]]:transition-none has-data-[resizing=true]:[&_[data-slot=sidebar-gap]]:transition-none'
         )}
       >
@@ -65,15 +74,17 @@ export function App({ children }: PropsWithChildren) {
           className={
             overview
               ? 'h-full min-h-0 min-w-0 overflow-hidden'
-              : home
-                ? 'min-h-svh min-w-0'
-                : 'min-w-0'
+              : grading
+                ? 'min-w-0 lg:h-full lg:min-h-0 lg:overflow-hidden'
+                : home
+                  ? 'min-h-svh min-w-0'
+                  : 'min-w-0'
           }
         >
           <div
             className={
               !home
-                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
+                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : grading ? 'pb-16 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:pb-4' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
                 : 'mx-auto w-full max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14'
             }
             id="content"

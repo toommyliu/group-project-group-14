@@ -313,7 +313,7 @@ export function ScanBatchCard({
                 ))}
                 {group.submission_id !== null ? (
                   <Link
-                    to="/assignments/$assignmentId/submissions"
+                    to="/assignments/$assignmentId/grade"
                     params={{ assignmentId }}
                     search={{ submission: group.submission_id }}
                     className={buttonVariants({
@@ -321,7 +321,7 @@ export function ScanBatchCard({
                       className: 'mt-3',
                     })}
                   >
-                    View submission
+                    Grade submission
                   </Link>
                 ) : (
                   <p className="mt-2 text-sm">

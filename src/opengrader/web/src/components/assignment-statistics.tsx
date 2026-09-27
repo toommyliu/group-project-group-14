@@ -80,7 +80,7 @@ export function AssignmentStatistics({
           <p>
             No fully graded submissions yet.{' '}
             <Link
-              to="/assignments/$assignmentId/submissions"
+              to="/assignments/$assignmentId/grade"
               params={{ assignmentId }}
               search={{
                 submission: questions[0]?.submission_id ?? undefined,
@@ -174,7 +174,7 @@ export function AssignmentStatistics({
                     >
                       {item.submission_id !== null ? (
                         <Link
-                          to="/assignments/$assignmentId/submissions"
+                          to="/assignments/$assignmentId/grade"
                           params={{ assignmentId }}
                           search={{
                             submission: item.submission_id,

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { Answer, Question } from '@/api/queries';
 import { GradingText } from './grading-text';
 import { AnswerCrop } from './answer-crop';
@@ -10,6 +11,7 @@ export function AnswerView({
   submissionId,
   question,
   answer,
+  header,
 }: {
   assignmentId: string;
   navigating: boolean;
@@ -17,43 +19,52 @@ export function AnswerView({
   submissionId: number;
   question: Question;
   answer: Answer | null;
+  header: ReactNode;
 }) {
   return (
-    <div className="grid items-start gap-8 min-[60rem]:grid-cols-[minmax(0,1fr)_minmax(18rem,23rem)] min-[75rem]:gap-8">
-      <div className="min-w-0">
+    <div className="grid gap-8 border-t pt-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)] lg:grid-rows-[minmax(0,1fr)] lg:gap-0">
+      <div className="flex min-w-0 flex-col gap-4 lg:-ms-2 lg:me-3 lg:-mt-2 lg:[scrollbar-gutter:stable] lg:overflow-y-auto lg:overscroll-contain lg:ps-2 lg:pe-3 lg:pt-2 lg:pb-4">
         <section aria-labelledby="question-heading">
-          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-            <h2
-              id="question-heading"
-              className="text-base leading-snug font-semibold"
-            >
-              Question {question.id}
-            </h2>
-            <span className="whitespace-nowrap text-muted-foreground tabular-nums">
-              {question.possible_points} points
-            </span>
-          </div>
+          <h2
+            id="question-heading"
+            className="flex min-h-11 items-center text-base leading-snug font-semibold"
+          >
+            Question
+          </h2>
           <GradingText>{question.prompt}</GradingText>
-          {question.expected_answers.length > 0 && (
-            <details className="mt-4 [&>div]:mt-2">
-              <summary className="min-h-11 w-fit cursor-pointer py-2.5">
-                Expected answer
-              </summary>
+        </section>
+        {question.expected_answers.length > 0 && (
+          <section aria-labelledby="expected-heading">
+            <h2
+              id="expected-heading"
+              className="flex min-h-11 items-center text-base leading-snug font-semibold"
+            >
+              Expected answer
+            </h2>
+            <div className="grid gap-3">
               {question.expected_answers.map((text, index) => (
                 <GradingText key={index}>{text}</GradingText>
               ))}
-            </details>
-          )}
-        </section>
-        <section className="mt-8" aria-labelledby="response-heading">
+            </div>
+          </section>
+        )}
+        <section aria-labelledby="response-heading">
           <h2
             id="response-heading"
-            className="mb-4 text-base leading-snug font-semibold"
+            className="flex min-h-11 items-center text-base leading-snug font-semibold"
           >
             Student response
           </h2>
           {answer ? (
             <>
+              {answer.response_text && (
+                <div className="mb-4">
+                  <h3 className="mb-1 text-sm leading-snug text-muted-foreground">
+                    Transcription
+                  </h3>
+                  <GradingText>{answer.response_text}</GradingText>
+                </div>
+              )}
               {answer.response_image_url ? (
                 <AnswerCrop
                   key={answer.response_image_url}
@@ -68,38 +79,40 @@ export function AnswerView({
                   No answer image available.
                 </p>
               )}
-              <h3 className="mt-6 mb-3 text-sm leading-snug font-semibold">
-                Transcription
-              </h3>
-              {answer.response_text ? (
-                <GradingText>{answer.response_text}</GradingText>
-              ) : (
-                <p className="text-muted-foreground">
-                  No response text recorded.
-                </p>
-              )}
             </>
           ) : (
-            <p className="max-w-prose space-y-4 py-8">
+            <p className="max-w-prose py-8">
               No response recorded for this question.
             </p>
           )}
         </section>
       </div>
-      {answer ? (
-        <GradePanel
-          assignmentId={assignmentId}
-          question={question}
-          answer={answer}
-          navigating={navigating}
-          onNext={onNext}
-        />
-      ) : (
-        <p className="rounded-lg border p-5 text-muted-foreground">
-          This question has no extracted response to grade. Check the submission
-          scan.
-        </p>
-      )}
+      <aside
+        aria-label="Grading"
+        className="flex min-w-0 flex-col border-t pt-6 lg:min-h-0 lg:border-s lg:border-t-0 lg:ps-4 lg:pt-0"
+      >
+        <div className="flex flex-col lg:-me-4 lg:-mt-2 lg:min-h-0 lg:flex-1 lg:[scrollbar-gutter:stable] lg:overflow-y-auto lg:overscroll-contain lg:ps-2 lg:pe-4 lg:pt-2 lg:pb-4">
+          {header && (
+            <div className="mb-6 shrink-0 lg:sticky lg:top-0 lg:z-10 lg:mb-0 lg:bg-background lg:pb-6">
+              {header}
+            </div>
+          )}
+          {answer ? (
+            <GradePanel
+              assignmentId={assignmentId}
+              question={question}
+              answer={answer}
+              navigating={navigating}
+              onNext={onNext}
+            />
+          ) : (
+            <p className="text-muted-foreground">
+              This question has no extracted response to grade. Check the
+              submission scan.
+            </p>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

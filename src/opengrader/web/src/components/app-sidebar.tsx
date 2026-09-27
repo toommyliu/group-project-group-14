@@ -4,8 +4,8 @@ import { Link, useMatchRoute } from '@tanstack/react-router';
 import {
   BookOpen,
   ChartColumn,
-  Files,
   LayoutGrid,
+  PenLine,
   ScanLine,
 } from 'lucide-react';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
@@ -37,11 +37,11 @@ export function AppSidebar() {
   const pages = useContext(WorkspacePages);
   const gradingPage = pages.find(
     (page) =>
-      page.path === '/assignments/$assignmentId/submissions' &&
+      page.path === '/assignments/$assignmentId/grade' &&
       page.data.assignment.id === assignment?.id
   );
   const gradingSelection =
-    gradingPage?.path === '/assignments/$assignmentId/submissions'
+    gradingPage?.path === '/assignments/$assignmentId/grade'
       ? {
           submission: gradingPage.data.submission?.id,
           question: gradingPage.data.question?.id,
@@ -66,9 +66,9 @@ export function AppSidebar() {
         icon: ScanLine,
       },
       {
-        to: '/assignments/$assignmentId/submissions',
-        title: 'Submissions',
-        icon: Files,
+        to: '/assignments/$assignmentId/grade',
+        title: 'Grade',
+        icon: PenLine,
       },
       {
         to: '/assignments/$assignmentId/statistics',
@@ -172,8 +172,7 @@ export function AppSidebar() {
                                 to={to}
                                 params={{ assignmentId: assignment.id }}
                                 search={
-                                  to ===
-                                  '/assignments/$assignmentId/submissions'
+                                  to === '/assignments/$assignmentId/grade'
                                     ? gradingSelection
                                     : {}
                                 }
