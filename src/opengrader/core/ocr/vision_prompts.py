@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,8 +41,23 @@ class VisionRequest:
     system_prompt: str | None = None
 
 
+MAX_IMAGE_SIDE = 1600
+
+
 def image_to_base64(image_path: str | Path) -> str:
-    data = Path(image_path).read_bytes()
+    from PIL import Image
+
+    path = Path(image_path)
+    data = path.read_bytes()
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if max(image.size) > MAX_IMAGE_SIDE:
+                image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE), Image.Resampling.LANCZOS)
+                buffer = io.BytesIO()
+                image.save(buffer, format="PNG")
+                data = buffer.getvalue()
+    except OSError:
+        pass
     return base64.b64encode(data).decode("ascii")
 
 
