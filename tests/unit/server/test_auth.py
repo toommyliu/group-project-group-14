@@ -81,7 +81,7 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
         assert client.get("/api/assignments").status_code == 401
 
 
-def test_remote_requests_require_sign_in_including_terminal_sockets(tmp_path):
+def test_remote_requests_require_sign_in_including_sockets(tmp_path):
     settings = ServerSettings(
         _env_file=None,
         auth_enabled=True,
@@ -102,7 +102,7 @@ def test_remote_requests_require_sign_in_including_terminal_sockets(tmp_path):
         assert response.headers["location"] == "/auth/login"
         assert client.get("/auth/me").json() == {"enabled": True, "user": None}
         with pytest.raises(WebSocketDisconnect) as closed:
-            with client.websocket_connect("/api/terminals/missing/ws"):
+            with client.websocket_connect("/api/socket"):
                 pass
         assert closed.value.code == 1008
 

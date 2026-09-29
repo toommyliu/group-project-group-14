@@ -20,35 +20,6 @@ CMU_FONT_FILES = (
     ROOT / "assets" / "fonts" / "cmu" / "cmunrm.ttf",
     ROOT / "assets" / "fonts" / "cmu" / "cmunbx.ttf",
 )
-T3_CODE_REVISION = "2c19283afed1e3b69a9af33360980527aeb37494"
-T3_CODE_FILES = (
-    ROOT / "src" / "opengrader" / "web" / "src" / "terminal" / "ghostty" / "core.ts",
-    ROOT / "src" / "opengrader" / "web" / "src" / "terminal" / "ghostty" / "renderer.ts",
-    ROOT / "src" / "opengrader" / "web" / "src" / "terminal" / "ghostty" / "surface.ts",
-)
-GHOSTTY_REVISION_FILE = (
-    ROOT
-    / "src"
-    / "opengrader"
-    / "web"
-    / "src"
-    / "terminal"
-    / "ghostty"
-    / "vendor"
-    / "VERSION"
-)
-GHOSTTY_WASM_FILE = GHOSTTY_REVISION_FILE.with_name("ghostty-vt.wasm")
-NERD_FONT_FILE = (
-    ROOT
-    / "src"
-    / "opengrader"
-    / "web"
-    / "src"
-    / "terminal"
-    / "ghostty"
-    / "fonts"
-    / "SymbolsNerdFontMono-Regular.woff2"
-)
 NOTICE_SEPARATOR = "------"
 RUNTIME_PRUNES = ("pytest",)
 PACKAGE_RE = re.compile(r"^([A-Za-z0-9_.-]+)==")
@@ -163,81 +134,6 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
-"""
-T3_CODE_NOTICE = f"""
-** T3 Code browser terminal adapter; revision {T3_CODE_REVISION} (MIT) -- https://github.com/pingdotgg/t3code/tree/{T3_CODE_REVISION}/apps/web/src/terminal/ghostty
-
-MIT License
-
-Copyright (c) 2026 T3 Tools Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-GHOSTTY_NOTICE_TEMPLATE = """
-** libghostty-vt; revision {revision} (MIT) -- https://github.com/ghostty-org/ghostty/tree/{revision}
-
-MIT License
-
-Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-NERD_FONT_NOTICE = """
-** Symbols Nerd Font Mono (MIT) -- https://github.com/ryanoasis/nerd-fonts
-
-The MIT License (MIT)
-
-Copyright (c) 2014 Ryan L McIntyre
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 """
 REMARK_MATH_LICENSE = """
 (The MIT License)
@@ -446,15 +342,6 @@ def _bundled_asset_notices() -> list[str]:
     notices = []
     if any(font.exists() for font in CMU_FONT_FILES):
         notices.append(_normalize_text(CMU_NOTICE))
-    if any(source.exists() for source in T3_CODE_FILES):
-        notices.append(_normalize_text(T3_CODE_NOTICE))
-    if GHOSTTY_WASM_FILE.exists() and GHOSTTY_REVISION_FILE.exists():
-        revision = GHOSTTY_REVISION_FILE.read_text(encoding="utf-8").strip()
-        notices.append(
-            _normalize_text(GHOSTTY_NOTICE_TEMPLATE.format(revision=revision))
-        )
-    if NERD_FONT_FILE.exists():
-        notices.append(_normalize_text(NERD_FONT_NOTICE))
     return notices
 
 

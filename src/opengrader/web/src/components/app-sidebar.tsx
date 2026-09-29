@@ -75,14 +75,9 @@ export function AppSidebar() {
         title: 'Statistics',
         icon: ChartColumn,
       },
-      // {
-      //   to: '/assignments/$assignmentId/terminals',
-      //   title: 'Terminals',
-      //   icon: TerminalSquare,
-      // },
     ] as const
   ).filter(
-    // A folder session grades one class folder: no scans or terminals to manage.
+    // A folder session grades one class folder: no scans to manage.
     (destination) => !folderSession || destination.title !== 'Scans'
   );
   return (

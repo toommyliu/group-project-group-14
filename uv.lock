@@ -1443,7 +1443,6 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "update" },
     { name = "uvicorn" },
-    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -1496,7 +1495,6 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.4.0" },
     { name = "update", specifier = ">=0.0.1,<0.0.2" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
-    { name = "websockets", specifier = ">=14,<17" },
 ]
 provides-extras = ["math", "photos", "pydantic-ai"]
 

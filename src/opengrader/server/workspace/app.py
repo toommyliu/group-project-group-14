@@ -67,8 +67,6 @@ from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
 from opengrader.server.scan_jobs import ScanJobs
 from opengrader.server.scans import add_scan_routes
-from opengrader.server.terminals.manager import TerminalManager
-from opengrader.server.terminals.routes import add_terminal_routes
 from opengrader.server.web import add_web_routes
 from opengrader.server.workspace.jobs import FeedbackJobs
 
@@ -105,17 +103,7 @@ _FOLDER_SESSION_REFUSALS = (
         re.compile(r"/api/assignments/[^/]+/scans(/.*)?"),
         "Scans cannot be added to a folder session. " + _NOT_IN_FOLDER_SESSION,
     ),
-    (
-        None,
-        re.compile(r"/api/(assignments/[^/]+/)?terminals(/.*)?"),
-        "Terminals are not available in a folder session. " + _NOT_IN_FOLDER_SESSION,
-    ),
 )
-
-
-# Creating or starting a terminal is refused above; the socket is closed too,
-# so no shell can be attached to a folder session by any route.
-_TERMINAL_SOCKET = re.compile(r"/api/terminals/[^/]+/ws")
 
 
 def folder_session_refusal(method: str, path: str) -> str | None:
@@ -139,14 +127,6 @@ class FolderSessionGuard:
         self.root = root
 
     async def __call__(self, scope, receive, send):  # noqa: ANN001
-        if (
-            scope["type"] == "websocket"
-            and _TERMINAL_SOCKET.fullmatch(scope["path"])
-            and load_folder_session(self.root) is not None
-        ):
-            # Closing before accepting answers the handshake with a 403.
-            await send({"type": "websocket.close", "code": 1008})
-            return
         if scope["type"] == "http":
             message = folder_session_refusal(scope["method"], scope["path"])
             if message is not None and load_folder_session(self.root) is not None:
@@ -187,7 +167,6 @@ def create_app(
         )
 
     scan_jobs = ScanJobs(scan_store, registry_lock, publish)
-    terminals = TerminalManager(root / ".opengrader")
 
     def require_assignment(assignment_id: str) -> None:
         workspace.assignment_source(assignment_id)
@@ -217,13 +196,11 @@ def create_app(
     async def lifespan(_app: FastAPI):
         loop = asyncio.get_running_loop()
         workspace.on_commit = lambda: loop.call_soon_threadsafe(notify)
-        terminals.start_maintenance()
         if process_jobs:
             jobs.start()
         try:
             yield
         finally:
-            await terminals.close()
             await run_in_threadpool(scan_jobs.close)
             if process_jobs:
                 await run_in_threadpool(jobs.close)
@@ -236,7 +213,6 @@ def create_app(
 
     app.state.workspace = workspace
     app.state.scan_jobs = scan_jobs
-    app.state.terminals = terminals
 
     @app.exception_handler(WorkspaceConflict)
     async def conflict(_request: Request, exc: WorkspaceConflict):
@@ -354,37 +330,20 @@ def create_app(
             return assignment
 
     @api.delete("/assignments/{assignment_id}", status_code=204)
-    async def delete_assignment(
-        assignment_id: str, stop_terminal_sessions: bool = False
-    ) -> Response:
-        async with terminals.lock:
-            running = [
-                s
-                for s in terminals.sessions.values()
-                if s.record.assignment_id == assignment_id and s.process is not None
-            ]
-            if running and not stop_terminal_sessions:
-                raise HTTPException(
-                    409,
-                    "Confirm that this assignment's terminal sessions may be stopped before deleting it.",
-                )
-            for session in running:
-                await terminals._stop(
-                    session, "Stopped when assignment deletion was confirmed."
-                )
+    async def delete_assignment(assignment_id: str) -> Response:
+        with registry_lock:
+            require_assignment(assignment_id)
+            futures = scan_jobs.stop_assignment(assignment_id)
+        try:
+            await run_in_threadpool(scan_jobs.wait_for_stopped, futures)
             with registry_lock:
-                require_assignment(assignment_id)
-                futures = scan_jobs.stop_assignment(assignment_id)
-            try:
-                await run_in_threadpool(scan_jobs.wait_for_stopped, futures)
-                with registry_lock:
-                    workspace.delete_assignment(assignment_id)
-                await run_in_threadpool(
-                    shutil.rmtree, assignments_dir / assignment_id, True
-                )
-            finally:
-                with registry_lock:
-                    scan_jobs.stopping.discard(assignment_id)
+                workspace.delete_assignment(assignment_id)
+            await run_in_threadpool(
+                shutil.rmtree, assignments_dir / assignment_id, True
+            )
+        finally:
+            with registry_lock:
+                scan_jobs.stopping.discard(assignment_id)
         return Response(status_code=204)
 
     @api.get("/assignments/{assignment_id}/source")
@@ -534,7 +493,6 @@ def create_app(
             assignment_id, [p.name for p in directories]
         ),
     )
-    add_terminal_routes(app, api, terminals, require_assignment)
     # Included last: the router copies its routes at inclusion time.
     app.include_router(api)
     add_web_routes(app, web_dist or Path(__file__).parents[2] / "web" / "dist")
