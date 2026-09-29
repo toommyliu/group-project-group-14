@@ -6,7 +6,9 @@ import {
   assignmentsQuery,
   questionsQuery,
   submissionsQuery,
+  type Assignment,
 } from '@/api/queries';
+import { assignmentNotFound, submissionNotFound } from '@/lib/not-found';
 
 export type GradingSearch = { submission?: number; question?: string };
 
@@ -27,15 +29,27 @@ export function validateGradingSearch(
   };
 }
 
+export async function requireAssignment(
+  client: QueryClient,
+  assignmentId: string
+) {
+  const find = (assignments: Assignment[]) =>
+    assignments.find((item) => item.id === assignmentId);
+  const cached = client.getQueryData(assignmentsQuery.queryKey);
+  const assignment =
+    (cached && find(cached)) ??
+    find(await client.fetchQuery({ ...assignmentsQuery, staleTime: 0 }));
+  if (!assignment) throw assignmentNotFound();
+  return assignment;
+}
+
 /** Load a complete grading selection before replacing the visible response. */
 export async function loadAssignment(
   client: QueryClient,
   assignmentId: string,
   search: GradingSearch
 ) {
-  const assignments = await client.ensureQueryData(assignmentsQuery);
-  const assignment = assignments.find((item) => item.id === assignmentId);
-  if (!assignment) return null;
+  const assignment = await requireAssignment(client, assignmentId);
   const submissions = await client.ensureQueryData(
     submissionsQuery(assignmentId)
   );
@@ -43,7 +57,8 @@ export async function loadAssignment(
     search.submission === undefined
       ? submissions[0]
       : submissions.find((item) => item.id === search.submission);
-  if (search.submission !== undefined && !submission) return null;
+  if (search.submission !== undefined && !submission)
+    throw submissionNotFound();
   const questions = submission
     ? await client.ensureQueryData(questionsQuery(assignmentId, submission.id))
     : [];

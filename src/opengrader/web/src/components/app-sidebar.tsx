@@ -76,10 +76,7 @@ export function AppSidebar() {
         icon: ChartColumn,
       },
     ] as const
-  ).filter(
-    // A folder session grades one class folder: no scans to manage.
-    (destination) => !folderSession || destination.title !== 'Scans'
-  );
+  ).filter((destination) => !folderSession || destination.title !== 'Scans');
   return (
     <>
       <Sidebar
@@ -97,7 +94,7 @@ export function AppSidebar() {
               to="/assignments/$assignmentId"
               params={{ assignmentId: folderSession.assignment_id }}
               onClick={close}
-              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline"
             >
               Opengrader
             </Link>
@@ -105,7 +102,7 @@ export function AppSidebar() {
             <Link
               to="/"
               onClick={close}
-              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline"
             >
               Opengrader
             </Link>
@@ -138,7 +135,6 @@ export function AppSidebar() {
           {assignment && (
             <nav aria-label={assignment.title} className="w-full">
               <SidebarGroup className="px-2 pt-2 pb-0">
-                {/* Keep the slot's height in both states so the icons below never move. */}
                 <div
                   title={assignment.title}
                   className="flex h-6 shrink-0 items-center px-4 text-xs font-medium text-sidebar-foreground/70 select-none group-data-[collapsible=icon]:px-2"

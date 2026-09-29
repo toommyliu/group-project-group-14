@@ -8,8 +8,14 @@ export function useAssignmentNavigation() {
     select: (state) => state.location.pathname,
   });
   const { data } = useQuery(assignmentsQuery);
+  // The router gives unmatched URLs no params.
+  const segment = /^\/assignments\/([^/]+)\//.exec(pathname)?.[1];
   return {
-    assignment: data?.find((item) => item.id === assignmentId),
+    assignment: data?.find((item) =>
+      assignmentId === undefined
+        ? segment === encodeURIComponent(item.id)
+        : item.id === assignmentId
+    ),
     pathname,
   };
 }
