@@ -396,8 +396,6 @@ REFUSED = [
     ("put", "/api/assignments/{aid}", {"qa_markdown": "- (1 points) Q\n", "expected_qa_markdown": ""}),
     ("delete", "/api/assignments/{aid}", None),
     ("post", "/api/assignments/{aid}/scans?filename=a.pdf", None),
-    ("post", "/api/assignments/{aid}/terminals", None),
-    ("post", "/api/terminals/abc/start", {"cols": 80, "rows": 24}),
 ]
 
 
@@ -411,7 +409,6 @@ def test_workspace_only_actions_are_refused_in_a_folder_session(session, method,
     assert response.status_code == 409
     assert "Create a workspace first" in response.json()["detail"]
     assert client.get(f"/api/assignments/{session['aid']}/scans").status_code == 200
-    assert client.get(f"/api/assignments/{session['aid']}/terminals").status_code == 200
 
 
 @pytest.mark.parametrize(("method", "path", "body"), REFUSED[:2])
@@ -438,13 +435,3 @@ def test_classic_is_warned_only_about_a_shared_workspace(quiz) -> None:
     # A folder the workspace does not hold is none of its business.
     other = quiz["root"] / "split-submissions"
     assert shared_workspace_for(other) is None
-
-
-def test_a_terminal_socket_is_closed_in_a_folder_session(session) -> None:
-    from starlette.websockets import WebSocketDisconnect
-
-    # 1008 is the guard; an unknown terminal outside a session closes with 4404.
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with session["client"].websocket_connect("/api/terminals/abc/ws") as socket:
-            socket.receive_text()
-    assert closed.value.code == 1008

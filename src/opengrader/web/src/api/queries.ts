@@ -230,15 +230,9 @@ export async function updateAssignment(
   );
 }
 
-export async function deleteAssignment(
-  assignmentId: string,
-  stopTerminalSessions: boolean
-) {
+export async function deleteAssignment(assignmentId: string) {
   await client.DELETE('/api/assignments/{assignment_id}', {
-    params: {
-      path: { assignment_id: assignmentId },
-      query: { stop_terminal_sessions: stopTerminalSessions },
-    },
+    params: { path: { assignment_id: assignmentId } },
   });
 }
 

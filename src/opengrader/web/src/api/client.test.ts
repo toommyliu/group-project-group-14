@@ -3,13 +3,11 @@ import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 
 let api: typeof import('./client');
 let queries: typeof import('./queries');
-let terminals: typeof import('./terminals');
 
 beforeAll(async () => {
   vi.stubGlobal('window', { location: { origin: 'http://localhost' } });
   api = await import('./client');
   queries = await import('./queries');
-  terminals = await import('./terminals');
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -62,7 +60,7 @@ it('preserves the validation target returned by the parser', async () => {
   });
 });
 
-it('formats validation details identically for terminal and assignment mutations', async () => {
+it('formats validation details identically for assignment mutations', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockImplementation(async () =>
@@ -80,8 +78,8 @@ it('formats validation details identically for terminal and assignment mutations
     )
   );
   for (const operation of [
-    () => terminals.createTerminal('a'),
     () => queries.createAssignment(''),
+    () => queries.updateAssignment('a', '', ''),
   ]) {
     await expect(operation()).rejects.toMatchObject({
       name: 'ApiError',
@@ -98,7 +96,7 @@ it.each(['<html>Bad gateway</html>', '{invalid json', '{"detail":"  "}'])(
       'fetch',
       vi.fn().mockResolvedValue(new Response(body, { status: 502 }))
     );
-    await expect(terminals.createTerminal('a')).rejects.toMatchObject({
+    await expect(queries.createAssignment('')).rejects.toMatchObject({
       name: 'ApiError',
       status: 502,
       message: expect.stringContaining('502'),
@@ -140,15 +138,14 @@ it('accepts bodyless deletes but rejects missing required data', async () => {
     'fetch',
     vi.fn().mockImplementation(async () => new Response(null, { status: 204 }))
   );
-  await expect(terminals.removeTerminal('t')).resolves.toBeUndefined();
-  await expect(queries.deleteAssignment('a', true)).resolves.toBeUndefined();
-  await expect(terminals.createTerminal('a')).rejects.toThrow('empty response');
+  await expect(queries.deleteAssignment('a')).resolves.toBeUndefined();
+  await expect(queries.createAssignment('')).rejects.toThrow('empty response');
 });
 
 it('identifies fetch failures and retains their cause', async () => {
   const cause = new TypeError('Failed to fetch');
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(cause));
-  await expect(terminals.createTerminal('a')).rejects.toMatchObject({
+  await expect(queries.createAssignment('')).rejects.toMatchObject({
     name: 'NetworkError',
     cause,
   });
@@ -185,6 +182,6 @@ it('does not classify response parsing bugs as connection failures', async () =>
   const cause = new TypeError('Decoder failed');
   vi.spyOn(response, 'text').mockRejectedValue(cause);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
-  await expect(terminals.createTerminal('a')).rejects.toBe(cause);
+  await expect(queries.createAssignment('')).rejects.toBe(cause);
   expect(cause).not.toBeInstanceOf(api.NetworkError);
 });

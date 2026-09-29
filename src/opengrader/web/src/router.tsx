@@ -177,31 +177,6 @@ export const overviewRoute = createRoute({
   errorComponent: RouteError,
 });
 
-export const terminalsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/assignments/$assignmentId/terminals',
-  remountDeps: ({ params }) => params.assignmentId,
-  beforeLoad: async ({ context, params: { assignmentId } }) => {
-    // Terminals aren't available in a folder session; send bookmarks back to the overview.
-    const workspace = await context.queryClient.ensureQueryData(workspaceQuery);
-    if (workspace.folder_session)
-      throw redirect({
-        to: '/assignments/$assignmentId',
-        params: { assignmentId },
-      });
-  },
-  loader: async ({ context, params: { assignmentId } }) => {
-    const assignments =
-      await context.queryClient.ensureQueryData(assignmentsQuery);
-    const assignment = assignments.find((item) => item.id === assignmentId);
-    if (!assignment) throw notFound();
-    return { assignment };
-  },
-  component: lazyRouteComponent(() => import('./routes/terminals-page')),
-  pendingComponent: AssignmentLoading,
-  errorComponent: RouteError,
-});
-
 export const statisticsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/$assignmentId/statistics',
@@ -234,7 +209,6 @@ export function createAppRouter(queryClient: QueryClient) {
       gradeRoute,
       scansRoute,
       overviewRoute,
-      terminalsRoute,
       statisticsRoute,
     ]),
     context: { queryClient },

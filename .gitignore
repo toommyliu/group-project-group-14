@@ -27,9 +27,6 @@ dist/
 build/
 
 vendor/
-!src/opengrader/web/src/terminal/ghostty/vendor/
-!src/opengrader/web/src/terminal/ghostty/vendor/VERSION
-!src/opengrader/web/src/terminal/ghostty/vendor/*.wasm
 
 target/
 
