@@ -36,11 +36,20 @@ export function scanUrl(assignmentId: string, batchId: string) {
   return `/api/assignments/${encodeURIComponent(assignmentId)}/scans/${encodeURIComponent(batchId)}`;
 }
 
+export function scanPageUrl(
+  assignmentId: string,
+  batchId: string,
+  page: number,
+  size: 'small' | 'large' = 'small'
+) {
+  return `${scanUrl(assignmentId, batchId)}/pages/${page}${size === 'large' ? '?size=large' : ''}`;
+}
+
 export function uploadScan(
   assignmentId: string,
   file: File,
   progress: (percent: number) => void
-): Promise<void> {
+): Promise<ScanBatch> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open(
@@ -60,7 +69,8 @@ export function uploadScan(
         )
       );
     request.onload = () => {
-      if (request.status >= 200 && request.status < 300) return resolve();
+      if (request.status >= 200 && request.status < 300)
+        return resolve(request.response as ScanBatch);
       reject(new ApiError(request.status, request.response));
     };
     request.send(file);

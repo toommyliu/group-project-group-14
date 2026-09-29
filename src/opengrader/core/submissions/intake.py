@@ -69,7 +69,7 @@ class SubmissionIntake:
         versions = list(self.qa.version_questions)
         version = self.assignment_version or document.assignment_version
         if versions and (version not in versions and (version or len(versions) > 1)):
-            raise ValueError("Exam version could not be matched. Choose the version for this scan and retry.")
+            raise ValueError("Assignment version could not be matched. Choose the version for this scan and retry.")
         # Publication moves this directory, so source and crop references must survive it.
         document = replace(
             document, source_pdf=str(pdf.resolve()), assignment_version=version,
