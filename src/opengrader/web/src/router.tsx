@@ -3,7 +3,6 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
-  notFound,
   redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
@@ -20,6 +19,7 @@ import { scansQuery } from './api/scans';
 import { workspaceQuery } from './api/workspace';
 import {
   loadAssignment,
+  requireAssignment,
   validateGradingSearch,
 } from './routes/assignment-data';
 import {
@@ -38,6 +38,13 @@ async function folderSessionAssignmentId(queryClient: QueryClient) {
 const rootRoute = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
+  // Not-found pages under an assignment need it on first render; assignment pages report load errors.
+  loader: async ({ context, location }) => {
+    if (location.pathname.startsWith('/assignments/'))
+      await context.queryClient
+        .ensureQueryData(assignmentsQuery)
+        .catch(() => undefined);
+  },
   notFoundComponent: RouteNotFound,
   component: lazyRouteComponent(() => import('./components/workspace')),
 });
@@ -105,7 +112,6 @@ export const gradeRoute = createRoute({
       loadAssignment(context.queryClient, params.assignmentId, deps),
       GradePage.preload?.(),
     ]);
-    if (!data) throw notFound();
     return data;
   },
   pendingComponent: GradeLoading,
@@ -129,14 +135,16 @@ export const scansRoute = createRoute({
       });
   },
   loader: async ({ context, params: { assignmentId } }) => {
-    const [assignments, scans, qa] = await Promise.all([
-      context.queryClient.ensureQueryData(assignmentsQuery),
+    const page = ScansPage.preload?.();
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const [scans, qa] = await Promise.all([
       context.queryClient.fetchQuery(scansQuery(assignmentId)),
       context.queryClient.ensureQueryData(assignmentQAQuery(assignmentId)),
-      ScansPage.preload?.(),
+      page,
     ]);
-    const assignment = assignments.find((item) => item.id === assignmentId);
-    if (!assignment) throw notFound();
     return {
       assignment,
       scans,
@@ -145,6 +153,7 @@ export const scansRoute = createRoute({
   },
   pendingComponent: AssignmentLoading,
   errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
 });
 
 export const overviewRoute = createRoute({
@@ -152,8 +161,12 @@ export const overviewRoute = createRoute({
   path: '/assignments/$assignmentId',
   remountDeps: ({ params }) => params.assignmentId,
   loader: async ({ context, params: { assignmentId } }) => {
-    const [assignments, qa, scans, submissions, source] = await Promise.all([
-      context.queryClient.ensureQueryData(assignmentsQuery),
+    const page = OverviewPage.preload?.();
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const [qa, scans, submissions, source] = await Promise.all([
       context.queryClient.fetchQuery({
         ...assignmentQAQuery(assignmentId),
         staleTime: 0,
@@ -167,14 +180,13 @@ export const overviewRoute = createRoute({
         ...assignmentSourceQuery(assignmentId),
         staleTime: 0,
       }),
-      OverviewPage.preload?.(),
+      page,
     ]);
-    const assignment = assignments.find((item) => item.id === assignmentId);
-    if (!assignment) throw notFound();
     return { assignment, qa, scans, submissions, source };
   },
   pendingComponent: AssignmentLoading,
   errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
 });
 
 export const statisticsRoute = createRoute({
@@ -182,15 +194,14 @@ export const statisticsRoute = createRoute({
   path: '/assignments/$assignmentId/statistics',
   remountDeps: ({ params }) => params.assignmentId,
   loader: async ({ context, params: { assignmentId } }) => {
-    const [assignments, statistics] = await Promise.all([
-      context.queryClient.ensureQueryData(assignmentsQuery),
-      context.queryClient.fetchQuery({
-        ...assignmentStatisticsQuery(assignmentId),
-        staleTime: 0,
-      }),
-    ]);
-    const assignment = assignments.find((item) => item.id === assignmentId);
-    if (!assignment) throw notFound();
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const statistics = await context.queryClient.fetchQuery({
+      ...assignmentStatisticsQuery(assignmentId),
+      staleTime: 0,
+    });
     return { assignment, statistics };
   },
   component: lazyRouteComponent(
@@ -198,6 +209,7 @@ export const statisticsRoute = createRoute({
   ),
   pendingComponent: AssignmentLoading,
   errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
 });
 
 export function createAppRouter(queryClient: QueryClient) {
@@ -212,6 +224,8 @@ export function createAppRouter(queryClient: QueryClient) {
       statisticsRoute,
     ]),
     context: { queryClient },
+    // Fuzzy mode runs the parent assignment route's loader, and Workspace renders that page.
+    notFoundMode: 'root',
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
     defaultPendingMs: 200,

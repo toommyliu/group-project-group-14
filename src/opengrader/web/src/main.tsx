@@ -1,3 +1,4 @@
+import { ApiError } from '@/api/client';
 import { observeWorkspace } from '@/api/events';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -8,11 +9,16 @@ import { RouterProvider } from '@tanstack/react-router';
 import { createAppRouter } from './router';
 import { syncTheme } from '@/lib/theme';
 
+function mayPassOnRetry(error: unknown) {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.status === 408 || error.status === 429;
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60_000,
-      retry: 1,
+      retry: (failures, error) => failures < 1 && mayPassOnRetry(error),
       refetchOnWindowFocus: false,
       networkMode: 'always',
     },

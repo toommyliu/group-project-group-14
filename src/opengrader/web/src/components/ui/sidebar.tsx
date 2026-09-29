@@ -244,8 +244,6 @@ function SidebarTrigger({
   const expanded = isMobile ? openMobile : open;
   const label = expanded ? 'Collapse navigation' : 'Expand navigation';
 
-  // The trigger keeps its place and icon in both states, so it can be clicked
-  // repeatedly without moving the pointer.
   return (
     <Tooltip>
       <TooltipTrigger
@@ -256,8 +254,7 @@ function SidebarTrigger({
             variant="link"
             size="icon-sm"
             className={cn(
-              // Hover and focus draw on a square centered on the icon, whatever the hit area's shape.
-              'relative isolate text-sidebar-foreground before:absolute before:top-1/2 before:left-1/2 before:-z-10 before:size-7 before:-translate-1/2 hover:text-sidebar-accent-foreground hover:before:bg-sidebar-accent focus-visible:border-transparent focus-visible:outline-none focus-visible:before:outline-2 focus-visible:before:outline-foreground',
+              'relative isolate text-sidebar-foreground before:absolute before:top-1/2 before:left-1/2 before:-z-10 before:size-7 before:-translate-1/2 hover:text-sidebar-accent-foreground hover:before:bg-sidebar-accent focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-none focus-visible:before:outline-2 focus-visible:before:outline-foreground',
               className
             )}
             onClick={(event) => {
