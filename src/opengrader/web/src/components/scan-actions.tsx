@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronDown } from 'lucide-react';
+import { Ellipsis } from 'lucide-react';
 import {
   deleteScan,
   removeScan,
   restoreScan,
   scansQuery,
+  scanUrl,
   type ScanBatch,
 } from '@/api/scans';
 import { errorMessage } from '@/lib/error-message';
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from './ui/dropdown-menu';
 import {
   AlertDialog,
@@ -98,10 +100,15 @@ export function ScanActions({
       <DropdownMenu>
         <DropdownMenuTrigger
           ref={trigger}
-          disabled={disabled}
-          render={<Button variant="outline" />}
+          render={
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              aria-label={`Actions for ${batch.filename}`}
+            />
+          }
         >
-          Scan actions <ChevronDown aria-hidden="true" />
+          <Ellipsis aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
@@ -109,6 +116,19 @@ export function ScanActions({
           finalFocus={confirmOpen ? false : undefined}
         >
           <DropdownMenuItem
+            render={
+              <a
+                href={`${scanUrl(assignmentId, batch.id)}/pdf`}
+                target="_blank"
+                rel="noreferrer"
+              />
+            }
+          >
+            Open original PDF
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            disabled={disabled}
             onClick={() =>
               void run(batch.status === 'removed' ? 'restore' : 'remove')
             }
@@ -117,6 +137,7 @@ export function ScanActions({
           </DropdownMenuItem>
           <DropdownMenuItem
             variant="destructive"
+            disabled={disabled}
             onClick={() => {
               setError('');
               setConfirmOpen(true);

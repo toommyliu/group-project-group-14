@@ -168,7 +168,7 @@ def test_failed_scan_deletion_includes_published_files_even_without_recorded_ids
 
     monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda *args, **kwargs: None)
     def fail(self, *args, **kwargs):
-        raise ValueError("Exam version could not be matched.")
+        raise ValueError("Assignment version could not be matched.")
     monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", fail)
     batch = analyze(client, app, assignment_id, upload(client, assignment_id))
     url = batch_url(assignment_id, batch)
