@@ -240,8 +240,9 @@ def test_a_failed_connection_test_shows_the_providers_setup_hint(
     text = asyncio.run(run())
     assert "connection refused" in text
     hint = app_config.get_provider(app_config.DEFAULT_PROVIDER).setup_hint
-    assert "ollama pull qwen2.5vl:7b" in hint
-    assert "ollama pull qwen2.5vl:7b" in text
+    for model in (app_config.DEFAULT_VISION_MODEL, app_config.DEFAULT_TEXT_MODEL):
+        assert model in hint
+        assert model in text
 
 
 def test_a_registered_cloud_provider_appears_and_reveals_the_key_row(
