@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli.review_queue import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.review_queue import command
 
 
 def _write_submission(
@@ -48,7 +49,7 @@ def test_review_queue_lists_flags_human_readable(tmp_path, capsys) -> None:
     _write_submission(subs / "a.submission.md", student_id="")
     _write_submission(subs / "b.submission.md", response_text="")
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     out = capsys.readouterr().out
     assert "need review" in out
@@ -62,7 +63,7 @@ def test_review_queue_json_output(tmp_path, capsys) -> None:
     subs.mkdir()
     _write_submission(subs / "a.submission.md", student_id="")
 
-    run_cli(["--input", str(subs), "--json"])
+    run_command(command, ["--input", str(subs), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert payload[0]["reason"] == "missing_student_id"
@@ -74,7 +75,7 @@ def test_review_queue_clean_set_reports_nothing(tmp_path, capsys) -> None:
     subs.mkdir()
     _write_submission(subs / "a.submission.md")
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     assert "No submissions need review" in capsys.readouterr().out
 
@@ -85,7 +86,7 @@ def test_review_queue_fail_on_high_exits_nonzero(tmp_path) -> None:
     _write_submission(subs / "a.submission.md", student_id="")
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--input", str(subs), "--fail-on-high"])
+        run_command(command, ["--input", str(subs), "--fail-on-high"])
     assert exc.value.code == 2
 
 
@@ -93,7 +94,7 @@ def test_review_queue_errors_on_empty_directory(tmp_path) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--input", str(subs)])
+        run_command(command, ["--input", str(subs)])
     assert exc.value.code == 1
 
 
@@ -125,7 +126,7 @@ def test_grades_awarded_before_a_rubric_edit_are_flagged(tmp_path, capsys) -> No
     _write_submission(tmp_path / "a.submission.md")
     _rubric_drift_journal(tmp_path)
 
-    run_cli(["--input", str(tmp_path), "--json"])
+    run_command(command, ["--input", str(tmp_path), "--json"])
     flags = json.loads(capsys.readouterr().out)
 
     stale = [f for f in flags if f["reason"] == "graded_before_rubric_change"]
@@ -138,7 +139,7 @@ def test_the_rubric_drift_check_can_be_switched_off(tmp_path, capsys) -> None:
     _write_submission(tmp_path / "a.submission.md")
     _rubric_drift_journal(tmp_path)
 
-    run_cli(["--input", str(tmp_path), "--json", "--no-rubric-drift"])
+    run_command(command, ["--input", str(tmp_path), "--json", "--no-rubric-drift"])
     flags = json.loads(capsys.readouterr().out)
 
     assert not [f for f in flags if f["reason"] == "graded_before_rubric_change"]
@@ -147,7 +148,7 @@ def test_the_rubric_drift_check_can_be_switched_off(tmp_path, capsys) -> None:
 def test_a_folder_with_no_journal_reports_no_drift(tmp_path, capsys) -> None:
     _write_submission(tmp_path / "a.submission.md")
 
-    run_cli(["--input", str(tmp_path), "--json"])
+    run_command(command, ["--input", str(tmp_path), "--json"])
     flags = json.loads(capsys.readouterr().out)
 
     assert not [f for f in flags if f["reason"] == "graded_before_rubric_change"]

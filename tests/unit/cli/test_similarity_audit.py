@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from opengrader.cli.similarity_audit import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.similarity_audit import command
 
 _LONG_A = (
     "A binary search halves the search interval each step, comparing the target "
@@ -48,7 +49,7 @@ def test_flags_near_identical_answers_human_readable(tmp_path, capsys) -> None:
     _write_submission(subs / "a.submission.md", student_id="1", student_name="Ann", response_text=_LONG_A)
     _write_submission(subs / "b.submission.md", student_id="2", student_name="Bob", response_text=_LONG_A)
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     out = capsys.readouterr().out
     assert "similar-answer cluster" in out
@@ -62,7 +63,7 @@ def test_distinct_answers_report_nothing(tmp_path, capsys) -> None:
     _write_submission(subs / "a.submission.md", student_id="1", student_name="Ann", response_text=_LONG_A)
     _write_submission(subs / "b.submission.md", student_id="2", student_name="Bob", response_text=_LONG_B)
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
     assert "No suspiciously-similar answers found" in capsys.readouterr().out
 
 
@@ -72,7 +73,7 @@ def test_json_output(tmp_path, capsys) -> None:
     _write_submission(subs / "a.submission.md", student_id="1", student_name="Ann", response_text=_LONG_A)
     _write_submission(subs / "b.submission.md", student_id="2", student_name="Bob", response_text=_LONG_A)
 
-    run_cli(["--input", str(subs), "--json"])
+    run_command(command, ["--input", str(subs), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert len(payload) == 1
@@ -88,7 +89,7 @@ def test_fail_on_match_exits_nonzero(tmp_path) -> None:
     _write_submission(subs / "b.submission.md", student_id="2", student_name="Bob", response_text=_LONG_A)
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--input", str(subs), "--fail-on-match"])
+        run_command(command, ["--input", str(subs), "--fail-on-match"])
     assert exc.value.code == 2
 
 
@@ -98,7 +99,7 @@ def test_invalid_threshold_rejected(tmp_path) -> None:
     _write_submission(subs / "a.submission.md", student_id="1", student_name="Ann", response_text=_LONG_A)
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--input", str(subs), "--threshold", "1.5"])
+        run_command(command, ["--input", str(subs), "--threshold", "1.5"])
     assert exc.value.code == 1
 
 
@@ -177,7 +178,7 @@ def _mc_cohort(tmp_path, *, questions=40, students=40, copier=True):
 def test_objective_half_is_off_without_solutions(tmp_path, capsys) -> None:
     subs, _qa = _mc_cohort(tmp_path)
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     out = capsys.readouterr().out
     assert "Objective answers" not in out
@@ -186,7 +187,7 @@ def test_objective_half_is_off_without_solutions(tmp_path, capsys) -> None:
 def test_flags_a_copied_objective_paper(tmp_path, capsys) -> None:
     subs, qa = _mc_cohort(tmp_path)
 
-    run_cli(["--input", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--input", str(subs), "--solutions", str(qa)])
 
     out = capsys.readouterr().out
     assert "Student 000 ↔ Student 001" in out
@@ -207,7 +208,7 @@ def test_reports_what_could_not_be_analyzed_before_any_verdict(tmp_path, capsys)
             answers=["A", "A"],
         )
 
-    run_cli(["--input", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--input", str(subs), "--solutions", str(qa)])
 
     out = capsys.readouterr().out
     assert "nobody answered it incorrectly" in out
@@ -218,7 +219,7 @@ def test_reports_what_could_not_be_analyzed_before_any_verdict(tmp_path, capsys)
 def test_json_keeps_the_array_shape_without_solutions(tmp_path, capsys) -> None:
     subs, _qa = _mc_cohort(tmp_path, copier=False)
 
-    run_cli(["--input", str(subs), "--json"])
+    run_command(command, ["--input", str(subs), "--json"])
 
     assert isinstance(json.loads(capsys.readouterr().out), list)
 
@@ -226,7 +227,7 @@ def test_json_keeps_the_array_shape_without_solutions(tmp_path, capsys) -> None:
 def test_json_becomes_an_object_with_solutions(tmp_path, capsys) -> None:
     subs, qa = _mc_cohort(tmp_path)
 
-    run_cli(["--input", str(subs), "--solutions", str(qa), "--json"])
+    run_command(command, ["--input", str(subs), "--solutions", str(qa), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert set(payload) == {"free_response", "objective"}
@@ -242,7 +243,7 @@ def test_fail_on_match_covers_the_objective_half(tmp_path) -> None:
     subs, qa = _mc_cohort(tmp_path)
 
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["--input", str(subs), "--solutions", str(qa), "--fail-on-match"])
+        run_command(command, ["--input", str(subs), "--solutions", str(qa), "--fail-on-match"])
 
     assert exit_info.value.code == 2
 
@@ -250,7 +251,8 @@ def test_fail_on_match_covers_the_objective_half(tmp_path) -> None:
 def test_pattern_threshold_can_be_tightened(tmp_path, capsys) -> None:
     subs, qa = _mc_cohort(tmp_path)
 
-    run_cli(
+    run_command(
+        command,
         [
             "--input", str(subs), "--solutions", str(qa),
             "--pattern-threshold", "20", "--json",
@@ -264,7 +266,7 @@ def test_missing_solutions_file_is_reported(tmp_path, capsys) -> None:
     subs, _qa = _mc_cohort(tmp_path)
 
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["--input", str(subs), "--solutions", str(tmp_path / "nope.md")])
+        run_command(command, ["--input", str(subs), "--solutions", str(tmp_path / "nope.md")])
 
     assert exit_info.value.code == 1
     assert "solutions file not found" in capsys.readouterr().err

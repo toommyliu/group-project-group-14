@@ -5,9 +5,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.curve import apply_curve, read_curve
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
@@ -16,13 +18,15 @@ from opengrader.core.submissions import (
 )
 
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --dry-run
   uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1"
   uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --attach-pdf
 
-setup (one-time):
+\b
+Setup (one-time):
   pip install canvas-sak
   canvas-sak help-me-setup
 """
@@ -105,56 +109,51 @@ def _check_canvas_sak_installed() -> bool:
     return shutil.which("canvas-sak") is not None
 
 
-def setup_args() -> ArgumentParser:
-    parser = ArgumentParser(
-        description="Export graded submission files to Canvas LMS via canvas_sak.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--submissions",
-        metavar="PATH",
-        help="Read extraction files instead of the current workspace assignment.",
-    )
-    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
-    parser.add_argument(
-        "--workspace-assignment", help="Assignment ID within the workspace."
-    )
-    parser.add_argument(
-        "--course",
-        required=True,
-        help="Canvas course name (fuzzy matched by canvas_sak).",
-    )
-    parser.add_argument(
-        "--assignment",
-        required=True,
-        help="Canvas assignment name (fuzzy matched by canvas_sak).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="Preview what would be posted without actually posting.",
-    )
-    parser.add_argument(
-        "--partial",
-        action="store_true",
-        default=False,
-        help="Export even if some questions are ungraded (treats missing points as 0).",
-    )
-    parser.add_argument(
-        "--attach-pdf",
-        action="store_true",
-        default=False,
-        help="Attach the annotated PDF to the Canvas comment if one exists.",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    parser = setup_args()
-    args = parser.parse_args(argv)
-
+@click.command("canvas-export", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--submissions",
+    metavar="PATH",
+    help="Read extraction files instead of the current workspace assignment.",
+)
+@click.option("--workspace", type=click.Path(path_type=Path), help="Workspace directory.")
+@click.option("--workspace-assignment", help="Assignment ID within the workspace.")
+@click.option(
+    "--course",
+    required=True,
+    help="Canvas course name (fuzzy matched by canvas_sak).",
+)
+@click.option(
+    "--assignment",
+    required=True,
+    help="Canvas assignment name (fuzzy matched by canvas_sak).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Preview what would be posted without actually posting.",
+)
+@click.option(
+    "--partial",
+    is_flag=True,
+    help="Export even if some questions are ungraded (treats missing points as 0).",
+)
+@click.option(
+    "--attach-pdf",
+    is_flag=True,
+    help="Attach the annotated PDF to the Canvas comment if one exists.",
+)
+def command(
+    *,
+    submissions: str | None,
+    workspace: Path | None,
+    workspace_assignment: str | None,
+    course: str,
+    assignment: str,
+    dry_run: bool,
+    partial: bool,
+    attach_pdf: bool,
+) -> None:
+    """Export graded submission files to Canvas LMS via canvas_sak."""
     if not _check_canvas_sak_installed():
         print(
             "error: canvas-sak not found on PATH.\n"
@@ -164,8 +163,8 @@ def run_cli(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    if args.submissions:
-        submissions_path = Path(args.submissions)
+    if submissions:
+        submissions_path = Path(submissions)
         try:
             paths = _submission_paths(submissions_path)
         except FileNotFoundError as exc:
@@ -178,31 +177,33 @@ def run_cli(argv: list[str] | None = None) -> None:
             submissions_path as workspace_submissions_path,
         )
 
-        if args.attach_pdf:
-            parser.error("--attach-pdf requires --submissions with annotated PDFs.")
-        try:
-            workspace, assignment_id = current_assignment(
-                workspace_root=args.workspace,
-                assignment_id=args.workspace_assignment,
+        if attach_pdf:
+            raise click.UsageError(
+                "--attach-pdf requires --submissions with annotated PDFs."
             )
-            submissions_path = workspace_submissions_path(workspace, assignment_id)
+        try:
+            opened, assignment_id = current_assignment(
+                workspace_root=workspace,
+                assignment_id=workspace_assignment,
+            )
+            submissions_path = workspace_submissions_path(opened, assignment_id)
             records = [
                 (
                     submissions_path / f"submission-{item.id}.submission.md",
-                    workspace.document(assignment_id, item.id),
+                    opened.document(assignment_id, item.id),
                 )
-                for item in workspace.submissions(assignment_id)
+                for item in opened.submissions(assignment_id)
             ]
         except (OSError, ValueError) as exc:
-            parser.error(str(exc))
+            raise click.UsageError(str(exc)) from None
 
     if not records:
         print(f"error: no submissions found in {submissions_path}", file=sys.stderr)
         sys.exit(1)
 
     curve = read_curve(submissions_path)
-    mode = "[DRY RUN] " if args.dry_run else ""
-    print(f"{mode}Exporting grades to Canvas: course={args.course!r} assignment={args.assignment!r}")
+    mode = "[DRY RUN] " if dry_run else ""
+    print(f"{mode}Exporting grades to Canvas: course={course!r} assignment={assignment!r}")
     if curve.is_active:
         print("A score curve is active — posting curved totals (raw shown alongside).")
     print()
@@ -213,7 +214,7 @@ def run_cli(argv: list[str] | None = None) -> None:
         print(f"  {path.name}")
 
         ungraded = _ungraded_count(doc)
-        if ungraded > 0 and not args.partial:
+        if ungraded > 0 and not partial:
             print(f"    SKIP: {ungraded} ungraded question(s) — run with --partial to export anyway\n")
             skipped += 1
             continue
@@ -237,7 +238,7 @@ def run_cli(argv: list[str] | None = None) -> None:
             print(f"    Score: {total:.10g} / {possible:.10g}")
 
         attachment: Path | None = None
-        if args.attach_pdf:
+        if attach_pdf:
             attachment = _annotated_pdf_path(path, doc)
             if attachment:
                 print(f"    Annotated PDF: {attachment.relative_to(path.parent)} ✓")
@@ -247,17 +248,17 @@ def run_cli(argv: list[str] | None = None) -> None:
         comment = _build_comment(doc)
 
         ok, output = _call_canvas_sak(
-            course=args.course,
-            assignment=args.assignment,
+            course=course,
+            assignment=assignment,
             sisid=doc.student_id,
             grade=total,
             message=comment,
             attachment=attachment,
-            dry_run=args.dry_run,
+            dry_run=dry_run,
         )
 
         if ok:
-            print(f"    {'[DRY RUN] Would post' if args.dry_run else 'Posted'}: {total:.10g} pts + comment")
+            print(f"    {'[DRY RUN] Would post' if dry_run else 'Posted'}: {total:.10g} pts + comment")
             ready += 1
         else:
             print(f"    FAILED: {output}")
@@ -265,7 +266,11 @@ def run_cli(argv: list[str] | None = None) -> None:
 
         print()
 
-    total_label = "ready" if args.dry_run else "posted"
+    total_label = "ready" if dry_run else "posted"
     print(f"{ready} {total_label}, {skipped} skipped, {failed} failed.")
-    if args.dry_run and ready > 0:
+    if dry_run and ready > 0:
         print("Run without --dry-run to post.")
+
+
+if __name__ == "__main__":
+    command()

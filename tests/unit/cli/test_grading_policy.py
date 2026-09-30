@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli.grading_policy import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.grading_policy import command
 from opengrader.core.policy import read_policy
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
@@ -40,11 +41,11 @@ def test_lock_then_unlock_updates_policy(tmp_path: Path) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
 
-    run_cli(["lock", "--submissions", str(subs)])
+    run_command(command, ["lock", "--submissions", str(subs)])
     assert read_policy(subs).anonymity_locked is True
     assert read_policy(subs).mode == "multi"
 
-    run_cli(["unlock", "--submissions", str(subs)])
+    run_command(command, ["unlock", "--submissions", str(subs)])
     assert read_policy(subs).anonymity_locked is False
     assert read_policy(subs).mode == "solo"
 
@@ -52,10 +53,10 @@ def test_lock_then_unlock_updates_policy(tmp_path: Path) -> None:
 def test_show_reports_current_policy(tmp_path: Path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
-    run_cli(["lock", "--submissions", str(subs)])
+    run_command(command, ["lock", "--submissions", str(subs)])
     capsys.readouterr()
 
-    run_cli(["show", "--submissions", str(subs)])
+    run_command(command, ["show", "--submissions", str(subs)])
 
     out = capsys.readouterr().out
     assert "anonymity_locked: True" in out
@@ -68,7 +69,7 @@ def test_redact_writes_map_and_strips_names(tmp_path: Path) -> None:
     _write_submission(subs / "a.submission.md", student_name="Ann Lee")
     name_map = tmp_path / "names.json"
 
-    run_cli(["redact-names", "--submissions", str(subs), "--name-map", str(name_map)])
+    run_command(command, ["redact-names", "--submissions", str(subs), "--name-map", str(name_map)])
 
     assert name_map.exists()
     assert load_student_submission_markdown(subs / "a.submission.md").student_name == ""
@@ -82,7 +83,8 @@ def test_redact_refuses_to_overwrite_existing_map(tmp_path: Path) -> None:
     name_map.write_text("{}")
 
     with pytest.raises(SystemExit):
-        run_cli(
+        run_command(
+            command,
             ["redact-names", "--submissions", str(subs), "--name-map", str(name_map)]
         )
     assert load_student_submission_markdown(subs / "a.submission.md").student_name != ""
@@ -94,12 +96,12 @@ def test_restore_round_trips_from_the_written_map(tmp_path: Path) -> None:
     _write_submission(subs / "a.submission.md", student_name="Ann Lee")
     name_map = tmp_path / "names.json"
 
-    run_cli(["redact-names", "--submissions", str(subs), "--name-map", str(name_map)])
-    run_cli(["restore-names", "--submissions", str(subs), "--name-map", str(name_map)])
+    run_command(command, ["redact-names", "--submissions", str(subs), "--name-map", str(name_map)])
+    run_command(command, ["restore-names", "--submissions", str(subs), "--name-map", str(name_map)])
 
     assert load_student_submission_markdown(subs / "a.submission.md").student_name == "Ann Lee"
 
 
 def test_missing_submissions_path_exits(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
-        run_cli(["show", "--submissions", str(tmp_path / "nope")])
+        run_command(command, ["show", "--submissions", str(tmp_path / "nope")])

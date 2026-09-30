@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import course_grades
 
 QA = """---
@@ -73,7 +74,7 @@ def course(tmp_path: Path) -> Path:
 
 
 def test_it_prints_weighted_grades_and_letters(course: Path, capsys) -> None:  # noqa: ANN001
-    course_grades.run_cli(["--course", str(course)])
+    run_command(course_grades.command, ["--course", str(course)])
     out = capsys.readouterr().out
     assert "CS 146" in out
     assert "Ana" in out and "Ben" in out
@@ -81,14 +82,14 @@ def test_it_prints_weighted_grades_and_letters(course: Path, capsys) -> None:  #
 
 
 def test_the_at_risk_list_appears_without_being_asked(course: Path, capsys) -> None:  # noqa: ANN001
-    course_grades.run_cli(["--course", str(course)])
+    run_command(course_grades.command, ["--course", str(course)])
     out = capsys.readouterr().out
     assert "At risk" in out
     assert "Ben" in out.split("At risk")[1]
 
 
 def test_outcomes_are_rolled_up_across_assignments(course: Path, capsys) -> None:  # noqa: ANN001
-    course_grades.run_cli(["--course", str(course), "--outcomes"])
+    run_command(course_grades.command, ["--course", str(course), "--outcomes"])
     out = capsys.readouterr().out
     assert "Learning outcomes" in out
     assert "CLO1" in out and "CLO2" in out
@@ -96,12 +97,12 @@ def test_outcomes_are_rolled_up_across_assignments(course: Path, capsys) -> None
 
 
 def test_a_directory_argument_finds_the_course_file(course: Path, capsys) -> None:  # noqa: ANN001
-    course_grades.run_cli(["--course", str(course.parent)])
+    run_command(course_grades.command, ["--course", str(course.parent)])
     assert "CS 146" in capsys.readouterr().out
 
 
 def test_summary_hides_the_per_student_list(course: Path, capsys) -> None:  # noqa: ANN001
-    course_grades.run_cli(["--course", str(course), "--summary"])
+    run_command(course_grades.command, ["--course", str(course), "--summary"])
     out = capsys.readouterr().out
     assert "Grades —" in out
     assert "Students\n" not in out
@@ -109,14 +110,14 @@ def test_summary_hides_the_per_student_list(course: Path, capsys) -> None:  # no
 
 def test_csv_has_one_column_per_assignment(course: Path, tmp_path: Path) -> None:
     output = tmp_path / "out" / "grades.csv"
-    course_grades.run_cli(["--course", str(course), "--csv", str(output)])
+    run_command(course_grades.command, ["--course", str(course), "--csv", str(output)])
     rows = output.read_text().splitlines()
     assert rows[0] == "student_id,student_name,Quiz %,Final %,course %,letter,missing"
     assert len(rows) == 3
 
 
 def test_json_carries_students_outcomes_and_at_risk(course: Path, capsys) -> None:  # noqa: ANN001
-    course_grades.run_cli(["--course", str(course), "--json"])
+    run_command(course_grades.command, ["--course", str(course), "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["course"] == "CS 146"
     assert len(payload["students"]) == 2
@@ -128,7 +129,7 @@ def test_json_carries_students_outcomes_and_at_risk(course: Path, capsys) -> Non
 
 def test_a_single_student_view_shows_every_assignment(course: Path, capsys) -> None:  # noqa: ANN001
     with pytest.raises(SystemExit) as exit_info:
-        course_grades.run_cli(["--course", str(course), "--student", "101"])
+        run_command(course_grades.command, ["--course", str(course), "--student", "101"])
     assert exit_info.value.code == 0
     out = capsys.readouterr().out
     assert "Ana" in out and "Quiz" in out and "Final" in out
@@ -136,7 +137,7 @@ def test_a_single_student_view_shows_every_assignment(course: Path, capsys) -> N
 
 def test_an_unknown_student_exits_nonzero(course: Path) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        course_grades.run_cli(["--course", str(course), "--student", "zzz"])
+        run_command(course_grades.command, ["--course", str(course), "--student", "zzz"])
     assert exit_info.value.code == 1
 
 
@@ -144,7 +145,7 @@ def test_a_bad_course_file_fails_with_a_readable_error(tmp_path: Path, capsys) -
     path = tmp_path / "course.toml"
     path.write_text('name = "X"\n')
     with pytest.raises(SystemExit) as exit_info:
-        course_grades.run_cli(["--course", str(path)])
+        run_command(course_grades.command, ["--course", str(path)])
     assert exit_info.value.code == 1
     assert "at least one" in capsys.readouterr().err
 
@@ -154,7 +155,7 @@ def test_a_broken_assignment_is_warned_about_not_fatal(course: Path, capsys) -> 
         course.read_text()
         + '[[assignment]]\nname = "Missing"\npath = "nowhere"\nweight = 10\n'
     )
-    course_grades.run_cli(["--course", str(course)])
+    run_command(course_grades.command, ["--course", str(course)])
     captured = capsys.readouterr()
     assert "Missing" in captured.err
     assert "CS 146" in captured.out

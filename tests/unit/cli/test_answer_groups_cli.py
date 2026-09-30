@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from opengrader.cli.answer_groups import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.answer_groups import command
 
 _ANSWER = (
     "A binary search repeatedly halves the interval, comparing the target to "
@@ -55,7 +56,7 @@ def cohort(tmp_path):
 
 
 def test_reports_the_grading_effort_a_cohort_actually_costs(cohort, capsys):
-    run_cli(["--input", str(cohort)])
+    run_command(command, ["--input", str(cohort)])
 
     out = capsys.readouterr().out
     assert "5 responses → 4 distinct answers → 3 after suggested merges" in out
@@ -63,7 +64,7 @@ def test_reports_the_grading_effort_a_cohort_actually_costs(cohort, capsys):
 
 
 def test_suggestions_list_the_answers_a_merge_would_join(cohort, capsys):
-    run_cli(["--input", str(cohort), "--suggestions"])
+    run_command(command, ["--input", str(cohort), "--suggestions"])
 
     out = capsys.readouterr().out
     assert "1 proposed merge(s)" in out
@@ -72,14 +73,14 @@ def test_suggestions_list_the_answers_a_merge_would_join(cohort, capsys):
 
 
 def test_a_strict_threshold_proposes_nothing(cohort, capsys):
-    run_cli(["--input", str(cohort), "--threshold", "0.999", "--suggestions"])
+    run_command(command, ["--input", str(cohort), "--threshold", "0.999", "--suggestions"])
 
     out = capsys.readouterr().out
     assert "No merges proposed at this threshold." in out
 
 
 def test_json_output_carries_the_counts_and_the_proposals(cohort, capsys):
-    run_cli(["--input", str(cohort), "--json"])
+    run_command(command, ["--input", str(cohort), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     question = payload["questions"][0]
@@ -96,14 +97,14 @@ def test_json_output_carries_the_counts_and_the_proposals(cohort, capsys):
 
 
 def test_a_single_question_can_be_isolated(cohort, capsys):
-    run_cli(["--input", str(cohort), "--question", "q1"])
+    run_command(command, ["--input", str(cohort), "--question", "q1"])
 
     assert "1 question(s)" in capsys.readouterr().out
 
 
 def test_an_unknown_question_is_an_error(cohort, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["--input", str(cohort), "--question", "q99"])
+        run_command(command, ["--input", str(cohort), "--question", "q99"])
 
     assert exit_info.value.code == 1
     assert "not found" in capsys.readouterr().err
@@ -111,7 +112,7 @@ def test_an_unknown_question_is_an_error(cohort, capsys):
 
 def test_an_out_of_range_threshold_is_refused(cohort, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["--input", str(cohort), "--threshold", "1.5"])
+        run_command(command, ["--input", str(cohort), "--threshold", "1.5"])
 
     assert exit_info.value.code == 1
     assert "between 0 and 1" in capsys.readouterr().err
@@ -119,7 +120,7 @@ def test_an_out_of_range_threshold_is_refused(cohort, capsys):
 
 def test_a_missing_input_path_is_an_error(tmp_path, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["--input", str(tmp_path / "nope")])
+        run_command(command, ["--input", str(tmp_path / "nope")])
 
     assert exit_info.value.code == 1
     assert "not found" in capsys.readouterr().err
@@ -128,6 +129,6 @@ def test_a_missing_input_path_is_an_error(tmp_path, capsys):
 def test_the_report_never_writes_to_the_submissions(cohort, capsys):
     before = {path: path.read_bytes() for path in sorted(cohort.rglob("*"))}
 
-    run_cli(["--input", str(cohort), "--suggestions"])
+    run_command(command, ["--input", str(cohort), "--suggestions"])
 
     assert {path: path.read_bytes() for path in sorted(cohort.rglob("*"))} == before

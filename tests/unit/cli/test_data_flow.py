@@ -8,6 +8,7 @@ import json
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import data_flow
 from opengrader.core import app_config
 
@@ -23,7 +24,7 @@ def _no_network(monkeypatch: pytest.MonkeyPatch):
 def test_default_settings_say_names_and_ids_use_a_local_model(
     capsys: pytest.CaptureFixture,
 ) -> None:
-    data_flow.run_cli([])
+    run_command(data_flow.command, [])
     out = capsys.readouterr().out
 
     assert "identity-image" in out
@@ -36,7 +37,7 @@ def test_read_identity_locally_off_says_tesseract_only(
 ) -> None:
     app_config.save_settings(app_config.AISettings(read_identity_locally=False))
 
-    data_flow.run_cli([])
+    run_command(data_flow.command, [])
     out = capsys.readouterr().out
 
     assert "Tesseract only" in out
@@ -45,7 +46,7 @@ def test_read_identity_locally_off_says_tesseract_only(
 def test_json_output_carries_the_identity_reason(capsys: pytest.CaptureFixture) -> None:
     app_config.save_settings(app_config.AISettings(read_identity_locally=False))
 
-    data_flow.run_cli(["--json"])
+    run_command(data_flow.command, ["--json"])
     payload = json.loads(capsys.readouterr().out)
     by = {item["category"]: item for item in payload["items"]}
 
@@ -54,7 +55,7 @@ def test_json_output_carries_the_identity_reason(capsys: pytest.CaptureFixture) 
 
 
 def test_json_output_reflects_the_default_on_state(capsys: pytest.CaptureFixture) -> None:
-    data_flow.run_cli(["--json"])
+    run_command(data_flow.command, ["--json"])
     payload = json.loads(capsys.readouterr().out)
     by = {item["category"]: item for item in payload["items"]}
 

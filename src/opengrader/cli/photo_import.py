@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.submissions.photo_intake import (
     DEFAULT_OUTPUT_DPI,
     PAPER_SIZES_IN,
@@ -16,15 +18,17 @@ from opengrader.core.submissions.photo_intake import (
     import_photos,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run photo-import --input photos/ --output split/
   uv run photo-import --input photos/ --output split/ --pages-per-photo-set 3
   uv run photo-import --input photos/ --output split/ --paper a4
   uv run photo-import --input photos/ --output split/ --no-perspective   # deskew only
   uv run photo-import --input photos/ --output split/ --json             # for scripting
 
-grouping (chosen automatically, in this order):
+\b
+Grouping (chosen automatically, in this order):
   1. one photo, --input pointing at a single file       -> one submission
   2. --pages-per-photo-set N                             -> N photos per student
   3. one subdirectory per student under --input          -> folder = submission
@@ -32,7 +36,8 @@ grouping (chosen automatically, in this order):
      s1234-p2.jpg, s5678-p1.jpg ...)                      -> token = submission
   5. none of the above                                    -> one photo = one submission
 
-then hand off to submission-extractor:
+\b
+Then hand off to submission-extractor:
   uv run submission-extractor --input split/ --output out/student-submissions/
 """
 
@@ -42,74 +47,6 @@ _METHOD_LABEL = {
     "deskew": "deskew only",
     "unreadable": "could not be read",
 }
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Import a folder of phone photos (JPEG/HEIC/PNG) into per-student "
-            "PDFs: deskew or perspective-correct each page, group pages into "
-            "submissions, and report the exact submission-extractor command "
-            "to run next."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help=(
-            "A directory of photos (optionally one subdirectory per student), "
-            "or a single photo file."
-        ),
-    )
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Directory to write the per-student PDFs to. --input is never modified.",
-    )
-    parser.add_argument(
-        "--pages-per-photo-set",
-        type=int,
-        default=None,
-        help=(
-            "Fixed number of photos per student, taken in natural filename "
-            "order. Mirrors submission-splitter --pages-per-submission."
-        ),
-    )
-    parser.add_argument(
-        "--dpi",
-        type=float,
-        default=DEFAULT_OUTPUT_DPI,
-        help=(
-            f"Minimum DPI the embedded page must clear (default "
-            f"{DEFAULT_OUTPUT_DPI:.0f} — the same floor scan-check enforces "
-            "for handwriting OCR). A higher-resolution photo keeps its own "
-            "resolution; only a low-resolution one is scaled up to meet this."
-        ),
-    )
-    parser.add_argument(
-        "--paper",
-        choices=sorted(PAPER_SIZES_IN),
-        default="letter",
-        help="Physical page size to rectify against (default: letter).",
-    )
-    parser.add_argument(
-        "--no-perspective",
-        action="store_true",
-        help=(
-            "Skip page-quad detection entirely and only deskew (small-angle "
-            "rotation, no keystone correction). Use this when perspective "
-            "correction is making a photo worse than leaving it flat."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the report as JSON instead of a human-readable summary.",
-    )
-    return parser
 
 
 def _report_to_dict(report: PhotoIntakeReport) -> dict[str, object]:
@@ -168,10 +105,76 @@ def _print_report(report: PhotoIntakeReport) -> None:
     )
 
 
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    input_path = Path(args.input)
+@click.command("photo-import", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help=(
+        "A directory of photos (optionally one subdirectory per student), "
+        "or a single photo file."
+    ),
+)
+@click.option(
+    "--output",
+    required=True,
+    help="Directory to write the per-student PDFs to. --input is never modified.",
+)
+@click.option(
+    "--pages-per-photo-set",
+    type=int,
+    help=(
+        "Fixed number of photos per student, taken in natural filename "
+        "order. Mirrors submission-splitter --pages-per-submission."
+    ),
+)
+@click.option(
+    "--dpi",
+    type=float,
+    default=DEFAULT_OUTPUT_DPI,
+    help=(
+        f"Minimum DPI the embedded page must clear (default "
+        f"{DEFAULT_OUTPUT_DPI:.0f} — the same floor scan-check enforces "
+        "for handwriting OCR). A higher-resolution photo keeps its own "
+        "resolution; only a low-resolution one is scaled up to meet this."
+    ),
+)
+@click.option(
+    "--paper",
+    type=click.Choice(sorted(PAPER_SIZES_IN)),
+    default="letter",
+    help="Physical page size to rectify against (default: letter).",
+)
+@click.option(
+    "--no-perspective",
+    is_flag=True,
+    help=(
+        "Skip page-quad detection entirely and only deskew (small-angle "
+        "rotation, no keystone correction). Use this when perspective "
+        "correction is making a photo worse than leaving it flat."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the report as JSON instead of a human-readable summary.",
+)
+def command(
+    *,
+    input_path: Path,
+    output: str,
+    pages_per_photo_set: int | None,
+    dpi: float,
+    paper: str,
+    no_perspective: bool,
+    as_json: bool,
+) -> None:
+    """Import a folder of phone photos (JPEG/HEIC/PNG) into per-student PDFs:
+    deskew or perspective-correct each page, group pages into submissions, and
+    report the exact submission-extractor command to run next.
+    """
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
@@ -179,21 +182,21 @@ def run_cli(argv: list[str] | None = None) -> None:
     try:
         report = import_photos(
             input_path,
-            args.output,
-            pages_per_photo_set=args.pages_per_photo_set,
-            dpi=args.dpi,
-            paper=args.paper,
-            perspective=not args.no_perspective,
+            output,
+            pages_per_photo_set=pages_per_photo_set,
+            dpi=dpi,
+            paper=paper,
+            perspective=not no_perspective,
         )
     except PhotoIntakeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(_report_to_dict(report), indent=2))
     else:
         _print_report(report)
 
 
 if __name__ == "__main__":
-    run_cli()
+    command()

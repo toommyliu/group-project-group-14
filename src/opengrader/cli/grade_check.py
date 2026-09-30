@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.release import (
     ReadinessIssue,
     ReadinessReport,
@@ -15,49 +17,20 @@ from opengrader.core.release import (
     load_workspace_release_context,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grade-check --submissions out/student-submissions/
   uv run grade-check --submissions out/student-submissions/ --roster roster.txt
   uv run grade-check --submissions out/student-submissions/ --json
   uv run grade-check --submissions out/student-submissions/ --fail-on-blocking
 
-what the severities mean:
+\b
+What the severities mean:
   BLOCKING  releasing now would hand back something known to be wrong
   WARNING   defensible, but a person should decide it rather than miss it
   NOTE      context that changes how the numbers should be read
 """
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Check whether a graded assignment is ready to hand back. Read-only."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--submissions",
-        help="Check extraction files instead of the current workspace assignment.",
-    )
-    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
-    parser.add_argument("--assignment", help="Assignment ID within the workspace.")
-    parser.add_argument(
-        "--roster",
-        default="",
-        help=(
-            "Roster TSV (ID<TAB>NAME), the same file submission-extractor takes "
-            "as --id-file. Adds a check for roster students with no submission."
-        ),
-    )
-    parser.add_argument("--json", action="store_true", help="Machine-readable output.")
-    parser.add_argument(
-        "--fail-on-blocking",
-        action="store_true",
-        help="Exit 2 when anything blocks the release — for scripting.",
-    )
-    return parser
 
 
 def _issue_payload(issue: ReadinessIssue) -> dict:
@@ -137,39 +110,64 @@ def print_readiness(context: ReleaseContext) -> None:
         )
 
 
-def run_cli(argv: list[str] | None = None) -> ReleaseContext:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    if args.submissions:
-        submissions = Path(args.submissions).expanduser()
-        if not submissions.exists():
-            print(f"Error: submissions path not found: {submissions}", file=sys.stderr)
+@click.command("grade-check", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--submissions",
+    help="Check extraction files instead of the current workspace assignment.",
+)
+@click.option("--workspace", type=click.Path(path_type=Path), help="Workspace directory.")
+@click.option("--assignment", help="Assignment ID within the workspace.")
+@click.option(
+    "--roster",
+    default="",
+    help=(
+        "Roster TSV (ID<TAB>NAME), the same file submission-extractor takes "
+        "as --id-file. Adds a check for roster students with no submission."
+    ),
+)
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+@click.option(
+    "--fail-on-blocking",
+    is_flag=True,
+    help="Exit 2 when anything blocks the release — for scripting.",
+)
+def command(
+    submissions: str | None,
+    workspace: Path | None,
+    assignment: str | None,
+    roster: str,
+    as_json: bool,
+    fail_on_blocking: bool,
+) -> ReleaseContext:
+    """Check whether a graded assignment is ready to hand back. Read-only."""
+    if submissions:
+        path = Path(submissions).expanduser()
+        if not path.exists():
+            print(f"Error: submissions path not found: {path}", file=sys.stderr)
             sys.exit(1)
-        context = load_release_context(
-            submissions, roster_path=args.roster.strip() or None
-        )
+        context = load_release_context(path, roster_path=roster.strip() or None)
     else:
         from opengrader.core.workspace.context import current_assignment
 
         try:
-            workspace, assignment_id = current_assignment(
-                workspace_root=args.workspace, assignment_id=args.assignment
+            opened, assignment_id = current_assignment(
+                workspace_root=workspace, assignment_id=assignment
             )
             context = load_workspace_release_context(
-                workspace, assignment_id, roster_path=args.roster.strip() or None
+                opened, assignment_id, roster_path=roster.strip() or None
             )
         except (OSError, ValueError) as exc:
-            parser.error(str(exc))
+            raise click.UsageError(str(exc)) from None
 
-    if args.json:
+    if as_json:
         print(json.dumps(_report_payload(context), indent=2))
     else:
         print_readiness(context)
 
-    if args.fail_on_blocking and not context.readiness.ready:
+    if fail_on_blocking and not context.readiness.ready:
         sys.exit(2)
     return context
 
 
-def main(argv: list[str] | None = None) -> None:
-    run_cli(argv)
+if __name__ == "__main__":
+    command()

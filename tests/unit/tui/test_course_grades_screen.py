@@ -25,11 +25,11 @@ class _Host(App):
 
 
 def _patch_cli(monkeypatch, captured: list[list[str]]):  # noqa: ANN001, ANN202
-    def _fake(argv):  # noqa: ANN001, ANN202
+    def _fake(_command, argv):  # noqa: ANN001, ANN202
         captured.append(list(argv))
         print("(stub course report)")
 
-    monkeypatch.setattr(screen_module, "run_course_grades_cli", _fake)
+    monkeypatch.setattr(screen_module, "run_command", _fake)
 
 
 async def _settle(pilot) -> None:  # noqa: ANN001
@@ -122,10 +122,10 @@ def test_the_report_lands_in_the_log(monkeypatch) -> None:  # noqa: ANN001
 
 
 def test_a_failing_report_leaves_the_screen_usable(monkeypatch) -> None:  # noqa: ANN001
-    def _boom(_argv):  # noqa: ANN001, ANN202
+    def _boom(_command, _argv):  # noqa: ANN001, ANN202
         raise RuntimeError("bad course file")
 
-    monkeypatch.setattr(screen_module, "run_course_grades_cli", _boom)
+    monkeypatch.setattr(screen_module, "run_command", _boom)
 
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.click("#course-grades-run")
@@ -140,11 +140,11 @@ def test_a_failing_report_leaves_the_screen_usable(monkeypatch) -> None:  # noqa
 def test_per_assignment_load_failures_reach_the_log(monkeypatch) -> None:  # noqa: ANN001
     import sys
 
-    def _warn(_argv):  # noqa: ANN001, ANN202
+    def _warn(_command, _argv):  # noqa: ANN001, ANN202
         print("CS 146")
         print("  ! Midterm: no .submission.md files", file=sys.stderr)
 
-    monkeypatch.setattr(screen_module, "run_course_grades_cli", _warn)
+    monkeypatch.setattr(screen_module, "run_command", _warn)
 
     async def body(pilot, screen):  # noqa: ANN001, ANN202
         await pilot.click("#course-grades-run")

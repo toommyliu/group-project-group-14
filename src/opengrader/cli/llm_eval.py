@@ -7,11 +7,13 @@ import socket
 import subprocess
 import sys
 import time
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from urllib.parse import urlparse
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
 from opengrader.core.grading.evaluation import (
     DEFAULT_BUCKET_SIZE,
@@ -39,20 +41,23 @@ from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.question_types import humanize_question_label
 from opengrader.core.submissions import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run llm-eval --solutions solutions.md --input out/student-submissions/
   uv run llm-eval --solutions solutions.md --input out/student-submissions/ --llm-model llama3.1 --llm-model mistral
   uv run llm-eval --solutions solutions.md --input out/student-submissions/ --target-agreement 0.95
   uv run llm-eval --solutions solutions.md --input out/student-submissions/ --limit 40 --json
 
-pool past classes of the same exam for a bigger sample (one shared answer key):
+\b
+Pool past classes of the same exam for a bigger sample (one shared answer key):
   uv run llm-eval --solutions solutions.md \\
       --input 2026-spring/student-submissions/ \\
       --input 2025-fall/student-submissions/ \\
       --input 2025-spring/student-submissions/
 
-then grade with the number it suggests:
+\b
+Then grade with the number it suggests:
   uv run automated-grading --solutions solutions.md --input out/student-submissions/ --llm --llm-min-confidence 0.85
 
 Read-only: this never writes a grade. It only asks the model to re-grade answers
@@ -426,166 +431,6 @@ def report_to_dict(report: LlmEvalReport) -> dict[str, object]:
     }
 
 
-def _build_parser() -> ArgumentParser:
-    ai = app_config.resolve()
-    parser = ArgumentParser(
-        description=(
-            "Measure how well an LLM grades free responses, by re-grading "
-            "answers a human already marked. Reports agreement per model, per "
-            "question type and per confidence bucket, then recommends an "
-            "evidence-based --llm-min-confidence for automated-grading. "
-            "Read-only: no grade is ever written."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--solutions", required=True, help="Path to the QA solutions markdown file."
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        action="append",
-        dest="inputs",
-        metavar="PATH",
-        help=(
-            "A graded submission file, or a directory of them. The more free "
-            "responses a human has graded, the sharper the answer — so repeat "
-            "this to pool several classes that share this answer key (the same "
-            "exam given in past terms). Same rubric and same point scale, just "
-            "more students."
-        ),
-    )
-    parser.add_argument(
-        "--llm-model",
-        action="append",
-        dest="llm_models",
-        metavar="MODEL",
-        help=(
-            "Ollama model to evaluate. Repeat to compare several "
-            f"(default: {ai.text_model}, from AI Setup)."
-        ),
-    )
-    parser.add_argument(
-        "--llm-host",
-        default=ai.host,
-        help="Ollama server URL (default: %(default)s, from AI Setup).",
-    )
-    parser.add_argument(
-        "--llm-timeout",
-        type=float,
-        default=app_config.DEFAULT_TIMEOUT_SECONDS,
-        help="Per-request timeout in seconds (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--auto-ollama",
-        action="store_true",
-        help=(
-            "Start 'ollama serve' if nothing is listening and pull each model "
-            "first. Off by default so a scripted run fails fast rather than "
-            "downloading several GB."
-        ),
-    )
-    parser.add_argument(
-        "--target-agreement",
-        type=float,
-        default=DEFAULT_TARGET_AGREEMENT,
-        metavar="RATE",
-        help=(
-            "How often a recommended threshold's grades must match the human's, "
-            "0-1 (default: %(default)s). Raise it for a high-stakes exam."
-        ),
-    )
-    parser.add_argument(
-        "--points-tolerance",
-        type=float,
-        default=0.0,
-        metavar="POINTS",
-        help=(
-            "Count a grade as agreeing when it is within this many points of "
-            "the human's (default: %(default)s — exact agreement only)."
-        ),
-    )
-    parser.add_argument(
-        "--min-sample",
-        type=int,
-        default=DEFAULT_MIN_SAMPLE,
-        metavar="N",
-        help=(
-            "A threshold covering fewer than N answers is too small to "
-            "recommend from (default: %(default)s)."
-        ),
-    )
-    parser.add_argument(
-        "--bucket-size",
-        type=float,
-        default=DEFAULT_BUCKET_SIZE,
-        metavar="WIDTH",
-        help="Width of a confidence bucket in the breakdown (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--threshold-step",
-        type=float,
-        default=DEFAULT_THRESHOLD_STEP,
-        metavar="STEP",
-        help="Spacing of the candidate thresholds tried (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--show-disagreements",
-        type=int,
-        default=5,
-        metavar="N",
-        help="How many of the worst disagreements to print (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "Evaluate at most N answers per model — a total across every "
-            "class, not per folder — for a quick first look before committing "
-            "to a full pass. The N are spread across students (and classes) "
-            "rather than taken from the first few, so a small sample still "
-            "describes the whole set."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the report as JSON on stdout instead of a readable summary.",
-    )
-    parser.add_argument(
-        "--llm-min-transcription-confidence",
-        type=float,
-        default=MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
-        metavar="PERCENT",
-        help=(
-            "Exclude answers whose OCR transcription confidence is below this "
-            "(0-100, default: %(default)s). Must match what "
-            "'automated-grading' runs with, since a threshold is only valid "
-            "for the population production actually grades."
-        ),
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Do not print per-answer progress to stderr.",
-    )
-    parser.add_argument(
-        "--yes-send-to-cloud",
-        action="store_true",
-        dest="yes_send_to_cloud",
-        help=(
-            "Confirm sending these already-graded answers to a cloud AI "
-            "provider for evaluation. The scale and destination are shown "
-            "first; nothing is sent without this or an interactive yes."
-        ),
-    )
-    return parser
-
-
 def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> None:
     parsed = urlparse(host)
     hostname = parsed.hostname or "127.0.0.1"
@@ -655,20 +500,191 @@ def _default_generate_factory(
     return factory
 
 
-def run_cli(
-    argv: list[str] | None = None,
+@click.command("llm-eval", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--solutions", required=True, help="Path to the QA solutions markdown file."
+)
+@click.option(
+    "--input",
+    "inputs",
+    required=True,
+    multiple=True,
+    metavar="PATH",
+    help=(
+        "A graded submission file, or a directory of them. The more free "
+        "responses a human has graded, the sharper the answer — so repeat "
+        "this to pool several classes that share this answer key (the same "
+        "exam given in past terms). Same rubric and same point scale, just "
+        "more students."
+    ),
+)
+@click.option(
+    "--llm-model",
+    "llm_models",
+    multiple=True,
+    metavar="MODEL",
+    show_default="from AI Setup",
+    help="Ollama model to evaluate. Repeat to compare several.",
+)
+@click.option(
+    "--llm-host",
+    default=ai_default("host"),
+    show_default="from AI Setup",
+    help="Ollama server URL.",
+)
+@click.option(
+    "--llm-timeout",
+    type=float,
+    default=app_config.DEFAULT_TIMEOUT_SECONDS,
+    show_default=True,
+    help="Per-request timeout in seconds.",
+)
+@click.option(
+    "--auto-ollama",
+    is_flag=True,
+    help=(
+        "Start 'ollama serve' if nothing is listening and pull each model "
+        "first. Off by default so a scripted run fails fast rather than "
+        "downloading several GB."
+    ),
+)
+@click.option(
+    "--target-agreement",
+    type=float,
+    default=DEFAULT_TARGET_AGREEMENT,
+    show_default=True,
+    metavar="RATE",
+    help=(
+        "How often a recommended threshold's grades must match the human's, "
+        "0-1. Raise it for a high-stakes exam."
+    ),
+)
+@click.option(
+    "--points-tolerance",
+    type=float,
+    default=0.0,
+    show_default=True,
+    metavar="POINTS",
+    help=(
+        "Count a grade as agreeing when it is within this many points of "
+        "the human's (0 means exact agreement only)."
+    ),
+)
+@click.option(
+    "--min-sample",
+    type=int,
+    default=DEFAULT_MIN_SAMPLE,
+    show_default=True,
+    metavar="N",
+    help=(
+        "A threshold covering fewer than N answers is too small to "
+        "recommend from."
+    ),
+)
+@click.option(
+    "--bucket-size",
+    type=float,
+    default=DEFAULT_BUCKET_SIZE,
+    show_default=True,
+    metavar="WIDTH",
+    help="Width of a confidence bucket in the breakdown.",
+)
+@click.option(
+    "--threshold-step",
+    type=float,
+    default=DEFAULT_THRESHOLD_STEP,
+    show_default=True,
+    metavar="STEP",
+    help="Spacing of the candidate thresholds tried.",
+)
+@click.option(
+    "--show-disagreements",
+    type=int,
+    default=5,
+    show_default=True,
+    metavar="N",
+    help="How many of the worst disagreements to print.",
+)
+@click.option(
+    "--limit",
+    type=int,
+    metavar="N",
+    help=(
+        "Evaluate at most N answers per model — a total across every "
+        "class, not per folder — for a quick first look before committing "
+        "to a full pass. The N are spread across students (and classes) "
+        "rather than taken from the first few, so a small sample still "
+        "describes the whole set."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the report as JSON on stdout instead of a readable summary.",
+)
+@click.option(
+    "--llm-min-transcription-confidence",
+    type=float,
+    default=MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
+    show_default=True,
+    metavar="PERCENT",
+    help=(
+        "Exclude answers whose OCR transcription confidence is below this "
+        "(0-100). Must match what "
+        "'automated-grading' runs with, since a threshold is only valid "
+        "for the population production actually grades."
+    ),
+)
+@click.option(
+    "--quiet",
+    is_flag=True,
+    help="Do not print per-answer progress to stderr.",
+)
+@click.option(
+    "--yes-send-to-cloud",
+    is_flag=True,
+    help=(
+        "Confirm sending these already-graded answers to a cloud AI "
+        "provider for evaluation. The scale and destination are shown "
+        "first; nothing is sent without this or an interactive yes."
+    ),
+)
+@click.pass_obj
+def command(
+    generate_factory: Callable[[str], GenerateFn] | None,
     *,
-    generate_factory: Callable[[str], GenerateFn] | None = None,
-) -> LlmEvalReport | None:
-    args = _build_parser().parse_args(argv)
-
-    solutions_path = Path(args.solutions)
+    solutions: str,
+    inputs: tuple[str, ...],
+    llm_models: tuple[str, ...],
+    llm_host: str,
+    llm_timeout: float,
+    auto_ollama: bool,
+    target_agreement: float,
+    points_tolerance: float,
+    min_sample: int,
+    bucket_size: float,
+    threshold_step: float,
+    show_disagreements: int,
+    limit: int | None,
+    as_json: bool,
+    llm_min_transcription_confidence: float,
+    quiet: bool,
+    yes_send_to_cloud: bool,
+) -> LlmEvalReport:
+    """Measure how well an LLM grades free responses, by re-grading answers
+    a human already marked. Reports agreement per model, per question type
+    and per confidence bucket, then recommends an evidence-based
+    --llm-min-confidence for automated-grading. Read-only: no grade is ever
+    written.
+    """
+    solutions_path = Path(solutions)
     if not solutions_path.exists():
         print(f"Error: solutions file not found at {solutions_path}", file=sys.stderr)
         sys.exit(1)
     qa_doc = load_qa_markdown(solutions_path)
 
-    roots = resolve_classes(args.inputs)
+    roots = resolve_classes(inputs)
     for root in roots:
         if not root.exists():
             print(f"Error: input path not found: {root}", file=sys.stderr)
@@ -687,23 +703,23 @@ def run_cli(
         qa_doc,
         warn=warn,
         label_classes=len(roots) > 1,
-        min_transcription_confidence=args.llm_min_transcription_confidence,
+        min_transcription_confidence=llm_min_transcription_confidence,
     )
-    if args.limit is not None:
-        targets = spread_targets(targets, args.limit)
+    if limit is not None:
+        targets = spread_targets(targets, limit)
 
-    models = args.llm_models or [app_config.resolve().text_model]
+    models = llm_models or [app_config.resolve().text_model]
 
     if not targets:
         report = build_llm_eval_report(
             [],
             skipped=tally,
             cases_per_model=0,
-            target_agreement=args.target_agreement,
-            min_sample=args.min_sample,
+            target_agreement=target_agreement,
+            min_sample=min_sample,
             classes=classes,
         )
-        if args.as_json:
+        if as_json:
             print(json.dumps(report_to_dict(report), indent=2))
         else:
             print_report(report)
@@ -718,7 +734,7 @@ def run_cli(
 
     if generate_factory is None:
         probe = app_config.with_overrides(
-            host=args.llm_host, text_model=models[0], timeout_seconds=args.llm_timeout
+            host=llm_host, text_model=models[0], timeout_seconds=llm_timeout
         )
         if probe.kind == "cloud":
             from opengrader.core.cloud_preflight import CloudPreflight, cli_confirm_cloud_send
@@ -731,12 +747,12 @@ def run_cli(
                     counts={"graded-text": calls} if calls else {},
                     students=len(targets),
                 ),
-                yes_send_to_cloud=args.yes_send_to_cloud,
+                yes_send_to_cloud=yes_send_to_cloud,
                 emit=lambda message: print(message, file=sys.stderr),
             )
 
     factory = generate_factory or _default_generate_factory(
-        args.llm_host, args.llm_timeout, auto_ollama=args.auto_ollama
+        llm_host, llm_timeout, auto_ollama=auto_ollama
     )
     print(
         f"Evaluating {len(models)} model(s) over {len(targets)} human-graded "
@@ -745,7 +761,7 @@ def run_cli(
     )
 
     def progress(model: str, index: int, total: int, target: EvalTarget) -> None:
-        if args.quiet:
+        if quiet:
             return
         print(
             f"  [{model} {index}/{total}] "
@@ -769,25 +785,29 @@ def run_cli(
         cases,
         skipped=tally,
         cases_per_model=len(targets),
-        points_tolerance=args.points_tolerance,
-        bucket_size=args.bucket_size,
-        threshold_step=args.threshold_step,
-        target_agreement=args.target_agreement,
-        min_sample=args.min_sample,
-        disagreement_samples=args.show_disagreements,
+        points_tolerance=points_tolerance,
+        bucket_size=bucket_size,
+        threshold_step=threshold_step,
+        target_agreement=target_agreement,
+        min_sample=min_sample,
+        disagreement_samples=show_disagreements,
         classes=classes,
     )
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(report_to_dict(report), indent=2))
     else:
         print_report(report)
     return report
 
 
-def main(argv: list[str] | None = None) -> None:
-    run_cli(argv)
+def run_cli(
+    argv: Sequence[str],
+    *,
+    generate_factory: Callable[[str], GenerateFn] | None = None,
+) -> LlmEvalReport | None:
+    return run_command(command, argv, obj=generate_factory)
 
 
 if __name__ == "__main__":
-    main()
+    command()

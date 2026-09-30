@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
-from opengrader.cli.transcribe_eval import main, run_cli
+from opengrader.cli import run_command
+from opengrader.cli.transcribe_eval import command
 from opengrader.core.history import AspectValue, GradeJournal, journal_payload, resolve_history_dir
 from opengrader.core.submissions.student_file import (
     StudentSubmissionDocument,
@@ -71,7 +73,7 @@ def test_reports_accuracy_from_recorded_corrections(tmp_path: Path, capsys) -> N
     _correct(root, question_id="q1", machine="teh cat", human="the cat")
     _correct(root, question_id="q2", machine="the cat", human="the cat")
 
-    report = run_cli(["--input", str(root)])
+    report = run_command(command, ["--input", str(root)])
     out = capsys.readouterr().out
 
     assert report is not None
@@ -91,7 +93,7 @@ def test_writes_nothing_at_all(tmp_path: Path) -> None:
         if path.is_file()
     }
 
-    run_cli(["--input", str(root)])
+    run_command(command, ["--input", str(root)])
 
     after = {
         path: path.stat().st_mtime_ns
@@ -111,7 +113,7 @@ def test_a_tool_re_read_is_excluded_and_explained(tmp_path: Path, capsys) -> Non
         actor="submission-extractor:refine",
     )
 
-    report = run_cli(["--input", str(root)])
+    report = run_command(command, ["--input", str(root)])
     out = capsys.readouterr().out
 
     assert report is not None
@@ -126,7 +128,7 @@ def test_json_carries_the_full_uncollapsed_curve(tmp_path: Path, capsys) -> None
     root = _write_cohort(tmp_path / "subs")
     _correct(root, question_id="q1", machine="teh cat", human="the cat", confidence=30.0)
 
-    run_cli(["--input", str(root), "--json"])
+    run_command(command, ["--input", str(root), "--json"])
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["overall"]["samples"] == 1
@@ -141,7 +143,7 @@ def test_pooling_two_cohorts_counts_each_once(tmp_path: Path) -> None:
     _correct(first, question_id="q1", machine="teh cat", human="the cat")
     _correct(second, question_id="q1", machine="teh dog", human="the dog")
 
-    report = run_cli(["--input", str(first), "--input", str(second)])
+    report = run_command(command, ["--input", str(first), "--input", str(second)])
 
     assert report is not None
     assert report.overall.samples == 2
@@ -152,7 +154,7 @@ def test_a_folder_named_twice_is_counted_once(tmp_path: Path, capsys) -> None:
     root = _write_cohort(tmp_path / "subs")
     _correct(root, question_id="q1", machine="teh cat", human="the cat")
 
-    report = run_cli(["--input", str(root), "--input", str(root)])
+    report = run_command(command, ["--input", str(root), "--input", str(root)])
     err = capsys.readouterr().err
 
     assert report is not None
@@ -161,7 +163,7 @@ def test_a_folder_named_twice_is_counted_once(tmp_path: Path, capsys) -> None:
 
 
 def test_a_missing_folder_is_a_warning_not_a_crash(tmp_path: Path, capsys) -> None:
-    report = run_cli(["--input", str(tmp_path / "nope")])
+    report = run_command(command, ["--input", str(tmp_path / "nope")])
     err = capsys.readouterr().err
 
     assert report is not None
@@ -179,15 +181,18 @@ def test_a_missing_folder_is_a_warning_not_a_crash(tmp_path: Path, capsys) -> No
 def test_bad_arguments_are_refused(tmp_path: Path, argv: list[str], capsys) -> None:
     root = _write_cohort(tmp_path / "subs")
 
-    assert run_cli(["--input", str(root), *argv]) is None
+    with pytest.raises(SystemExit) as exit_info:
+        run_command(command, ["--input", str(root), *argv])
+    assert exit_info.value.code == 1
     assert "error:" in capsys.readouterr().err
 
 
-def test_main_returns_an_exit_code_not_a_report(tmp_path: Path) -> None:
+def test_the_command_exits_with_a_status_not_a_report(tmp_path: Path) -> None:
     root = _write_cohort(tmp_path / "subs")
+    runner = CliRunner()
 
-    assert main(["--input", str(root)]) == 0
-    assert main(["--input", str(root), "--target-catch", "9"]) == 1
+    assert runner.invoke(command, ["--input", str(root)]).exit_code == 0
+    assert runner.invoke(command, ["--input", str(root), "--target-catch", "9"]).exit_code == 1
 
 
 def test_pooled_cohorts_keep_students_apart(tmp_path: Path) -> None:
@@ -196,7 +201,7 @@ def test_pooled_cohorts_keep_students_apart(tmp_path: Path) -> None:
     _correct(fall, question_id="q1", machine="teh cat", human="the cat")
     _correct(spring, question_id="q1", machine="teh dog", human="the dog")
 
-    report = run_cli(["--input", str(fall), "--input", str(spring)])
+    report = run_command(command, ["--input", str(fall), "--input", str(spring)])
 
     assert report is not None
     assert report.overall.samples == 2
@@ -210,7 +215,7 @@ def test_a_single_cohort_carries_no_label(tmp_path: Path) -> None:
     root = _write_cohort(tmp_path / "subs")
     _correct(root, question_id="q1", machine="teh cat", human="the cat")
 
-    report = run_cli(["--input", str(root)])
+    report = run_command(command, ["--input", str(root)])
 
     assert report is not None
     assert report.worst[0].cohort == ""

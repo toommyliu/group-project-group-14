@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.export.bundle import (
     BUNDLE_PRESETS,
@@ -23,15 +25,17 @@ from opengrader.core.workspace.context import (
 )
 from opengrader.core.workspace.store import WorkspaceNotFound
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run return-bundle --submissions out/student-submissions/
   uv run return-bundle --submissions out/student-submissions/ --gradebook
   uv run return-bundle --submissions out/student-submissions/ --student-pdfs --analysis
   uv run return-bundle --submissions out/ --output ~/returns --name quiz1-return --all
   uv run return-bundle --submissions out/student-submissions/ --content gradebook-student
 
-contents:
+\b
+Contents:
   gradebook          class gradebook CSV (one row per student)
   student-pdfs       one annotated + summarized PDF per student
   gradebook-student  gradebook CSV + student PDFs
@@ -40,128 +44,146 @@ contents:
 """
 
 
-def setup_args() -> ArgumentParser:
-    parser = ArgumentParser(
-        description="Package graded submissions into a return bundle directory.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--submissions",
-        metavar="PATH",
-        help="Read extraction files instead of the current workspace assignment.",
-    )
-    parser.add_argument("--workspace", type=Path, help="Workspace directory.")
-    parser.add_argument("--assignment", help="Assignment ID within the workspace.")
-    parser.add_argument(
-        "--output",
-        metavar="DIR",
-        help="Directory to create the bundle in. Defaults to the submissions folder.",
-    )
-    parser.add_argument(
-        "--name",
-        metavar="NAME",
-        help="Bundle folder name. Defaults to '<assignment>-return-<date>'.",
-    )
-    parser.add_argument(
-        "--content",
-        choices=sorted(BUNDLE_PRESETS),
-        help="Named content preset (alternative to the individual flags below).",
-    )
-    parser.add_argument(
-        "--gradebook",
-        action="store_true",
-        help="Include the class gradebook CSV.",
-    )
-    parser.add_argument(
-        "--student-pdfs",
-        action="store_true",
-        help="Include one annotated + summarized PDF per student.",
-    )
-    parser.add_argument(
-        "--analysis",
-        action="store_true",
-        help="Include the class analysis report PDF.",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Include everything (gradebook + student PDFs + analysis).",
-    )
-    parser.add_argument(
-        "--solutions",
-        default=None,
-        help=(
-            "QA answer key. Optional, and only used to add the learning-outcome "
-            "mastery section to the analysis report — the outcome tags live in "
-            "the answer key. Without it the bundle is unchanged."
-        ),
-    )
-    parser.add_argument(
-        "--anonymous",
-        action="store_true",
-        help="Withhold student names from filenames and summary pages.",
-    )
-    return parser
-
-
-def _resolve_content(args) -> BundleContent:
-    if args.content:
-        preset = BUNDLE_PRESETS[args.content]
+def _resolve_content(
+    *,
+    content_preset: str | None,
+    gradebook: bool,
+    student_pdfs: bool,
+    analysis: bool,
+    include_all: bool,
+) -> BundleContent:
+    if content_preset:
+        preset = BUNDLE_PRESETS[content_preset]
     else:
         preset = BundleContent()
 
     content = BundleContent(
-        gradebook=args.gradebook or args.all or preset.gradebook,
-        student_pdfs=args.student_pdfs or args.all or preset.student_pdfs,
-        analysis=args.analysis or args.all or preset.analysis,
+        gradebook=gradebook or include_all or preset.gradebook,
+        student_pdfs=student_pdfs or include_all or preset.student_pdfs,
+        analysis=analysis or include_all or preset.analysis,
     )
     if content.is_empty:
         return BUNDLE_PRESETS["all"]
     return content
 
 
-def run_cli(argv: list[str] | None = None) -> None:
-    parser = setup_args()
-    args = parser.parse_args(argv)
-
-    content = _resolve_content(args)
+@click.command("return-bundle", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--submissions",
+    metavar="PATH",
+    help="Read extraction files instead of the current workspace assignment.",
+)
+@click.option("--workspace", type=click.Path(path_type=Path), help="Workspace directory.")
+@click.option("--assignment", help="Assignment ID within the workspace.")
+@click.option(
+    "--output",
+    metavar="DIR",
+    help="Directory to create the bundle in. Defaults to the submissions folder.",
+)
+@click.option(
+    "--name",
+    metavar="NAME",
+    help="Bundle folder name. Defaults to '<assignment>-return-<date>'.",
+)
+@click.option(
+    "--content",
+    "content_preset",
+    type=click.Choice(sorted(BUNDLE_PRESETS)),
+    help="Named content preset (alternative to the individual flags below).",
+)
+@click.option(
+    "--gradebook",
+    is_flag=True,
+    help="Include the class gradebook CSV.",
+)
+@click.option(
+    "--student-pdfs",
+    is_flag=True,
+    help="Include one annotated + summarized PDF per student.",
+)
+@click.option(
+    "--analysis",
+    is_flag=True,
+    help="Include the class analysis report PDF.",
+)
+@click.option(
+    "--all",
+    "include_all",
+    is_flag=True,
+    help="Include everything (gradebook + student PDFs + analysis).",
+)
+@click.option(
+    "--solutions",
+    help=(
+        "QA answer key. Optional, and only used to add the learning-outcome "
+        "mastery section to the analysis report — the outcome tags live in "
+        "the answer key. Without it the bundle is unchanged."
+    ),
+)
+@click.option(
+    "--anonymous",
+    is_flag=True,
+    help="Withhold student names from filenames and summary pages.",
+)
+def command(
+    *,
+    submissions: str | None,
+    workspace: Path | None,
+    assignment: str | None,
+    output: str | None,
+    name: str | None,
+    content_preset: str | None,
+    gradebook: bool,
+    student_pdfs: bool,
+    analysis: bool,
+    include_all: bool,
+    solutions: str | None,
+    anonymous: bool,
+) -> None:
+    """Package graded submissions into a return bundle directory."""
+    content = _resolve_content(
+        content_preset=content_preset,
+        gradebook=gradebook,
+        student_pdfs=student_pdfs,
+        analysis=analysis,
+        include_all=include_all,
+    )
     try:
         qa_document = None
-        if args.solutions:
-            qa_path = Path(args.solutions)
+        if solutions:
+            qa_path = Path(solutions)
             if not qa_path.is_file():
                 raise FileNotFoundError(f"solutions file not found: {qa_path}")
             qa_document = load_qa_markdown(qa_path)
 
-        submissions = None
+        workspace_submissions = None
         curve = None
-        if args.submissions:
-            submissions_path = Path(args.submissions)
-            output_dir = Path(args.output) if args.output else submissions_path
+        if submissions:
+            submissions_path = Path(submissions)
+            output_dir = Path(output) if output else submissions_path
         else:
-            workspace, assignment_id = current_assignment(
-                workspace_root=args.workspace, assignment_id=args.assignment
+            opened, assignment_id = current_assignment(
+                workspace_root=workspace, assignment_id=assignment
             )
-            submissions = []
-            for item in workspace.submissions(assignment_id):
-                document = workspace.document(assignment_id, item.id)
+            workspace_submissions = []
+            for item in opened.submissions(assignment_id):
+                document = opened.document(assignment_id, item.id)
                 try:
-                    source_pdf = workspace.asset(document.source_pdf)
+                    source_pdf = opened.asset(document.source_pdf)
                 except WorkspaceNotFound:
                     source_pdf = None
-                submissions.append(BundleSubmission(document, source_pdf))
-            submissions_path = workspace_submissions_path(workspace, assignment_id)
-            saved = inputs_for_assignment(workspace, assignment_id)
+                workspace_submissions.append(BundleSubmission(document, source_pdf))
+            submissions_path = workspace_submissions_path(opened, assignment_id)
+            saved = inputs_for_assignment(opened, assignment_id)
             default_output = (
-                resolve_path(workspace.root, saved.folder)
+                resolve_path(opened.root, saved.folder)
                 if saved is not None
-                else workspace.root
+                else opened.root
             )
-            output_dir = Path(args.output) if args.output else default_output
+            output_dir = Path(output) if output else default_output
             curve = read_curve(submissions_path)
             if qa_document is None:
-                qa_document = parse_qa_markdown(workspace.assignment_source(assignment_id))
+                qa_document = parse_qa_markdown(opened.assignment_source(assignment_id))
 
         if output_dir.is_file():
             output_dir = output_dir.parent
@@ -169,12 +191,12 @@ def run_cli(argv: list[str] | None = None) -> None:
             submissions_path,
             output_dir,
             content=content,
-            name=args.name,
-            anonymous=args.anonymous,
+            name=name,
+            anonymous=anonymous,
             progress=lambda message: print(message),
             qa_document=qa_document,
             curve=curve,
-            submissions=submissions,
+            submissions=workspace_submissions,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -189,3 +211,7 @@ def run_cli(argv: list[str] | None = None) -> None:
         print(f"  analysis: {result.analysis_path}")
     for warning in result.warnings:
         print(f"  warning: {warning}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    command()

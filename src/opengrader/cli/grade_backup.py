@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.crypto import (
     EncryptionError,
     is_encrypted,
@@ -25,8 +27,9 @@ from opengrader.core.integrity import (
     write_snapshot,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grade-backup snapshot --submissions out/subs/
   uv run grade-backup verify   --submissions out/subs/
   uv run grade-backup verify   --submissions out/subs/ --fail-on-change
@@ -35,7 +38,8 @@ examples:
   uv run grade-backup restore  --archive ~/backups/quiz1.zip --output ~/recovered/
   uv run grade-backup backup   --submissions out/subs/ --encrypt
 
-encryption:
+\b
+Encryption:
   --encrypt asks for a passphrase (twice) and writes a .zip.enc nobody can read
   without it — for a backup that leaves this machine on a drive or a stick.
   check/restore notice an encrypted archive on their own and ask. There is no
@@ -43,7 +47,8 @@ encryption:
   visible to every other program running on the computer. For an unattended
   script, set the OPENGRADER_PASSPHRASE environment variable instead.
 
-what the statuses mean:
+\b
+What the statuses mean:
   unchanged   byte-identical to the snapshot
   appended    an append-only log grew, and its recorded lines are intact (normal)
   added       a new file the snapshot never saw (normal while grading)
@@ -53,83 +58,20 @@ what the statuses mean:
 """
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Fingerprint a grading folder, verify it later, and make verified "
-            "backups of it."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+_submissions_option = click.option("--submissions", required=True)
+_archive_option = click.option("--archive", "archive_file", required=True)
 
-    snapshot = subparsers.add_parser(
-        "snapshot", help="Record a checksum of every file in the folder."
-    )
-    snapshot.add_argument("--submissions", required=True)
 
-    verify = subparsers.add_parser(
-        "verify", help="Compare the folder against its recorded snapshot."
-    )
-    verify.add_argument("--submissions", required=True)
-    verify.add_argument(
-        "--all",
-        action="store_true",
-        help="List every file, not only the ones that need attention.",
-    )
-    verify.add_argument(
-        "--no-explain",
-        action="store_true",
-        help="Skip the audit-journal cross-reference (faster on a long journal).",
-    )
-    verify.add_argument(
-        "--fail-on-change",
-        action="store_true",
-        help="Exit 2 if anything needs attention — for scripting.",
-    )
-
-    backup = subparsers.add_parser(
-        "backup", help="Write a verified zip archive of the folder."
-    )
-    backup.add_argument("--submissions", required=True)
-    backup.add_argument(
-        "--output",
-        default="",
-        help=(
-            "Archive path to create (.zip). Default: <folder>-backup-<date>.zip "
-            "beside the submissions directory — never inside it, since a backup "
-            "kept there is lost with what it protects."
-        ),
-    )
-    backup.add_argument(
-        "--encrypt",
-        action="store_true",
-        help=(
-            "Protect the archive with a passphrase (prompted, never typed on "
-            "the command line). Writes <name>.zip.enc."
-        ),
-    )
-    backup.add_argument(
-        "--snapshot",
-        action="store_true",
-        help="Also record the snapshot into the folder, so verify works after.",
-    )
-
-    check = subparsers.add_parser(
-        "check", help="Verify an archive against the manifest inside it."
-    )
-    check.add_argument("--archive", required=True)
-
-    restore = subparsers.add_parser(
-        "restore", help="Extract an archive into a new directory and verify it."
-    )
-    restore.add_argument("--archive", required=True)
-    restore.add_argument(
-        "--output", required=True, help="Directory to create (must not exist)."
-    )
-
-    return parser
+@click.group(
+    "grade-backup",
+    cls=Group,
+    context_settings=CONTEXT_SETTINGS,
+    epilog=EPILOG,
+)
+def command() -> None:
+    """Fingerprint a grading folder, verify it later, and make verified
+    backups of it.
+    """
 
 
 def _resolve(raw: str, *, what: str) -> Path:
@@ -140,8 +82,11 @@ def _resolve(raw: str, *, what: str) -> Path:
     return path
 
 
-def _cmd_snapshot(args: Namespace) -> None:
-    folder = _resolve(args.submissions, what="submissions path")
+@command.command("snapshot")
+@_submissions_option
+def snapshot_command(submissions: str) -> None:
+    """Record a checksum of every file in the folder."""
+    folder = _resolve(submissions, what="submissions path")
     previous = read_snapshot(folder)
     snapshot = build_snapshot(folder)
     path = write_snapshot(folder, snapshot)
@@ -153,10 +98,31 @@ def _cmd_snapshot(args: Namespace) -> None:
         print(f"(Replaced the snapshot taken at {previous.created_at}.)")
 
 
-def _cmd_verify(args: Namespace) -> None:
-    folder = _resolve(args.submissions, what="submissions path")
+@command.command("verify")
+@_submissions_option
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="List every file, not only the ones that need attention.",
+)
+@click.option(
+    "--no-explain",
+    is_flag=True,
+    help="Skip the audit-journal cross-reference (faster on a long journal).",
+)
+@click.option(
+    "--fail-on-change",
+    is_flag=True,
+    help="Exit 2 if anything needs attention — for scripting.",
+)
+def verify_command(
+    submissions: str, show_all: bool, no_explain: bool, fail_on_change: bool
+) -> None:
+    """Compare the folder against its recorded snapshot."""
+    folder = _resolve(submissions, what="submissions path")
     try:
-        report = verify_folder(folder, explain=not args.no_explain)
+        report = verify_folder(folder, explain=not no_explain)
     except IntegrityError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -164,7 +130,7 @@ def _cmd_verify(args: Namespace) -> None:
     print(f"Snapshot taken {report.snapshot_at}")
     print(f"{summarize_report(report)}\n")
 
-    if args.all:
+    if show_all:
         for finding in report.findings:
             print(f"  {finding.describe()}")
         print()
@@ -185,7 +151,7 @@ def _cmd_verify(args: Namespace) -> None:
     else:
         print("Nothing needs attention.")
 
-    if args.fail_on_change and concerning:
+    if fail_on_change and concerning:
         sys.exit(2)
 
 
@@ -203,12 +169,40 @@ def _passphrase_for(archive: Path) -> str:
     return _passphrase(is_encrypted(archive))
 
 
-def _cmd_backup(args: Namespace) -> None:
-    folder = _resolve(args.submissions, what="submissions path")
-    passphrase = _passphrase(args.encrypt, confirm=True)
+@command.command("backup")
+@_submissions_option
+@click.option(
+    "--output",
+    default="",
+    help=(
+        "Archive path to create (.zip). Default: <folder>-backup-<date>.zip "
+        "beside the submissions directory — never inside it, since a backup "
+        "kept there is lost with what it protects."
+    ),
+)
+@click.option(
+    "--encrypt",
+    is_flag=True,
+    help=(
+        "Protect the archive with a passphrase (prompted, never typed on "
+        "the command line). Writes <name>.zip.enc."
+    ),
+)
+@click.option(
+    "--snapshot",
+    "record_snapshot",
+    is_flag=True,
+    help="Also record the snapshot into the folder, so verify works after.",
+)
+def backup_command(
+    submissions: str, output: str, encrypt: bool, record_snapshot: bool
+) -> None:
+    """Write a verified zip archive of the folder."""
+    folder = _resolve(submissions, what="submissions path")
+    passphrase = _passphrase(encrypt, confirm=True)
     destination = (
-        Path(args.output).expanduser()
-        if args.output.strip()
+        Path(output).expanduser()
+        if output.strip()
         else default_backup_path(folder, encrypted=bool(passphrase))
     )
     try:
@@ -239,14 +233,17 @@ def _cmd_backup(args: Namespace) -> None:
             print(f"  {path}", file=sys.stderr)
         sys.exit(2)
 
-    if args.snapshot:
+    if record_snapshot:
         snapshot = build_snapshot(folder)
         write_snapshot(folder, snapshot)
         print("Snapshot recorded in the folder — 'verify' now works against it.")
 
 
-def _cmd_check(args: Namespace) -> None:
-    archive = _resolve(args.archive, what="archive")
+@command.command("check")
+@_archive_option
+def check_command(archive_file: str) -> None:
+    """Verify an archive against the manifest inside it."""
+    archive = _resolve(archive_file, what="archive")
     try:
         mismatches = verify_backup(archive, passphrase=_passphrase_for(archive))
     except IntegrityError as exc:
@@ -261,18 +258,22 @@ def _cmd_check(args: Namespace) -> None:
     sys.exit(2)
 
 
-def _cmd_restore(args: Namespace) -> None:
-    archive = _resolve(args.archive, what="archive")
+@command.command("restore")
+@_archive_option
+@click.option("--output", required=True, help="Directory to create (must not exist).")
+def restore_command(archive_file: str, output: str) -> None:
+    """Extract an archive into a new directory and verify it."""
+    archive = _resolve(archive_file, what="archive")
     try:
         result = restore_backup(
             archive,
-            Path(args.output).expanduser(),
+            Path(output).expanduser(),
             passphrase=_passphrase_for(archive),
         )
     except IntegrityError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    print(f"Restored {result.file_count} file(s) → {Path(args.output).expanduser()}")
+    print(f"Restored {result.file_count} file(s) → {Path(output).expanduser()}")
     if not result.verified:
         print(
             f"WARNING: {len(result.mismatches)} restored file(s) do not match "
@@ -283,15 +284,5 @@ def _cmd_restore(args: Namespace) -> None:
     print("Every restored file matches the archive's manifest.")
 
 
-_COMMANDS = {
-    "snapshot": _cmd_snapshot,
-    "verify": _cmd_verify,
-    "backup": _cmd_backup,
-    "check": _cmd_check,
-    "restore": _cmd_restore,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    _COMMANDS[args.command](args)
+if __name__ == "__main__":
+    command()

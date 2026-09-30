@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import automated_grading, run as run_module
 from opengrader.cli import submission_extractor, submission_splitter
 from opengrader.core import app_config
@@ -74,8 +75,16 @@ def _argv(tmp_path, *extra: str) -> list[str]:
     return ["--scan", str(tmp_path / "bundle.pdf"), "--out", str(tmp_path / "cohort"), *extra]
 
 
+def _exit_status(argv: list[str]) -> int:
+    try:
+        run_command(run_module.command, argv)
+    except SystemExit as exc:
+        return exc.code
+    return 0
+
+
 def test_the_required_pair_is_scan_and_out(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     request = captured["request"]
     assert request.scan == tmp_path / "bundle.pdf"
     assert request.output_dir == tmp_path / "cohort"
@@ -84,7 +93,8 @@ def test_the_required_pair_is_scan_and_out(tmp_path, captured) -> None:
 
 
 def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
-    run_module.run_cli(
+    run_command(
+        run_module.command,
         _argv(
             tmp_path,
             "--qa", str(tmp_path / "qa.md"),
@@ -120,7 +130,7 @@ def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
 
 
 def test_no_auto_grade_turns_the_stage_off(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path, "--no-auto-grade"))
+    run_command(run_module.command, _argv(tmp_path, "--no-auto-grade"))
     assert captured["request"].auto_grade is False
 
 
@@ -128,7 +138,7 @@ def test_llm_absent_follows_the_two_settings_independently(tmp_path, captured) -
     app_config.save_settings(
         app_config.AISettings(read_handwriting=True, grade_written=False)
     )
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     llm = captured["request"].llm
     assert llm.read_handwriting is True
     assert llm.grade_written is False
@@ -138,7 +148,7 @@ def test_llm_absent_follows_the_two_settings_the_other_way(tmp_path, captured) -
     app_config.save_settings(
         app_config.AISettings(read_handwriting=False, grade_written=True)
     )
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     llm = captured["request"].llm
     assert llm.read_handwriting is False
     assert llm.grade_written is True
@@ -148,7 +158,7 @@ def test_llm_flag_is_a_blunt_override_for_both(tmp_path, captured) -> None:
     app_config.save_settings(
         app_config.AISettings(read_handwriting=False, grade_written=False)
     )
-    run_module.run_cli(_argv(tmp_path, "--llm"))
+    run_command(run_module.command, _argv(tmp_path, "--llm"))
     llm = captured["request"].llm
     assert llm.read_handwriting is True
     assert llm.grade_written is True
@@ -160,7 +170,7 @@ def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
     app_config.save_settings(
         app_config.AISettings(read_handwriting=True, grade_written=True)
     )
-    run_module.run_cli(_argv(tmp_path, "--no-llm"))
+    run_command(run_module.command, _argv(tmp_path, "--no-llm"))
     llm = captured["request"].llm
     assert llm.read_handwriting is False
     assert llm.grade_written is False
@@ -168,34 +178,34 @@ def test_no_llm_flag_turns_both_off_even_if_ai_setup_says_otherwise(
 
 def test_auto_grade_defaults_on_from_ai_setup(tmp_path, captured) -> None:
     app_config.save_settings(app_config.AISettings(auto_grade=True))
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert captured["request"].auto_grade is True
 
 
 def test_auto_grade_defaults_off_from_ai_setup(tmp_path, captured) -> None:
     app_config.save_settings(app_config.AISettings(auto_grade=False))
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert captured["request"].auto_grade is False
 
 
 def test_no_auto_grade_still_works_with_ai_setup_on(tmp_path, captured) -> None:
     app_config.save_settings(app_config.AISettings(auto_grade=True))
-    run_module.run_cli(_argv(tmp_path, "--no-auto-grade"))
+    run_command(run_module.command, _argv(tmp_path, "--no-auto-grade"))
     assert captured["request"].auto_grade is False
 
 
 def test_auto_ollama_defaults_from_ai_setup(tmp_path, captured) -> None:
     app_config.save_settings(app_config.AISettings(auto_start=False))
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert captured["request"].llm.auto_ollama is False
 
     app_config.save_settings(app_config.AISettings(auto_start=True))
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert captured["request"].llm.auto_ollama is True
 
 
 def test_absent_paths_stay_none_rather_than_becoming_dot(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     request = captured["request"]
     assert request.qa_file is None
     assert request.roster is None
@@ -204,7 +214,7 @@ def test_absent_paths_stay_none_rather_than_becoming_dot(tmp_path, captured) -> 
 
 
 def test_the_summary_names_every_stage_and_what_it_did(tmp_path, captured, capsys) -> None:
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     out = capsys.readouterr().out
     assert "Summary" in out
     for stage in (STAGE_SCAN_CHECK, STAGE_SPLIT, STAGE_EXTRACT, STAGE_AUTO_GRADE):
@@ -215,13 +225,14 @@ def test_the_summary_names_every_stage_and_what_it_did(tmp_path, captured, capsy
 def test_the_reused_line_is_concrete_about_what_resume_saved(
     tmp_path, captured, capsys
 ) -> None:
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert "reused 42 split PDF(s) from the previous run" in capsys.readouterr().out
 
 
 def test_a_finished_run_prints_how_to_open_it(tmp_path, captured, capsys) -> None:
     workspace = tmp_path / "grading workspace"
-    run_module.run_cli(
+    run_command(
+        run_module.command,
         _argv(tmp_path, "--qa", str(tmp_path / "qa.md"), "--workspace", str(workspace))
     )
     out = capsys.readouterr().out
@@ -234,12 +245,13 @@ def test_a_finished_run_prints_how_to_open_it(tmp_path, captured, capsys) -> Non
 @pytest.mark.parametrize("status", [StageStatus.BLOCKED, StageStatus.FAILED])
 def test_failed_pipeline_does_not_publish_leftover_outputs(tmp_path, captured, status):
     captured["report"] = _report(tmp_path, _outcome(STAGE_EXTRACT, status))
-    run_module.run_cli(_argv(tmp_path, "--qa", str(tmp_path / "qa.md")))
+    code = _exit_status(_argv(tmp_path, "--qa", str(tmp_path / "qa.md")))
+    assert code == (2 if status is StageStatus.BLOCKED else 1)
     assert "publication" not in captured
 
 
 def test_run_without_answer_key_explains_how_to_publish(tmp_path, captured, capsys):
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert "publication" not in captured
     assert "--qa" in capsys.readouterr().out
 
@@ -259,7 +271,7 @@ def test_publication_failure_exits_nonzero_and_preserves_outputs(
     monkeypatch.setattr(
         "opengrader.server.workspace.client.ensure_service", unavailable
     )
-    assert run_module.main(_argv(tmp_path, "--qa", str(report.qa_file), "--json")) == 1
+    assert _exit_status(_argv(tmp_path, "--qa", str(report.qa_file), "--json")) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] is False
     assert result["stages"][-1]["stage"] == "publish"
@@ -275,7 +287,7 @@ def test_stages_the_run_never_reached_are_named_as_such(
         tmp_path,
         _outcome(STAGE_SCAN_CHECK, StageStatus.FAILED, "no PDF found"),
     )
-    run_module.run_cli(_argv(tmp_path))
+    assert _exit_status(_argv(tmp_path)) == 1
     out = capsys.readouterr().out
     assert "not reached" in out
     assert "split, extract, auto-grade" in out
@@ -286,14 +298,14 @@ def test_a_blocked_run_says_how_to_proceed(tmp_path, captured, capsys) -> None:
         tmp_path,
         _outcome(STAGE_SCAN_CHECK, StageStatus.BLOCKED, "2 high-severity finding(s)"),
     )
-    run_module.run_cli(_argv(tmp_path))
+    assert _exit_status(_argv(tmp_path)) == 2
     out = capsys.readouterr().out
     assert "--force" in out
     assert "before anything was graded" in out
 
 
 def test_progress_callbacks_are_wired_up(tmp_path, captured) -> None:
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     progress = captured["progress"]
     assert progress is not None
     assert progress.on_stage_start is not None
@@ -302,21 +314,21 @@ def test_progress_callbacks_are_wired_up(tmp_path, captured) -> None:
 
 
 def test_a_clean_run_exits_zero(tmp_path, captured) -> None:
-    assert run_module.main(_argv(tmp_path)) == 0
+    assert _exit_status(_argv(tmp_path)) == 0
 
 
 def test_a_failed_stage_exits_one(tmp_path, captured) -> None:
     captured["report"] = _report(
         tmp_path, _outcome(STAGE_SPLIT, StageStatus.FAILED, "exited with status 1")
     )
-    assert run_module.main(_argv(tmp_path)) == 1
+    assert _exit_status(_argv(tmp_path)) == 1
 
 
 def test_a_blocked_run_exits_two(tmp_path, captured) -> None:
     captured["report"] = _report(
         tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.BLOCKED, "high-severity")
     )
-    assert run_module.main(_argv(tmp_path)) == 2
+    assert _exit_status(_argv(tmp_path)) == 2
 
 
 def test_dry_run_prints_the_plan_and_touches_nothing(
@@ -328,7 +340,7 @@ def test_dry_run_prints_the_plan_and_touches_nothing(
     monkeypatch.setattr(run_module, "run_pipeline", explode)
     monkeypatch.setattr(run_module, "_publish_results", explode)
     assert (
-        run_module.main(_argv(tmp_path, "--dry-run", "--qa", str(tmp_path / "qa.md")))
+        _exit_status(_argv(tmp_path, "--dry-run", "--qa", str(tmp_path / "qa.md")))
         == 0
     )
 
@@ -340,11 +352,11 @@ def test_dry_run_prints_the_plan_and_touches_nothing(
 
 
 def test_dry_run_returns_no_report(tmp_path) -> None:
-    assert run_module.run_cli(_argv(tmp_path, "--dry-run")) is None
+    assert run_command(run_module.command, _argv(tmp_path, "--dry-run")) is None
 
 
 def test_json_is_machine_readable(tmp_path, captured, capsys) -> None:
-    run_module.run_cli(_argv(tmp_path, "--json"))
+    run_command(run_module.command, _argv(tmp_path, "--json"))
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
     assert payload["submission_count"] == 2
@@ -424,7 +436,7 @@ def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
             return response.content
 
         monkeypatch.setattr(WorkspaceClient, "request", request)
-        code = run_module.main(
+        code = _exit_status(
             [
                 "--scan",
                 str(scans),
@@ -490,7 +502,7 @@ def test_json_stdout_is_not_polluted_by_the_inner_clis(
 
     monkeypatch.setattr(submission_extractor, "run_cli", chatty_extract)
 
-    run_module.main(["--scan", str(scans), "--out", str(tmp_path / "cohort"), "--json"])
+    _exit_status(["--scan", str(scans), "--out", str(tmp_path / "cohort"), "--json"])
     captured = capsys.readouterr()
     assert json.loads(captured.out)["ok"] is True
     assert "Found 2 submission PDF(s)" in captured.err
@@ -524,7 +536,7 @@ def test_without_a_class_folder_scan_and_out_are_still_required(
     tmp_path, captured, capsys
 ) -> None:
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli(["--scan", str(tmp_path / "bundle.pdf")])
+        run_command(run_module.command, ["--scan", str(tmp_path / "bundle.pdf")])
     assert raised.value.code == 2
     assert "class folder" in capsys.readouterr().err
     assert "request" not in captured
@@ -534,7 +546,7 @@ def test_a_class_folder_fills_every_input_and_is_the_output(
     tmp_path, captured, capsys
 ) -> None:
     folder = _class_folder(tmp_path)
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
 
     request = captured["request"]
     assert request.scan == folder / "scans.pdf"
@@ -555,7 +567,7 @@ def test_run_folder_uses_its_parent_workspace(tmp_path, captured) -> None:
     folder = _class_folder(course)
     workspace = Workspace.create(course)
 
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
 
     assert captured["publication"][1] == course
     binding = workspace.assignment_inputs()[0]
@@ -570,7 +582,7 @@ def test_run_folder_creates_its_own_workspace_when_none_exists(tmp_path, capture
 
     folder = _class_folder(tmp_path)
 
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
 
     assert captured["publication"][1] == folder
     assert Workspace(folder).assignment_inputs()[0].folder == "."
@@ -580,12 +592,12 @@ def test_bare_run_from_an_assignment_subfolder_reuses_saved_inputs(
     tmp_path, monkeypatch, captured
 ) -> None:
     folder = _class_folder(tmp_path)
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
     incoming = folder / "incoming"
     incoming.mkdir()
     monkeypatch.chdir(incoming)
 
-    run_module.run_cli([])
+    run_command(run_module.command, [])
 
     assert captured["request"].scan == folder / "scans.pdf"
     assert captured["request"].qa_file == folder / "qa.md"
@@ -598,19 +610,19 @@ def test_changed_scan_requires_fresh_and_keeps_the_previous_assignment(
     from opengrader.core.workspace.store import Workspace
 
     folder = _class_folder(tmp_path)
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
     workspace = Workspace(folder)
     old_id = workspace.assignment_inputs()[0].id
     workspace.create_assignment(_QA_TEXT, assignment_id=old_id)
     (folder / "scans.pdf").write_bytes(b"%PDF-1.4\nchanged\n")
 
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(folder)])
+        run_command(run_module.command, [str(folder)])
     assert raised.value.code == 2
     assert "--fresh" in capsys.readouterr().err
     assert workspace.assignment_inputs()[0].id == old_id
 
-    run_module.run_cli([str(folder), "--fresh"])
+    run_command(run_module.command, [str(folder), "--fresh"])
 
     new_id = workspace.assignment_inputs()[0].id
     assert new_id != old_id
@@ -624,7 +636,7 @@ def test_failed_fresh_publication_keeps_the_previous_assignment_selected(
     from opengrader.core.workspace.store import Workspace
 
     folder = _class_folder(tmp_path)
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
     workspace = Workspace(folder)
     old_id = workspace.assignment_inputs()[0].id
     workspace.create_assignment(_QA_TEXT, assignment_id=old_id)
@@ -637,16 +649,15 @@ def test_failed_fresh_publication_keeps_the_previous_assignment_selected(
         )
 
     monkeypatch.setattr(run_module, "_publish_results", failed_publish)
-    report = run_module.run_cli([str(folder), "--fresh"])
-
-    assert report is not None and not report.ok
+    assert _exit_status([str(folder), "--fresh"]) == 1
     assert workspace.assignment_inputs()[0].id == old_id
 
 
 def test_a_flag_overrides_what_the_folder_offered(tmp_path, captured, capsys) -> None:
     folder = _class_folder(tmp_path)
     other_key = tmp_path / "other-key.md"
-    run_module.run_cli(
+    run_command(
+        run_module.command,
         [str(folder), "--qa", str(other_key), "--out", str(tmp_path / "elsewhere")]
     )
 
@@ -664,7 +675,7 @@ def test_two_possible_scans_stop_the_run_and_name_both(tmp_path, captured, capsy
     (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
 
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(folder)])
+        run_command(run_module.command, [str(folder)])
     assert raised.value.code == 2
     err = capsys.readouterr().err
     assert "--scan" in err and "period1.pdf" in err and "period2.pdf" in err
@@ -677,7 +688,7 @@ def test_an_explicit_scan_settles_an_ambiguous_folder(tmp_path, captured) -> Non
     (folder / "period1.pdf").write_bytes(b"%PDF-1.4\n")
     (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
 
-    run_module.run_cli([str(folder), "--scan", str(folder / "period2.pdf")])
+    run_command(run_module.command, [str(folder), "--scan", str(folder / "period2.pdf")])
     assert captured["request"].scan == folder / "period2.pdf"
 
 
@@ -690,7 +701,7 @@ def test_two_templates_are_left_out_with_a_warning_not_a_stop(
     (folder / "template-vA.pdf").write_bytes(b"%PDF-1.4\n")
     (folder / "template-vB.pdf").write_bytes(b"%PDF-1.4\n")
 
-    run_module.run_cli([str(folder)])
+    run_command(run_module.command, [str(folder)])
     assert captured["request"].blank_template is None
     assert "blank template not used — pass --blank-template" in capsys.readouterr().out
 
@@ -700,20 +711,20 @@ def test_a_folder_with_no_scan_says_so(tmp_path, captured, capsys) -> None:
     folder.mkdir()
 
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(folder)])
+        run_command(run_module.command, [str(folder)])
     assert raised.value.code == 2
     assert "no scanned bundle" in capsys.readouterr().err
 
 
 def test_a_class_folder_that_does_not_exist_is_a_usage_error(tmp_path, captured) -> None:
     with pytest.raises(SystemExit) as raised:
-        run_module.run_cli([str(tmp_path / "nope")])
+        run_command(run_module.command, [str(tmp_path / "nope")])
     assert raised.value.code == 2
 
 
 def test_json_keeps_the_folder_summary_off_stdout(tmp_path, captured, capsys) -> None:
     folder = _class_folder(tmp_path)
-    run_module.run_cli([str(folder), "--json"])
+    run_command(run_module.command, [str(folder), "--json"])
     streams = capsys.readouterr()
     assert json.loads(streams.out)["ok"] is True
     assert "Class folder" in streams.err
@@ -769,7 +780,7 @@ def test_flag_confirmed_run_is_never_refused(tmp_path, monkeypatch) -> None:
         return _report(tmp_path, _outcome(STAGE_SCAN_CHECK, StageStatus.RAN, "ok"))
 
     monkeypatch.setattr(run_module, "run_pipeline", fake_run)
-    report = run_module.run_cli(_argv(tmp_path, "--yes-send-to-cloud"))
+    report = run_command(run_module.command, _argv(tmp_path, "--yes-send-to-cloud"))
     assert calls == [True]
     assert report.ok
 
@@ -787,7 +798,7 @@ def test_tty_confirmation_yes_reruns_confirmed(tmp_path, monkeypatch, capsys) ->
     monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
     monkeypatch.setattr("builtins.input", lambda prompt="": "y")
 
-    report = run_module.run_cli(_argv(tmp_path))
+    report = run_command(run_module.command, _argv(tmp_path))
 
     assert calls == [False, True]
     assert report.ok
@@ -805,7 +816,7 @@ def test_tty_confirmation_no_stays_refused_and_exits_two(tmp_path, monkeypatch, 
     monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
 
-    assert run_module.main(_argv(tmp_path)) == 2
+    assert _exit_status(_argv(tmp_path)) == 2
     assert "Not confirmed" in capsys.readouterr().out
 
 
@@ -820,7 +831,7 @@ def test_non_interactive_without_the_flag_prints_statement_and_exits_two(
     # The default captured stdin under pytest already reports isatty() as
     # False; no monkeypatch needed to simulate a script/redirected run.
 
-    assert run_module.main(_argv(tmp_path)) == 2
+    assert _exit_status(_argv(tmp_path)) == 2
     out = capsys.readouterr().out
     assert "847" in out and "ai.example.edu" in out
     assert "--yes-send-to-cloud" in out
@@ -834,7 +845,7 @@ def test_json_output_carries_the_refusal_and_statement_by_field(
 
     monkeypatch.setattr(run_module, "run_pipeline", fake_run)
 
-    assert run_module.main(_argv(tmp_path, "--json")) == 2
+    assert _exit_status(_argv(tmp_path, "--json")) == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["cloud_confirmation_needed"] is True
     assert payload["cloud_preflight"]["host"] == "ai.example.edu"
@@ -870,7 +881,7 @@ def test_the_summary_reports_what_this_run_sent(tmp_path, monkeypatch, capsys) -
     monkeypatch.setattr(
         run_module, "run_pipeline", lambda request, **kw: _report_with_egress(tmp_path)
     )
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     out = capsys.readouterr().out
     assert "Sent to the cloud" in out
     assert "answer-image" in out
@@ -879,7 +890,7 @@ def test_the_summary_reports_what_this_run_sent(tmp_path, monkeypatch, capsys) -
 
 
 def test_a_local_only_run_prints_no_egress_section(tmp_path, captured, capsys) -> None:
-    run_module.run_cli(_argv(tmp_path))
+    run_command(run_module.command, _argv(tmp_path))
     assert "Sent to the cloud" not in capsys.readouterr().out
 
 
@@ -887,7 +898,7 @@ def test_json_egress_field_carries_counts_and_cost(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(
         run_module, "run_pipeline", lambda request, **kw: _report_with_egress(tmp_path)
     )
-    run_module.run_cli(_argv(tmp_path, "--json"))
+    run_command(run_module.command, _argv(tmp_path, "--json"))
     payload = json.loads(capsys.readouterr().out)
     assert payload["egress"]["total_calls"] == 3
     assert payload["egress"]["calls_by_category"]["answer-image"] == 3
@@ -895,6 +906,6 @@ def test_json_egress_field_carries_counts_and_cost(tmp_path, monkeypatch, capsys
 
 
 def test_json_egress_field_is_null_for_a_local_only_run(tmp_path, captured, capsys) -> None:
-    run_module.run_cli(_argv(tmp_path, "--json"))
+    run_command(run_module.command, _argv(tmp_path, "--json"))
     payload = json.loads(capsys.readouterr().out)
     assert payload["egress"] is None

@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import sys
 import time
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core import app_config
 from opengrader.core.app_config import manifests as ai_manifests
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run opengrader-providers list
   uv run opengrader-providers list --json
   uv run opengrader-providers add --example openai
@@ -83,11 +86,28 @@ def _print_provider(spec: app_config.ProviderSpec) -> None:
         print(f"  {'Consent:':<15}not-needed (runs on this computer)")
 
 
-def _cmd_list(args: Namespace) -> None:
+@click.group(
+    "providers",
+    cls=Group,
+    context_settings=CONTEXT_SETTINGS,
+    epilog=EPILOG,
+    invoke_without_command=True,
+)
+@click.pass_context
+def command(ctx: click.Context) -> None:
+    """Add, inspect, test and remove AI provider manifests."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(list_command)
+
+
+@command.command("list")
+@click.option("--json", "as_json", is_flag=True)
+def list_command(*, as_json: bool) -> None:
+    """Show every registered provider."""
     providers = app_config.registered_providers()
     problems = app_config.manifest_problems()
 
-    if args.as_json:
+    if as_json:
         body = {
             "providers": [_provider_to_dict(spec) for spec in providers],
             "problems": list(problems),
@@ -158,8 +178,87 @@ def _confirm_add(dest: Path, name: str) -> None:
         sys.exit(1)
 
 
-def _cmd_add(args: Namespace) -> None:
-    modes = [bool(args.example), bool(args.from_path), bool(args.name)]
+@command.command("add", context_settings={"allow_extra_args": True})
+@click.option(
+    "--example",
+    default="",
+    help="Copy a shipped example verbatim (see 'list' for the names).",
+)
+@click.option(
+    "--from",
+    "from_path",
+    default="",
+    help="Validate and copy in an existing manifest file.",
+)
+@click.option("--name", default="", help="Provider id (flags mode).")
+@click.option("--label", default="", help="What the dropdown shows.")
+@click.option(
+    "--dialect",
+    type=click.Choice((*app_config.dialect_names(), ai_manifests.PYDANTIC_AI_DIALECT)),
+)
+@click.option(
+    "--host",
+    default="",
+    help=(
+        "API base, e.g. https://host/v1. Optional for --dialect pydantic-ai "
+        "when the provider prefix (e.g. bedrock:, vertexai:) has no caller-set URL."
+    ),
+)
+@click.option("--vision-model", default="")
+@click.option("--text-model", default="")
+@click.option(
+    "--api-key-env",
+    default="",
+    help="Name of the environment variable holding the key (never the key).",
+)
+@click.option("--setup-hint", default="")
+@click.option("--summary", default="")
+@click.option(
+    "--supports-model-listing",
+    is_flag=True,
+    help="Set if this service can enumerate the models a key may use.",
+)
+@click.option(
+    "--credential-command",
+    "credential_program",
+    metavar="COMMAND [ARG]...",
+    help=(
+        "Command whose stdout would be the key. Stored, but never run until "
+        "'opengrader-providers allow-credential-command NAME' approves it."
+    ),
+)
+@click.option("--input-per-mtok", type=float)
+@click.option("--output-per-mtok", type=float)
+@click.option("--force", is_flag=True, help="Overwrite an existing manifest.")
+@click.pass_context
+def add_command(
+    ctx: click.Context,
+    *,
+    example: str,
+    from_path: str,
+    name: str,
+    label: str,
+    dialect: str | None,
+    host: str,
+    vision_model: str,
+    text_model: str,
+    api_key_env: str,
+    setup_hint: str,
+    summary: str,
+    supports_model_listing: bool,
+    credential_program: str | None,
+    input_per_mtok: float | None,
+    output_per_mtok: float | None,
+    force: bool,
+) -> None:
+    """Add a provider from a shipped example, a file, or flags."""
+    if ctx.args and credential_program is None:
+        raise click.UsageError(f"Got unexpected extra arguments ({' '.join(ctx.args)})")
+    credential_command = (
+        (credential_program, *ctx.args) if credential_program is not None else ()
+    )
+
+    modes = [bool(example), bool(from_path), bool(name)]
     if sum(modes) != 1:
         _error(
             "pass exactly one of: --example NAME, --from PATH, or --name (with "
@@ -167,17 +266,17 @@ def _cmd_add(args: Namespace) -> None:
         )
         sys.exit(1)
 
-    if args.example:
+    if example:
         try:
-            text = ai_manifests.example_text(args.example)
+            text = ai_manifests.example_text(example)
         except ai_manifests.ManifestError as exc:
             _error(str(exc))
             sys.exit(1)
-        _confirm_add(*_install(text, force=args.force))
+        _confirm_add(*_install(text, force=force))
         return
 
-    if args.from_path:
-        source = Path(args.from_path).expanduser()
+    if from_path:
+        source = Path(from_path).expanduser()
         if not source.is_file():
             _error(f"no such file: {source}")
             sys.exit(1)
@@ -187,55 +286,55 @@ def _cmd_add(args: Namespace) -> None:
         except (ai_manifests.ManifestError, OSError, UnicodeDecodeError) as exc:
             _error(str(exc))
             sys.exit(1)
-        _confirm_add(*_install(text, force=args.force))
+        _confirm_add(*_install(text, force=force))
         return
 
     missing = [
         flag
         for flag, value in (
-            ("--label", args.label),
-            ("--dialect", args.dialect),
-            ("--vision-model", args.vision_model),
-            ("--text-model", args.text_model),
+            ("--label", label),
+            ("--dialect", dialect),
+            ("--vision-model", vision_model),
+            ("--text-model", text_model),
         )
         if not value
     ]
     # host is the one required field the pydantic-ai backend does not need:
     # a prefix with no caller-supplied endpoint (Bedrock, Vertex, ...) uses
     # the SDK's own — see manifests.parse_manifest / _parse_pydantic_ai_manifest.
-    if not args.host and args.dialect != ai_manifests.PYDANTIC_AI_DIALECT:
+    if not host and dialect != ai_manifests.PYDANTIC_AI_DIALECT:
         missing.append("--host")
     if missing:
         _error(f"--name also needs: {', '.join(missing)}.")
         sys.exit(1)
 
     pricing = None
-    if args.input_per_mtok is not None or args.output_per_mtok is not None:
+    if input_per_mtok is not None or output_per_mtok is not None:
         pricing = app_config.ProviderPricing(
-            input_per_mtok=args.input_per_mtok or 0.0,
-            output_per_mtok=args.output_per_mtok or 0.0,
+            input_per_mtok=input_per_mtok or 0.0,
+            output_per_mtok=output_per_mtok or 0.0,
         )
 
     try:
         text = ai_manifests.render_manifest(
-            name=args.name,
-            label=args.label,
-            dialect=args.dialect,
-            host=args.host,
-            vision_model=args.vision_model,
-            text_model=args.text_model,
-            api_key_env=args.api_key_env or "",
-            setup_hint=args.setup_hint or "",
-            summary=args.summary or "",
-            supports_model_listing=args.supports_model_listing,
-            credential_command=tuple(args.credential_command or ()),
+            name=name,
+            label=label,
+            dialect=dialect,
+            host=host,
+            vision_model=vision_model,
+            text_model=text_model,
+            api_key_env=api_key_env or "",
+            setup_hint=setup_hint or "",
+            summary=summary or "",
+            supports_model_listing=supports_model_listing,
+            credential_command=credential_command,
             pricing=pricing,
         )
     except ai_manifests.ManifestError as exc:
         _error(str(exc))
         sys.exit(1)
 
-    _confirm_add(*_install(text, force=args.force))
+    _confirm_add(*_install(text, force=force))
 
 
 def _print_valid(path: Path, spec: app_config.ProviderSpec) -> None:
@@ -258,9 +357,13 @@ def _validate_one(path: Path) -> bool:
     return True
 
 
-def _cmd_validate(args: Namespace) -> None:
-    target = args.target
+@command.command("validate")
+@click.argument("target", required=False, default="")
+def validate_command(*, target: str) -> None:
+    """Validate one manifest, one provider, or all of them.
 
+    TARGET is a file path or a provider name.
+    """
     if not target:
         directory = app_config.manifests_dir()
         try:
@@ -308,8 +411,18 @@ def _cmd_validate(args: Namespace) -> None:
     sys.exit(1)
 
 
-def _cmd_test(args: Namespace) -> None:
-    name = args.provider
+@command.command("test")
+@click.argument("name", metavar="PROVIDER")
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Skip the cloud-provider confirmation (for scripts).",
+)
+def connection_test_command(*, name: str, yes: bool) -> None:
+    """Make one real, tiny call to a provider and report latency.
+
+    PROVIDER is a registered provider's name.
+    """
     known = {spec.name for spec in app_config.registered_providers()}
     if name not in known:
         _error(
@@ -324,7 +437,7 @@ def _cmd_test(args: Namespace) -> None:
     )
 
     if resolved.kind == "cloud":
-        if not args.yes:
+        if not yes:
             if sys.stdin.isatty():
                 print(
                     f"This sends a short test prompt (no student data) to "
@@ -392,9 +505,15 @@ def _typed_yes(prompt: str) -> bool:
     return answer == "yes"
 
 
-def _cmd_consent(args: Namespace) -> None:
-    _known_provider(args.provider)
-    resolved = app_config.for_provider(args.provider)
+@command.command("consent")
+@click.argument("provider")
+def consent_command(*, provider: str) -> None:
+    """Grant cloud consent: read what leaves, then type yes.
+
+    PROVIDER is a registered cloud provider's name.
+    """
+    _known_provider(provider)
+    resolved = app_config.for_provider(provider)
     if resolved.kind == "local":
         _error(
             f"{resolved.provider.label} runs on this computer; there is nothing to "
@@ -420,16 +539,28 @@ def _cmd_consent(args: Namespace) -> None:
     print(f"Revoke at any time: opengrader-providers revoke {resolved.provider.name}")
 
 
-def _cmd_revoke(args: Namespace) -> None:
-    _known_provider(args.provider)
+@command.command("revoke")
+@click.argument("provider")
+def revoke_command(*, provider: str) -> None:
+    """Revoke a provider's cloud consent.
+
+    PROVIDER is a provider's name.
+    """
+    _known_provider(provider)
     settings = app_config.load_settings()
-    settings = app_config.consent.revoke_cloud_consent(settings, args.provider)
+    settings = app_config.consent.revoke_cloud_consent(settings, provider)
     app_config.save_settings(settings)
-    print(f"Cloud consent for {args.provider!r} revoked.")
+    print(f"Cloud consent for {provider!r} revoked.")
 
 
-def _cmd_allow_credential_command(args: Namespace) -> None:
-    spec = _known_provider(args.provider)
+@command.command("allow-credential-command")
+@click.argument("provider")
+def allow_credential_command_command(*, provider: str) -> None:
+    """Approve running a manifest's credential_command.
+
+    PROVIDER is a registered provider's name.
+    """
+    spec = _known_provider(provider)
     if not spec.credential_command:
         _error(f"{spec.label} names no credential_command.")
         sys.exit(2)
@@ -452,16 +583,28 @@ def _cmd_allow_credential_command(args: Namespace) -> None:
     )
 
 
-def _cmd_revoke_credential_command(args: Namespace) -> None:
-    _known_provider(args.provider)
+@command.command("revoke-credential-command")
+@click.argument("provider")
+def revoke_credential_command_command(*, provider: str) -> None:
+    """Revoke a provider's credential_command approval.
+
+    PROVIDER is a provider's name.
+    """
+    _known_provider(provider)
     settings = app_config.load_settings()
-    settings = app_config.consent.revoke_credential_consent(settings, args.provider)
+    settings = app_config.consent.revoke_credential_consent(settings, provider)
     app_config.save_settings(settings)
-    print(f"credential_command approval for {args.provider!r} revoked.")
+    print(f"credential_command approval for {provider!r} revoked.")
 
 
-def _cmd_remove(args: Namespace) -> None:
-    name = args.provider
+@command.command("remove")
+@click.argument("name", metavar="PROVIDER")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def remove_command(*, name: str, yes: bool) -> None:
+    """Delete a user-added manifest.
+
+    PROVIDER is a user-added provider's name.
+    """
     spec = next(
         (s for s in app_config.registered_providers() if s.name == name), None
     )
@@ -481,7 +624,7 @@ def _cmd_remove(args: Namespace) -> None:
 
     manifest_path = Path(spec.manifest_path)
 
-    if not args.yes:
+    if not yes:
         print(f"Would delete {manifest_path} ({spec.label}, {spec.kind}).")
         if sys.stdin.isatty():
             try:
@@ -512,153 +655,5 @@ def _cmd_remove(args: Namespace) -> None:
         )
 
 
-def _add_add_parser(subparsers) -> None:
-    add = subparsers.add_parser(
-        "add",
-        help="Add a provider from a shipped example, a file, or flags.",
-    )
-    add.add_argument(
-        "--example",
-        default="",
-        help="Copy a shipped example verbatim (see 'list' for the names).",
-    )
-    add.add_argument(
-        "--from",
-        dest="from_path",
-        default="",
-        help="Validate and copy in an existing manifest file.",
-    )
-    add.add_argument("--name", default="", help="Provider id (flags mode).")
-    add.add_argument("--label", default="", help="What the dropdown shows.")
-    add.add_argument(
-        "--dialect",
-        default="",
-        choices=(*app_config.dialect_names(), ai_manifests.PYDANTIC_AI_DIALECT, ""),
-    )
-    add.add_argument(
-        "--host",
-        default="",
-        help=(
-            "API base, e.g. https://host/v1. Optional for --dialect pydantic-ai "
-            "when the provider prefix (e.g. bedrock:, vertexai:) has no caller-set URL."
-        ),
-    )
-    add.add_argument("--vision-model", default="")
-    add.add_argument("--text-model", default="")
-    add.add_argument(
-        "--api-key-env",
-        default="",
-        help="Name of the environment variable holding the key (never the key).",
-    )
-    add.add_argument("--setup-hint", default="")
-    add.add_argument("--summary", default="")
-    add.add_argument(
-        "--supports-model-listing",
-        action="store_true",
-        help="Set if this service can enumerate the models a key may use.",
-    )
-    add.add_argument(
-        "--credential-command",
-        nargs="+",
-        default=(),
-        help=(
-            "Command whose stdout would be the key. Stored, but never run until "
-            "'opengrader-providers allow-credential-command NAME' approves it."
-        ),
-    )
-    add.add_argument("--input-per-mtok", type=float, default=None)
-    add.add_argument("--output-per-mtok", type=float, default=None)
-    add.add_argument(
-        "--force", action="store_true", help="Overwrite an existing manifest."
-    )
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description="Add, inspect, test and remove AI provider manifests.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command")
-
-    listing = subparsers.add_parser("list", help="Show every registered provider.")
-    listing.add_argument("--json", action="store_true", dest="as_json")
-
-    _add_add_parser(subparsers)
-
-    validate = subparsers.add_parser(
-        "validate", help="Validate one manifest, one provider, or all of them."
-    )
-    validate.add_argument(
-        "target", nargs="?", default="", help="A file path or a provider name."
-    )
-
-    test = subparsers.add_parser(
-        "test", help="Make one real, tiny call to a provider and report latency."
-    )
-    test.add_argument("provider", help="A registered provider's name.")
-    test.add_argument(
-        "--yes",
-        action="store_true",
-        help="Skip the cloud-provider confirmation (for scripts).",
-    )
-
-    remove = subparsers.add_parser("remove", help="Delete a user-added manifest.")
-    remove.add_argument("provider", help="A user-added provider's name.")
-    remove.add_argument(
-        "--yes", action="store_true", help="Skip the confirmation prompt."
-    )
-
-    # Consent commands: interactive, TTY-only,
-    # and no flag anywhere below skips the typed confirmation — that is the
-    # entire point of them being their own commands instead of a --yes flag.
-    consent = subparsers.add_parser(
-        "consent", help="Grant cloud consent: read what leaves, then type yes."
-    )
-    consent.add_argument("provider", help="A registered cloud provider's name.")
-
-    revoke = subparsers.add_parser("revoke", help="Revoke a provider's cloud consent.")
-    revoke.add_argument("provider", help="A provider's name.")
-
-    allow_credential = subparsers.add_parser(
-        "allow-credential-command",
-        help="Approve running a manifest's credential_command.",
-    )
-    allow_credential.add_argument("provider", help="A registered provider's name.")
-
-    revoke_credential = subparsers.add_parser(
-        "revoke-credential-command", help="Revoke a provider's credential_command approval."
-    )
-    revoke_credential.add_argument("provider", help="A provider's name.")
-
-    return parser
-
-
-_COMMANDS = {
-    "list": _cmd_list,
-    "add": _cmd_add,
-    "validate": _cmd_validate,
-    "consent": _cmd_consent,
-    "revoke": _cmd_revoke,
-    "allow-credential-command": _cmd_allow_credential_command,
-    "revoke-credential-command": _cmd_revoke_credential_command,
-    "test": _cmd_test,
-    "remove": _cmd_remove,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    command = args.command or "list"
-    if command == "list" and not hasattr(args, "as_json"):
-        args.as_json = False
-    _COMMANDS[command](args)
-
-
-def main() -> None:
-    run_cli()
-
-
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    command()

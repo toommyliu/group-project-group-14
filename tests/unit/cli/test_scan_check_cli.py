@@ -4,6 +4,7 @@ import fitz
 import pytest
 from pypdf import PdfReader
 
+from opengrader.cli import run_command
 from opengrader.cli import scan_check as cli
 from opengrader.core.submissions.scan_check import OrientationUnavailableError
 
@@ -36,14 +37,14 @@ def upright(monkeypatch):
 
 
 def test_a_clean_scan_reports_no_problems(tmp_path, upright, capsys) -> None:
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf"))])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf"))])
     assert "no problems found" in capsys.readouterr().out
 
 
 def test_rotated_pages_are_reported_with_the_fix_hint(
     tmp_path, upside_down, capsys
 ) -> None:
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf", pages=2))])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf", pages=2))])
     out = capsys.readouterr().out
     assert "HIGH" in out
     assert "rotated 180" in out
@@ -56,7 +57,7 @@ def test_fix_writes_an_upright_copy_beside_the_original(
     source = _pdf(tmp_path / "scan.pdf", pages=3)
     before = source.read_bytes()
 
-    cli.run_cli(["--input", str(source), "--fix"])
+    run_command(cli.command, ["--input", str(source), "--fix"])
 
     corrected = tmp_path / "scan-upright.pdf"
     assert corrected.exists()
@@ -68,7 +69,7 @@ def test_fix_writes_an_upright_copy_beside_the_original(
 def test_fix_writes_nothing_when_there_is_nothing_to_turn(
     tmp_path, upright, capsys
 ) -> None:
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf")), "--fix"])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf")), "--fix"])
     assert not (tmp_path / "scan-upright.pdf").exists()
     assert "Nothing to rotate" in capsys.readouterr().out
 
@@ -82,7 +83,7 @@ def test_fix_across_a_directory_writes_into_the_output_directory(
     _pdf(scans / "submission-0002.pdf")
     out = tmp_path / "upright"
 
-    cli.run_cli(["--input", str(scans), "--fix", "--output", str(out)])
+    run_command(cli.command, ["--input", str(scans), "--fix", "--output", str(out)])
 
     assert sorted(path.name for path in out.glob("*.pdf")) == [
         "submission-0001.pdf",
@@ -93,14 +94,15 @@ def test_fix_across_a_directory_writes_into_the_output_directory(
 def test_fix_refuses_to_overwrite_the_input(tmp_path, upside_down) -> None:
     source = _pdf(tmp_path / "scan.pdf")
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["--input", str(source), "--fix", "--output", str(source)])
+        run_command(cli.command, ["--input", str(source), "--fix", "--output", str(source)])
     assert exit_info.value.code == 1
 
 
 def test_page_count_mismatch_is_reported_for_a_bundle(
     tmp_path, upright, capsys
 ) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "--input", str(_pdf(tmp_path / "scan.pdf", pages=5)),
             "--pages-per-submission", "2",
@@ -117,7 +119,7 @@ def test_a_split_directory_is_measured_against_the_template(
     _pdf(scans / "submission-0001.pdf", pages=3)
     template = _pdf(tmp_path / "blank.pdf", pages=4)
 
-    cli.run_cli(["--input", str(scans), "--blank-template", str(template)])
+    run_command(cli.command, ["--input", str(scans), "--blank-template", str(template)])
 
     out = capsys.readouterr().out
     assert "3 pages, but a submission should have 4" in out
@@ -130,7 +132,7 @@ def test_pages_per_submission_means_exact_length_for_a_directory(
     scans.mkdir()
     _pdf(scans / "submission-0001.pdf", pages=3)
 
-    cli.run_cli(["--input", str(scans), "--pages-per-submission", "4"])
+    run_command(cli.command, ["--input", str(scans), "--pages-per-submission", "4"])
 
     assert "3 pages, but a submission should have 4" in capsys.readouterr().out
 
@@ -144,7 +146,7 @@ def test_an_unavailable_orientation_check_is_stated_not_hidden(
     monkeypatch.setattr(
         "opengrader.core.submissions.scan_check.detect_page_orientation", _unavailable
     )
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf"))])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf"))])
 
     out = capsys.readouterr().out
     assert "orientation could not be checked" in out
@@ -156,7 +158,7 @@ def test_unverified_pages_are_listed(tmp_path, monkeypatch, capsys) -> None:
         "opengrader.core.submissions.scan_check.detect_page_orientation",
         lambda _image: (_ for _ in ()).throw(ValueError("Too few characters")),
     )
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf", pages=2))])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf", pages=2))])
     assert "orientation unverified on page(s) 1, 2" in capsys.readouterr().out
 
 
@@ -167,7 +169,7 @@ def test_no_orientation_skips_the_slow_pass(tmp_path, monkeypatch, capsys) -> No
     monkeypatch.setattr(
         "opengrader.core.submissions.scan_check.detect_page_orientation", _boom
     )
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf")), "--no-orientation"])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf")), "--no-orientation"])
     assert "orientation check skipped" in capsys.readouterr().out
 
 
@@ -186,7 +188,8 @@ def _numbered_pdf(path: Path, numbers) -> Path:
 def test_out_of_order_pages_are_reported_with_their_remedy(
     tmp_path, upright, capsys
 ) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "--input", str(_numbered_pdf(tmp_path / "scan.pdf", [1, 3, 2])),
             "--pages-per-submission", "3",
@@ -198,7 +201,7 @@ def test_out_of_order_pages_are_reported_with_their_remedy(
 
 
 def test_page_order_says_when_it_could_not_run(tmp_path, upright, capsys) -> None:
-    cli.run_cli(["--input", str(_numbered_pdf(tmp_path / "scan.pdf", [1, 3, 2]))])
+    run_command(cli.command, ["--input", str(_numbered_pdf(tmp_path / "scan.pdf", [1, 3, 2]))])
     out = capsys.readouterr().out
     assert "page order not checked" in out
     assert "--pages-per-submission" in out
@@ -212,14 +215,15 @@ def test_a_split_directory_checks_order_against_each_file(
     _numbered_pdf(split / "submission-0001.pdf", [1, 2, 3])
     _numbered_pdf(split / "submission-0002.pdf", [1, 3, 2])
 
-    cli.run_cli(["--input", str(split)])
+    run_command(cli.command, ["--input", str(split)])
     out = capsys.readouterr().out
     assert "submission-0002.pdf" in out
     assert "out of order" in out
 
 
 def test_no_page_order_skips_the_check(tmp_path, upright, capsys) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "--input", str(_numbered_pdf(tmp_path / "scan.pdf", [1, 3, 2])),
             "--pages-per-submission", "3",
@@ -236,7 +240,8 @@ def test_json_output_carries_the_page_order_verdict(
 ) -> None:
     import json
 
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "--input", str(_numbered_pdf(tmp_path / "scan.pdf", [1, 3, 2])),
             "--pages-per-submission", "3",
@@ -264,7 +269,7 @@ def test_json_output_carries_the_rotations_and_issues(
 ) -> None:
     import json
 
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf", pages=2)), "--json"])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf", pages=2)), "--json"])
     payload = json.loads(capsys.readouterr().out)
 
     report = payload["reports"][0]
@@ -276,19 +281,20 @@ def test_json_output_carries_the_rotations_and_issues(
 
 def test_fail_on_high_exits_non_zero(tmp_path, upside_down) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(
+        run_command(
+            cli.command,
             ["--input", str(_pdf(tmp_path / "scan.pdf")), "--fail-on-high"]
         )
     assert exit_info.value.code == 2
 
 
 def test_fail_on_high_is_quiet_on_a_clean_scan(tmp_path, upright) -> None:
-    cli.run_cli(["--input", str(_pdf(tmp_path / "scan.pdf")), "--fail-on-high"])
+    run_command(cli.command, ["--input", str(_pdf(tmp_path / "scan.pdf")), "--fail-on-high"])
 
 
 def test_a_missing_input_is_an_error(tmp_path) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["--input", str(tmp_path / "nope.pdf")])
+        run_command(cli.command, ["--input", str(tmp_path / "nope.pdf")])
     assert exit_info.value.code == 1
 
 
@@ -296,12 +302,12 @@ def test_a_non_pdf_input_is_an_error(tmp_path) -> None:
     notes = tmp_path / "notes.txt"
     notes.write_text("not a scan")
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["--input", str(notes)])
+        run_command(cli.command, ["--input", str(notes)])
     assert exit_info.value.code == 1
 
 
 def test_a_directory_with_no_pdfs_is_an_error(tmp_path) -> None:
     (tmp_path / "empty").mkdir()
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["--input", str(tmp_path / "empty")])
+        run_command(cli.command, ["--input", str(tmp_path / "empty")])
     assert exit_info.value.code == 1

@@ -20,7 +20,7 @@ def _qa_picker_app() -> TuiApp:
 def test_export_requires_all_fields(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        export_module, "run_canvas_export_cli", lambda argv: calls.append(argv)
+        export_module, "run_command", lambda _command, argv: calls.append(argv)
     )
 
     async def run() -> None:
@@ -42,11 +42,11 @@ def test_export_requires_all_fields(monkeypatch) -> None:
 def test_export_runs_cli_with_expected_argv(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def fake_cli(argv: list[str]) -> None:
+    def fake_cli(_command, argv: list[str]) -> None:
         calls.append(argv)
         print("2 ready, 0 skipped, 0 failed.")
 
-    monkeypatch.setattr(export_module, "run_canvas_export_cli", fake_cli)
+    monkeypatch.setattr(export_module, "run_command", fake_cli)
 
     async def run() -> None:
         app = _qa_picker_app()
@@ -81,7 +81,7 @@ def test_workspace_export_uses_saved_assignment_without_a_submissions_path(
 ) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        export_module, "run_canvas_export_cli", lambda argv: calls.append(argv)
+        export_module, "run_command", lambda _command, argv: calls.append(argv)
     )
 
     async def run() -> None:
@@ -111,7 +111,7 @@ def test_workspace_export_uses_saved_assignment_without_a_submissions_path(
 def test_unchecking_dry_run_omits_the_flag(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        export_module, "run_canvas_export_cli", lambda argv: calls.append(argv)
+        export_module, "run_command", lambda _command, argv: calls.append(argv)
     )
 
     async def run() -> None:

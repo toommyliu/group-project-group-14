@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from contextlib import contextmanager
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.handoff.merge import (
     ConflictPolicy,
     MergeError,
@@ -34,8 +36,9 @@ from opengrader.core.handoff.packet import (
 )
 from opengrader.core.history import GradeJournal, resolve_history_dir
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grade-merge pack --submissions out/subs/ --output ~/handouts --grader alice --qa-file qa.md
   uv run grade-merge pack --submissions out/subs/ --output ~/handouts --name quiz1-alice
   uv run grade-merge list --submissions out/subs/
@@ -43,9 +46,11 @@ examples:
   uv run grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --yes
   uv run grade-merge apply --submissions out/subs/ --incoming ~/from-alice/ --conflicts theirs --yes
 
+\b
   uv run grade-merge pack --submissions out/subs/ --grader alice --encrypt
 
-encryption:
+\b
+Encryption:
   --encrypt seals the packet into one passphrase-protected file instead of a
   folder, for a copy that travels by email or on a stick. preview/apply notice a
   sealed packet on their own and ask for the passphrase. There is no
@@ -53,141 +58,54 @@ encryption:
   visible to every other program on the computer. For a script, set the
   OPENGRADER_PASSPHRASE environment variable instead.
 
+\b
   Redaction and encryption solve different problems and compose: redaction stops
   the *grader* seeing who they are marking, encryption stops *everyone else*
   seeing the packet at all.
 
-undo a merge:
+\b
+Undo a merge:
   uv run grade-restore apply --submissions out/subs/ --without-actor merge:<packet-id> --yes
 """
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Hand a redacted copy of a cohort to another grader, then three-way "
-            "merge their grades back into yours."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    pack = subparsers.add_parser(
-        "pack", help="Create an anonymous grader copy of this cohort."
-    )
-    pack.add_argument("--submissions", required=True, help="The master submissions directory.")
-    pack.add_argument(
-        "--output",
+def _merge_options(function):
+    function = click.option(
+        "--packet",
+        default="",
+        help="Packet id, if the returned folder lost its manifest.",
+    )(function)
+    function = click.option(
+        "--key",
+        "raw_key",
         default="",
         help=(
-            "Directory to create the packet folder in. Default: a "
-            "grader-copies/ folder beside the submissions directory."
+            "Handoff key for the packet. Found automatically from the "
+            "packet's id; give it only if you moved the file."
         ),
-    )
-    pack.add_argument(
-        "--name",
-        default="",
-        help="Packet id (also the folder name). Defaults to <assignment>-for-<grader>.",
-    )
-    pack.add_argument(
-        "--grader", default="", help="Who the packet is for; used in the default name."
-    )
-    pack.add_argument(
-        "--qa-file",
-        default="",
-        help="Answer key to copy in, so the grader can open the packet directly.",
-    )
-    pack.add_argument(
-        "--no-redact",
-        action="store_true",
+    )(function)
+    function = click.option(
+        "--incoming",
+        "raw_incoming",
+        required=True,
         help=(
-            "Keep real names and ids. Only for a trusted co-teacher — the copy "
-            "is then no more anonymous than the original."
+            "The returned packet: a directory, or the sealed .zip.enc file "
+            "if it was packed with --encrypt."
         ),
-    )
-    pack.add_argument(
-        "--encrypt",
-        action="store_true",
-        help=(
-            "Seal the packet into one passphrase-protected file (prompted, "
-            "never typed on the command line) instead of a folder."
-        ),
-    )
-    pack.add_argument(
-        "--with-pdfs",
-        action="store_true",
-        help=(
-            "Also copy the scanned PDFs (whole-page context). Incompatible with "
-            "redaction: the student's name is written on every sheet."
-        ),
-    )
+    )(function)
+    return click.option(
+        "--submissions",
+        "raw_submissions",
+        required=True,
+        help="Your master submissions directory.",
+    )(function)
 
-    listing = subparsers.add_parser(
-        "list", help="Show the packets cut from this cohort and where they went."
-    )
-    listing.add_argument("--submissions", required=True)
 
-    for name, help_text in (
-        ("preview", "Show what a returned copy would change, writing nothing."),
-        ("apply", "Merge a returned copy into this cohort."),
-    ):
-        merge = subparsers.add_parser(name, help=help_text)
-        merge.add_argument(
-            "--submissions", required=True, help="Your master submissions directory."
-        )
-        merge.add_argument(
-            "--incoming",
-            required=True,
-            help=(
-                "The returned packet: a directory, or the sealed .zip.enc file "
-                "if it was packed with --encrypt."
-            ),
-        )
-        merge.add_argument(
-            "--key",
-            default="",
-            help=(
-                "Handoff key for the packet. Found automatically from the "
-                "packet's id; give it only if you moved the file."
-            ),
-        )
-        merge.add_argument(
-            "--packet",
-            default="",
-            help="Packet id, if the returned folder lost its manifest.",
-        )
-        if name == "preview":
-            merge.add_argument(
-                "--json", action="store_true", help="Emit the plan as JSON."
-            )
-        else:
-            merge.add_argument(
-                "--conflicts",
-                choices=("skip", "ours", "theirs"),
-                default="skip",
-                help=(
-                    "What to do with answers you both changed: skip (default, "
-                    "leaves them for a human), keep ours, or take theirs."
-                ),
-            )
-            merge.add_argument(
-                "--yes",
-                action="store_true",
-                help="Actually write. Without it the merge is only previewed.",
-            )
-            merge.add_argument(
-                "--import-history",
-                action="store_true",
-                help=(
-                    "Also copy the other grader's audit journal in (de-aliased), "
-                    "so their session shows up in grade-history and "
-                    "grading-stats. Off by default because it costs the "
-                    "one-command undo — see the note printed after the merge."
-                ),
-            )
-
-    return parser
+@click.group("grade-merge", cls=Group, context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+def command() -> None:
+    """Hand a redacted copy of a cohort to another grader, then three-way
+    merge their grades back into yours.
+    """
 
 
 def _resolve_path(raw: str, *, what: str) -> Path:
@@ -208,26 +126,90 @@ def _passphrase(wanted: bool, *, confirm: bool = False) -> str:
         sys.exit(1)
 
 
-def _cmd_pack(args: Namespace) -> None:
-    submissions = _resolve_path(args.submissions, what="submissions path")
-    passphrase = _passphrase(args.encrypt, confirm=True)
+@command.command("pack")
+@click.option(
+    "--submissions",
+    "raw_submissions",
+    required=True,
+    help="The master submissions directory.",
+)
+@click.option(
+    "--output",
+    "raw_output",
+    default="",
+    help=(
+        "Directory to create the packet folder in. Default: a "
+        "grader-copies/ folder beside the submissions directory."
+    ),
+)
+@click.option(
+    "--name",
+    default="",
+    help="Packet id (also the folder name). Defaults to <assignment>-for-<grader>.",
+)
+@click.option(
+    "--grader", default="", help="Who the packet is for; used in the default name."
+)
+@click.option(
+    "--qa-file",
+    "raw_qa_file",
+    default="",
+    help="Answer key to copy in, so the grader can open the packet directly.",
+)
+@click.option(
+    "--no-redact",
+    is_flag=True,
+    help=(
+        "Keep real names and ids. Only for a trusted co-teacher — the copy "
+        "is then no more anonymous than the original."
+    ),
+)
+@click.option(
+    "--encrypt",
+    is_flag=True,
+    help=(
+        "Seal the packet into one passphrase-protected file (prompted, "
+        "never typed on the command line) instead of a folder."
+    ),
+)
+@click.option(
+    "--with-pdfs",
+    is_flag=True,
+    help=(
+        "Also copy the scanned PDFs (whole-page context). Incompatible with "
+        "redaction: the student's name is written on every sheet."
+    ),
+)
+def pack_command(
+    raw_submissions: str,
+    raw_output: str,
+    name: str,
+    grader: str,
+    raw_qa_file: str,
+    no_redact: bool,
+    encrypt: bool,
+    with_pdfs: bool,
+) -> None:
+    """Create an anonymous grader copy of this cohort."""
+    submissions = _resolve_path(raw_submissions, what="submissions path")
+    passphrase = _passphrase(encrypt, confirm=True)
     output = (
-        Path(args.output).expanduser()
-        if args.output.strip()
+        Path(raw_output).expanduser()
+        if raw_output.strip()
         else default_packet_output_dir(submissions)
     )
     qa_file = (
-        _resolve_path(args.qa_file, what="QA file") if args.qa_file.strip() else None
+        _resolve_path(raw_qa_file, what="QA file") if raw_qa_file.strip() else None
     )
     try:
         result = build_packet(
             submissions,
             output,
-            packet_id=args.name,
-            grader=args.grader,
+            packet_id=name,
+            grader=grader,
             qa_file_path=qa_file,
-            redact=not args.no_redact,
-            include_pdfs=args.with_pdfs,
+            redact=not no_redact,
+            include_pdfs=with_pdfs,
         )
     except PacketError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -279,8 +261,11 @@ def _cmd_pack(args: Namespace) -> None:
         print("This copy is NOT redacted: it carries real names and ids.")
 
 
-def _cmd_list(args: Namespace) -> None:
-    submissions = _resolve_path(args.submissions, what="submissions path")
+@command.command("list")
+@click.option("--submissions", "raw_submissions", required=True)
+def list_command(raw_submissions: str) -> None:
+    """Show the packets cut from this cohort and where they went."""
+    submissions = _resolve_path(raw_submissions, what="submissions path")
     keys = list_handoff_keys(submissions)
     if not keys:
         print(
@@ -378,17 +363,19 @@ def _plan_json(plan: MergePlan) -> str:
 
 
 @contextmanager
-def _prepare_merge(args: Namespace):  # noqa: ANN202
-    ours = _resolve_path(args.submissions, what="submissions path")
-    incoming = _resolve_path(args.incoming, what="incoming path")
+def _prepare_merge(  # noqa: ANN202
+    *, raw_submissions: str, raw_incoming: str, raw_key: str, packet: str
+):
+    ours = _resolve_path(raw_submissions, what="submissions path")
+    incoming = _resolve_path(raw_incoming, what="incoming path")
     passphrase = _passphrase(is_sealed_packet(incoming))
     try:
         with opened_packet(incoming, passphrase) as unpacked:
             key, manifest = locate_handoff_key(
                 ours,
                 unpacked,
-                explicit_key=args.key.strip() or None,
-                packet_id=args.packet,
+                explicit_key=raw_key.strip() or None,
+                packet_id=packet,
             )
             incoming_root = resolve_incoming_root(unpacked)
             plan, ours_side, theirs_side = build_merge_plan(
@@ -400,10 +387,21 @@ def _prepare_merge(args: Namespace):  # noqa: ANN202
         sys.exit(2)
 
 
-def _cmd_preview(args: Namespace) -> None:
-    with _prepare_merge(args) as prepared:
+@command.command("preview")
+@_merge_options
+@click.option("--json", "as_json", is_flag=True, help="Emit the plan as JSON.")
+def preview_command(
+    raw_submissions: str, raw_incoming: str, raw_key: str, packet: str, as_json: bool
+) -> None:
+    """Show what a returned copy would change, writing nothing."""
+    with _prepare_merge(
+        raw_submissions=raw_submissions,
+        raw_incoming=raw_incoming,
+        raw_key=raw_key,
+        packet=packet,
+    ) as prepared:
         _ours, _incoming, _key, _manifest, plan, ours_side, theirs_side = prepared
-        if args.json:
+        if as_json:
             print(_plan_json(plan))
             return
         if not plan:
@@ -415,15 +413,66 @@ def _cmd_preview(args: Namespace) -> None:
         print("\nPreview only. Use 'grade-merge apply … --yes' to write.")
 
 
-def _cmd_apply(args: Namespace) -> None:
-    with _prepare_merge(args) as prepared:
-        _apply_prepared(args, *prepared)
+@command.command("apply")
+@_merge_options
+@click.option(
+    "--conflicts",
+    type=click.Choice(("skip", "ours", "theirs")),
+    default="skip",
+    help=(
+        "What to do with answers you both changed: skip (default, "
+        "leaves them for a human), keep ours, or take theirs."
+    ),
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Actually write. Without it the merge is only previewed.",
+)
+@click.option(
+    "--import-history",
+    is_flag=True,
+    help=(
+        "Also copy the other grader's audit journal in (de-aliased), "
+        "so their session shows up in grade-history and "
+        "grading-stats. Off by default because it costs the "
+        "one-command undo — see the note printed after the merge."
+    ),
+)
+def apply_command(
+    raw_submissions: str,
+    raw_incoming: str,
+    raw_key: str,
+    packet: str,
+    conflicts: ConflictPolicy,
+    yes: bool,
+    import_history: bool,
+) -> None:
+    """Merge a returned copy into this cohort."""
+    with _prepare_merge(
+        raw_submissions=raw_submissions,
+        raw_incoming=raw_incoming,
+        raw_key=raw_key,
+        packet=packet,
+    ) as prepared:
+        _apply_prepared(
+            *prepared, policy=conflicts, yes=yes, import_history=import_history
+        )
 
 
 def _apply_prepared(  # noqa: ANN001
-    args: Namespace, ours, incoming, key, manifest, plan, ours_side, theirs_side
+    ours,
+    incoming,
+    key,
+    manifest,
+    plan,
+    ours_side,
+    theirs_side,
+    *,
+    policy: ConflictPolicy,
+    yes: bool,
+    import_history: bool,
 ) -> None:
-    policy: ConflictPolicy = args.conflicts
     resolved = resolve_conflicts(plan.conflicts, policy=policy)
     changes = list(plan.changes) + list(resolved)
 
@@ -442,7 +491,7 @@ def _apply_prepared(  # noqa: ANN001
         )
     _print_caveats(plan, ours_side, theirs_side)
 
-    if not args.yes:
+    if not yes:
         print("\nPreview only. Re-run with --yes to write these changes.")
         return
 
@@ -457,7 +506,7 @@ def _apply_prepared(  # noqa: ANN001
     )
 
     undo_actors = [merge_actor(label)]
-    if args.import_history:
+    if import_history:
         imported = import_incoming_journal(
             incoming,
             ours,
@@ -491,14 +540,5 @@ def _apply_prepared(  # noqa: ANN001
         sys.exit(1)
 
 
-_COMMANDS = {
-    "pack": _cmd_pack,
-    "list": _cmd_list,
-    "preview": _cmd_preview,
-    "apply": _cmd_apply,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    _COMMANDS[args.command](args)
+if __name__ == "__main__":
+    command()

@@ -77,11 +77,11 @@ def test_content_dropdown_defaults_to_everything() -> None:
 def test_export_builds_expected_argv(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def fake_cli(argv: list[str]) -> None:
+    def fake_cli(_command, argv: list[str]) -> None:
         calls.append(argv)
         print("Bundle written to /somewhere")
 
-    monkeypatch.setattr(bundle_module, "run_return_bundle_cli", fake_cli)
+    monkeypatch.setattr(bundle_module, "run_command", fake_cli)
 
     async def run() -> None:
         app = _BundleApp(str(tmp_path))
@@ -113,7 +113,7 @@ def test_export_builds_expected_argv(monkeypatch, tmp_path: Path) -> None:
 def test_export_without_submissions_notifies_and_skips(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        bundle_module, "run_return_bundle_cli", lambda argv: calls.append(argv)
+        bundle_module, "run_command", lambda _command, argv: calls.append(argv)
     )
 
     async def run() -> None:
@@ -130,7 +130,7 @@ def test_export_without_submissions_notifies_and_skips(monkeypatch) -> None:
 def test_workspace_export_passes_selected_assignment(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        bundle_module, "run_return_bundle_cli", lambda argv: calls.append(argv)
+        bundle_module, "run_command", lambda _command, argv: calls.append(argv)
     )
 
     async def run() -> None:

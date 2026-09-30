@@ -11,7 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, RichLog, Select, Static
 
-from opengrader.cli.return_bundle import run_cli as run_return_bundle_cli
+from opengrader.cli import return_bundle, run_command
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
 _CONTENT_OPTIONS: list[tuple[str, str]] = [
@@ -226,7 +226,7 @@ class ReturnBundleScreen(ModalScreen[None]):
         succeeded = True
         try:
             with redirect_stdout(buffer), redirect_stderr(buffer):
-                run_return_bundle_cli(argv)
+                run_command(return_bundle.command, argv)
         except SystemExit as exc:
             succeeded = exc.code in (0, None)
         except Exception as exc:

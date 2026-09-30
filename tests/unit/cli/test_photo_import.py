@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from opengrader.cli import run_command
 from opengrader.cli import photo_import
 
 
@@ -25,7 +26,8 @@ def test_run_cli_writes_pdfs_and_prints_summary(tmp_path, capsys) -> None:  # no
     _save_plain_photo(input_dir / "s1-p2.jpg")
     output_dir = tmp_path / "out"
 
-    photo_import.run_cli(
+    run_command(
+        photo_import.command,
         ["--input", str(input_dir), "--output", str(output_dir), "--no-perspective"]
     )
 
@@ -42,7 +44,8 @@ def test_run_cli_json_output_is_valid_json(tmp_path, capsys) -> None:  # noqa: A
     _save_plain_photo(input_dir / "photo1.jpg")
     output_dir = tmp_path / "out"
 
-    photo_import.run_cli(
+    run_command(
+        photo_import.command,
         [
             "--input",
             str(input_dir),
@@ -66,7 +69,8 @@ def test_run_cli_pages_per_photo_set(tmp_path, capsys) -> None:  # noqa: ANN001
         _save_plain_photo(input_dir / name)
     output_dir = tmp_path / "out"
 
-    photo_import.run_cli(
+    run_command(
+        photo_import.command,
         [
             "--input",
             str(input_dir),
@@ -84,7 +88,8 @@ def test_run_cli_pages_per_photo_set(tmp_path, capsys) -> None:  # noqa: ANN001
 
 def test_run_cli_missing_input_exits_nonzero(tmp_path, capsys) -> None:  # noqa: ANN001
     with pytest.raises(SystemExit) as excinfo:
-        photo_import.run_cli(
+        run_command(
+            photo_import.command,
             ["--input", str(tmp_path / "nope"), "--output", str(tmp_path / "out")]
         )
     assert excinfo.value.code != 0
@@ -103,7 +108,8 @@ def test_run_cli_heic_without_extra_exits_nonzero(tmp_path, capsys) -> None:  # 
     (input_dir / "page1.heic").write_bytes(b"not a real heic file")
 
     with pytest.raises(SystemExit) as excinfo:
-        photo_import.run_cli(
+        run_command(
+            photo_import.command,
             ["--input", str(input_dir), "--output", str(tmp_path / "out")]
         )
     assert excinfo.value.code != 0

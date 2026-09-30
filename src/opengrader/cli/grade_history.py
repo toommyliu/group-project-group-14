@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.history import (
     GradeJournalEntry,
     read_journal,
     resolve_history_dir,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grade-history --input out/student-submissions/
   uv run grade-history --input out/student-submissions/ --actor prof_kim
   uv run grade-history --input out/student-submissions/ --student 123456789
@@ -49,50 +52,39 @@ def _print_human(entries: list[GradeJournalEntry]) -> None:
         )
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Show the grade-change history (who changed what, when) recorded "
-            "for a set of submissions."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="The submissions directory (or file) whose history to read.",
-    )
-    parser.add_argument("--actor", default=None, help="Only show changes by this grader.")
-    parser.add_argument(
-        "--student",
-        default=None,
-        help="Only show changes for this student id.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the history as a JSON array instead of a readable list.",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    input_path = Path(args.input)
+@click.command("grade-history", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="The submissions directory (or file) whose history to read.",
+)
+@click.option("--actor", help="Only show changes by this grader.")
+@click.option("--student", help="Only show changes for this student id.")
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the history as a JSON array instead of a readable list.",
+)
+def command(
+    input_path: Path, actor: str | None, student: str | None, as_json: bool
+) -> None:
+    """Show the grade-change history (who changed what, when) recorded for a
+    set of submissions.
+    """
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
     entries = read_journal(resolve_history_dir(input_path))
-    if args.actor is not None:
-        entries = [e for e in entries if e.actor == args.actor]
-    if args.student is not None:
-        entries = [e for e in entries if e.student_id == args.student]
+    if actor is not None:
+        entries = [e for e in entries if e.actor == actor]
+    if student is not None:
+        entries = [e for e in entries if e.student_id == student]
 
-    if args.as_json:
+    if as_json:
         print(
             json.dumps(
                 [
@@ -114,3 +106,7 @@ def run_cli(argv: list[str] | None = None) -> None:
         )
     else:
         _print_human(entries)
+
+
+if __name__ == "__main__":
+    command()

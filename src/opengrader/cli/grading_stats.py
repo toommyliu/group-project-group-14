@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.analytics import (
     ActorGradingStats,
     GradingSessionReport,
@@ -15,8 +17,9 @@ from opengrader.core.analytics import (
 from opengrader.core.analytics.grading_session import DEFAULT_IDLE_GAP_SECONDS
 from opengrader.core.history import read_journal, resolve_history_dir
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grading-stats --input out/student-submissions/
   uv run grading-stats --input out/student-submissions/ --actor prof_kim
   uv run grading-stats --input out/student-submissions/ --idle-gap 600
@@ -126,59 +129,52 @@ def _report_to_dict(report: GradingSessionReport) -> dict[str, object]:
     }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Summarize grading throughput (how much, how fast, per grader) from "
-            "the recorded grade-history journal."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="The submissions directory (or file) whose history to analyze.",
-    )
-    parser.add_argument(
-        "--actor",
-        default=None,
-        help="Only analyze changes by this grader.",
-    )
-    parser.add_argument(
-        "--idle-gap",
-        type=float,
-        default=DEFAULT_IDLE_GAP_SECONDS,
-        metavar="SECONDS",
-        help=(
-            "Gaps longer than this between a grader's actions count as a break "
-            f"(new session, excluded from active time). Default {DEFAULT_IDLE_GAP_SECONDS:g}."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the report as JSON instead of a readable summary.",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    input_path = Path(args.input)
+@click.command("grading-stats", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="The submissions directory (or file) whose history to analyze.",
+)
+@click.option("--actor", help="Only analyze changes by this grader.")
+@click.option(
+    "--idle-gap",
+    type=float,
+    default=DEFAULT_IDLE_GAP_SECONDS,
+    metavar="SECONDS",
+    help=(
+        "Gaps longer than this between a grader's actions count as a break "
+        f"(new session, excluded from active time). Default {DEFAULT_IDLE_GAP_SECONDS:g}."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the report as JSON instead of a readable summary.",
+)
+def command(
+    input_path: Path, actor: str | None, idle_gap: float, as_json: bool
+) -> None:
+    """Summarize grading throughput (how much, how fast, per grader) from
+    the recorded grade-history journal.
+    """
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
     entries = read_journal(resolve_history_dir(input_path))
-    if args.actor is not None:
-        entries = [entry for entry in entries if entry.actor == args.actor]
+    if actor is not None:
+        entries = [entry for entry in entries if entry.actor == actor]
 
-    report = build_grading_session_report(entries, idle_gap_seconds=args.idle_gap)
+    report = build_grading_session_report(entries, idle_gap_seconds=idle_gap)
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(_report_to_dict(report), indent=2))
     else:
         _print_human(report)
+
+
+if __name__ == "__main__":
+    command()

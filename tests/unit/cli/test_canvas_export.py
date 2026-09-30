@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import canvas_export
 from opengrader.core.submissions import load_student_submission_markdown
 from opengrader.core.workspace.intake import publish_submission
@@ -38,7 +39,8 @@ def test_canvas_export_from_workspace_uses_saved_grades(
 
     monkeypatch.setattr(canvas_export, "_call_canvas_sak", record)
 
-    canvas_export.run_cli(
+    run_command(
+        canvas_export.command,
         ["--course", "CS146", "--assignment", "Midterm", "--dry-run"]
     )
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.submissions.scan_check import (
     DEFAULT_DPI_FLOOR,
     ScanIssue,
@@ -18,8 +20,9 @@ from opengrader.core.submissions.scan_check import (
     page_order_fix_is_safe,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run scan-check --input scans/all-submissions.pdf
   uv run scan-check --input scans/all-submissions.pdf --pages-per-submission 6   # also checks page order
   uv run scan-check --input scans/all-submissions.pdf --fix            # writes all-submissions-upright.pdf
@@ -27,7 +30,8 @@ examples:
   uv run scan-check --input split/ --fix --output split-upright/
   uv run scan-check --input scans/all.pdf --json --fail-on-high        # for scripting/CI
 
-note:
+\b
+Note:
   Out-of-order pages are reported here, never repaired here — page numbers
   restart at 1 for every student, so they can only be put back in order after
   the bundle is split. Fix them with:
@@ -151,102 +155,102 @@ def _fix_destination(source: Path, output: str | None, *, many: bool) -> Path:
     return destination
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Pre-flight a scan before grading: detect rotated pages, sheets that "
-            "are out of order, blank sheets, low resolution, clipped margins and "
-            "page-count mismatches, and optionally write an upright copy."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="A scanned PDF, or a directory of PDFs (e.g. a split/ directory).",
-    )
-    parser.add_argument(
-        "--pages-per-submission",
-        type=int,
-        default=None,
-        help=(
-            "Pages each student's submission should have. Checks that a bundle "
-            "holds a whole number of submissions — a spare or missing sheet "
-            "shifts every boundary after it."
-        ),
-    )
-    parser.add_argument(
-        "--blank-template",
-        metavar="PDF",
-        default=None,
-        help=(
-            "Blank template PDF. Its page count is the length each already-split "
-            "submission should be; use it when --input is a split directory."
-        ),
-    )
-    parser.add_argument(
-        "--dpi-floor",
-        type=float,
-        default=DEFAULT_DPI_FLOOR,
-        help=(
-            f"Flag pages scanned below this effective DPI (default "
-            f"{DEFAULT_DPI_FLOOR:.0f}). Handwriting OCR degrades badly beneath it."
-        ),
-    )
-    parser.add_argument(
-        "--no-orientation",
-        action="store_true",
-        help=(
-            "Skip the rotation check (the slow part — one Tesseract OSD pass per "
-            "page). The other checks still run."
-        ),
-    )
-    parser.add_argument(
-        "--no-page-order",
-        action="store_true",
-        help=(
-            "Skip the page-order check. It reads each page's own page number "
-            "(QR code, PDF text layer, or OCR of the footer) and reports any "
-            "submission whose sheets do not run forwards. Needs to know how long "
-            "a submission is, so on a single bundle it does nothing without "
-            "--pages-per-submission or --blank-template."
-        ),
-    )
-    parser.add_argument(
-        "--fix",
-        action="store_true",
-        help=(
-            "Write an upright copy with rotated pages turned. Never modifies the "
-            "input; see --output for where the copy goes."
-        ),
-    )
-    parser.add_argument(
-        "--output",
-        default=None,
-        help=(
-            "Where --fix writes. A directory for several inputs (default: "
-            "alongside each input as <name>-upright.pdf)."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the reports as JSON instead of a human-readable list.",
-    )
-    parser.add_argument(
-        "--fail-on-high",
-        action="store_true",
-        help="Exit non-zero if any high-severity problem is found (for scripting/CI).",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    input_path = Path(args.input)
+@click.command("scan-check", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="A scanned PDF, or a directory of PDFs (e.g. a split/ directory).",
+)
+@click.option(
+    "--pages-per-submission",
+    type=int,
+    help=(
+        "Pages each student's submission should have. Checks that a bundle "
+        "holds a whole number of submissions — a spare or missing sheet "
+        "shifts every boundary after it."
+    ),
+)
+@click.option(
+    "--blank-template",
+    metavar="PDF",
+    help=(
+        "Blank template PDF. Its page count is the length each already-split "
+        "submission should be; use it when --input is a split directory."
+    ),
+)
+@click.option(
+    "--dpi-floor",
+    type=float,
+    default=DEFAULT_DPI_FLOOR,
+    help=(
+        f"Flag pages scanned below this effective DPI (default "
+        f"{DEFAULT_DPI_FLOOR:.0f}). Handwriting OCR degrades badly beneath it."
+    ),
+)
+@click.option(
+    "--no-orientation",
+    is_flag=True,
+    help=(
+        "Skip the rotation check (the slow part — one Tesseract OSD pass per "
+        "page). The other checks still run."
+    ),
+)
+@click.option(
+    "--no-page-order",
+    is_flag=True,
+    help=(
+        "Skip the page-order check. It reads each page's own page number "
+        "(QR code, PDF text layer, or OCR of the footer) and reports any "
+        "submission whose sheets do not run forwards. Needs to know how long "
+        "a submission is, so on a single bundle it does nothing without "
+        "--pages-per-submission or --blank-template."
+    ),
+)
+@click.option(
+    "--fix",
+    is_flag=True,
+    help=(
+        "Write an upright copy with rotated pages turned. Never modifies the "
+        "input; see --output for where the copy goes."
+    ),
+)
+@click.option(
+    "--output",
+    help=(
+        "Where --fix writes. A directory for several inputs (default: "
+        "alongside each input as <name>-upright.pdf)."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the reports as JSON instead of a human-readable list.",
+)
+@click.option(
+    "--fail-on-high",
+    is_flag=True,
+    help="Exit non-zero if any high-severity problem is found (for scripting/CI).",
+)
+def command(
+    *,
+    input_path: Path,
+    pages_per_submission: int | None,
+    blank_template: str | None,
+    dpi_floor: float,
+    no_orientation: bool,
+    no_page_order: bool,
+    fix: bool,
+    output: str | None,
+    as_json: bool,
+    fail_on_high: bool,
+) -> None:
+    """Pre-flight a scan before grading: detect rotated pages, sheets that
+    are out of order, blank sheets, low resolution, clipped margins and
+    page-count mismatches, and optionally write an upright copy.
+    """
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
@@ -261,8 +265,8 @@ def run_cli(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     expected_page_count: int | None = None
-    if args.blank_template:
-        template_path = Path(args.blank_template)
+    if blank_template:
+        template_path = Path(blank_template)
         if not template_path.exists():
             print(
                 f"Error: blank template not found: {template_path}", file=sys.stderr
@@ -271,10 +275,10 @@ def run_cli(argv: list[str] | None = None) -> None:
         expected_page_count = _template_page_count(template_path)
 
     is_bundle = input_path.is_file()
-    bundle_expectation = args.pages_per_submission if is_bundle else None
+    bundle_expectation = pages_per_submission if is_bundle else None
     per_file_expectation = expected_page_count
-    if not is_bundle and args.pages_per_submission:
-        per_file_expectation = args.pages_per_submission
+    if not is_bundle and pages_per_submission:
+        per_file_expectation = pages_per_submission
 
     reports: list[ScanReport] = []
     fixed: list[tuple[Path, Path, int]] = []
@@ -284,14 +288,14 @@ def run_cli(argv: list[str] | None = None) -> None:
             pages_per_submission=bundle_expectation,
             expected_page_count=per_file_expectation,
             single_submission=not is_bundle,
-            dpi_floor=args.dpi_floor,
-            check_orientation=not args.no_orientation,
-            check_page_order=not args.no_page_order,
+            dpi_floor=dpi_floor,
+            check_orientation=not no_orientation,
+            check_page_order=not no_page_order,
         )
         reports.append(report)
 
-        if args.fix and report.rotation_plan:
-            destination = _fix_destination(path, args.output, many=len(paths) > 1)
+        if fix and report.rotation_plan:
+            destination = _fix_destination(path, output, many=len(paths) > 1)
             if destination.resolve() == path.resolve():
                 print(
                     f"Error: --fix would overwrite the original scan {path}; "
@@ -302,13 +306,13 @@ def run_cli(argv: list[str] | None = None) -> None:
             turned = apply_rotation_fixes(path, destination, report.rotation_plan)
             fixed.append((path, destination, turned))
 
-    if args.as_json:
+    if as_json:
         print(
             json.dumps(
                 {
                     "reports": [
                         _report_to_dict(
-                            report, has_blank_template=bool(args.blank_template)
+                            report, has_blank_template=bool(blank_template)
                         )
                         for report in reports
                     ],
@@ -327,7 +331,7 @@ def run_cli(argv: list[str] | None = None) -> None:
     else:
         for report in reports:
             _print_report(report, show_source=len(reports) > 1)
-        if args.fix:
+        if fix:
             print()
             if fixed:
                 for _source, destination, turned in fixed:
@@ -339,9 +343,9 @@ def run_cli(argv: list[str] | None = None) -> None:
             else:
                 print("Nothing to rotate; no copies written.")
 
-    if args.fail_on_high and any(report.high_severity for report in reports):
+    if fail_on_high and any(report.high_severity for report in reports):
         sys.exit(2)
 
 
 if __name__ == "__main__":
-    run_cli()
+    command()

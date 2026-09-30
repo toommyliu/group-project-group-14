@@ -11,7 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, RichLog, Static
 
-from opengrader.cli.canvas_export import run_cli as run_canvas_export_cli
+from opengrader.cli import canvas_export, run_command
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
 
@@ -228,7 +228,7 @@ class CanvasExportScreen(ModalScreen[None]):
         succeeded = True
         try:
             with redirect_stdout(buffer), redirect_stderr(buffer):
-                run_canvas_export_cli(argv)
+                run_command(canvas_export.command, argv)
         except SystemExit as exc:
             succeeded = exc.code in (0, None)
         except Exception as exc:

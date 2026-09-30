@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli import grades_export
-from opengrader.cli.grades_export import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.grades_export import command
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
@@ -75,7 +75,7 @@ def test_grades_export_writes_gradebook_csv(tmp_path: Path) -> None:
     _write_submissions(submissions)
     output = tmp_path / "gradebook.csv"
 
-    run_cli(["--submissions", str(submissions), "--output", str(output)])
+    run_command(command, ["--submissions", str(submissions), "--output", str(output)])
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     assert rows[0] == ["student_id", "student_name", "Q1", "Q2", "total", "possible"]
@@ -121,7 +121,7 @@ def test_grades_export_inside_assignment_reads_saved_workspace_grades(
     monkeypatch.chdir(folder)
     output = tmp_path / "grades.csv"
 
-    run_cli(["--output", str(output)])
+    run_command(command, ["--output", str(output)])
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     assert rows == [
@@ -136,7 +136,7 @@ def test_grades_export_ungraded_cell_is_blank(tmp_path: Path) -> None:
     _write_submissions(submissions)
     output = tmp_path / "gradebook.csv"
 
-    run_cli(["--submissions", str(submissions), "--output", str(output)])
+    run_command(command, ["--submissions", str(submissions), "--output", str(output)])
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     andy = rows[1]
@@ -153,7 +153,7 @@ def test_grades_export_adds_curved_column_when_curve_active(tmp_path: Path) -> N
     write_curve(submissions, Curve("bonus", 5.0))
     output = tmp_path / "gradebook.csv"
 
-    run_cli(["--submissions", str(submissions), "--output", str(output)])
+    run_command(command, ["--submissions", str(submissions), "--output", str(output)])
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     assert rows[0] == [
@@ -175,7 +175,7 @@ def test_grades_export_neutralizes_csv_formula_injection(tmp_path: Path) -> None
     )
     output = tmp_path / "gradebook.csv"
 
-    run_cli(["--submissions", str(submissions), "--output", str(output)])
+    run_command(command, ["--submissions", str(submissions), "--output", str(output)])
 
     rows = list(csv.reader(output.open(encoding="utf-8")))
     assert rows[1][0] == "'@SUM(A1:A9)"
@@ -193,7 +193,7 @@ def test_grades_export_stdout_also_escapes_formulas(tmp_path: Path, capsys) -> N
         questions=[_question("q1", 10, 10)],
     )
 
-    run_cli(["--submissions", str(submissions)])
+    run_command(command, ["--submissions", str(submissions)])
 
     out = capsys.readouterr().out
     rows = list(csv.reader(out.splitlines()))
@@ -227,7 +227,7 @@ def test_grades_export_errors_on_empty_directory(tmp_path: Path, capsys) -> None
     empty.mkdir()
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--submissions", str(empty)])
+        run_command(command, ["--submissions", str(empty)])
     assert exc.value.code == 1
     assert "no *.submission.md" in capsys.readouterr().err
 
@@ -290,24 +290,24 @@ def _outcome_cohort(tmp_path, marks_by_student):  # noqa: ANN001, ANN202
 def test_outcome_columns_appear_only_with_solutions(tmp_path, capsys) -> None:  # noqa: ANN001
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": 5}})
 
-    grades_export.run_cli(["--submissions", str(subs)])
+    run_command(command, ["--submissions", str(subs)])
     assert "outcome:" not in capsys.readouterr().out
 
-    grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--submissions", str(subs), "--solutions", str(qa)])
     header = capsys.readouterr().out.splitlines()[0]
     assert "outcome:CLO1 %" in header and "outcome:CLO2 %" in header
 
 
 def test_outcome_columns_come_after_the_totals(tmp_path, capsys) -> None:  # noqa: ANN001
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": 5}})
-    grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--submissions", str(subs), "--solutions", str(qa)])
     header = capsys.readouterr().out.splitlines()[0].split(",")
     assert header.index("possible") < header.index("outcome:CLO1 %")
 
 
 def test_outcome_cells_are_percentages_of_the_tagged_points(tmp_path, capsys) -> None:  # noqa: ANN001
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": 5}})
-    grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--submissions", str(subs), "--solutions", str(qa)])
     rows = capsys.readouterr().out.splitlines()
     header, row = rows[0].split(","), rows[1].split(",")
     assert row[header.index("outcome:CLO1 %")] == "70.0"
@@ -316,7 +316,7 @@ def test_outcome_cells_are_percentages_of_the_tagged_points(tmp_path, capsys) ->
 
 def test_an_ungraded_outcome_cell_is_blank_not_zero(tmp_path, capsys) -> None:  # noqa: ANN001
     qa, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9, "q2": None}})
-    grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--submissions", str(subs), "--solutions", str(qa)])
     rows = capsys.readouterr().out.splitlines()
     header, row = rows[0].split(","), rows[1].split(",")
     assert row[header.index("outcome:CLO1 %")] == "90.0"
@@ -332,7 +332,7 @@ def test_an_untagged_answer_key_adds_no_columns(tmp_path, capsys) -> None:  # no
         "- (10 points) Explain.\n  - **Correct**\n    - x\n"
         "- (10 points) Apply.\n  - **Correct**\n    - y\n"
     )
-    grades_export.run_cli(["--submissions", str(subs), "--solutions", str(qa)])
+    run_command(command, ["--submissions", str(subs), "--solutions", str(qa)])
     assert "outcome:" not in capsys.readouterr().out
 
 
@@ -341,7 +341,8 @@ def test_a_missing_solutions_file_fails_fast(tmp_path) -> None:  # noqa: ANN001
 
     _, subs = _outcome_cohort(tmp_path, {"101": {"q1": 9}})
     with pytest.raises(SystemExit) as exit_info:
-        grades_export.run_cli(
+        run_command(
+            command,
             ["--submissions", str(subs), "--solutions", str(tmp_path / "nope.md")]
         )
     assert exit_info.value.code == 1

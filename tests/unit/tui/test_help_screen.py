@@ -85,7 +85,7 @@ def test_every_command_line_tool_is_documented() -> None:
 
     text = _help_text()
     undocumented = sorted(
-        name for name in scripts - {"tui-dev"} if name not in text
+        name for name in scripts if name not in text
     )
     assert undocumented == [], f"no help entry names these tools: {undocumented}"
 

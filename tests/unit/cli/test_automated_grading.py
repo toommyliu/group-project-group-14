@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli.automated_grading import grade_student_file, run_cli
 from opengrader.core import app_config
 from opengrader.core.qa_file import load_qa_markdown
@@ -660,7 +661,7 @@ def test_a_batch_run_is_undone_by_grade_restore(tmp_path: Path) -> None:
     }
     assert graded["q1"] is not None
 
-    grade_restore.run_cli([
+    run_command(grade_restore.command, [
         "apply", "--submissions", str(tmp_path),
         "--without-actor", "automated-grading", "--yes",
     ])

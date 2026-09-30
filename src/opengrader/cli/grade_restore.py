@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from datetime import datetime
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.export.gradebook import discover_submission_paths
 from opengrader.core.history import (
     RESTORABLE_ASPECTS,
@@ -26,8 +28,9 @@ from opengrader.core.history import (
 )
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grade-restore show --submissions out/subs/ --at 2026-08-02T12:00
   uv run grade-restore show --submissions out/subs/ --at 2h --student 012345
   uv run grade-restore diff --submissions out/subs/ --at 90m
@@ -36,34 +39,38 @@ examples:
   uv run grade-restore apply --submissions out/subs/ --without-actor bot --yes
   uv run grade-restore log --submissions out/subs/          # who touched what, when
 
-times:
+\b
+Times:
   --at accepts 2026-08-02T14:30, 2026-08-02 14:30, 2026-08-02 (start of day),
   a full ISO timestamp with an offset, or a relative age: 90s / 30m / 2h / 1d / 1w.
   A time without a timezone is read as this machine's local clock.
 """
 
 
-def _add_common(parser: ArgumentParser) -> None:
-    parser.add_argument(
-        "--submissions",
-        required=True,
-        help="Submissions directory (or a single .submission.md file).",
-    )
-    parser.add_argument(
-        "--student",
-        action="append",
-        default=[],
-        metavar="ID",
-        help="Limit to this student id (repeatable).",
-    )
-    parser.add_argument(
-        "--question",
-        action="append",
-        default=[],
-        metavar="QID",
-        help="Limit to this question id, e.g. q3 (repeatable).",
-    )
-    parser.add_argument(
+_submissions_option = click.option(
+    "--submissions",
+    required=True,
+    help="Submissions directory (or a single .submission.md file).",
+)
+
+
+def _scope_options(function):
+    function = click.option(
+        "--without-actor",
+        multiple=True,
+        metavar="NAME",
+        help=(
+            "Replay as if this grader never acted (repeatable). Their changes "
+            "are undone only where nobody edited the same answer afterwards."
+        ),
+    )(function)
+    function = click.option(
+        "--at",
+        default="",
+        metavar="TIME",
+        help="The point in time to reconstruct (see 'times' below).",
+    )(function)
+    function = click.option(
         "--only",
         default="",
         metavar="ASPECTS",
@@ -71,71 +78,32 @@ def _add_common(parser: ArgumentParser) -> None:
             "Comma-separated aspects to consider: grade, comment, transcription "
             "(default: all three)."
         ),
-    )
-    parser.add_argument(
-        "--at",
-        default="",
-        metavar="TIME",
-        help="The point in time to reconstruct (see 'times' below).",
-    )
-    parser.add_argument(
-        "--without-actor",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help=(
-            "Replay as if this grader never acted (repeatable). Their changes "
-            "are undone only where nobody edited the same answer afterwards."
-        ),
-    )
+    )(function)
+    function = click.option(
+        "--question",
+        multiple=True,
+        metavar="QID",
+        help="Limit to this question id, e.g. q3 (repeatable).",
+    )(function)
+    function = click.option(
+        "--student",
+        multiple=True,
+        metavar="ID",
+        help="Limit to this student id (repeatable).",
+    )(function)
+    return _submissions_option(function)
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Reconstruct and restore grades from the audit journal: inspect the "
-            "state at any past moment, diff it against today, and write it back."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    show = subparsers.add_parser(
-        "show", help="Print the reconstructed grades at a point in time."
-    )
-    _add_common(show)
-
-    diff = subparsers.add_parser(
-        "diff", help="Show what differs between then and the files as they are now."
-    )
-    _add_common(diff)
-
-    apply_cmd = subparsers.add_parser(
-        "apply", help="Write the reconstructed grades back to the submission files."
-    )
-    _add_common(apply_cmd)
-    apply_cmd.add_argument(
-        "--yes",
-        action="store_true",
-        help="Actually write. Without it the changes are only previewed.",
-    )
-    apply_cmd.add_argument(
-        "--reason",
-        default="",
-        help="Why the restore was performed; recorded in the audit journal.",
-    )
-
-    log = subparsers.add_parser(
-        "log", help="Summarize the journal: actors, time span, and what is restorable."
-    )
-    log.add_argument(
-        "--submissions",
-        required=True,
-        help="Submissions directory (or a single .submission.md file).",
-    )
-
-    return parser
+@click.group(
+    "grade-restore",
+    cls=Group,
+    context_settings=CONTEXT_SETTINGS,
+    epilog=EPILOG,
+)
+def command() -> None:
+    """Reconstruct and restore grades from the audit journal: inspect the
+    state at any past moment, diff it against today, and write it back.
+    """
 
 
 def _resolve_submissions(raw: str) -> Path:
@@ -187,8 +155,16 @@ def _load_documents(path: Path) -> list[tuple[Path, object]]:
     return loaded
 
 
-def _prepare(args: Namespace):  # noqa: ANN202
-    path = _resolve_submissions(args.submissions)
+def _prepare(  # noqa: ANN202
+    *,
+    submissions: str,
+    student: tuple[str, ...],
+    question: tuple[str, ...],
+    only: str,
+    at: str,
+    without_actor: tuple[str, ...],
+):
+    path = _resolve_submissions(submissions)
     entries = read_journal(resolve_history_dir(path))
     if not entries:
         print(
@@ -200,8 +176,9 @@ def _prepare(args: Namespace):  # noqa: ANN202
         )
         sys.exit(1)
 
-    at = _parse_at(args.at)
-    snapshot = replay_journal(entries, at=at, exclude_actors=args.without_actor)
+    snapshot = replay_journal(
+        entries, at=_parse_at(at), exclude_actors=without_actor
+    )
 
     documents = _load_documents(path)
     paths_by_key = {}
@@ -214,26 +191,32 @@ def _prepare(args: Namespace):  # noqa: ANN202
     plan = plan_restore(
         snapshot,
         current,
-        students=args.student,
-        questions=args.question,
-        aspects=_parse_aspects(args.only),
+        students=student,
+        questions=question,
+        aspects=_parse_aspects(only),
         known_students=paths_by_key.keys(),
     )
     return path, snapshot, plan, paths_by_key
 
 
-def _describe_scope(args: Namespace, snapshot) -> str:  # noqa: ANN001
+def _describe_scope(
+    snapshot,  # noqa: ANN001
+    *,
+    student: tuple[str, ...],
+    question: tuple[str, ...],
+    without_actor: tuple[str, ...],
+) -> str:
     parts = []
     if snapshot.at is None:
         parts.append("the whole journal")
     else:
         parts.append(f"the state at {snapshot.at.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    if args.without_actor:
-        parts.append(f"without {', '.join(args.without_actor)}")
-    if args.student:
-        parts.append(f"students {', '.join(args.student)}")
-    if args.question:
-        parts.append(f"questions {', '.join(args.question)}")
+    if without_actor:
+        parts.append(f"without {', '.join(without_actor)}")
+    if student:
+        parts.append(f"students {', '.join(student)}")
+    if question:
+        parts.append(f"questions {', '.join(question)}")
     return "; ".join(parts)
 
 
@@ -249,13 +232,33 @@ def _print_unresolved(plan: RestorePlan) -> None:
         print(f"  - {key}", file=sys.stderr)
 
 
-def _cmd_show(args: Namespace) -> None:
-    path, snapshot, plan, _paths = _prepare(args)
-    print(f"Reconstructed {_describe_scope(args, snapshot)} for {path}.\n")
+@command.command("show")
+@_scope_options
+def show_command(
+    submissions: str,
+    student: tuple[str, ...],
+    question: tuple[str, ...],
+    only: str,
+    at: str,
+    without_actor: tuple[str, ...],
+) -> None:
+    """Print the reconstructed grades at a point in time."""
+    path, snapshot, plan, _paths = _prepare(
+        submissions=submissions,
+        student=student,
+        question=question,
+        only=only,
+        at=at,
+        without_actor=without_actor,
+    )
+    scope = _describe_scope(
+        snapshot, student=student, question=question, without_actor=without_actor
+    )
+    print(f"Reconstructed {scope} for {path}.\n")
 
-    wanted_students = {s.strip().casefold() for s in args.student if s.strip()}
-    wanted_questions = {q.strip().casefold() for q in args.question if q.strip()}
-    aspects = _parse_aspects(args.only)
+    wanted_students = {s.strip().casefold() for s in student if s.strip()}
+    wanted_questions = {q.strip().casefold() for q in question if q.strip()}
+    aspects = _parse_aspects(only)
 
     by_student: dict[str, list[tuple[str, str]]] = {}
     for (key, question_id), cell in snapshot.cells.items():
@@ -295,9 +298,28 @@ def _print_plan(plan: RestorePlan) -> None:
         print(f"  {change.describe()}")
 
 
-def _cmd_diff(args: Namespace) -> None:
-    _path, snapshot, plan, _paths = _prepare(args)
-    scope = _describe_scope(args, snapshot)
+@command.command("diff")
+@_scope_options
+def diff_command(
+    submissions: str,
+    student: tuple[str, ...],
+    question: tuple[str, ...],
+    only: str,
+    at: str,
+    without_actor: tuple[str, ...],
+) -> None:
+    """Show what differs between then and the files as they are now."""
+    _path, snapshot, plan, _paths = _prepare(
+        submissions=submissions,
+        student=student,
+        question=question,
+        only=only,
+        at=at,
+        without_actor=without_actor,
+    )
+    scope = _describe_scope(
+        snapshot, student=student, question=question, without_actor=without_actor
+    )
     if not plan:
         print(f"No differences: the files already match {scope}.")
         _print_unresolved(plan)
@@ -310,9 +332,40 @@ def _cmd_diff(args: Namespace) -> None:
     _print_unresolved(plan)
 
 
-def _cmd_apply(args: Namespace) -> None:
-    path, snapshot, plan, paths_by_key = _prepare(args)
-    scope = _describe_scope(args, snapshot)
+@command.command("apply")
+@_scope_options
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Actually write. Without it the changes are only previewed.",
+)
+@click.option(
+    "--reason",
+    default="",
+    help="Why the restore was performed; recorded in the audit journal.",
+)
+def apply_command(
+    submissions: str,
+    student: tuple[str, ...],
+    question: tuple[str, ...],
+    only: str,
+    at: str,
+    without_actor: tuple[str, ...],
+    yes: bool,
+    reason: str,
+) -> None:
+    """Write the reconstructed grades back to the submission files."""
+    path, snapshot, plan, paths_by_key = _prepare(
+        submissions=submissions,
+        student=student,
+        question=question,
+        only=only,
+        at=at,
+        without_actor=without_actor,
+    )
+    scope = _describe_scope(
+        snapshot, student=student, question=question, without_actor=without_actor
+    )
     if not plan:
         print(f"Nothing to restore: the files already match {scope}.")
         _print_unresolved(plan)
@@ -325,13 +378,13 @@ def _cmd_apply(args: Namespace) -> None:
     _print_plan(plan)
     _print_unresolved(plan)
 
-    if not args.yes:
+    if not yes:
         print("\nPreview only. Re-run with --yes to write these changes.")
         return
 
     journal = GradeJournal(resolve_history_dir(path))
     outcome = apply_restore_plan(
-        plan, paths_by_key, journal=journal, reason=args.reason
+        plan, paths_by_key, journal=journal, reason=reason
     )
     print(
         f"\nRestored {len(outcome.written)} change(s) across "
@@ -344,8 +397,11 @@ def _cmd_apply(args: Namespace) -> None:
         sys.exit(1)
 
 
-def _cmd_log(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
+@command.command("log")
+@_submissions_option
+def log_command(submissions: str) -> None:
+    """Summarize the journal: actors, time span, and what is restorable."""
+    path = _resolve_submissions(submissions)
     entries = read_journal(resolve_history_dir(path))
     if not entries:
         print(f"No grade history recorded for {path}.")
@@ -372,14 +428,5 @@ def _cmd_log(args: Namespace) -> None:
         print(f"    {kind:<20} {count}{note}")
 
 
-_COMMANDS = {
-    "show": _cmd_show,
-    "diff": _cmd_diff,
-    "apply": _cmd_apply,
-    "log": _cmd_log,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    _COMMANDS[args.command](args)
+if __name__ == "__main__":
+    command()

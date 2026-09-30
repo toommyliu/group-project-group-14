@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.export.gradebook import discover_submission_paths
 from opengrader.core.question_types import humanize_question_label
 from opengrader.core.submissions.answer_groups import (
@@ -28,8 +30,9 @@ from opengrader.core.submissions.suggested_groups import (
     summarize_grouping_effort,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run answer-groups --input out/student-submissions/
   uv run answer-groups --input out/student-submissions/ --suggestions
   uv run answer-groups --input out/student-submissions/ --threshold 0.9
@@ -171,67 +174,67 @@ def _report_to_dict(
     }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Report how much distinct work a graded set actually contains: "
-            "responses, distinct answers, and what remains once near-identical "
-            "answers are merged."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="A .submission.md file or a directory of them.",
-    )
-    parser.add_argument(
-        "--question",
-        default="",
-        help="Report only this question id (e.g. q3). Default: every question.",
-    )
-    parser.add_argument(
-        "--suggestions",
-        action="store_true",
-        help="Also print each proposed merge and the answers it would join.",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=DEFAULT_SUGGESTION_THRESHOLD,
-        help=(
-            "Similarity (0-1) two answers need before a merge is proposed "
-            f"(default {DEFAULT_SUGGESTION_THRESHOLD}). Every pair inside a "
-            "proposal must clear it, not just one."
-        ),
-    )
-    parser.add_argument(
-        "--min-length",
-        type=int,
-        default=DEFAULT_SUGGESTION_MIN_LENGTH,
-        help=(
-            "Minimum answer length, in characters of normalized text, to be "
-            f"considered for a merge (default {DEFAULT_SUGGESTION_MIN_LENGTH})."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the report as JSON instead of a human-readable table.",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    if not 0.0 < args.threshold <= 1.0:
+@click.command("answer-groups", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="A .submission.md file or a directory of them.",
+)
+@click.option(
+    "--question",
+    default="",
+    help="Report only this question id (e.g. q3). Default: every question.",
+)
+@click.option(
+    "--suggestions",
+    "show_suggestions",
+    is_flag=True,
+    help="Also print each proposed merge and the answers it would join.",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=DEFAULT_SUGGESTION_THRESHOLD,
+    help=(
+        "Similarity (0-1) two answers need before a merge is proposed "
+        f"(default {DEFAULT_SUGGESTION_THRESHOLD}). Every pair inside a "
+        "proposal must clear it, not just one."
+    ),
+)
+@click.option(
+    "--min-length",
+    type=int,
+    default=DEFAULT_SUGGESTION_MIN_LENGTH,
+    help=(
+        "Minimum answer length, in characters of normalized text, to be "
+        f"considered for a merge (default {DEFAULT_SUGGESTION_MIN_LENGTH})."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the report as JSON instead of a human-readable table.",
+)
+def command(
+    *,
+    input_path: Path,
+    question: str,
+    show_suggestions: bool,
+    threshold: float,
+    min_length: int,
+    as_json: bool,
+) -> None:
+    """Report how much distinct work a graded set actually contains:
+    responses, distinct answers, and what remains once near-identical answers
+    are merged.
+    """
+    if not 0.0 < threshold <= 1.0:
         print("Error: --threshold must be between 0 and 1.", file=sys.stderr)
         sys.exit(1)
 
-    input_path = Path(args.input)
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
@@ -249,27 +252,27 @@ def run_cli(argv: list[str] | None = None) -> None:
             print(f"Warning: could not read {path}: {exc}", file=sys.stderr)
 
     question_ids = _ordered_question_ids(documents)
-    if args.question:
-        if args.question not in question_ids:
+    if question:
+        if question not in question_ids:
             print(
-                f"Error: question {args.question} not found "
+                f"Error: question {question} not found "
                 f"(have: {', '.join(question_ids) or 'none'})",
                 file=sys.stderr,
             )
             sys.exit(1)
-        question_ids = [args.question]
+        question_ids = [question]
 
     rows: list[GroupingEffort] = []
     suggestions_by_question: dict[str, list[SuggestedGroup]] = {}
     for question_id in question_ids:
         groups = _groups_for_question(documents, question_id)
         suggestions = suggest_group_merges(
-            groups, threshold=args.threshold, min_length=args.min_length
+            groups, threshold=threshold, min_length=min_length
         )
         suggestions_by_question[question_id] = suggestions
         rows.append(summarize_grouping_effort(question_id, groups, suggestions))
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(_report_to_dict(rows, suggestions_by_question), indent=2))
         return
 
@@ -283,7 +286,7 @@ def run_cli(argv: list[str] | None = None) -> None:
     )
     _print_effort_table(rows)
 
-    if args.suggestions:
+    if show_suggestions:
         total = sum(len(items) for items in suggestions_by_question.values())
         if not total:
             print("\nNo merges proposed at this threshold.")

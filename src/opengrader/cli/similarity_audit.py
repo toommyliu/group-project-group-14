@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.qa_file import load_qa_markdown
 from opengrader.core.submissions import (
     SimilarityFlag,
@@ -26,14 +28,16 @@ from opengrader.core.submissions.similarity import (
 )
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run similarity-audit --input out/student-submissions/
   uv run similarity-audit --input out/student-submissions/ --threshold 0.9
   uv run similarity-audit --input out/student-submissions/ --json
   uv run similarity-audit --input out/student-submissions/ --fail-on-match
 
-also audit the objective questions (needs the answer key):
+\b
+Also audit the objective questions (needs the answer key):
   uv run similarity-audit --input out/student-submissions/ --solutions solutions.md
   uv run similarity-audit --input out/student-submissions/ --solutions solutions.md \\
     --pattern-threshold 4.5      # fewer, stronger objective flags
@@ -263,116 +267,117 @@ def _pattern_report_to_dict(report: AnswerPatternReport) -> dict[str, object]:
     }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Audit a graded submission set for answer similarity — cluster "
-            "students whose free-response answers are near-identical, and (with "
-            "--solutions) flag pairs whose incorrect objective answers agree far "
-            "more often than chance allows."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="A .submission.md file or a directory of them.",
-    )
-    parser.add_argument(
-        "--solutions",
-        help=(
-            "QA answer-key file. Enables the objective (multiple-choice) half of "
-            "the audit: pairs of students who gave identical *wrong* answers far "
-            "more often than the class's own spread of wrong answers predicts. "
-            "The key is required because 'shared wrong answer' is undefined "
-            "without it."
-        ),
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=DEFAULT_SIMILARITY_THRESHOLD,
-        help=(
-            "Free-response similarity (0-1) at or above which a pair is flagged "
-            f"(default {DEFAULT_SIMILARITY_THRESHOLD}). Raise it for fewer, "
-            "tighter matches."
-        ),
-    )
-    parser.add_argument(
-        "--min-length",
-        type=int,
-        default=DEFAULT_MIN_LENGTH,
-        help=(
-            "Minimum answer length, in characters of normalized text, to be "
-            f"compared (default {DEFAULT_MIN_LENGTH}). Shorter answers are "
-            "skipped: a whole class legitimately gives the same short answer."
-        ),
-    )
-    parser.add_argument(
-        "--pattern-threshold",
-        type=float,
-        default=DEFAULT_PATTERN_THRESHOLD,
-        help=(
-            "Objective audit: standard deviations above the expected number of "
-            "identical wrong answers at which a pair is flagged (default "
-            f"{DEFAULT_PATTERN_THRESHOLD:g}). The test runs over every pair in "
-            "the class, so this is deliberately stricter than the usual 3.0 — "
-            "raise it further on a very large class. Needs --solutions."
-        ),
-    )
-    parser.add_argument(
-        "--min-shared-wrong",
-        type=int,
-        default=DEFAULT_MIN_SHARED_WRONG,
-        help=(
-            "Objective audit: how many identical wrong answers a pair must share "
-            f"before its score is considered at all (default "
-            f"{DEFAULT_MIN_SHARED_WRONG}). One agreement on a rare wrong answer "
-            "scores enormously and is a coincidence. Needs --solutions."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help=(
-            "Emit the clusters as a JSON array instead of a human-readable list. "
-            "With --solutions the output is instead an object with "
-            "'free_response' and 'objective' keys, so the existing array shape is "
-            "unchanged for callers that don't pass an answer key."
-        ),
-    )
-    parser.add_argument(
-        "--fail-on-match",
-        action="store_true",
-        help=(
-            "Exit non-zero if anything is flagged — a similar-answer cluster or, "
-            "with --solutions, an objective answer-pattern pair (for "
-            "scripting/CI)."
-        ),
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    if not 0.0 < args.threshold <= 1.0:
+@click.command("similarity-audit", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="A .submission.md file or a directory of them.",
+)
+@click.option(
+    "--solutions",
+    help=(
+        "QA answer-key file. Enables the objective (multiple-choice) half of "
+        "the audit: pairs of students who gave identical *wrong* answers far "
+        "more often than the class's own spread of wrong answers predicts. "
+        "The key is required because 'shared wrong answer' is undefined "
+        "without it."
+    ),
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=DEFAULT_SIMILARITY_THRESHOLD,
+    help=(
+        "Free-response similarity (0-1) at or above which a pair is flagged "
+        f"(default {DEFAULT_SIMILARITY_THRESHOLD}). Raise it for fewer, "
+        "tighter matches."
+    ),
+)
+@click.option(
+    "--min-length",
+    type=int,
+    default=DEFAULT_MIN_LENGTH,
+    help=(
+        "Minimum answer length, in characters of normalized text, to be "
+        f"compared (default {DEFAULT_MIN_LENGTH}). Shorter answers are "
+        "skipped: a whole class legitimately gives the same short answer."
+    ),
+)
+@click.option(
+    "--pattern-threshold",
+    type=float,
+    default=DEFAULT_PATTERN_THRESHOLD,
+    help=(
+        "Objective audit: standard deviations above the expected number of "
+        "identical wrong answers at which a pair is flagged (default "
+        f"{DEFAULT_PATTERN_THRESHOLD:g}). The test runs over every pair in "
+        "the class, so this is deliberately stricter than the usual 3.0 — "
+        "raise it further on a very large class. Needs --solutions."
+    ),
+)
+@click.option(
+    "--min-shared-wrong",
+    type=int,
+    default=DEFAULT_MIN_SHARED_WRONG,
+    help=(
+        "Objective audit: how many identical wrong answers a pair must share "
+        f"before its score is considered at all (default "
+        f"{DEFAULT_MIN_SHARED_WRONG}). One agreement on a rare wrong answer "
+        "scores enormously and is a coincidence. Needs --solutions."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help=(
+        "Emit the clusters as a JSON array instead of a human-readable list. "
+        "With --solutions the output is instead an object with "
+        "'free_response' and 'objective' keys, so the existing array shape is "
+        "unchanged for callers that don't pass an answer key."
+    ),
+)
+@click.option(
+    "--fail-on-match",
+    is_flag=True,
+    help=(
+        "Exit non-zero if anything is flagged — a similar-answer cluster or, "
+        "with --solutions, an objective answer-pattern pair (for "
+        "scripting/CI)."
+    ),
+)
+def command(
+    *,
+    input_path: Path,
+    solutions: str | None,
+    threshold: float,
+    min_length: int,
+    pattern_threshold: float,
+    min_shared_wrong: int,
+    as_json: bool,
+    fail_on_match: bool,
+) -> None:
+    """Audit a graded submission set for answer similarity — cluster
+    students whose free-response answers are near-identical, and (with
+    --solutions) flag pairs whose incorrect objective answers agree far
+    more often than chance allows.
+    """
+    if not 0.0 < threshold <= 1.0:
         print("Error: --threshold must be between 0 and 1.", file=sys.stderr)
         sys.exit(1)
-    if args.min_shared_wrong < 1:
+    if min_shared_wrong < 1:
         print("Error: --min-shared-wrong must be at least 1.", file=sys.stderr)
         sys.exit(1)
 
-    input_path = Path(args.input)
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
     qa_doc = None
-    if args.solutions:
-        qa_path = Path(args.solutions)
+    if solutions:
+        qa_path = Path(solutions)
         if not qa_path.exists():
             print(f"Error: solutions file not found: {qa_path}", file=sys.stderr)
             sys.exit(1)
@@ -391,20 +396,20 @@ def run_cli(argv: list[str] | None = None) -> None:
             print(f"Warning: could not read {path}: {exc}", file=sys.stderr)
 
     flags = build_similarity_flags(
-        documents, threshold=args.threshold, min_length=args.min_length
+        documents, threshold=threshold, min_length=min_length
     )
     pattern_report = (
         build_answer_pattern_report_for_documents(
             documents,
             qa_doc,
-            threshold=args.pattern_threshold,
-            min_shared_wrong=args.min_shared_wrong,
+            threshold=pattern_threshold,
+            min_shared_wrong=min_shared_wrong,
         )
         if qa_doc is not None
         else None
     )
 
-    if args.as_json:
+    if as_json:
         free_response = [_flag_to_dict(flag) for flag in flags]
         if pattern_report is None:
             print(json.dumps(free_response, indent=2))
@@ -425,5 +430,9 @@ def run_cli(argv: list[str] | None = None) -> None:
             _print_patterns_human(pattern_report)
 
     found = bool(flags) or bool(pattern_report and pattern_report.flags)
-    if args.fail_on_match and found:
+    if fail_on_match and found:
         sys.exit(2)
+
+
+if __name__ == "__main__":
+    command()

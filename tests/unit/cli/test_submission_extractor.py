@@ -1,8 +1,8 @@
 import builtins
-from argparse import ArgumentTypeError
 from dataclasses import replace
 from pathlib import Path
 
+import click
 import pytest
 
 import opengrader.cli.submission_extractor as extractor_cli
@@ -240,7 +240,7 @@ def test_jobs_accepts_auto_and_positive_integers() -> None:
 
 def test_jobs_rejects_nonsense() -> None:
     for bad in ("-1", "half", ""):
-        with pytest.raises(ArgumentTypeError):
+        with pytest.raises(click.BadParameter):
             _parse_jobs(bad)
 
 

@@ -5,9 +5,11 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.course import (
     COURSE_FILENAME,
     CourseConfigError,
@@ -17,8 +19,9 @@ from opengrader.core.course import (
 )
 from opengrader.core.export.gradebook import escape_csv_field
 
-EPILOG = f"""
-examples:
+EPILOG = f"""\
+\b
+Examples:
   uv run course-grades --course course.toml
   uv run course-grades --course .                      # finds ./{COURSE_FILENAME}
   uv run course-grades --course course.toml --csv course-grades.csv
@@ -27,15 +30,18 @@ examples:
   uv run course-grades --course course.toml --student 012345
   uv run course-grades --course course.toml --json
 
-a course.toml looks like:
+\b
+A course.toml looks like:
   name = "CS 146 - Spring 2026"
 
+\b
   [[assignment]]
   name = "Quiz 1"
   path = "quizzes/quiz-1/student-submissions"
   weight = 10
   solutions = "quizzes/quiz-1/solutions.md"   # optional, unlocks outcomes
 
+\b
   [grades]
   A = 90
   B = 80
@@ -260,71 +266,69 @@ def report_to_dict(report: CourseReport) -> dict[str, object]:
     }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Roll a semester of assignment folders into one course gradebook: "
-            "weighted grades, letter grades, an at-risk list, per-student "
-            "trend, and learning-outcome mastery across the whole course. "
-            "Read-only — it never changes an assignment."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--course",
-        required=True,
-        help=f"Path to a {COURSE_FILENAME} (or a directory containing one).",
-    )
-    parser.add_argument(
-        "--csv",
-        default=None,
-        metavar="PATH",
-        help="Also write the course gradebook as a CSV here.",
-    )
-    parser.add_argument(
-        "--at-risk",
-        action="store_true",
-        help="Show the at-risk list (also shown by default when it is non-empty).",
-    )
-    parser.add_argument(
-        "--outcomes",
-        action="store_true",
-        help="Show learning-outcome mastery across the course.",
-    )
-    parser.add_argument(
-        "--student",
-        default=None,
-        metavar="ID_OR_NAME",
-        help="Show one student's full picture instead of the class summary.",
-    )
-    parser.add_argument(
-        "--summary",
-        action="store_true",
-        help="Print only the headline figures, not the per-student list.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the whole report as JSON instead of a readable summary.",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
+@click.command("course-grades", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--course",
+    required=True,
+    help=f"Path to a {COURSE_FILENAME} (or a directory containing one).",
+)
+@click.option(
+    "--csv",
+    "csv_path",
+    metavar="PATH",
+    help="Also write the course gradebook as a CSV here.",
+)
+@click.option(
+    "--at-risk",
+    is_flag=True,
+    help="Show the at-risk list (also shown by default when it is non-empty).",
+)
+@click.option(
+    "--outcomes",
+    is_flag=True,
+    help="Show learning-outcome mastery across the course.",
+)
+@click.option(
+    "--student",
+    metavar="ID_OR_NAME",
+    help="Show one student's full picture instead of the class summary.",
+)
+@click.option(
+    "--summary",
+    is_flag=True,
+    help="Print only the headline figures, not the per-student list.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the whole report as JSON instead of a readable summary.",
+)
+def command(
+    *,
+    course: str,
+    csv_path: str | None,
+    at_risk: bool,
+    outcomes: bool,
+    student: str | None,
+    summary: bool,
+    as_json: bool,
+) -> None:
+    """Roll a semester of assignment folders into one course gradebook:
+    weighted grades, letter grades, an at-risk list, per-student trend, and
+    learning-outcome mastery across the whole course. Read-only — it never
+    changes an assignment.
+    """
     try:
-        config = load_course_config(args.course)
+        config = load_course_config(course)
     except CourseConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     report = build_course_report(config)
 
-    if args.csv:
-        output = Path(args.csv)
+    if csv_path:
+        output = Path(csv_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         with output.open("w", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerows(
@@ -332,23 +336,23 @@ def run_cli(argv: list[str] | None = None) -> None:
                 for row in build_csv_rows(report)
             )
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(report_to_dict(report), indent=2))
         return
 
-    if args.student:
-        sys.exit(_print_student(report, args.student))
+    if student:
+        sys.exit(_print_student(report, student))
 
-    _print_report(report, show_all=not args.summary)
+    _print_report(report, show_all=not summary)
 
-    if args.at_risk or report.at_risk:
+    if at_risk or report.at_risk:
         _print_at_risk(report)
-    if args.outcomes or report.outcomes:
+    if outcomes or report.outcomes:
         _print_outcomes(report)
 
-    if args.csv:
-        print(f"\nWrote {Path(args.csv)}")
+    if csv_path:
+        print(f"\nWrote {Path(csv_path)}")
 
 
 if __name__ == "__main__":
-    run_cli()
+    command()

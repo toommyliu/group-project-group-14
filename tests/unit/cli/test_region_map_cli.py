@@ -8,7 +8,8 @@ import fitz
 import pytest
 from PIL import Image, ImageDraw
 
-from opengrader.cli.region_map import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.region_map import command
 from opengrader.core.region_map import (
     MappedQuestion,
     RegionBox,
@@ -54,7 +55,7 @@ def assignment(tmp_path: Path) -> Path:
 
 def test_propose_grid_writes_a_map_and_reports_it(assignment: Path, tmp_path: Path, capsys) -> None:
     output = tmp_path / "grid.regions.json"
-    run_cli(["propose", "--input", str(assignment), "--output", str(output), "--grid", "3"])
+    run_command(command, ["propose", "--input", str(assignment), "--output", str(output), "--grid", "3"])
 
     assert output.exists()
     region_map = load_region_map(output)
@@ -67,12 +68,12 @@ def test_propose_grid_writes_a_map_and_reports_it(assignment: Path, tmp_path: Pa
 
 def test_propose_blank_writes_an_empty_map(assignment: Path, tmp_path: Path) -> None:
     output = tmp_path / "empty.regions.json"
-    run_cli(["propose", "--input", str(assignment), "--output", str(output), "--blank"])
+    run_command(command, ["propose", "--input", str(assignment), "--output", str(output), "--blank"])
     assert load_region_map(output).questions == ()
 
 
 def test_propose_defaults_the_output_next_to_the_assignment(assignment: Path) -> None:
-    run_cli(["propose", "--input", str(assignment), "--grid", "1"])
+    run_command(command, ["propose", "--input", str(assignment), "--grid", "1"])
     assert (assignment.parent / "midterm.regions.json").exists()
 
 
@@ -80,10 +81,10 @@ def test_propose_refuses_to_clobber_hand_corrected_boxes(
     assignment: Path, tmp_path: Path, capsys
 ) -> None:
     output = tmp_path / "m.regions.json"
-    run_cli(["propose", "--input", str(assignment), "--output", str(output), "--grid", "1"])
+    run_command(command, ["propose", "--input", str(assignment), "--output", str(output), "--grid", "1"])
 
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["propose", "--input", str(assignment), "--output", str(output), "--grid", "9"])
+        run_command(command, ["propose", "--input", str(assignment), "--output", str(output), "--grid", "9"])
 
     assert exit_info.value.code == 1
     assert "--force" in capsys.readouterr().err
@@ -92,8 +93,9 @@ def test_propose_refuses_to_clobber_hand_corrected_boxes(
 
 def test_propose_force_replaces_the_map(assignment: Path, tmp_path: Path) -> None:
     output = tmp_path / "m.regions.json"
-    run_cli(["propose", "--input", str(assignment), "--output", str(output), "--grid", "1"])
-    run_cli(
+    run_command(command, ["propose", "--input", str(assignment), "--output", str(output), "--grid", "1"])
+    run_command(
+        command,
         ["propose", "--input", str(assignment), "--output", str(output), "--grid", "3", "--force"]
     )
     assert len(load_region_map(output).questions) == 6
@@ -101,7 +103,8 @@ def test_propose_force_replaces_the_map(assignment: Path, tmp_path: Path) -> Non
 
 def test_propose_refuses_a_missing_assignment(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(
+        run_command(
+            command,
             [
                 "propose",
                 "--input",
@@ -115,7 +118,7 @@ def test_propose_refuses_a_missing_assignment(tmp_path: Path, capsys) -> None:
 
 
 def test_validate_passes_a_good_map(assignment: Path, capsys) -> None:
-    run_cli(["validate", "--map", str(_write_map(assignment)), "--input", str(assignment)])
+    run_command(command, ["validate", "--map", str(_write_map(assignment)), "--input", str(assignment)])
     assert "No problems found" in capsys.readouterr().out
 
 
@@ -126,7 +129,7 @@ def test_validate_exits_two_on_an_error_level_finding(assignment: Path, tmp_path
     path.write_text(json.dumps(data))
 
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["validate", "--map", str(path)])
+        run_command(command, ["validate", "--map", str(path)])
     assert exit_info.value.code == 2
 
 
@@ -136,13 +139,13 @@ def test_validate_does_not_fail_on_warnings_alone(assignment: Path, tmp_path: Pa
     data["fields"]["name"] = None
     path.write_text(json.dumps(data))
 
-    run_cli(["validate", "--map", str(path)])
+    run_command(command, ["validate", "--map", str(path)])
 
 
 def test_validate_refuses_a_map_for_a_different_assignment(assignment: Path, tmp_path: Path, capsys) -> None:
     other = _image_only_pdf(tmp_path / "final.pdf", marker="OTHER")
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["validate", "--map", str(_write_map(assignment)), "--input", str(other)])
+        run_command(command, ["validate", "--map", str(_write_map(assignment)), "--input", str(other)])
 
     assert exit_info.value.code == 2
     assert "final.pdf" in capsys.readouterr().out
@@ -155,7 +158,7 @@ def test_validate_json_lists_findings_machine_readably(assignment: Path, tmp_pat
     path.write_text(json.dumps(data))
 
     with pytest.raises(SystemExit):
-        run_cli(["validate", "--map", str(path), "--json"])
+        run_command(command, ["validate", "--map", str(path), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert any(finding["kind"] == "empty_region" for finding in payload["findings"])
@@ -166,14 +169,15 @@ def test_validate_refuses_an_unreadable_map(tmp_path: Path, capsys) -> None:
     broken = tmp_path / "broken.json"
     broken.write_text("{oops")
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["validate", "--map", str(broken)])
+        run_command(command, ["validate", "--map", str(broken)])
     assert exit_info.value.code == 1
     assert "not valid JSON" in capsys.readouterr().err
 
 
 def test_preview_writes_a_pdf(assignment: Path, tmp_path: Path, capsys) -> None:
     output = tmp_path / "preview.pdf"
-    run_cli(
+    run_command(
+        command,
         [
             "preview",
             "--map",
@@ -194,7 +198,8 @@ def test_preview_writes_a_pdf(assignment: Path, tmp_path: Path, capsys) -> None:
 
 
 def test_preview_writes_pngs_for_a_png_output(assignment: Path, tmp_path: Path) -> None:
-    run_cli(
+    run_command(
+        command,
         [
             "preview",
             "--map",
@@ -214,7 +219,8 @@ def test_preview_writes_pngs_for_a_png_output(assignment: Path, tmp_path: Path) 
 def test_preview_refuses_the_wrong_assignment(assignment: Path, tmp_path: Path, capsys) -> None:
     other = _image_only_pdf(tmp_path / "final.pdf", marker="OTHER")
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(
+        run_command(
+            command,
             [
                 "preview",
                 "--map",
@@ -251,7 +257,7 @@ def test_from_qa_seeds_points_in_place(assignment: Path, tmp_path: Path, capsys)
         )
     )
 
-    run_cli(["from-qa", "--map", str(path), "--qa-file", str(qa_file)])
+    run_command(command, ["from-qa", "--map", str(path), "--qa-file", str(qa_file)])
 
     seeded = load_region_map(path)
     assert [question.possible_points for question in seeded.questions] == [12.0, 4.0]
@@ -264,7 +270,7 @@ def test_from_qa_can_write_elsewhere(assignment: Path, tmp_path: Path) -> None:
     qa_file.write_text("- (7 points) One\n  - **Correct**\n    - x\n")
     output = tmp_path / "seeded.json"
 
-    run_cli(["from-qa", "--map", str(path), "--qa-file", str(qa_file), "--output", str(output)])
+    run_command(command, ["from-qa", "--map", str(path), "--qa-file", str(qa_file), "--output", str(output)])
 
     assert output.exists()
     assert load_region_map(output).questions[0].possible_points == 7.0

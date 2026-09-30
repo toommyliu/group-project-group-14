@@ -7,103 +7,28 @@ import subprocess
 import sys
 import tempfile
 import time
-from argparse import ArgumentParser, BooleanOptionalAction, RawDescriptionHelpFormatter
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 from urllib.parse import urlparse
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.qa_file.text2qti import parse_text2qti, render_qa
 
 _TEXT_SUFFIXES = {".md", ".txt", ".text"}
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run create-answer-key --input questions.md --output qa.md
   uv run create-answer-key --input questions.docx --output qa.md --title "Quiz 1"
   uv run create-answer-key --input answer-key.pdf --output qa.md --auto-ollama
   uv run create-answer-key --input answer-key.pdf --output qa.md --blank-template blank.pdf
 """
-
-
-def _build_parser() -> ArgumentParser:
-    ai = app_config.resolve()
-    parser = ArgumentParser(
-        description=(
-            "Build a QA-format answer key from a question file — a text2qti "
-            "markdown (.md/.txt), a Word document (.docx), or a solved answer-key "
-            "PDF (.pdf). The input format is detected from the file extension."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument("--input", required=True, help="Path to the question file (.md/.txt/.docx/.pdf).")
-    parser.add_argument("--output", required=True, help="Path to write the generated QA markdown file.")
-    parser.add_argument("--title", default=None, help="Override the answer-key title.")
-    parser.add_argument(
-        "--instructions",
-        default=None,
-        help="Override the answer-key instructions/description.",
-    )
-
-    text_group = parser.add_argument_group("text2qti / Word inputs")
-    text_group.add_argument(
-        "--questions-start-page",
-        type=int,
-        default=1,
-        help="Value for the 'questions_start_page' frontmatter field (default: 1).",
-    )
-
-    pdf_group = parser.add_argument_group("PDF inputs")
-    pdf_group.add_argument(
-        "--blank-template",
-        metavar="PDF",
-        default=None,
-        help="Blank version of the assignment PDF (same layout) for alignment.",
-    )
-    pdf_group.add_argument(
-        "--ollama-model",
-        default=ai.vision_model,
-        help="Ollama vision model (default: %(default)s, from AI Setup).",
-    )
-    pdf_group.add_argument(
-        "--ollama-host",
-        default=ai.host,
-        help="Ollama server URL (default: %(default)s, from AI Setup).",
-    )
-    pdf_group.add_argument(
-        "--ollama-timeout",
-        type=float,
-        default=ai.timeout_seconds,
-        help="Ollama request timeout in seconds (default: %(default)s).",
-    )
-    pdf_group.add_argument(
-        "--auto-ollama",
-        action="store_true",
-        help="Start the Ollama server and pull the vision model if needed.",
-    )
-    pdf_group.add_argument(
-        "--llm-read-scans",
-        action=BooleanOptionalAction,
-        default=ai.read_handwriting,
-        help=(
-            "Whether a scanned/image PDF answer key is read with the vision "
-            "model on top of OCR. A plain-text file and a born-digital PDF "
-            "never touch it either way. (default: %(default)s, from AI Setup)"
-        ),
-    )
-    pdf_group.add_argument(
-        "--yes-send-to-cloud",
-        action="store_true",
-        dest="yes_send_to_cloud",
-        help=(
-            "Confirm sending the scanned answer key to a cloud AI provider "
-            "for --llm-read-scans. The scale and destination are shown first; "
-            "nothing is sent without this or an interactive yes."
-        ),
-    )
-    return parser
 
 
 def _read_docx_text(path: Path) -> str:
@@ -117,26 +42,32 @@ def _read_docx_text(path: Path) -> str:
     return "\n".join(paragraph.text for paragraph in document.paragraphs)
 
 
-def _qa_from_text(text: str, args) -> str:
+def _qa_from_text(
+    text: str,
+    *,
+    title: str | None,
+    instructions: str | None,
+    questions_start_page: int,
+) -> str:
     parsed = parse_text2qti(text)
     if not parsed.questions:
         raise ValueError("no questions parsed from the input (is it text2qti format?)")
     return render_qa(
         parsed,
-        title_override=args.title,
-        instructions_override=args.instructions,
-        questions_start_page=args.questions_start_page,
+        title_override=title,
+        instructions_override=instructions,
+        questions_start_page=questions_start_page,
     )
 
 
-def _start_ollama_server_if_needed(args, emit: Callable[[str], None]):
-    parsed_url = urlparse(args.ollama_host)
+def _start_ollama_server_if_needed(ollama_host: str, emit: Callable[[str], None]):
+    parsed_url = urlparse(ollama_host)
     host = parsed_url.hostname or "127.0.0.1"
     port = parsed_url.port or 11434
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         if s.connect_ex((host, port)) == 0:
             return None, None
-    emit(f"Ollama server not found at {args.ollama_host}. Starting 'ollama serve'...")
+    emit(f"Ollama server not found at {ollama_host}. Starting 'ollama serve'...")
     log_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
     try:
         proc = subprocess.Popen(["ollama", "serve"], stdout=log_file, stderr=log_file)
@@ -166,10 +97,18 @@ def _answer_key_pages_phrase(path: Path) -> str:
 
 def _qa_from_pdf(
     input_path: Path,
-    args,
     emit: Callable[[str], None],
     progress: "Callable[[int, int], None] | None" = None,
     *,
+    llm_read_scans: bool,
+    auto_ollama: bool,
+    ollama_model: str,
+    ollama_host: str,
+    ollama_timeout: float,
+    title: str | None,
+    instructions: str | None,
+    blank_template: str | None,
+    yes_send_to_cloud: bool,
     prompt_cloud_send: bool = True,
 ) -> str:
     from opengrader.core.qa_file.pdf_answer_key import extract_qa_markdown_from_pdf
@@ -178,7 +117,7 @@ def _qa_from_pdf(
     log_file = None
     try:
         vision_reader = None
-        if not args.llm_read_scans:
+        if not llm_read_scans:
             emit(
                 "The scan will be read with OCR alone (turn on 'Read "
                 "handwriting on scans' in AI setup to also use the vision "
@@ -188,21 +127,21 @@ def _qa_from_pdf(
             resolved_default = app_config.resolve()
             resolved = app_config.with_overrides(
                 resolved_default,
-                host=args.ollama_host,
-                vision_model=args.ollama_model,
-                timeout_seconds=args.ollama_timeout,
+                host=ollama_host,
+                vision_model=ollama_model,
+                timeout_seconds=ollama_timeout,
             )
-            if args.auto_ollama and resolved.provider.kind == "local":
-                server_proc, log_file = _start_ollama_server_if_needed(args, emit)
-                emit(f"Ensuring model '{args.ollama_model}' is available...")
+            if auto_ollama and resolved.provider.kind == "local":
+                server_proc, log_file = _start_ollama_server_if_needed(ollama_host, emit)
+                emit(f"Ensuring model '{ollama_model}' is available...")
                 subprocess.run(
-                    ["ollama", "pull", args.ollama_model],
+                    ["ollama", "pull", ollama_model],
                     check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
             if (
-                args.auto_ollama
-                or args.ollama_model != resolved_default.vision_model
-                or args.ollama_host != resolved_default.host
+                auto_ollama
+                or ollama_model != resolved_default.vision_model
+                or ollama_host != resolved_default.host
             ):
                 if resolved.kind == "cloud":
                     from opengrader.core.cloud_preflight import (
@@ -226,7 +165,7 @@ def _qa_from_pdf(
                                 )
                             },
                         ),
-                        yes_send_to_cloud=args.yes_send_to_cloud,
+                        yes_send_to_cloud=yes_send_to_cloud,
                         emit=emit,
                         interactive=prompt_cloud_send,
                     )
@@ -246,9 +185,9 @@ def _qa_from_pdf(
 
         return extract_qa_markdown_from_pdf(
             input_path,
-            title=args.title or "Extracted Assignment",
-            instructions=args.instructions or "Auto-generated",
-            blank_template_path=args.blank_template,
+            title=title or "Extracted Assignment",
+            instructions=instructions or "Auto-generated",
+            blank_template_path=blank_template,
             vision_reader=vision_reader,
             emit=emit,
             progress=progress,
@@ -260,25 +199,112 @@ def _qa_from_pdf(
             log_file.close()
 
 
-def run_cli(
-    argv: list[str] | None = None,
-    *,
-    status_callback: "Callable[[str], None] | None" = None,
-    progress_callback: "Callable[[int, int], None] | None" = None,
-    prompt_cloud_send: bool = True,
-) -> None:
+@dataclass(frozen=True)
+class _Hooks:
+    status_callback: Callable[[str], None] | None = None
+    progress_callback: Callable[[int, int], None] | None = None
     # prompt_cloud_send=False: a caller that owns the terminal (the TUI) gets
     # CloudConfirmationNeeded instead of an input() prompt; see cli_confirm_cloud_send.
+    prompt_cloud_send: bool = True
+
+
+@click.command("create-answer-key", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Path to the question file (.md/.txt/.docx/.pdf).",
+)
+@click.option("--output", required=True, help="Path to write the generated QA markdown file.")
+@click.option("--title", help="Override the answer-key title.")
+@click.option(
+    "--instructions",
+    help="Override the answer-key instructions/description.",
+)
+@click.option(
+    "--questions-start-page",
+    type=int,
+    default=1,
+    help="Value for the 'questions_start_page' frontmatter field (default: 1).",
+)
+@click.option(
+    "--blank-template",
+    metavar="PDF",
+    help="Blank version of the assignment PDF (same layout) for alignment.",
+)
+@click.option(
+    "--ollama-model",
+    default=ai_default("vision_model"),
+    show_default="from AI Setup",
+    help="Ollama vision model.",
+)
+@click.option(
+    "--ollama-host",
+    default=ai_default("host"),
+    show_default="from AI Setup",
+    help="Ollama server URL.",
+)
+@click.option(
+    "--ollama-timeout",
+    type=float,
+    default=ai_default("timeout_seconds"),
+    show_default="from AI Setup",
+    help="Ollama request timeout in seconds.",
+)
+@click.option(
+    "--auto-ollama",
+    is_flag=True,
+    help="Start the Ollama server and pull the vision model if needed.",
+)
+@click.option(
+    "--llm-read-scans/--no-llm-read-scans",
+    default=ai_default("read_handwriting"),
+    show_default="from AI Setup",
+    help=(
+        "Whether a scanned/image PDF answer key is read with the vision "
+        "model on top of OCR. A plain-text file and a born-digital PDF "
+        "never touch it either way."
+    ),
+)
+@click.option(
+    "--yes-send-to-cloud",
+    is_flag=True,
+    help=(
+        "Confirm sending the scanned answer key to a cloud AI provider "
+        "for --llm-read-scans. The scale and destination are shown first; "
+        "nothing is sent without this or an interactive yes."
+    ),
+)
+@click.pass_obj
+def command(
+    hooks: _Hooks | None,
+    *,
+    input_path: Path,
+    output: str,
+    title: str | None,
+    instructions: str | None,
+    questions_start_page: int,
+    blank_template: str | None,
+    ollama_model: str,
+    ollama_host: str,
+    ollama_timeout: float,
+    auto_ollama: bool,
+    llm_read_scans: bool,
+    yes_send_to_cloud: bool,
+) -> None:
+    """Build a QA-format answer key from a question file — a text2qti
+    markdown (.md/.txt), a Word document (.docx), or a solved answer-key
+    PDF (.pdf). The input format is detected from the file extension.
+    """
+    hooks = hooks or _Hooks()
+
     def emit(message: str) -> None:
-        if status_callback is not None:
-            status_callback(message)
+        if hooks.status_callback is not None:
+            hooks.status_callback(message)
         else:
             print(message)
 
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    input_path = Path(args.input)
     if not input_path.exists():
         print(f"error: input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
@@ -287,18 +313,37 @@ def run_cli(
     # own, so a cloud call here is recorded next to where the key is written.
     from opengrader.core import egress
 
-    egress.activate(Path(args.output).parent)
+    egress.activate(Path(output).parent)
 
     suffix = input_path.suffix.lower()
     try:
         if suffix in _TEXT_SUFFIXES:
-            qa_markdown = _qa_from_text(input_path.read_text(), args)
+            qa_markdown = _qa_from_text(
+                input_path.read_text(),
+                title=title,
+                instructions=instructions,
+                questions_start_page=questions_start_page,
+            )
         elif suffix == ".docx":
-            qa_markdown = _qa_from_text(_read_docx_text(input_path), args)
+            qa_markdown = _qa_from_text(
+                _read_docx_text(input_path),
+                title=title,
+                instructions=instructions,
+                questions_start_page=questions_start_page,
+            )
         elif suffix == ".pdf":
             qa_markdown = _qa_from_pdf(
-                input_path, args, emit, progress_callback,
-                prompt_cloud_send=prompt_cloud_send,
+                input_path, emit, hooks.progress_callback,
+                llm_read_scans=llm_read_scans,
+                auto_ollama=auto_ollama,
+                ollama_model=ollama_model,
+                ollama_host=ollama_host,
+                ollama_timeout=ollama_timeout,
+                title=title,
+                instructions=instructions,
+                blank_template=blank_template,
+                yes_send_to_cloud=yes_send_to_cloud,
+                prompt_cloud_send=hooks.prompt_cloud_send,
             )
         else:
             print(
@@ -311,7 +356,7 @@ def run_cli(
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    output_path = Path(args.output)
+    output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(qa_markdown)
 
@@ -325,5 +370,23 @@ def run_cli(
     emit(f"Wrote answer key to {output_path}")
 
 
+def run_cli(
+    argv: Sequence[str],
+    *,
+    status_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    prompt_cloud_send: bool = True,
+) -> None:
+    run_command(
+        command,
+        argv,
+        obj=_Hooks(
+            status_callback=status_callback,
+            progress_callback=progress_callback,
+            prompt_cloud_send=prompt_cloud_send,
+        ),
+    )
+
+
 if __name__ == "__main__":
-    run_cli()
+    command()

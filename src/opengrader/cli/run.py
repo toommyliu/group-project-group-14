@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, BooleanOptionalAction, RawDescriptionHelpFormatter
 from contextlib import redirect_stdout
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import shlex
 from uuid import uuid4
 
-from opengrader.core import app_config
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, ai_default, resolved_ai
 from opengrader.core.workspace.models import AssignmentInputs
 from opengrader.core.pipeline import (
     PIPELINE_STAGES,
@@ -25,8 +26,9 @@ from opengrader.core.pipeline import (
     run_pipeline,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run opengrader-run cs146-quiz1/                    # finds the scan, answer key, roster, template
   uv run opengrader-run cs146-quiz1/ --qa other-key.md  # any flag overrides what was found
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/
@@ -36,7 +38,8 @@ examples:
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm --auto-ollama
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
 
-class folder:
+\b
+Class folder:
   Give a folder instead of --scan/--out and its inputs are found for you: a
   markdown answer key that parses, a tab-separated roster, a PDF named
   *template* or *blank*, and the remaining PDF as the scan (or a subfolder of
@@ -44,12 +47,14 @@ class folder:
   answer key stop the run and are named; two rosters or templates are left
   out with a warning. The folder doubles as --out.
 
-resuming:
+\b
+Resuming:
   Re-run the same command. Nothing is repeated that does not need to be, and the
   summary says which stages were reused. If inputs change, use --fresh to process
   them as a new assignment while preserving previous grades.
 
-what it builds under --out:
+\b
+What it builds under --out:
   split/                       per-student PDFs (skipped when --scan is a directory)
   submissions/                 the *.submission.md folder for file utilities
   .opengrader/run-ledger.jsonl the stage ledger that makes a re-run resumable
@@ -129,228 +134,6 @@ class _Narrator:
     def _write(self, text: str) -> None:
         self._stream.write(text)
         self._stream.flush()
-
-
-def _build_parser() -> ArgumentParser:
-    ai = app_config.resolve()
-    parser = ArgumentParser(
-        description=(
-            "Run the whole pre-grading pipeline — scan check, split, extract, "
-            "auto-grade — with one command. Re-runs resume instead of repeating."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "folder",
-        nargs="?",
-        default=None,
-        metavar="CLASS_FOLDER",
-        help=(
-            "A class folder holding the scan and, optionally, the answer key, "
-            "roster and blank template — each is found automatically, and any "
-            "flag below overrides what was found. Also the --out folder unless "
-            "--out is given."
-        ),
-    )
-    parser.add_argument(
-        "--scan",
-        default=None,
-        help=(
-            "The bulk scan PDF, or a directory of already-split per-student "
-            "PDFs (in which case the split stage is skipped). Required without "
-            "a class folder."
-        ),
-    )
-    parser.add_argument(
-        "--out",
-        default=None,
-        help=(
-            "Cohort folder to build: split/, submissions/ and the run ledger. "
-            "Required without a class folder."
-        ),
-    )
-    parser.add_argument(
-        "--workspace",
-        type=Path,
-        help="Workspace to receive processed submissions. Defaults to the folder's nearest workspace.",
-    )
-    parser.add_argument("--assignment", help="Use this assignment ID in the workspace.")
-    parser.add_argument(
-        "--qa",
-        default=None,
-        help=(
-            "Answer key markdown. Without it the run stops after extraction and "
-            "auto-grading is skipped."
-        ),
-    )
-    parser.add_argument(
-        "--roster",
-        default=None,
-        help="Tab-separated roster (ID<TAB>NAME); names and IDs are matched to it.",
-    )
-    parser.add_argument(
-        "--blank-template",
-        metavar="PDF",
-        default=None,
-        help=(
-            "Blank copy of the assignment. Supplies the question layout to the "
-            "extractor and the true page sequence to the split stage."
-        ),
-    )
-    parser.add_argument(
-        "--pages-per-submission",
-        type=int,
-        default=None,
-        help=(
-            "Pages each student's submission has. Also what lets the pre-flight "
-            "check page order and page count at all."
-        ),
-    )
-    parser.add_argument(
-        "--jobs",
-        type=int,
-        default=None,
-        help="Extraction worker processes (default: the extractor's own choice).",
-    )
-    parser.add_argument(
-        "--llm",
-        action=BooleanOptionalAction,
-        default=None,
-        help=(
-            "Let a local model help: it is asked about handwriting Tesseract "
-            "read badly, and about free responses the rubric cannot settle. "
-            "Deliberately tri-state: left absent, reading handwriting and "
-            "suggesting grades each follow their own AI Setup switch (they are "
-            "genuinely different decisions); given as --llm/--no-llm, it is a "
-            "blunt override for both, which is what a script or a CI run "
-            "wants. (unset default: follows AI Setup)"
-        ),
-    )
-    parser.add_argument(
-        "--llm-vision-model",
-        default="",
-        help=(
-            "Ollama vision model for transcription. Left blank, each stage "
-            "resolves its own default from the AI Setup settings (saved setting "
-            "> built-in default) — set it there once instead of "
-            "passing it here on every run."
-        ),
-    )
-    parser.add_argument(
-        "--llm-text-model",
-        default="",
-        help=(
-            "Ollama chat model for grading free responses. Left blank, each "
-            "stage resolves its own default from the AI Setup settings, same as "
-            "--llm-vision-model above."
-        ),
-    )
-    parser.add_argument(
-        "--ollama-host",
-        default="",
-        help=(
-            "Ollama server URL. Left blank, each stage resolves its own default "
-            "from the AI Setup settings, same as --llm-vision-model above."
-        ),
-    )
-    parser.add_argument(
-        "--auto-ollama",
-        action=BooleanOptionalAction,
-        default=ai.auto_start,
-        help=(
-            "Start 'ollama serve' and pull the models if they are not there. "
-            "(default: %(default)s, from AI Setup)"
-        ),
-    )
-    parser.add_argument(
-        "--llm-min-confidence",
-        type=float,
-        default=None,
-        help=(
-            "Only write AI grade suggestions at or above this confidence (0-1). "
-            "Run 'llm-eval' on already-graded work to find the right value."
-        ),
-    )
-    parser.add_argument(
-        "--auto-grade",
-        action=BooleanOptionalAction,
-        default=ai.auto_grade,
-        dest="auto_grade",
-        help=(
-            "Run the auto-grade stage automatically once extraction finishes "
-            "(default: %(default)s, from AI Setup). --no-auto-grade: extract "
-            "only; leave every answer for the TUI."
-        ),
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help=(
-            "Carry on past a high-severity pre-flight finding. The finding is "
-            "still reported — this says you have read it and want it graded."
-        ),
-    )
-    parser.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Redo every stage; changed inputs create a new assignment and preserve prior grades.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print what each stage would do, then exit. Writes nothing.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Print the report as JSON instead of prose.",
-    )
-    parser.add_argument(
-        "--yes-send-to-cloud",
-        action="store_true",
-        dest="yes_send_to_cloud",
-        help=(
-            "Confirm sending this run's data to a cloud AI provider — the scale "
-            "and destination are shown first (see the pre-flight statement) and "
-            "nothing is sent without this or an interactive yes. Never implied "
-            "by --llm or any other AI toggle."
-        ),
-    )
-    return parser
-
-
-def _build_request(
-    args, ai: "app_config.ResolvedAI | None" = None
-) -> PipelineRequest:
-    resolved_ai = ai if ai is not None else app_config.resolve()
-    return PipelineRequest(
-        scan=Path(args.scan),
-        output_dir=Path(args.out),
-        qa_file=Path(args.qa) if args.qa else None,
-        roster=Path(args.roster) if args.roster else None,
-        blank_template=Path(args.blank_template) if args.blank_template else None,
-        pages_per_submission=args.pages_per_submission,
-        llm=LlmOptions(
-            read_handwriting=(
-                args.llm if args.llm is not None else resolved_ai.read_handwriting
-            ),
-            grade_written=(
-                args.llm if args.llm is not None else resolved_ai.grade_written
-            ),
-            vision_model=args.llm_vision_model,
-            text_model=args.llm_text_model,
-            host=args.ollama_host,
-            auto_ollama=args.auto_ollama,
-            min_confidence=args.llm_min_confidence,
-        ),
-        jobs=args.jobs,
-        auto_grade=args.auto_grade,
-        force=args.force,
-        fresh=args.fresh,
-        send_to_cloud_confirmed=args.yes_send_to_cloud,
-    )
 
 
 def _print_plan(request: PipelineRequest) -> None:
@@ -495,6 +278,16 @@ def exit_code(report: PipelineReport) -> int:
     return 0 if report.ok else 1
 
 
+@dataclass
+class _Inputs:
+    scan: str | None
+    out: str | None
+    qa: str | None
+    roster: str | None
+    blank_template: str | None
+    pages_per_submission: int | None
+
+
 _FOLDER_ROLE_FLAGS = (
     ("scan", "scan", "--scan"),
     ("qa", "qa", "--qa"),
@@ -507,10 +300,10 @@ _FOLDER_ROLE_FLAGS = (
 _BLOCKING_ROLES = frozenset({"scan", "qa"})
 
 
-def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
-    if args.folder is None:
-        if not args.scan or not args.out:
-            parser.error("give a class folder, or both --scan and --out")
+def _resolve_class_folder(folder: str | None, inputs: _Inputs, *, stream) -> None:
+    if folder is None:
+        if not inputs.scan or not inputs.out:
+            raise click.UsageError("give a class folder, or both --scan and --out")
         return
 
     from opengrader.core.class_folder import (
@@ -520,9 +313,9 @@ def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
     )
 
     try:
-        found = scan_class_folder(args.folder)
+        found = scan_class_folder(folder)
     except NotADirectoryError as exc:
-        parser.error(str(exc))
+        raise click.UsageError(str(exc)) from None
 
     stream.write(f"Class folder {found.folder}\n")
     for line in describe_class_folder(found):
@@ -530,7 +323,7 @@ def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
 
     blocking: list[str] = []
     for role, dest, flag in _FOLDER_ROLE_FLAGS:
-        given = getattr(args, dest)
+        given = getattr(inputs, dest)
         if given:
             stream.write(f"  = {ROLE_LABELS[role]:<15} {given} (from {flag})\n")
             continue
@@ -546,29 +339,30 @@ def _resolve_class_folder(parser: ArgumentParser, args, *, stream) -> None:
             continue
         path = found.found(role)
         if path is not None:
-            setattr(args, dest, str(path))
+            setattr(inputs, dest, str(path))
     stream.write("\n")
     stream.flush()
 
     if blocking:
-        parser.error(
+        raise click.UsageError(
             "more than one file in the class folder fits — choose with "
             + "; ".join(blocking)
         )
-    if not args.scan:
-        parser.error(
+    if not inputs.scan:
+        raise click.UsageError(
             f"no scanned bundle or folder of split PDFs found in {found.folder} "
             "— pass --scan"
         )
-    if not args.out:
-        args.out = str(found.folder)
+    if not inputs.out:
+        inputs.out = str(found.folder)
 
 
 def _resolve_cloud_confirmation(
     request: PipelineRequest,
     report: PipelineReport,
     narrator: "_Narrator",
-    args,
+    *,
+    as_json: bool,
 ) -> tuple[PipelineRequest, PipelineReport]:
     """`report` is the refusal run_pipeline returns for an unconfirmed cloud
     run. Show the pre-flight statement and either get a yes and re-run, or
@@ -578,12 +372,12 @@ def _resolve_cloud_confirmation(
     redirected run, or --json for machine consumption) only gets the
     statement and the flag that would confirm it, then refuses.
     """
-    stream = sys.stderr if args.as_json else sys.stdout
+    stream = sys.stderr if as_json else sys.stdout
     preflight = report.cloud_preflight
     statement = preflight.statement() if preflight is not None else report.stages[0].detail
     stream.write(f"\n{statement}\n")
 
-    interactive = sys.stdin.isatty() and not args.as_json
+    interactive = sys.stdin.isatty() and not as_json
     if not interactive:
         stream.write(
             "\nRe-run with --yes-send-to-cloud to confirm, or turn off the AI "
@@ -603,14 +397,14 @@ def _resolve_cloud_confirmation(
         return request, report
 
     confirmed_request = replace(request, send_to_cloud_confirmed=True)
-    new_report = _run_pipeline(confirmed_request, narrator, args)
+    new_report = _run_pipeline(confirmed_request, narrator, as_json=as_json)
     return confirmed_request, new_report
 
 
 def _run_pipeline(
-    request: PipelineRequest, narrator: "_Narrator", args
+    request: PipelineRequest, narrator: "_Narrator", *, as_json: bool
 ) -> PipelineReport:
-    if args.as_json:
+    if as_json:
         with redirect_stdout(sys.stderr):
             return run_pipeline(request, progress=narrator.as_progress())
     return run_pipeline(request, progress=narrator.as_progress())
@@ -658,7 +452,7 @@ def _publish_results(
     )
 
 
-def _run_target(parser: ArgumentParser, args) -> Path:
+def _run_target(folder: str | None, inputs: _Inputs, assignment: str | None) -> Path:
     from opengrader.core.workspace.context import (
         assignment_for_directory,
         inputs_for_assignment,
@@ -666,12 +460,12 @@ def _run_target(parser: ArgumentParser, args) -> Path:
     )
     from opengrader.core.workspace.store import Workspace, discover_workspace
 
-    if args.folder:
-        return Path(args.folder).expanduser().resolve()
-    if args.scan or args.out:
-        if not args.scan or not args.out:
-            parser.error("give a class folder, or both --scan and --out")
-        return Path(args.out).expanduser().resolve()
+    if folder:
+        return Path(folder).expanduser().resolve()
+    if inputs.scan or inputs.out:
+        if not inputs.scan or not inputs.out:
+            raise click.UsageError("give a class folder, or both --scan and --out")
+        return Path(inputs.out).expanduser().resolve()
     root = discover_workspace(Path.cwd())
     if root is not None:
         workspace = Workspace(root)
@@ -679,11 +473,11 @@ def _run_target(parser: ArgumentParser, args) -> Path:
             assignment_id = assignment_for_directory(
                 workspace,
                 Path.cwd(),
-                assignment_id=args.assignment,
+                assignment_id=assignment,
                 include_pending=True,
             )
         except ValueError as exc:
-            parser.error(str(exc))
+            raise click.UsageError(str(exc)) from None
         if assignment_id is not None:
             saved = inputs_for_assignment(workspace, assignment_id)
             if saved is not None:
@@ -691,7 +485,7 @@ def _run_target(parser: ArgumentParser, args) -> Path:
     return Path.cwd().resolve()
 
 
-def _fill_saved_inputs(args, workspace_root: Path, target: Path) -> None:
+def _fill_saved_inputs(inputs: _Inputs, workspace_root: Path, target: Path) -> None:
     from opengrader.core.workspace.context import resolve_path
     from opengrader.core.workspace.store import DATABASE, Workspace
 
@@ -709,16 +503,16 @@ def _fill_saved_inputs(args, workspace_root: Path, target: Path) -> None:
         return
     for key in ("scan", "output", "qa", "roster", "blank_template"):
         dest = "out" if key == "output" else key
-        value = getattr(args, dest)
+        value = getattr(inputs, dest)
         stored = getattr(saved, key)
         if not value and stored:
-            setattr(args, dest, str(resolve_path(target, stored)))
-    if args.pages_per_submission is None:
-        args.pages_per_submission = saved.pages_per_submission
+            setattr(inputs, dest, str(resolve_path(target, stored)))
+    if inputs.pages_per_submission is None:
+        inputs.pages_per_submission = saved.pages_per_submission
 
 
 def _save_inputs(
-    args, root: Path, target: Path
+    inputs: _Inputs, root: Path, target: Path, *, assignment: str | None, fresh: bool
 ) -> tuple[AssignmentInputs, str | None]:
     from opengrader.core.workspace.context import input_state, resolve_path, stored_path
     from opengrader.core.workspace.store import DATABASE, Workspace
@@ -731,102 +525,314 @@ def _save_inputs(
         ),
         None,
     )
-    if saved is not None and args.assignment and args.assignment != saved.id:
+    if saved is not None and assignment and assignment != saved.id:
         raise ValueError("This folder belongs to another assignment.")
     assignment_id = (
-        saved.id if saved is not None else args.assignment or workspace.assignment_id_for_folder(target)
+        saved.id if saved is not None else assignment or workspace.assignment_id_for_folder(target)
     )
-    inputs = AssignmentInputs(
+    stored = AssignmentInputs(
         id=assignment_id,
         folder=stored_path(root, target),
-        scan=stored_path(target, Path(args.scan)),
-        output=stored_path(target, Path(args.out)),
-        submissions=stored_path(target, Path(args.out) / "submissions"),
-        qa=stored_path(target, Path(args.qa)) if args.qa else None,
-        roster=stored_path(target, Path(args.roster)) if args.roster else None,
+        scan=stored_path(target, Path(inputs.scan)),
+        output=stored_path(target, Path(inputs.out)),
+        submissions=stored_path(target, Path(inputs.out) / "submissions"),
+        qa=stored_path(target, Path(inputs.qa)) if inputs.qa else None,
+        roster=stored_path(target, Path(inputs.roster)) if inputs.roster else None,
         blank_template=(
-            stored_path(target, Path(args.blank_template))
-            if args.blank_template else None
+            stored_path(target, Path(inputs.blank_template))
+            if inputs.blank_template else None
         ),
-        pages_per_submission=args.pages_per_submission,
+        pages_per_submission=inputs.pages_per_submission,
         input_state=input_state({
-            "scan": Path(args.scan),
-            "qa": Path(args.qa) if args.qa else None,
-            "roster": Path(args.roster) if args.roster else None,
-            "blank_template": Path(args.blank_template) if args.blank_template else None,
+            "scan": Path(inputs.scan),
+            "qa": Path(inputs.qa) if inputs.qa else None,
+            "roster": Path(inputs.roster) if inputs.roster else None,
+            "blank_template": Path(inputs.blank_template) if inputs.blank_template else None,
         }),
     )
-    changed = saved is not None and inputs != saved
+    changed = saved is not None and stored != saved
     published = saved is not None and any(
-        assignment.id == saved.id for assignment in workspace.assignments()
+        item.id == saved.id for item in workspace.assignments()
     )
     if changed and published:
-        if not args.fresh:
+        if not fresh:
             raise ValueError(
                 "Assignment inputs changed. Pass --fresh to process them as a new assignment; existing grades stay in the previous assignment."
             )
-        return inputs.model_copy(update={"id": str(uuid4())}), saved.id
-    workspace.save_assignment_inputs(inputs)
-    return inputs, None
+        return stored.model_copy(update={"id": str(uuid4())}), saved.id
+    workspace.save_assignment_inputs(stored)
+    return stored, None
 
 
-def run_cli(argv: list[str] | None = None) -> PipelineReport | None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+@click.command("run", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.argument("folder", required=False, metavar="[CLASS_FOLDER]")
+@click.option(
+    "--scan",
+    help=(
+        "The bulk scan PDF, or a directory of already-split per-student "
+        "PDFs (in which case the split stage is skipped). Required without "
+        "a class folder."
+    ),
+)
+@click.option(
+    "--out",
+    help=(
+        "Cohort folder to build: split/, submissions/ and the run ledger. "
+        "Required without a class folder."
+    ),
+)
+@click.option(
+    "--workspace",
+    type=click.Path(path_type=Path),
+    help="Workspace to receive processed submissions. Defaults to the folder's nearest workspace.",
+)
+@click.option("--assignment", help="Use this assignment ID in the workspace.")
+@click.option(
+    "--qa",
+    help=(
+        "Answer key markdown. Without it the run stops after extraction and "
+        "auto-grading is skipped."
+    ),
+)
+@click.option(
+    "--roster",
+    help="Tab-separated roster (ID<TAB>NAME); names and IDs are matched to it.",
+)
+@click.option(
+    "--blank-template",
+    metavar="PDF",
+    help=(
+        "Blank copy of the assignment. Supplies the question layout to the "
+        "extractor and the true page sequence to the split stage."
+    ),
+)
+@click.option(
+    "--pages-per-submission",
+    type=int,
+    help=(
+        "Pages each student's submission has. Also what lets the pre-flight "
+        "check page order and page count at all."
+    ),
+)
+@click.option(
+    "--jobs",
+    type=int,
+    help="Extraction worker processes (default: the extractor's own choice).",
+)
+@click.option(
+    "--llm/--no-llm",
+    default=None,
+    help=(
+        "Let a local model help: it is asked about handwriting Tesseract "
+        "read badly, and about free responses the rubric cannot settle. "
+        "Deliberately tri-state: left absent, reading handwriting and "
+        "suggesting grades each follow their own AI Setup switch (they are "
+        "genuinely different decisions); given as --llm/--no-llm, it is a "
+        "blunt override for both, which is what a script or a CI run "
+        "wants. (unset default: follows AI Setup)"
+    ),
+)
+@click.option(
+    "--llm-vision-model",
+    default="",
+    help=(
+        "Ollama vision model for transcription. Left blank, each stage "
+        "resolves its own default from the AI Setup settings (saved setting "
+        "> built-in default) — set it there once instead of "
+        "passing it here on every run."
+    ),
+)
+@click.option(
+    "--llm-text-model",
+    default="",
+    help=(
+        "Ollama chat model for grading free responses. Left blank, each "
+        "stage resolves its own default from the AI Setup settings, same as "
+        "--llm-vision-model above."
+    ),
+)
+@click.option(
+    "--ollama-host",
+    default="",
+    help=(
+        "Ollama server URL. Left blank, each stage resolves its own default "
+        "from the AI Setup settings, same as --llm-vision-model above."
+    ),
+)
+@click.option(
+    "--auto-ollama/--no-auto-ollama",
+    default=ai_default("auto_start"),
+    show_default="from AI Setup",
+    help="Start 'ollama serve' and pull the models if they are not there.",
+)
+@click.option(
+    "--llm-min-confidence",
+    type=float,
+    help=(
+        "Only write AI grade suggestions at or above this confidence (0-1). "
+        "Run 'llm-eval' on already-graded work to find the right value."
+    ),
+)
+@click.option(
+    "--auto-grade/--no-auto-grade",
+    default=ai_default("auto_grade"),
+    show_default="from AI Setup",
+    help=(
+        "Run the auto-grade stage automatically once extraction finishes. "
+        "--no-auto-grade: extract only; leave every answer for the TUI."
+    ),
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help=(
+        "Carry on past a high-severity pre-flight finding. The finding is "
+        "still reported — this says you have read it and want it graded."
+    ),
+)
+@click.option(
+    "--fresh",
+    is_flag=True,
+    help="Redo every stage; changed inputs create a new assignment and preserve prior grades.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print what each stage would do, then exit. Writes nothing.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Print the report as JSON instead of prose.",
+)
+@click.option(
+    "--yes-send-to-cloud",
+    is_flag=True,
+    help=(
+        "Confirm sending this run's data to a cloud AI provider — the scale "
+        "and destination are shown first (see the pre-flight statement) and "
+        "nothing is sent without this or an interactive yes. Never implied "
+        "by --llm or any other AI toggle."
+    ),
+)
+def command(
+    *,
+    folder: str | None,
+    scan: str | None,
+    out: str | None,
+    workspace: Path | None,
+    assignment: str | None,
+    qa: str | None,
+    roster: str | None,
+    blank_template: str | None,
+    pages_per_submission: int | None,
+    jobs: int | None,
+    llm: bool | None,
+    llm_vision_model: str,
+    llm_text_model: str,
+    ollama_host: str,
+    auto_ollama: bool,
+    llm_min_confidence: float | None,
+    auto_grade: bool,
+    force: bool,
+    fresh: bool,
+    dry_run: bool,
+    as_json: bool,
+    yes_send_to_cloud: bool,
+) -> PipelineReport | None:
+    """Run the whole pre-grading pipeline — scan check, split, extract,
+    auto-grade — with one command. Re-runs resume instead of repeating.
+
+    CLASS_FOLDER holds the scan and, optionally, the answer key, roster and
+    blank template — each is found automatically, and any flag below
+    overrides what was found. Also the --out folder unless --out is given.
+    """
     from opengrader.core.workspace.store import discover_workspace
 
+    inputs = _Inputs(
+        scan=scan,
+        out=out,
+        qa=qa,
+        roster=roster,
+        blank_template=blank_template,
+        pages_per_submission=pages_per_submission,
+    )
     try:
-        target = _run_target(parser, args)
+        target = _run_target(folder, inputs, assignment)
         root = (
-            args.workspace.expanduser().resolve()
-            if args.workspace is not None
+            workspace.expanduser().resolve()
+            if workspace is not None
             else discover_workspace(target) or target
         )
-        _fill_saved_inputs(args, root, target)
+        _fill_saved_inputs(inputs, root, target)
     except (OSError, ValueError) as exc:
-        parser.error(str(exc))
-    if args.folder is None and not args.scan:
-        args.folder = str(target)
-    _resolve_class_folder(
-        parser, args, stream=sys.stderr if args.as_json else sys.stdout
-    )
-    request = _build_request(args)
+        raise click.UsageError(str(exc)) from None
+    if folder is None and not inputs.scan:
+        folder = str(target)
+    _resolve_class_folder(folder, inputs, stream=sys.stderr if as_json else sys.stdout)
 
-    if args.dry_run:
+    ai = resolved_ai()
+    request = PipelineRequest(
+        scan=Path(inputs.scan),
+        output_dir=Path(inputs.out),
+        qa_file=Path(inputs.qa) if inputs.qa else None,
+        roster=Path(inputs.roster) if inputs.roster else None,
+        blank_template=Path(inputs.blank_template) if inputs.blank_template else None,
+        pages_per_submission=inputs.pages_per_submission,
+        llm=LlmOptions(
+            read_handwriting=llm if llm is not None else ai.read_handwriting,
+            grade_written=llm if llm is not None else ai.grade_written,
+            vision_model=llm_vision_model,
+            text_model=llm_text_model,
+            host=ollama_host,
+            auto_ollama=auto_ollama,
+            min_confidence=llm_min_confidence,
+        ),
+        jobs=jobs,
+        auto_grade=auto_grade,
+        force=force,
+        fresh=fresh,
+        send_to_cloud_confirmed=yes_send_to_cloud,
+    )
+
+    if dry_run:
         _print_plan(request)
         return None
 
     try:
-        inputs, previous_id = _save_inputs(args, root, target)
+        saved, previous_id = _save_inputs(
+            inputs, root, target, assignment=assignment, fresh=fresh
+        )
     except (OSError, ValueError) as exc:
-        parser.error(str(exc))
+        raise click.UsageError(str(exc)) from None
 
-    narrator = _Narrator(stream=sys.stderr if args.as_json else sys.stdout)
-    report = _run_pipeline(request, narrator, args)
+    narrator = _Narrator(stream=sys.stderr if as_json else sys.stdout)
+    report = _run_pipeline(request, narrator, as_json=as_json)
     if report.cloud_confirmation_needed:
-        request, report = _resolve_cloud_confirmation(request, report, narrator, args)
+        request, report = _resolve_cloud_confirmation(
+            request, report, narrator, as_json=as_json
+        )
 
     report = replace(report, workspace=root)
     if report.ok and report.ready_to_grade and request.qa_file is not None:
         narrator.status("Publishing results to the workspace.")
-        report = _publish_results(report, root, inputs.id)
-    if report.ok and report.assignment_id == inputs.id and previous_id is not None:
+        report = _publish_results(report, root, saved.id)
+    if report.ok and report.assignment_id == saved.id and previous_id is not None:
         from opengrader.core.workspace.store import Workspace
 
-        Workspace(root).replace_assignment_inputs(previous_id, inputs)
+        Workspace(root).replace_assignment_inputs(previous_id, saved)
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(_report_to_dict(report), indent=2))
     else:
         _print_summary(report)
 
+    code = exit_code(report)
+    if code:
+        sys.exit(code)
     return report
 
 
-def main(argv: list[str] | None = None) -> int:
-    report = run_cli(argv)
-    return 0 if report is None else exit_code(report)
-
-
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    command()
