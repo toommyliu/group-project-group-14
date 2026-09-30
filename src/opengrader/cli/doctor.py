@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, ai_default, resolved_ai
 from opengrader.core import app_config
 from opengrader.core.environment import (
     EnvironmentCheck,
@@ -13,8 +15,9 @@ from opengrader.core.environment import (
     build_environment_report,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run doctor                      # check everything
   uv run doctor --smoke              # also build a template PDF end to end
   uv run doctor --json               # machine-readable, for a bug report
@@ -92,79 +95,76 @@ def _report_to_json(report: EnvironmentReport, *, ai: "app_config.ResolvedAI | N
     return result
 
 
-def build_parser() -> ArgumentParser:
-    ai = app_config.resolve()
-    parser = ArgumentParser(
-        description="Check that this machine has everything Opengrader needs.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--ollama-host",
-        default=ai.host,
-        help="Ollama server to check (default: %(default)s, from AI Setup).",
-    )
-    parser.add_argument(
-        "--ollama-model",
-        default=ai.vision_model,
-        help="Vision model the extractor would use (default: %(default)s, from AI Setup).",
-    )
-    parser.add_argument(
-        "--llm-model",
-        default=None,
-        help="Text model `automated-grading --llm` would use, if different.",
-    )
-    parser.add_argument(
-        "--smoke",
-        action="store_true",
-        help="Also run an end-to-end check: answer key -> template PDF.",
-    )
-    parser.add_argument(
-        "--no-graphics",
-        action="store_true",
-        help="Skip the terminal-graphics check (it inspects the terminal).",
-    )
-    parser.add_argument(
-        "--time-ai",
-        action="store_true",
-        help="Time one small real request to the configured handwriting model and report it against your timeout. Note: slow on a first call because the model's weights are loaded then.",
-    )
-    parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
-    parser.add_argument(
-        "--fail-on-problem",
-        action="store_true",
-        help="Exit 2 when a core capability is broken (for scripts and CI).",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    ai = app_config.resolve()
+@click.command("doctor", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--ollama-host",
+    default=ai_default("host"),
+    show_default="from AI Setup",
+    help="Ollama server to check.",
+)
+@click.option(
+    "--ollama-model",
+    default=ai_default("vision_model"),
+    show_default="from AI Setup",
+    help="Vision model the extractor would use.",
+)
+@click.option(
+    "--llm-model",
+    help="Text model `automated-grading --llm` would use, if different.",
+)
+@click.option(
+    "--smoke",
+    is_flag=True,
+    help="Also run an end-to-end check: answer key -> template PDF.",
+)
+@click.option(
+    "--no-graphics",
+    is_flag=True,
+    help="Skip the terminal-graphics check (it inspects the terminal).",
+)
+@click.option(
+    "--time-ai",
+    is_flag=True,
+    help="Time one small real request to the configured handwriting model and report it against your timeout. Note: slow on a first call because the model's weights are loaded then.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON instead of text.")
+@click.option(
+    "--fail-on-problem",
+    is_flag=True,
+    help="Exit 2 when a core capability is broken (for scripts and CI).",
+)
+def command(
+    *,
+    ollama_host: str,
+    ollama_model: str,
+    llm_model: str | None,
+    smoke: bool,
+    no_graphics: bool,
+    time_ai: bool,
+    as_json: bool,
+    fail_on_problem: bool,
+) -> None:
+    """Check that this machine has everything Opengrader needs."""
+    ai = resolved_ai()
 
     report = build_environment_report(
-        vision_model=args.ollama_model,
-        text_model=args.llm_model,
-        ollama_host=args.ollama_host,
-        check_graphics=not args.no_graphics,
-        smoke_test=args.smoke,
+        vision_model=ollama_model,
+        text_model=llm_model,
+        ollama_host=ollama_host,
+        check_graphics=not no_graphics,
+        smoke_test=smoke,
         ai=ai,
-        time_ai=args.time_ai,
+        time_ai=time_ai,
     )
 
-    if args.json:
+    if as_json:
         print(json.dumps(_report_to_json(report, ai=ai), indent=2))
     else:
         _print_human(report, ai=ai)
 
-    if args.fail_on_problem and report.broken:
-        return 2
-    return 0
-
-
-def main() -> int:
-    return run_cli()
+    if fail_on_problem and report.broken:
+        sys.exit(2)
 
 
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    command()

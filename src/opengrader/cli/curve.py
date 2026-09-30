@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.curve import (
     Curve,
     CurveEffect,
@@ -21,8 +23,9 @@ from opengrader.core.submissions import (
     load_student_submission_markdown,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run curve show   --submissions out/student-submissions/
   uv run curve set    --submissions out/student-submissions/ --method bonus --value 5
   uv run curve set    --submissions out/student-submissions/ --method scale --value 1.1
@@ -101,26 +104,68 @@ def _load_and_preview(submissions_path: Path, curve: Curve) -> None:
     _print_effect(summarize_curve(totals, curve))
 
 
-def _cmd_show(args) -> None:
-    submissions_path = Path(args.submissions)
+def _submissions_option(function):
+    return click.option(
+        "--submissions",
+        "submissions_path",
+        type=click.Path(path_type=Path),
+        required=True,
+        metavar="PATH",
+        help="Submissions directory (or a single .submission.md file).",
+    )(function)
+
+
+def _no_cap_option(function):
+    return click.option(
+        "--no-cap",
+        is_flag=True,
+        help="Allow the curve to exceed the possible points (extra credit).",
+    )(function)
+
+
+@click.group("curve", cls=Group, context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+def command() -> None:
+    """Get, set, or clear an assignment's reversible score curve."""
+
+
+@command.command("show")
+@_submissions_option
+def show_command(*, submissions_path: Path) -> None:
+    """Show the current curve and its effect."""
     curve = read_curve(submissions_path)
     print(f"Curve: {_describe_curve(curve)}")
     print(f"  file: {resolve_curve_path(submissions_path)}")
     _load_and_preview(submissions_path, curve)
 
 
-def _cmd_set(args) -> None:
-    submissions_path = Path(args.submissions)
-    if args.method in ("bonus", "scale") and args.value is None:
+@command.command("set")
+@_submissions_option
+@click.option(
+    "--method",
+    required=True,
+    type=click.Choice(["bonus", "scale", "sqrt"]),
+    help="bonus (add points), scale (multiply), or sqrt (root curve).",
+)
+@click.option(
+    "--value",
+    type=float,
+    help="Points for bonus, or the multiplier for scale. Ignored for sqrt.",
+)
+@_no_cap_option
+def set_command(
+    *, submissions_path: Path, method: str, value: float | None, no_cap: bool
+) -> None:
+    """Set the curve."""
+    if method in ("bonus", "scale") and value is None:
         print(
-            f"error: --method {args.method} requires --value.",
+            f"error: --method {method} requires --value.",
             file=sys.stderr,
         )
         sys.exit(1)
     curve = Curve(
-        method=args.method,
-        value=float(args.value) if args.value is not None else 0.0,
-        cap_at_max=not args.no_cap,
+        method=method,
+        value=float(value) if value is not None else 0.0,
+        cap_at_max=not no_cap,
     )
     write_curve(submissions_path, curve)
     print(f"Set curve: {_describe_curve(curve)}")
@@ -128,23 +173,58 @@ def _cmd_set(args) -> None:
     _load_and_preview(submissions_path, curve)
 
 
-def _cmd_suggest(args) -> None:
-    submissions_path = Path(args.submissions)
-    if args.target_mean is None and args.target_median is None:
+@command.command("suggest")
+@_submissions_option
+@click.option(
+    "--method",
+    required=True,
+    type=click.Choice(["bonus", "scale"]),
+    help="bonus (add points) or scale (multiply) — the methods with a "
+    "solvable value. (sqrt has no adjustable value to target.)",
+)
+@click.option(
+    "--target-mean",
+    type=float,
+    metavar="PERCENT",
+    help="Target class mean, as a percentage (e.g. 78).",
+)
+@click.option(
+    "--target-median",
+    type=float,
+    metavar="PERCENT",
+    help="Target class median, as a percentage (e.g. 75).",
+)
+@_no_cap_option
+@click.option(
+    "--apply",
+    is_flag=True,
+    help="Write the suggested curve (otherwise just preview it).",
+)
+def suggest_command(
+    *,
+    submissions_path: Path,
+    method: str,
+    target_mean: float | None,
+    target_median: float | None,
+    no_cap: bool,
+    apply: bool,
+) -> None:
+    """Solve for the curve that lands the class average on a target."""
+    if target_mean is None and target_median is None:
         print(
             "error: give --target-mean or --target-median (a class average, %).",
             file=sys.stderr,
         )
         sys.exit(1)
-    if args.target_mean is not None and args.target_median is not None:
+    if target_mean is not None and target_median is not None:
         print(
             "error: give only one of --target-mean / --target-median.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    statistic = "mean" if args.target_mean is not None else "median"
-    target = args.target_mean if args.target_mean is not None else args.target_median
+    statistic = "mean" if target_mean is not None else "median"
+    target = target_mean if target_mean is not None else target_median
 
     try:
         totals = _student_totals(submissions_path)
@@ -154,14 +234,14 @@ def _cmd_suggest(args) -> None:
 
     curve = solve_curve(
         totals,
-        args.method,
+        method,
         float(target),
         statistic=statistic,
-        cap_at_max=not args.no_cap,
+        cap_at_max=not no_cap,
     )
     if curve is None:
         print(
-            f"Could not find a {args.method} curve for a {statistic} of {target:g}%. "
+            f"Could not find a {method} curve for a {statistic} of {target:g}%. "
             "Try the other method, --no-cap, or a target closer to the current "
             "average.",
             file=sys.stderr,
@@ -172,108 +252,16 @@ def _cmd_suggest(args) -> None:
     print(f"  targets a {statistic} of {target:g}%")
     _print_effect(summarize_curve(totals, curve))
 
-    if args.apply:
+    if apply:
         write_curve(submissions_path, curve)
         print(f"Applied. file: {resolve_curve_path(submissions_path)}")
     else:
         print("  (preview only — re-run with --apply to save, or use curve set)")
 
 
-def _cmd_clear(args) -> None:
-    submissions_path = Path(args.submissions)
+@command.command("clear")
+@_submissions_option
+def clear_command(*, submissions_path: Path) -> None:
+    """Remove the curve (restore raw totals)."""
     clear_curve(submissions_path)
     print("Cleared curve — raw totals restored.")
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description="Get, set, or clear an assignment's reversible score curve.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    def _add_submissions(sub: ArgumentParser) -> None:
-        sub.add_argument(
-            "--submissions",
-            required=True,
-            metavar="PATH",
-            help="Submissions directory (or a single .submission.md file).",
-        )
-
-    show = subparsers.add_parser("show", help="Show the current curve and its effect.")
-    _add_submissions(show)
-    show.set_defaults(func=_cmd_show)
-
-    set_cmd = subparsers.add_parser("set", help="Set the curve.")
-    _add_submissions(set_cmd)
-    set_cmd.add_argument(
-        "--method",
-        required=True,
-        choices=["bonus", "scale", "sqrt"],
-        help="bonus (add points), scale (multiply), or sqrt (root curve).",
-    )
-    set_cmd.add_argument(
-        "--value",
-        type=float,
-        default=None,
-        help="Points for bonus, or the multiplier for scale. Ignored for sqrt.",
-    )
-    set_cmd.add_argument(
-        "--no-cap",
-        action="store_true",
-        default=False,
-        help="Allow the curve to exceed the possible points (extra credit).",
-    )
-    set_cmd.set_defaults(func=_cmd_set)
-
-    suggest = subparsers.add_parser(
-        "suggest",
-        help="Solve for the curve that lands the class average on a target.",
-    )
-    _add_submissions(suggest)
-    suggest.add_argument(
-        "--method",
-        required=True,
-        choices=["bonus", "scale"],
-        help="bonus (add points) or scale (multiply) — the methods with a "
-        "solvable value. (sqrt has no adjustable value to target.)",
-    )
-    suggest.add_argument(
-        "--target-mean",
-        type=float,
-        default=None,
-        metavar="PERCENT",
-        help="Target class mean, as a percentage (e.g. 78).",
-    )
-    suggest.add_argument(
-        "--target-median",
-        type=float,
-        default=None,
-        metavar="PERCENT",
-        help="Target class median, as a percentage (e.g. 75).",
-    )
-    suggest.add_argument(
-        "--no-cap",
-        action="store_true",
-        default=False,
-        help="Allow the curve to exceed the possible points (extra credit).",
-    )
-    suggest.add_argument(
-        "--apply",
-        action="store_true",
-        default=False,
-        help="Write the suggested curve (otherwise just preview it).",
-    )
-    suggest.set_defaults(func=_cmd_suggest)
-
-    clear = subparsers.add_parser("clear", help="Remove the curve (restore raw totals).")
-    _add_submissions(clear)
-    clear.set_defaults(func=_cmd_clear)
-
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    args.func(args)

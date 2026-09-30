@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli.curve import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.curve import command
 from opengrader.core.curve import Curve, read_curve
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
@@ -45,7 +46,7 @@ def test_curve_set_persists_and_previews(tmp_path: Path, capsys) -> None:
     subs.mkdir()
     _seed(subs)
 
-    run_cli(["set", "--submissions", str(subs), "--method", "sqrt"])
+    run_command(command, ["set", "--submissions", str(subs), "--method", "sqrt"])
 
     assert read_curve(subs) == Curve("sqrt", 0.0, cap_at_max=True)
     out = capsys.readouterr().out
@@ -59,7 +60,7 @@ def test_curve_set_bonus_requires_value(tmp_path: Path, capsys) -> None:
     _seed(subs)
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["set", "--submissions", str(subs), "--method", "bonus"])
+        run_command(command, ["set", "--submissions", str(subs), "--method", "bonus"])
     assert exc.value.code == 1
     assert "requires --value" in capsys.readouterr().err
 
@@ -69,7 +70,8 @@ def test_curve_suggest_previews_without_applying(tmp_path: Path, capsys) -> None
     subs.mkdir()
     _seed(subs)
 
-    run_cli(
+    run_command(
+        command,
         [
             "suggest", "--submissions", str(subs),
             "--method", "bonus", "--target-mean", "60",
@@ -87,7 +89,8 @@ def test_curve_suggest_apply_persists(tmp_path: Path) -> None:
     subs.mkdir()
     _seed(subs)
 
-    run_cli(
+    run_command(
+        command,
         [
             "suggest", "--submissions", str(subs),
             "--method", "scale", "--target-mean", "85", "--apply",
@@ -105,7 +108,7 @@ def test_curve_suggest_requires_a_target(tmp_path: Path, capsys) -> None:
     _seed(subs)
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(["suggest", "--submissions", str(subs), "--method", "bonus"])
+        run_command(command, ["suggest", "--submissions", str(subs), "--method", "bonus"])
     assert exc.value.code == 1
     assert "target" in capsys.readouterr().err
 
@@ -117,7 +120,8 @@ def test_curve_suggest_unreachable_target_errors(tmp_path: Path, capsys) -> None
     _write(subs / "a.submission.md", "s1", 50.0)
 
     with pytest.raises(SystemExit) as exc:
-        run_cli(
+        run_command(
+            command,
             [
                 "suggest", "--submissions", str(subs),
                 "--method", "scale", "--target-mean", "100",
@@ -132,12 +136,12 @@ def test_curve_show_and_clear(tmp_path: Path, capsys) -> None:
     subs.mkdir()
     _seed(subs)
 
-    run_cli(["set", "--submissions", str(subs), "--method", "bonus", "--value", "10"])
+    run_command(command, ["set", "--submissions", str(subs), "--method", "bonus", "--value", "10"])
     capsys.readouterr()
 
-    run_cli(["show", "--submissions", str(subs)])
+    run_command(command, ["show", "--submissions", str(subs)])
     assert "bonus: +10 points" in capsys.readouterr().out
 
-    run_cli(["clear", "--submissions", str(subs)])
+    run_command(command, ["clear", "--submissions", str(subs)])
     assert "restored" in capsys.readouterr().out
     assert read_curve(subs) == Curve()

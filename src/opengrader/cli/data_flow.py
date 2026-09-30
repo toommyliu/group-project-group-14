@@ -10,25 +10,12 @@ read of the configuration, not a run.
 from __future__ import annotations
 
 import json
-import sys
-from argparse import ArgumentParser
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core import app_config
 from opengrader.core import egress
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Report which categories of student data would leave this machine "
-            "under the current AI configuration, and to which host — printable "
-            "and handable to a department."
-        ),
-    )
-    parser.add_argument(
-        "--json", action="store_true", dest="as_json", help="Machine-readable output."
-    )
-    return parser
 
 
 def _kill_switch_lines(resolved: "app_config.ResolvedAI") -> list[str]:
@@ -43,15 +30,18 @@ def _kill_switch_lines(resolved: "app_config.ResolvedAI") -> list[str]:
     return lines
 
 
-def run_cli(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
+@click.command("data-flow", context_settings=CONTEXT_SETTINGS)
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output.")
+def command(as_json: bool) -> None:
+    """Report which categories of student data would leave this machine
+    under the current AI configuration, and to which host — printable and
+    handable to a department.
+    """
     resolved = app_config.resolve()
     report = app_config.data_flow_report(resolved)
     log_path = egress.active_log_path()
 
-    if args.as_json:
+    if as_json:
         body = report.to_dict()
         body["kill_switch"] = {
             "cloud_forbidden": resolved.cloud_forbidden or not app_config.consent.cloud_allowed(),
@@ -68,9 +58,5 @@ def run_cli(argv: list[str] | None = None) -> None:
     print(f"Egress log: {log_path}")
 
 
-def main() -> None:
-    run_cli()
-
-
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    command()

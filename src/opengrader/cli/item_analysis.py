@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.analytics import (
     DEFAULT_MASTERY_THRESHOLD,
     DifficultyBand,
@@ -22,13 +24,15 @@ from opengrader.core.qa_file import (
 )
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run item-analysis --input out/student-submissions/
   uv run item-analysis --input out/student-submissions/ --json
   uv run item-analysis --input out/student-submissions/ --flagged-only
 
-learning-outcome mastery (needs the answer key, where the **Outcome** tags live):
+\b
+Learning-outcome mastery (needs the answer key, where the **Outcome** tags live):
   uv run item-analysis --input out/student-submissions/ --solutions solutions.md
 """
 
@@ -137,53 +141,6 @@ def _item_to_dict(item: ItemAnalysis) -> dict[str, object]:
     }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Analyze a graded submission set item-by-item: difficulty, "
-            "separation (discrimination), and multiple-choice distractors."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="A .submission.md file or a directory of them.",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the analysis as a JSON array instead of a human-readable list.",
-    )
-    parser.add_argument(
-        "--flagged-only",
-        action="store_true",
-        help="Show only items flagged for attention (negative or weak separation).",
-    )
-    parser.add_argument(
-        "--solutions",
-        default=None,
-        help=(
-            "QA answer key. Optional: supply it to add a learning-outcome "
-            "mastery section (the **Outcome** tags live in the answer key, not "
-            "in the submissions)."
-        ),
-    )
-    parser.add_argument(
-        "--mastery-threshold",
-        type=float,
-        default=DEFAULT_MASTERY_THRESHOLD,
-        metavar="RATE",
-        help=(
-            "Share of an outcome's points a student must earn to count as "
-            "having mastered it, 0-1 (default: %(default)s)."
-        ),
-    )
-    return parser
-
-
 def _outcomes_to_dict(report) -> dict[str, object]:  # noqa: ANN001
     return {
         "mastery_threshold": report.mastery_threshold,
@@ -247,10 +204,55 @@ def _print_outcomes(report) -> None:  # noqa: ANN001
         )
 
 
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    input_path = Path(args.input)
+@click.command("item-analysis", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="A .submission.md file or a directory of them.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the analysis as a JSON array instead of a human-readable list.",
+)
+@click.option(
+    "--flagged-only",
+    is_flag=True,
+    help="Show only items flagged for attention (negative or weak separation).",
+)
+@click.option(
+    "--solutions",
+    help=(
+        "QA answer key. Optional: supply it to add a learning-outcome "
+        "mastery section (the **Outcome** tags live in the answer key, not "
+        "in the submissions)."
+    ),
+)
+@click.option(
+    "--mastery-threshold",
+    type=float,
+    default=DEFAULT_MASTERY_THRESHOLD,
+    show_default=True,
+    metavar="RATE",
+    help=(
+        "Share of an outcome's points a student must earn to count as "
+        "having mastered it, 0-1."
+    ),
+)
+def command(
+    *,
+    input_path: Path,
+    as_json: bool,
+    flagged_only: bool,
+    solutions: str | None,
+    mastery_threshold: float,
+) -> None:
+    """Analyze a graded submission set item-by-item: difficulty,
+    separation (discrimination), and multiple-choice distractors.
+    """
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
@@ -270,8 +272,8 @@ def run_cli(argv: list[str] | None = None) -> None:
     report = build_item_analysis(documents)
 
     outcome_report = None
-    if args.solutions:
-        qa_path = Path(args.solutions)
+    if solutions:
+        qa_path = Path(solutions)
         if not qa_path.exists():
             print(f"Error: solutions file not found: {qa_path}", file=sys.stderr)
             sys.exit(1)
@@ -288,10 +290,10 @@ def run_cli(argv: list[str] | None = None) -> None:
                 documents,
                 tags,
                 possible_points_by_question=possible_points_by_question(qa_doc),
-                mastery_threshold=args.mastery_threshold,
+                mastery_threshold=mastery_threshold,
             )
 
-    if args.as_json:
+    if as_json:
         payload: dict[str, object] = {
             "items": [_item_to_dict(item) for item in report.items],
         }
@@ -299,6 +301,10 @@ def run_cli(argv: list[str] | None = None) -> None:
             payload["outcomes"] = _outcomes_to_dict(outcome_report)
         print(json.dumps(payload["items"] if outcome_report is None else payload, indent=2))
     else:
-        _print_human(list(report.items), report.class_size, flagged_only=args.flagged_only)
+        _print_human(list(report.items), report.class_size, flagged_only=flagged_only)
         if outcome_report is not None:
             _print_outcomes(outcome_report)
+
+
+if __name__ == "__main__":
+    command()

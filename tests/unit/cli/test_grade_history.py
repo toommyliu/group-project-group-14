@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli.grade_history import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.grade_history import command
 from opengrader.core.history import GradeJournal, resolve_history_dir
 
 
@@ -34,7 +35,7 @@ def test_grade_history_lists_all_graders(tmp_path, capsys) -> None:
     subs.mkdir()
     _seed_history(subs)
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     out = capsys.readouterr().out
     assert "2 change(s) by 2 grader(s)" in out
@@ -47,7 +48,7 @@ def test_grade_history_filters_by_actor(tmp_path, capsys) -> None:
     subs.mkdir()
     _seed_history(subs)
 
-    run_cli(["--input", str(subs), "--actor", "ta_bob", "--json"])
+    run_command(command, ["--input", str(subs), "--actor", "ta_bob", "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert len(payload) == 1
@@ -60,7 +61,7 @@ def test_grade_history_filters_by_student(tmp_path, capsys) -> None:
     subs.mkdir()
     _seed_history(subs)
 
-    run_cli(["--input", str(subs), "--student", "111", "--json"])
+    run_command(command, ["--input", str(subs), "--student", "111", "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert [e["student_id"] for e in payload] == ["111"]
@@ -70,12 +71,12 @@ def test_grade_history_empty_reports_nothing(tmp_path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     assert "No grade history recorded yet." in capsys.readouterr().out
 
 
 def test_grade_history_errors_on_missing_input(tmp_path) -> None:
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--input", str(tmp_path / "nope")])
+        run_command(command, ["--input", str(tmp_path / "nope")])
     assert exc.value.code == 1

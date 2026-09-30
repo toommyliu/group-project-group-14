@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import providers as cli
 from opengrader.core import app_config
 from opengrader.core.app_config import manifests
@@ -41,7 +42,7 @@ def no_network(monkeypatch):
 
 def _run(argv: list[str]) -> int:
     try:
-        cli.run_cli(argv)
+        run_command(cli.command, argv)
     except SystemExit as exc:
         return int(exc.code or 0)
     return 0
@@ -74,6 +75,20 @@ def test_add_refuses_to_overwrite_without_force(capsys, no_network) -> None:
     assert _run(FLAGS) == 1
     assert "already exists" in capsys.readouterr().err
     assert _run([*FLAGS, "--force"]) == 0
+
+
+def test_add_takes_every_word_of_a_credential_command(no_network) -> None:
+    argv = ["add", "--credential-command", "op", "read", "op://vault/key", *FLAGS[1:]]
+    assert _run(argv) == 0
+
+    spec = app_config.get_provider("campus")
+    assert spec.credential_command == ("op", "read", "op://vault/key")
+
+
+def test_add_rejects_a_stray_argument(capsys) -> None:
+    assert _run([*FLAGS, "stray"]) == 2
+    assert "stray" in capsys.readouterr().err
+    assert list(app_config.manifests_dir().glob("*.toml")) == []
 
 
 def test_add_example_copies_the_shipped_file(no_network) -> None:
@@ -134,6 +149,38 @@ def test_test_refuses_a_cloud_provider_without_confirmation(
 
     assert _run(["test", "campus"]) == 2
     assert "--yes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv", [["consent", "campus"], ["consent", "campus", "--yes"]]
+)
+def test_cloud_consent_is_only_granted_by_typing_yes_at_a_terminal(
+    monkeypatch, argv
+) -> None:
+    assert _run(FLAGS) == 0
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "yes")
+
+    assert _run(argv) == 2
+    assert not app_config.consent.has_cloud_consent(
+        app_config.load_settings(), app_config.for_provider("campus")
+    )
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["allow-credential-command", "campus"], ["allow-credential-command", "campus", "--yes"]],
+)
+def test_a_credential_command_is_only_approved_by_typing_yes_at_a_terminal(
+    monkeypatch, argv
+) -> None:
+    assert _run([*FLAGS, "--credential-command", "op", "read", "op://vault/key"]) == 0
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "yes")
+
+    assert _run(argv) == 2
+    spec = next(s for s in app_config.registered_providers() if s.name == "campus")
+    assert not app_config.consent.has_credential_consent(app_config.load_settings(), spec)
 
 
 def test_test_sends_one_fixed_prompt_and_never_prints_the_key(
@@ -200,5 +247,5 @@ def test_a_failed_test_is_redacted_and_exits_2(capsys, monkeypatch) -> None:
 def test_the_front_door_routes_to_this_command() -> None:
     from opengrader.cli.main import find
 
-    assert find("providers").target == "opengrader.cli.providers:run_cli"
+    assert find("providers").target == "opengrader.cli.providers:command"
     assert find("opengrader-providers").name == "providers"

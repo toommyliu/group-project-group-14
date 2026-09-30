@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import grade_restore
 from opengrader.core.history.journal import resolve_history_dir
 from opengrader.core.submissions.student_file import load_student_submission_markdown
@@ -95,7 +96,7 @@ def _good_then_bad(subs: Path) -> None:
 
 def test_log_summarizes_actors_and_what_is_restorable(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
-    grade_restore.run_cli(["log", "--submissions", str(cohort)])
+    run_command(grade_restore.command, ["log", "--submissions", str(cohort)])
     out = capsys.readouterr().out
     assert "4 journal entries" in out
     assert "alice" in out and "bot" in out
@@ -105,7 +106,8 @@ def test_log_summarizes_actors_and_what_is_restorable(cohort, capsys) -> None:  
 def test_diff_reports_changes_without_writing(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
     before = (cohort / "s1" / "s1.submission.md").read_text()
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["diff", "--submissions", str(cohort), "--without-actor", "bot"]
     )
     out = capsys.readouterr().out
@@ -116,7 +118,8 @@ def test_diff_reports_changes_without_writing(cohort, capsys) -> None:  # noqa: 
 def test_apply_without_yes_is_a_preview(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
     before = (cohort / "s1" / "s1.submission.md").read_text()
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--without-actor", "bot"]
     )
     assert "Re-run with --yes" in capsys.readouterr().out
@@ -125,7 +128,8 @@ def test_apply_without_yes_is_a_preview(cohort, capsys) -> None:  # noqa: ANN001
 
 def test_apply_undoes_one_actor_and_leaves_the_other_alone(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--without-actor", "bot", "--yes"]
     )
     document = load_student_submission_markdown(cohort / "s1" / "s1.submission.md")
@@ -139,9 +143,9 @@ def test_apply_undoes_one_actor_and_leaves_the_other_alone(cohort, capsys) -> No
 def test_apply_is_idempotent(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
     args = ["apply", "--submissions", str(cohort), "--without-actor", "bot", "--yes"]
-    grade_restore.run_cli(args)
+    run_command(grade_restore.command, args)
     capsys.readouterr()
-    grade_restore.run_cli(args)
+    run_command(grade_restore.command, args)
     assert "Nothing to restore" in capsys.readouterr().out
 
 
@@ -157,7 +161,8 @@ def test_apply_restores_a_question_back_to_ungraded(cohort, capsys) -> None:  # 
                    {"points": 0, "rubric": ["Incorrect"]}),
         ],
     )
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--without-actor", "bot", "--yes"]
     )
     question = load_student_submission_markdown(
@@ -170,7 +175,8 @@ def test_apply_restores_a_question_back_to_ungraded(cohort, capsys) -> None:  # 
 def test_apply_restores_to_a_point_in_time(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
     checkpoint = (BASE + timedelta(minutes=10)).isoformat()
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--at", checkpoint, "--yes"]
     )
     question = load_student_submission_markdown(
@@ -181,7 +187,8 @@ def test_apply_restores_to_a_point_in_time(cohort, capsys) -> None:  # noqa: ANN
 
 def test_apply_records_itself_in_the_journal(cohort) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--without-actor", "bot", "--yes",
          "--reason", "bad batch"]
     )
@@ -197,7 +204,8 @@ def test_apply_records_itself_in_the_journal(cohort) -> None:  # noqa: ANN001
 
 def test_question_filter_narrows_the_restore(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--without-actor", "bot",
          "--question", "q2", "--yes"]
     )
@@ -211,7 +219,8 @@ def test_question_filter_narrows_the_restore(cohort, capsys) -> None:  # noqa: A
 
 def test_only_filter_restores_one_aspect(cohort) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["apply", "--submissions", str(cohort), "--without-actor", "bot",
          "--only", "comment", "--yes"]
     )
@@ -224,7 +233,8 @@ def test_only_filter_restores_one_aspect(cohort) -> None:  # noqa: ANN001
 
 def test_show_prints_the_reconstructed_state(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
-    grade_restore.run_cli(
+    run_command(
+        grade_restore.command,
         ["show", "--submissions", str(cohort), "--at", (BASE + timedelta(minutes=10)).isoformat()]
     )
     out = capsys.readouterr().out
@@ -234,7 +244,7 @@ def test_show_prints_the_reconstructed_state(cohort, capsys) -> None:  # noqa: A
 
 def test_an_empty_journal_exits_with_an_explanation(cohort, capsys) -> None:  # noqa: ANN001
     with pytest.raises(SystemExit) as exit_info:
-        grade_restore.run_cli(["diff", "--submissions", str(cohort)])
+        run_command(grade_restore.command, ["diff", "--submissions", str(cohort)])
     assert exit_info.value.code == 1
     assert "No grade history recorded" in capsys.readouterr().err
 
@@ -242,7 +252,8 @@ def test_an_empty_journal_exits_with_an_explanation(cohort, capsys) -> None:  # 
 def test_an_unknown_aspect_is_rejected(cohort, capsys) -> None:  # noqa: ANN001
     _good_then_bad(cohort)
     with pytest.raises(SystemExit):
-        grade_restore.run_cli(
+        run_command(
+            grade_restore.command,
             ["diff", "--submissions", str(cohort), "--only", "nonsense"]
         )
     assert "unknown aspect" in capsys.readouterr().err
@@ -265,7 +276,7 @@ def test_a_student_missing_from_disk_is_reported(cohort, capsys) -> None:  # noq
             }
         ],
     )
-    grade_restore.run_cli(["diff", "--submissions", str(cohort)])
+    run_command(grade_restore.command, ["diff", "--submissions", str(cohort)])
     captured = capsys.readouterr()
     assert "no submission file here" in captured.err
     assert "9999" in captured.err

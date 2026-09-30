@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from collections.abc import Sequence
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.analytics.transcription_eval import (
     DEFAULT_ERROR_TOLERANCE,
     DEFAULT_MIN_SAMPLE,
@@ -27,103 +30,22 @@ from opengrader.core.export.gradebook import discover_submission_paths
 from opengrader.core.history import read_journal, resolve_history_dir
 from opengrader.core.submissions import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run transcribe-eval --input out/student-submissions/
   uv run transcribe-eval --input out/student-submissions/ --target-catch 0.95
   uv run transcribe-eval --input out/student-submissions/ --ignore-case
   uv run transcribe-eval --input past-term/subs/ --input this-term/subs/
   uv run transcribe-eval --input out/student-submissions/ --json
 
-what it measures:
+\b
+What it measures:
   Only answers a human corrected in the grade screen ('x'). That is a
   deliberately biased sample - graders check what the review queue flagged -
   so the report leads with how much of the cohort it covers. An answer nobody
   checked is not evidence that it was read correctly.
 """
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Measure OCR/vision-model transcription accuracy from the "
-            "corrections graders have already made."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        action="append",
-        required=True,
-        metavar="PATH",
-        help=(
-            "A submissions folder (or one .submission.md). Repeat to pool "
-            "cohorts read by the same pipeline."
-        ),
-    )
-    parser.add_argument(
-        "--ignore-case",
-        action="store_true",
-        help=(
-            "Treat a case difference as correct. Off by default: a lost "
-            "capital is a real misread."
-        ),
-    )
-    parser.add_argument(
-        "--tolerance",
-        type=float,
-        default=DEFAULT_ERROR_TOLERANCE,
-        metavar="RATE",
-        help=(
-            "Character error rate below which a reading counts as correct "
-            f"(default: {DEFAULT_ERROR_TOLERANCE:g}, i.e. exact)."
-        ),
-    )
-    parser.add_argument(
-        "--target-catch",
-        type=float,
-        default=DEFAULT_TARGET_CATCH,
-        metavar="RATE",
-        help=(
-            "Share of measured errors a recommended escalation floor must "
-            f"catch (0-1, default: {DEFAULT_TARGET_CATCH:g})."
-        ),
-    )
-    parser.add_argument(
-        "--min-sample",
-        type=int,
-        default=DEFAULT_MIN_SAMPLE,
-        metavar="N",
-        help=(
-            "Recommend nothing when fewer than this many errors were measured "
-            f"(default: {DEFAULT_MIN_SAMPLE})."
-        ),
-    )
-    parser.add_argument(
-        "--ignore-actor",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help=(
-            "Exclude a grader's corrections (repeatable). Tool actors "
-            "(name:role) are always excluded — a machine's re-read is not "
-            "ground truth."
-        ),
-    )
-    parser.add_argument(
-        "--worst",
-        type=int,
-        default=5,
-        metavar="N",
-        help="How many worst misreads to print (default: 5).",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit the whole report as JSON.",
-    )
-    return parser
 
 
 def cohort_labels(roots: list[Path]) -> dict[Path, str]:
@@ -144,7 +66,7 @@ def cohort_labels(roots: list[Path]) -> dict[Path, str]:
 
 
 def _load_cohorts(
-    inputs: list[str], *, ignore_actors: list[str]
+    inputs: Sequence[str], *, ignore_actors: Sequence[str]
 ) -> tuple[list[TranscriptionSample], CoverageStats, SampleTally, list[str]]:
     problems: list[str] = []
     roots: list[Path] = []
@@ -389,23 +311,98 @@ def _as_json(report: TranscriptionEvalReport) -> dict:
     }
 
 
-def main(argv: list[str] | None = None) -> int:
-    report = run_cli(argv)
-    return 0 if report is not None else 1
-
-
-def run_cli(argv: list[str] | None = None) -> TranscriptionEvalReport | None:
-    args = _build_parser().parse_args(argv)
-
-    if not 0.0 < args.target_catch <= 1.0:
+@click.command("transcribe-eval", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "inputs",
+    multiple=True,
+    required=True,
+    metavar="PATH",
+    help=(
+        "A submissions folder (or one .submission.md). Repeat to pool "
+        "cohorts read by the same pipeline."
+    ),
+)
+@click.option(
+    "--ignore-case",
+    is_flag=True,
+    help=(
+        "Treat a case difference as correct. Off by default: a lost "
+        "capital is a real misread."
+    ),
+)
+@click.option(
+    "--tolerance",
+    type=float,
+    default=DEFAULT_ERROR_TOLERANCE,
+    metavar="RATE",
+    help=(
+        "Character error rate below which a reading counts as correct "
+        f"(default: {DEFAULT_ERROR_TOLERANCE:g}, i.e. exact)."
+    ),
+)
+@click.option(
+    "--target-catch",
+    type=float,
+    default=DEFAULT_TARGET_CATCH,
+    metavar="RATE",
+    help=(
+        "Share of measured errors a recommended escalation floor must "
+        f"catch (0-1, default: {DEFAULT_TARGET_CATCH:g})."
+    ),
+)
+@click.option(
+    "--min-sample",
+    type=int,
+    default=DEFAULT_MIN_SAMPLE,
+    metavar="N",
+    help=(
+        "Recommend nothing when fewer than this many errors were measured "
+        f"(default: {DEFAULT_MIN_SAMPLE})."
+    ),
+)
+@click.option(
+    "--ignore-actor",
+    "ignore_actors",
+    multiple=True,
+    metavar="NAME",
+    help=(
+        "Exclude a grader's corrections (repeatable). Tool actors "
+        "(name:role) are always excluded — a machine's re-read is not "
+        "ground truth."
+    ),
+)
+@click.option(
+    "--worst",
+    type=int,
+    default=5,
+    metavar="N",
+    help="How many worst misreads to print (default: 5).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit the whole report as JSON.")
+def command(
+    *,
+    inputs: tuple[str, ...],
+    ignore_case: bool,
+    tolerance: float,
+    target_catch: float,
+    min_sample: int,
+    ignore_actors: tuple[str, ...],
+    worst: int,
+    as_json: bool,
+) -> TranscriptionEvalReport:
+    """Measure OCR/vision-model transcription accuracy from the
+    corrections graders have already made.
+    """
+    if not 0.0 < target_catch <= 1.0:
         print("error: --target-catch must be between 0 and 1.", file=sys.stderr)
-        return None
-    if args.tolerance < 0.0:
+        sys.exit(1)
+    if tolerance < 0.0:
         print("error: --tolerance cannot be negative.", file=sys.stderr)
-        return None
+        sys.exit(1)
 
     samples, coverage, tally, problems = _load_cohorts(
-        args.input, ignore_actors=args.ignore_actor
+        inputs, ignore_actors=ignore_actors
     )
     for problem in problems:
         print(f"warning: {problem}", file=sys.stderr)
@@ -414,19 +411,19 @@ def run_cli(argv: list[str] | None = None) -> TranscriptionEvalReport | None:
         samples,
         coverage=coverage,
         tally=tally,
-        ignore_case=args.ignore_case,
-        tolerance=args.tolerance,
-        target_catch=args.target_catch,
-        min_sample=args.min_sample,
-        worst_count=max(args.worst, 0),
+        ignore_case=ignore_case,
+        tolerance=tolerance,
+        target_catch=target_catch,
+        min_sample=min_sample,
+        worst_count=max(worst, 0),
     )
 
-    if args.json:
+    if as_json:
         print(json.dumps(_as_json(report), indent=2))
     else:
-        _print_human(report, worst=args.worst)
+        _print_human(report, worst=worst)
     return report
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    command()

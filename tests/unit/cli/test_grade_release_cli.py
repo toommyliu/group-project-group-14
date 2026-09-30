@@ -4,10 +4,11 @@ import json
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
-from opengrader.cli.grade_check import main as grade_check_main
-from opengrader.cli.grade_check import run_cli as grade_check
-from opengrader.cli.grade_release import run_cli as grade_release
+from opengrader.cli import grade_check as grade_check_module
+from opengrader.cli import grade_release as grade_release_module
+from opengrader.cli import run_command
 from opengrader.core.release import read_releases, resolve_releases_dir
 
 
@@ -52,7 +53,7 @@ def _ungrade(folder: Path) -> None:
 
 
 def test_grade_check_reports_ready(folder: Path, capsys):
-    context = grade_check(["--submissions", str(folder)])
+    context = run_command(grade_check_module.command, ["--submissions", str(folder)])
     output = capsys.readouterr().out
 
     assert context.readiness.ready
@@ -82,7 +83,7 @@ def test_grade_check_inside_workspace_reads_saved_grades(
     _ungrade(folder)
     monkeypatch.chdir(workspace.root)
 
-    context = grade_check([])
+    context = run_command(grade_check_module.command, [])
 
     assert context.readiness.ready
     assert "1/1 answers graded" in capsys.readouterr().out
@@ -111,7 +112,7 @@ def test_grade_release_inside_workspace_records_saved_grades(
     _ungrade(folder)
     monkeypatch.chdir(workspace.root)
 
-    grade_release(["create", "--yes"])
+    run_command(grade_release_module.command, ["create", "--yes"])
 
     releases = read_releases(submissions_path(workspace, assignment.id))
     assert len(releases) == 1
@@ -123,12 +124,12 @@ def test_grade_check_fails_on_blocking_for_scripts(folder: Path):
         _submission("").replace("  - Rubric: Correct", "  - Rubric:")
     )
     with pytest.raises(SystemExit) as exit_info:
-        grade_check(["--submissions", str(folder), "--fail-on-blocking"])
+        run_command(grade_check_module.command, ["--submissions", str(folder), "--fail-on-blocking"])
     assert exit_info.value.code == 2
 
 
 def test_grade_check_json_carries_the_verdict(folder: Path, capsys):
-    grade_check(["--submissions", str(folder), "--json"])
+    run_command(grade_check_module.command, ["--submissions", str(folder), "--json"])
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["ready"] is True
@@ -138,7 +139,7 @@ def test_grade_check_json_carries_the_verdict(folder: Path, capsys):
 
 def test_grade_check_writes_nothing(folder: Path, capsys):
     before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
-    grade_check(["--submissions", str(folder)])
+    run_command(grade_check_module.command, ["--submissions", str(folder)])
     capsys.readouterr()
 
     after = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
@@ -146,23 +147,26 @@ def test_grade_check_writes_nothing(folder: Path, capsys):
     assert not (folder / ".opengrader").exists()
 
 
-def test_grade_check_main_returns_none(folder: Path, capsys):
-    assert grade_check_main(["--submissions", str(folder)]) is None
-    capsys.readouterr()
+def test_grade_check_exits_zero_from_the_shell_when_ready(folder: Path):
+    result = CliRunner().invoke(
+        grade_check_module.command, ["--submissions", str(folder)]
+    )
+
+    assert result.exit_code == 0, result.output
 
 
 def test_grade_check_names_unreadable_files_before_the_verdict(
     folder: Path, capsys
 ):
     (folder / "broken.submission.md").write_bytes(b"\xff\xfe not utf-8 \x00")
-    grade_check(["--submissions", str(folder)])
+    run_command(grade_check_module.command, ["--submissions", str(folder)])
     output = capsys.readouterr().out
 
     assert output.index("could not be read") < output.index("Ready to release.")
 
 
 def test_create_previews_without_yes(folder: Path, capsys):
-    grade_release(["create", "--submissions", str(folder)])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder)])
     output = capsys.readouterr().out
 
     assert "Re-run with --yes" in output
@@ -170,7 +174,8 @@ def test_create_previews_without_yes(folder: Path, capsys):
 
 
 def test_create_writes_with_yes(folder: Path, capsys):
-    grade_release(
+    run_command(
+        grade_release_module.command,
         ["create", "--submissions", str(folder), "--label", "in class", "--yes"]
     )
     output = capsys.readouterr().out
@@ -185,7 +190,7 @@ def test_create_writes_with_yes(folder: Path, capsys):
 def test_create_refuses_a_blocking_cohort(folder: Path, capsys):
     _ungrade(folder)
     with pytest.raises(SystemExit) as exit_info:
-        grade_release(["create", "--submissions", str(folder), "--yes"])
+        run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
 
     assert exit_info.value.code == 2
     assert read_releases(folder) == []
@@ -194,7 +199,8 @@ def test_create_refuses_a_blocking_cohort(folder: Path, capsys):
 
 def test_force_records_over_a_blocking_cohort(folder: Path, capsys):
     _ungrade(folder)
-    grade_release(
+    run_command(
+        grade_release_module.command,
         ["create", "--submissions", str(folder), "--yes", "--force"]
     )
     output = capsys.readouterr().out
@@ -206,7 +212,7 @@ def test_force_records_over_a_blocking_cohort(folder: Path, capsys):
 def test_a_release_writes_nothing_into_a_submission(folder: Path, capsys):
     submission = folder / "sub-0001.submission.md"
     before = submission.read_bytes()
-    grade_release(["create", "--submissions", str(folder), "--yes"])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
     capsys.readouterr()
 
     assert submission.read_bytes() == before
@@ -214,11 +220,11 @@ def test_a_release_writes_nothing_into_a_submission(folder: Path, capsys):
 
 
 def test_diff_names_the_question_that_changed(folder: Path, capsys):
-    grade_release(["create", "--submissions", str(folder), "--yes"])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
     capsys.readouterr()
     _regrade(folder, "5")
 
-    grade_release(["diff", "--submissions", str(folder)])
+    run_command(grade_release_module.command, ["diff", "--submissions", str(folder)])
     output = capsys.readouterr().out
 
     assert "q1" in output
@@ -227,11 +233,11 @@ def test_diff_names_the_question_that_changed(folder: Path, capsys):
 
 
 def test_diff_json_is_machine_readable(folder: Path, capsys):
-    grade_release(["create", "--submissions", str(folder), "--yes"])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
     capsys.readouterr()
     _regrade(folder, "5")
 
-    grade_release(["diff", "--submissions", str(folder), "--json"])
+    run_command(grade_release_module.command, ["diff", "--submissions", str(folder), "--json"])
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["changes"][0]["question_id"] == "q1"
@@ -240,30 +246,30 @@ def test_diff_json_is_machine_readable(folder: Path, capsys):
 
 def test_diff_without_a_release_says_so(folder: Path, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        grade_release(["diff", "--submissions", str(folder)])
+        run_command(grade_release_module.command, ["diff", "--submissions", str(folder)])
     assert exit_info.value.code == 1
     assert "grade-release create" in capsys.readouterr().err
 
 
 def test_list_and_show(folder: Path, capsys):
-    grade_release(["create", "--submissions", str(folder), "--yes"])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
     capsys.readouterr()
 
-    grade_release(["list", "--submissions", str(folder)])
+    run_command(grade_release_module.command, ["list", "--submissions", str(folder)])
     listing = capsys.readouterr().out
     assert "1 release(s)" in listing
 
-    grade_release(["show", "--submissions", str(folder)])
+    run_command(grade_release_module.command, ["show", "--submissions", str(folder)])
     shown = capsys.readouterr().out
     assert "Ada Lovelace" in shown
     assert "3/5" in shown
 
 
 def test_show_rejects_an_unknown_release(folder: Path, capsys):
-    grade_release(["create", "--submissions", str(folder), "--yes"])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
     capsys.readouterr()
     with pytest.raises(SystemExit) as exit_info:
-        grade_release(["show", "--submissions", str(folder), "--release", "rel-nope"])
+        run_command(grade_release_module.command, ["show", "--submissions", str(folder), "--release", "rel-nope"])
     assert exit_info.value.code == 1
     assert "grade-release list" in capsys.readouterr().err
 
@@ -275,7 +281,7 @@ def test_a_release_never_blocks_a_later_grade_change(folder: Path, capsys):
         update_student_submission_file,
     )
 
-    grade_release(["create", "--submissions", str(folder), "--yes"])
+    run_command(grade_release_module.command, ["create", "--submissions", str(folder), "--yes"])
     capsys.readouterr()
 
     path = folder / "sub-0001.submission.md"

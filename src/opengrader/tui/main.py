@@ -1,7 +1,10 @@
-from argparse import ArgumentParser
-import os
+from contextlib import suppress
 from pathlib import Path
+import sys
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, run_command
 from opengrader.tui.terminal_graphics import (
     ENV_OVERRIDE,
     PROTOCOL_CHOICES,
@@ -11,113 +14,57 @@ from opengrader.tui.terminal_graphics import (
 )
 from opengrader.tui.tui import TuiApp
 
-_TEXTUAL_ENV_VAR = "TEXTUAL"
-_DEVTOOLS_FEATURE = "devtools"
 
-
-def _enable_textual_feature(feature: str) -> None:
-    features = {
-        value.strip().lower()
-        for value in os.environ.get(_TEXTUAL_ENV_VAR, "").split(",")
-        if value.strip()
-    }
-    features.add(feature)
-    os.environ[_TEXTUAL_ENV_VAR] = ",".join(sorted(features))
-
-
-def _add_graphics_arguments(parser: ArgumentParser) -> None:
-    parser.add_argument(
+def _graphics_options(function):
+    function = click.option(
+        "--check-graphics",
+        is_flag=True,
+        help=(
+            "Print which image protocol this terminal will use (and why), "
+            "then exit. Paste this into a bug report."
+        ),
+    )(function)
+    return click.option(
         "--graphics",
-        choices=PROTOCOL_CHOICES,
+        type=click.Choice(PROTOCOL_CHOICES),
         default="auto",
         help=(
             "Terminal image protocol for answer crops. 'auto' detects it; "
             "force one when detection guesses wrong (also settable via "
             f"{ENV_OVERRIDE})."
         ),
-    )
-    parser.add_argument(
-        "--check-graphics",
-        action="store_true",
-        help=(
-            "Print which image protocol this terminal will use (and why), "
-            "then exit. Paste this into a bug report."
-        ),
-    )
+    )(function)
 
 
-def _add_folder_arguments(parser: ArgumentParser) -> None:
-    parser.add_argument("--qa-file", help="Path to a QA markdown file.")
-    parser.add_argument(
+def _folder_options(function):
+    function = click.option(
         "--submissions",
+        type=click.Path(path_type=Path),
         help="Path to a .submission.md file or directory containing submission files.",
-    )
+    )(function)
+    return click.option(
+        "--qa-file", type=click.Path(path_type=Path), help="Path to a QA markdown file."
+    )(function)
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Open a workspace in the terminal grading app: its assignment list, "
-            "shared live with the web app through a local service. For Tools & "
-            "Settings and grading plain folders, use `opengrader classic`."
-        )
-    )
-    parser.add_argument(
-        "folder",
-        nargs="?",
-        type=Path,
-        help=(
-            "Assignment or workspace folder. Defaults to the workspace around "
-            "the current directory. A folder outside any workspace becomes "
-            "one; a class folder that is ready to grade is imported with the "
-            "grades already in its files."
-        ),
-    )
-    parser.add_argument(
-        "--workspace",
-        type=Path,
-        help=(
-            "Open this workspace directly (shared with the web app through a "
-            "local service; created if it does not exist yet)."
-        ),
-    )
-    parser.add_argument(
-        "--assignment",
-        help="Assignment ID. Required at a workspace root with several assignments.",
-    )
-    _add_folder_arguments(parser)
-    _add_graphics_arguments(parser)
-    return parser
-
-
-def _build_classic_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Open the classic grading app: Tools & Settings with a Start "
-            "grading card, grading class folders in place. Never uses a "
-            "workspace or starts a service, except through the opt-in Open in "
-            "browser button (Tools → Browser app). This is what the desktop "
-            "icon opens."
-        ),
-    )
-    _add_folder_arguments(parser)
-    _add_graphics_arguments(parser)
-    return parser
-
-
-def _parse(parser: ArgumentParser, argv: list[str] | None):
-    """Parse argv and settle the image protocol, before Textual owns stdin."""
-    args = parser.parse_args(argv)
+def _prepare(
+    ctx: click.Context,
+    *,
+    graphics: str,
+    check_graphics: bool,
+    qa_file: Path | None,
+    submissions: Path | None,
+) -> None:
     # Probe graphics before Textual owns stdin and image widgets snapshot the protocol.
     try:
-        capability = configure_graphics(args.graphics)
+        capability = configure_graphics(graphics)
     except GraphicsOverrideError as exc:
-        parser.error(str(exc))
-    if args.check_graphics:
-        parser.exit(0, graphics_report(capability) + "\n")
-    if bool(args.qa_file) != bool(args.submissions):
-        parser.error("--qa-file and --submissions must be provided together")
-    return args
+        raise click.UsageError(str(exc)) from None
+    if check_graphics:
+        click.echo(graphics_report(capability))
+        ctx.exit()
+    if bool(qa_file) != bool(submissions):
+        raise click.UsageError("--qa-file and --submissions must be provided together")
 
 
 # What a grading session returns on F2 in a workspace: show the list again.
@@ -130,26 +77,66 @@ error: no workspace in {here} or any folder above it.
 """
 
 
-def run_app(argv: list[str] | None = None) -> None:
-    """`opengrader tui`: a workspace, straight to its assignments."""
-    parser = _build_parser()
-    args = _parse(parser, argv)
-    if args.qa_file and (args.folder or args.workspace or args.assignment):
-        parser.error("--qa-file/--submissions cannot be combined with a workspace selection")
+@click.command("tui", context_settings=CONTEXT_SETTINGS)
+@click.argument("folder", required=False, type=click.Path(path_type=Path))
+@click.option(
+    "--workspace",
+    type=click.Path(path_type=Path),
+    help=(
+        "Open this workspace directly (shared with the web app through a "
+        "local service; created if it does not exist yet)."
+    ),
+)
+@click.option(
+    "--assignment",
+    help="Assignment ID. Required at a workspace root with several assignments.",
+)
+@_folder_options
+@_graphics_options
+@click.pass_context
+def tui_command(
+    ctx: click.Context,
+    folder: Path | None,
+    workspace: Path | None,
+    assignment: str | None,
+    qa_file: Path | None,
+    submissions: Path | None,
+    graphics: str,
+    check_graphics: bool,
+) -> None:
+    """Open a workspace in the terminal grading app: its assignment list,
+    shared live with the web app through a local service. For Tools &
+    Settings and grading plain folders, use `opengrader classic`.
+
+    FOLDER is an assignment or workspace folder. Defaults to the workspace
+    around the current directory. A folder outside any workspace becomes one;
+    a class folder that is ready to grade is imported with the grades already
+    in its files.
+    """
+    _prepare(
+        ctx,
+        graphics=graphics,
+        check_graphics=check_graphics,
+        qa_file=qa_file,
+        submissions=submissions,
+    )
+    if qa_file and (folder or workspace or assignment):
+        raise click.UsageError(
+            "--qa-file/--submissions cannot be combined with a workspace selection"
+        )
 
     try:
-        if args.qa_file:
+        if qa_file and submissions:
             # Kept for scripts: a folder named outright is graded the classic
             # way, in place and with no service.
-            _grade_folder(Path(args.qa_file), Path(args.submissions))
+            _grade_folder(qa_file, submissions)
             return
-        target = (args.folder or args.workspace or Path.cwd()).expanduser().resolve()
-        root = args.workspace or _workspace_for(target)
-        assignment = args.assignment
-        if root is None and args.folder is None:
+        target = (folder or workspace or Path.cwd()).expanduser().resolve()
+        root = workspace or _workspace_for(target)
+        if root is None and folder is None:
             # A bare `tui` never turns the current directory into a workspace
             # behind the user's back: offer the ones already opened instead.
-            root = _choose_recent_workspace(parser, target)
+            root = _choose_recent_workspace(target)
             if root is None:
                 return
             target = root
@@ -158,30 +145,52 @@ def run_app(argv: list[str] | None = None) -> None:
             assignment = assignment or imported
         _run_workspace(Path(root).expanduser().resolve(), assignment=assignment, target=target)
     except (OSError, ValueError, RuntimeError) as exc:
-        parser.exit(2, f"error: {exc}\n")
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(2)
 
 
-def run_classic(argv: list[str] | None = None) -> None:
-    """`opengrader classic`: Tools & Settings and folder grading, no workspace."""
-    parser = _build_classic_parser()
-    args = _parse(parser, argv)
+@click.command("classic", context_settings=CONTEXT_SETTINGS)
+@_folder_options
+@_graphics_options
+@click.pass_context
+def classic_command(
+    ctx: click.Context,
+    qa_file: Path | None,
+    submissions: Path | None,
+    graphics: str,
+    check_graphics: bool,
+) -> None:
+    """Open the classic grading app: Tools & Settings with a Start grading
+    card, grading class folders in place. Never uses a workspace or starts a
+    service, except through the opt-in Open in browser button (Tools →
+    Browser app). This is what the desktop icon opens.
+    """
+    _prepare(
+        ctx,
+        graphics=graphics,
+        check_graphics=check_graphics,
+        qa_file=qa_file,
+        submissions=submissions,
+    )
     try:
-        if args.qa_file:
-            _grade_folder(Path(args.qa_file), Path(args.submissions))
+        if qa_file and submissions:
+            _grade_folder(qa_file, submissions)
         else:
             TuiApp().run()
     except (OSError, ValueError) as exc:
-        parser.exit(2, f"error: {exc}\n")
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(2)
 
 
-def _choose_recent_workspace(parser: ArgumentParser, here: Path) -> Path | None:
+def _choose_recent_workspace(here: Path) -> Path | None:
     """A workspace opened before; with none on record, exit 2 with the pointer."""
     from opengrader.core.recents import load_recents
     from opengrader.tui.recent_workspaces import RecentWorkspaces
 
     recent = [item for item in load_recents() if item.kind == "workspace"]
     if not recent:
-        parser.exit(2, _NO_WORKSPACE.format(here=here))
+        click.echo(_NO_WORKSPACE.format(here=here), err=True, nl=False)
+        sys.exit(2)
     return RecentWorkspaces(recent, here=here).run()
 
 
@@ -303,9 +312,10 @@ def _run_workspace(
             if selected is None:
                 return
             if selected == PROCESS_WORKSPACE:
-                from opengrader.cli.run import run_cli
+                from opengrader.cli import run
 
-                run_cli(process_workspace_argv(str(target), str(root)))
+                with suppress(SystemExit):
+                    run_command(run.command, process_workspace_argv(str(target), str(root)))
                 assignments = fetch()
                 try:
                     selected = assignment_for_directory(Workspace(root), target)
@@ -334,10 +344,5 @@ def _run_workspace(
         selected = None
 
 
-def run_app_dev() -> None:
-    _enable_textual_feature(_DEVTOOLS_FEATURE)
-    run_app()
-
-
 if __name__ == "__main__":
-    run_app()
+    tui_command()

@@ -1,9 +1,10 @@
 """Detached local workspace service entry point."""
 
-from argparse import ArgumentParser
 from pathlib import Path
 import os
 import socket
+
+import click
 
 from opengrader.server.workspace.client import ServiceConnection, exclusive_lock
 
@@ -61,7 +62,11 @@ def serve(root: Path, *, port: int = 0) -> None:
                 record.unlink(missing_ok=True)
 
 
+@click.command(help=__doc__)
+@click.argument("workspace", type=click.Path(path_type=Path))
+def command(workspace: Path) -> None:
+    serve(workspace)
+
+
 if __name__ == "__main__":
-    parser = ArgumentParser(description=__doc__)
-    parser.add_argument("workspace", type=Path)
-    serve(parser.parse_args().workspace)
+    command()

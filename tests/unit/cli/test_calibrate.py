@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli.calibrate import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.calibrate import command
 from opengrader.core.handoff.packet import PACKET_SUBMISSIONS_DIRNAME
 from opengrader.core.history.journal import GradeJournal
 from opengrader.core.submissions.student_file import (
@@ -72,7 +73,8 @@ def _grade_packet(packet_root: Path, points: float) -> None:
 
 def _pack(cohort: Path, tmp_path: Path, graders: str = "alice,bob") -> Path:
     out = tmp_path / "packets"
-    run_cli(
+    run_command(
+        command,
         [
             "pack",
             "--submissions", str(cohort),
@@ -100,7 +102,8 @@ def test_pack_cuts_one_packet_per_grader(cohort, tmp_path, capsys):
 
 def test_pack_refuses_a_single_grader(cohort, tmp_path, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(
+        run_command(
+            command,
             [
                 "pack",
                 "--submissions", str(cohort),
@@ -117,7 +120,7 @@ def test_list_shows_the_recorded_sessions(cohort, tmp_path, capsys):
     _pack(cohort, tmp_path)
     capsys.readouterr()
 
-    run_cli(["list", "--submissions", str(cohort)])
+    run_command(command, ["list", "--submissions", str(cohort)])
 
     out = capsys.readouterr().out
     assert "norming" in out
@@ -125,7 +128,7 @@ def test_list_shows_the_recorded_sessions(cohort, tmp_path, capsys):
 
 
 def test_list_is_quiet_when_there_are_no_sessions(cohort, capsys):
-    run_cli(["list", "--submissions", str(cohort)])
+    run_command(command, ["list", "--submissions", str(cohort)])
 
     assert "No calibration sets recorded" in capsys.readouterr().out
 
@@ -136,7 +139,8 @@ def test_report_names_the_harsher_grader(cohort, tmp_path, capsys):
     _grade_packet(out / "norming-bob", 5.0)
     capsys.readouterr()
 
-    run_cli(
+    run_command(
+        command,
         [
             "report",
             "--submissions", str(cohort),
@@ -161,7 +165,7 @@ def test_report_refuses_when_only_one_grader_returned_a_packet(
     capsys.readouterr()
 
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["report", "--submissions", str(cohort), "--set", "norming"])
+        run_command(command, ["report", "--submissions", str(cohort), "--set", "norming"])
 
     captured = capsys.readouterr()
     assert exit_info.value.code == 1
@@ -171,7 +175,7 @@ def test_report_refuses_when_only_one_grader_returned_a_packet(
 
 def test_report_on_an_unknown_set_is_an_error(cohort, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["report", "--submissions", str(cohort), "--set", "nope"])
+        run_command(command, ["report", "--submissions", str(cohort), "--set", "nope"])
 
     assert exit_info.value.code == 1
     assert "no calibration set named nope" in capsys.readouterr().err
@@ -183,7 +187,7 @@ def test_from_set_uses_the_most_recent_session(cohort, tmp_path, capsys):
     _grade_packet(out / "norming-bob", 5.0)
     capsys.readouterr()
 
-    run_cli(["report", "--submissions", str(cohort), "--from-set", "--min-samples", "4"])
+    run_command(command, ["report", "--submissions", str(cohort), "--from-set", "--min-samples", "4"])
 
     assert "calibration set 'norming'" in capsys.readouterr().out
 
@@ -194,7 +198,8 @@ def test_report_json_carries_the_pair_statistics(cohort, tmp_path, capsys):
     _grade_packet(out / "norming-bob", 5.0)
     capsys.readouterr()
 
-    run_cli(
+    run_command(
+        command,
         [
             "report",
             "--submissions", str(cohort),
@@ -248,7 +253,8 @@ def _journal_grading(cohort: Path) -> None:
 def test_report_defaults_to_the_audit_journal(cohort, capsys):
     _journal_grading(cohort)
 
-    run_cli(
+    run_command(
+        command,
         [
             "report",
             "--submissions", str(cohort),
@@ -265,7 +271,7 @@ def test_report_defaults_to_the_audit_journal(cohort, capsys):
 def test_a_divided_cohort_with_no_shared_answer_is_told_so(cohort, capsys):
     _journal_grading(cohort)
 
-    run_cli(["report", "--submissions", str(cohort), "--min-drift-samples", "3"])
+    run_command(command, ["report", "--submissions", str(cohort), "--min-drift-samples", "3"])
 
     out = capsys.readouterr().out
     assert "No two graders marked comparable work" in out
@@ -285,7 +291,8 @@ def test_a_divided_cohort_is_still_comparable_through_a_shared_answer(
         )
     _journal_grading(root)
 
-    run_cli(
+    run_command(
+        command,
         [
             "report",
             "--submissions", str(root),
@@ -301,7 +308,7 @@ def test_a_divided_cohort_is_still_comparable_through_a_shared_answer(
 
 def test_report_without_any_history_is_an_error(cohort, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["report", "--submissions", str(cohort)])
+        run_command(command, ["report", "--submissions", str(cohort)])
 
     assert exit_info.value.code == 1
     assert "no grading history" in capsys.readouterr().err
@@ -309,7 +316,7 @@ def test_report_without_any_history_is_an_error(cohort, capsys):
 
 def test_a_missing_submissions_path_is_an_error(tmp_path, capsys):
     with pytest.raises(SystemExit) as exit_info:
-        run_cli(["report", "--submissions", str(tmp_path / "nope")])
+        run_command(command, ["report", "--submissions", str(tmp_path / "nope")])
 
     assert exit_info.value.code == 1
     assert "not found" in capsys.readouterr().err
@@ -324,7 +331,8 @@ def test_reporting_never_changes_a_grade(cohort, tmp_path, capsys):
     }
     capsys.readouterr()
 
-    run_cli(
+    run_command(
+        command,
         ["report", "--submissions", str(cohort), "--set", "norming", "--min-samples", "4"]
     )
 

@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import fitz
 import pytest
 
-from opengrader.cli.qa_file import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.qa_file import command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SAMPLES_DIR = REPO_ROOT / "samples"
 
 
-def _run_cli(monkeypatch: pytest.MonkeyPatch, *args: str) -> None:
-    monkeypatch.setattr(sys, "argv", ["qa-file", *args])
-    run_cli()
+def _run_cli(*args: str) -> None:
+    run_command(command, args)
 
 
 def _extract_pdf_text(path: Path) -> str:
@@ -31,13 +30,12 @@ def _extract_pdf_text(path: Path) -> str:
     ],
 )
 def test_validate_accepts_sample_qa_files(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     sample_name: str,
 ) -> None:
     sample_path = SAMPLES_DIR / sample_name
 
-    _run_cli(monkeypatch, "validate", "--qa-file", str(sample_path))
+    _run_cli("validate", "--qa-file", str(sample_path))
 
     assert f"QA file is valid: {sample_path}" in capsys.readouterr().out
 
@@ -58,7 +56,6 @@ def test_validate_accepts_sample_qa_files(
     ],
 )
 def test_generate_template_accepts_single_version_sample_qa_files(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     sample_name: str,
     output_name: str,
@@ -66,9 +63,7 @@ def test_generate_template_accepts_single_version_sample_qa_files(
 ) -> None:
     output_path = tmp_path / output_name
 
-    _run_cli(
-        monkeypatch,
-        "generate-template",
+    _run_cli("generate-template",
         "--qa-file",
         str(SAMPLES_DIR / sample_name),
         "--output-pdf",
@@ -82,14 +77,11 @@ def test_generate_template_accepts_single_version_sample_qa_files(
 
 
 def test_generate_template_accepts_all_versions_sample_qa_file(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     output_path = tmp_path / "qa-multi.pdf"
 
-    _run_cli(
-        monkeypatch,
-        "generate-template",
+    _run_cli("generate-template",
         "--qa-file",
         str(SAMPLES_DIR / "cs146-quiz1/qa.md"),
         "--output-pdf",
@@ -109,15 +101,12 @@ def test_generate_template_accepts_all_versions_sample_qa_file(
 
 
 def test_generate_bubble_sheet_writes_a_sheet_and_names_what_it_skipped(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     output_path = tmp_path / "sheet.pdf"
 
-    _run_cli(
-        monkeypatch,
-        "generate-template",
+    _run_cli("generate-template",
         "--qa-file",
         str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf",
@@ -132,13 +121,10 @@ def test_generate_bubble_sheet_writes_a_sheet_and_names_what_it_skipped(
 
 
 def test_generate_bubble_sheet_refuses_a_qa_file_with_no_multiple_choice(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     with pytest.raises(ValueError, match="no multiple-choice questions"):
-        _run_cli(
-            monkeypatch,
-            "generate-template",
+        _run_cli("generate-template",
             "--qa-file",
             str(SAMPLES_DIR / "cmpe195a-quiz1/qa.md"),
             "--output-pdf",
@@ -148,7 +134,6 @@ def test_generate_bubble_sheet_refuses_a_qa_file_with_no_multiple_choice(
 
 
 def test_generate_bubble_sheet_with_a_roster_makes_one_sheet_per_student(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
@@ -156,9 +141,7 @@ def test_generate_bubble_sheet_with_a_roster_makes_one_sheet_per_student(
     roster.write_text("100001\tAda Lovelace\n100002\tAlan Turing\n")
     output_path = tmp_path / "batch.pdf"
 
-    _run_cli(
-        monkeypatch,
-        "generate-template",
+    _run_cli("generate-template",
         "--qa-file",
         str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf",
@@ -176,14 +159,11 @@ def test_generate_bubble_sheet_with_a_roster_makes_one_sheet_per_student(
 
 
 def test_copies_prints_that_many_sheets(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     output_path = tmp_path / "copies.pdf"
-    _run_cli(
-        monkeypatch,
-        "generate-template",
+    _run_cli("generate-template",
         "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf", str(output_path),
         "--bubble-sheet",
@@ -195,14 +175,11 @@ def test_copies_prints_that_many_sheets(
 
 
 def test_shuffle_gives_each_sheet_its_own_order_and_form_code(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     output_path = tmp_path / "scrambled.pdf"
-    _run_cli(
-        monkeypatch,
-        "generate-template",
+    _run_cli("generate-template",
         "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
         "--output-pdf", str(output_path),
         "--bubble-sheet",
@@ -223,12 +200,10 @@ def test_shuffle_gives_each_sheet_its_own_order_and_form_code(
 
 
 def test_shuffle_without_a_batch_is_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path
 ) -> None:
     with pytest.raises(ValueError, match="--roster or --copies"):
-        _run_cli(
-            monkeypatch,
-            "generate-template",
+        _run_cli("generate-template",
             "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
             "--output-pdf", str(tmp_path / "x.pdf"),
             "--bubble-sheet",
@@ -237,14 +212,12 @@ def test_shuffle_without_a_batch_is_refused(
 
 
 def test_a_roster_and_copies_together_are_refused(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path
 ) -> None:
     roster = tmp_path / "roster.tsv"
     roster.write_text("1\tA\n")
     with pytest.raises(ValueError, match="one or the other"):
-        _run_cli(
-            monkeypatch,
-            "generate-template",
+        _run_cli("generate-template",
             "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz2-multiple-choice/qa.md"),
             "--output-pdf", str(tmp_path / "x.pdf"),
             "--bubble-sheet",
@@ -254,12 +227,10 @@ def test_a_roster_and_copies_together_are_refused(
 
 
 def test_shuffling_a_written_template_is_refused_with_the_reason(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path
 ) -> None:
     with pytest.raises(ValueError, match="needs --bubble-sheet"):
-        _run_cli(
-            monkeypatch,
-            "generate-template",
+        _run_cli("generate-template",
             "--qa-file", str(SAMPLES_DIR / "cmpe195a-quiz1/qa.md"),
             "--output-pdf", str(tmp_path / "x.pdf"),
             "--shuffle",

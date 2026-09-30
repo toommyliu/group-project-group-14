@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 
 import pytest
+from click.testing import CliRunner
 
+from opengrader.cli import run_command
 from opengrader.cli import doctor
 from opengrader.core.environment import EnvironmentCheck, EnvironmentReport
 
@@ -27,13 +29,13 @@ def stub_report(monkeypatch: pytest.MonkeyPatch):
     return install
 
 
-def test_clean_environment_exits_zero(stub_report, capsys: pytest.CaptureFixture) -> None:
+def test_clean_environment_exits_zero(stub_report) -> None:
     stub_report(_report(EnvironmentCheck(name="Python", status="ready", detail="3.12.4")))
 
-    assert doctor.run_cli([]) == 0
-    out = capsys.readouterr().out
-    assert "Python: 3.12.4" in out
-    assert "Everything Opengrader needs" in out
+    result = CliRunner().invoke(doctor.command, [])
+    assert result.exit_code == 0
+    assert "Python: 3.12.4" in result.output
+    assert "Everything Opengrader needs" in result.output
 
 
 def test_findings_print_their_impact_and_fix(
@@ -51,7 +53,7 @@ def test_findings_print_their_impact_and_fix(
         )
     )
 
-    doctor.run_cli([])
+    run_command(doctor.command, [])
     out = capsys.readouterr().out
     assert "Scanned exams extract to empty answers." in out
     assert "Fix: brew install tesseract" in out
@@ -68,7 +70,7 @@ def test_findings_are_repeated_as_a_todo_list_worst_first(
         )
     )
 
-    doctor.run_cli([])
+    run_command(doctor.command, [])
     out = capsys.readouterr().out
     todo = out.split("To do, most important first:")[1]
     assert todo.index("Tesseract OCR") < todo.index("pix2tex")
@@ -77,12 +79,14 @@ def test_findings_are_repeated_as_a_todo_list_worst_first(
 
 def test_fail_on_problem_exits_two_only_for_broken_checks(stub_report) -> None:
     stub_report(_report(EnvironmentCheck(name="Tesseract OCR", status="broken", detail="")))
-    assert doctor.run_cli(["--fail-on-problem"]) == 2
+    result = CliRunner().invoke(doctor.command, ["--fail-on-problem"])
+    assert result.exit_code == 2
 
 
 def test_fail_on_problem_ignores_optional_gaps(stub_report) -> None:
     stub_report(_report(EnvironmentCheck(name="Ollama server", status="degraded", detail="")))
-    assert doctor.run_cli(["--fail-on-problem"]) == 0
+    result = CliRunner().invoke(doctor.command, ["--fail-on-problem"])
+    assert result.exit_code == 0
 
 
 def test_json_output_carries_every_field(stub_report, capsys: pytest.CaptureFixture) -> None:
@@ -98,7 +102,7 @@ def test_json_output_carries_every_field(stub_report, capsys: pytest.CaptureFixt
         )
     )
 
-    doctor.run_cli(["--json"])
+    run_command(doctor.command, ["--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "degraded"
     assert payload["checks"] == [
@@ -114,7 +118,8 @@ def test_json_output_carries_every_field(stub_report, capsys: pytest.CaptureFixt
 
 def test_flags_reach_the_engine(stub_report) -> None:
     recorded = stub_report(_report())
-    doctor.run_cli(
+    run_command(
+        doctor.command,
         [
             "--ollama-model",
             "llama3.2-vision:11b",
@@ -135,14 +140,9 @@ def test_flags_reach_the_engine(stub_report) -> None:
     assert recorded["time_ai"] is False
 
 
-def test_main_returns_the_exit_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(doctor, "run_cli", lambda argv=None: 0)
-    assert doctor.main() == 0
-
-
 def test_time_ai_flag_reaches_the_engine(stub_report) -> None:
     recorded = stub_report(_report())
-    doctor.run_cli(["--time-ai"])
+    run_command(doctor.command, ["--time-ai"])
     assert recorded.get("time_ai") is True
     assert "ai" in recorded
 
@@ -157,7 +157,7 @@ def test_ai_features_and_latency_in_json_output(stub_report, capsys: pytest.Capt
         )
     )
 
-    doctor.run_cli(["--json"])
+    run_command(doctor.command, ["--json"])
     payload = json.loads(capsys.readouterr().out)
     check_names = [check["name"] for check in payload["checks"]]
     assert "AI features" in check_names

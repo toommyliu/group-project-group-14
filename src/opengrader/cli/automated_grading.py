@@ -6,12 +6,14 @@ import socket
 import subprocess
 import sys
 import time
-from argparse import ArgumentParser, BooleanOptionalAction, RawDescriptionHelpFormatter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
 from opengrader.core.grading.answer_cache import AnswerGradeCache
 from opengrader.core.grading.llm_grader import (
@@ -33,8 +35,9 @@ from opengrader.core.grading.automated import (
 )
 
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run automated-grading --solutions solutions.md --input student-0001.submission.md
   uv run automated-grading --solutions solutions.md --input ./student-submissions/
   uv run automated-grading --solutions Solutions/solutions.md --input samples/student_responses.md
@@ -43,7 +46,8 @@ examples:
   uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm --llm-model llama3.1 --llm-min-confidence 0.8
   uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm --dry-run
 
-pick --llm-min-confidence from evidence, not from a guess:
+\b
+Pick --llm-min-confidence from evidence, not from a guess:
   uv run llm-eval --solutions solutions.md --input ./student-submissions/
 """
 
@@ -77,112 +81,6 @@ def _submission_paths(input_path: Path) -> list[Path]:
     return direct + nested
 
 
-def setup_args() -> ArgumentParser:
-    ai = app_config.resolve()
-    parser = ArgumentParser(
-        description="Grade student markdown files using a solutions template.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--solutions", required=True, help="Path to the solutions markdown file"
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="Path to a single student file or a directory of files",
-    )
-    parser.add_argument(
-        "--llm",
-        action=BooleanOptionalAction,
-        default=ai.grade_written,
-        help=(
-            "Use a local LLM (Ollama) to suggest rubric grades for free "
-            "responses that do not match exactly. Suggestions are written as "
-            "normal grades tagged '[AI]' for you to review in the TUI. "
-            "(default: %(default)s, from AI Setup)"
-        ),
-    )
-    parser.add_argument(
-        "--llm-model",
-        default=ai.text_model,
-        help=(
-            "Ollama model to grade with (default: %(default)s, from AI Setup). "
-            "Any installed chat model works, e.g. llama3.1, mistral, qwen2.5."
-        ),
-    )
-    parser.add_argument(
-        "--llm-host",
-        default=ai.host,
-        help="Ollama server URL (default: %(default)s, from AI Setup).",
-    )
-    parser.add_argument(
-        "--llm-timeout",
-        type=float,
-        default=app_config.DEFAULT_TIMEOUT_SECONDS,
-        help="Per-request timeout in seconds (default: %(default)s).",
-    )
-    parser.add_argument(
-        "--llm-min-confidence",
-        type=float,
-        default=ai.min_confidence,
-        help=(
-            "Only write AI suggestions at or above this confidence (0-1); "
-            "weaker ones are left for manual grading (default: %(default)s). "
-            "Run 'llm-eval' against already-graded submissions to find the "
-            "value your model and exam actually support."
-        ),
-    )
-    parser.add_argument(
-        "--llm-min-transcription-confidence",
-        type=float,
-        default=MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
-        metavar="PERCENT",
-        help=(
-            "Do not ask the model to grade an answer whose OCR transcription "
-            "confidence is below this (0-100, default: %(default)s); those go "
-            "to manual review instead, where the review queue already flags "
-            "them. The model reads the transcribed text and never the image, "
-            "so below this it would be grading words nobody vouched for. "
-            "Answers with no measured confidence (vision-model reads) are "
-            "always graded. Use 0 to disable."
-        ),
-    )
-    parser.add_argument(
-        "--auto-ollama",
-        action="store_true",
-        help=(
-            "Before grading, start 'ollama serve' if nothing is listening and "
-            "pull the grading model. Mirrors the split/extract/answer-key steps; "
-            "off by default so scripted runs fail fast instead of downloading."
-        ),
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print what would change (including AI suggestions) without writing.",
-    )
-    parser.add_argument(
-        "--no-journal",
-        action="store_true",
-        help=(
-            "Do not record this run in the audit journal. Off by default: "
-            "journalling is what lets 'grade-restore' undo a bad batch."
-        ),
-    )
-    parser.add_argument(
-        "--yes-send-to-cloud",
-        action="store_true",
-        dest="yes_send_to_cloud",
-        help=(
-            "Confirm sending free-response answers to a cloud AI provider for "
-            "--llm grading. The scale and destination are shown first; nothing "
-            "is sent without this or an interactive yes. Never implied by --llm."
-        ),
-    )
-    return parser
-
-
 def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> None:
     parsed = urlparse(host)
     hostname = parsed.hostname or "127.0.0.1"
@@ -210,23 +108,142 @@ def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> No
     emit("Warning: timed out waiting for Ollama to start.")
 
 
-def run_cli(
-    argv: list[str] | None = None,
+@dataclass(frozen=True)
+class _Hooks:
+    progress: GradingProgress | None = None
+    status_callback: Callable[[str], None] | None = None
+
+
+@click.command("automated-grading", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--solutions", required=True, help="Path to the solutions markdown file"
+)
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Path to a single student file or a directory of files",
+)
+@click.option(
+    "--llm/--no-llm",
+    default=ai_default("grade_written"),
+    show_default="from AI Setup",
+    help=(
+        "Use a local LLM (Ollama) to suggest rubric grades for free "
+        "responses that do not match exactly. Suggestions are written as "
+        "normal grades tagged '[AI]' for you to review in the TUI."
+    ),
+)
+@click.option(
+    "--llm-model",
+    "text_model",
+    default=ai_default("text_model"),
+    show_default="from AI Setup",
+    help=(
+        "Ollama model to grade with. "
+        "Any installed chat model works, e.g. llama3.1, mistral, qwen2.5."
+    ),
+)
+@click.option(
+    "--llm-host",
+    default=ai_default("host"),
+    show_default="from AI Setup",
+    help="Ollama server URL.",
+)
+@click.option(
+    "--llm-timeout",
+    type=float,
+    default=app_config.DEFAULT_TIMEOUT_SECONDS,
+    show_default=True,
+    help="Per-request timeout in seconds.",
+)
+@click.option(
+    "--llm-min-confidence",
+    type=float,
+    default=ai_default("min_confidence"),
+    show_default="from AI Setup",
+    help=(
+        "Only write AI suggestions at or above this confidence (0-1); "
+        "weaker ones are left for manual grading. "
+        "Run 'llm-eval' against already-graded submissions to find the "
+        "value your model and exam actually support."
+    ),
+)
+@click.option(
+    "--llm-min-transcription-confidence",
+    type=float,
+    default=MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE,
+    show_default=True,
+    metavar="PERCENT",
+    help=(
+        "Do not ask the model to grade an answer whose OCR transcription "
+        "confidence is below this (0-100); those go "
+        "to manual review instead, where the review queue already flags "
+        "them. The model reads the transcribed text and never the image, "
+        "so below this it would be grading words nobody vouched for. "
+        "Answers with no measured confidence (vision-model reads) are "
+        "always graded. Use 0 to disable."
+    ),
+)
+@click.option(
+    "--auto-ollama",
+    is_flag=True,
+    help=(
+        "Before grading, start 'ollama serve' if nothing is listening and "
+        "pull the grading model. Mirrors the split/extract/answer-key steps; "
+        "off by default so scripted runs fail fast instead of downloading."
+    ),
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print what would change (including AI suggestions) without writing.",
+)
+@click.option(
+    "--no-journal",
+    is_flag=True,
+    help=(
+        "Do not record this run in the audit journal. Off by default: "
+        "journalling is what lets 'grade-restore' undo a bad batch."
+    ),
+)
+@click.option(
+    "--yes-send-to-cloud",
+    is_flag=True,
+    help=(
+        "Confirm sending free-response answers to a cloud AI provider for "
+        "--llm grading. The scale and destination are shown first; nothing "
+        "is sent without this or an interactive yes. Never implied by --llm."
+    ),
+)
+@click.pass_obj
+def command(
+    hooks: _Hooks | None,
     *,
-    progress: GradingProgress | None = None,
-    status_callback: Callable[[str], None] | None = None,
+    solutions: str,
+    input_path: Path,
+    llm: bool,
+    text_model: str,
+    llm_host: str,
+    llm_timeout: float,
+    llm_min_confidence: float,
+    llm_min_transcription_confidence: float,
+    auto_ollama: bool,
+    dry_run: bool,
+    no_journal: bool,
+    yes_send_to_cloud: bool,
 ) -> None:
-    progress = progress or GradingProgress()
+    """Grade student markdown files using a solutions template."""
+    hooks = hooks or _Hooks()
+    progress = hooks.progress or GradingProgress()
 
     def emit(message: str) -> None:
         print(message)
-        if status_callback is not None:
-            status_callback(message)
+        if hooks.status_callback is not None:
+            hooks.status_callback(message)
 
-    parser = setup_args()
-    args = parser.parse_args(argv)
-
-    if args.llm:
+    if llm:
         resolved_ai = app_config.resolve()
         problems = resolved_ai.problems()
         if problems:
@@ -234,16 +251,15 @@ def run_cli(
                 print(f"Error: {problem}", file=sys.stderr)
             sys.exit(2)
 
-    solutions_path = Path(args.solutions)
+    solutions_path = Path(solutions)
     if not solutions_path.exists():
         print(f"Error: Solutions file not found at {solutions_path}")
         sys.exit(1)
 
     qa_doc = load_qa_markdown(solutions_path)
 
-    input_path = Path(args.input)
     if not input_path.is_file() and not input_path.is_dir():
-        print(f"Error: Input path '{args.input}' is not a file or directory.")
+        print(f"Error: Input path '{input_path}' is not a file or directory.")
         sys.exit(1)
 
     paths = _submission_paths(input_path)
@@ -251,14 +267,14 @@ def run_cli(
     llm_generate: GenerateFn | None = None
     llm_model = ""
     llm_provider = ""
-    if args.llm:
+    if llm:
         resolved = app_config.with_overrides(
             resolved_ai,
-            host=args.llm_host,
-            text_model=args.llm_model,
-            timeout_seconds=args.llm_timeout,
+            host=llm_host,
+            text_model=text_model,
+            timeout_seconds=llm_timeout,
         )
-        if args.auto_ollama and resolved.kind == "local":
+        if auto_ollama and resolved.kind == "local":
             try:
                 _start_ollama_server_if_needed(resolved.host, emit)
             except RuntimeError as exc:
@@ -301,7 +317,7 @@ def run_cli(
             cli_confirm_cloud_send(
                 resolved,
                 preflight,
-                yes_send_to_cloud=args.yes_send_to_cloud,
+                yes_send_to_cloud=yes_send_to_cloud,
                 emit=lambda message: print(message, file=sys.stderr),
             )
         try:
@@ -324,14 +340,14 @@ def run_cli(
         llm_provider = resolved.provider.name
         emit(
             f"LLM free-response grading enabled (model={resolved.text_model}, "
-            f"min confidence={args.llm_min_confidence:g})."
+            f"min confidence={llm_min_confidence:g})."
         )
 
     total = len(paths)
     failures = 0
 
     run_journal: _RunJournal | None = None
-    if not args.dry_run and not args.no_journal:
+    if not dry_run and not no_journal:
         run_journal = _RunJournal(input_path)
 
     answer_cache = AnswerGradeCache()
@@ -346,12 +362,12 @@ def run_cli(
                     md_file,
                     qa_doc,
                     llm_generate=llm_generate,
-                    llm_min_confidence=args.llm_min_confidence,
+                    llm_min_confidence=llm_min_confidence,
                     llm_model=llm_model,
                     llm_provider=llm_provider,
-                    min_transcription_confidence=args.llm_min_transcription_confidence,
+                    min_transcription_confidence=llm_min_transcription_confidence,
                     answer_cache=answer_cache,
-                    dry_run=args.dry_run,
+                    dry_run=dry_run,
                     question_callback=lambda qid, name=md_file.name: progress.question(
                         name, qid
                     ),
@@ -382,5 +398,18 @@ def run_cli(
         )
 
 
+def run_cli(
+    argv: Sequence[str],
+    *,
+    progress: GradingProgress | None = None,
+    status_callback: Callable[[str], None] | None = None,
+) -> None:
+    run_command(
+        command,
+        argv,
+        obj=_Hooks(progress=progress, status_callback=status_callback),
+    )
+
+
 if __name__ == "__main__":
-    run_cli()
+    command()

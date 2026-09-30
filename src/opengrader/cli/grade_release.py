@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.cli.grade_check import print_readiness
 from opengrader.core.curve import describe_curve, read_curve
 from opengrader.core.release import (
@@ -24,8 +26,9 @@ from opengrader.core.release import (
 )
 from opengrader.core.workspace.store import Workspace
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grade-release create --submissions out/subs/
   uv run grade-release create --submissions out/subs/ --label "returned in class" --yes
   uv run grade-release create --submissions out/subs/ --yes --force
@@ -34,7 +37,8 @@ examples:
   uv run grade-release diff   --submissions out/subs/
   uv run grade-release diff   --submissions out/subs/ --release rel-2026-08-05-1a2b3c --json
 
-note:
+\b
+Note:
   A release never blocks a later grade change. 'diff' is how you find the ones
   that happened after the students saw their grades.
 """
@@ -49,75 +53,20 @@ _CHANGE_LABELS = {
 }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description="Record when grades were handed back, and what moved since.",
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    create = subparsers.add_parser(
-        "create", help="Check readiness and record a release (previews without --yes)."
-    )
-    create.add_argument("--submissions")
-    create.add_argument(
-        "--label",
-        default="",
-        help='Human name for this hand-back, e.g. "returned in class".',
-    )
-    create.add_argument(
-        "--roster",
-        default="",
-        help="Roster TSV; adds the missing-submission check to the readiness gate.",
-    )
-    create.add_argument(
-        "--yes", action="store_true", help="Actually write it (previews otherwise)."
-    )
-    create.add_argument(
-        "--force",
-        action="store_true",
-        help="Record the release even though something blocks it.",
-    )
-
-    listing = subparsers.add_parser("list", help="Every recorded release, oldest first.")
-    listing.add_argument("--submissions")
-    listing.add_argument("--json", action="store_true")
-
-    show = subparsers.add_parser("show", help="One release's recorded grades.")
-    show.add_argument("--submissions")
-    show.add_argument(
-        "--release", default="", help="Release id (default: the most recent)."
-    )
-    show.add_argument("--json", action="store_true")
-
-    diff = subparsers.add_parser(
-        "diff", help="What has changed since a release handed grades out."
-    )
-    diff.add_argument("--submissions")
-    diff.add_argument(
-        "--release", default="", help="Release id (default: the most recent)."
-    )
-    diff.add_argument(
-        "--raw",
-        action="store_true",
-        help=(
-            "Compare against the release's own curve instead of today's, i.e. "
-            "ask 'did any grade change?' rather than 'is their total still what "
-            "we told them?'"
-        ),
-    )
-    diff.add_argument("--json", action="store_true")
-
-    for command in (create, listing, show, diff):
-        command.add_argument("--workspace", type=Path, help="Workspace directory.")
-        command.add_argument("--assignment", help="Assignment ID within the workspace.")
-    return parser
+def _workspace_options(function):
+    function = click.option(
+        "--assignment", help="Assignment ID within the workspace."
+    )(function)
+    return click.option(
+        "--workspace", type=click.Path(path_type=Path), help="Workspace directory."
+    )(function)
 
 
-def _resolve_submissions(args: Namespace) -> tuple[Path, Workspace | None, str | None]:
-    if args.submissions:
-        path = Path(args.submissions).expanduser()
+def _resolve_submissions(
+    *, submissions: str | None, workspace: Path | None, assignment: str | None
+) -> tuple[Path, Workspace | None, str | None]:
+    if submissions:
+        path = Path(submissions).expanduser()
         if not path.exists():
             print(f"Error: submissions path not found: {path}", file=sys.stderr)
             sys.exit(1)
@@ -125,13 +74,13 @@ def _resolve_submissions(args: Namespace) -> tuple[Path, Workspace | None, str |
     from opengrader.core.workspace.context import current_assignment, submissions_path
 
     try:
-        workspace, assignment_id = current_assignment(
-            workspace_root=args.workspace, assignment_id=args.assignment
+        opened, assignment_id = current_assignment(
+            workspace_root=workspace, assignment_id=assignment
         )
     except (OSError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
-    return submissions_path(workspace, assignment_id), workspace, assignment_id
+    return submissions_path(opened, assignment_id), opened, assignment_id
 
 
 def _resolve_release(submissions: Path, release_id: str) -> GradeRelease:
@@ -160,19 +109,60 @@ def _number(value: float | None) -> str:
     return f"{value:g}" if value is not None else "—"
 
 
-def _cmd_create(args: Namespace) -> None:
-    submissions, workspace, assignment_id = _resolve_submissions(args)
+@click.group(
+    "grade-release",
+    cls=Group,
+    context_settings=CONTEXT_SETTINGS,
+    epilog=EPILOG,
+)
+def command() -> None:
+    """Record when grades were handed back, and what moved since."""
+
+
+@command.command("create")
+@click.option("--submissions")
+@click.option(
+    "--label",
+    default="",
+    help='Human name for this hand-back, e.g. "returned in class".',
+)
+@click.option(
+    "--roster",
+    default="",
+    help="Roster TSV; adds the missing-submission check to the readiness gate.",
+)
+@click.option("--yes", is_flag=True, help="Actually write it (previews otherwise).")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Record the release even though something blocks it.",
+)
+@_workspace_options
+def create_command(
+    *,
+    submissions: str | None,
+    label: str,
+    roster: str,
+    yes: bool,
+    force: bool,
+    workspace: Path | None,
+    assignment: str | None,
+) -> None:
+    """Check readiness and record a release (previews without --yes)."""
+    folder, opened, assignment_id = _resolve_submissions(
+        submissions=submissions, workspace=workspace, assignment=assignment
+    )
     context = (
         load_workspace_release_context(
-            workspace, assignment_id, roster_path=args.roster.strip() or None
+            opened, assignment_id, roster_path=roster.strip() or None
         )
-        if workspace is not None and assignment_id is not None
-        else load_release_context(submissions, roster_path=args.roster.strip() or None)
+        if opened is not None and assignment_id is not None
+        else load_release_context(folder, roster_path=roster.strip() or None)
     )
     print_readiness(context)
     print()
 
-    if not context.readiness.ready and not args.force:
+    if not context.readiness.ready and not force:
         print(
             "Refusing to release: fix the blocking issues above, or pass --force "
             "to record the release anyway.",
@@ -180,18 +170,16 @@ def _cmd_create(args: Namespace) -> None:
         )
         sys.exit(2)
 
-    if not args.yes:
+    if not yes:
         print(
             f"Would record a release of {len(context.documents)} student(s). "
             "Re-run with --yes to write it."
         )
         return
 
-    release = build_release(
-        context.documents, curve=context.curve, label=args.label
-    )
+    release = build_release(context.documents, curve=context.curve, label=label)
     try:
-        path = write_release(submissions, release)
+        path = write_release(folder, release)
     except ReleaseError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -213,10 +201,23 @@ def _cmd_create(args: Namespace) -> None:
         )
 
 
-def _cmd_list(args: Namespace) -> None:
-    submissions, _, _ = _resolve_submissions(args)
-    releases = read_releases(submissions)
-    if args.json:
+@command.command("list")
+@click.option("--submissions")
+@click.option("--json", "as_json", is_flag=True)
+@_workspace_options
+def list_command(
+    *,
+    submissions: str | None,
+    as_json: bool,
+    workspace: Path | None,
+    assignment: str | None,
+) -> None:
+    """Every recorded release, oldest first."""
+    folder, _, _ = _resolve_submissions(
+        submissions=submissions, workspace=workspace, assignment=assignment
+    )
+    releases = read_releases(folder)
+    if as_json:
         print(
             json.dumps(
                 [
@@ -235,9 +236,9 @@ def _cmd_list(args: Namespace) -> None:
         )
         return
     if not releases:
-        print(f"No releases recorded in {submissions}.")
+        print(f"No releases recorded in {folder}.")
         return
-    print(f"{len(releases)} release(s) in {submissions}:\n")
+    print(f"{len(releases)} release(s) in {folder}:\n")
     for release in releases:
         label = f"  {release.label}" if release.label else ""
         print(
@@ -246,10 +247,27 @@ def _cmd_list(args: Namespace) -> None:
         )
 
 
-def _cmd_show(args: Namespace) -> None:
-    submissions, _, _ = _resolve_submissions(args)
-    release = _resolve_release(submissions, args.release)
-    if args.json:
+@command.command("show")
+@click.option("--submissions")
+@click.option(
+    "--release", "release_id", default="", help="Release id (default: the most recent)."
+)
+@click.option("--json", "as_json", is_flag=True)
+@_workspace_options
+def show_command(
+    *,
+    submissions: str | None,
+    release_id: str,
+    as_json: bool,
+    workspace: Path | None,
+    assignment: str | None,
+) -> None:
+    """One release's recorded grades."""
+    folder, _, _ = _resolve_submissions(
+        submissions=submissions, workspace=workspace, assignment=assignment
+    )
+    release = _resolve_release(folder, release_id)
+    if as_json:
         print(
             json.dumps(
                 {
@@ -351,18 +369,45 @@ def _print_comparison(comparison: ReleaseComparison, *, compared_curve: str) -> 
             )
 
 
-def _cmd_diff(args: Namespace) -> None:
-    submissions, workspace, assignment_id = _resolve_submissions(args)
-    release = _resolve_release(submissions, args.release)
-    context = (
-        load_workspace_release_context(workspace, assignment_id)
-        if workspace is not None and assignment_id is not None
-        else load_release_context(submissions)
+@command.command("diff")
+@click.option("--submissions")
+@click.option(
+    "--release", "release_id", default="", help="Release id (default: the most recent)."
+)
+@click.option(
+    "--raw",
+    is_flag=True,
+    help=(
+        "Compare against the release's own curve instead of today's, i.e. "
+        "ask 'did any grade change?' rather than 'is their total still what "
+        "we told them?'"
+    ),
+)
+@click.option("--json", "as_json", is_flag=True)
+@_workspace_options
+def diff_command(
+    *,
+    submissions: str | None,
+    release_id: str,
+    raw: bool,
+    as_json: bool,
+    workspace: Path | None,
+    assignment: str | None,
+) -> None:
+    """What has changed since a release handed grades out."""
+    folder, opened, assignment_id = _resolve_submissions(
+        submissions=submissions, workspace=workspace, assignment=assignment
     )
-    current_curve = None if args.raw else read_curve(submissions)
+    release = _resolve_release(folder, release_id)
+    context = (
+        load_workspace_release_context(opened, assignment_id)
+        if opened is not None and assignment_id is not None
+        else load_release_context(folder)
+    )
+    current_curve = None if raw else read_curve(folder)
     comparison = compare_release(release, context.documents, curve=current_curve)
 
-    if args.json:
+    if as_json:
         print(
             json.dumps(
                 {
@@ -407,19 +452,10 @@ def _cmd_diff(args: Namespace) -> None:
     _print_comparison(
         comparison,
         compared_curve=describe_curve(
-            release.curve if args.raw else read_curve(submissions)
+            release.curve if raw else read_curve(folder)
         ),
     )
 
 
-_COMMANDS = {
-    "create": _cmd_create,
-    "list": _cmd_list,
-    "show": _cmd_show,
-    "diff": _cmd_diff,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    _COMMANDS[args.command](args)
+if __name__ == "__main__":
+    command()

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.submissions.regrade import (
     RegradeRequest,
     add_regrade_request,
@@ -14,8 +16,9 @@ from opengrader.core.submissions.regrade import (
     resolve_regrade_request,
 )
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run regrade add --submissions out/subs/ --student 012345 --question q3 \\
       --reason "Valid alternative method deserves partial credit."
   uv run regrade add --submissions out/subs/ --student 012345 \\
@@ -29,64 +32,12 @@ examples:
 _STATUS_GLYPH = {"open": "●", "resolved": "✓", "denied": "✗"}
 
 
-def _add_submissions(parser: ArgumentParser) -> None:
-    parser.add_argument(
+def _submissions_option(function):
+    return click.option(
         "--submissions",
         required=True,
         help="Submissions directory (or a single .submission.md file).",
-    )
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "File and track student regrade requests: add a dispute, list "
-            "open (or all) requests, resolve or deny one."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    add = subparsers.add_parser("add", help="File a new regrade request.")
-    _add_submissions(add)
-    add.add_argument(
-        "--student", required=True, help="The disputing student's id."
-    )
-    add.add_argument(
-        "--question",
-        default="",
-        help="The disputed question id (e.g. q3). Omit for a whole-assignment dispute.",
-    )
-    add.add_argument(
-        "--reason",
-        default="",
-        help="The student's stated reason for the dispute.",
-    )
-
-    listing = subparsers.add_parser("list", help="List regrade requests.")
-    _add_submissions(listing)
-    listing.add_argument(
-        "--all",
-        action="store_true",
-        help="Show every request (default: only still-open ones).",
-    )
-
-    resolve = subparsers.add_parser(
-        "resolve", help="Mark a request resolved (grade reviewed/adjusted)."
-    )
-    resolve.add_argument("request_id", help="The request id (e.g. rg-1a2b3c4d).")
-    _add_submissions(resolve)
-    resolve.add_argument("--note", default="", help="Resolution note.")
-
-    deny = subparsers.add_parser(
-        "deny", help="Mark a request denied (the grade stands)."
-    )
-    deny.add_argument("request_id", help="The request id (e.g. rg-1a2b3c4d).")
-    _add_submissions(deny)
-    deny.add_argument("--note", default="", help="Reason the grade stands.")
-
-    return parser
+    )(function)
 
 
 def _resolve_submissions(raw: str) -> Path:
@@ -111,14 +62,35 @@ def _format_request(request: RegradeRequest) -> str:
     return line
 
 
-def _cmd_add(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
+@click.group("regrade", cls=Group, context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+def command() -> None:
+    """File and track student regrade requests: add a dispute, list open (or
+    all) requests, resolve or deny one.
+    """
+
+
+@command.command("add")
+@_submissions_option
+@click.option("--student", required=True, help="The disputing student's id.")
+@click.option(
+    "--question",
+    default="",
+    help="The disputed question id (e.g. q3). Omit for a whole-assignment dispute.",
+)
+@click.option(
+    "--reason",
+    default="",
+    help="The student's stated reason for the dispute.",
+)
+def add_command(*, submissions: str, student: str, question: str, reason: str) -> None:
+    """File a new regrade request."""
+    path = _resolve_submissions(submissions)
     try:
         request = add_regrade_request(
             path,
-            student_id=args.student,
-            reason=args.reason,
-            question_id=args.question,
+            student_id=student,
+            reason=reason,
+            question_id=question,
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -130,13 +102,22 @@ def _cmd_add(args: Namespace) -> None:
     )
 
 
-def _cmd_list(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
+@command.command("list")
+@_submissions_option
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Show every request (default: only still-open ones).",
+)
+def list_command(*, submissions: str, show_all: bool) -> None:
+    """List regrade requests."""
+    path = _resolve_submissions(submissions)
     requests = read_regrade_requests(path)
-    if not args.all:
+    if not show_all:
         requests = [r for r in requests if r.is_open]
     if not requests:
-        scope = "requests" if args.all else "open requests"
+        scope = "requests" if show_all else "open requests"
         print(f"No {scope} for {path}.")
         return
     open_count = sum(1 for r in requests if r.is_open)
@@ -147,32 +128,35 @@ def _cmd_list(args: Namespace) -> None:
         print()
 
 
-def _cmd_resolve(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
-    updated = resolve_regrade_request(path, args.request_id, note=args.note)
+@command.command("resolve")
+@click.argument("request_id")
+@_submissions_option
+@click.option("--note", default="", help="Resolution note.")
+def resolve_command(*, request_id: str, submissions: str, note: str) -> None:
+    """Mark a request resolved (grade reviewed/adjusted).
+
+    REQUEST_ID is the request id (e.g. rg-1a2b3c4d).
+    """
+    path = _resolve_submissions(submissions)
+    updated = resolve_regrade_request(path, request_id, note=note)
     if updated is None:
-        print(f"Error: no regrade request {args.request_id!r}", file=sys.stderr)
+        print(f"Error: no regrade request {request_id!r}", file=sys.stderr)
         sys.exit(1)
     print(f"Resolved {updated.request_id}.")
 
 
-def _cmd_deny(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
-    updated = deny_regrade_request(path, args.request_id, note=args.note)
+@command.command("deny")
+@click.argument("request_id")
+@_submissions_option
+@click.option("--note", default="", help="Reason the grade stands.")
+def deny_command(*, request_id: str, submissions: str, note: str) -> None:
+    """Mark a request denied (the grade stands).
+
+    REQUEST_ID is the request id (e.g. rg-1a2b3c4d).
+    """
+    path = _resolve_submissions(submissions)
+    updated = deny_regrade_request(path, request_id, note=note)
     if updated is None:
-        print(f"Error: no regrade request {args.request_id!r}", file=sys.stderr)
+        print(f"Error: no regrade request {request_id!r}", file=sys.stderr)
         sys.exit(1)
     print(f"Denied {updated.request_id}.")
-
-
-_COMMANDS = {
-    "add": _cmd_add,
-    "list": _cmd_list,
-    "resolve": _cmd_resolve,
-    "deny": _cmd_deny,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    _COMMANDS[args.command](args)

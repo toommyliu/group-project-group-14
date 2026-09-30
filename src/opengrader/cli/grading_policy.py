@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.anonymize import (
     read_name_map,
     redact_submission_names,
@@ -14,8 +16,9 @@ from opengrader.core.anonymize import (
 )
 from opengrader.core.policy import GradingPolicy, read_policy, write_policy
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run grading-policy show --submissions out/student-submissions/
   uv run grading-policy lock --submissions out/student-submissions/
   uv run grading-policy unlock --submissions out/student-submissions/
@@ -23,60 +26,11 @@ examples:
   uv run grading-policy restore-names --submissions out/subs/ --name-map names.json
 """
 
-
-def _add_submissions(parser: ArgumentParser) -> None:
-    parser.add_argument(
-        "--submissions",
-        required=True,
-        help="Submissions directory (or a single .submission.md file).",
-    )
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Get or set a submissions folder's anonymity policy: the soft "
-            "multi-grader lock (lock/unlock) and name redaction (redact-names/"
-            "restore-names)."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    _add_submissions(subparsers.add_parser("show", help="Print the current policy."))
-    _add_submissions(
-        subparsers.add_parser(
-            "lock", help="Lock the folder to anonymous grading (multi-grader)."
-        )
-    )
-    _add_submissions(
-        subparsers.add_parser("unlock", help="Unlock (solo grading, toggle freely).")
-    )
-
-    redact = subparsers.add_parser(
-        "redact-names",
-        help="Strip student names from the files, writing a name map to keep.",
-    )
-    _add_submissions(redact)
-    redact.add_argument(
-        "--name-map",
-        required=True,
-        help="Where to write the id↔name map (keep this out of the graders' copy).",
-    )
-
-    restore = subparsers.add_parser(
-        "restore-names",
-        help="Write names back into the files from a name map.",
-    )
-    _add_submissions(restore)
-    restore.add_argument(
-        "--name-map",
-        required=True,
-        help="The name map written by redact-names.",
-    )
-
-    return parser
+_submissions_option = click.option(
+    "--submissions",
+    required=True,
+    help="Submissions directory (or a single .submission.md file).",
+)
 
 
 def _resolve_submissions(raw: str) -> Path:
@@ -94,26 +48,57 @@ def _print_policy(path: Path, policy: GradingPolicy) -> None:
     print(f"  anonymity_locked: {policy.anonymity_locked}  ({state})")
 
 
-def _cmd_show(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
+@click.group(
+    "grading-policy",
+    cls=Group,
+    context_settings=CONTEXT_SETTINGS,
+    epilog=EPILOG,
+)
+def command() -> None:
+    """Get or set a submissions folder's anonymity policy: the soft
+    multi-grader lock (lock/unlock) and name redaction
+    (redact-names/restore-names).
+    """
+
+
+@command.command("show")
+@_submissions_option
+def show_command(submissions: str) -> None:
+    """Print the current policy."""
+    path = _resolve_submissions(submissions)
     _print_policy(path, read_policy(path))
 
 
-def _cmd_lock(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
+@command.command("lock")
+@_submissions_option
+def lock_command(submissions: str) -> None:
+    """Lock the folder to anonymous grading (multi-grader)."""
+    path = _resolve_submissions(submissions)
     write_policy(path, GradingPolicy(mode="multi", anonymity_locked=True))
     print(f"Locked {path} to anonymous grading (multi-grader).")
 
 
-def _cmd_unlock(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
+@command.command("unlock")
+@_submissions_option
+def unlock_command(submissions: str) -> None:
+    """Unlock (solo grading, toggle freely)."""
+    path = _resolve_submissions(submissions)
     write_policy(path, GradingPolicy(mode="solo", anonymity_locked=False))
     print(f"Unlocked {path} — solo grading (teacher mode may be toggled).")
 
 
-def _cmd_redact(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
-    name_map_path = Path(args.name_map).expanduser()
+@command.command("redact-names")
+@_submissions_option
+@click.option(
+    "--name-map",
+    "name_map_file",
+    required=True,
+    help="Where to write the id↔name map (keep this out of the graders' copy).",
+)
+def redact_command(submissions: str, name_map_file: str) -> None:
+    """Strip student names from the files, writing a name map to keep."""
+    path = _resolve_submissions(submissions)
+    name_map_path = Path(name_map_file).expanduser()
     if name_map_path.exists():
         print(
             f"Error: {name_map_path} already exists; refusing to overwrite a "
@@ -133,9 +118,18 @@ def _cmd_redact(args: Namespace) -> None:
     )
 
 
-def _cmd_restore(args: Namespace) -> None:
-    path = _resolve_submissions(args.submissions)
-    name_map_path = Path(args.name_map).expanduser()
+@command.command("restore-names")
+@_submissions_option
+@click.option(
+    "--name-map",
+    "name_map_file",
+    required=True,
+    help="The name map written by redact-names.",
+)
+def restore_command(submissions: str, name_map_file: str) -> None:
+    """Write names back into the files from a name map."""
+    path = _resolve_submissions(submissions)
+    name_map_path = Path(name_map_file).expanduser()
     if not name_map_path.exists():
         print(f"Error: name map not found: {name_map_path}", file=sys.stderr)
         sys.exit(1)
@@ -148,15 +142,5 @@ def _cmd_restore(args: Namespace) -> None:
     print(f"Restored names into {restored} submission(s) under {path}.")
 
 
-_COMMANDS = {
-    "show": _cmd_show,
-    "lock": _cmd_lock,
-    "unlock": _cmd_unlock,
-    "redact-names": _cmd_redact,
-    "restore-names": _cmd_restore,
-}
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-    _COMMANDS[args.command](args)
+if __name__ == "__main__":
+    command()

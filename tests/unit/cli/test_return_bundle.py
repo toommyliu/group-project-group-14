@@ -5,7 +5,8 @@ from pathlib import Path
 import fitz
 import pytest
 
-from opengrader.cli.return_bundle import _resolve_content, run_cli
+from opengrader.cli import run_command
+from opengrader.cli.return_bundle import _resolve_content, command
 from opengrader.core.submissions import (
     StudentSubmissionDocument,
     StudentSubmissionQuestion,
@@ -43,27 +44,29 @@ def _write_cohort(directory: Path) -> None:
         )
 
 
-class _Args:
-    def __init__(self, **kwargs) -> None:
-        self.content = kwargs.get("content")
-        self.gradebook = kwargs.get("gradebook", False)
-        self.student_pdfs = kwargs.get("student_pdfs", False)
-        self.analysis = kwargs.get("analysis", False)
-        self.all = kwargs.get("all", False)
+def _flags(**selected) -> dict:
+    return {
+        "content_preset": None,
+        "gradebook": False,
+        "student_pdfs": False,
+        "analysis": False,
+        "include_all": False,
+        **selected,
+    }
 
 
 def test_resolve_content_defaults_to_all_when_nothing_selected() -> None:
-    content = _resolve_content(_Args())
+    content = _resolve_content(**_flags())
     assert (content.gradebook, content.student_pdfs, content.analysis) == (True, True, True)
 
 
 def test_resolve_content_unions_individual_flags() -> None:
-    content = _resolve_content(_Args(gradebook=True, analysis=True))
+    content = _resolve_content(**_flags(gradebook=True, analysis=True))
     assert (content.gradebook, content.student_pdfs, content.analysis) == (True, False, True)
 
 
 def test_resolve_content_preset() -> None:
-    content = _resolve_content(_Args(content="student-pdfs"))
+    content = _resolve_content(**_flags(content_preset="student-pdfs"))
     assert (content.gradebook, content.student_pdfs, content.analysis) == (False, True, False)
 
 
@@ -73,7 +76,7 @@ def test_cli_all_writes_bundle(tmp_path: Path, capsys) -> None:
     _write_cohort(subs)
     out = tmp_path / "out"
 
-    run_cli(["--submissions", str(subs), "--output", str(out), "--name", "b1", "--all"])
+    run_command(command, ["--submissions", str(subs), "--output", str(out), "--name", "b1", "--all"])
 
     bundle = out / "b1"
     assert (bundle / "gradebook" / "gradebook.csv").exists()
@@ -89,7 +92,7 @@ def test_cli_gradebook_flag_only(tmp_path: Path) -> None:
     _write_cohort(subs)
     out = tmp_path / "out"
 
-    run_cli(["--submissions", str(subs), "--output", str(out), "--name", "b2", "--gradebook"])
+    run_command(command, ["--submissions", str(subs), "--output", str(out), "--name", "b2", "--gradebook"])
 
     bundle = out / "b2"
     assert (bundle / "gradebook" / "gradebook.csv").exists()
@@ -102,14 +105,14 @@ def test_cli_output_defaults_to_submissions_folder(tmp_path: Path) -> None:
     subs.mkdir()
     _write_cohort(subs)
 
-    run_cli(["--submissions", str(subs), "--name", "b3", "--gradebook"])
+    run_command(command, ["--submissions", str(subs), "--name", "b3", "--gradebook"])
 
     assert (subs / "b3" / "gradebook" / "gradebook.csv").exists()
 
 
 def test_cli_errors_on_missing_path(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit) as excinfo:
-        run_cli(["--submissions", str(tmp_path / "nope"), "--gradebook"])
+        run_command(command, ["--submissions", str(tmp_path / "nope"), "--gradebook"])
     assert excinfo.value.code == 1
     assert "error:" in capsys.readouterr().err
 
@@ -147,7 +150,7 @@ def test_cli_workspace_bundle_uses_saved_grades_and_assets(
         source.write_text("stale extraction", encoding="utf-8")
 
     monkeypatch.chdir(folder)
-    run_cli(["--name", "return", "--content", "gradebook-student"])
+    run_command(command, ["--name", "return", "--content", "gradebook-student"])
 
     bundle = folder / "return"
     assert (bundle / "gradebook" / "gradebook.csv").exists()

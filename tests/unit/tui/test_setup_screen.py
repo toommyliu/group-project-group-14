@@ -70,8 +70,8 @@ def test_template_qr_checkbox_reveals_roster_and_builds_argv(monkeypatch) -> Non
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         setup_screen,
-        "run_qa_file_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
+        "run_command",
+        lambda _command, argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
 
     async def run() -> None:
@@ -459,8 +459,8 @@ def test_bubble_sheet_builds_argv_and_never_adds_a_redundant_qr(monkeypatch) -> 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         setup_screen,
-        "run_qa_file_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
+        "run_command",
+        lambda _command, argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
 
     async def run() -> None:
@@ -490,8 +490,8 @@ def test_unticking_bubble_sheet_drops_a_roster_left_behind(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         setup_screen,
-        "run_qa_file_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
+        "run_command",
+        lambda _command, argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
 
     async def run() -> None:
@@ -516,12 +516,12 @@ def test_unticking_bubble_sheet_drops_a_roster_left_behind(monkeypatch) -> None:
 
 
 def test_questions_left_off_a_bubble_sheet_are_surfaced_to_the_user(monkeypatch) -> None:
-    def fake_cli(argv, **kwargs) -> None:  # noqa: ANN001
+    def fake_cli(_command, argv, **kwargs) -> None:  # noqa: ANN001
         print("Note: 1 question(s) are not multiple choice and were left off "
               "the sheet: q2b")
         print("Wrote bubble sheet (3 questions, 1 page(s)): /tmp/out.pdf")
 
-    monkeypatch.setattr(setup_screen, "run_qa_file_cli", fake_cli)
+    monkeypatch.setattr(setup_screen, "run_command", fake_cli)
     notices: list[tuple[str, str]] = []
 
     async def run() -> None:
@@ -555,8 +555,8 @@ def test_copy_count_and_shuffle_reach_the_cli(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         setup_screen,
-        "run_qa_file_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
+        "run_command",
+        lambda _command, argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
 
     async def run() -> None:
@@ -584,7 +584,7 @@ def test_copy_count_and_shuffle_reach_the_cli(monkeypatch) -> None:
 def test_a_roster_and_a_copy_count_together_are_refused(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        setup_screen, "run_qa_file_cli", lambda argv, **kwargs: calls.append(list(argv))
+        setup_screen, "run_command", lambda _command, argv, **kwargs: calls.append(list(argv))
     )
     notices: list[tuple[str, str]] = []
 
@@ -620,7 +620,7 @@ def test_a_roster_and_a_copy_count_together_are_refused(monkeypatch) -> None:
 def test_a_nonsense_copy_count_is_refused(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        setup_screen, "run_qa_file_cli", lambda argv, **kwargs: calls.append(list(argv))
+        setup_screen, "run_command", lambda _command, argv, **kwargs: calls.append(list(argv))
     )
     notices: list[tuple[str, str]] = []
 
@@ -653,7 +653,7 @@ def test_a_nonsense_copy_count_is_refused(monkeypatch) -> None:
 def test_scrambling_without_a_batch_is_refused(monkeypatch) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        setup_screen, "run_qa_file_cli", lambda argv, **kwargs: calls.append(list(argv))
+        setup_screen, "run_command", lambda _command, argv, **kwargs: calls.append(list(argv))
     )
     notices: list[tuple[str, str]] = []
 
@@ -685,8 +685,8 @@ def test_unticking_bubble_sheet_ignores_a_copy_count_left_behind(monkeypatch) ->
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         setup_screen,
-        "run_qa_file_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
+        "run_command",
+        lambda _command, argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
 
     async def run() -> None:
@@ -713,8 +713,8 @@ def test_unticking_scramble_ignores_a_count_left_behind(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         setup_screen,
-        "run_qa_file_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
+        "run_command",
+        lambda _command, argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
 
     async def run() -> None:

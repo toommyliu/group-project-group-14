@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from opengrader.cli.grading_stats import run_cli
+from opengrader.cli import run_command
+from opengrader.cli.grading_stats import command
 from opengrader.core.history import GradeJournal, resolve_history_dir
 
 
@@ -26,7 +27,7 @@ def test_grading_stats_human_output(tmp_path: Path, capsys) -> None:
     subs.mkdir()
     _seed_journal(subs)
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     out = capsys.readouterr().out
     assert "3 action(s) by 1 grader(s)" in out
@@ -39,7 +40,7 @@ def test_grading_stats_json_output(tmp_path: Path, capsys) -> None:
     subs.mkdir()
     _seed_journal(subs)
 
-    run_cli(["--input", str(subs), "--json"])
+    run_command(command, ["--input", str(subs), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["total_events"] == 3
@@ -53,13 +54,13 @@ def test_grading_stats_empty_history(tmp_path: Path, capsys) -> None:
     subs = tmp_path / "subs"
     subs.mkdir()
 
-    run_cli(["--input", str(subs)])
+    run_command(command, ["--input", str(subs)])
 
     assert "No grading activity recorded" in capsys.readouterr().out
 
 
 def test_grading_stats_errors_on_missing_input(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit) as exc:
-        run_cli(["--input", str(tmp_path / "nope")])
+        run_command(command, ["--input", str(tmp_path / "nope")])
     assert exc.value.code == 1
     assert "not found" in capsys.readouterr().err

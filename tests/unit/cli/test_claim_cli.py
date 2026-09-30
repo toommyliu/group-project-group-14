@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from opengrader.cli import run_command
 from opengrader.cli import claim as cli
 from opengrader.core.claims import read_claims
 
@@ -65,7 +66,7 @@ def _actors(submissions: Path) -> list[str]:
 
 
 def test_divide_by_question_writes_one_claim_each(cohort, capsys) -> None:
-    cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
+    run_command(cli.command, ["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
 
     claims = read_claims(cohort)
     assert [claim.actor for claim in claims] == ["alice", "bob"]
@@ -76,7 +77,8 @@ def test_divide_by_question_writes_one_claim_each(cohort, capsys) -> None:
 
 
 def test_divide_by_student_uses_real_ids(cohort) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "divide", "--submissions", str(cohort),
             "--graders", "alice,bob", "--by", "student",
@@ -88,7 +90,8 @@ def test_divide_by_student_uses_real_ids(cohort) -> None:
 
 
 def test_divide_dry_run_writes_nothing(cohort, capsys) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "divide", "--submissions", str(cohort),
             "--graders", "alice,bob", "--dry-run",
@@ -99,9 +102,9 @@ def test_divide_dry_run_writes_nothing(cohort, capsys) -> None:
 
 
 def test_divide_refuses_to_double_book(cohort, capsys) -> None:
-    cli.run_cli(["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "zoe"])
+    run_command(cli.command, ["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "zoe"])
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
+        run_command(cli.command, ["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
 
     assert exit_info.value.code == 2
     assert "zoe" in capsys.readouterr().err
@@ -111,7 +114,8 @@ def test_divide_refuses_to_double_book(cohort, capsys) -> None:
 def test_more_graders_than_questions_leaves_nobody_holding_everything(
     cohort, capsys
 ) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "divide", "--submissions", str(cohort),
             "--graders", "a,b,c,d,e,f",
@@ -124,7 +128,8 @@ def test_more_graders_than_questions_leaves_nobody_holding_everything(
 
 
 def test_add_expands_a_question_range(cohort) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "add", "--submissions", str(cohort),
             "--questions", "q1-q3", "--actor", "alice",
@@ -135,7 +140,8 @@ def test_add_expands_a_question_range(cohort) -> None:
 
 
 def test_add_accepts_a_question_list(cohort) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "add", "--submissions", str(cohort),
             "--questions", "q1,q4", "--actor", "alice",
@@ -146,7 +152,8 @@ def test_add_accepts_a_question_list(cohort) -> None:
 
 
 def test_student_range_is_positional_but_stored_as_ids(cohort) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "add", "--submissions", str(cohort),
             "--student-range", "1-3", "--actor", "alice",
@@ -158,7 +165,8 @@ def test_student_range_is_positional_but_stored_as_ids(cohort) -> None:
 
 def test_an_unknown_question_is_refused(cohort, capsys) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(
+        run_command(
+            cli.command,
             [
                 "add", "--submissions", str(cohort),
                 "--questions", "q9", "--actor", "alice",
@@ -171,7 +179,8 @@ def test_an_unknown_question_is_refused(cohort, capsys) -> None:
 
 def test_a_student_range_past_the_cohort_is_refused(cohort, capsys) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(
+        run_command(
+            cli.command,
             [
                 "add", "--submissions", str(cohort),
                 "--student-range", "9-12", "--actor", "alice",
@@ -183,13 +192,14 @@ def test_a_student_range_past_the_cohort_is_refused(cohort, capsys) -> None:
 
 def test_add_with_no_slice_refuses_to_claim_the_assignment(cohort, capsys) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["add", "--submissions", str(cohort), "--actor", "alice"])
+        run_command(cli.command, ["add", "--submissions", str(cohort), "--actor", "alice"])
     assert exit_info.value.code == 1
     assert "entire assignment" in capsys.readouterr().err
 
 
 def test_claiming_the_whole_assignment_is_possible_on_purpose(cohort) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         ["add", "--submissions", str(cohort), "--actor", "alice", "--everything"]
     )
     (claim,) = read_claims(cohort)
@@ -197,11 +207,13 @@ def test_claiming_the_whole_assignment_is_possible_on_purpose(cohort) -> None:
 
 
 def test_add_reports_the_conflicting_holder(cohort, capsys) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         ["add", "--submissions", str(cohort), "--questions", "q1-q2", "--actor", "alice"]
     )
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(
+        run_command(
+            cli.command,
             [
                 "add", "--submissions", str(cohort),
                 "--questions", "q2-q3", "--actor", "bob",
@@ -214,30 +226,30 @@ def test_add_reports_the_conflicting_holder(cohort, capsys) -> None:
 
 
 def test_list_shows_active_claims_only_by_default(cohort, capsys) -> None:
-    cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
+    run_command(cli.command, ["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
     capsys.readouterr()
     claims = read_claims(cohort)
-    cli.run_cli(["release", claims[0].claim_id, "--submissions", str(cohort)])
+    run_command(cli.command, ["release", claims[0].claim_id, "--submissions", str(cohort)])
     capsys.readouterr()
 
-    cli.run_cli(["list", "--submissions", str(cohort)])
+    run_command(cli.command, ["list", "--submissions", str(cohort)])
     active = capsys.readouterr().out
     assert "bob" in active and "alice" not in active
 
-    cli.run_cli(["list", "--submissions", str(cohort), "--all"])
+    run_command(cli.command, ["list", "--submissions", str(cohort), "--all"])
     everything = capsys.readouterr().out
     assert "alice" in everything and "bob" in everything
 
 
 def test_list_says_so_when_nothing_is_claimed(cohort, capsys) -> None:
-    cli.run_cli(["list", "--submissions", str(cohort)])
+    run_command(cli.command, ["list", "--submissions", str(cohort)])
     assert "Everyone sees the whole assignment" in capsys.readouterr().out
 
 
 def test_status_reports_full_coverage(cohort, capsys) -> None:
-    cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
+    run_command(cli.command, ["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
     capsys.readouterr()
-    cli.run_cli(["status", "--submissions", str(cohort)])
+    run_command(cli.command, ["status", "--submissions", str(cohort)])
 
     out = capsys.readouterr().out
     assert "24/24 answers claimed" in out
@@ -245,10 +257,12 @@ def test_status_reports_full_coverage(cohort, capsys) -> None:
 
 
 def test_status_flags_a_deliberate_overlap(cohort, capsys) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         ["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "alice"]
     )
-    cli.run_cli(
+    run_command(
+        cli.command,
         [
             "add", "--submissions", str(cohort),
             "--questions", "q1", "--actor", "bob", "--force",
@@ -257,7 +271,8 @@ def test_status_flags_a_deliberate_overlap(cohort, capsys) -> None:
     capsys.readouterr()
 
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(
+        run_command(
+            cli.command,
             ["status", "--submissions", str(cohort), "--fail-on-overlap"]
         )
     assert exit_info.value.code == 2
@@ -269,9 +284,9 @@ def test_status_flags_a_deliberate_overlap(cohort, capsys) -> None:
 def test_status_json_carries_the_numbers(cohort, capsys) -> None:
     import json
 
-    cli.run_cli(["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
+    run_command(cli.command, ["divide", "--submissions", str(cohort), "--graders", "alice,bob"])
     capsys.readouterr()
-    cli.run_cli(["status", "--submissions", str(cohort), "--json"])
+    run_command(cli.command, ["status", "--submissions", str(cohort), "--json"])
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["total_cells"] == 24
@@ -281,25 +296,28 @@ def test_status_json_carries_the_numbers(cohort, capsys) -> None:
 
 
 def test_release_frees_the_work_for_someone_else(cohort, capsys) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         ["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "alice"]
     )
     (claim,) = read_claims(cohort)
-    cli.run_cli(["release", claim.claim_id, "--submissions", str(cohort)])
+    run_command(cli.command, ["release", claim.claim_id, "--submissions", str(cohort)])
     capsys.readouterr()
 
-    cli.run_cli(
+    run_command(
+        cli.command,
         ["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "bob"]
     )
     assert "bob" in _actors(cohort)
 
 
 def test_complete_marks_the_slice_done(cohort, capsys) -> None:
-    cli.run_cli(
+    run_command(
+        cli.command,
         ["add", "--submissions", str(cohort), "--questions", "q1", "--actor", "alice"]
     )
     (claim,) = read_claims(cohort)
-    cli.run_cli(["complete", claim.claim_id, "--submissions", str(cohort)])
+    run_command(cli.command, ["complete", claim.claim_id, "--submissions", str(cohort)])
 
     assert "Completed" in capsys.readouterr().out
     assert read_claims(cohort)[0].status == "completed"
@@ -307,13 +325,13 @@ def test_complete_marks_the_slice_done(cohort, capsys) -> None:
 
 def test_closing_an_unknown_id_is_an_error(cohort, capsys) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["release", "cl-nope", "--submissions", str(cohort)])
+        run_command(cli.command, ["release", "cl-nope", "--submissions", str(cohort)])
     assert exit_info.value.code == 1
     assert "no claim with id" in capsys.readouterr().err
 
 
 def test_a_missing_submissions_path_is_an_error(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit) as exit_info:
-        cli.run_cli(["list", "--submissions", str(tmp_path / "nope")])
+        run_command(cli.command, ["list", "--submissions", str(tmp_path / "nope")])
     assert exit_info.value.code == 1
     assert "not found" in capsys.readouterr().err

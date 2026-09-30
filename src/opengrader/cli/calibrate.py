@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.analytics.grader_agreement import (
     DEFAULT_MIN_DRIFT_SAMPLES,
     DEFAULT_MIN_PAIR_SAMPLES,
@@ -30,16 +32,19 @@ from opengrader.core.handoff.packet import default_packet_output_dir
 from opengrader.core.history import read_journal, resolve_history_dir
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   # Before dividing the pile: everyone marks the same 8 answers, blind.
   uv run calibrate pack --submissions out/student-submissions/ \\
       --graders alice,bob,carol --sample 8 --qa-file qa.md
   uv run calibrate list --submissions out/student-submissions/
 
+\b
   # After the packets come back.
   uv run calibrate report --submissions out/student-submissions/ --set calibration-2026-08-05
 
+\b
   # No meeting: read the grading that already happened out of the journal.
   uv run calibrate report --submissions out/student-submissions/
   uv run calibrate report --submissions out/student-submissions/ --json
@@ -201,19 +206,98 @@ def _load_documents(submissions: Path) -> list:
     return documents
 
 
-def _run_pack(args: Namespace, submissions: Path) -> None:
-    graders = [name.strip() for name in args.graders.split(",") if name.strip()]
-    output = Path(args.output) if args.output else default_packet_output_dir(submissions)
+def _submissions_option(function):
+    return click.option(
+        "--submissions",
+        required=True,
+        type=click.Path(path_type=Path),
+        help="The assignment's submissions directory (or one .submission.md).",
+    )(function)
+
+
+def _check_submissions(submissions: Path) -> None:
+    if not submissions.exists():
+        print(f"Error: submissions path not found: {submissions}", file=sys.stderr)
+        sys.exit(1)
+
+
+@click.group("calibrate", cls=Group, context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+def command() -> None:
+    """Measure whether a team of graders marks an assignment the same
+    way — from a calibration (norming) round, or from grading that
+    already happened.
+    """
+
+
+@command.command(
+    "pack", short_help="Cut one blind, identical sample packet per grader."
+)
+@_submissions_option
+@click.option(
+    "--graders",
+    required=True,
+    help="Comma-separated grader names (at least two — agreement is a comparison).",
+)
+@click.option(
+    "--sample",
+    type=int,
+    default=DEFAULT_SAMPLE_SIZE,
+    help=(
+        f"How many students each grader marks (default {DEFAULT_SAMPLE_SIZE}). "
+        "Larger measures more precisely and gets skipped."
+    ),
+)
+@click.option(
+    "--qa-file",
+    default="",
+    help="Answer key to copy into each packet so the TUI opens it as-is.",
+)
+@click.option(
+    "--output",
+    default="",
+    help=(
+        "Where to write the packets (default: a grader-copies/ folder beside "
+        "the submissions directory, never inside it)."
+    ),
+)
+@click.option(
+    "--name",
+    "set_name",
+    default="",
+    help="Name for this calibration set (default: calibration-<date>).",
+)
+@click.option(
+    "--seed",
+    type=int,
+    help="Seed for the sample draw, so a lost packet can be re-cut identically.",
+)
+def pack_command(
+    *,
+    submissions: Path,
+    graders: str,
+    sample: int,
+    qa_file: str,
+    output: str,
+    set_name: str,
+    seed: int | None,
+) -> None:
+    """Sample the cohort and cut one anonymous, ungraded packet per
+    grader — every packet holding the same students, each under its
+    own codes.
+    """
+    _check_submissions(submissions)
+    grader_names = [name.strip() for name in graders.split(",") if name.strip()]
+    output_dir = Path(output) if output else default_packet_output_dir(submissions)
 
     try:
         result = build_calibration_set(
             submissions,
-            graders,
-            output,
-            sample_size=args.sample,
-            qa_file_path=args.qa_file or None,
-            set_id=args.name or "",
-            seed=args.seed,
+            grader_names,
+            output_dir,
+            sample_size=sample,
+            qa_file_path=qa_file or None,
+            set_id=set_name or "",
+            seed=seed,
         )
     except CalibrationError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -236,7 +320,11 @@ def _run_pack(args: Namespace, submissions: Path) -> None:
     )
 
 
-def _run_list(submissions: Path) -> None:
+@command.command("list")
+@_submissions_option
+def list_command(submissions: Path) -> None:
+    """List the calibration sets recorded for this assignment."""
+    _check_submissions(submissions)
     sets = list_calibration_sets(submissions)
     if not sets:
         print("No calibration sets recorded for this assignment.")
@@ -250,11 +338,63 @@ def _run_list(submissions: Path) -> None:
         print(f"      {', '.join(record.graders)}")
 
 
-def _run_report(args: Namespace, submissions: Path) -> None:
-    if args.set_id or args.from_set:
-        record = find_calibration_set(submissions, args.set_id)
+@command.command(
+    "report", short_help="Report leniency, drift and agreement between graders."
+)
+@_submissions_option
+@click.option(
+    "--set",
+    "set_id",
+    default="",
+    help="Report on this calibration set's returned packets.",
+)
+@click.option(
+    "--from-set",
+    is_flag=True,
+    help="Use the most recent calibration set (equivalent to --set with its name).",
+)
+@click.option(
+    "--min-samples",
+    type=int,
+    default=DEFAULT_MIN_PAIR_SAMPLES,
+    help=(
+        "Shared answers a grader pair needs before its comparison counts as "
+        f"evidence rather than provisional (default {DEFAULT_MIN_PAIR_SAMPLES})."
+    ),
+)
+@click.option(
+    "--min-drift-samples",
+    type=int,
+    default=DEFAULT_MIN_DRIFT_SAMPLES,
+    help=(
+        "Graded answers one grader needs before an early-vs-late split is "
+        f"reported at all (default {DEFAULT_MIN_DRIFT_SAMPLES})."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the report as JSON instead of a human-readable summary.",
+)
+def report_command(
+    *,
+    submissions: Path,
+    set_id: str,
+    from_set: bool,
+    min_samples: int,
+    min_drift_samples: int,
+    as_json: bool,
+) -> None:
+    """Report how each grader marked and how they compare. Reads the
+    audit journal by default; --set reads a returned calibration round
+    instead, which is the cleaner measurement.
+    """
+    _check_submissions(submissions)
+    if set_id or from_set:
+        record = find_calibration_set(submissions, set_id)
         if record is None:
-            named = f" named {args.set_id}" if args.set_id else ""
+            named = f" named {set_id}" if set_id else ""
             print(
                 f"Error: no calibration set{named} for {submissions}. "
                 "Run `calibrate list` to see what exists.",
@@ -308,149 +448,15 @@ def _run_report(args: Namespace, submissions: Path) -> None:
 
     report = build_grader_agreement_report(
         answers,
-        min_pair_samples=args.min_samples,
-        min_drift_samples=args.min_drift_samples,
+        min_pair_samples=min_samples,
+        min_drift_samples=min_drift_samples,
     )
 
-    if args.as_json:
+    if as_json:
         print(json.dumps(_report_to_dict(report, source=source), indent=2))
         return
     _print_report(report, source=source)
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Measure whether a team of graders marks an assignment the same "
-            "way — from a calibration (norming) round, or from grading that "
-            "already happened."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    def add_submissions(sub: ArgumentParser) -> None:
-        sub.add_argument(
-            "--submissions",
-            required=True,
-            help="The assignment's submissions directory (or one .submission.md).",
-        )
-
-    pack = subparsers.add_parser(
-        "pack",
-        help="Cut one blind, identical sample packet per grader.",
-        description=(
-            "Sample the cohort and cut one anonymous, ungraded packet per "
-            "grader — every packet holding the same students, each under its "
-            "own codes."
-        ),
-    )
-    add_submissions(pack)
-    pack.add_argument(
-        "--graders",
-        required=True,
-        help="Comma-separated grader names (at least two — agreement is a comparison).",
-    )
-    pack.add_argument(
-        "--sample",
-        type=int,
-        default=DEFAULT_SAMPLE_SIZE,
-        help=(
-            f"How many students each grader marks (default {DEFAULT_SAMPLE_SIZE}). "
-            "Larger measures more precisely and gets skipped."
-        ),
-    )
-    pack.add_argument(
-        "--qa-file",
-        default="",
-        help="Answer key to copy into each packet so the TUI opens it as-is.",
-    )
-    pack.add_argument(
-        "--output",
-        default="",
-        help=(
-            "Where to write the packets (default: a grader-copies/ folder beside "
-            "the submissions directory, never inside it)."
-        ),
-    )
-    pack.add_argument(
-        "--name",
-        default="",
-        help="Name for this calibration set (default: calibration-<date>).",
-    )
-    pack.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Seed for the sample draw, so a lost packet can be re-cut identically.",
-    )
-
-    listing = subparsers.add_parser(
-        "list", help="List the calibration sets recorded for this assignment."
-    )
-    add_submissions(listing)
-
-    report = subparsers.add_parser(
-        "report",
-        help="Report leniency, drift and agreement between graders.",
-        description=(
-            "Report how each grader marked and how they compare. Reads the "
-            "audit journal by default; --set reads a returned calibration round "
-            "instead, which is the cleaner measurement."
-        ),
-    )
-    add_submissions(report)
-    report.add_argument(
-        "--set",
-        dest="set_id",
-        default="",
-        help="Report on this calibration set's returned packets.",
-    )
-    report.add_argument(
-        "--from-set",
-        dest="from_set",
-        action="store_true",
-        help="Use the most recent calibration set (equivalent to --set with its name).",
-    )
-    report.add_argument(
-        "--min-samples",
-        type=int,
-        default=DEFAULT_MIN_PAIR_SAMPLES,
-        help=(
-            "Shared answers a grader pair needs before its comparison counts as "
-            f"evidence rather than provisional (default {DEFAULT_MIN_PAIR_SAMPLES})."
-        ),
-    )
-    report.add_argument(
-        "--min-drift-samples",
-        type=int,
-        default=DEFAULT_MIN_DRIFT_SAMPLES,
-        help=(
-            "Graded answers one grader needs before an early-vs-late split is "
-            f"reported at all (default {DEFAULT_MIN_DRIFT_SAMPLES})."
-        ),
-    )
-    report.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the report as JSON instead of a human-readable summary.",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    submissions = Path(args.submissions)
-    if not submissions.exists():
-        print(f"Error: submissions path not found: {submissions}", file=sys.stderr)
-        sys.exit(1)
-
-    if args.command == "pack":
-        _run_pack(args, submissions)
-    elif args.command == "list":
-        _run_list(submissions)
-    else:
-        _run_report(args, submissions)
+if __name__ == "__main__":
+    command()

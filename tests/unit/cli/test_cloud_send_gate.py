@@ -3,8 +3,8 @@ the pipeline can invoke with a cloud AI provider selected.
 
 Two things are checked for each CLI that can actually send to the cloud:
 
-1. Its argparse parser accepts `--yes-send-to-cloud` (a pure parsing check —
-   this is what would have caught the pipeline appending a flag no parser
+1. Its command accepts `--yes-send-to-cloud` (a pure parsing check —
+   this is what would have caught the pipeline appending a flag no command
    declared). The one exception is the splitter: every vision call it makes
    is a whole-page read that GuardedVisionReader always keeps local, so it
    never sends anything and its parser does not accept the flag at all —
@@ -21,7 +21,6 @@ would reach a provider, so nothing is actually sent.
 
 from __future__ import annotations
 
-from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -123,60 +122,53 @@ def _raise_consent_required(*_args, **_kwargs):
 # ---------------------------------------------------------------------------
 
 
-def test_submission_splitter_parser_does_not_accept_the_flag() -> None:
+def test_submission_splitter_parser_does_not_accept_the_flag(capsys) -> None:
     # The splitter's only vision calls are whole-page reads (page numbers,
     # Name/ID headers), which GuardedVisionReader always keeps local — a
     # split run never sends anything to the cloud, so unlike every other
     # child CLI here it does not accept --yes-send-to-cloud at all.
-    parser = submission_splitter._build_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(
+    with pytest.raises(SystemExit) as excinfo:
+        submission_splitter.run_cli(
             ["--input", "in.pdf", "--output", "out", "--yes-send-to-cloud"]
         )
+    assert excinfo.value.code == 2
+    assert "No such option: --yes-send-to-cloud" in capsys.readouterr().err
 
 
-def test_submission_extractor_parser_accepts_the_flag(tmp_path: Path) -> None:
-    # submission_extractor builds its parser inline in run_cli rather than
-    # exposing a _build_parser(). If the flag were unrecognized, argparse
-    # itself would exit(2) before the input path is even looked at; here it
-    # gets past parsing and fails on the (deliberately) missing input
-    # instead, which proves the flag was accepted.
-    with pytest.raises(FileNotFoundError):
-        submission_extractor.run_cli(
-            [
-                "--input", str(tmp_path / "does-not-exist"),
-                "--output", str(tmp_path / "out"),
-                "--yes-send-to-cloud",
-            ]
-        )
+def test_submission_extractor_parser_accepts_the_flag() -> None:
+    ctx = submission_extractor.command.make_context(
+        "submission-extractor",
+        ["--input", "in/", "--output", "out", "--yes-send-to-cloud"],
+    )
+    assert ctx.params["yes_send_to_cloud"] is True
 
 
 def test_automated_grading_parser_accepts_the_flag() -> None:
-    parser = automated_grading.setup_args()
-    args = parser.parse_args(
-        ["--solutions", "s.md", "--input", "i.md", "--yes-send-to-cloud"]
+    ctx = automated_grading.command.make_context(
+        "automated-grading",
+        ["--solutions", "s.md", "--input", "i.md", "--yes-send-to-cloud"],
     )
-    assert args.yes_send_to_cloud is True
+    assert ctx.params["yes_send_to_cloud"] is True
 
 
 def test_answer_key_parser_accepts_the_flag() -> None:
-    parser = answer_key._build_parser()
-    args = parser.parse_args(
-        ["--input", "in.pdf", "--output", "out.md", "--yes-send-to-cloud"]
+    ctx = answer_key.command.make_context(
+        "create-answer-key",
+        ["--input", "in.pdf", "--output", "out.md", "--yes-send-to-cloud"],
     )
-    assert args.yes_send_to_cloud is True
+    assert ctx.params["yes_send_to_cloud"] is True
 
 
 def test_llm_eval_parser_accepts_the_flag() -> None:
-    parser = llm_eval._build_parser()
-    args = parser.parse_args(
+    ctx = llm_eval.command.make_context(
+        "llm-eval",
         [
             "--solutions", "s.md",
             "--input", "i/",
             "--yes-send-to-cloud",
-        ]
+        ],
     )
-    assert args.yes_send_to_cloud is True
+    assert ctx.params["yes_send_to_cloud"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -187,13 +179,13 @@ def test_llm_eval_parser_accepts_the_flag() -> None:
 
 def test_splitter_vision_fallback_exits_2_on_missing_consent(monkeypatch, capsys) -> None:
     monkeypatch.setattr(app_config, "vision_reader", _raise_consent_required)
-    args = Namespace(
-        ollama_host="https://cloud.example/v1",
-        ollama_model="a-vision-model",
-        ollama_timeout=5.0,
+    resolved = app_config.with_overrides(
+        host="https://cloud.example/v1",
+        vision_model="a-vision-model",
+        timeout_seconds=5.0,
     )
     with pytest.raises(SystemExit) as excinfo:
-        submission_splitter._verified_vision_reader(args, lambda _m: None)
+        submission_splitter._verified_vision_reader(resolved, lambda _m: None)
     assert excinfo.value.code == 2
     err = capsys.readouterr().err
     assert "opengrader providers consent" in err
@@ -207,20 +199,22 @@ def test_answer_key_pdf_path_exits_2_on_missing_consent(tmp_path: Path, monkeypa
     # covered by its own tests) — --ollama-model differing from the default
     # is what makes _qa_from_pdf build a vision reader at all.
     ai = app_config.resolve()
-    args = Namespace(
-        llm_read_scans=True,
-        auto_ollama=False,
-        ollama_model="a-different-model",
-        ollama_host=ai.host,
-        ollama_timeout=5.0,
-        title=None,
-        instructions=None,
-        blank_template=None,
-        yes_send_to_cloud=False,
-    )
     messages: list[str] = []
     with pytest.raises(SystemExit) as excinfo:
-        answer_key._qa_from_pdf(tmp_path / "key.pdf", args, messages.append, None)
+        answer_key._qa_from_pdf(
+            tmp_path / "key.pdf",
+            messages.append,
+            None,
+            llm_read_scans=True,
+            auto_ollama=False,
+            ollama_model="a-different-model",
+            ollama_host=ai.host,
+            ollama_timeout=5.0,
+            title=None,
+            instructions=None,
+            blank_template=None,
+            yes_send_to_cloud=False,
+        )
     assert excinfo.value.code == 2
     assert any("opengrader providers consent" in message for message in messages)
 
@@ -576,21 +570,23 @@ def test_answer_key_confirmation_does_not_claim_a_single_image(
         doc.new_page(width=612, height=792)
     doc.save(str(key))
     doc.close()
-    args = Namespace(
-        llm_read_scans=True,
-        auto_ollama=False,
-        ollama_model="a-different-model",
-        ollama_host=_GATE_CLOUD_HOST,
-        ollama_timeout=5.0,
-        title=None,
-        instructions=None,
-        blank_template=None,
-        yes_send_to_cloud=False,
-    )
     messages: list[str] = []
 
     with pytest.raises(SystemExit) as excinfo:
-        answer_key._qa_from_pdf(key, args, messages.append, None)
+        answer_key._qa_from_pdf(
+            key,
+            messages.append,
+            None,
+            llm_read_scans=True,
+            auto_ollama=False,
+            ollama_model="a-different-model",
+            ollama_host=_GATE_CLOUD_HOST,
+            ollama_timeout=5.0,
+            title=None,
+            instructions=None,
+            blank_template=None,
+            yes_send_to_cloud=False,
+        )
 
     assert excinfo.value.code == 2
     text = " ".join(messages)

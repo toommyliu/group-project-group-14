@@ -15,10 +15,8 @@ from opengrader.cli import qa_file as qa_file_module
 from opengrader.cli.main import (
     COMMANDS,
     EXIT_INTERRUPTED,
-    PROGRAM_NAME,
     SECTION_ORDER,
     cli,
-    dispatch,
     find,
 )
 
@@ -72,51 +70,29 @@ def test_importing_cli_main_pulls_in_no_heavy_dependency() -> None:
     assert heavy_and_loaded == [], f"importing opengrader.cli.main pulled in: {heavy_and_loaded}"
 
 
-def test_dispatch_forwards_argv_untouched_and_patches_sys_argv(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spec = find("qa-file")
-    assert spec is not None
+def test_every_registry_row_loads_a_click_command() -> None:
+    import click
 
-    seen: dict[str, object] = {}
-
-    def fake_run_cli(argv: list[str]) -> int:
-        seen["argv"] = argv
-        seen["sys_argv"] = list(sys.argv)
-        return 0
-
-    monkeypatch.setattr(qa_file_module, "run_cli", fake_run_cli)
-
-    given = ["--check", "qa.md"]
-    outer_argv = list(sys.argv)
-    dispatch(spec, given)
-
-    assert seen["argv"] is given, "argv must be forwarded as-is, not copied or rebuilt"
-    assert seen["sys_argv"][0] == f"{PROGRAM_NAME} qa-file"
-    assert seen["sys_argv"][1:] == given
-    assert sys.argv == outer_argv, "sys.argv must be restored after a normal return"
-
-    def exploding_run_cli(argv: list[str]) -> int:
-        raise RuntimeError("entry function blew up")
-
-    monkeypatch.setattr(qa_file_module, "run_cli", exploding_run_cli)
-    with pytest.raises(RuntimeError):
-        dispatch(spec, given)
-    assert sys.argv == outer_argv, "sys.argv must be restored even when the entry raises"
+    for spec in COMMANDS:
+        assert isinstance(spec.load(), click.Command), spec.target
 
 
-def test_dispatch_makes_a_real_argparse_usage_line_name_the_dispatched_command(
-    capsys: pytest.CaptureFixture,
-) -> None:
-    spec = find("qa-file")
-    assert spec is not None
+def test_a_subcommand_runs_natively_with_its_own_arguments(tmp_path: Path) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("---\ntitle: Quiz\n---\n- (2 points) First question\n", encoding="utf-8")
 
-    with pytest.raises(SystemExit) as excinfo:
-        dispatch(spec, ["--help"])
-    assert excinfo.value.code == 0
+    result = CliRunner().invoke(cli, ["qa-file", "validate", "--qa-file", str(qa)])
 
-    out = capsys.readouterr().out
-    assert "usage: opengrader qa-file " in out
+    assert result.exit_code == 0, result.output
+    assert f"QA file is valid: {qa}" in result.output
+
+
+def test_subcommand_help_names_the_dispatched_command() -> None:
+    result = CliRunner().invoke(cli, ["qa-file", "--help"])
+
+    assert result.exit_code == 0
+    assert "Usage: opengrader qa-file " in result.output
+    assert "generate-template" in result.output
 
 
 def test_folder_shorthand_opens_the_tui_command(tmp_path: Path) -> None:
@@ -126,56 +102,30 @@ def test_folder_shorthand_opens_the_tui_command(tmp_path: Path) -> None:
     result = CliRunner().invoke(cli, [str(folder), "--help"])
 
     assert result.exit_code == 0
-    assert "usage: opengrader tui" in result.output
+    assert "Usage: opengrader tui" in result.output
 
 
-def test_dispatch_exit_codes_follow_the_entry_functions_return_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spec = find("qa-file")
-    assert spec is not None
-
-    def returning(value):
-        def entry(argv: list[str]):
-            return value
-
-        return entry
-
-    monkeypatch.setattr(qa_file_module, "run_cli", returning(3))
-    assert dispatch(spec, []) == 3
-
-    monkeypatch.setattr(qa_file_module, "run_cli", returning(None))
-    assert dispatch(spec, []) == 0
-
-    monkeypatch.setattr(qa_file_module, "run_cli", returning(object()))
-    assert dispatch(spec, []) == 0
-
-    monkeypatch.setattr(qa_file_module, "run_cli", returning(True))
-    assert dispatch(spec, []) == 0, "True must not become exit code 1"
-
-    monkeypatch.setattr(qa_file_module, "run_cli", returning(False))
-    assert dispatch(spec, []) == 0, "False must go through the bool exclusion, not the int case"
-
-    def interrupting(argv: list[str]):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(qa_file_module, "run_cli", interrupting)
-    assert dispatch(spec, []) == EXIT_INTERRUPTED
-
-
-def test_dispatch_lets_a_systemexit_from_the_entry_propagate_with_its_code(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spec = find("qa-file")
-    assert spec is not None
-
-    def exits(argv: list[str]):
+def test_a_subcommands_exit_status_is_the_programs(monkeypatch: pytest.MonkeyPatch) -> None:
+    def exits(qa_file: str) -> None:
         raise SystemExit(7)
 
-    monkeypatch.setattr(qa_file_module, "run_cli", exits)
-    with pytest.raises(SystemExit) as excinfo:
-        dispatch(spec, ["--help"])
-    assert excinfo.value.code == 7
+    monkeypatch.setattr(qa_file_module.validate_command, "callback", exits)
+
+    result = CliRunner().invoke(cli, ["qa-file", "validate", "--qa-file", "qa.md"])
+
+    assert result.exit_code == 7
+
+
+def test_an_interrupted_subcommand_exits_130(monkeypatch: pytest.MonkeyPatch) -> None:
+    def interrupted(qa_file: str) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(qa_file_module.validate_command, "callback", interrupted)
+
+    result = CliRunner().invoke(cli, ["qa-file", "validate", "--qa-file", "qa.md"])
+
+    assert result.exit_code == EXIT_INTERRUPTED
+    assert "qa-file: interrupted." in result.output
 
 
 def test_aliases_resolve_to_the_same_registry_row_as_their_canonical_name() -> None:
@@ -196,21 +146,26 @@ def test_bare_command_inside_a_workspace_opens_the_tui(monkeypatch, tmp_path) ->
 
     Workspace.create(tmp_path)
     monkeypatch.chdir(tmp_path)
-    opened: list[list[str]] = []
-    monkeypatch.setattr(tui_main, "run_app", lambda argv: opened.append(argv))
+    opened: list[dict] = []
+    monkeypatch.setattr(
+        tui_main.tui_command, "callback", lambda **options: opened.append(options)
+    )
 
     result = CliRunner().invoke(cli, [])
 
     assert result.exit_code == 0
-    assert opened == [[]]
+    assert len(opened) == 1
+    assert opened[0]["folder"] is None and opened[0]["workspace"] is None
 
 
 def test_bare_command_outside_a_workspace_shows_help(monkeypatch, tmp_path) -> None:
     from opengrader.tui import main as tui_main
 
     monkeypatch.chdir(tmp_path)
-    opened: list[list[str]] = []
-    monkeypatch.setattr(tui_main, "run_app", lambda argv: opened.append(argv))
+    opened: list[dict] = []
+    monkeypatch.setattr(
+        tui_main.tui_command, "callback", lambda **options: opened.append(options)
+    )
 
     result = CliRunner().invoke(cli, [])
 
@@ -238,17 +193,11 @@ def test_sectioned_help_lists_every_listed_command_once_and_hides_the_rest() -> 
 
     for spec in COMMANDS:
         if not spec.listed:
-            # Dev-only and folder tools stay out of the power-user listing.
             assert row_counts[spec.name] == 0, f"{spec.name!r} should not be listed"
             continue
         assert row_counts[spec.name] == 1, f"{spec.name!r} appears {row_counts[spec.name]} time(s) as a row"
         assert spec.section in SECTION_ORDER
         assert f"{spec.section}:" in listing
-
-    assert "tui-dev" not in result.output
-    tui_dev = find("tui-dev")
-    assert tui_dev is not None
-    assert tui_dev.hidden is True
 
     present_sections = [section for section in SECTION_ORDER if f"{section}:" in listing]
     positions = [listing.index(f"{section}:") for section in present_sections]
@@ -296,22 +245,37 @@ def test_commands_lists_folder_tools_only_with_all() -> None:
 
     assert "claim" not in plain.split() and "tui" in plain.split()
     assert "claim" in everything.split() and "(folder tool)" in everything
-    assert "tui-dev" not in everything  # dev-only stays hidden even here
 
 
-def test_a_folder_tool_still_runs_by_name_and_alias(capsys) -> None:
+def test_a_folder_tool_still_runs_by_name_and_alias() -> None:
     for name in ("claim", "split"):  # canonical name, and an alias
         result = CliRunner().invoke(cli, [name, "--help"])
         assert result.exit_code == 0, name
-        assert "usage: opengrader" in result.output + capsys.readouterr().out
+        assert f"Usage: opengrader {name}" in result.output
 
 
-def test_completion_offers_only_listed_commands() -> None:
-    from opengrader.cli.main import OpengraderCLI
+def test_completion_offers_only_listed_commands_without_loading_them() -> None:
+    probe = (
+        "import json, sys; "
+        "from click.shell_completion import ShellComplete; "
+        "from opengrader.cli.main import cli; "
+        "items = ShellComplete(cli, {}, 'opengrader', '_OPENGRADER_COMPLETE').get_completions([], ''); "
+        "print(json.dumps({'names': [item.value for item in items], 'loaded': sorted("
+        "name for name in sys.modules "
+        "if name.startswith('opengrader.cli.') and name != 'opengrader.cli.main')}))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
 
-    names = OpengraderCLI().list_commands(None)  # type: ignore[arg-type]
-    assert "tui" in names and "classic" in names
-    assert "claim" not in names and "tui-dev" not in names
+    completion = json.loads(result.stdout)
+    assert "tui" in completion["names"] and "classic" in completion["names"]
+    assert "claim" not in completion["names"]
+    assert completion["loaded"] == []
 
 
 def test_an_unknown_command_still_suggests_a_folder_tool() -> None:

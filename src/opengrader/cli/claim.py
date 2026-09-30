@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, Namespace, RawDescriptionHelpFormatter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS, Group
 from opengrader.core.claims import (
     ClaimConflictError,
     CoverageReport,
@@ -25,8 +29,9 @@ from opengrader.core.export.gradebook import (
 )
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run claim divide --submissions out/subs/ --graders alice,bob,carol
   uv run claim divide --submissions out/subs/ --graders alice,bob --by student
   uv run claim add --submissions out/subs/ --questions q1-q3
@@ -96,17 +101,19 @@ def _expand_student_range(raw: str, students: list[str]) -> list[str]:
     return students[start - 1 : end]
 
 
-def _slice_from_args(args: Namespace, submissions: Path) -> WorkSlice:
+def _slice_from_args(
+    submissions: Path, *, raw_questions: str, raw_students: str, student_range: str
+) -> WorkSlice:
     questions, students = _read_cohort(submissions)
     chosen_questions: list[str] = []
     chosen_students: list[str] = []
 
-    if args.questions:
-        chosen_questions = _expand_ids(args.questions, questions)
-    if args.students:
-        chosen_students = _expand_ids(args.students, students)
-    if args.student_range:
-        chosen_students = _expand_student_range(args.student_range, students)
+    if raw_questions:
+        chosen_questions = _expand_ids(raw_questions, questions)
+    if raw_students:
+        chosen_students = _expand_ids(raw_students, students)
+    if student_range:
+        chosen_students = _expand_student_range(student_range, students)
 
     return WorkSlice(
         question_ids=tuple(chosen_questions), student_ids=tuple(chosen_students)
@@ -164,31 +171,31 @@ def _print_status(report: CoverageReport) -> None:
         print("\nEvery answer is claimed exactly once. ✓")
 
 
-def _run_list(args: Namespace, submissions: Path) -> None:
+def _run_list(submissions: Path, *, show_all: bool, as_json: bool) -> None:
     claims = read_claims(submissions)
-    if not args.show_all:
+    if not show_all:
         claims = [claim for claim in claims if claim.is_active]
 
-    if args.as_json:
+    if as_json:
         print(json.dumps([_claim_to_dict(claim) for claim in claims], indent=2))
         return
 
     if not claims:
-        scope = "claims" if args.show_all else "active claims"
+        scope = "claims" if show_all else "active claims"
         print(f"No {scope}. Everyone sees the whole assignment.")
         return
-    label = "claim(s)" if args.show_all else "active claim(s)"
+    label = "claim(s)" if show_all else "active claim(s)"
     print(f"{len(claims)} {label}:")
     for claim in claims:
         print(_claim_row(claim))
 
 
-def _run_status(args: Namespace, submissions: Path) -> None:
+def _run_status(submissions: Path, *, as_json: bool, fail_on_overlap: bool) -> None:
     questions, students = _read_cohort(submissions)
     report = coverage_report(
         read_claims(submissions), question_ids=questions, student_ids=students
     )
-    if args.as_json:
+    if as_json:
         print(
             json.dumps(
                 {
@@ -212,20 +219,35 @@ def _run_status(args: Namespace, submissions: Path) -> None:
     else:
         _print_status(report)
 
-    if args.fail_on_overlap and report.has_overlaps:
+    if fail_on_overlap and report.has_overlaps:
         sys.exit(2)
 
 
-def _run_add(args: Namespace, submissions: Path) -> None:
-    work = _slice_from_args(args, submissions)
+def _run_add(
+    submissions: Path,
+    *,
+    actor: str | None,
+    raw_questions: str,
+    raw_students: str,
+    student_range: str,
+    note: str,
+    force: bool,
+    everything: bool,
+) -> None:
+    work = _slice_from_args(
+        submissions,
+        raw_questions=raw_questions,
+        raw_students=raw_students,
+        student_range=student_range,
+    )
     try:
         claim = claim_work(
             submissions,
             work,
-            actor=args.actor,
-            note=args.note,
-            allow_overlap=args.force,
-            allow_everything=args.everything,
+            actor=actor,
+            note=note,
+            allow_overlap=force,
+            allow_everything=everything,
         )
     except ClaimConflictError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -235,22 +257,30 @@ def _run_add(args: Namespace, submissions: Path) -> None:
     print(f"Claimed {claim.work.describe()} for {claim.actor} ({claim.claim_id}).")
 
 
-def _run_divide(args: Namespace, submissions: Path) -> None:
+def _run_divide(
+    submissions: Path,
+    *,
+    raw_graders: str,
+    by: str,
+    note: str,
+    dry_run: bool,
+    force: bool,
+) -> None:
     questions, students = _read_cohort(submissions)
-    graders = [name.strip() for name in args.graders.split(",") if name.strip()]
+    graders = [name.strip() for name in raw_graders.split(",") if name.strip()]
     shares = divide_work(
-        graders, question_ids=questions, student_ids=students, axis=args.by
+        graders, question_ids=questions, student_ids=students, axis=by
     )
 
     if len(shares) < len(graders):
         print(
             f"Note: only {len(shares)} of {len(graders)} graders got work — there "
-            f"are fewer {args.by}s than graders.",
+            f"are fewer {by}s than graders.",
             file=sys.stderr,
         )
 
-    if args.dry_run:
-        print(f"Would divide by {args.by}:")
+    if dry_run:
+        print(f"Would divide by {by}:")
         for actor, work in shares:
             print(f"  {actor:<14} {work.describe()}")
         print("\nDry run: nothing written.")
@@ -259,7 +289,7 @@ def _run_divide(args: Namespace, submissions: Path) -> None:
     for actor, work in shares:
         try:
             claim = claim_work(
-                submissions, work, actor=actor, note=args.note, allow_overlap=args.force
+                submissions, work, actor=actor, note=note, allow_overlap=force
             )
         except ClaimConflictError as exc:
             print(f"Error: {actor}: {exc}", file=sys.stderr)
@@ -270,173 +300,206 @@ def _run_divide(args: Namespace, submissions: Path) -> None:
             )
             sys.exit(2)
         print(f"  {claim.actor:<14} {claim.work.describe()}  ({claim.claim_id})")
-    print(f"\nDivided by {args.by} between {len(shares)} grader(s).")
+    print(f"\nDivided by {by} between {len(shares)} grader(s).")
 
 
-def _run_close(args: Namespace, submissions: Path, *, complete: bool) -> None:
+def _run_close(
+    submissions: Path, *, claim_id: str, actor: str | None, complete: bool
+) -> None:
     action = complete_claim if complete else release_claim
-    claim = action(submissions, args.claim_id, actor=args.actor)
+    claim = action(submissions, claim_id, actor=actor)
     if claim is None:
-        print(f"Error: no claim with id {args.claim_id}", file=sys.stderr)
+        print(f"Error: no claim with id {claim_id}", file=sys.stderr)
         sys.exit(1)
     verb = "Completed" if complete else "Released"
     print(f"{verb} {claim.claim_id} ({claim.work.describe()}, {claim.actor}).")
 
 
-def _add_submissions(parser: ArgumentParser) -> None:
-    parser.add_argument(
-        "--submissions",
-        required=True,
-        help="Submissions directory (or a single .submission.md file).",
-    )
-
-
-def _add_actor(parser: ArgumentParser) -> None:
-    parser.add_argument(
-        "--actor",
-        default=None,
-        help=(
-            "Who is claiming (default: OPENGRADER_GRADER, else your OS user — "
-            "the same identity the audit journal records)."
-        ),
-    )
-
-
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Divide grading between several people: claim slices of the class "
-            "so two graders never mark the same paper."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    listing = subparsers.add_parser("list", help="Show who holds what.")
-    _add_submissions(listing)
-    listing.add_argument(
-        "--all",
-        action="store_true",
-        dest="show_all",
-        help="Include released and completed claims, not just active ones.",
-    )
-    listing.add_argument("--json", action="store_true", dest="as_json")
-
-    status = subparsers.add_parser(
-        "status", help="Coverage: what is claimed, unclaimed, or double-booked."
-    )
-    _add_submissions(status)
-    status.add_argument("--json", action="store_true", dest="as_json")
-    status.add_argument(
-        "--fail-on-overlap",
-        action="store_true",
-        help="Exit non-zero if two graders share work (for scripting/CI).",
-    )
-
-    add = subparsers.add_parser("add", help="Claim a slice of the work.")
-    _add_submissions(add)
-    _add_actor(add)
-    add.add_argument(
-        "--questions",
-        default="",
-        help="Question ids: a list (q1,q2,q7) or a range (q1-q3). Omit for all.",
-    )
-    add.add_argument(
-        "--students",
-        default="",
-        help="Student ids: a list, or a range between two ids. Omit for all.",
-    )
-    add.add_argument(
-        "--student-range",
-        default="",
-        help=(
-            "Students by 1-based position in the class (e.g. 1-40), resolved to "
-            "real ids at claim time. The same order the TUI numbers s1..sN."
-        ),
-    )
-    add.add_argument("--note", default="", help="Free-text note stored on the claim.")
-    add.add_argument(
-        "--force",
-        action="store_true",
-        help="Claim even if it overlaps someone else's active claim.",
-    )
-    add.add_argument(
-        "--everything",
-        action="store_true",
-        help="Deliberately claim the whole assignment (no --questions/--students).",
-    )
-
-    divide = subparsers.add_parser(
-        "divide", help="Split the whole class evenly between graders."
-    )
-    _add_submissions(divide)
-    divide.add_argument(
-        "--graders",
-        required=True,
-        help="Comma-separated grader names, in the order they get slices.",
-    )
-    divide.add_argument(
-        "--by",
-        choices=("question", "student"),
-        default="question",
-        help=(
-            "What to cut: question (each grader marks a run of questions for "
-            "everyone — one rubric applied consistently, the usual choice) or "
-            "student (each grader takes a run of students across all questions)."
-        ),
-    )
-    divide.add_argument("--note", default="", help="Note stored on every claim.")
-    divide.add_argument(
-        "--dry-run", action="store_true", help="Print the split without writing it."
-    )
-    divide.add_argument(
-        "--force",
-        action="store_true",
-        help="Divide even if it overlaps existing active claims.",
-    )
-
-    release = subparsers.add_parser("release", help="Give a claim back to the pool.")
-    release.add_argument("claim_id")
-    _add_submissions(release)
-    _add_actor(release)
-
-    complete = subparsers.add_parser("complete", help="Mark a claim finished.")
-    complete.add_argument("claim_id")
-    _add_submissions(complete)
-    _add_actor(complete)
-
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    submissions = Path(args.submissions)
+@contextmanager
+def _submissions_or_exit(raw: str) -> Iterator[Path]:
+    submissions = Path(raw)
     if not submissions.exists():
         print(f"Error: submissions path not found: {submissions}", file=sys.stderr)
         sys.exit(1)
-
     try:
-        if args.command == "list":
-            _run_list(args, submissions)
-        elif args.command == "status":
-            _run_status(args, submissions)
-        elif args.command == "add":
-            _run_add(args, submissions)
-        elif args.command == "divide":
-            _run_divide(args, submissions)
-        elif args.command == "release":
-            _run_close(args, submissions, complete=False)
-        elif args.command == "complete":
-            _run_close(args, submissions, complete=True)
-    except FileNotFoundError as exc:
+        yield submissions
+    except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    except ValueError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        sys.exit(1)
+
+
+_submissions_option = click.option(
+    "--submissions",
+    required=True,
+    help="Submissions directory (or a single .submission.md file).",
+)
+_actor_option = click.option(
+    "--actor",
+    help=(
+        "Who is claiming (default: OPENGRADER_GRADER, else your OS user — "
+        "the same identity the audit journal records)."
+    ),
+)
+
+
+@click.group("claim", cls=Group, context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+def command() -> None:
+    """Divide grading between several people: claim slices of the class so
+    two graders never mark the same paper.
+    """
+
+
+@command.command("list")
+@_submissions_option
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Include released and completed claims, not just active ones.",
+)
+@click.option("--json", "as_json", is_flag=True)
+def list_command(submissions: str, show_all: bool, as_json: bool) -> None:
+    """Show who holds what."""
+    with _submissions_or_exit(submissions) as path:
+        _run_list(path, show_all=show_all, as_json=as_json)
+
+
+@command.command("status")
+@_submissions_option
+@click.option("--json", "as_json", is_flag=True)
+@click.option(
+    "--fail-on-overlap",
+    is_flag=True,
+    help="Exit non-zero if two graders share work (for scripting/CI).",
+)
+def status_command(submissions: str, as_json: bool, fail_on_overlap: bool) -> None:
+    """Coverage: what is claimed, unclaimed, or double-booked."""
+    with _submissions_or_exit(submissions) as path:
+        _run_status(path, as_json=as_json, fail_on_overlap=fail_on_overlap)
+
+
+@command.command("add")
+@_submissions_option
+@_actor_option
+@click.option(
+    "--questions",
+    "raw_questions",
+    default="",
+    help="Question ids: a list (q1,q2,q7) or a range (q1-q3). Omit for all.",
+)
+@click.option(
+    "--students",
+    "raw_students",
+    default="",
+    help="Student ids: a list, or a range between two ids. Omit for all.",
+)
+@click.option(
+    "--student-range",
+    default="",
+    help=(
+        "Students by 1-based position in the class (e.g. 1-40), resolved to "
+        "real ids at claim time. The same order the TUI numbers s1..sN."
+    ),
+)
+@click.option("--note", default="", help="Free-text note stored on the claim.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Claim even if it overlaps someone else's active claim.",
+)
+@click.option(
+    "--everything",
+    is_flag=True,
+    help="Deliberately claim the whole assignment (no --questions/--students).",
+)
+def add_command(
+    submissions: str,
+    actor: str | None,
+    raw_questions: str,
+    raw_students: str,
+    student_range: str,
+    note: str,
+    force: bool,
+    everything: bool,
+) -> None:
+    """Claim a slice of the work."""
+    with _submissions_or_exit(submissions) as path:
+        _run_add(
+            path,
+            actor=actor,
+            raw_questions=raw_questions,
+            raw_students=raw_students,
+            student_range=student_range,
+            note=note,
+            force=force,
+            everything=everything,
+        )
+
+
+@command.command("divide")
+@_submissions_option
+@click.option(
+    "--graders",
+    "raw_graders",
+    required=True,
+    help="Comma-separated grader names, in the order they get slices.",
+)
+@click.option(
+    "--by",
+    type=click.Choice(("question", "student")),
+    default="question",
+    help=(
+        "What to cut: question (each grader marks a run of questions for "
+        "everyone — one rubric applied consistently, the usual choice) or "
+        "student (each grader takes a run of students across all questions)."
+    ),
+)
+@click.option("--note", default="", help="Note stored on every claim.")
+@click.option("--dry-run", is_flag=True, help="Print the split without writing it.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Divide even if it overlaps existing active claims.",
+)
+def divide_command(
+    submissions: str,
+    raw_graders: str,
+    by: str,
+    note: str,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Split the whole class evenly between graders."""
+    with _submissions_or_exit(submissions) as path:
+        _run_divide(
+            path,
+            raw_graders=raw_graders,
+            by=by,
+            note=note,
+            dry_run=dry_run,
+            force=force,
+        )
+
+
+@command.command("release")
+@click.argument("claim_id")
+@_submissions_option
+@_actor_option
+def release_command(claim_id: str, submissions: str, actor: str | None) -> None:
+    """Give a claim back to the pool."""
+    with _submissions_or_exit(submissions) as path:
+        _run_close(path, claim_id=claim_id, actor=actor, complete=False)
+
+
+@command.command("complete")
+@click.argument("claim_id")
+@_submissions_option
+@_actor_option
+def complete_command(claim_id: str, submissions: str, actor: str | None) -> None:
+    """Mark a claim finished."""
+    with _submissions_or_exit(submissions) as path:
+        _run_close(path, claim_id=claim_id, actor=actor, complete=True)
 
 
 if __name__ == "__main__":
-    run_cli()
+    command()

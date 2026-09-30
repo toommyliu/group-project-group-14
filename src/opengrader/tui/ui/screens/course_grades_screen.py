@@ -11,7 +11,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, RichLog, Select, Static
 
-from opengrader.cli.course_grades import run_cli as run_course_grades_cli
+from opengrader.cli import course_grades, run_command
 from opengrader.core.course import COURSE_FILENAME
 from opengrader.tui.ui.screens.course_builder_screen import CourseBuilderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
@@ -269,7 +269,7 @@ class CourseGradesScreen(ModalScreen[None]):
         succeeded = True
         try:
             with redirect_stdout(buffer), redirect_stderr(buffer):
-                run_course_grades_cli(argv)
+                run_command(course_grades.command, argv)
         except SystemExit as exc:
             succeeded = exc.code in (0, None)
         except Exception as exc:

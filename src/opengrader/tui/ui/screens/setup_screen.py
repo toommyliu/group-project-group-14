@@ -50,7 +50,8 @@ from opengrader.cli.automated_grading import (
     GradingProgress,
     run_cli as run_grading_cli,
 )
-from opengrader.cli.qa_file import run_cli as run_qa_file_cli
+from opengrader.cli import run_command
+from opengrader.cli.qa_file import command as qa_file_command
 from opengrader.core.cloud_preflight import CloudConfirmationNeeded
 from opengrader.core.class_folder import (
     GRADING_ROLES,
@@ -3018,7 +3019,7 @@ class SetupScreen(Vertical):
         captured = io.StringIO()
         try:
             with contextlib.redirect_stdout(captured):
-                run_qa_file_cli(argv)
+                run_command(qa_file_command, argv)
         except SystemExit as exc:
             self.app.notify(f"Template generation failed: {exc}", severity="error")
             return

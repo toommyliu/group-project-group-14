@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sys
-from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
+import click
+
+from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.submissions import (
     ConsistencyFlag,
     ConsistencyKind,
@@ -14,8 +16,9 @@ from opengrader.core.submissions import (
 )
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
-EPILOG = """
-examples:
+EPILOG = """\
+\b
+Examples:
   uv run consistency-audit --input out/student-submissions/
   uv run consistency-audit --input out/student-submissions/ --include-blank
   uv run consistency-audit --input out/student-submissions/ --json
@@ -125,46 +128,39 @@ def _flag_to_dict(flag: ConsistencyFlag) -> dict[str, object]:
     }
 
 
-def _build_parser() -> ArgumentParser:
-    parser = ArgumentParser(
-        description=(
-            "Audit a graded submission set for consistency — flag answer groups "
-            "where students who gave the same answer received different grades."
-        ),
-        epilog=EPILOG,
-        formatter_class=RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="A .submission.md file or a directory of them.",
-    )
-    parser.add_argument(
-        "--include-blank",
-        action="store_true",
-        help=(
-            "Also audit the blank ('no answer') group. Off by default: a blank "
-            "transcription often reflects work the OCR missed."
-        ),
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="as_json",
-        help="Emit the flags as a JSON array instead of a human-readable list.",
-    )
-    parser.add_argument(
-        "--fail-on-inconsistency",
-        action="store_true",
-        help="Exit non-zero if any inconsistency is found (for scripting/CI).",
-    )
-    return parser
-
-
-def run_cli(argv: list[str] | None = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    input_path = Path(args.input)
+@click.command("consistency-audit", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
+@click.option(
+    "--input",
+    "input_path",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="A .submission.md file or a directory of them.",
+)
+@click.option(
+    "--include-blank",
+    is_flag=True,
+    help=(
+        "Also audit the blank ('no answer') group. Off by default: a blank "
+        "transcription often reflects work the OCR missed."
+    ),
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the flags as a JSON array instead of a human-readable list.",
+)
+@click.option(
+    "--fail-on-inconsistency",
+    is_flag=True,
+    help="Exit non-zero if any inconsistency is found (for scripting/CI).",
+)
+def command(
+    input_path: Path, include_blank: bool, as_json: bool, fail_on_inconsistency: bool
+) -> None:
+    """Audit a graded submission set for consistency — flag answer groups
+    where students who gave the same answer received different grades.
+    """
     if not input_path.exists():
         print(f"Error: input path not found: {input_path}", file=sys.stderr)
         sys.exit(1)
@@ -181,12 +177,16 @@ def run_cli(argv: list[str] | None = None) -> None:
         except ValueError as exc:
             print(f"Warning: could not read {path}: {exc}", file=sys.stderr)
 
-    flags = build_consistency_flags(documents, include_blank=args.include_blank)
+    flags = build_consistency_flags(documents, include_blank=include_blank)
 
-    if args.as_json:
+    if as_json:
         print(json.dumps([_flag_to_dict(flag) for flag in flags], indent=2))
     else:
         _print_human(flags)
 
-    if args.fail_on_inconsistency and flags:
+    if fail_on_inconsistency and flags:
         sys.exit(2)
+
+
+if __name__ == "__main__":
+    command()
