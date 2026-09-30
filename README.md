@@ -24,9 +24,9 @@ Opengrader is a local, offline-first exam-grading toolchain — think Gradescope
 - **Template generation** — turn a QA-format markdown answer key into printable exam PDFs (Computer Modern fonts, answer boxes, multi-version exams). Draft the QA file itself from an existing answer-key PDF or a text2qti exam.
 - **Scan ingestion** — split a bulk scanner PDF into per-student PDFs, fix out-of-order pages, and extract each response via OCR (Tesseract + OpenCV) and a local vision LLM (Ollama) into structured per-student markdown files with response image crops.
 - **Grading TUI** — Gradescope-style question-by-question rubric grading in the terminal: in-terminal response images, rubric editing, per-question statistics, anonymous grading by default (teacher mode reveals names), and automatic write-back of grades to submission files and annotated PDFs.
-- **Automated grading** — auto-score submissions against a solutions file (exact answer matching; unmatched free responses are left for manual grading).
+- **Automated grading** — auto-score submissions against a solutions file (exact, numeric, and true/false answer matching). With `--llm`, an AI model suggests grades for free responses, tagged `[AI]` for you to review; anything it isn't confident about is left for manual grading.
 - **Canvas export** — push scores and per-question comments to Canvas LMS via `canvas-sak`, from the CLI or from inside the TUI.
-- **Offline-first** — grading work is saved in a local SQLite workspace. The only network use is the localhost Ollama server and optional Canvas export.
+- **Offline-first** — grading work is saved in a local SQLite workspace. By default the only network use is the localhost Ollama server and optional Canvas export. A cloud AI provider can be added (`opengrader providers`), but only with your explicit consent, and `opengrader data-flow` shows exactly which student data would leave your machine and where it would go.
 
 ## Prerequisites
 
@@ -118,7 +118,7 @@ stages — are left out of that list because `opengrader classic` has a screen
 for each of them. They are hidden, not removed: typing one by name (or alias)
 still runs it, and `opengrader commands --all` lists them. The standalone script names underneath it still work exactly
 as before — `uv run submission-splitter ...` and
-`uv run opengrader submission-splitter ...` call the same function with the
+`uv run opengrader submission-splitter ...` run the same command with the
 same flags — so every command in this guide keeps working; `opengrader` is
 just the one name to remember instead of thirty.
 
@@ -167,7 +167,7 @@ uv run opengrader help submission-extractor   # that tool's own --help (hidden t
 uv run opengrader commands            # the same list, one per line
 uv run opengrader commands --all      # ...plus the folder tools `opengrader classic` covers
 uv run opengrader commands --json     # every command, with its folder_tool flag, for scripts
-uv run opengrader completion zsh      # shell completion for subcommand names
+uv run opengrader completion zsh      # shell completion for subcommands and their flags
 ```
 
 Short aliases exist for the tools you'll reach for most: `split`
@@ -216,7 +216,8 @@ screen also provides "Run every step — one scan in, graded work out".
 
 Every script below runs standalone (`uv run <name> ...`) or through the front
 door (`uv run opengrader <name> ...`) — same code, same flags, either
-spelling.
+spelling. The one exception is `classic`, which only exists as
+`uv run opengrader classic`.
 
 - `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
 - `tui`: Open a workspace in the TUI — an assignment or workspace folder, or `--workspace` and `--assignment`. `--qa-file` + `--submissions` still grade one folder directly, the classic way.
@@ -428,8 +429,9 @@ isn't already; the installer tells you the exact line). Everything is still reac
 The installed launcher **contains no path to your checkout**. It finds the
 project on every run, so nothing breaks when the project moves, gets cloned
 somewhere else, or — the common one on macOS — lives on an external drive that
-remounts under a new name (`Samsung_T5` one day, `Samsung_T5 1` the next,
-depending on what order your drives were plugged in). It looks, in order, at
+remounts under a new name (macOS adds a number when another drive with the
+same name is already connected, so `/Volumes/MyDrive` can come back as
+`/Volumes/MyDrive 1`). It looks, in order, at
 `$OPENGRADER_HOME`, the checkout you're standing in, the one it used last
 time, then any mounted volume and your home directory. Run it inside a
 different clone and that clone is what runs — useful when you have a branch
@@ -484,7 +486,8 @@ https://github.com/user-attachments/assets/f8938fa9-d64f-4d88-a8e4-62a48111a471
 
 | Area | Technologies |
 | ---- | ------------ |
-| Frontend/backend | [Python](https://www.python.org/), [Textual](https://textual.textualize.io/), Terminal Emulator | 
+| Frontend/backend | [Python](https://www.python.org/), [Textual](https://textual.textualize.io/), Terminal Emulator |
+| Command line | [Click](https://click.palletsprojects.com/) |
 | Document processing | [pypdf](https://pypdf.readthedocs.io/en/stable/), [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/), [Tesseract](https://tesseract-ocr.github.io/), [opencv](https://pypi.org/project/opencv-python/) |
 | Local model integration | [Ollama](https://ollama.com/)
 | Testing | [pytest](https://docs.pytest.org/en/stable/) |
