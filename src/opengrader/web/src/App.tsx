@@ -41,6 +41,9 @@ export function App({ children }: PropsWithChildren) {
   const grading =
     assignment &&
     Boolean(matchRoute({ to: '/assignments/$assignmentId/grade' }));
+  const scans =
+    assignment &&
+    Boolean(matchRoute({ to: '/assignments/$assignmentId/scans' }));
   const notFound = useRouterState({
     select: ({ matches }) =>
       matches.some((match) => match.status === 'notFound' || match._notFound),
@@ -88,7 +91,7 @@ export function App({ children }: PropsWithChildren) {
           <div
             className={
               !standalone
-                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : grading ? 'pb-16 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:pb-4' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
+                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : grading ? 'pb-16 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:pb-4' : scans ? 'flex flex-1 flex-col pb-4 md:pb-8' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
                 : 'mx-auto w-full max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14'
             }
             id="content"
