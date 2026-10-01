@@ -62,7 +62,7 @@ from opengrader.server.assignment_qa import (
     preview_qa,
     edit_assignment_draft,
 )
-from opengrader.server.auth import add_auth_routes
+from opengrader.server.auth import add_auth_routes, is_local, signed_in
 from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
 from opengrader.server.scan_jobs import ScanJobs
@@ -209,7 +209,7 @@ def create_app(
     app = FastAPI(title="Opengrader workspace", lifespan=lifespan)
     app.add_middleware(FolderSessionGuard, root=root)
     api = APIRouter(prefix="/api")
-    add_auth_routes(app, settings or ServerSettings(_env_file=None))
+    add_auth_routes(app, settings or ServerSettings(_env_file=None), workspace)
 
     app.state.workspace = workspace
     app.state.scan_jobs = scan_jobs
@@ -271,7 +271,11 @@ def create_app(
         return get_workspace()
 
     @api.post("/shutdown", status_code=204)
-    def shutdown() -> Response:
+    def shutdown(request: Request) -> Response:
+        if not is_local(request):
+            raise HTTPException(
+                403, "The server can only be stopped from the computer running it."
+            )
         callback = getattr(app.state, "shutdown", None)
         if callback is not None:
             callback()
@@ -399,15 +403,23 @@ def create_app(
         "/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}"
     )
     def save(
-        assignment_id: str, submission_id: int, question_id: str, edit: GradeEdit
+        assignment_id: str,
+        submission_id: int,
+        question_id: str,
+        edit: GradeEdit,
+        request: Request,
     ) -> GradeSaveResult:
+        user = signed_in(request)
+        actor = user.email if user else None
         if load_folder_session(root) is None:
-            return workspace.save_grade(assignment_id, submission_id, question_id, edit)
+            return workspace.save_grade(
+                assignment_id, submission_id, question_id, edit, actor=actor
+            )
         # Held across the commit and the file write so a sync cannot pull
         # this cell in between; checked again inside in case of a convert.
         with folder_lock(root):
             result = workspace.save_grade(
-                assignment_id, submission_id, question_id, edit
+                assignment_id, submission_id, question_id, edit, actor=actor
             )
             session = load_folder_session(root)
             if session is None or session.assignment_id != assignment_id:

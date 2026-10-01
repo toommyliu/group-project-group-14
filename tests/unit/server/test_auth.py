@@ -15,7 +15,12 @@ def test_auth_is_optional_for_offline_use(tmp_path):
     with TestClient(
         create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     ) as client:
-        assert client.get("/auth/me").json() == {"enabled": False, "user": None}
+        assert client.get("/auth/me").json() == {
+            "enabled": False,
+            "user": None,
+            "role": None,
+            "viewing_as_grader": False,
+        }
         response = client.get("/auth/login")
         assert response.status_code == 503
 
@@ -31,14 +36,20 @@ def test_saved_credentials_only_enable_sign_in_when_requested(tmp_path, monkeypa
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="session-secret",
+        instructors="prof@sjsu.edu",
     )
     with TestClient(create_app(tmp_path, settings=settings, process_jobs=False)) as client:
-        assert client.get("/auth/me").json() == {"enabled": enabled, "user": None}
+        assert client.get("/auth/me").json() == {
+            "enabled": enabled,
+            "user": None,
+            "role": None,
+            "viewing_as_grader": False,
+        }
 
 
 def test_local_mode_refuses_remote_access(tmp_path):
     app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
-    app.add_middleware(RemoteAuthGuard, enabled=False)
+    app.add_middleware(RemoteAuthGuard)
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000)) as client:
         assert client.get("/api/assignments").status_code == 200
         response = client.get("/api/assignments", headers={"X-Forwarded-Proto": "https"})
@@ -53,6 +64,7 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
+        instructors="grader@sjsu.edu",
     )
     session = {
         "user": {
@@ -69,10 +81,15 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
         create_app(tmp_path, settings=settings, process_jobs=False)
     ) as client:
         client.cookies.set("opengrader_session", cookie, domain="testserver.local")
-        assert client.get("/auth/me").json()["user"] == {
-            "id": "google-subject",
-            "email": "grader@sjsu.edu",
-            "name": "Test Grader",
+        assert client.get("/auth/me").json() == {
+            "enabled": True,
+            "user": {
+                "id": "google-subject",
+                "email": "grader@sjsu.edu",
+                "name": "Test Grader",
+            },
+            "role": "instructor",
+            "viewing_as_grader": False,
         }
         assert client.get("/api/assignments").status_code == 200
         response = client.post("/auth/logout")
@@ -88,6 +105,7 @@ def test_remote_requests_require_sign_in_including_sockets(tmp_path):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
+        instructors="prof@sjsu.edu",
     )
     with TestClient(
         create_app(tmp_path, settings=settings, process_jobs=False)
@@ -100,7 +118,12 @@ def test_remote_requests_require_sign_in_including_sockets(tmp_path):
         response = client.get("/assignments", follow_redirects=False)
         assert response.status_code == 303
         assert response.headers["location"] == "/auth/login"
-        assert client.get("/auth/me").json() == {"enabled": True, "user": None}
+        assert client.get("/auth/me").json() == {
+            "enabled": True,
+            "user": None,
+            "role": None,
+            "viewing_as_grader": False,
+        }
         with pytest.raises(WebSocketDisconnect) as closed:
             with client.websocket_connect("/api/socket"):
                 pass
@@ -114,6 +137,7 @@ def test_local_cli_access_does_not_allow_unsigned_proxied_requests(tmp_path):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
+        instructors="prof@sjsu.edu",
     )
     with TestClient(
         create_app(tmp_path, settings=settings, process_jobs=False),

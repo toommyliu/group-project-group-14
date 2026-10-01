@@ -15,6 +15,7 @@ def test_dotenv_loads_typed_server_settings(tmp_path, monkeypatch):
         'OPENGRADER_AUTH_ENABLED=true\n'
         'OPENGRADER_SECURE_COOKIE=yes\n'
         'OPENGRADER_GOOGLE_DOMAIN=SJSU.EDU\n'
+        'OPENGRADER_INSTRUCTORS= Prof@SJSU.edu, co.instructor@sjsu.edu ,\n'
         'UNRELATED_SETTING=value\n',
         encoding="utf-8",
     )
@@ -24,6 +25,7 @@ def test_dotenv_loads_typed_server_settings(tmp_path, monkeypatch):
     assert settings.auth_enabled is True
     assert settings.secure_cookie is True
     assert settings.google_domain == "sjsu.edu"
+    assert settings.instructors == {"prof@sjsu.edu", "co.instructor@sjsu.edu"}
     assert "private-client-secret" not in repr(settings)
     assert "private-session-secret" not in repr(settings)
 
@@ -40,6 +42,18 @@ def test_shell_environment_overrides_dotenv(tmp_path, monkeypatch):
 def test_enabled_auth_requires_credentials():
     with pytest.raises(ValidationError, match="Google sign-in requires"):
         ServerSettings(_env_file=None, auth_enabled=True, google_client_id="client-id")
+
+
+def test_instructors_must_be_on_the_domain():
+    with pytest.raises(ValidationError, match="prof@gmail.com"):
+        ServerSettings(
+            _env_file=None,
+            auth_enabled=True,
+            google_client_id="client-id",
+            google_client_secret="client-secret",
+            session_secret="session-secret",
+            instructors="prof@sjsu.edu,prof@gmail.com",
+        )
 
 
 def test_example_requires_a_generated_session_secret():

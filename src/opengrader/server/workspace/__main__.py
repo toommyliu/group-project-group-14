@@ -20,7 +20,7 @@ def serve(root: Path, *, port: int = 0) -> None:
         settings = ServerSettings()
         app = create_app(root, settings=settings)
         if not settings.auth_enabled:
-            app.add_middleware(RemoteAuthGuard, enabled=False)
+            app.add_middleware(RemoteAuthGuard)
         workspace = app.state.workspace
         server = uvicorn.Server(
             uvicorn.Config(

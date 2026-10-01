@@ -35,7 +35,11 @@ from opengrader.core.workspace.models import (
 
 DATABASE = Path(".opengrader/workspace.sqlite3")
 DOCUMENT = TypeAdapter(StudentSubmissionDocument)
-_SCHEMA = """
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    4: ("CREATE TABLE graders (email TEXT PRIMARY KEY)",),
+}
+_VERSION = max(_MIGRATIONS) + 1
+_SCHEMA = f"""
 CREATE TABLE workspace (id TEXT PRIMARY KEY, actor TEXT NOT NULL);
 CREATE TABLE assignments (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL);
 CREATE TABLE assignment_inputs (
@@ -74,7 +78,8 @@ CREATE TABLE feedback_jobs (
     PRIMARY KEY (assignment_id, submission_id),
     FOREIGN KEY (assignment_id, submission_id) REFERENCES submissions(assignment_id, id)
 );
-PRAGMA user_version = 4;
+CREATE TABLE graders (email TEXT PRIMARY KEY);
+PRAGMA user_version = {_VERSION};
 """
 
 
@@ -119,10 +124,21 @@ class Workspace:
         if not self.database.is_file():
             raise ValueError("No workspace database in this directory.")
         with self.connect() as db:
-            if db.execute("PRAGMA user_version").fetchone()[0] != 4:
-                raise ValueError(
-                    "This workspace needs a compatible version of Opengrader."
-                )
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+        if version == _VERSION:
+            return
+        if version not in _MIGRATIONS:
+            raise ValueError(
+                "This workspace needs a compatible version of Opengrader."
+            )
+        with self.connect(write=True) as db:
+            # Another process may have upgraded it since the read above.
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            while version in _MIGRATIONS:
+                for statement in _MIGRATIONS[version]:
+                    db.execute(statement)
+                version += 1
+                db.execute(f"PRAGMA user_version = {version}")
 
     @classmethod
     def create(cls, root: Path, *, actor: str | None = None) -> "Workspace":
@@ -410,8 +426,28 @@ class Workspace:
                 )
             ]
 
+    def graders(self) -> list[str]:
+        with self.connect() as db:
+            return [
+                row[0] for row in db.execute("SELECT email FROM graders ORDER BY email")
+            ]
+
+    def add_grader(self, email: str) -> None:
+        with self.connect(write=True) as db:
+            db.execute("INSERT OR IGNORE INTO graders VALUES (?)", (email,))
+
+    def remove_grader(self, email: str) -> None:
+        with self.connect(write=True) as db:
+            db.execute("DELETE FROM graders WHERE email=?", (email,))
+
     def save_grade(
-        self, assignment_id: str, submission_id: int, question_id: str, edit: GradeEdit
+        self,
+        assignment_id: str,
+        submission_id: int,
+        question_id: str,
+        edit: GradeEdit,
+        *,
+        actor: str | None = None,
     ) -> GradeSaveResult:
         """Commit a grade, history, receipt, event, and feedback work together."""
         request_id = str(edit.request_id)
@@ -420,7 +456,7 @@ class Workspace:
             sort_keys=True,
         )
         with self.connect(write=True) as db:
-            actor = db.execute("SELECT actor FROM workspace").fetchone()[0]
+            actor = actor or db.execute("SELECT actor FROM workspace").fetchone()[0]
             receipt = db.execute(
                 "SELECT * FROM receipts WHERE request_id=?", (request_id,)
             ).fetchone()
