@@ -736,7 +736,7 @@ function PageThumb({
             aria-hidden="true"
           />
         )}
-        <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-focus-within/page:opacity-100 group-hover/page:opacity-100 has-aria-expanded:opacity-100 pointer-coarse:opacity-100">
+        <div className="absolute top-0.5 right-0.5 flex gap-0.5 bg-background opacity-0 group-focus-within/page:opacity-100 group-hover/page:opacity-100 has-aria-expanded:opacity-100 pointer-coarse:opacity-100">
           <Button
             variant="outline"
             size="icon-xs"
