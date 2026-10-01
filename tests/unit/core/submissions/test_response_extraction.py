@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 
 import opengrader.core.submissions.processor as processor
@@ -11,10 +10,7 @@ from opengrader.core.submissions.processor import (
     _split_prompt_and_response,
     _TextLine,
 )
-from opengrader.core.submissions.student_file import (
-    StudentInkFragment,
-    StudentSubmissionQuestion,
-)
+from opengrader.core.submissions.student_file import StudentSubmissionQuestion
 
 
 def _line(text: str) -> _TextLine:
@@ -151,58 +147,6 @@ def test_vlm_fill_skips_already_filled_and_imageless(tmp_path: Path) -> None:
     assert filled[0].response_text == "already graded text"
     assert filled[1].response_text == ""
     assert ticks == []
-
-
-def test_verified_blank_ink_never_calls_a_model(tmp_path: Path) -> None:
-    reader = _StubVisionReader()
-    reader.raise_on_answer = AssertionError(
-        "a blank ink layer must not reach a model"
-    )
-
-    question = _question("q1", "responses/q1.png")
-    question = replace(
-        question,
-        ink_image_path="responses/q1.ink.png",
-        ink_fragments=(),
-    )
-
-    filled = _fill_responses_with_vlm(
-        [question],
-        tmp_path,
-        reader,
-        pdf_name="s.pdf",
-        progress=ExtractionProgress(),
-        progress_callback=lambda _message: None,
-    )
-
-    assert filled[0].response_text == ""
-    assert filled[0].response_source is None
-
-
-def test_ink_layer_uses_the_handwriting_only_prompt(tmp_path: Path) -> None:
-    reader = _StubVisionReader()
-    reader.answer = "isolated answer"
-
-    question = replace(
-        _question("q1", "responses/q1.png"),
-        ink_image_path="responses/q1.ink.png",
-        ink_fragments=(
-            StudentInkFragment(page_number=1, bbox_norm=(0.2, 0.3, 0.1, 0.1)),
-        ),
-    )
-
-    filled = _fill_responses_with_vlm(
-        [question],
-        tmp_path,
-        reader,
-        pdf_name="s.pdf",
-        progress=ExtractionProgress(),
-        progress_callback=lambda _message: None,
-    )
-
-    assert reader.answer_calls == [tmp_path / "responses/q1.ink.png"]
-    assert filled[0].response_text == "isolated answer"
-    assert filled[0].ink_fragments[0].text == "isolated answer"
 
 
 def test_vlm_failure_falls_back_to_ocr(monkeypatch, tmp_path: Path) -> None:

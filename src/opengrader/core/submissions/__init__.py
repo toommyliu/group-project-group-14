@@ -7,7 +7,6 @@ from .answer_groups import (
 from .student_file import (
     AssignmentTitleMetadata,
     IdentityCandidate,
-    StudentInkFragment,
     StudentSubmissionBuildResult,
     StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
@@ -326,7 +325,6 @@ __all__ = [
     "write_extra_pages_map",
     "AssignmentTitleMetadata",
     "IdentityCandidate",
-    "StudentInkFragment",
     "StudentSubmissionBuildResult",
     "StudentSubmissionDocument",
     "StudentSubmissionGradeUpdate",
