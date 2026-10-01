@@ -620,7 +620,7 @@ function GroupRow({
           Empty. This submission is removed when you drop the page.
         </p>
       ) : (
-        <ol className="flex flex-wrap content-start items-start gap-y-6 pb-4">
+        <ol className="flex flex-wrap content-start items-start gap-y-6 pb-4 select-none">
           {group.pages.map((page, index) => (
             <PageThumb
               key={page.number}
