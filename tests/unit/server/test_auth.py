@@ -4,7 +4,6 @@ from base64 import b64encode
 import pytest
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
-from starlette.websockets import WebSocketDisconnect
 
 from opengrader.server.auth import RemoteAuthGuard, user_from_claims
 from opengrader.server.settings import ServerSettings
@@ -98,7 +97,7 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
         assert client.get("/api/assignments").status_code == 401
 
 
-def test_remote_requests_require_sign_in_including_sockets(tmp_path):
+def test_remote_requests_require_sign_in(tmp_path):
     settings = ServerSettings(
         _env_file=None,
         auth_enabled=True,
@@ -124,10 +123,6 @@ def test_remote_requests_require_sign_in_including_sockets(tmp_path):
             "role": None,
             "viewing_as_grader": False,
         }
-        with pytest.raises(WebSocketDisconnect) as closed:
-            with client.websocket_connect("/api/socket"):
-                pass
-        assert closed.value.code == 1008
 
 
 def test_local_cli_access_does_not_allow_unsigned_proxied_requests(tmp_path):

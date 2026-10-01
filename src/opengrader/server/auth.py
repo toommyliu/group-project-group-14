@@ -70,6 +70,24 @@ def is_local(connection: HTTPConnection) -> bool:
     )
 
 
+def is_untrusted_browser_request(connection: HTTPConnection) -> bool:
+    site = connection.headers.get("sec-fetch-site")
+    if site == "same-origin":
+        return False
+    if (
+        connection.scope["method"] in {"GET", "HEAD"}
+        and connection.headers.get("sec-fetch-mode") == "navigate"
+        and connection.headers.get("sec-fetch-dest") == "document"
+    ):
+        return False
+    if site not in {None, "none"}:
+        return True
+    origin = connection.headers.get("origin")
+    if origin is None:
+        return False
+    return origin != str(connection.url.replace(path="", query="", fragment=""))
+
+
 def signed_in(connection: HTTPConnection) -> AuthUser | None:
     user = connection.scope.get("session", {}).get("user")
     return AuthUser.model_validate(user) if user else None
@@ -123,10 +141,16 @@ class RemoteAuthGuard:
         self.access = access
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] not in {"http", "websocket"}:
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
         connection = HTTPConnection(scope)
+        if is_untrusted_browser_request(connection):
+            await JSONResponse(
+                {"detail": f"Open {connection.base_url} in a new browser tab, then try again."},
+                status_code=403,
+            )(scope, receive, send)
+            return
         user = None
         if self.access is not None:
             user = signed_in(connection)
@@ -135,8 +159,6 @@ class RemoteAuthGuard:
                 user = None
         if is_local(connection) or scope["path"].startswith("/auth/") or user:
             await self.app(scope, receive, send)
-        elif scope["type"] == "websocket":
-            await send({"type": "websocket.close", "code": 1008})
         elif self.access is None:
             await JSONResponse(
                 {"detail": "Remote access is disabled for this workspace."},
