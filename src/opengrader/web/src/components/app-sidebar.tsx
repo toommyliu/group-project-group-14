@@ -1,13 +1,16 @@
 import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link, useMatchRoute } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import {
   BookOpen,
   ChartColumn,
   LayoutGrid,
   PenLine,
   ScanLine,
+  Users,
 } from 'lucide-react';
+import { authQuery } from '@/api/auth';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { useFolderSession } from '@/hooks/use-folder-session';
 import { ModeToggle } from './mode-toggle';
@@ -51,6 +54,8 @@ export function AppSidebar() {
   const browsing =
     Boolean(matchRoute({ to: '/assignments', pending: true })) ||
     Boolean(matchRoute({ to: '/assignments/new', pending: true }));
+  const managesPeople = useQuery(authQuery).data?.role === 'instructor';
+  const onPeople = Boolean(matchRoute({ to: '/people', pending: true }));
   const expanded = isMobile ? openMobile : open;
   const close = () => setOpenMobile(false);
   const destinations = (
@@ -109,25 +114,44 @@ export function AppSidebar() {
           )}
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pt-2">
-          {!folderSession && (
+          {(!folderSession || managesPeople) && (
             <nav aria-label="Workspace" className="w-full">
               <SidebarGroup className="px-2 py-0">
                 <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      className={menuButtonClass}
-                      tooltip="All assignments"
-                      aria-label="All assignments"
-                      isActive={browsing}
-                      render={<Link to="/assignments" onClick={close} />}
-                      aria-current={browsing ? 'page' : undefined}
-                    >
-                      <LayoutGrid aria-hidden="true" />
-                      <span className="group-data-[collapsible=icon]:hidden">
-                        All assignments
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                  {!folderSession && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        className={menuButtonClass}
+                        tooltip="All assignments"
+                        aria-label="All assignments"
+                        isActive={browsing}
+                        render={<Link to="/assignments" onClick={close} />}
+                        aria-current={browsing ? 'page' : undefined}
+                      >
+                        <LayoutGrid aria-hidden="true" />
+                        <span className="group-data-[collapsible=icon]:hidden">
+                          All assignments
+                        </span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
+                  {managesPeople && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        className={menuButtonClass}
+                        tooltip="People"
+                        aria-label="People"
+                        isActive={onPeople}
+                        render={<Link to="/people" onClick={close} />}
+                        aria-current={onPeople ? 'page' : undefined}
+                      >
+                        <Users aria-hidden="true" />
+                        <span className="group-data-[collapsible=icon]:hidden">
+                          People
+                        </span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
                 </SidebarMenu>
               </SidebarGroup>
             </nav>

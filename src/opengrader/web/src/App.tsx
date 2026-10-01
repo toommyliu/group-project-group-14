@@ -5,6 +5,7 @@ import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { useFolderSession } from '@/hooks/use-folder-session';
 import { AppSidebar } from '@/components/app-sidebar';
 import { FolderSessionBanner } from '@/components/folder-session-banner';
+import { GraderViewToolbar } from '@/components/grader-view-toolbar';
 import {
   SidebarInset,
   SidebarProvider,
@@ -98,6 +99,7 @@ export function App({ children }: PropsWithChildren) {
             tabIndex={-1}
           >
             {!standalone && <MobileSidebarTrigger />}
+            <GraderViewToolbar />
             {folderSession && assignment && (
               <FolderSessionBanner session={folderSession} />
             )}

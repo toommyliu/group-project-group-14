@@ -3,6 +3,7 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  notFound,
   redirect,
 } from '@tanstack/react-router';
 import type { QueryClient } from '@tanstack/react-query';
@@ -15,6 +16,8 @@ import {
   assignmentStatisticsQuery,
   submissionsQuery,
 } from './api/queries';
+import { authQuery } from './api/auth';
+import { peopleQuery } from './api/people';
 import { scansQuery } from './api/scans';
 import { workspaceQuery } from './api/workspace';
 import {
@@ -212,6 +215,19 @@ export const statisticsRoute = createRoute({
   notFoundComponent: RouteNotFound,
 });
 
+export const peopleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/people',
+  beforeLoad: async ({ context }) => {
+    const auth = await context.queryClient.ensureQueryData(authQuery);
+    if (auth.role !== 'instructor') throw notFound();
+  },
+  loader: ({ context }) =>
+    context.queryClient.fetchQuery({ ...peopleQuery, staleTime: 0 }),
+  component: lazyRouteComponent(() => import('./routes/people-page')),
+  errorComponent: RouteError,
+});
+
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     routeTree: rootRoute.addChildren([
@@ -222,6 +238,7 @@ export function createAppRouter(queryClient: QueryClient) {
       scansRoute,
       overviewRoute,
       statisticsRoute,
+      peopleRoute,
     ]),
     context: { queryClient },
     // Fuzzy mode runs the parent assignment route's loader, and Workspace renders that page.

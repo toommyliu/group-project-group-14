@@ -17,6 +17,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/view-as": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** View As */
+        post: operations["view_as_auth_view_as_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -28,6 +45,57 @@ export interface paths {
         put?: never;
         /** Logout */
         post: operations["logout_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** People */
+        get: operations["people_api_people_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/people/graders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Grader */
+        post: operations["add_grader_api_people_graders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/people/graders/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove Grader */
+        post: operations["remove_grader_api_people_graders_remove_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -744,6 +812,13 @@ export interface components {
             /** Enabled */
             enabled: boolean;
             user?: components["schemas"]["AuthUser"] | null;
+            /** Role */
+            role?: ("instructor" | "grader") | null;
+            /**
+             * Viewing As Grader
+             * @default false
+             */
+            viewing_as_grader: boolean;
         };
         /** AuthUser */
         AuthUser: {
@@ -867,6 +942,11 @@ export interface components {
             answer: components["schemas"]["Answer"];
             folder?: components["schemas"]["FolderWrite"] | null;
         };
+        /** Grader */
+        Grader: {
+            /** Email */
+            email: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -893,6 +973,15 @@ export interface components {
              * @enum {integer}
              */
             rotation: 0 | 90 | 180 | 270;
+        };
+        /** People */
+        People: {
+            /** Domain */
+            domain: string;
+            /** Instructors */
+            instructors: string[];
+            /** Graders */
+            graders: string[];
         };
         /** PipelineOutput */
         PipelineOutput: {
@@ -1353,6 +1442,14 @@ export interface components {
             /** Label */
             label: string;
         };
+        /** ViewAs */
+        ViewAs: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "instructor" | "grader";
+        };
         /** VisualEditInput */
         VisualEditInput: {
             /** Qa Markdown */
@@ -1409,6 +1506,37 @@ export interface operations {
             };
         };
     };
+    view_as_auth_view_as_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewAs"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     logout_auth_logout_post: {
         parameters: {
             query?: never;
@@ -1424,6 +1552,92 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    people_api_people_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["People"];
+                };
+            };
+        };
+    };
+    add_grader_api_people_graders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Grader"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["People"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_grader_api_people_graders_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Grader"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["People"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
