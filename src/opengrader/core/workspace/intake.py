@@ -168,7 +168,6 @@ def publish_submission(
                 response_image_path=copy_asset(
                     question.response_image_path, asset_root
                 ),
-                ink_image_path=copy_asset(question.ink_image_path, asset_root),
             )
             for question in document.questions
         ],

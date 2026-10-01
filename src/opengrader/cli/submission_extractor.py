@@ -490,9 +490,8 @@ class _Hooks:
     help=(
         "Path to the exact blank assignment PDF that students received "
         "(same printed content and layout; real text layer required). It "
-        "supplies question/name/ID regions and is aligned to each scan so "
-        "printed ink can be removed. The scans themselves need no text "
-        "layer. This mode does not use OCR layout detection."
+        "supplies question/name/ID regions. The scans themselves need no "
+        "text layer. This mode does not use OCR layout detection."
     ),
 )
 @click.option(
@@ -514,8 +513,7 @@ class _Hooks:
     help=(
         "The blank assignment the region map was drawn on. Given, the map is "
         "verified against it before a single scan is read; the map already "
-        "carries that file's fingerprint. The blank is also aligned to "
-        "each scan to separate printed text from student ink."
+        "carries that file's fingerprint."
     ),
 )
 @click.option(
@@ -663,9 +661,8 @@ class _Hooks:
     help=(
         "Also transcribe each question's response using the Ollama vision "
         "model (Tesseract fallback), for automated grading. Without it, "
-        "scans are still cropped (with --blank-template, the ink image and "
-        "every detected fragment are saved too) and names, IDs and titles "
-        "are still read, but Response text is left empty. Ignored for "
+        "scans are still cropped and names, IDs and titles are still "
+        "read, but Response text is left empty. Ignored for "
         "text-layer PDFs, whose typed answers are read straight from the "
         "text layer."
     ),
@@ -1025,30 +1022,18 @@ def command(
             )
             sys.exit(1)
 
-        if region_map_input:
-            region_map_reference = Path(region_map_input)
-        else:
+        if not region_map_input:
             candidate = Path(region_map_path).parent / region_map.source_name
-            region_map_reference = candidate if candidate.exists() else None
-            if region_map_reference is not None:
+            if candidate.exists():
                 try:
                     region_map = load_verified_region_map(
-                        Path(region_map_path), region_map_reference
+                        Path(region_map_path), candidate
                     )
                 except RegionMapError as exc:
                     print(f"error: {exc}", file=sys.stderr)
                     sys.exit(1)
 
-        blank_assignment_template = region_map_to_blank_template(
-            region_map,
-            reference_pdf_path=region_map_reference,
-        )
-        if region_map_reference is None:
-            print(
-                "note: the mapped blank PDF was not found beside the region map. "
-                "Pass --region-map-input to separate printed text from student ink.",
-                file=sys.stderr,
-            )
+        blank_assignment_template = region_map_to_blank_template(region_map)
 
     bubble_sheet_layout = None
     if bubble_sheet:

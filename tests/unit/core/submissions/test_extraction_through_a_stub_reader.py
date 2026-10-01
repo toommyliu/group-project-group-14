@@ -78,7 +78,7 @@ class _StubVisionReader:
         )
     )
     qa_value: tuple[str, str] = ("What is a stack?", "A LIFO data structure.")
-    handwriting_value: str = "isolated ink text"
+    handwriting_value: str = "handwritten answer text"
     page_number_value: int | None = 1
     first_page_value: bool = True
     # Matches `GuardedVisionReader.provider` / `DialectVisionReader` readers,

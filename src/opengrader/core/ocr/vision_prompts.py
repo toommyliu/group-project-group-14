@@ -261,8 +261,6 @@ def parse_question_prompt_and_answer(raw: str) -> tuple[str, str]:
 
 
 def handwriting_only_request(*, math_latex: bool = False) -> VisionRequest:
-    """Transcribe student work in either a full response crop or isolated ink."""
-
     prompt = """Read only the handwritten text in this image. Copy all handwriting verbatim, including words unrelated to the printed question. Exclude all machine-printed text, page numbers, and identity headers. For a circled or checked multiple-choice option, copy only its letter. Read top to bottom and left to right within each row. Preserve repeated words, line breaks, spelling, and code punctuation. Return {"text":""} for no student response, or [unclear] for unreadable handwriting. """
     if math_latex:
         prompt += "Write visible mathematical notation as LaTeX inside $...$ or $$...$$, without changing ordinary prose. "
