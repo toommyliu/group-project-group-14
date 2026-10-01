@@ -190,19 +190,25 @@ def test_saved_grades_record_the_signed_in_grader(tmp_path):
     ]
 
 
-def test_only_the_server_machine_can_stop_the_server(tmp_path):
+def test_only_callers_with_the_service_token_can_stop_the_server(tmp_path):
     stopped = []
     with hosted(tmp_path) as remote:
         remote.app.state.shutdown = lambda: stopped.append(True)
         sign_in(remote, "prof@sjsu.edu")
-        assert remote.post("/api/shutdown").status_code == 403
+        assert remote.post("/api/shutdown").status_code == 404
         assert stopped == []
 
     with hosted(
         tmp_path, base_url="http://localhost:8000", client=("127.0.0.1", 50000)
     ) as local:
         local.app.state.shutdown = lambda: stopped.append(True)
-        assert local.post("/api/shutdown").status_code == 204
+        assert local.post("/api/shutdown").status_code == 404
+        wrong = {"Authorization": "Bearer not-the-token"}
+        assert local.post("/api/shutdown", headers=wrong).status_code == 404
+        assert stopped == []
+
+        token = {"Authorization": f"Bearer {local.app.state.shutdown_token}"}
+        assert local.post("/api/shutdown", headers=token).status_code == 204
         assert stopped == [True]
 
 

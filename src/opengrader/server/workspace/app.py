@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 import re
+import secrets
 import shutil
 from threading import RLock
 
@@ -62,7 +63,7 @@ from opengrader.server.assignment_qa import (
     preview_qa,
     edit_assignment_draft,
 )
-from opengrader.server.auth import add_auth_routes, is_local, signed_in
+from opengrader.server.auth import add_auth_routes, signed_in
 from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
 from opengrader.server.scan_jobs import ScanJobs
@@ -213,6 +214,7 @@ def create_app(
 
     app.state.workspace = workspace
     app.state.scan_jobs = scan_jobs
+    app.state.shutdown_token = secrets.token_urlsafe(32)
 
     @app.exception_handler(WorkspaceConflict)
     async def conflict(_request: Request, exc: WorkspaceConflict):
@@ -270,12 +272,12 @@ def create_app(
                 record_event(db, assignment_id, kind="assignment")
         return get_workspace()
 
-    @api.post("/shutdown", status_code=204)
+    @api.post("/shutdown", status_code=204, include_in_schema=False)
     def shutdown(request: Request) -> Response:
-        if not is_local(request):
-            raise HTTPException(
-                403, "The server can only be stopped from the computer running it."
-            )
+        expected = f"Bearer {app.state.shutdown_token}".encode()
+        given = request.headers.get("authorization", "").encode()
+        if not secrets.compare_digest(given, expected):
+            raise HTTPException(404)
         callback = getattr(app.state, "shutdown", None)
         if callback is not None:
             callback()
