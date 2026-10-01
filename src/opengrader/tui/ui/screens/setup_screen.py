@@ -86,6 +86,7 @@ _PIPE_STATUS_GLYPH = {
     StageStatus.SKIPPED: "·",
     StageStatus.BLOCKED: "●",
     StageStatus.FAILED: "✗",
+    StageStatus.PAUSED: "‖",
 }
 
 
@@ -594,6 +595,20 @@ class SetupScreen(Vertical):
                         "of order, unreadable. Tick this only after reading "
                         "what it found (it still gets reported) and deciding "
                         "to grade the scan as it is.",
+                        classes="card-hint",
+                    )
+
+                    yield Checkbox(
+                        "Draft missing rubric items with AI first",
+                        id="pipe-draft-rubrics",
+                    )
+                    yield Static(
+                        "Before auto-grading, the AI drafts partial-credit "
+                        "rubric items for written questions that have none and "
+                        "writes them into the answer key. The run then stops "
+                        "and opens grading so you can check them (press e on a "
+                        "question); press Y there to have the AI grade with "
+                        "them, or run the pipeline again.",
                         classes="card-hint",
                     )
 
@@ -2446,6 +2461,7 @@ class SetupScreen(Vertical):
             llm=llm,
             auto_grade=current.auto_grade,
             force=self.query_one("#pipe-force", Checkbox).value,
+            draft_rubrics=self.query_one("#pipe-draft-rubrics", Checkbox).value,
         )
 
     def _run_pipeline_preview(self) -> None:
@@ -2581,7 +2597,10 @@ class SetupScreen(Vertical):
     def _pipe_stage_finish(self, outcome: StageOutcome) -> None:
         glyph = _PIPE_STATUS_GLYPH.get(outcome.status, "·")
         self._pipe_log_lines.append(f"{glyph} {outcome.stage}: {outcome.message}")
-        if outcome.status in (StageStatus.BLOCKED, StageStatus.FAILED) and outcome.detail:
+        if (
+            outcome.status in (StageStatus.BLOCKED, StageStatus.FAILED, StageStatus.PAUSED)
+            and outcome.detail
+        ):
             for line in outcome.detail.splitlines():
                 self._pipe_log_lines.append(f"    {line}")
         self.query_one("#pipe-stage-log", Static).update("\n".join(self._pipe_log_lines))
@@ -2649,6 +2668,25 @@ class SetupScreen(Vertical):
             message = failed.message if failed is not None else "The pipeline failed."
             self.query_one("#pipe-progress-status", Static).update(f"Failed: {message}")
             self.app.notify(f"Pipeline failed: {message}", severity="error")
+            return
+
+        if report.paused_for_review:
+            paused = next(
+                o for o in report.stages if o.status is StageStatus.PAUSED
+            )
+            self.query_one("#pipe-progress-status", Static).update(
+                f"Paused: {paused.message}"
+            )
+            self.app.notify(
+                "The AI drafted rubric items into the answer key. Check them in "
+                "grading (press e on a question), then press Y to have the AI "
+                "grade with them.",
+                timeout=12,
+            )
+            if not launched_early and report.ready_to_grade and qa_path:
+                self.post_message(
+                    self.LaunchRequested(qa_path, str(report.submissions_dir))
+                )
             return
 
         if launched_early:

@@ -10,6 +10,7 @@ from opengrader.cli import automated_grading, submission_extractor, submission_s
 from opengrader.core.pipeline import (
     PIPELINE_STAGES,
     STAGE_AUTO_GRADE,
+    STAGE_DRAFT_RUBRICS,
     STAGE_EXTRACT,
     STAGE_SCAN_CHECK,
     STAGE_SPLIT,
@@ -131,10 +132,20 @@ def _request(tmp_path, **overrides) -> PipelineRequest:
     return PipelineRequest(**base)  # type: ignore[arg-type]
 
 
+def _stage_plan(request: PipelineRequest, stage: str):
+    return next(plan for plan in plan_pipeline(request) if plan.stage == stage)
+
+
 def test_plan_covers_every_stage_in_run_order(tmp_path) -> None:
     plans = plan_pipeline(_request(tmp_path))
     assert tuple(plan.stage for plan in plans) == PIPELINE_STAGES
-    assert PIPELINE_STAGES == (STAGE_SCAN_CHECK, STAGE_SPLIT, STAGE_EXTRACT, STAGE_AUTO_GRADE)
+    assert PIPELINE_STAGES == (
+        STAGE_SCAN_CHECK,
+        STAGE_SPLIT,
+        STAGE_EXTRACT,
+        STAGE_DRAFT_RUBRICS,
+        STAGE_AUTO_GRADE,
+    )
 
 
 def test_scan_check_runs_in_process_and_so_builds_no_command(tmp_path) -> None:
@@ -221,7 +232,7 @@ def test_auto_grade_argv_carries_the_text_model_and_the_confidence_floor(tmp_pat
         qa_file=qa,
         llm=LlmOptions(grade_written=True, text_model="llama3.1", min_confidence=0.8),
     )
-    plan = plan_pipeline(request)[3]
+    plan = _stage_plan(request, STAGE_AUTO_GRADE)
     assert plan.argv == (
         "automated-grading",
         "--solutions",
@@ -244,7 +255,7 @@ def test_the_vision_model_never_reaches_the_text_grader(tmp_path) -> None:
         qa_file=qa,
         llm=LlmOptions(grade_written=True, vision_model="qwen2.5vl:7b"),
     )
-    assert "qwen2.5vl:7b" not in plan_pipeline(request)[3].argv
+    assert "qwen2.5vl:7b" not in _stage_plan(request, STAGE_AUTO_GRADE).argv
 
 
 def test_split_is_skipped_for_a_directory_of_already_split_pdfs(tmp_path) -> None:
@@ -257,7 +268,7 @@ def test_split_is_skipped_for_a_directory_of_already_split_pdfs(tmp_path) -> Non
 
 
 def test_auto_grade_is_skipped_without_an_answer_key(tmp_path) -> None:
-    plan = plan_pipeline(_request(tmp_path))[3]
+    plan = _stage_plan(_request(tmp_path), STAGE_AUTO_GRADE)
     assert plan.status is StageStatus.SKIPPED
     assert "no answer key" in plan.reason
 
@@ -265,7 +276,7 @@ def test_auto_grade_is_skipped_without_an_answer_key(tmp_path) -> None:
 def test_auto_grade_is_skipped_when_turned_off(tmp_path) -> None:
     qa = tmp_path / "qa.md"
     qa.write_text("# key\n", encoding="utf-8")
-    plan = plan_pipeline(_request(tmp_path, qa_file=qa, auto_grade=False))[3]
+    plan = _stage_plan(_request(tmp_path, qa_file=qa, auto_grade=False), STAGE_AUTO_GRADE)
     assert plan.status is StageStatus.SKIPPED
 
 
@@ -276,7 +287,12 @@ def test_stages_run_in_order_and_report_what_they_did(tmp_path, stages, clean_sc
 
     assert stages.stages() == [STAGE_SPLIT, STAGE_EXTRACT, STAGE_AUTO_GRADE]
     assert [outcome.stage for outcome in report.stages] == list(PIPELINE_STAGES)
-    assert all(outcome.status is StageStatus.RAN for outcome in report.stages)
+    assert all(
+        outcome.status is StageStatus.RAN
+        for outcome in report.stages
+        if outcome.stage != STAGE_DRAFT_RUBRICS
+    )
+    assert report.stage(STAGE_DRAFT_RUBRICS).status is StageStatus.SKIPPED
     assert report.ok
     assert report.submission_count == 2
     assert report.ready_to_grade
@@ -631,3 +647,124 @@ def test_a_confirmed_cloud_run_actually_runs_and_still_carries_the_preflight(
     assert report.cloud_preflight is not None
     assert report.cloud_preflight.sends_anything is True
     assert stages.calls  # the extract stage actually ran
+
+
+def _drafts(*, written: bool, failed: tuple[str, ...] = ()):
+    from opengrader.cli.draft_rubric import DraftResult
+    from opengrader.core.qa_file.markdown import QARubricFlatOption
+
+    options = (
+        QARubricFlatOption("Correct", 0.0, "correct", "exclusive"),
+        QARubricFlatOption("Partially Correct - Missing base case", -3.0, "partial", "checklist"),
+        QARubricFlatOption("Partially Correct - Off by one", -2.0, "partial", "checklist"),
+        QARubricFlatOption("Incorrect", -5.0, "incorrect", "exclusive"),
+    )
+    results = [
+        DraftResult("q2", "", "drafted", options=options, written=written),
+    ]
+    results += [DraftResult(qid, "", "failed", reason="no usable rubric") for qid in failed]
+    return results
+
+
+def _draft_stub(monkeypatch, results):
+    from opengrader.cli import draft_rubric
+
+    calls: list[list[str]] = []
+
+    def run_cli(argv, **_kwargs):
+        calls.append(list(argv))
+        return results
+
+    monkeypatch.setattr(draft_rubric, "run_cli", run_cli)
+    return calls
+
+
+def test_draft_rubrics_is_skipped_unless_requested(tmp_path) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    plan = _stage_plan(_request(tmp_path, qa_file=qa), STAGE_DRAFT_RUBRICS)
+    assert plan.status is StageStatus.SKIPPED
+    assert "not requested" in plan.reason
+
+    plan = _stage_plan(_request(tmp_path, draft_rubrics=True), STAGE_DRAFT_RUBRICS)
+    assert plan.status is StageStatus.SKIPPED
+    assert "no answer key" in plan.reason
+
+
+def test_draft_rubrics_argv_writes_and_carries_model_host_and_cloud_confirmation(tmp_path) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    request = _request(
+        tmp_path,
+        qa_file=qa,
+        draft_rubrics=True,
+        send_to_cloud_confirmed=True,
+        llm=LlmOptions(text_model="llama3.1", host="http://box:11434", vision_model="vl"),
+    )
+    plan = _stage_plan(request, STAGE_DRAFT_RUBRICS)
+    assert plan.will_run is True
+    assert plan.argv == (
+        "draft-rubric",
+        "--solutions",
+        str(qa),
+        "--input",
+        str(tmp_path / "cohort" / "submissions"),
+        "--write",
+        "--llm-model",
+        "llama3.1",
+        "--llm-host",
+        "http://box:11434",
+        "--yes-send-to-cloud",
+    )
+
+
+def test_written_drafts_pause_before_auto_grading(
+    tmp_path, stages, clean_scan, monkeypatch
+) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    calls = _draft_stub(monkeypatch, _drafts(written=True, failed=("q4",)))
+
+    report = run_pipeline(_request(tmp_path, qa_file=qa, draft_rubrics=True))
+
+    assert len(calls) == 1
+    assert STAGE_AUTO_GRADE not in stages.stages()
+    outcome = report.stage(STAGE_DRAFT_RUBRICS)
+    assert outcome.status is StageStatus.PAUSED
+    assert "q2" in outcome.message and "run again" in outcome.message
+    assert "Missing base case (-3)" in outcome.detail
+    assert "could not draft: q4" in outcome.detail
+    assert report.stage(STAGE_AUTO_GRADE) is None
+    # Paused on purpose: not a failure, but flagged so nothing is published.
+    assert report.ok
+    assert report.paused_for_review
+
+
+def test_nothing_left_to_draft_goes_straight_on_to_grading(
+    tmp_path, stages, clean_scan, monkeypatch
+) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    _draft_stub(monkeypatch, [])
+
+    report = run_pipeline(_request(tmp_path, qa_file=qa, draft_rubrics=True))
+
+    assert report.stage(STAGE_DRAFT_RUBRICS).status is StageStatus.RAN
+    assert "already has partial-credit items" in report.stage(STAGE_DRAFT_RUBRICS).message
+    assert stages.stages()[-1] == STAGE_AUTO_GRADE
+    assert not report.paused_for_review
+
+
+def test_failed_drafts_alone_do_not_pause(tmp_path, stages, clean_scan, monkeypatch) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    from opengrader.cli.draft_rubric import DraftResult
+
+    _draft_stub(monkeypatch, [DraftResult("q2", "", "failed", reason="garbage")])
+
+    report = run_pipeline(_request(tmp_path, qa_file=qa, draft_rubrics=True))
+
+    outcome = report.stage(STAGE_DRAFT_RUBRICS)
+    assert outcome.status is StageStatus.RAN
+    assert "could not draft rubric items for q2" in outcome.message
+    assert stages.stages()[-1] == STAGE_AUTO_GRADE

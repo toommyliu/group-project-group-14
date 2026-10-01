@@ -15,6 +15,7 @@ from opengrader.core.qa_file import (
 )
 from opengrader.core.qa_file.markdown import QAChoice
 from opengrader.core.question_types import MULTIPLE_CHOICE, normalize_boolean
+from opengrader.core.submissions.printed_text import printed_question_text
 
 MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE = 60.0
 
@@ -35,6 +36,8 @@ class SolutionEntry:
     true_false_correct: bool | None = None
     prompt: str = ""
     rubric_options: tuple[RubricChoice, ...] = ()
+    # Printed question text Tesseract may have read into the response.
+    printed_text: tuple[str, ...] = ()
 
     @property
     def is_numeric(self) -> bool:
@@ -83,6 +86,7 @@ def make_solution_entry(
     *,
     prompt: str = "",
     rubric: object = (),
+    printed_text: tuple[str, ...] = (),
 ) -> SolutionEntry:
     if correct_choice_labels:
         return SolutionEntry(
@@ -91,6 +95,7 @@ def make_solution_entry(
             is_multiple_answer=True,
             prompt=prompt,
             rubric_options=rubric_choices(rubric, points),
+            printed_text=printed_text,
         )
     if correct_choice_label:
         return SolutionEntry(
@@ -100,6 +105,7 @@ def make_solution_entry(
             true_false_correct=true_false_correct(choices, correct_choice_label),
             prompt=prompt,
             rubric_options=rubric_choices(rubric, points),
+            printed_text=printed_text,
         )
     numeric_specs = parse_numeric_answers(answers)
     return SolutionEntry(
@@ -108,6 +114,7 @@ def make_solution_entry(
         numeric_specs=tuple(numeric_specs) if numeric_specs is not None else (),
         prompt=prompt,
         rubric_options=rubric_choices(rubric, points),
+        printed_text=printed_text,
     )
 
 
@@ -135,6 +142,7 @@ def flatten_solution_entries(
                     subquestion.correct_choice_labels,
                     prompt=subquestion.prompt,
                     rubric=subquestion.rubric,
+                    printed_text=printed_question_text(question),
                 )
             continue
         entries[question.id] = make_solution_entry(
@@ -145,6 +153,7 @@ def flatten_solution_entries(
             question.correct_choice_labels,
             prompt=question.prompt,
             rubric=question.rubric,
+            printed_text=printed_question_text(question),
         )
     return entries
 

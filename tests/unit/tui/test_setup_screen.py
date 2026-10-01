@@ -1477,6 +1477,7 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
 
             app.query_one("#pipe-pages", Input).value = "6"
             app.query_one("#pipe-force", Checkbox).value = True
+            app.query_one("#pipe-draft-rubrics", Checkbox).value = True
 
             return screen._build_pipeline_request()
 
@@ -1489,6 +1490,7 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
     assert request.blank_template == template
     assert request.pages_per_submission == 6
     assert request.force is True
+    assert request.draft_rubrics is True
     assert request.llm.enabled is True
     assert request.llm.read_handwriting is True
     assert request.llm.grade_written is True
@@ -1517,6 +1519,7 @@ def test_pipeline_request_defaults_when_every_disclosure_is_off(tmp_path) -> Non
     assert request.blank_template is None
     assert request.pages_per_submission is None
     assert request.force is False
+    assert request.draft_rubrics is False
     resolved = app_config.resolve()
     assert resolved.read_handwriting is False
     assert resolved.grade_written is False
@@ -2077,3 +2080,52 @@ def test_the_llm_probe_is_skipped_entirely_when_the_ai_is_not_wanted(monkeypatch
     asyncio.run(run())
 
     assert calls == []
+
+
+def test_a_run_paused_for_rubric_review_opens_grading_to_check_the_drafts(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline import (
+        STAGE_DRAFT_RUBRICS,
+        PipelineReport,
+        StageOutcome,
+        StageStatus,
+    )
+
+    submissions = tmp_path / "cohort" / "submissions" / "submission-0001"
+    submissions.mkdir(parents=True)
+    (submissions / "submission-0001.submission.md").write_text("# stub\n", encoding="utf-8")
+    report = PipelineReport(
+        stages=(
+            StageOutcome(
+                stage=STAGE_DRAFT_RUBRICS,
+                status=StageStatus.PAUSED,
+                message="drafted rubric items for q2 into qa.md",
+            ),
+        ),
+        submissions_dir=tmp_path / "cohort" / "submissions",
+        qa_file=tmp_path / "qa.md",
+    )
+
+    async def run():
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            posted: list[object] = []
+            original_post = screen.post_message
+
+            def record(message):  # noqa: ANN001, ANN202
+                if isinstance(message, SetupScreen.LaunchRequested):
+                    posted.append(message)
+                    return True
+                return original_post(message)
+
+            screen.post_message = record  # type: ignore[method-assign]
+            screen._pipe_finish(report, False, str(tmp_path / "qa.md"), None, False)
+            await pilot.pause()
+            status = str(app.query_one("#pipe-progress-status", Static).render())
+            return posted, status
+
+    posted, status = asyncio.run(run())
+    assert status.startswith("Paused: drafted rubric items for q2")
+    launches = [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
+    assert len(launches) == 1

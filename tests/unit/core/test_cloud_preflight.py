@@ -188,6 +188,31 @@ class TestCounting:
         assert "answer-image" not in preflight.counts
 
 
+    def test_drafting_rubrics_counts_one_call_per_question_and_version(
+        self, tmp_path, cloud_spec
+    ):
+        # Nothing else is on, so every graded-text call counted is a draft.
+        resolved = _consented(cloud_spec, read_handwriting=False, grade_written=False)
+        scan = tmp_path / "split"
+        _pdf(scan / "submission-0001.pdf")
+        _pdf(scan / "submission-0002.pdf")
+        qa = tmp_path / "qa.md"
+        qa.write_text(
+            "---\ntitle: T\n---\n\n## Version A\n\n"
+            "- (1 points) Q1\n  **Correct** A\n- (1 points) Q2\n  **Correct** B\n\n"
+            "## Version B\n\n"
+            "- (1 points) Q1\n  **Correct** A\n- (1 points) Q2\n  **Correct** B\n",
+            encoding="utf-8",
+        )
+        drafting = _request(tmp_path, scan, qa_file=qa, draft_rubrics=True, auto_grade=False)
+        preflight = plan_cloud_egress(drafting, resolved)
+        # Per question, not per student: 2 questions x 2 versions.
+        assert preflight.counts == {"graded-text": 4}
+        assert preflight.sends_anything is True
+
+        not_drafting = _request(tmp_path, scan, qa_file=qa, auto_grade=False)
+        assert plan_cloud_egress(not_drafting, resolved).sends_anything is False
+
 class TestStatementAndDict:
     def test_statement_reports_scale_destination_and_cost(self) -> None:
         preflight = CloudPreflight(

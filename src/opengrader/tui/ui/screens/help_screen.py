@@ -283,6 +283,18 @@ _GRADING_ROWS: list[tuple[str, str]] = [
         "usual - that overwrites the AI grade.",
     ),
     (
+        "shift+Y",
+        "AI draft grades for this question: the configured AI grades every "
+        "student who has no grade on it yet, using this question's rubric - "
+        "one call per distinct written answer, so students who wrote the same "
+        "thing get the same grade (accepted similar-answer merges count as the "
+        "same answer). Blank answers are never sent, and a grade that already "
+        "exists is never overwritten. Answers the AI is not confident about "
+        "are left for you. Every drafted grade carries the [AI ...] tag, so v "
+        "sweeps them for you to confirm (y) or override. A cloud provider "
+        "shows how many calls will be sent and asks first.",
+    ),
+    (
         "shift+U",
         "Unify similar answers: review the merges proposed for this "
         "question's near-identical answers and accept one to widen what g "
@@ -298,7 +310,11 @@ _GRADING_ROWS: list[tuple[str, str]] = [
     (
         "e",
         "Edit the rubric. Saved changes are written back to the QA file "
-        "and apply to every student.",
+        "and apply to every student. In the editor, Draft with AI (or "
+        "ctrl+r) asks the configured AI to draft partial-credit items from "
+        "the answers students actually gave; the draft only fills the "
+        "editor rows, and nothing is saved until you review it and press Save. "
+        "The same draft from a terminal: CLI: draft-rubric.",
     ),
     (
         "c",

@@ -1,129 +1,336 @@
-# Packaging & Desktop Distribution
+# Installing Opengrader on your computer
 
-Everything needed to hand Opengrader to an end-user as a **clickable desktop
-icon** — no Python knowledge required on their part. One installer run creates
-the icon; every launch self-heals the environment.
+There are two ways to run Opengrader. Pick the one that fits you — you can
+also install both.
+
+| | **Desktop app** | **`opengrader` terminal command** |
+| --- | --- | --- |
+| Best for | Instructors and TAs who'd rather not use a terminal | People who are comfortable typing commands |
+| How you start it | Double-click the **Opengrader** icon on your Desktop | Type `opengrader` in any terminal window |
+| What opens | The classic app: Tools & Settings, and a *Start grading* card for grading a class folder | Whatever command you type — for example `opengrader tui` opens a shared workspace |
+| Sets itself up | Yes — installs everything it needs on first launch | No — expects Opengrader to already be set up (see the main [README](../README.md)) |
+
+Neither one needs administrator rights. Everything is installed for your user
+account only.
+
+---
+
+## Install the desktop app
+
+**Before you start:** you need a copy of the Opengrader folder on your
+computer (for example, downloaded with `git clone` — see the main
+[README](../README.md#installation)).
+
+Open a terminal in that folder and run the one line for your system:
+
+| System | Run this once |
+| --- | --- |
+| macOS or Linux | `bash packaging/install.sh` |
+| Windows | `powershell -ExecutionPolicy Bypass -File packaging\install.ps1` |
+
+That's it. An **Opengrader** icon appears on your Desktop (on macOS it is also
+added to the *Applications* folder in your home folder; on Linux it also
+appears in your apps menu).
+
+### The first time you open it
+
+Double-click the icon. A terminal window opens and shows a short checklist
+while Opengrader gets itself ready:
+
+1. **Updates its own files** from the folder you installed from, if that folder
+   is still there.
+2. **Installs uv**, the tool it uses to manage Python, if it's missing.
+3. **Installs Python 3.12** for Opengrader's own use. Your computer's existing
+   Python is never touched.
+4. **Installs Opengrader's libraries.**
+5. **Installs Tesseract**, the text-recognition program used to read scanned
+   pages — automatically on Windows, and on macOS if Homebrew is installed. On Linux it asks
+   before installing, because that needs your password. If it can't be
+   installed, Opengrader still opens; only reading scans is unavailable until
+   you install it.
+6. **Checks for Ollama**, the program that runs the AI model that reads
+   handwriting. Ollama is **not** installed for you (its models are several GB),
+   so if it's missing you'll see a note with the download link:
+   <https://ollama.com>.
+
+The first launch takes a minute or two. After that, every step is already
+done, so Opengrader opens almost instantly.
+
+### What you'll see
+
+The icon opens the **classic app**: a *Start grading* card where you choose a
+class folder to grade, plus Tools & Settings for every other task (checking your
+computer's setup, AI settings, backups, and more). It grades your class folders
+right where they are and doesn't need an internet connection.
+
+**About the terminal window:** Opengrader shows students' scanned answers
+inside the window. On macOS the icon uses the best terminal app you have
+installed — Ghostty, iTerm2, WezTerm or kitty if present, otherwise the
+built-in Terminal. The built-in Terminal can only show a rough preview of each
+answer; press **`o`** while grading to open the full-quality image in Preview.
+
+### Optional: the browser version
+
+Opengrader can also show a class folder in your web browser. This is
+completely optional and off by default. To turn it on, go to
+**Tools → Browser app** and tick **Show Open in browser**.
+
+The browser version has to be *built* once, which needs two free tools,
+**Node.js** and **pnpm**. The *Browser app* section tells you whether they're
+installed, whether the browser version is built and up to date, and has
+**Check again** and **Build / Rebuild** buttons. If you press **Open in
+browser** before it's built, Opengrader offers to build it for you.
+
+**Setting it up for someone else?** Build it before you install, so they never
+see that step:
+
+| System | Run this instead of the normal install |
+| --- | --- |
+| macOS or Linux | `bash packaging/install.sh --build-web` |
+| Windows | `powershell -ExecutionPolicy Bypass -File packaging\install.ps1 -BuildWeb` |
+
+If pnpm isn't found or the build fails, the install still finishes — just
+without the browser version.
+
+---
+
+## Updating
+
+- **If you still have the folder you installed from:** update that folder (for
+  example with `git pull`), then just click the icon. It copies the new version
+  in automatically every time it starts. (On macOS and Linux this uses a
+  standard tool called `rsync`; if your system doesn't have it, run the
+  installer again instead.)
+- **If you deleted that folder:** the app keeps working as it is. To update,
+  get a fresh copy of Opengrader and run the installer again.
+
+## Uninstalling
+
+Delete these files and folders:
+
+| System | Delete |
+| --- | --- |
+| macOS | `~/Library/Application Support/Opengrader`, `~/Applications/Opengrader.app`, and the `Opengrader` shortcut on your Desktop |
+| Linux | `~/.local/share/opengrader`, `~/.local/share/applications/opengrader.desktop`, and `opengrader.desktop` on your Desktop |
+| Windows | `%LOCALAPPDATA%\Opengrader` and `Opengrader.lnk` on your Desktop |
+
+(`~` means your home folder.) Your class folders and grades are stored
+separately and are **not** deleted.
+
+---
+
+## Install the `opengrader` terminal command
+
+This lets you type `opengrader doctor` (or any other Opengrader command) from
+any folder, instead of `uv run opengrader doctor` from inside the Opengrader
+folder. It adds **one** command, `opengrader`; every tool is reached through
+it (`opengrader tui`, `opengrader run`, `opengrader split …`).
+
+| System | Run this once, from the Opengrader folder | It installs to |
+| --- | --- | --- |
+| macOS or Linux | `sh packaging/install-command.sh` | `~/.local/bin/opengrader` |
+| Windows | `powershell -ExecutionPolicy Bypass -File packaging\install-command.ps1` | `%USERPROFILE%\.local\bin\` |
+
+**If `opengrader` isn't found afterwards,** that folder isn't on your *PATH*
+(the list of places your terminal looks for commands) yet:
+
+- **macOS / Linux:** the installer prints the exact line to add. Paste it,
+  then open a new terminal window.
+- **Windows:** run the installer again with `-AddToPath` on the end and it
+  adds the folder for you (for your account only), then open a new terminal
+  window. If you have uv installed, this folder is usually on your PATH
+  already.
+
+To install somewhere else, set `OPENGRADER_BIN` to the folder you want before
+running the installer.
+
+**To remove it:** delete `~/.local/bin/opengrader` (Windows: `opengrader.cmd`
+and `opengrader.ps1` in `%USERPROFILE%\.local\bin`).
+
+### Moving the Opengrader folder is fine
+
+The `opengrader` command doesn't remember a fixed location for the Opengrader
+folder — it finds it each time it runs. So you never need to reinstall it when
+you move the folder, rename it, make a second copy, or keep it on an external
+drive whose name changes. (macOS adds a number when another drive with the same
+name is already connected, so `/Volumes/MyDrive` can come back as
+`/Volumes/MyDrive 1`.)
+
+If you have more than one copy, the one you're currently inside wins. To always
+use a specific copy, set `OPENGRADER_HOME`:
+
+```bash
+OPENGRADER_HOME=/path/to/opengrader opengrader doctor
+```
+
+### It works with or without uv
+
+The command prefers uv (it can install anything that's missing), but it also
+works with a Poetry environment, a normal Python virtual environment, a Conda
+environment, or a Python you choose yourself with `OPENGRADER_PYTHON`. If it
+can't find any working setup, it tells you the exact command to create one.
+
+---
+
+## Troubleshooting
+
+| Problem | What to do |
+| --- | --- |
+| The desktop app stops on a step with an error | The window stays open and shows the last lines of its log. The full log is `opengrader-bootstrap.log` in your temporary folder (`$TMPDIR` on macOS/Linux, `%TEMP%` on Windows). |
+| "Tesseract OCR not found" | Opengrader works, but can't read scanned pages. Install Tesseract (`brew install tesseract` on macOS; your package manager on Linux), then relaunch. |
+| "Ollama not found" | Handwriting reading is unavailable. Install Ollama from <https://ollama.com>, then relaunch. |
+| Is my computer set up correctly? | Run `opengrader doctor` (or open Tools → *Check this computer* in the app). It lists anything missing and how to fix it. |
+| Scanned answers look blocky | Your terminal can't show full images. Press **`o`** while grading to open the image in your normal image viewer, or install a terminal such as iTerm2, Ghostty or WezTerm. `opengrader tui --check-graphics` shows what was detected. |
+| `opengrader: command not found` | See *If `opengrader` isn't found afterwards* above. |
+| The command is using the wrong copy of Opengrader | Run `OPENGRADER_WRAPPER_DEBUG=1 opengrader --version` to see which copy it picked and why, then set `OPENGRADER_HOME` to the one you want. |
+
+## Changing the icon
+
+Replace `packaging/icons/opengrader.png` (a 1024×1024 PNG with transparent
+margins) and/or `packaging/icons/opengrader.ico` (Windows), then run the
+installer again. To make the `.ico` from the PNG with Python's Pillow library:
+`img.save("opengrader.ico", sizes=[(256,256),(48,48),(32,32),(16,16)])`.
+
+---
+
+## For developers: how it works
+
+### Files in this folder
 
 ```
 packaging/
-├── bootstrap.sh      # launcher: env check/auto-install → run TUI (macOS, Linux)
-├── bootstrap.ps1     # launcher: same, for Windows
-├── install.sh        # one-shot installer: copy app + create shortcut (macOS, Linux)
-├── install.ps1       # one-shot installer for Windows
-├── opengrader        # the `opengrader` terminal command (finds its own checkout)
-├── opengrader.ps1    # the same launcher for Windows
-├── opengrader.cmd    # shim: .PS1 is not in PATHEXT, so this is what PATH finds
-├── install-command.sh   # puts that command on your PATH (macOS, Linux)
-├── install-command.ps1  # the same, for Windows
+├── install.sh            # one-time desktop-app installer (macOS, Linux)
+├── install.ps1           # one-time desktop-app installer (Windows)
+├── bootstrap.sh          # runs on every icon click: check/repair, then `opengrader classic` (macOS, Linux)
+├── bootstrap.ps1         # the same, for Windows
+├── opengrader            # the `opengrader` terminal command (finds its own checkout)
+├── opengrader.ps1        # the same command, for Windows
+├── opengrader.cmd        # Windows shim: .PS1 isn't in PATHEXT, so this is what PATH finds
+├── install-command.sh    # puts the `opengrader` command on PATH (macOS, Linux)
+├── install-command.ps1   # the same, for Windows
 └── icons/
-    ├── opengrader.png   # master icon (1024×1024, macOS/Linux)
-    └── opengrader.ico   # Windows shortcut icon
+    ├── opengrader.png    # master icon (1024×1024, macOS/Linux)
+    └── opengrader.ico    # Windows shortcut icon
 ```
 
-Two different audiences, deliberately separate: the **desktop icon** above is
-for an instructor who never opens a terminal, while `opengrader` /
-`install-command.sh` below are for someone who lives in one. They also open
-different apps: the icon runs **`opengrader classic`** — Tools & Settings with
-a *Start grading* card, grading class folders in place, no workspace service
-unless the user opts in to *Open in browser* (Tools → Browser app) —
-while `opengrader tui` in a terminal opens a **workspace** straight to its
-assignment list, shared live with the web app.
+### The desktop app
 
-## The `opengrader` command (terminal users)
+1. **`install.*` (run once)** copies the checkout into a per-user folder
+   (`rsync`, or `tar` when rsync is missing; `robocopy` on Windows — `.git`,
+   `.venv`, caches and `node_modules` excluded), records the checkout's path in
+   `<install root>/source-path`, and creates the platform's shortcut:
+   - **macOS:** `~/Library/Application Support/Opengrader` plus a real
+     `~/Applications/Opengrader.app` bundle, symlinked onto the Desktop. The
+     `.icns` is built at install time from `icons/opengrader.png` with the
+     built-in `sips`/`iconutil`, so no binary icon is checked into git. The
+     bundle's executable opens `Opengrader.command` in the first terminal it
+     finds: Ghostty → iTerm2 → WezTerm → kitty → Terminal.app
+     (graphics-capable terminals first).
+   - **Linux:** `${XDG_DATA_HOME:-~/.local/share}/opengrader` plus a
+     freedesktop `.desktop` entry in the apps menu and on the Desktop.
+     `Terminal=true` makes the desktop environment open its default terminal.
+   - **Windows:** `%LOCALAPPDATA%\Opengrader` plus a Desktop `.lnk` with the
+     `.ico`, targeting Windows Terminal (`wt.exe`) when available, otherwise
+     `powershell.exe`.
+2. **`bootstrap.*` (every click)** runs each step behind a one-line progress
+   display, with all tool output sent to `opengrader-bootstrap.log` in the temp
+   folder; on failure it prints the log's last lines and waits for a keypress
+   instead of closing the window. Steps: refresh files from `source-path` if
+   that checkout still exists (macOS/Linux need `rsync` for this, otherwise it
+   is skipped; the updated launcher is staged for the next run) → install `uv`
+   (official installer, or winget) → `uv python install 3.12` (a uv-managed
+   interpreter, matching the project's `>=3.12,<3.13` pin) →
+   `uv sync --frozen --no-dev` (exactly what `uv.lock` records) → Tesseract,
+   best effort (brew / winget; on Linux apt/dnf/pacman only after asking,
+   since it needs sudo) → a note if Ollama is missing →
+   `uv run --no-sync opengrader classic`. Every step is a no-op when already
+   satisfied, so a normal launch adds well under a second.
+3. **The browser app.** `--build-web` / `-BuildWeb` runs
+   `pnpm install --frozen-lockfile && pnpm build` in `src/opengrader/web`
+   before copying (best effort: a missing pnpm or a failed build only warns).
+   Building it yourself first works too:
+   `pnpm --dir src/opengrader/web install --frozen-lockfile && pnpm --dir src/opengrader/web build`.
+   `web/dist/` is copied with everything else. When the checkout has no
+   `dist/` of its own, a `dist/` built inside the installed copy is kept by
+   both the installer and the launch-time refresh (the installer's `tar`
+   fallback starts clean). A stale build is detected by comparing the web
+   sources' fingerprint with the stamp `build_web` writes into `dist/` (file
+   modification times for a hand-built `dist/` without a stamp). Builds started
+   from inside the app are logged to `web-build.log` beside the AI settings.
 
-| OS | Command | Installs to |
+### The `opengrader` command
+
+`packaging/opengrader` contains **no path to any checkout**; it finds one on
+every run. A folder counts as a checkout when its `pyproject.toml` says
+`name = "opengrader"` — never by folder name, which can be anything. First
+match wins:
+
+| # | Where it looks | Why |
 | --- | --- | --- |
-| macOS / Linux | `sh packaging/install-command.sh` | `~/.local/bin/opengrader` |
-| Windows | `powershell -ExecutionPolicy Bypass -File packaging\install-command.ps1` | `%USERPROFILE%\.local\bin\opengrader.{cmd,ps1}` |
+| 1 | `$OPENGRADER_HOME` | An explicit choice wins; a wrong one is an **error**, never a silent fallback |
+| 2 | The checkout the script itself sits in | `packaging/opengrader doctor` works straight from a clone, uninstalled |
+| 3 | Walking up from the current folder | Inside a checkout, that's the one you meant — this is what makes two clones behave |
+| 4 | The path it found last time | Saved in `${XDG_CACHE_HOME:-~/.cache}/opengrader/checkout-path`; only a cache, so deleting it costs one search |
+| 5 | A search | Each mounted volume, then `$HOME`, 5 folders deep; override with `OPENGRADER_SEARCH_ROOTS` |
 
-Add `-AddToPath` on Windows to have the installer edit your **user** PATH (never
-the machine one, which needs admin rights); without it the script prints the
-one-liner and leaves the change to you, matching what the POSIX installer does.
-`%USERPROFILE%\.local\bin` is where uv installs itself on Windows, so it is
-usually on PATH already.
-
-Windows gets **two** files. A `.ps1` is not executable by name — `.PS1` is not
-in `PATHEXT` — so a bare `opengrader` would find nothing with only the script
-installed. `opengrader.cmd` is what the shell finds, and it does nothing but
-hand off to `opengrader.ps1` beside it (`%~dp0`), with `-NoProfile` and a
-process-scoped `-ExecutionPolicy Bypass` so a default RemoteSigned policy does
-not refuse a script that was copied rather than signed.
-
-Installs exactly one command rather than the thirty-odd in
-`[project.scripts]`. `uv tool install .` is the standard alternative and puts
-all of them — `doctor`, `curve`, `claim`, `tui` — on the user's `PATH` as
-global names; uv offers no way to filter which entry points a tool install
-exposes (checked on uv 0.12), so this installer exists to avoid re-creating,
-globally, the problem the `opengrader` front door was built to solve.
-
-`packaging/opengrader` holds **no path to any checkout** — it resolves one on
-every run, so it never needs reinstalling when the project moves, is cloned, or
-sits on an external drive whose mount point changes (macOS renames a second
-volume of the same name to `Samsung_T5 1`, and which drive gets the suffix
-depends on plug-in order). Resolution order, first match wins:
-
-| # | Rule | Why |
-| --- | --- | --- |
-| 1 | `$OPENGRADER_HOME` | An explicit answer wins; a wrong one is an **error**, never a silent fallback |
-| 2 | The checkout this script sits in | `packaging/opengrader doctor` works straight from a clone, uninstalled |
-| 3 | Walking up from the current directory | Inside a checkout, that checkout is the one you meant — this is what makes two clones behave |
-| 4 | The path remembered last time | `$XDG_CACHE_HOME/opengrader/checkout-path`; a *cache*, so deleting it costs one search, never correctness |
-| 5 | A bounded search | Each mounted volume, then `$HOME`, depth 5, first root that answers wins |
-
-### Which Python runs it
-
-Preferring uv is not the same as requiring it. Having found the checkout, the
-launcher picks the first runner that can actually work:
+Then it picks the first way of running Python that works:
 
 | # | Runner | Why here |
 | --- | --- | --- |
 | 1 | `$OPENGRADER_PYTHON` | An interpreter you name yourself; skips uv entirely |
-| 2 | A project venv **another tool built** | No `uv = ` line in its `pyvenv.cfg`. Used directly and never handed to uv, because `uv run` would sync a Poetry-managed venv against `uv.lock` and quietly take it over |
-| 3 | `uv run --project` | The project's own setup, and the only runner that *installs* what is missing rather than failing on it — so it stays first for everyone else |
-| 4 | A uv-made project venv | For a machine where uv has since gone away |
-| 5 | Poetry (`poetry env info --path`) | Poetry 2.x reads this project's PEP 621 metadata natively; verified |
-| 6 | `$VIRTUAL_ENV` / `$CONDA_PREFIX` | Whatever the caller has activated (Conda does not set `VIRTUAL_ENV`, hence both) |
+| 2 | A project venv **another tool built** (no `uv =` line in its `pyvenv.cfg`) | Used directly and never handed to uv, because `uv run` would sync a Poetry-managed venv against `uv.lock` and take it over |
+| 3 | `uv run --project` | The project's own setup, and the only runner that *installs* what's missing rather than failing |
+| 4 | A uv-made project venv | For a machine where uv has since been removed |
+| 5 | Poetry (`poetry env info --path`) | Poetry 2.x reads this project's PEP 621 metadata natively |
+| 6 | `$VIRTUAL_ENV` / `$CONDA_PREFIX` | Whatever is activated (Conda doesn't set `VIRTUAL_ENV`, hence both) |
 | 7 | A `python3` on PATH that can already import it | Covers `pipx` and a plain `pip install -e .` |
 
-Everything except uv is invoked as `<python> -m opengrader`, never as the
-venv's `bin/opengrader` console script: those scripts hardcode an absolute
-interpreter path at install time and rot when it moves. This checkout's own
-`.venv/bin/pytest` still points at `/Volumes/Samsung_T5/…`, a path that
-stopped existing the day the drive came back as `Samsung_T5 1`. `python -m`
-carries no such path, which is why `src/opengrader/__main__.py` exists.
+Everything except uv is run as `<python> -m opengrader`, never through the
+venv's `bin/opengrader` script: those scripts hard-code the absolute path of
+the Python they were installed with, so they break as soon as the folder moves
+or its drive is renamed. `python -m` carries no such path, which is why
+`src/opengrader/__main__.py` exists.
 
-What the launcher **cannot** do is invent an environment: the project needs
-Python 3.12 and its dependencies installed somehow. When no runner works it
-says so and names all three ways to fix it (`uv sync`, `poetry install`,
-`python3.12 -m venv .venv && .venv/bin/pip install -e .`) rather than failing
-with an import error.
+The command installs one name rather than all the scripts in
+`[project.scripts]`. `uv tool install .` would put every one of them (`doctor`,
+`curve`, `claim`, `tui`, …) on PATH as a global command, and uv has no way to
+install only some of a package's scripts — so this installer exists to keep
+`opengrader` the one name to remember.
 
-A directory counts as a checkout when its `pyproject.toml` declares
-`name = "opengrader"` — **not** by folder name, which here is a GitHub
-Classroom artifact (`group-project-group-14`) that says nothing about what is
-inside it and that anyone may rename. On a machine with other Python projects
-beside it, that name check is the only thing that tells them apart.
+On Windows, `opengrader.cmd` exists because a `.ps1` can't be run by name
+(`.PS1` isn't in `PATHEXT`). It only hands off to `opengrader.ps1` beside it
+with `-NoProfile` and a process-only `-ExecutionPolicy Bypass`, so the default
+policy doesn't refuse a copied, unsigned script.
 
-Both launchers implement the same two ordered lists, and a change to one
-belongs in the other. Where they necessarily differ:
+Both launchers implement the same two lists, so **a change to one belongs in
+the other**. Where they have to differ:
 
-| | POSIX (`opengrader`) | Windows (`opengrader.ps1`) |
+| | macOS / Linux (`opengrader`) | Windows (`opengrader.ps1`) |
 | --- | --- | --- |
-| Interpreter in a venv | `bin/python` | `Scripts\python.exe` |
-| Search roots | `/Volumes/*`, then `$HOME` | `%USERPROFILE%`, then each ready drive, then the system drive shallowly |
-| Loop hazard skipped | symlinked volumes (`/Volumes/Macintosh HD` → `/`) | reparse points / junctions (`C:\Users\All Users`) |
-| Reporting an error from the resolver | must `return`, never `exit` — it runs in a command substitution, where `exit` ends only the subshell | `exit` is fine and ends the script |
-| Remembered path | `$XDG_CACHE_HOME/opengrader/checkout-path` | `%LOCALAPPDATA%\opengrader\checkout-path` |
+| Python inside a venv | `bin/python` | `Scripts\python.exe` |
+| Search roots | `/Volumes/*`, then `$HOME` | `%USERPROFILE%`, then each ready drive, then the system drive (shallow) |
+| Loops it skips | Symlinked volumes (`/Volumes/Macintosh HD` → `/`) | Reparse points / junctions (`C:\Users\All Users`) |
+| Reporting an error from the finder | Must `return`, never `exit` — it runs in a command substitution, where `exit` only ends the subshell | `exit` is fine |
+| Remembered path | `${XDG_CACHE_HOME:-~/.cache}/opengrader/checkout-path` | `%LOCALAPPDATA%\opengrader\checkout-path` |
+| `OPENGRADER_SEARCH_ROOTS` separator | `:` | `;` |
 
-Debugging: `OPENGRADER_WRAPPER_DEBUG=1 opengrader ...` prints which rule
-matched, on both. `OPENGRADER_SEARCH_ROOTS` overrides where the search looks
-(`:`-separated on POSIX, `;`-separated on Windows).
+`OPENGRADER_WRAPPER_DEBUG=1` makes either one print which rule matched.
 
-### Verifying on Windows
+### Tests
 
-`opengrader.ps1` was written on a machine with no PowerShell, so it has been
-reviewed but **not executed**. CI covers the portable half (see below); this is
-the checklist for the rest, in the order a failure is most likely.
+Tests stub `uv`, so they check *which checkout and runner were chosen* without
+running anything: `tests/unit/packaging/test_opengrader_wrapper.py` for the
+macOS/Linux launcher and `test_opengrader_wrapper_windows.py` for the
+PowerShell one. The Windows test runs under `pwsh` on any OS and is skipped
+where PowerShell isn't installed, so in practice it runs in CI
+(`ubuntu-latest`). The Windows-only runner rules (`Scripts\python.exe`,
+`Lib\site-packages`, `$env:CONDA_PREFIX`) can't be reached outside Windows and
+are **not** covered.
+
+### Checking on a real Windows machine
+
+`opengrader.ps1` has been reviewed but not yet run on real Windows. Run these
+in order; the first failure is the one to fix:
 
 ```powershell
 # 0. It parses at all. Nothing below matters if this reports a ParserError.
@@ -135,11 +342,11 @@ powershell -ExecutionPolicy Bypass -File packaging\opengrader.ps1 --version
 $env:OPENGRADER_WRAPPER_DEBUG = 1
 powershell -ExecutionPolicy Bypass -File packaging\opengrader.ps1 --version   # says which rule matched
 
-# 2. Install, then use it from somewhere else entirely.
+# 2. Install, then use it from somewhere else entirely (open a new terminal first).
 powershell -ExecutionPolicy Bypass -File packaging\install-command.ps1 -AddToPath
-cd \; opengrader doctor            # new terminal first, so PATH is picked up
+cd \; opengrader doctor
 
-# 3. The rules CI cannot reach — the Windows venv layout.
+# 3. The Windows venv layout, which CI can't reach.
 cd <checkout>; uv sync              # or: poetry install
 cd \; $env:OPENGRADER_WRAPPER_DEBUG = 1; opengrader --version
 #   expect: "running with uv"
@@ -151,146 +358,16 @@ Remove-Item Env:\OPENGRADER_PYTHON
 $env:Path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'uv' }) -join ';'
 opengrader --version                #   expect: "running with ...\.venv (uv not installed)"
 
-# 5. stdout stays clean for scripts (the Write-Host trap).
+# 5. Output stays clean for scripts (nothing written with Write-Host leaks into it).
 opengrader commands --json | ConvertFrom-Json | Select-Object -First 1
 
-# 6. The TUI gets a real console: keyboard and images, not a pipe.
+# 6. The grading app gets a real console: keyboard and images, not a pipe.
 opengrader tui --check-graphics
 ```
 
-Most likely to break, given none of it has run: step 0 (a parse error), then
-the `Join-Path` calls that build `Scripts\python.exe` paths in step 3, then the
-`-Filter` patterns in `Test-VenvHasPackage`. If step 2 installs but `opengrader`
-is still not found, check that `%USERPROFILE%\.local\bin` really made it into
-PATH and that both `opengrader.cmd` and `opengrader.ps1` landed there — the
-`.cmd` is the half PATH can actually find.
-
-Tests stub `uv`, so they assert *which checkout was chosen* without running
-anything: `tests/unit/packaging/test_opengrader_wrapper.py` for the POSIX
-launcher, and `test_opengrader_wrapper_windows.py` for the PowerShell one —
-the latter runs under `pwsh` on any OS and is skipped where PowerShell is
-absent, so CI (`ubuntu-latest`, which ships pwsh) is where it actually
-executes. The Windows-layout runner rules (`Scripts\python.exe`,
-`Lib\site-packages`, `$env:CONDA_PREFIX`) cannot be reached off Windows and
-are **not** covered; only a real Windows machine exercises those.
-
-## Install (what you tell users to run)
-
-From a checkout of this repo:
-
-| OS | Command |
-| --- | --- |
-| macOS / Linux | `bash packaging/install.sh` |
-| Windows | `powershell -ExecutionPolicy Bypass -File packaging\install.ps1` |
-
-That's it. An **Opengrader** icon appears on the Desktop; double-clicking it
-opens a terminal window, quietly verifies/installs everything, then launches
-the classic app (`opengrader classic`). The first launch takes a minute or two (Python + dependencies);
-subsequent launches are instant.
-
-### The browser app is optional
-
-Nothing above installs Node.js or pnpm, and nothing needs them: the browser
-app is opt-in (Tools → *Browser app* → *Show Open in browser*). Ticking it
-also shows a small health panel there — whether Node.js and pnpm are found
-(path + version, or an install hint when they're not) and whether the browser
-app is built and up to date, stale (its web files changed since it was last
-built) or not built at all — with *Check again* and *Build*/*Rebuild browser
-app* buttons; nothing in it runs while the section is unticked. The first
-press of *Open in browser* on a machine without a built (or an out-of-date)
-web app offers to build it there too (`pnpm install --frozen-lockfile` +
-`vite build` inside the installed copy, logged to `web-build.log` beside the
-AI settings); with no pnpm or corepack it only says what to install, or —
-for a stale build — opens the existing one anyway and says so.
-
-To spare users that step, either pass **`--build-web`** to `install.sh` (or
-**`-BuildWeb`** to `install.ps1`) — it runs the same `pnpm install
---frozen-lockfile && pnpm build` against this checkout before copying, best
-effort: no pnpm found, or a failed build, just prints a warning and installs
-without it — or build the web app yourself first — `pnpm --dir
-src/opengrader/web install --frozen-lockfile && pnpm --dir
-src/opengrader/web build`. Either way `web/dist/` is copied with everything
-else. `node_modules/` never is: `install.sh`/`.ps1` and the launch-time
-refresh in `bootstrap.sh`/`.ps1` exclude it. A `dist/` built in the installed
-copy is kept by both whenever the checkout has none of its own (with
-rsync/robocopy; the `tar` fallback starts clean); a checkout that does have
-one replaces it. A build made from older sources is no longer silently
-served as current — the health panel (and *Open in browser*) detect it as
-stale by comparing the sources' fingerprint against the stamp `build_web`
-writes into `dist/`, falling back to file mtimes for a `dist/` built by hand
-that carries no stamp.
-
-## How it works
-
-### Layered design
-
-1. **`install.*` (run once)** — copies the repo to a per-user directory and
-   generates the platform's native shortcut pointing at the bootstrap script:
-   - macOS → `~/Library/Application Support/Opengrader` + a real
-     `Opengrader.app` bundle in `~/Applications` (symlinked on the Desktop).
-     The `.icns` is built at install time from `icons/opengrader.png` using
-     stock `sips`/`iconutil` — no binary icon checked into git.
-   - Linux → `~/.local/share/opengrader` + a freedesktop `.desktop` entry
-     (`Terminal=true` forces a terminal window) in the apps menu and Desktop.
-   - Windows → `%LOCALAPPDATA%\Opengrader` + a Desktop `.lnk` with the `.ico`
-     attached, opening Windows Terminal when available.
-
-   No sudo/admin at any point; everything is per-user. It also records the
-   checkout's path in `<install root>/source-path`.
-
-2. **Self-updating** — on every launch, bootstrap checks `source-path`: if
-   that checkout still exists, it mirrors it into the installed copy (and
-   stages the updated launcher for the next run) before starting the TUI. So
-   on a machine that keeps the repo around, the desktop icon always runs the
-   latest code — edit or `git pull`, then just click the icon. If the
-   checkout is gone (typical end-user), the step is skipped and the installed
-   copy keeps working; re-running the installer remains the manual update
-   path.
-
-3. **`bootstrap.*` (runs on every click)** — validates the environment behind
-   a clean per-step progress display, repairing whatever is missing:
-   - **uv** — the only tool bootstrapped directly (official installer/winget).
-     It then owns everything Python-side.
-   - **Python 3.12** — `uv python install 3.12`: a uv-managed interpreter,
-     never touching the system Python. Matches the project's strict
-     `>=3.12,<3.13` pin.
-   - **Dependencies** — `uv sync --frozen --no-dev`: installs exactly what
-     `uv.lock` records, into the app's own `.venv`.
-   - **Tesseract OCR** — best-effort system install (brew / winget; on Linux
-     it asks before using sudo). Never blocks launch: the TUI works without
-     it, only scan extraction needs it.
-   - **Ollama** is *not* auto-installed (multi-GB models, user choice) — the
-     script prints a pointer instead.
-
-   All installer output is redirected to a log (`opengrader-bootstrap.log` in
-   the temp dir); on failure the last lines are shown and the window waits for
-   a keypress instead of vanishing. Each step is a no-op when already
-   satisfied, so the check adds well under a second after first run.
-
-### Forcing a terminal window
-
-- **macOS**: the app bundle's executable picks the best installed terminal —
-  Ghostty → iTerm2 → WezTerm → kitty → Terminal.app (graphics-capable
-  terminals first, so scan images render at full fidelity) — and opens
-  `Opengrader.command` in it. Terminal.app is a working last resort: the TUI
-  detects it, shows a coarse preview, and offers the `o` hotkey to open a crop
-  in Preview.app.
-- **Linux**: `Terminal=true` in the `.desktop` entry makes the DE spawn its
-  default terminal emulator.
-- **Windows**: the `.lnk` targets `wt.exe` (or `powershell.exe`), which always
-  opens a console window.
-
-### Changing the icon
-
-Replace `packaging/icons/opengrader.png` (1024×1024 PNG, transparent margins)
-and/or `opengrader.ico`, then re-run the installer — macOS rebuilds the
-`.icns`, Linux/Windows pick up the file directly. To regenerate both from one
-PNG: Pillow's `img.save("opengrader.ico", sizes=[(256,256),(48,48),(32,32),(16,16)])`.
-
-## Uninstall
-
-| OS | Remove |
-| --- | --- |
-| macOS | `~/Library/Application Support/Opengrader`, `~/Applications/Opengrader.app`, `~/Desktop/Opengrader` |
-| Linux | `~/.local/share/opengrader`, `~/.local/share/applications/opengrader.desktop`, `~/Desktop/opengrader.desktop` |
-| Windows | `%LOCALAPPDATA%\Opengrader`, `Desktop\Opengrader.lnk` |
+Most likely to break: step 0 (a parse error), then the `Join-Path` calls that
+build `Scripts\python.exe` paths in step 3, then the `-Filter` patterns in
+`Test-VenvHasPackage`. If step 2 installs but `opengrader` still isn't found,
+check that `%USERPROFILE%\.local\bin` is really on PATH and that both
+`opengrader.cmd` and `opengrader.ps1` are there — the `.cmd` is the one PATH
+can find.

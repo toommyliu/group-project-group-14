@@ -12,6 +12,7 @@ from opengrader.cli import submission_extractor, submission_splitter
 from opengrader.core import app_config
 from opengrader.core.pipeline import (
     STAGE_AUTO_GRADE,
+    STAGE_DRAFT_RUBRICS,
     STAGE_EXTRACT,
     STAGE_SCAN_CHECK,
     STAGE_SPLIT,
@@ -290,7 +291,7 @@ def test_stages_the_run_never_reached_are_named_as_such(
     assert _exit_status(_argv(tmp_path)) == 1
     out = capsys.readouterr().out
     assert "not reached" in out
-    assert "split, extract, auto-grade" in out
+    assert "split, extract, draft-rubrics, auto-grade" in out
 
 
 def test_a_blocked_run_says_how_to_proceed(tmp_path, captured, capsys) -> None:
@@ -458,6 +459,7 @@ def test_the_cli_drives_the_real_engine(tmp_path, monkeypatch, capsys) -> None:
         STAGE_SCAN_CHECK: "ran",
         STAGE_SPLIT: "skipped",
         STAGE_EXTRACT: "ran",
+        STAGE_DRAFT_RUBRICS: "skipped",
         STAGE_AUTO_GRADE: "skipped",
         "publish": "ran",
     }
@@ -909,3 +911,42 @@ def test_json_egress_field_is_null_for_a_local_only_run(tmp_path, captured, caps
     run_command(run_module.command, _argv(tmp_path, "--json"))
     payload = json.loads(capsys.readouterr().out)
     assert payload["egress"] is None
+
+
+def test_draft_rubrics_flag_lands_in_the_request(tmp_path, captured) -> None:
+    run_command(run_module.command, _argv(tmp_path, "--draft-rubrics"))
+    assert captured["request"].draft_rubrics is True
+    run_command(run_module.command, _argv(tmp_path))
+    assert captured["request"].draft_rubrics is False
+
+
+def test_a_run_paused_for_rubric_review_publishes_nothing_and_exits_zero(
+    tmp_path, captured, capsys
+) -> None:
+    captured["report"] = _report(
+        tmp_path,
+        _outcome(STAGE_EXTRACT, StageStatus.RAN, "2 submission(s) ready to grade"),
+        _outcome(STAGE_DRAFT_RUBRICS, StageStatus.PAUSED, "drafted rubric items for q2"),
+    )
+    code = _exit_status(_argv(tmp_path, "--qa", str(tmp_path / "qa.md"), "--draft-rubrics"))
+
+    assert code == 0
+    # Publishing now would turn the coming review of the answer key into a
+    # "changed input" that demands --fresh.
+    assert "publication" not in captured
+    out = capsys.readouterr().out
+    assert "Paused for review" in out
+    assert "run the same command again" in out
+    assert "auto-grade" in out  # named under "not reached"
+
+
+def test_a_paused_run_says_so_in_json(tmp_path, captured, capsys) -> None:
+    captured["report"] = _report(
+        tmp_path,
+        _outcome(STAGE_DRAFT_RUBRICS, StageStatus.PAUSED, "drafted rubric items for q2"),
+    )
+    code = _exit_status(_argv(tmp_path, "--qa", str(tmp_path / "qa.md"), "--json"))
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["paused_for_review"] is True
+    assert payload["stages"][-1]["status"] == "paused"

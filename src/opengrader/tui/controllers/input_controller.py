@@ -41,6 +41,7 @@ class InputCommand(str, Enum):
     GRADE_TOGGLE_GROUP_MODE = "grade_toggle_group_mode"
     GRADE_TOGGLE_AI_REVIEW = "grade_toggle_ai_review"
     GRADE_CONFIRM_AI = "grade_confirm_ai"
+    GRADE_AI_DRAFT_GRADES = "grade_ai_draft_grades"
     OPEN_UNIFY_ANSWERS = "open_unify_answers"
     GRADE_EDIT_RUBRIC = "grade_edit_rubric"
     GRADE_EDIT_TRANSCRIPTION = "grade_edit_transcription"
@@ -434,6 +435,12 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "Confirm AI Grade",
         (InputContext.GRADE,),
         show=False,
+    ),
+    CommandBindingSpec(
+        "Y",
+        InputCommand.GRADE_AI_DRAFT_GRADES,
+        "AI Draft Grades",
+        (InputContext.GRADE,),
     ),
     CommandBindingSpec(
         "o",

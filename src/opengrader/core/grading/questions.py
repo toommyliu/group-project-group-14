@@ -15,6 +15,7 @@ from opengrader.core.qa_file import (
 )
 from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 from opengrader.core.submissions import StudentSubmissionDocument
+from opengrader.core.submissions.printed_text import printed_question_text
 
 _VERSION_MARKER_RE = re.compile(r"\[([A-Za-z0-9]+)\]|\(([A-Za-z0-9]+)\)")
 
@@ -27,6 +28,8 @@ class QuestionContext:
     expected_answers: list[str]
     rubric: list[QARubricItem]
     question_type: QuestionType = FREE_RESPONSE
+    # Printed question text Tesseract may have read into the response.
+    printed_text: tuple[str, ...] = ()
 
 
 def questions_for_submission(
@@ -75,6 +78,7 @@ def flatten_question_contexts(questions: list[QAQuestion]) -> list[QuestionConte
                     expected_answers=answers,
                     rubric=question.rubric,
                     question_type=qa_question_type(question),
+                    printed_text=printed_question_text(parent),
                 )
             )
     return contexts

@@ -23,6 +23,7 @@ from opengrader.core.submissions import (
     suggest_group_merges,
 )
 from opengrader.core.traversal import shuffled_order, traversal_seed
+from opengrader.tui.controllers.ai_drafts import AIDraftMixin
 from opengrader.tui.data import Provider, QuestionSeed, RubricOptionSeed
 from opengrader.tui.formatting import format_question_label
 from opengrader.tui.state import (
@@ -66,7 +67,7 @@ class GradeApp(Protocol):
     def show_grade_conflict(self) -> None: ...
 
 
-class GradeController:
+class GradeController(AIDraftMixin):
     def __init__(
         self,
         app: GradeApp,
@@ -514,6 +515,7 @@ class GradeController:
             self.refresh_grade_screen(status="Rubric editor is not available.")
             return
 
+        self._ai_rubric_draft_question = None
         present_editor(
             self._app,
             current_question,
@@ -530,6 +532,7 @@ class GradeController:
         original_options: list[RubricOptionSeed],
     ) -> None:
         if options is None:
+            self._ai_rubric_draft_question = None
             return
 
         save_rubric = getattr(self._data_provider, "save_rubric_options", None)
@@ -577,6 +580,7 @@ class GradeController:
                 "Rubric saved. Updated "
                 f"{result.propagated_count} matching "
                 f"grade{'s' if result.propagated_count != 1 else ''}."
+                + self._ai_rubric_saved_hint(current_question.question_id)
             )
         )
 

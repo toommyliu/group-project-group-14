@@ -1037,3 +1037,72 @@ def test_llm_does_not_refuse_once_calibration_is_measured(
     submission_path.write_text(SUBMISSION_MD)
 
     run_cli(["--solutions", str(solutions_path), "--input", str(submission_path)])
+
+
+_FREE_RESPONSE_QA = """---
+title: T
+---
+
+- (5 points) Explain recursion.
+  - **Correct**
+    - A function that calls itself with a smaller input.
+  - **Rubric**
+    - Correct (+0)
+{partial}    - Incorrect (-5)
+
+- (5 points) What is 2 + 2?
+  - **Correct**
+    - 4
+"""
+
+_BARE_PARTIAL = "    - Partially Correct (-3)\n"
+
+
+def _llm_run(tmp_path: Path, monkeypatch, partial: str) -> list[str]:
+    import opengrader.cli.automated_grading as ag
+
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr("opengrader.core.llm.generate", lambda **k: "{}")
+    solutions_path = tmp_path / "qa.md"
+    solutions_path.write_text(_FREE_RESPONSE_QA.format(partial=partial))
+    (tmp_path / "student.submission.md").write_text(SUBMISSION_MD)
+    messages: list[str] = []
+    ag.run_cli(
+        ["--solutions", str(solutions_path), "--input", str(tmp_path), "--llm"],
+        status_callback=messages.append,
+    )
+    return messages
+
+
+def test_llm_run_names_written_questions_without_partial_credit(tmp_path, monkeypatch) -> None:
+    messages = _llm_run(tmp_path, monkeypatch, partial=_BARE_PARTIAL)
+    note = next(m for m in messages if m.startswith("Note:"))
+    # q2 is numeric, graded exactly, so it never needs drafted items.
+    assert note.startswith("Note: q1 has no partial-credit rubric items yet")
+    assert "q2" not in note
+    assert "uv run draft-rubric --solutions" in note
+
+
+def test_no_hint_once_partial_credit_items_exist(tmp_path, monkeypatch) -> None:
+    messages = _llm_run(
+        tmp_path,
+        monkeypatch,
+        partial="    - Partially Correct\n"
+        "      - Mentions self-calls but no base case (-2)\n"
+        "      - Describes iteration instead (-3)\n",
+    )
+    assert not any(m.startswith("Note:") for m in messages)
+
+
+def test_no_hint_without_llm(tmp_path) -> None:
+    import opengrader.cli.automated_grading as ag
+
+    solutions_path = tmp_path / "qa.md"
+    solutions_path.write_text(_FREE_RESPONSE_QA.format(partial=_BARE_PARTIAL))
+    (tmp_path / "student.submission.md").write_text(SUBMISSION_MD)
+    messages: list[str] = []
+    ag.run_cli(
+        ["--solutions", str(solutions_path), "--input", str(tmp_path)],
+        status_callback=messages.append,
+    )
+    assert not any(m.startswith("Note:") for m in messages)

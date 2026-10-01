@@ -16,6 +16,7 @@ import click
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
 from opengrader.core.grading.answer_cache import AnswerGradeCache
+from opengrader.core.grading.rubric_draft import has_partial_credit_items
 from opengrader.core.grading.llm_grader import (
     GRADE_SUGGESTION_SCHEMA,
     GenerateFn,
@@ -28,7 +29,7 @@ from opengrader.core.grading.solutions import (
     objective_correctness,
     solution_entries_for_submission,
 )
-from opengrader.core.qa_file import load_qa_markdown
+from opengrader.core.qa_file import QADocument, load_qa_markdown
 from opengrader.core.grading.automated import (
     DEFAULT_LLM_MIN_CONFIDENCE, JOURNAL_ACTOR_AUTO, JOURNAL_ACTOR_LLM,
     RunJournal as _RunJournal, grade_student_file,
@@ -71,6 +72,30 @@ _make_solution_entry = make_solution_entry
 _flatten_solution_entries = flatten_solution_entries
 _solution_entries_for_submission = solution_entries_for_submission
 _objective_correctness = objective_correctness
+
+
+def questions_without_partial_credit(qa_doc: QADocument) -> list[str]:
+    """Written-answer questions whose rubric has no described partial-credit items.
+
+    For these the AI can only choose Correct, the bare Partially Correct, or
+    Incorrect. Objective questions (choice, numeric, true/false) are graded
+    exactly, so they never need one.
+    """
+    question_sets = list(qa_doc.version_questions.values()) or [qa_doc.questions]
+    missing: list[str] = []
+    for questions in question_sets:
+        for question_id, entry in flatten_solution_entries(questions).items():
+            objective = (
+                entry.is_multiple_choice
+                or entry.is_multiple_answer
+                or entry.is_numeric
+                or entry.true_false_correct is not None
+            )
+            if objective or has_partial_credit_items(entry.rubric_options):
+                continue
+            if question_id not in missing:
+                missing.append(question_id)
+    return missing
 
 
 def _submission_paths(input_path: Path) -> list[Path]:
@@ -342,6 +367,16 @@ def command(
             f"LLM free-response grading enabled (model={resolved.text_model}, "
             f"min confidence={llm_min_confidence:g})."
         )
+        coarse = questions_without_partial_credit(qa_doc)
+        if coarse:
+            emit(
+                f"Note: {', '.join(coarse)} "
+                f"{'has' if len(coarse) == 1 else 'have'} no partial-credit rubric "
+                "items yet, so the AI can only choose Correct, Partially Correct "
+                "or Incorrect there. For finer partial credit, draft them first "
+                "and review them:\n"
+                f"  uv run draft-rubric --solutions {solutions_path} --input {input_path} --write"
+            )
 
     total = len(paths)
     failures = 0

@@ -37,6 +37,7 @@ Examples:
   uv run opengrader-run --scan scans/bundle.pdf --out cohort/ --dry-run # show the plan, do nothing
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm --auto-ollama
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
+  uv run opengrader-run cs146-quiz1/ --draft-rubrics    # AI drafts missing rubric items, then pauses
 
 \b
 Class folder:
@@ -54,6 +55,13 @@ Resuming:
   them as a new assignment while preserving previous grades.
 
 \b
+Drafting rubrics (--draft-rubrics):
+  After extraction the AI drafts partial-credit rubric items for written
+  questions that have none, writes them into the answer key, and stops before
+  auto-grading and before publishing. Review the drafts, then run the same
+  command again: nothing is left to draft, so it goes on to grade with them.
+
+\b
 What it builds under --out:
   split/                       per-student PDFs (skipped when --scan is a directory)
   submissions/                 the *.submission.md folder for file utilities
@@ -69,6 +77,7 @@ _STATUS_LABEL = {
     StageStatus.SKIPPED: "skipped",
     StageStatus.BLOCKED: "BLOCKED",
     StageStatus.FAILED: "FAILED",
+    StageStatus.PAUSED: "paused",
 }
 
 _STATUS_GLYPH = {
@@ -77,6 +86,7 @@ _STATUS_GLYPH = {
     StageStatus.SKIPPED: "·",
     StageStatus.BLOCKED: "●",
     StageStatus.FAILED: "✗",
+    StageStatus.PAUSED: "‖",
 }
 
 
@@ -109,7 +119,10 @@ class _Narrator:
             else ""
         )
         self._write(f"  {glyph} {outcome.message}{seconds}\n")
-        if outcome.status in (StageStatus.BLOCKED, StageStatus.FAILED) and outcome.detail:
+        if (
+            outcome.status in (StageStatus.BLOCKED, StageStatus.FAILED, StageStatus.PAUSED)
+            and outcome.detail
+        ):
             for line in outcome.detail.splitlines():
                 self._write(f"    {line}\n")
 
@@ -198,6 +211,15 @@ def _print_summary(report: PipelineReport) -> None:
         # by _resolve_cloud_confirmation before this summary ran.
         return
 
+    if report.paused_for_review:
+        print(
+            "\nPaused for review: the AI drafted rubric items into "
+            f"{report.qa_file}. Check them (edit the file, or press e on the "
+            "question in 'opengrader classic'), then run the same command again "
+            "to auto-grade with them. Nothing was published yet."
+        )
+        return
+
     blocked = next((o for o in report.stages if o.status is StageStatus.BLOCKED), None)
     if blocked is not None:
         print(
@@ -247,6 +269,7 @@ def _egress_summary_to_dict(report: PipelineReport) -> dict[str, object] | None:
 def _report_to_dict(report: PipelineReport) -> dict[str, object]:
     return {
         "ok": report.ok,
+        "paused_for_review": report.paused_for_review,
         "ready_to_grade": report.ready_to_grade,
         "submission_count": report.submission_count,
         "submissions_dir": str(report.submissions_dir),
@@ -683,6 +706,15 @@ def _save_inputs(
     ),
 )
 @click.option(
+    "--draft-rubrics",
+    is_flag=True,
+    help=(
+        "Before auto-grading, let the AI draft partial-credit rubric items for "
+        "written questions that have none, write them into the answer key, and "
+        "stop so you can review them. Run again afterwards to grade with them."
+    ),
+)
+@click.option(
     "--force",
     is_flag=True,
     help=(
@@ -735,6 +767,7 @@ def command(
     auto_ollama: bool,
     llm_min_confidence: float | None,
     auto_grade: bool,
+    draft_rubrics: bool,
     force: bool,
     fresh: bool,
     dry_run: bool,
@@ -742,7 +775,7 @@ def command(
     yes_send_to_cloud: bool,
 ) -> PipelineReport | None:
     """Run the whole pre-grading pipeline — scan check, split, extract,
-    auto-grade — with one command. Re-runs resume instead of repeating.
+    (optionally draft rubrics,) auto-grade — with one command. Re-runs resume instead of repeating.
 
     CLASS_FOLDER holds the scan and, optionally, the answer key, roster and
     blank template — each is found automatically, and any flag below
@@ -793,6 +826,7 @@ def command(
         auto_grade=auto_grade,
         force=force,
         fresh=fresh,
+        draft_rubrics=draft_rubrics,
         send_to_cloud_confirmed=yes_send_to_cloud,
     )
 
@@ -815,7 +849,14 @@ def command(
         )
 
     report = replace(report, workspace=root)
-    if report.ok and report.ready_to_grade and request.qa_file is not None:
+    # A paused run published nothing on purpose: the answer key is about to be
+    # reviewed, and publishing first would make that edit a "changed input".
+    if (
+        report.ok
+        and not report.paused_for_review
+        and report.ready_to_grade
+        and request.qa_file is not None
+    ):
         narrator.status("Publishing results to the workspace.")
         report = _publish_results(report, root, saved.id)
     if report.ok and report.assignment_id == saved.id and previous_id is not None:

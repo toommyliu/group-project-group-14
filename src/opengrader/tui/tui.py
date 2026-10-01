@@ -352,6 +352,11 @@ class TuiApp(App[Literal["switch_assignment"]]):
     ) -> None:
         self.grade_controller.commit_pending_comment()
 
+    def on_grade_screen_rubric_draft_requested(
+        self, _event: GradeScreen.RubricDraftRequested
+    ) -> None:
+        self.grade_controller.draft_rubric_with_ai()
+
     def on_grade_screen_transcription_updated(
         self, event: GradeScreen.TranscriptionUpdated
     ) -> None:
@@ -631,6 +636,10 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self.input_controller.register(
             InputCommand.GRADE_CONFIRM_AI,
             self.grade_controller.confirm_ai_grade,
+        )
+        self.input_controller.register(
+            InputCommand.GRADE_AI_DRAFT_GRADES,
+            self.grade_controller.draft_grades_with_ai,
         )
         self.input_controller.register(
             InputCommand.GRADE_EDIT_RUBRIC,

@@ -30,18 +30,21 @@ if TYPE_CHECKING:  # pragma: no cover
 STAGE_SCAN_CHECK = "scan-check"
 STAGE_SPLIT = "split"
 STAGE_EXTRACT = "extract"
+STAGE_DRAFT_RUBRICS = "draft-rubrics"
 STAGE_AUTO_GRADE = "auto-grade"
 
 PIPELINE_STAGES: tuple[str, ...] = (
     STAGE_SCAN_CHECK,
     STAGE_SPLIT,
     STAGE_EXTRACT,
+    STAGE_DRAFT_RUBRICS,
     STAGE_AUTO_GRADE,
 )
 
 _STAGE_COMMANDS = {
     STAGE_SPLIT: "submission-splitter",
     STAGE_EXTRACT: "submission-extractor",
+    STAGE_DRAFT_RUBRICS: "draft-rubric",
     STAGE_AUTO_GRADE: "automated-grading",
 }
 
@@ -52,6 +55,9 @@ class StageStatus(str, Enum):
     SKIPPED = "skipped"
     BLOCKED = "blocked"
     FAILED = "failed"
+    # Stopped on purpose for a person to review (drafted rubrics): not a
+    # failure, but nothing after it runs and nothing is published.
+    PAUSED = "paused"
 
 
 @dataclass(frozen=True)
@@ -82,6 +88,9 @@ class PipelineRequest:
     auto_grade: bool = True
     force: bool = False
     fresh: bool = False
+    # Draft rubric items for written questions that have none, then stop
+    # before auto-grading so a person reviews them. Never on by default.
+    draft_rubrics: bool = False
     # A run that would send anything to the cloud refuses unless this is True
     # (interactively confirmed, or --yes-send-to-cloud). Never defaulted true
     # by anything else, and never implied by turning on an AI feature. Student
@@ -173,6 +182,10 @@ class PipelineReport:
     def ready_to_grade(self) -> bool:
         return self.submission_count > 0
 
+    @property
+    def paused_for_review(self) -> bool:
+        return any(outcome.status is StageStatus.PAUSED for outcome in self.stages)
+
     def stage(self, name: str) -> StageOutcome | None:
         for outcome in self.stages:
             if outcome.stage == name:
@@ -257,6 +270,33 @@ def _plan_stage(
             argv=argv,
         )
 
+    if stage == STAGE_DRAFT_RUBRICS:
+        if not request.draft_rubrics:
+            return StagePlan(
+                stage=stage,
+                will_run=False,
+                reason="not requested (--draft-rubrics drafts missing rubric items)",
+                status=StageStatus.SKIPPED,
+            )
+        if request.qa_file is None:
+            return StagePlan(
+                stage=stage,
+                will_run=False,
+                reason="no answer key given, so there are no rubrics to draft",
+                status=StageStatus.SKIPPED,
+            )
+        # No ledger reuse: once its drafts are written the questions have
+        # partial credit, so a re-run finds nothing to draft and moves on.
+        return StagePlan(
+            stage=stage,
+            will_run=True,
+            reason=(
+                "drafts rubric items for written questions that have none, "
+                "and pauses for review if it writes any"
+            ),
+            argv=argv,
+        )
+
     source, settings_id = _stage_ledger_key(request, stage)
     record = ledger.get(stage)
     if record_is_reusable(
@@ -286,6 +326,8 @@ def _stage_argv(request: PipelineRequest, stage: str) -> tuple[str, ...]:
         return _split_argv(request)
     if stage == STAGE_EXTRACT:
         return _extract_argv(request)
+    if stage == STAGE_DRAFT_RUBRICS:
+        return _draft_rubrics_argv(request)
     if stage == STAGE_AUTO_GRADE:
         return _auto_grade_argv(request)
     return ()
@@ -337,6 +379,24 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv += ["--ollama-host", request.llm.host]
         if request.llm.auto_ollama:
             argv.append("--auto-ollama")
+    if request.send_to_cloud_confirmed:
+        argv.append("--yes-send-to-cloud")
+    return tuple(argv)
+
+
+def _draft_rubrics_argv(request: PipelineRequest) -> tuple[str, ...]:
+    argv = [
+        _STAGE_COMMANDS[STAGE_DRAFT_RUBRICS],
+        "--solutions",
+        str(request.qa_file),
+        "--input",
+        str(request.submissions_dir),
+        "--write",
+    ]
+    if request.llm.text_model:
+        argv += ["--llm-model", request.llm.text_model]
+    if request.llm.host:
+        argv += ["--llm-host", request.llm.host]
     if request.send_to_cloud_confirmed:
         argv.append("--yes-send-to-cloud")
     return tuple(argv)
@@ -576,7 +636,7 @@ def run_pipeline(
 
             outcomes.append(outcome)
             reporter.stage_finish(outcome)
-            if outcome.status in (StageStatus.FAILED, StageStatus.BLOCKED):
+            if outcome.status in (StageStatus.FAILED, StageStatus.BLOCKED, StageStatus.PAUSED):
                 break
 
         # What THIS run sent — never a lifetime total — plus its cost.
@@ -615,6 +675,8 @@ def _execute(
         return _run_split(request, plan, progress, started)
     if plan.stage == STAGE_EXTRACT:
         return _run_extract(request, plan, progress, started)
+    if plan.stage == STAGE_DRAFT_RUBRICS:
+        return _run_draft_rubrics(request, plan, progress, started)
     return _run_auto_grade(request, plan, progress, started)
 
 
@@ -772,6 +834,62 @@ def _run_extract(
         message=f"{len(outputs)} submission(s) ready to grade",
         duration_seconds=duration,
         outputs=tuple(str(path) for path in outputs),
+    )
+
+
+def _run_draft_rubrics(
+    request: PipelineRequest,
+    plan: StagePlan,
+    progress: PipelineProgress,
+    started: float,
+) -> StageOutcome:
+    from opengrader.cli import draft_rubric
+    from opengrader.core.grading.rubric_draft import render_rubric_markdown
+
+    progress.status("Drafting rubric items for written questions that have none…")
+    results = draft_rubric.run_cli(list(plan.argv[1:])) or []
+    duration = time.monotonic() - started
+    written = [result for result in results if result.written]
+    failed = [result for result in results if result.status == "failed"]
+    key_name = request.qa_file.name if request.qa_file is not None else "the answer key"
+
+    if written:
+        names = ", ".join(result.question_id for result in written)
+        detail_lines: list[str] = []
+        for result in written:
+            detail_lines.append(f"{result.question_id}:")
+            detail_lines.extend(
+                f"  {line}" for line in render_rubric_markdown(result.options).splitlines()
+            )
+        if failed:
+            detail_lines.append(
+                "could not draft: " + ", ".join(result.question_id for result in failed)
+            )
+        return StageOutcome(
+            stage=plan.stage,
+            status=StageStatus.PAUSED,
+            message=(
+                f"drafted rubric items for {names} into {key_name} — review them, "
+                "then run again to auto-grade"
+            ),
+            detail="\n".join(detail_lines),
+            duration_seconds=duration,
+            outputs=(str(request.qa_file),) if request.qa_file is not None else (),
+        )
+
+    if failed:
+        message = (
+            "could not draft rubric items for "
+            + ", ".join(result.question_id for result in failed)
+            + "; auto-grading uses their existing rubric"
+        )
+    else:
+        message = "every written question already has partial-credit items"
+    return StageOutcome(
+        stage=plan.stage,
+        status=StageStatus.RAN,
+        message=message,
+        duration_seconds=duration,
     )
 
 

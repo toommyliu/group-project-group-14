@@ -168,6 +168,13 @@ COMMANDS: tuple[Subcommand, ...] = (
         folder_tool=True,
     ),
     Subcommand(
+        name="draft-rubric",
+        target="opengrader.cli.draft_rubric:command",
+        summary="let AI draft rubric items from your students' answers",
+        section=SECTION_GRADE,
+        folder_tool=True,
+    ),
+    Subcommand(
         name="automated-grading",
         target="opengrader.cli.automated_grading:command",
         summary="grade what can be graded without a person",

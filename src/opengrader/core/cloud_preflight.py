@@ -189,6 +189,21 @@ def _question_count(request: "PipelineRequest") -> int | None:
 
 
 
+def _draft_call_ceiling(request: "PipelineRequest") -> int:
+    """Most rubric-draft calls a run could make: graded parts across all versions."""
+    if request.qa_file is None:
+        return 0
+    try:
+        from opengrader.core.grading.solutions import flatten_solution_entries
+        from opengrader.core.qa_file import load_qa_markdown
+
+        doc = load_qa_markdown(request.qa_file)
+    except Exception:  # noqa: BLE001 - unreadable key: the stage itself will fail
+        return 0
+    question_sets = list(doc.version_questions.values()) or [doc.questions]
+    return sum(len(flatten_solution_entries(questions)) for questions in question_sets)
+
+
 def _log_entries(path: Path) -> list[dict]:
     from opengrader.core import egress
 
@@ -259,6 +274,7 @@ def plan_cloud_egress(
     from opengrader.core import app_config
     from opengrader.core.pipeline import (
         STAGE_AUTO_GRADE,
+        STAGE_DRAFT_RUBRICS,
         STAGE_EXTRACT,
         _read_ledger,
         _stage_ledger_key,
@@ -311,11 +327,20 @@ def plan_cloud_egress(
             # questions, any figure would be a guess presented as a count.
             uncounted["answer-image"] = f"one answer image per answer found in {where}"
 
+    draft_plan = plans.get(STAGE_DRAFT_RUBRICS)
+    if draft_plan is not None and draft_plan.will_run:
+        # One text call per question drafted (per answer-key version), each
+        # carrying up to a dozen distinct answers. Questions that already have
+        # partial credit are skipped at run time, so this is an upper bound.
+        ceiling = _draft_call_ceiling(request)
+        if ceiling:
+            counts["graded-text"] = counts.get("graded-text", 0) + ceiling
+
     grade_plan = plans.get(STAGE_AUTO_GRADE)
     grade_written = request.llm.grade_written or current.grade_written
     if grade_plan is not None and grade_plan.will_run and grade_written:
         if students:
-            counts["graded-text"] = students * per_student
+            counts["graded-text"] = counts.get("graded-text", 0) + students * per_student
         if not (students and per_student_known):
             uncounted["graded-text"] = (
                 f"one graded-text call per written answer AI-graded in {where}"

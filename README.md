@@ -24,7 +24,7 @@ Opengrader is a local, offline-first exam-grading toolchain — think Gradescope
 - **Template generation** — turn a QA-format markdown answer key into printable exam PDFs (Computer Modern fonts, answer boxes, multi-version exams). Draft the QA file itself from an existing answer-key PDF or a text2qti exam.
 - **Scan ingestion** — split a bulk scanner PDF into per-student PDFs, fix out-of-order pages, and extract each response via OCR (Tesseract + OpenCV) and a local vision LLM (Ollama) into structured per-student markdown files with response image crops.
 - **Grading TUI** — Gradescope-style question-by-question rubric grading in the terminal: in-terminal response images, rubric editing, per-question statistics, anonymous grading by default (teacher mode reveals names), and automatic write-back of grades to submission files and annotated PDFs.
-- **Automated grading** — auto-score submissions against a solutions file (exact, numeric, and true/false answer matching). With `--llm`, an AI model suggests grades for free responses, tagged `[AI]` for you to review; anything it isn't confident about is left for manual grading.
+- **Automated grading** — auto-score submissions against a solutions file (exact, numeric, and true/false answer matching). With `--llm`, an AI model suggests grades for free responses, tagged `[AI]` for you to review; anything it isn't confident about is left for manual grading. The AI can also draft partial-credit rubric items from the answers students gave and a first-pass grade for each answer, which you review and confirm.
 - **Canvas export** — push scores and per-question comments to Canvas LMS via `canvas-sak`, from the CLI or from inside the TUI.
 - **Offline-first** — grading work is saved in a local SQLite workspace. By default the only network use is the localhost Ollama server and optional Canvas export. A cloud AI provider can be added (`opengrader providers`), but only with your explicit consent, and `opengrader data-flow` shows exactly which student data would leave your machine and where it would go.
 
@@ -87,8 +87,27 @@ cd opengrader
 
 Set up a Python virtual environment and install packages:
 ```bash
-uv sync --all-groups
+uv sync --all-groups --extra pydantic-ai --extra photos
 ```
+
+`--all-groups` installs the development tools (tests, linters). The optional
+features are *extras*, which `--all-groups` does **not** include — name each
+one you want with `--extra`:
+
+| Extra | What it adds | Needed for |
+| --- | --- | --- |
+| `pydantic-ai` | Clients for cloud AI services (Anthropic, OpenAI, Google, Bedrock, Cohere, Groq, Mistral) | Using a cloud AI provider, and part of the test suite |
+| `photos` | Reading iPhone HEIC photos | `photo-import` with HEIC files |
+| `math` | Handwritten-math recognition (pix2tex) | Reading handwritten math as LaTeX. Large: it installs PyTorch |
+
+Local grading with Ollama needs none of them.
+
+> [!WARNING]
+> `uv sync` makes the environment match *exactly* what you ask for, so a plain
+> `uv sync` (or `uv sync --all-groups`) **removes** any extras that are
+> installed. If cloud providers or provider tests stop working after a sync,
+> re-run the command above. (`uv run` only adds what is missing; it never
+> removes packages.)
 
 ### Desktop App (Optional)
 
@@ -211,6 +230,12 @@ reuses completed pipeline steps and keeps saved grades. If an input changes,
 the old grading work. Add `--dry-run` to preview the pipeline. The TUI setup
 screen also provides "Run every step — one scan in, graded work out".
 
+Add `--draft-rubrics` to have the AI draft partial-credit rubric items for
+written questions that don't have any yet. The run writes them into your
+answer key and **stops before grading** so you can check them; run the same
+command again and it grades with them. (In the app: tick *Draft missing rubric
+items with AI first* on the pipeline card.)
+
 <details>
 <summary>Available Scripts</summary>
 
@@ -219,7 +244,7 @@ door (`uv run opengrader <name> ...`) — same code, same flags, either
 spelling. The one exception is `classic`, which only exists as
 `uv run opengrader classic`.
 
-- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
+- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, `--draft-rubrics` drafts missing rubric items and pauses for you to review them before grading, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
 - `tui`: Open a workspace in the TUI — an assignment or workspace folder, or `--workspace` and `--assignment`. `--qa-file` + `--submissions` still grade one folder directly, the classic way.
 - `classic` (`opengrader classic`): Tools & Settings and folder grading with no workspace; what the desktop icon opens.
 - `qa-file`: Work with QA markdown files.
@@ -231,7 +256,8 @@ spelling. The one exception is `classic`, which only exists as
 - `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
 - `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR. Runs submissions in parallel across CPU cores (`--jobs`) and can pick up where an interrupted run stopped (`--resume`).
 - `create-answer-key` (`answer-key`): Build a QA markdown draft from an existing answer key — a [text2qti](https://github.com/gpoore/text2qti) file, a Word document, or a solved answer-key PDF (OCR + vision model for a scanned one). The input format is detected from the file extension; replaces the old `pdf-to-qa-solutions` and `text2qti-to-qa` scripts, both retired.
-- `automated-grading`: Update student `.submission.md` files from a solutions markdown file.
+- `draft-rubric`: Analyze student answers to free-response questions and ask the AI to draft partial-credit rubric items. By default, it prints the drafts; use `--write` to save them into your QA file. The next step is `automated-grading --llm` to apply the rubric and get a first-pass grade for each answer.
+- `automated-grading`: Update student `.submission.md` files from a solutions markdown file. With `--llm`, it also tells you which written questions have no partial-credit rubric items yet and how to draft them.
 - `claim`: Divide grading between several TAs. `claim divide --graders alice,bob,carol` splits the cohort into contiguous slices; `claim status` shows coverage, gaps and any double-booked work. Claiming work someone else holds is refused.
 - `canvas-export`: Push saved workspace scores and per-question comments to Canvas LMS (requires `canvas-sak` setup; supports `--dry-run`). Pass `--submissions` to export file-based grading work.
 

@@ -58,6 +58,7 @@ from opengrader.core.submissions import (
     set_student_identity_file,
     update_student_submission_file,
 )
+from opengrader.core.submissions.printed_text import response_without_printed_text
 from opengrader.core.submissions.watch import ExtractionWatcher
 from opengrader.core.analytics import (
     GraderAgreementReport,
@@ -261,7 +262,15 @@ class SubmissionFilesProvider:
                     points=context.points,
                     prompt=context.prompt,
                     expected_answers=context.expected_answers,
-                    response_text=response.response_text if response is not None else "",
+                    response_text=(
+                        response_without_printed_text(
+                            response.response_text,
+                            source=response.response_source,
+                            printed=context.printed_text,
+                        )
+                        if response is not None
+                        else ""
+                    ),
                     points_awarded=(
                         response.points_awarded if response is not None else None
                     ),
@@ -443,6 +452,7 @@ class SubmissionFilesProvider:
                     points_delta=option.points_delta,
                     kind=option.kind,
                     selection_mode=option.selection_mode,
+                    default_comment=option.default_comment,
                 )
                 for option in options
             ],

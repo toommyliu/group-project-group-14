@@ -425,6 +425,9 @@ class GradeScreen(Vertical):
     class ReturnToHomeRequested(Message):
         pass
 
+    class RubricDraftRequested(Message):
+        """The instructor asked the AI to draft partial-credit items in the editor."""
+
     def __init__(self, default_image_path: str, *, id: str | None = None) -> None:
         self._default_image_path = default_image_path
         self._rubric_count = 0
@@ -436,6 +439,9 @@ class GradeScreen(Vertical):
         self._rubric_edit_callback = None
         self._rubric_edit_mode = False
         self._rubric_edit_points = 0.0
+        # Bumped whenever the editor opens or closes, so a slow AI draft can
+        # tell whether the editor it was asked from is still the one showing.
+        self._rubric_edit_session = 0
         self._zoom_fraction = 0.7
         self._zoom_at_limit = False
         self._rotation = 0
@@ -527,6 +533,16 @@ class GradeScreen(Vertical):
                         with Horizontal(id="rubric-editor-actions"):
                             yield Button("+ Subitem", id="rubric-edit-add", compact=True)
                             yield Button("+ Bonus", id="rubric-edit-add-bonus", compact=True)
+                            yield Button(
+                                "Draft with AI",
+                                id="rubric-edit-draft",
+                                compact=True,
+                                tooltip=(
+                                    "Draft partial-credit items from the answers "
+                                    "students gave (ctrl+r). Nothing is saved "
+                                    "until you press Save."
+                                ),
+                            )
                             yield Button("Save", id="rubric-edit-save", compact=True)
                             yield Button("Cancel", id="rubric-edit-cancel", compact=True)
 
@@ -942,94 +958,22 @@ class GradeScreen(Vertical):
         initial_option_index = self._active_rubric_option_index()
         self._rubric_edit_callback = callback
         self._rubric_edit_mode = True
+        self._rubric_edit_session += 1
         self._rubric_edit_points = question.points
         self._clear_rubric_editor_rows()
-        correct_rows = self.query_one("#rubric-editor-correct", Vertical)
-        partial_rows = self.query_one("#rubric-editor-subitems", Vertical)
-        bonus_rows = self.query_one("#rubric-editor-bonus", Vertical)
-        incorrect_rows = self.query_one("#rubric-editor-incorrect", Vertical)
-
-        correct_option: tuple[int, RubricOptionSeed] | None = None
-        incorrect_option: tuple[int, RubricOptionSeed] | None = None
-        partial_options: list[tuple[int, RubricOptionSeed]] = []
-        bonus_options: list[tuple[int, RubricOptionSeed]] = []
-        for option_index, option in enumerate(question.rubric_options):
-            seed = RubricOptionSeed(
+        seeds = [
+            RubricOptionSeed(
                 label=option.label,
                 points_delta=option.points_delta,
                 kind=option.kind,
                 selection_mode=option.selection_mode,
                 default_comment=option.default_comment,
             )
-            if option.label == "Correct":
-                correct_option = (option_index, seed)
-            elif option.label == "Incorrect":
-                incorrect_option = (option_index, seed)
-            elif option.kind == "bonus":
-                bonus_options.append((option_index, seed))
-            else:
-                partial_options.append((option_index, seed))
-
-        focus_target_by_option_index: dict[int, Input] = {}
-
-        correct_index = correct_option[0] if correct_option is not None else None
-        correct_row = _RubricEditRow(
-            0,
-            (
-                correct_option[1]
-                if correct_option is not None
-                else RubricOptionSeed("Correct", 0.0, "correct", "exclusive")
-            ),
-            row_kind="correct",
+            for option in question.rubric_options
+        ]
+        focus_target_by_option_index = self._populate_rubric_edit_rows(
+            seeds, points=question.points
         )
-        correct_rows.mount(correct_row)
-        if correct_index is not None:
-            target = self._rubric_edit_row_initial_focus(correct_row)
-            if target is not None:
-                focus_target_by_option_index[correct_index] = target
-
-        for option_index, option in partial_options:
-            row = _RubricEditRow(
-                len(partial_rows.children),
-                option,
-                row_kind="partial",
-            )
-            partial_rows.mount(row)
-            target = self._rubric_edit_row_initial_focus(row)
-            if target is not None:
-                focus_target_by_option_index[option_index] = target
-
-        for option_index, option in bonus_options:
-            row = _RubricEditRow(
-                len(bonus_rows.children),
-                option,
-                row_kind="bonus",
-            )
-            bonus_rows.mount(row)
-            target = self._rubric_edit_row_initial_focus(row)
-            if target is not None:
-                focus_target_by_option_index[option_index] = target
-
-        incorrect_index = incorrect_option[0] if incorrect_option is not None else None
-        incorrect_row = _RubricEditRow(
-            0,
-            (
-                incorrect_option[1]
-                if incorrect_option is not None
-                else RubricOptionSeed(
-                    "Incorrect",
-                    -question.points,
-                    "incorrect",
-                    "exclusive",
-                )
-            ),
-            row_kind="incorrect",
-        )
-        incorrect_rows.mount(incorrect_row)
-        if incorrect_index is not None:
-            target = self._rubric_edit_row_initial_focus(incorrect_row)
-            if target is not None:
-                focus_target_by_option_index[incorrect_index] = target
 
         status = self.query_one("#rubric-editor-status", Static)
         status.update("")
@@ -1046,9 +990,139 @@ class GradeScreen(Vertical):
         if target is not None:
             self.call_next(target.focus)
 
+    _ALL_RUBRIC_SECTIONS = ("correct", "partial", "bonus", "incorrect")
+
+    def _populate_rubric_edit_rows(
+        self,
+        options: list[RubricOptionSeed],
+        *,
+        points: float,
+        sections: tuple[str, ...] = _ALL_RUBRIC_SECTIONS,
+    ) -> dict[int, Input]:
+        """Mount editor rows for `options` into the given sections.
+
+        Returns the first editable input of each mounted option, keyed by the
+        option's index in `options`. Correct and Incorrect rows are always
+        mounted (with their defaults when `options` lacks them) when their
+        section is requested.
+        """
+        correct_rows = self.query_one("#rubric-editor-correct", Vertical)
+        partial_rows = self.query_one("#rubric-editor-subitems", Vertical)
+        bonus_rows = self.query_one("#rubric-editor-bonus", Vertical)
+        incorrect_rows = self.query_one("#rubric-editor-incorrect", Vertical)
+
+        correct_option: tuple[int, RubricOptionSeed] | None = None
+        incorrect_option: tuple[int, RubricOptionSeed] | None = None
+        partial_options: list[tuple[int, RubricOptionSeed]] = []
+        bonus_options: list[tuple[int, RubricOptionSeed]] = []
+        for option_index, option in enumerate(options):
+            if option.label == "Correct":
+                correct_option = (option_index, option)
+            elif option.label == "Incorrect":
+                incorrect_option = (option_index, option)
+            elif option.kind == "bonus":
+                bonus_options.append((option_index, option))
+            else:
+                partial_options.append((option_index, option))
+
+        focus_target_by_option_index: dict[int, Input] = {}
+
+        def remember(option_index: int | None, row: _RubricEditRow) -> None:
+            if option_index is None:
+                return
+            target = self._rubric_edit_row_initial_focus(row)
+            if target is not None:
+                focus_target_by_option_index[option_index] = target
+
+        if "correct" in sections:
+            correct_row = _RubricEditRow(
+                0,
+                (
+                    correct_option[1]
+                    if correct_option is not None
+                    else RubricOptionSeed("Correct", 0.0, "correct", "exclusive")
+                ),
+                row_kind="correct",
+            )
+            correct_rows.mount(correct_row)
+            remember(correct_option[0] if correct_option else None, correct_row)
+
+        if "partial" in sections:
+            for option_index, option in partial_options:
+                row = _RubricEditRow(
+                    len(partial_rows.children),
+                    option,
+                    row_kind="partial",
+                )
+                partial_rows.mount(row)
+                remember(option_index, row)
+
+        if "bonus" in sections:
+            for option_index, option in bonus_options:
+                row = _RubricEditRow(
+                    len(bonus_rows.children),
+                    option,
+                    row_kind="bonus",
+                )
+                bonus_rows.mount(row)
+                remember(option_index, row)
+
+        if "incorrect" in sections:
+            incorrect_row = _RubricEditRow(
+                0,
+                (
+                    incorrect_option[1]
+                    if incorrect_option is not None
+                    else RubricOptionSeed(
+                        "Incorrect",
+                        -points,
+                        "incorrect",
+                        "exclusive",
+                    )
+                ),
+                row_kind="incorrect",
+            )
+            incorrect_rows.mount(incorrect_row)
+            remember(incorrect_option[0] if incorrect_option else None, incorrect_row)
+
+        return focus_target_by_option_index
+
+    def rubric_edit_session(self) -> int:
+        """Changes every time the rubric editor opens or closes."""
+        return self._rubric_edit_session
+
+    def set_rubric_editor_status(self, text: str) -> None:
+        status = self.query_one("#rubric-editor-status", Static)
+        status.update(text)
+        status.display = bool(text)
+
+    def apply_rubric_draft(
+        self, options: list[RubricOptionSeed], *, status: str = ""
+    ) -> bool:
+        """Replace the editor's Correct/partial/Incorrect rows with a draft.
+
+        Bonus rows the instructor already has are kept. Nothing is saved: the
+        rows are only filled in, exactly as if typed, and Save still decides.
+        Returns False when the editor is not open.
+        """
+        if not self._rubric_edit_mode:
+            return False
+        self._clear_rubric_editor_rows(
+            sections=("#rubric-editor-correct", "#rubric-editor-subitems", "#rubric-editor-incorrect")
+        )
+        self._populate_rubric_edit_rows(
+            options,
+            points=self._rubric_edit_points,
+            sections=("correct", "partial", "incorrect"),
+        )
+        self._renumber_rubric_edit_rows()
+        self.set_rubric_editor_status(status)
+        return True
+
     def exit_rubric_edit_mode(self) -> None:
         self._rubric_edit_callback = None
         self._rubric_edit_mode = False
+        self._rubric_edit_session += 1
         self._update_rubric_list_visibility()
         self._clear_rubric_editor_rows()
         self._focus_rubric_list()
@@ -1508,6 +1582,11 @@ class GradeScreen(Vertical):
         event.stop()
         self._save_rubric_edit()
 
+    @on(Button.Pressed, "#rubric-edit-draft")
+    def _on_rubric_draft_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.post_message(self.RubricDraftRequested())
+
     @on(Button.Pressed, "#rubric-edit-cancel")
     def _on_rubric_cancel_pressed(self, event: Button.Pressed) -> None:
         event.stop()
@@ -1555,6 +1634,10 @@ class GradeScreen(Vertical):
             focused = self.app.focused
             if event.key in ("ctrl+s", "super+s", "cmd+s"):
                 self._save_rubric_edit()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "ctrl+r":
+                self.post_message(self.RubricDraftRequested())
                 event.prevent_default()
                 event.stop()
             elif event.key == "escape":
@@ -1615,13 +1698,16 @@ class GradeScreen(Vertical):
             return
 
 
-    def _clear_rubric_editor_rows(self) -> None:
-        for container_id in (
+    def _clear_rubric_editor_rows(
+        self,
+        sections: tuple[str, ...] = (
             "#rubric-editor-correct",
             "#rubric-editor-subitems",
             "#rubric-editor-bonus",
             "#rubric-editor-incorrect",
-        ):
+        ),
+    ) -> None:
+        for container_id in sections:
             container = self.query_one(container_id, Vertical)
             for child in list(container.children):
                 child.remove()
@@ -1687,9 +1773,10 @@ class GradeScreen(Vertical):
                     ("g", "Grade answer group"),
                     ("v", "Confirm AI grades (mode)"),
                     ("y", "Confirm this AI grade"),
+                    ("shift+Y", "AI draft grades (ungraded)"),
                     ("shift+U", "Unify similar answers"),
                     ("ctrl+g", "Finalize student"),
-                    ("e", "Edit rubric"),
+                    ("e", "Edit rubric (ctrl+r: AI draft)"),
                     ("c", "Focus comment"),
                     ("x", "Fix transcription"),
                     ("l", "Comment library"),

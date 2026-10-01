@@ -24,6 +24,7 @@ from opengrader.core.grading.solutions import (
     solution_version_for_submission,
 )
 from opengrader.core.llm import LLMError
+from opengrader.core.submissions.printed_text import response_without_printed_text
 from opengrader.core.qa_file import QADocument
 from opengrader.core.history import GradeJournal, current_actor, resolve_history_dir
 from opengrader.core.submissions import (
@@ -135,7 +136,11 @@ def grade_student_file(
         if entry is None:
             continue
 
-        response = question.response_text.strip()
+        response = response_without_printed_text(
+            question.response_text,
+            source=question.response_source,
+            printed=entry.printed_text,
+        ).strip()
         if not response:
             continue
 
