@@ -46,6 +46,7 @@ def serve(root: Path, *, port: int = 0) -> None:
                 url=f"http://localhost:{listener.getsockname()[1]}",
                 pid=os.getpid(),
                 workspace_id=workspace.info().id,
+                token=app.state.shutdown_token,
             )
             record = root / ".opengrader/service.json"
             temporary = record.with_suffix(".tmp")

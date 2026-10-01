@@ -27,6 +27,8 @@ class ServiceConnection(BaseModel):
     url: str
     pid: int
     workspace_id: str
+    # service.json from a server started before tokens existed has none.
+    token: str = ""
 
 
 class ServiceError(RuntimeError):
@@ -50,11 +52,14 @@ class WorkspaceClient:
     ) -> bytes:
         if not path.startswith("/") or path.startswith("//"):
             raise ValueError("Expected a workspace API path.")
+        headers = {"Content-Type": "application/json"}
+        if self.connection.token:
+            headers["Authorization"] = f"Bearer {self.connection.token}"
         request = Request(
             self.connection.url + path,
             data=body.model_dump_json().encode() if body else None,
             method=method,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         try:
             with urlopen(request, timeout=timeout) as response:

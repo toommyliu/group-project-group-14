@@ -153,23 +153,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/shutdown": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Shutdown */
-        post: operations["shutdown_api_shutdown_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/assignments": {
         parameters: {
             query?: never;
@@ -1698,24 +1681,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WorkspaceInfo"];
                 };
-            };
-        };
-    };
-    shutdown_api_shutdown_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
