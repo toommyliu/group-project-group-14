@@ -1469,6 +1469,7 @@ dependencies = [
     { name = "click" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "itsdangerous" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -1507,7 +1508,6 @@ pydantic-ai = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pip-licenses" },
     { name = "textual-dev" },
 ]
@@ -1519,6 +1519,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1,<9.0" },
     { name = "cryptography", specifier = ">=42.0,<47.0" },
     { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "itsdangerous", specifier = ">=2.2,<3" },
     { name = "matplotlib", specifier = ">=3.10,<4.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -1550,7 +1551,6 @@ provides-extras = ["math", "photos", "pydantic-ai"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pip-licenses", specifier = ">=5.0.0" },
     { name = "textual-dev", specifier = ">=1.8.0" },
 ]

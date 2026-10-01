@@ -530,3 +530,58 @@ def test_event_listener_resumes_after_a_truncated_http_stream(monkeypatch, tmp_p
         assert urls.get_nowait() == "http://workspace/api/events?after=7"
     finally:
         stop()
+
+
+def test_a_service_that_dies_on_start_reports_why(monkeypatch, tmp_path):
+    from opengrader.server.workspace import client
+
+    root = tmp_path / "course"
+    (root / ".opengrader").mkdir(parents=True)
+    log = root / ".opengrader/service.log"
+    log.write_text("PermissionError: an earlier, unrelated failure\n")
+
+    class Crashed:
+        def __init__(self, argv, *, stdout, **kwargs):
+            stdout.write(
+                b"Traceback (most recent call last):\n"
+                b'  File "auth.py", line 7, in <module>\n'
+                b"ModuleNotFoundError: No module named 'httpx'\n\n"
+            )
+            stdout.flush()
+
+        def poll(self):
+            return 1
+
+    monkeypatch.setattr(client.subprocess, "Popen", Crashed)
+
+    with pytest.raises(RuntimeError) as failure:
+        client.ensure_service(root)
+
+    message = str(failure.value)
+    assert "No module named 'httpx'" in message
+    assert "earlier, unrelated" not in message
+    assert str(log.resolve()) in message
+
+
+def test_a_service_that_dies_silently_does_not_blame_an_earlier_run(
+    monkeypatch, tmp_path
+):
+    from opengrader.server.workspace import client
+
+    root = tmp_path / "course"
+    (root / ".opengrader").mkdir(parents=True)
+    (root / ".opengrader/service.log").write_text("PermissionError: last week\n")
+
+    class Silent:
+        def __init__(self, argv, **kwargs):
+            pass
+
+        def poll(self):
+            return 1
+
+    monkeypatch.setattr(client.subprocess, "Popen", Silent)
+
+    with pytest.raises(RuntimeError, match=r"could not start\. Check ") as failure:
+        client.ensure_service(root)
+
+    assert "last week" not in str(failure.value)

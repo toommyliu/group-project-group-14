@@ -101,6 +101,11 @@ if [[ -n "$SYNC_SOURCE" ]]; then
     install -m 755 "$APP_DIR/packaging/bootstrap.sh" "$SCRIPT_DIR/.bootstrap.sh.new" &&
       mv -f "$SCRIPT_DIR/.bootstrap.sh.new" "$SCRIPT_DIR/bootstrap.sh"
   fi
+  # The macOS icon's entry point, kept current the same way (desktop installs only).
+  if [[ -f "$SCRIPT_DIR/Opengrader.command" && -f "$APP_DIR/packaging/Opengrader.command" ]]; then
+    install -m 755 "$APP_DIR/packaging/Opengrader.command" "$SCRIPT_DIR/.Opengrader.command.new" &&
+      mv -f "$SCRIPT_DIR/.Opengrader.command.new" "$SCRIPT_DIR/Opengrader.command"
+  fi
 fi
 
 if command -v uv >/dev/null 2>&1; then

@@ -69,6 +69,11 @@ installed — Ghostty, iTerm2, WezTerm or kitty if present, otherwise the
 built-in Terminal. The built-in Terminal can only show a rough preview of each
 answer; press **`o`** while grading to open the full-quality image in Preview.
 
+**Quitting:** when you quit Opengrader, its window closes too. If something
+went wrong while it was starting, the window stays open so you can read the
+message. (If you used *Open in browser*, the browser version keeps running
+until you press **Stop** on the *Start grading* card.)
+
 ### Optional: the browser version
 
 Opengrader can also show a class folder in your web browser. This is
@@ -203,6 +208,7 @@ packaging/
 ├── install.ps1           # one-time desktop-app installer (Windows)
 ├── bootstrap.sh          # runs on every icon click: check/repair, then `opengrader classic` (macOS, Linux)
 ├── bootstrap.ps1         # the same, for Windows
+├── Opengrader.command    # what the macOS icon opens: runs bootstrap.sh, then closes the window
 ├── opengrader            # the `opengrader` terminal command (finds its own checkout)
 ├── opengrader.ps1        # the same command, for Windows
 ├── opengrader.cmd        # Windows shim: .PS1 isn't in PATHEXT, so this is what PATH finds
@@ -225,7 +231,14 @@ packaging/
      built-in `sips`/`iconutil`, so no binary icon is checked into git. The
      bundle's executable opens `Opengrader.command` in the first terminal it
      finds: Ghostty → iTerm2 → WezTerm → kitty → Terminal.app
-     (graphics-capable terminals first).
+     (graphics-capable terminals first). `Opengrader.command` is a real file
+     here (it used to be generated): it runs `bootstrap.sh` and, after a
+     clean exit in Terminal.app, asks Terminal to close the window that
+     holds only this session — Terminal would otherwise leave it open on
+     "[Process completed]". A failed launch keeps its window. kitty is
+     started with `-o macos_quit_when_last_window_closed=yes`, so it leaves
+     the Dock with its window. Only the icon takes this path; the
+     `opengrader` command never closes a terminal.
    - **Linux:** `${XDG_DATA_HOME:-~/.local/share}/opengrader` plus a
      freedesktop `.desktop` entry in the apps menu and on the Desktop.
      `Terminal=true` makes the desktop environment open its default terminal.

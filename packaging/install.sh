@@ -92,11 +92,7 @@ if [[ "$OS" == "Darwin" ]]; then
   APP="$HOME/Applications/Opengrader.app"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-  cat >"$ROOT/Opengrader.command" <<EOF
-#!/bin/bash
-exec "$ROOT/bootstrap.sh"
-EOF
-  chmod 755 "$ROOT/Opengrader.command"
+  install -m 755 "$SRC/packaging/Opengrader.command" "$ROOT/Opengrader.command"
 
   cat >"$APP/Contents/MacOS/opengrader" <<EOF
 #!/bin/bash
@@ -108,7 +104,8 @@ done
 case "\$pick" in
   Ghostty)  exec open -na Ghostty --args -e "\$CMD" ;;
   WezTerm)  exec open -na WezTerm --args start -- "\$CMD" ;;
-  kitty)    exec open -na kitty   --args "\$CMD" ;;
+  # kitty stays in the Dock after its last window closes unless told otherwise.
+  kitty)    exec open -na kitty   --args -o macos_quit_when_last_window_closed=yes "\$CMD" ;;
   iTerm)    exec open -a iTerm "\$CMD" ;;
   *)        exec open -a Terminal "\$CMD" ;;
 esac

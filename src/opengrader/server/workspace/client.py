@@ -160,6 +160,22 @@ def running_service(root: Path) -> ServiceConnection | None:
         return None
 
 
+def _last_log_line(path: Path, start: int = 0, *, limit: int = 200) -> str:
+    """The service's final word before it exited — a traceback ends with the cause.
+
+    The log is appended to across starts; `start` keeps an earlier run's
+    failure from being blamed for this one.
+    """
+    try:
+        with path.open("rb") as log:
+            log.seek(0, os.SEEK_END)
+            log.seek(max(log.tell() - 4096, start, 0))
+            lines = log.read().decode(errors="replace").splitlines()
+    except OSError:
+        return ""
+    return next((line.strip()[:limit] for line in reversed(lines) if line.strip()), "")
+
+
 def ensure_service(root: Path) -> ServiceConnection:
     """Attach to one service, or start it detached from the terminal lifetime."""
     root = root.expanduser().resolve()
@@ -179,7 +195,9 @@ def ensure_service(root: Path) -> ServiceConnection:
 
                 if not (root / DATABASE).exists():
                     Workspace.create(root)
-                with (root / ".opengrader/service.log").open("ab") as log:
+                log_path = root / ".opengrader/service.log"
+                log_start = log_path.stat().st_size if log_path.exists() else 0
+                with log_path.open("ab") as log:
                     process = subprocess.Popen(
                         [
                             sys.executable,
@@ -203,8 +221,11 @@ def ensure_service(root: Path) -> ServiceConnection:
                     if active:
                         return active
                     if process.poll() is not None:
+                        reason = _last_log_line(log_path, log_start)
                         raise RuntimeError(
-                            f"The workspace service could not start. Check {root / '.opengrader/service.log'}."
+                            "The workspace service could not start"
+                            + (f" ({reason})" if reason else "")
+                            + f". Check {log_path}."
                         )
                     time.sleep(0.1)
                 process.terminate()
