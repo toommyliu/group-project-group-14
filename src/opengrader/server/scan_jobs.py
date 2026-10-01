@@ -9,6 +9,8 @@ from threading import RLock
 from typing import Callable
 from uuid import uuid4
 
+from opengrader.core.pages.catalog import CATALOG_DIRNAME, ensure_catalog, is_scan, load_catalog
+from opengrader.core.pages.split import plan_scan
 from opengrader.core.submissions.boundary import plan_boundary_ranges
 from opengrader.core.submissions.scan_check import analyze_scan_pdf
 from opengrader.core.submissions.scan_plan import ScanPage, write_scan_submissions
@@ -119,6 +121,22 @@ class ScanJobs:
         findings = [ScanFinding(page=issue.page, severity=issue.severity, detail=issue.detail) for issue in report.issues]
         if not report.orientation_available:
             findings.append(ScanFinding(severity="warning", detail=report.orientation_note or "Page orientation could not be checked."))
+        if batch.mode == "automatic" and is_scan(source):
+            plans, expected = self.processing.submit(
+                plan_scan, source, source.parent / CATALOG_DIRNAME, batch.pages_per_submission,
+            ).result()
+            batch.pages_per_submission = batch.pages_per_submission or expected
+            batch.groups = [
+                ScanGroup(key=str(uuid4()), pages=[PageSelection(number=number, rotation=rotation) for number, rotation in plan.pages],
+                          scan_warnings=list(plan.warnings))
+                for plan in plans
+            ]
+            batch.excluded_pages = []
+            batch.findings = findings
+            batch.status = "review"
+            batch.message = "Review the page groups before creating submissions."
+            self.save(assignment_id, batch)
+            return
         if batch.mode == "automatic":
             ranges, _warnings = self.processing.submit(
                 plan_boundary_ranges, source, expected_pages=batch.pages_per_submission,
@@ -153,6 +171,11 @@ class ScanJobs:
         }
         if missing:
             write_scan_submissions(directory / "original.pdf", missing)
+        catalog = None
+        if is_scan(directory / "original.pdf"):
+            batch.message = "Learning the printed pages from the scan."
+            self.save(assignment_id, batch)
+            catalog = load_catalog(self.processing.submit(ensure_catalog, directory / "original.pdf", directory / CATALOG_DIRNAME).result())
         intakes: dict[str | None, SubmissionIntake] = {}
         for index, group in enumerate(batch.groups, start=1):
             name = f"scan-{batch.id}-{group.key}"
@@ -167,7 +190,7 @@ class ScanJobs:
                     write_scan_warnings(pdf, tuple(group.scan_warnings))
                     version = group.assignment_version or batch.assignment_version
                     if version not in intakes:
-                        intakes[version] = SubmissionIntake(assignment / "qa.md", auto_grade=batch.auto_grade, assignment_version=version)
+                        intakes[version] = SubmissionIntake(assignment / "qa.md", auto_grade=batch.auto_grade, assignment_version=version, page_catalog=catalog)
                     intake = intakes[version]
                     staging = self.processing.submit(intake.extract, pdf, directory / "extracted").result()
                     with self.lock:

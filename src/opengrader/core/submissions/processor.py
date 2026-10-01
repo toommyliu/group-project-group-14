@@ -24,6 +24,7 @@ from opengrader.core.pdf_utils import (
     safe_image_to_data,
 )
 from .student_file import (
+    AssignmentTitleMetadata,
     IdentityCandidate,
     StudentInkFragment,
     StudentSubmissionDocument,
@@ -44,6 +45,8 @@ from .transcription import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.bubble_sheet import BubbleSheetLayout
+    from opengrader.core.pages.catalog import PageCatalog
+    from opengrader.core.pages.extract import CatalogCrops
     from opengrader.core.ocr import OcrConfig
     from opengrader.core.ocr.vision_reader import VisionReader
 from opengrader.core.ocr.math_ocr import (
@@ -500,7 +503,8 @@ def _finalize_submission_document(
 ) -> tuple[StudentSubmissionDocument, Path]:
     from .splitter import read_scan_warnings
 
-    document = replace(document, scan_warnings=read_scan_warnings(pdf_path))
+    warnings = (*read_scan_warnings(pdf_path), *document.scan_warnings)
+    document = replace(document, scan_warnings=tuple(dict.fromkeys(warnings)))
     document = _apply_extra_pages(document, pdf_path, extra_pages)
     markdown_path.write_text(render_student_submission_markdown(document))
     return document, markdown_path
@@ -1833,6 +1837,134 @@ def _build_document_from_assignment_template(
     return document, name_field, id_field, name_image, id_image
 
 
+def _build_document_from_page_catalog(
+    pdf_path: Path,
+    submission_dir: Path,
+    catalog: "PageCatalog",
+    *,
+    vision_reader: "VisionReader | None" = None,
+    llm_responses: bool = False,
+    llm_math: bool = False,
+    math_transcriber: "MathTranscriber | None" = None,
+    escalate_floor: float | None = None,
+    dpi: int = 300,
+    debug: bool = False,
+    progress: ExtractionProgress | None = None,
+    progress_callback: Callable[[str], None] = lambda _message: None,
+) -> StudentSubmissionDocument:
+    from opengrader.core.pages.extract import crop_submission
+
+    progress = progress or ExtractionProgress()
+    crops = crop_submission(pdf_path, submission_dir, catalog, dpi=dpi, debug=debug)
+
+    transcribe = llm_responses or escalate_floor is not None
+    reader = vision_reader if transcribe else None
+    if reader is not None:
+        progress.file_start(pdf_path.name, sum(1 for q in crops.questions if q.response_image_path))
+    questions = []
+    for question in crops.questions:
+        if transcribe and question.response_image_path:
+            text, confidence, source, provider = _transcribe_crop(
+                submission_dir / question.response_image_path,
+                question_id=question.question_id,
+                vision_reader=reader,
+                progress_callback=progress_callback,
+                math_latex=llm_math,
+                math_transcriber=math_transcriber,
+                escalate_floor=escalate_floor,
+            )
+            question = replace(
+                question,
+                response_text=text,
+                response_confidence=confidence,
+                response_source=source,
+                response_provider=provider,
+            )
+            if reader is not None:
+                progress.response(pdf_path.name, question.question_id)
+        questions.append(question)
+
+    student_name, name_confidence = _read_identity_field(
+        submission_dir, crops.name_image, "name", vision_reader, progress_callback,
+        crops.print_boxes.get("name", ()), crops.written_width.get("name", 1.0),
+    )
+    student_id, id_confidence = _read_identity_field(
+        submission_dir, crops.id_image, "sid", vision_reader, progress_callback,
+        crops.print_boxes.get("id", ()), crops.written_width.get("id", 1.0),
+    )
+    title = _read_title(submission_dir, crops, progress_callback)
+    return StudentSubmissionDocument(
+        student_name=student_name,
+        student_id=student_id,
+        course_code=title.course_code,
+        assignment_title=title.assignment_title,
+        assignment_version=title.assignment_version,
+        source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
+        student_score="",
+        name_image_path=crops.name_image,
+        id_image_path=crops.id_image,
+        name_confidence=name_confidence,
+        id_confidence=id_confidence,
+        questions=questions,
+        scan_warnings=tuple(crops.warnings),
+    )
+
+
+def _read_title(
+    submission_dir: Path, crops: "CatalogCrops", progress_callback: Callable[[str], None]
+) -> AssignmentTitleMetadata:
+    from PIL import Image
+
+    from opengrader.core.pages.printed import read_title
+
+    usual = parse_assignment_metadata_from_title(crops.title_text)
+    if not crops.title_image:
+        return usual
+    try:
+        with Image.open(submission_dir / crops.title_image) as image:
+            text = read_title(image)
+    except Exception as exc:
+        progress_callback(f"  Warning: could not read the title ({exc}); using the page's usual title.")
+        return usual
+    own = parse_assignment_metadata_from_title(text)
+    if not crops.title_text or (own.course_code, own.assignment_title) == (usual.course_code, usual.assignment_title):
+        return own
+    return usual
+
+
+def _is_scan(pdf_path: Path) -> bool:
+    from opengrader.core.pages.catalog import is_scan
+
+    return is_scan(pdf_path)
+
+
+def _read_identity_field(
+    submission_dir: Path,
+    image: str | None,
+    field_kind: str,
+    vision_reader: "VisionReader | None",
+    progress_callback: Callable[[str], None],
+    printed: tuple[tuple[float, float, float, float], ...] = (),
+    written_width: float = 1.0,
+) -> tuple[str, float | None]:
+    from PIL import Image
+
+    from opengrader.core.pages.printed import read_field
+
+    if not image:
+        return "", None
+    path = submission_dir / image
+    if vision_reader is not None:
+        try:
+            text = vision_reader.extract_field_text(image_path=path, field_kind=field_kind)
+            if text:
+                return text, None
+        except Exception as exc:
+            progress_callback(f"  Warning: could not read the {field_kind}: {exc}")
+    with Image.open(path) as crop:
+        return read_field(crop, field_kind, printed, written_width)
+
+
 def _build_document_from_text_layer_only(
     pdf_path: Path,
     submission_dir: Path,
@@ -2042,9 +2174,10 @@ def build_student_submission_document_unified(
     bubble_sheet_layout: "BubbleSheetLayout | None" = None,
     bubble_shuffled: bool = False,
     bubble_form_key: str | None = None,
+    page_catalog: "PageCatalog | None" = None,
 ) -> tuple[StudentSubmissionDocument, Path]:
-    """Route precedence: OMR, template, text layer, OCR layout. Text layers bypass models;
-    escalate_floor puts OCR before models.
+    """Route precedence: OMR, template, page catalog, text layer, OCR layout. Text layers
+    bypass models; escalate_floor puts OCR before models.
     """
     progress = progress or ExtractionProgress()
     submission_dir = output_dir / pdf_path.stem
@@ -2054,9 +2187,8 @@ def build_student_submission_document_unified(
         resolve_math_transcriber(math_backend, strict=False) if llm_math else None
     )
 
-    qr_student_id = _read_qr_student_id(pdf_path)
-
     if bubble_sheet_layout is not None:
+        qr_student_id = _read_qr_student_id(pdf_path)
         document = _build_document_from_bubble_sheet(
             pdf_path=pdf_path,
             submission_dir=submission_dir,
@@ -2078,6 +2210,7 @@ def build_student_submission_document_unified(
         )
 
     if blank_assignment_template:
+        qr_student_id = _read_qr_student_id(pdf_path)
         progress_callback("Using blank assignment template for extraction...")
         document, name_field, id_field, name_image, id_image = (
             _build_document_from_assignment_template(
@@ -2117,7 +2250,9 @@ def build_student_submission_document_unified(
     finally:
         doc.close()
 
-    if has_text_layer:
+    scanned_with_catalog = page_catalog is not None and _is_scan(pdf_path)
+    qr_student_id = None if scanned_with_catalog else _read_qr_student_id(pdf_path)
+    if has_text_layer and not scanned_with_catalog:
         document, markdown_path = _build_document_from_text_layer_only(
             pdf_path=pdf_path,
             submission_dir=submission_dir,
@@ -2128,6 +2263,29 @@ def build_student_submission_document_unified(
             section_by_id=section_by_id,
             qr_student_id=qr_student_id,
         )
+    elif scanned_with_catalog:
+        progress_callback("Cropping with the assignment's page catalog...")
+        document = _build_document_from_page_catalog(
+            pdf_path,
+            submission_dir,
+            page_catalog,
+            vision_reader=vision_reader,
+            llm_responses=llm_responses,
+            llm_math=llm_math,
+            math_transcriber=math_transcriber,
+            escalate_floor=escalate_floor,
+            dpi=dpi,
+            debug=save_layout_debug,
+            progress=progress,
+            progress_callback=progress_callback,
+        )
+        document = _apply_roster_identity(
+            document, roster, progress_callback, resolve_ambiguous, qr_student_id
+        )
+        document = _apply_section(
+            document, default_section, section_by_id, progress_callback
+        )
+        markdown_path = submission_dir / f"{pdf_path.stem}.submission.md"
     else:
         if ocr_config is None:
             raise ValueError("OCR configuration is required for scanned PDFs without a text layer.")

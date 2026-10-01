@@ -40,12 +40,8 @@ for scan in "$samples_dir"/*/submissions.pdf; do
     uv run submission-splitter --input "$scan" \
         --output "$assignment_dir/split-submissions" --fix-rotation --fix-order
 
-    set --
-    if [ -f "$assignment_dir/template.pdf" ]; then
-        set -- --blank-template "$assignment_dir/template.pdf"
-    fi
     uv run submission-extractor --input "$assignment_dir/split-submissions" \
-        --output "$assignment_dir/student-submissions" --llm-responses "$@"
+        --output "$assignment_dir/student-submissions"
 
     if [ -f "$assignment_dir/qa.md" ]; then
         uv run automated-grading --solutions "$assignment_dir/qa.md" \

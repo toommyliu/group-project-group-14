@@ -22,7 +22,7 @@ Opengrader is a local, offline-first exam-grading toolchain — think Gradescope
 ## Capabilities
 
 - **Template generation** — turn a QA-format markdown answer key into printable exam PDFs (Computer Modern fonts, answer boxes, multi-version exams). Draft the QA file itself from an existing answer-key PDF or a text2qti exam.
-- **Scan ingestion** — split a bulk scanner PDF into per-student PDFs, fix out-of-order pages, and extract each response via OCR (Tesseract + OpenCV) and a local vision LLM (Ollama) into structured per-student markdown files with response image crops.
+- **Scan ingestion** — split a bulk scanner PDF into per-student PDFs and crop every answer, name and ID, with no blank template and no QR codes: the scanned pages are matched to each other, so every copy of a printed page is cropped along the same questions (read from the print with PaddleOCR's PP-OCR models), turned upright, and put back in page order. Missing, repeated and unrecognized pages are flagged. Each student's name and ID (vision LLM, or PP-OCR without one) and printed title (subscript form markers included) are always read; answers are transcribed only when asked, for automated grading. Everything lands in structured per-student markdown files.
 - **Grading TUI** — Gradescope-style question-by-question rubric grading in the terminal: in-terminal response images, rubric editing, per-question statistics, anonymous grading by default (teacher mode reveals names), and automatic write-back of grades to submission files and annotated PDFs.
 - **Automated grading** — auto-score submissions against a solutions file (exact, numeric, and true/false answer matching). With `--llm`, an AI model suggests grades for free responses, tagged `[AI]` for you to review; anything it isn't confident about is left for manual grading. The AI can also draft partial-credit rubric items from the answers students gave and a first-pass grade for each answer, which you review and confirm.
 - **Canvas export** — push scores and per-question comments to Canvas LMS via `canvas-sak`, from the CLI or from inside the TUI.
@@ -295,12 +295,20 @@ Split a scanned submissions PDF:
 ```bash
 uv run submission-splitter \
   --input scans/all-submissions.pdf \
-  --output split/ \
-  --pages-per-submission 6
+  --output split/
 ```
 
+Without a page count, the splitter matches the scanned pages to each other: every
+copy of a printed page lines up with every other copy, so it learns the assignment's
+printed pages from the scans themselves (no blank template, no QR codes). Each
+student starts at a copy of page 1 (or wherever a printed page repeats); pages
+are turned upright and put back in printed order; missing, repeated and
+unrecognized pages are flagged. What it learned is saved in
+`split/.opengrader-pages/` and reused by `submission-extractor`.
+
 Useful `submission-splitter` options:
-- `--detect-boundaries`: Detect submission starts using QR/printed page-number restarts and identity headers. Combine with `--pages-per-submission 3` to flag short scans while keeping each student's pages together. Without an explicit page count, automatic detection is the default. A blank template supplies an expected count, not fixed groups.
+- `--pages-per-submission <N>`: How many pages each submission should have. For scans it checks the split (a submission of another length is flagged); pages are still matched to decide it. For typed PDFs it is a fixed split size.
+- `--detect-boundaries`: The older boundary detection: QR/printed page-number restarts and Name/ID headers read with Tesseract. Combine with `--pages-per-submission 3` to flag short scans while keeping each student's pages together. A blank template supplies an expected count, not fixed groups.
 - Missing-page and duplicate-page warnings are saved beside each split PDF in `.scan.json` files and carried into extracted submissions and the review queue. Keep these sidecars with the split PDFs. Unnumbered scans with identical headers on every page may still need manual split review.
 - `--start-page <N>` and `--end-page <N>`: Split only a page range, using 1-indexed page numbers.
 - `--filename-prefix <prefix>`: Change output names from `submission-0001.pdf`.
@@ -333,8 +341,10 @@ Useful `submission-extractor` options:
 - `--ollama-model <model>`: Set the Ollama vision model. Defaults to the saved AI settings, falling back to `qwen3.5:9b` if not configured.
 - `--ollama-host <url>`: Set the Ollama server URL. Defaults to the saved AI settings, falling back to `http://127.0.0.1:11434` if not configured.
 - `--ollama-timeout <seconds>`: Set the Ollama request timeout. Defaults to the saved AI settings, falling back to `120` if not configured.
-- `--no-ollama-qa`: Skip Ollama question prompt/answer extraction while still using it for name, ID, and title extraction.
-- `--save-layout-debug`: Write layout JSON and overlay PNGs for each submission.
+- `--llm-responses`: Also transcribe every answer (vision model, Tesseract fallback) so it can be graded automatically. Defaults to AI Setup's *read handwriting*. Without it, scans are still cropped and each student's name, ID and title are still read, so grading can start from the crops right away.
+- `--no-ollama-qa`: With `--legacy-layout`, skip Ollama question prompt/answer extraction while still using it for name, ID, and title extraction.
+- `--legacy-layout`: Detect each scan's layout on its own, as before page matching. By default, scans are matched to each other (using the splitter's saved pages when present) and every student's answers are cut along the same printed questions.
+- `--debug`: Write `<submission>/layout_debug/`: each scanned page with every crop's outline (answers, name, ID, title) drawn on it, and the layout as JSON.
 
 Transcription uses separate system and user instructions. Student answers use an answer-only JSON schema, preserve repeated words and mistakes, and flag `[unclear]` readings for review. A valid empty model response stays empty. Invalid or truncated JSON is a failed reading, not student text.
 
@@ -514,7 +524,7 @@ https://github.com/user-attachments/assets/f8938fa9-d64f-4d88-a8e4-62a48111a471
 | ---- | ------------ |
 | Frontend/backend | [Python](https://www.python.org/), [Textual](https://textual.textualize.io/), Terminal Emulator |
 | Command line | [Click](https://click.palletsprojects.com/) |
-| Document processing | [pypdf](https://pypdf.readthedocs.io/en/stable/), [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/), [Tesseract](https://tesseract-ocr.github.io/), [opencv](https://pypi.org/project/opencv-python/) |
+| Document processing | [pypdf](https://pypdf.readthedocs.io/en/stable/), [PyMuPDF](https://pymupdf.readthedocs.io/en/latest/), [Tesseract](https://tesseract-ocr.github.io/), [opencv](https://pypi.org/project/opencv-python/), [RapidOCR](https://github.com/RapidAI/RapidOCR) (PaddleOCR PP-OCR models) |
 | Local model integration | [Ollama](https://ollama.com/)
 | Testing | [pytest](https://docs.pytest.org/en/stable/) |
 

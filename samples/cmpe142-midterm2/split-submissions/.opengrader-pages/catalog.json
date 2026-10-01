@@ -1,0 +1,793 @@
+{
+ "version": 1,
+ "groups": [
+  {
+   "id": "g01",
+   "pdf": "../../submissions.pdf",
+   "index": 0,
+   "turns": 0,
+   "page_number": 1,
+   "members": 2,
+   "copies_read": 2,
+   "lines": [
+    {
+     "text": "Name:",
+     "box": [
+      0.1520182341337204,
+      0.10912298411130905,
+      0.21828050585463643,
+      0.13760080933570862
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "ID:",
+     "box": [
+      0.6640625,
+      0.12096774578094482,
+      0.6916504055261612,
+      0.13734879344701767
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "SP26 CMPE 142 Exam 2B_j",
+     "box": [
+      0.3818359524011612,
+      0.13533266633749008,
+      0.626953125,
+      0.15448588877916336
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "You are not allowed to have anything in or over your ears during the exam. You cannot accss any",
+     "box": [
+      0.1748046949505806,
+      0.17212702333927155,
+      0.8587239682674408,
+      0.19984879344701767
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "electronics including a smartwatch during the exam. You can only use a pen or pencil. Access to anything",
+     "box": [
+      0.1536458358168602,
+      0.1875000074505806,
+      0.8577474057674408,
+      0.2129536271095276
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "EVERY EXTRA SENTENCE. You will also lose points for any incorrect statements made in an essay.",
+     "box": [
+      0.1536458432674408,
+      0.2285786271095276,
+      0.8196614980697632,
+      0.2547883242368698
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "DO NOT ASK CLARIFYING QUESTIONS DURING THE EXAM. If something is phrased incorrectly or",
+     "box": [
+      0.1767578199505806,
+      0.2436995878815651,
+      0.8557942807674408,
+      0.26587702333927155
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "the question has an error, we can talk about it after the exam.",
+     "box": [
+      0.1575520858168602,
+      0.25957660377025604,
+      0.5576172173023224,
+      0.2797379046678543
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "When referencing functions or system calls, the arguments will often be omitted if they aren't relevant",
+     "box": [
+      0.1774088591337204,
+      0.27167338132858276,
+      0.8564453423023224,
+      0.2948588728904724
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "to the question. For example, int foo(int i, char *s) may be referred to as foo() or foo(..) f the question is",
+     "box": [
+      0.1562500074505806,
+      0.2860383242368698,
+      0.8554687798023224,
+      0.3084677457809448
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "asking about foo() generally.",
+     "box": [
+      0.1585286483168602,
+      0.3021673560142517,
+      0.3505859524011612,
+      0.32006049156188965
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "hex 1 2 3 4 5 6 7 8 9 A B C D E F",
+     "box": [
+      0.1569010466337204,
+      0.3314012140035629,
+      0.8994140923023224,
+      0.35030242800712585
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "binary 0001 0010 0011 0100 0101 0110 0111 1000 1001 1010 1011 1100 1101 1110 1111",
+     "box": [
+      0.1565755233168602,
+      0.3452621102333069,
+      0.9176432490348816,
+      0.36441534757614136
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "decimal 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15",
+     "box": [
+      0.1585286483168602,
+      0.359375,
+      0.9046224057674408,
+      0.37802422046661377
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "octal 1 2 3 4 5 6 7 10 11 12 13 14 15 16 17",
+     "box": [
+      0.1588541716337204,
+      0.3734879046678543,
+      0.904296875,
+      0.39238910377025604
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "definition reminders:",
+     "box": [
+      0.1819661483168602,
+      0.40851815044879913,
+      0.326171875,
+      0.42489922046661377
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "turnaround time = completion time - arrival time",
+     "box": [
+      0.1813151091337204,
+      0.42363910377025604,
+      0.5065104365348816,
+      0.4400201737880707
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "response time = start time (the first time the job gets to start running) - arrival time",
+     "box": [
+      0.1806640699505806,
+      0.43674394488334656,
+      0.7233073115348816,
+      0.45388107001781464
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "when referring to multi-level page tables the first page table lookup will be to the \"top\" page table (also",
+     "box": [
+      0.1803385466337204,
+      0.44984880089759827,
+      0.8505859673023224,
+      0.4682459533214569
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "known as the page global directory and also known as the 4th level page table) and the last lookup will be",
+     "box": [
+      0.1591796949505806,
+      0.46370968222618103,
+      0.8505859375,
+      0.4813508242368698
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "to the \"bottom\" page table (also known as the first level page table). the page table that the top page table",
+     "box": [
+      0.1588541716337204,
+      0.4765625,
+      0.8509114980697632,
+      0.49546369910240173
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "refers to is the 3rd level page table. the page table after that and before the bottom page table is the 2nd level",
+     "box": [
+      0.1591796949505806,
+      0.49042338132858276,
+      0.8509114980697632,
+      0.5090726017951965
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "page table.",
+     "box": [
+      0.1604817733168602,
+      0.505040317773819,
+      0.2369791716337204,
+      0.5209173560142517
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "three C's of cache misses:",
+     "box": [
+      0.1829427182674408,
+      0.5183971524238586,
+      0.3518880307674408,
+      0.5330141484737396
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "compulsory: first reference to the item",
+     "box": [
+      0.1842447966337204,
+      0.5443548560142517,
+      0.4495442807674408,
+      0.5582157373428345
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "\u2022capacity: no space to keep item in memory",
+     "box": [
+      0.1839192733168602,
+      0.5577116906642914,
+      0.4781901091337204,
+      0.57232865691185
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "\u2022 conflict: limits on where the item could be placed prevented it from being in memory",
+     "box": [
+      0.18359375,
+      0.5703125,
+      0.7483724057674408,
+      0.5861895084381104
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "1. (50 points)Minimum score. You don't have to do anything for this question.",
+     "box": [
+      0.1692708358168602,
+      0.5955681818181817,
+      0.68359375,
+      0.6106351017951965
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "2. (1 point) if the 16-bit number 0x95B3 is stored big-endian, what will be the first byte in HEX at the",
+     "box": [
+      0.1682942733168602,
+      0.6497727272727272,
+      0.849609375,
+      0.6643145084381104
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "address where it is stored? (include the 0x prefix and no leading zeros. use uppercase letters)",
+     "box": [
+      0.1861979216337204,
+      0.6617943942546844,
+      0.791015625,
+      0.6786794066429138
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "3. (1 point) if the 16-bit number 0xB395 is stored little-endian, what will be the first byte in HEX at the",
+     "box": [
+      0.1669921875,
+      0.718409090909091,
+      0.8505859673023224,
+      0.7333669662475586
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "address where it is stored? (include the Ox prefix and no leading zeros. use uppercase letters)",
+     "box": [
+      0.1855468824505806,
+      0.7298386991024017,
+      0.7916666865348816,
+      0.7464717924594879
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "4. (2 points) the following function clears bit (makes 0) n (where bit 0 is the least significant bit) in a",
+     "box": [
+      0.1660156324505806,
+      0.7851136363636364,
+      0.8518880307674408,
+      0.8007954545454545
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "64-bit page table entry. write the code to replace XXXX (DO NOT USE ANY SPACES!)",
+     "box": [
+      0.1848958358168602,
+      0.7961189448833466,
+      0.7454427480697632,
+      0.8142641484737396
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "void clr_pte_bit(uint64_t *pte, n) {",
+     "box": [
+      0.1858723983168602,
+      0.8238407373428345,
+      0.46875,
+      0.8404738008975983
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "*pte = XXXX;",
+     "box": [
+      0.2242838591337204,
+      0.8384577035903931,
+      0.3216145932674408,
+      0.8548387289047241
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "}",
+     "box": [
+      0.1917317733168602,
+      0.8525705933570862,
+      0.2080078199505806,
+      0.8679435551166534
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "1",
+     "box": [
+      0.4990234524011612,
+      0.8830645382404327,
+      0.5136719048023224,
+      0.8971774578094482
+     ],
+     "score": 1.0
+    }
+   ],
+   "question_types": {
+    "q1": "free_response",
+    "q2": "free_response",
+    "q3": "free_response",
+    "q4": "free_response"
+   }
+  },
+  {
+   "id": "g02",
+   "pdf": "../../submissions.pdf",
+   "index": 1,
+   "turns": 0,
+   "page_number": 2,
+   "members": 2,
+   "copies_read": 2,
+   "lines": [
+    {
+     "text": "Name:",
+     "box": [
+      0.1523437574505806,
+      0.08064516261219978,
+      0.21935096803383952,
+      0.10685483738780022
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "ID:",
+     "box": [
+      0.6640625,
+      0.09122983738780022,
+      0.6920573115348816,
+      0.10609878599643707
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "5. (2 points) What does each level of the Multi-Level Feedback Queue (MLFQ) correspond to?",
+     "box": [
+      0.1621093824505806,
+      0.17761363636363636,
+      0.791015625,
+      0.19193181818181818
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "6. (2 points) in MLFQ, rule 5 says: \"After some time period S, move all the jobs in the system to the topmost",
+     "box": [
+      0.1637369841337204,
+      0.23284090909090907,
+      0.8548177480697632,
+      0.24852272727272728
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "queue.\" What problem does rule 5 prevent? (one word, all lowercase)",
+     "box": [
+      0.1829427182674408,
+      0.24722782522439957,
+      0.6416015923023224,
+      0.2651209533214569
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "7. (2 points) if we have a program with the following lines of code:",
+     "box": [
+      0.1643880233168602,
+      0.30136363636363633,
+      0.6097005307674408,
+      0.31772727272727275
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "char buffer[1024];",
+     "box": [
+      0.193359375,
+      0.35761089622974396,
+      0.3349609524011612,
+      0.3724798262119293
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "int fd = open(\"/tmp/file\", 0_RDWR);",
+     "box": [
+      0.1933593824505806,
+      0.3714717775583267,
+      0.46484375,
+      0.38734880089759827
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "char *data = mmap(NULL, 1024*1024, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);",
+     "box": [
+      0.1923828199505806,
+      0.38457661867141724,
+      0.7783203423023224,
+      0.4009576588869095
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "Assume all of the above lines and the following lines execute successfully. Write a line of code that will",
+     "box": [
+      0.1855468824505806,
+      0.42414315044879913,
+      0.8502604365348816,
+      0.44254033267498016
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "cause a dirty page for /tmp/file.",
+     "box": [
+      0.1861979216337204,
+      0.4400201439857483,
+      0.3977864682674408,
+      0.4551411271095276
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "8. (2 points) if we are running on a Linux machine with 4G of RAM and 1G of swap, what happens when",
+     "box": [
+      0.16796875,
+      0.5564772727272727,
+      0.8483073115348816,
+      0.5715726017951965
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "we run the following program?",
+     "box": [
+      0.1865234449505806,
+      0.5703125,
+      0.3932291865348816,
+      0.5839214026927948
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "#include <stdio.h>",
+     "box": [
+      0.1953125,
+      0.5977822542190552,
+      0.3372395932674408,
+      0.609375
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "#include <stdlib.h>",
+     "box": [
+      0.1953125,
+      0.6113911867141724,
+      0.3444010615348816,
+      0.6229838728904724
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "int main(int argc, char *argv[]) {",
+     "box": [
+      0.1943359449505806,
+      0.6365927457809448,
+      0.4599609524011612,
+      0.6509576737880707
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "char *mem [20];",
+     "box": [
+      0.2255859449505806,
+      0.6496976017951965,
+      0.3362630307674408,
+      0.6643145084381104
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "for (int i = 0; i < 20; i++) {",
+     "box": [
+      0.224609375,
+      0.6633064150810242,
+      0.4599609524011612,
+      0.6774193644523621
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "mem[i] = malloc(1024*1024*1024);",
+     "box": [
+      0.2558594048023224,
+      0.676915317773819,
+      0.5022786855697632,
+      0.6907761991024017
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "if (mem[i] == NULL) {",
+     "box": [
+      0.256184920668602,
+      0.6900201737880707,
+      0.4225260615348816,
+      0.7041330933570862
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "printf(\"failed\\n\");",
+     "box": [
+      0.2851562798023224,
+      0.7026209831237793,
+      0.435546875,
+      0.7190020084381104
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "exit(i+1);",
+     "box": [
+      0.2871094048023224,
+      0.7177419066429138,
+      0.3671875,
+      0.731350839138031
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "}",
+     "box": [
+      0.2535807490348816,
+      0.7303427457809448,
+      0.269856795668602,
+      0.7459677457809448
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "}",
+     "box": [
+      0.2239583358168602,
+      0.7449597120285034,
+      0.2386067733168602,
+      0.7588205933570862
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "printf(\"allocated 20G\\n\");",
+     "box": [
+      0.2239583432674408,
+      0.7570564150810242,
+      0.427734375,
+      0.7731854617595673
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "exit(0);",
+     "box": [
+      0.2249348983168602,
+      0.7719254493713379,
+      0.2910156399011612,
+      0.7857863008975983
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "}",
+     "box": [
+      0.1920572966337204,
+      0.7850302457809448,
+      0.2076822966337204,
+      0.8006552457809448
+     ],
+     "score": 1.0
+    },
+    {
+     "text": "2",
+     "box": [
+      0.498046875,
+      0.880040317773819,
+      0.5136719346046448,
+      0.8949092626571655
+     ],
+     "score": 1.0
+    }
+   ],
+   "question_types": {
+    "q5": "free_response",
+    "q6": "free_response",
+    "q7": "free_response",
+    "q8": "free_response"
+   }
+  }
+ ],
+ "pages": [
+  {
+   "pdf": "../../submissions.pdf",
+   "index": 0,
+   "group": "g01",
+   "homography": [
+    [
+     1.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     1.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "inliers": 3000
+  },
+  {
+   "pdf": "../../submissions.pdf",
+   "index": 1,
+   "group": "g02",
+   "homography": [
+    [
+     1.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     1.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "inliers": 3000
+  },
+  {
+   "pdf": "../../submissions.pdf",
+   "index": 2,
+   "group": "g01",
+   "homography": [
+    [
+     0.9970317883841637,
+     0.00024632118005521046,
+     0.0015603576115560255
+    ],
+    [
+     -0.003726684694140516,
+     0.9873479377956661,
+     0.0055200573561282355
+    ],
+    [
+     -0.001689670613937141,
+     -0.003225737168373384,
+     1.0
+    ]
+   ],
+   "inliers": 604
+  },
+  {
+   "pdf": "../../submissions.pdf",
+   "index": 3,
+   "group": "g02",
+   "homography": [
+    [
+     1.006562127646269,
+     0.006545637279579082,
+     -0.00580661322437553
+    ],
+    [
+     -0.0031796945515553073,
+     1.0082981002559543,
+     -0.0008789355851695312
+    ],
+    [
+     -0.0003600200849818575,
+     0.003922860826956286,
+     1.0
+    ]
+   ],
+   "inliers": 993
+  }
+ ]
+}
