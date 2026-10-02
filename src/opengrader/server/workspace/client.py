@@ -196,6 +196,11 @@ def ensure_service(root: Path) -> ServiceConnection:
                 if not (root / DATABASE).exists():
                     Workspace.create(root)
                 log_path = root / ".opengrader/service.log"
+                try:
+                    if log_path.stat().st_size > 1024 * 1024:
+                        os.replace(log_path, log_path.with_suffix(".log.1"))
+                except OSError:
+                    pass
                 log_start = log_path.stat().st_size if log_path.exists() else 0
                 with log_path.open("ab") as log:
                     process = subprocess.Popen(

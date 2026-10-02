@@ -603,3 +603,39 @@ def test_feedback_without_a_pdf_fails_quietly_and_keeps_the_saved_grade(managed)
     assert workspace.jobs()[0].error == "This submission has no source PDF. Its grade is saved."
     assert workspace.answer(assignment, 1, "q1").analysis == "Saved feedback"
     assert "assignment_id" not in get_contextvars()
+
+
+@pytest.mark.parametrize("rollover_fails", [False, True])
+def test_an_oversized_service_log_preserves_the_previous_crash_on_start(monkeypatch, tmp_path, rollover_fails):
+    from opengrader.server.workspace import client
+
+    root = tmp_path / "course"
+    (root / ".opengrader").mkdir(parents=True)
+    log = root / ".opengrader/service.log"
+    previous = b"previous crash\n" + b"x" * (2 * 1024 * 1024)
+    log.write_bytes(previous)
+    backup = root / ".opengrader/service.log.1"
+    backup.write_bytes(b"older crash\n")
+
+    class Crashed:
+        def __init__(self, argv, *, stdout, **kwargs):
+            stdout.write(b"RuntimeError: current startup failed\n")
+            stdout.flush()
+
+        def poll(self):
+            return 1
+
+    monkeypatch.setattr(client.subprocess, "Popen", Crashed)
+    if rollover_fails:
+        def refused(_source, _destination):
+            raise PermissionError("log is held open")
+
+        monkeypatch.setattr(client.os, "replace", refused)
+    with pytest.raises(RuntimeError) as failure:
+        client.ensure_service(root)
+    assert backup.read_bytes() == (b"older crash\n" if rollover_fails else previous)
+    assert log.read_bytes() == (previous if rollover_fails else b"") + b"RuntimeError: current startup failed\n"
+    assert str(failure.value) == (
+        "The workspace service could not start (RuntimeError: current startup failed)"
+        f". Check {log.resolve()}."
+    )
