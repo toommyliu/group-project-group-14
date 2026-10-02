@@ -2,13 +2,19 @@
 
 from pathlib import Path
 from threading import Event, Thread
+from time import perf_counter
 
 import structlog
 
 from opengrader.core.workspace.store import Workspace, record_event
 from opengrader.core.workspace.models import FeedbackJob
+from opengrader.server import logs
 
 logger = structlog.stdlib.get_logger(__name__)
+
+
+class FeedbackUnavailable(ValueError):
+    pass
 
 
 class FeedbackJobs:
@@ -19,9 +25,11 @@ class FeedbackJobs:
 
     def start(self) -> None:
         with self.workspace.connect(write=True) as db:
-            db.execute(
+            requeued = db.execute(
                 "UPDATE feedback_jobs SET status='pending' WHERE status='running'"
-            )
+            ).rowcount
+        if requeued:
+            logger.info("feedback.requeued", jobs=requeued)
         self.thread.start()
 
     def close(self) -> None:
@@ -29,6 +37,7 @@ class FeedbackJobs:
         self.thread.join()
 
     def _run(self) -> None:
+        failing = False
         while not self.stopped.is_set():
             try:
                 for job in self.workspace.jobs():
@@ -37,41 +46,54 @@ class FeedbackJobs:
                     if job.status == "pending":
                         self.process(job)
             except Exception:
-                logger.exception("feedback.check_failed")
+                if not failing:
+                    logger.exception("feedback.check_failed")
+                    failing = True
+            else:
+                if failing:
+                    logger.info("feedback.check_recovered")
+                    failing = False
             self.stopped.wait(0.5)
 
     def process(self, job: FeedbackJob) -> None:
-        workspace = self.workspace
-        key = (job.assignment_id, job.submission_id, job.generation)
-        with workspace.connect(write=True) as db:
-            changed = db.execute(
-                "UPDATE feedback_jobs SET status='running' WHERE assignment_id=? AND submission_id=? AND generation=? AND status='pending'",
-                key,
-            ).rowcount
-        if not changed:
-            return
-        artifact = None
-        error = ""
-        try:
-            artifact = (
-                self._render(job).relative_to(workspace.root / ".opengrader").as_posix()
-            )
-        except Exception as exc:
-            logger.exception("feedback.failed")
-            error = str(exc)
-        with workspace.connect(write=True) as db:
-            # An older render cannot mark a newer grade's feedback ready.
-            db.execute(
-                "UPDATE feedback_jobs SET status=?, error=?, artifact=? WHERE assignment_id=? AND submission_id=? AND generation=?",
-                ("failed" if error else "ready", error, artifact, *key),
-            )
-            record_event(
-                db,
-                job.assignment_id,
-                kind="feedback",
-                submission_id=job.submission_id,
-                revision=str(job.generation),
-            )
+        with structlog.contextvars.bound_contextvars(
+            assignment_id=job.assignment_id, submission_id=job.submission_id, generation=job.generation
+        ):
+            workspace = self.workspace
+            key = (job.assignment_id, job.submission_id, job.generation)
+            with workspace.connect(write=True) as db:
+                changed = db.execute(
+                    "UPDATE feedback_jobs SET status='running' WHERE assignment_id=? AND submission_id=? AND generation=? AND status='pending'",
+                    key,
+                ).rowcount
+            if not changed:
+                return
+            started = perf_counter()
+            artifact = None
+            error = ""
+            try:
+                artifact = (
+                    self._render(job).relative_to(workspace.root / ".opengrader").as_posix()
+                )
+            except FeedbackUnavailable as exc:
+                logger.debug("feedback.unavailable", reason="no_source_pdf")
+                error = str(exc)
+            except Exception as exc:
+                logger.exception("feedback.failed", duration_ms=logs.elapsed_ms(started))
+                error = str(exc)
+            with workspace.connect(write=True) as db:
+                # An older render cannot mark a newer grade's feedback ready.
+                db.execute(
+                    "UPDATE feedback_jobs SET status=?, error=?, artifact=? WHERE assignment_id=? AND submission_id=? AND generation=?",
+                    ("failed" if error else "ready", error, artifact, *key),
+                )
+                record_event(
+                    db,
+                    job.assignment_id,
+                    kind="feedback",
+                    submission_id=job.submission_id,
+                    revision=str(job.generation),
+                )
 
     def _render(self, job: FeedbackJob) -> Path:
         from opengrader.core.pdf.annotations import (
@@ -83,7 +105,7 @@ class FeedbackJobs:
 
         document = self.workspace.document(job.assignment_id, job.submission_id)
         if not document.source_pdf:
-            raise ValueError("This submission has no source PDF. Its grade is saved.")
+            raise FeedbackUnavailable("This submission has no source PDF. Its grade is saved.")
         source = self.workspace.asset(document.source_pdf)
         output = (
             self.workspace.root

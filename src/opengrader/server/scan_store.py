@@ -4,11 +4,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import structlog
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 from fastapi import HTTPException
 
 from opengrader.server.scan_models import MAX_SCAN_PAGES, ScanBatch
+
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class ScanStore:
@@ -78,7 +82,12 @@ class ScanStore:
                 continue
             for batch in self.list(assignment.name):
                 if batch.status in ("checking", "queued", "processing"):
+                    previous_status = batch.status
                     batch.status = "failed"
                     batch.message = "Processing was interrupted. Retry to continue; completed submissions are preserved."
                     batch.revision += 1
                     self.save(assignment.name, batch)
+                    logger.warning(
+                        "scan.recovered", assignment_id=assignment.name,
+                        batch_id=batch.id, previous_status=previous_status,
+                    )

@@ -5,6 +5,7 @@ from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, Thre
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from threading import RLock
+from time import perf_counter
 from typing import Callable
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from opengrader.core.submissions.splitter import plan_submission_ranges, write_s
 from opengrader.server.scan_models import PageSelection, ScanBatch, ScanFinding, ScanGroup
 from opengrader.core.submissions.intake import SubmissionIntake
 from opengrader.server.scan_store import ScanStore
+from opengrader.server import logs
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -49,7 +51,9 @@ class ScanJobs:
         with self.lock:
             self.check_running(assignment_id)
             futures = self.futures.setdefault(assignment_id, set())
-            future = self.executor.submit(self._run, assignment_id, batch_id, analyze)
+            queued_at = perf_counter()
+            logger.info("scan.queued", assignment_id=assignment_id, batch_id=batch_id, step="analyze" if analyze else "process")
+            future = self.executor.submit(self._run, assignment_id, batch_id, analyze, queued_at)
             futures.add(future)
             def finished(completed: Future[None]) -> None:
                 with self.lock:
@@ -83,30 +87,45 @@ class ScanJobs:
             batch.revision += 1
             self.store.save(assignment_id, batch)
 
-    def _run(self, assignment_id: str, batch_id: str, analyze: bool) -> None:
-        batch: ScanBatch | None = None
-        try:
-            with self.lock:
-                self.check_running(assignment_id)
-                batch = self.store.get(assignment_id, batch_id)
-            if analyze:
-                self._analyze(assignment_id, batch)
-            else:
-                self._process(assignment_id, batch)
-        except ScanCancelled:
-            return
-        except (Exception, SystemExit) as exc:
-            if isinstance(exc, BrokenProcessPool):
-                self.processing.shutdown(wait=False)
-                self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
-            logger.exception("scan.failed", assignment_id=assignment_id, batch_id=batch_id)
-            if batch is None:
+    def _restart_processing(self) -> None:
+        self.processing.shutdown(wait=False)
+        self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+        logger.warning("scan.worker_restarted")
+
+    def _run(self, assignment_id: str, batch_id: str, analyze: bool, queued_at: float) -> None:
+        with structlog.contextvars.bound_contextvars(
+            assignment_id=assignment_id, batch_id=batch_id, step="analyze" if analyze else "process"
+        ):
+            started = perf_counter()
+            logger.info("scan.started", waited_ms=logs.elapsed_ms(queued_at))
+            batch: ScanBatch | None = None
+            try:
+                with self.lock:
+                    self.check_running(assignment_id)
+                    batch = self.store.get(assignment_id, batch_id)
+                if analyze:
+                    self._analyze(assignment_id, batch)
+                else:
+                    self._process(assignment_id, batch)
+            except ScanCancelled:
+                logger.info("scan.cancelled")
                 return
-            batch.status = "failed"
-            batch.message = "Could not finish this scan. Retry to continue, or check the server log."
-            with self.lock:
-                if assignment_id not in self.stopping:
-                    self.save(assignment_id, batch)
+            except (Exception, SystemExit) as exc:
+                if isinstance(exc, BrokenProcessPool):
+                    self._restart_processing()
+                logger.exception("scan.failed", duration_ms=logs.elapsed_ms(started))
+                if batch is None:
+                    return
+                batch.status = "failed"
+                batch.message = "Could not finish this scan. Retry to continue, or check the server log."
+                with self.lock:
+                    if assignment_id not in self.stopping:
+                        self.save(assignment_id, batch)
+                return
+            logger.info(
+                "scan.finished", status=batch.status, groups=len(batch.groups),
+                failed=sum(bool(group.error) for group in batch.groups), duration_ms=logs.elapsed_ms(started),
+            )
 
     def _analyze(self, assignment_id: str, batch: ScanBatch) -> None:
         source = self.store.directory(assignment_id, batch.id) / "original.pdf"
@@ -205,10 +224,13 @@ class ScanJobs:
                 raise
             except (Exception, SystemExit) as exc:
                 if isinstance(exc, BrokenProcessPool):
-                    self.processing.shutdown(wait=False)
-                    self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
-                logger.exception("scan.submission_failed", assignment_id=assignment_id, batch_id=batch.id, index=index)
-                group.error = str(exc) if isinstance(exc, ValueError) else "Could not read this submission. Check its pages and retry."
+                    self._restart_processing()
+                if isinstance(exc, ValueError):
+                    logger.warning("scan.submission_failed", index=index, exc_info=exc)
+                    group.error = str(exc)
+                else:
+                    logger.exception("scan.submission_failed", index=index)
+                    group.error = "Could not read this submission. Check its pages and retry."
             self.save(assignment_id, batch)
         failed = sum(bool(group.error) for group in batch.groups)
         batch.status = "failed" if failed else "ready"

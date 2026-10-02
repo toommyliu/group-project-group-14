@@ -10,7 +10,6 @@ import shutil
 from threading import RLock
 
 import structlog
-
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -211,6 +210,7 @@ def create_app(
             if process_jobs:
                 await run_in_threadpool(jobs.close)
             workspace.on_commit = None
+            logger.info("server.stopped")
 
     app = FastAPI(title="Opengrader workspace", lifespan=lifespan)
     app.add_middleware(FolderSessionGuard, root=root)
@@ -260,9 +260,20 @@ def create_app(
         with folder_lock(root):
             assignment_id = require_folder_session()
             try:
-                return sync_folder(workspace, assignment_id)
+                result = sync_folder(workspace, assignment_id)
             except WriteBackError as exc:
+                logger.info("folder.sync_failed", assignment_id=assignment_id, reason=str(exc))
                 raise HTTPException(409, str(exc)) from exc
+            log = (
+                logger.info
+                if any((result.imported, result.updated, result.written, result.failed))
+                else logger.debug
+            )
+            log(
+                "folder.synced", assignment_id=assignment_id, imported=result.imported,
+                updated=result.updated, written=result.written, failed=result.failed,
+            )
+            return result
 
     @api.post("/folder-session/convert")
     def convert_folder_session() -> WorkspaceInfo:
@@ -270,12 +281,13 @@ def create_app(
             assignment_id = require_folder_session()
             try:
                 sync_folder(workspace, assignment_id)
-            except WriteBackError:
-                pass  # a moved folder: the grades are all in the workspace anyway
+            except WriteBackError as exc:
+                logger.info("folder.sync_failed", assignment_id=assignment_id, reason=str(exc))
             end_folder_session(root)
             # Other open tabs reload the assignment and see the new mode.
             with workspace.connect(write=True) as db:
                 record_event(db, assignment_id, kind="assignment")
+            logger.info("folder.converted", assignment_id=assignment_id)
         return get_workspace()
 
     @api.post("/shutdown", status_code=204, include_in_schema=False)
@@ -285,6 +297,7 @@ def create_app(
         if not secrets.compare_digest(given, expected):
             raise HTTPException(404)
         callback = getattr(app.state, "shutdown", None)
+        logger.info("server.shutdown_requested")
         if callback is not None:
             callback()
         return Response(status_code=204)
@@ -304,6 +317,7 @@ def create_app(
         result = publish_pipeline(workspace, assignment_id, output)
         with registry_lock:
             extraction_source(result.assignment.id)
+        logger.info("submissions.imported", assignment_id=result.assignment.id, submissions=result.submission_count)
         return result
 
     @api.post("/drafts/preview")
@@ -324,6 +338,7 @@ def create_app(
         with registry_lock:
             assignment = workspace.create_assignment(request.qa_markdown)
             extraction_source(assignment.id)
+            logger.info("assignment.created", assignment_id=assignment.id)
             return assignment
 
     @api.put("/assignments/{assignment_id}")
@@ -339,6 +354,7 @@ def create_app(
                 assignment_id, request.qa_markdown, request.expected_qa_markdown
             )
             extraction_source(assignment_id)
+            logger.info("assignment.updated", assignment_id=assignment_id)
             return assignment
 
     @api.delete("/assignments/{assignment_id}", status_code=204)
@@ -353,6 +369,7 @@ def create_app(
             await run_in_threadpool(
                 shutil.rmtree, assignments_dir / assignment_id, True
             )
+            logger.info("assignment.deleted", assignment_id=assignment_id)
         finally:
             with registry_lock:
                 scan_jobs.stopping.discard(assignment_id)
@@ -432,13 +449,14 @@ def create_app(
             session = load_folder_session(root)
             if session is None or session.assignment_id != assignment_id:
                 return result
-            return result.model_copy(
-                update={
-                    "folder": write_through(
-                        workspace, assignment_id, submission_id, question_id
-                    )
-                }
-            )
+            folder = write_through(workspace, assignment_id, submission_id, question_id)
+            if folder.status == "failed":
+                logger.warning(
+                    "folder.write_failed", assignment_id=assignment_id,
+                    submission_id=submission_id, question_id=question_id,
+                    reason=folder.message,
+                )
+            return result.model_copy(update={"folder": folder})
 
     @api.get("/assets/{name}")
     def asset(name: str) -> FileResponse:

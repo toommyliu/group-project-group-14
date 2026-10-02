@@ -5,7 +5,6 @@ from threading import Lock
 from typing import Annotated, Literal, Mapping
 
 import structlog
-
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -17,7 +16,14 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.settings import ServerSettings, on_domain
 
+logger = structlog.stdlib.get_logger(__name__)
+
 Role = Literal["instructor", "grader"]
+_OAUTH_ERRORS = frozenset({
+    "access_denied", "invalid_request", "invalid_client", "invalid_grant", "invalid_scope",
+    "unauthorized_client", "unsupported_grant_type", "unsupported_response_type",
+    "server_error", "temporarily_unavailable", "mismatching_state",
+})
 
 
 class AuthUser(BaseModel):
@@ -127,6 +133,7 @@ class Access:
         with self._lock:
             self._workspace.add_grader(email)
             self.graders |= {email}
+            logger.info("people.grader_added", grader=email)
 
     def remove_grader(self, email: str) -> None:
         email = email.strip().lower()
@@ -135,6 +142,7 @@ class Access:
         with self._lock:
             self._workspace.remove_grader(email)
             self.graders -= {email}
+            logger.info("people.grader_removed", grader=email)
 
 
 class RemoteAuthGuard:
@@ -148,6 +156,7 @@ class RemoteAuthGuard:
             return
         connection = HTTPConnection(scope)
         if is_untrusted_browser_request(connection):
+            logger.debug("auth.denied", reason="cross_site")
             await JSONResponse(
                 {"detail": f"Open {connection.base_url} in a new browser tab, then try again."},
                 status_code=403,
@@ -157,6 +166,7 @@ class RemoteAuthGuard:
         if self.access is not None:
             user = signed_in(connection)
             if user is not None and self.access.role(user.email) is None:
+                logger.info("auth.revoked", user=user.email)
                 connection.session.clear()
                 user = None
             if user is not None:
@@ -164,16 +174,19 @@ class RemoteAuthGuard:
         if is_local(connection) or scope["path"].startswith("/auth/") or user:
             await self.app(scope, receive, send)
         elif self.access is None:
+            logger.debug("auth.denied", reason="remote_disabled")
             await JSONResponse(
                 {"detail": "Remote access is disabled for this workspace."},
                 status_code=403,
             )(scope, receive, send)
         elif scope["path"] == "/api" or scope["path"].startswith("/api/"):
+            logger.debug("auth.denied", reason="sign_in_required")
             await JSONResponse(
                 {"detail": "Sign in with Google to access this workspace."},
                 status_code=401,
             )(scope, receive, send)
         else:
+            logger.debug("auth.denied", reason="sign_in_required")
             await RedirectResponse("/auth/login", status_code=303)(scope, receive, send)
 
 
@@ -264,24 +277,31 @@ def add_auth_routes(
         try:
             token = await oauth.google.authorize_access_token(request)  # type: ignore[union-attr]
         except OAuthError as exc:
+            error = exc.error if exc.error in _OAUTH_ERRORS else "oauth_error"
+            logger.info("auth.failed", error=error)
             raise HTTPException(401, "Google sign-in was not completed.") from exc
         request.session.clear()
         try:
             user = user_from_claims(token.get("userinfo") or {}, settings.google_domain)
-            if access.role(user.email) is None:
-                raise ValueError(
-                    f"{user.email} hasn't been added yet. "
-                    "Ask an instructor to add you."
-                )
         except ValueError as exc:
+            logger.info("auth.refused", reason="account_not_allowed")
             return refused(str(exc))
+        role = access.role(user.email)
+        if role is None:
+            logger.info("auth.refused", reason="not_added")
+            return refused(
+                f"{user.email} hasn't been added yet. "
+                "Ask an instructor to add you."
+            )
         request.session["user"] = user.model_dump()
+        logger.info("auth.signed_in", user=user.email, role=role)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/auth/logout", status_code=204)
     def logout(request: Request) -> Response:
         if access is not None:
             request.session.clear()
+            logger.info("auth.signed_out")
         return Response(status_code=204)
 
     def managed_access(status: Viewer) -> Access:

@@ -585,3 +585,21 @@ def test_a_service_that_dies_silently_does_not_blame_an_earlier_run(
         client.ensure_service(root)
 
     assert "last week" not in str(failure.value)
+
+
+def test_feedback_without_a_pdf_fails_quietly_and_keeps_the_saved_grade(managed):
+    from structlog.contextvars import get_contextvars, merge_contextvars
+    from structlog.testing import capture_logs
+
+    workspace, assignment, _ = managed
+    workspace.save_grade(assignment, 1, "q1", command(workspace.answer(assignment, 1, "q1")))
+    with capture_logs(processors=[merge_contextvars]) as events:
+        FeedbackJobs(workspace).process(workspace.jobs()[0])
+    assert events == [{
+        "event": "feedback.unavailable", "log_level": "debug", "reason": "no_source_pdf",
+        "assignment_id": assignment, "submission_id": 1, "generation": 1,
+    }]
+    assert workspace.jobs()[0].status == "failed"
+    assert workspace.jobs()[0].error == "This submission has no source PDF. Its grade is saved."
+    assert workspace.answer(assignment, 1, "q1").analysis == "Saved feedback"
+    assert "assignment_id" not in get_contextvars()

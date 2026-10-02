@@ -219,3 +219,75 @@ def test_rejected_requests_log_parse_and_value_errors_at_debug(tmp_path, monkeyp
     assert parse == {"event": "request.rejected", "error": "QAParseError", "log_level": "debug"}
     assert isinstance(value.pop("exc_info"), ValueError)
     assert value == {"event": "request.rejected", "error": "ValueError", "log_level": "debug"}
+
+
+def test_feedback_checks_log_once_per_outage_and_each_recovery(tmp_path, monkeypatch):
+    from structlog.testing import capture_logs
+
+    from opengrader.core.workspace.store import Workspace
+    from opengrader.server.workspace.jobs import FeedbackJobs
+
+    workspace = Workspace.create(tmp_path)
+    jobs = FeedbackJobs(workspace)
+    outcomes = iter([False, False, True, False, True])
+    attempts = 0
+
+    def check():
+        nonlocal attempts
+        attempts += 1
+        healthy = next(outcomes)
+        if attempts == 5:
+            jobs.stopped.set()
+        if not healthy:
+            raise RuntimeError("database unavailable")
+        return []
+
+    monkeypatch.setattr(workspace, "jobs", check)
+    monkeypatch.setattr(jobs.stopped, "wait", lambda timeout: None)
+    with capture_logs() as events:
+        jobs._run()
+    assert attempts == 5
+    assert events == [
+        {"event": "feedback.check_failed", "log_level": "error", "exc_info": True},
+        {"event": "feedback.check_recovered", "log_level": "info"},
+        {"event": "feedback.check_failed", "log_level": "error", "exc_info": True},
+        {"event": "feedback.check_recovered", "log_level": "info"},
+    ]
+
+
+def test_foreground_sigterm_logs_start_and_stop(tmp_path):
+    import time
+
+    from opengrader.server.workspace.client import running_service
+
+    process = subprocess.Popen(
+        [sys.executable, "-m", "opengrader.cli.serve", "--port", "0", "--workspace", str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        connection = None
+        while time.monotonic() < deadline and process.poll() is None:
+            connection = running_service(tmp_path)
+            if connection is not None:
+                break
+            time.sleep(0.1)
+        assert connection is not None
+        process.terminate()
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+    events = [
+        json.loads(line)
+        for line in (tmp_path / ".opengrader/logs/server.jsonl").read_text().splitlines()
+    ]
+    assert [event["event"] for event in events] == ["server.started", "server.stopped"]
+    assert events[0]["mode"] == "local"
+    assert events[1]["level"] == "info"
+    assert "server.started" in stderr
+    assert "server.stopped" in stderr
+    assert stdout == f"Workspace: {tmp_path}\nOpen {connection.url}\n"

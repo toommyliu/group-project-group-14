@@ -71,7 +71,6 @@ def serve(root: Path, *, port: int = 0, detached: bool) -> None:
                 server.run(sockets=[listener])
             finally:
                 record.unlink(missing_ok=True)
-                logger.info("server.stopped")
 
 
 @click.command(help=__doc__)

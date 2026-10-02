@@ -239,14 +239,22 @@ def test_a_removed_file_is_reported_not_fatal(session) -> None:
 
 
 def test_a_question_the_file_lacks_is_reported(session) -> None:
+    from structlog.testing import capture_logs
+
     path = session["files"][0]
     before, remainder = path.read_text().split("- q5a:", 1)
     _, after = remainder.split("- q5b:", 1)
     path.write_text(before + "- q5b:" + after)
-    response = _save(session, "q5a", points_awarded=1)
+    with capture_logs() as events:
+        response = _save(session, "q5a", points_awarded=1)
 
     assert response.json()["folder"]["status"] == "failed"
     assert "q5a" in response.json()["folder"]["message"]
+    assert events == [{
+        "event": "folder.write_failed", "log_level": "warning",
+        "assignment_id": session["aid"], "submission_id": session["sids"][0], "question_id": "q5a",
+        "reason": f"{path.name} has no q5a, so this grade is saved in the browser session only.",
+    }]
 
 
 def test_concurrent_saves_to_one_file_all_reach_it(session) -> None:

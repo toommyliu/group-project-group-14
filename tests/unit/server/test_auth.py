@@ -169,3 +169,19 @@ def test_google_claims_must_be_verified_and_from_sjsu():
             pass
         else:
             raise AssertionError("invalid Google claims should be rejected")
+
+
+@pytest.mark.parametrize("error, expected", [("access_denied", "access_denied"), ("private-student-answer", "oauth_error")])
+def test_oauth_failure_logs_only_known_error_codes(tmp_path, error, expected):
+    from structlog.testing import capture_logs
+
+    settings = ServerSettings(
+        _env_file=None, auth_enabled=True, google_client_id="client-id",
+        google_client_secret="client-secret", session_secret="session-secret",
+    )
+    with TestClient(create_app(tmp_path, settings=settings, process_jobs=False)) as client:
+        with capture_logs() as events:
+            response = client.get("/auth/callback", params={"error": error})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Google sign-in was not completed."}
+    assert events == [{"event": "auth.failed", "log_level": "info", "error": expected}]

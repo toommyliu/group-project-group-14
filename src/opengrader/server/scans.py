@@ -82,7 +82,9 @@ def add_scan_routes(
                 with lock:
                     require_assignment(assignment_id)
                     return store.accept(assignment_id, path, filename, digest.hexdigest())
-            return await run_in_threadpool(accept)
+            batch = await run_in_threadpool(accept)
+            logger.info("scan.uploaded", assignment_id=assignment_id, batch_id=batch.id, pages=batch.page_count, bytes=size)
+            return batch
         finally:
             path.unlink(missing_ok=True)
 
@@ -205,6 +207,7 @@ def add_scan_routes(
             shutil.rmtree(deleted)
         except OSError:
             logger.warning("scan.cleanup_failed", directory=str(deleted), exc_info=True)
+        logger.info("scan.deleted", assignment_id=assignment_id, batch_id=batch_id)
         return Response(status_code=204)
 
     @api.post("/assignments/{assignment_id}/scans/{batch_id}/restore")
