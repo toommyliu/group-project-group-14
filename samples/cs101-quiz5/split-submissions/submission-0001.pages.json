@@ -1,0 +1,12 @@
+{
+ "pages": [
+  {
+   "group": "g01",
+   "page_number": 1
+  },
+  {
+   "group": "g02",
+   "page_number": 2
+  }
+ ]
+}
