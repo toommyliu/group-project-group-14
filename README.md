@@ -111,7 +111,7 @@ Local grading with Ollama needs none of them.
 
 ### Desktop App (Optional)
 
-To create a double-clickable **Opengrader** icon on your Desktop, run once from the checkout:
+To create a double-clickable **Opengrader** icon on your Desktop, double-click **Install Opengrader (Mac)** or **Install Opengrader (Windows)** in the checkout, or run once from it:
 
 ```bash
 bash packaging/install.sh                                        # macOS / Linux

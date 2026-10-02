@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -8,7 +11,17 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, RichLog, Static
 
 from opengrader.core import app_config
-from opengrader.core.environment import EnvironmentReport, build_environment_report
+from opengrader.core.environment import (
+    TESSERACT_CHECK_NAME,
+    EnvironmentReport,
+    build_environment_report,
+)
+from opengrader.core.tesseract_install import (
+    HOMEBREW_URL,
+    TesseractInstallError,
+    find_homebrew,
+    install_tesseract,
+)
 from opengrader.tui.formatting import (
     format_environment_check,
     format_environment_verdict,
@@ -80,6 +93,8 @@ class DoctorScreen(ModalScreen[None]):
         self._vision_model = vision_model
         self._text_model = text_model
         self._ollama_host = ollama_host
+        self._brew: str | None = None
+        self._install_process: subprocess.Popen[str] | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="doctor-dialog") as dialog:
@@ -88,7 +103,9 @@ class DoctorScreen(ModalScreen[None]):
                 "Checks everything Opengrader needs that Python cannot install "
                 "for itself — the scanner's text recognition, the optional local "
                 "AI, and whether this terminal can show answer crops — and names "
-                "the exact command to fix anything missing. Nothing is changed.",
+                "the exact command to fix anything missing. Nothing is changed "
+                "unless you press Install Tesseract, which is offered on a Mac "
+                "when Tesseract is missing and Homebrew is there to install it.",
                 id="doctor-hint",
             )
             yield Checkbox(
@@ -106,6 +123,14 @@ class DoctorScreen(ModalScreen[None]):
             log.border_title = "Result"
             yield log
             with Horizontal(id="doctor-buttons"):
+                install = Button(
+                    "Install Tesseract",
+                    variant="success",
+                    id="doctor-install-tesseract",
+                    compact=True,
+                )
+                install.display = False
+                yield install
                 yield Button(
                     "Run checks", variant="primary", id="doctor-run", compact=True
                 )
@@ -138,17 +163,35 @@ class DoctorScreen(ModalScreen[None]):
             ai=app_config.resolve(),
             time_ai=False,
         )
-        self.app.call_from_thread(self._show, report)
+        self.app.call_from_thread(self._show, report, find_homebrew())
 
-    def _show(self, report: EnvironmentReport) -> None:
+    def _show(self, report: EnvironmentReport, brew: str | None = None) -> None:
         if not self.is_attached:
             return
         for button in self.query(Button):
             button.disabled = False
+        tesseract_missing = any(
+            check.name == TESSERACT_CHECK_NAME and check.status == "broken"
+            for check in report.checks
+        )
+        self._brew = brew if tesseract_missing else None
+        self.query_one("#doctor-install-tesseract", Button).display = bool(self._brew)
         log = self.query_one("#doctor-log", RichLog)
         log.clear()
         for check in report.checks:
             log.write(format_environment_check(check))
+            if check.name == TESSERACT_CHECK_NAME and check.status == "broken":
+                if self._brew:
+                    log.write(
+                        "   Homebrew is installed, so Opengrader can do this for "
+                        "you: press Install Tesseract below."
+                    )
+                elif sys.platform == "darwin":
+                    log.write(
+                        "   Homebrew, the tool that installs Tesseract, is not on "
+                        f"this Mac. Install it from {HOMEBREW_URL}, then run the "
+                        "checks again and an Install Tesseract button appears here."
+                    )
         log.write("")
         log.write(format_environment_verdict(report))
 
@@ -157,6 +200,78 @@ class DoctorScreen(ModalScreen[None]):
                 f"{len(report.broken)} problem(s) need fixing — see the result pane.",
                 severity="error",
             )
+
+    @on(Button.Pressed, "#doctor-install-tesseract")
+    def _on_install_tesseract(self, event: Button.Pressed) -> None:
+        event.stop()
+        brew = self._brew
+        if brew is None:
+            return
+        for button in self.query(Button):
+            button.disabled = True
+        log = self.query_one("#doctor-log", RichLog)
+        log.clear()
+        log.auto_scroll = True
+        log.write(
+            "Installing Tesseract with Homebrew. This needs the internet and can "
+            "take a few minutes; closing this check stops it."
+        )
+        log.write("")
+        self.run_worker(lambda: self._install(brew), thread=True, exclusive=True)
+
+    def _install(self, brew: str) -> None:
+        try:
+            install_tesseract(
+                brew,
+                on_line=self._relay_line,
+                on_start=self._remember_install,
+            )
+        except TesseractInstallError as exc:
+            error: TesseractInstallError | None = exc
+        else:
+            error = None
+        self._install_process = None
+        # Closed mid-install: the screen is gone and nobody is left to tell.
+        if not self.is_attached:
+            return
+        self.app.call_from_thread(self._install_finished, error)
+
+    def _remember_install(self, process: subprocess.Popen[str]) -> None:
+        self._install_process = process
+
+    def _relay_line(self, line: str) -> None:
+        if self.is_attached:
+            self.app.call_from_thread(self._log_line, line)
+
+    def _log_line(self, line: str) -> None:
+        if self.is_attached:
+            self.query_one("#doctor-log", RichLog).write(line)
+
+    def _install_finished(self, error: TesseractInstallError | None) -> None:
+        if not self.is_attached:
+            return
+        log = self.query_one("#doctor-log", RichLog)
+        log.auto_scroll = False
+        if error is None:
+            self.app.notify("Tesseract installed — checking again.")
+            self._start_run()
+            return
+        for button in self.query(Button):
+            button.disabled = False
+        log.write("")
+        log.write(f"Tesseract was not installed. {error}")
+        log.write(
+            "Press Install Tesseract to try again, or run "
+            "'brew install tesseract' in a terminal to see the whole output."
+        )
+        self.app.notify("Tesseract was not installed.", severity="error")
+
+    def on_unmount(self) -> None:
+        # A worker thread cannot be cancelled; ending the install is what
+        # lets it, and the app, finish.
+        process = self._install_process
+        if process is not None and process.poll() is None:
+            process.terminate()
 
     @on(Button.Pressed, "#doctor-close")
     def _on_close(self, event: Button.Pressed) -> None:

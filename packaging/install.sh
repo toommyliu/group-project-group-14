@@ -93,6 +93,9 @@ if [[ "$OS" == "Darwin" ]]; then
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
   install -m 755 "$SRC/packaging/Opengrader.command" "$ROOT/Opengrader.command"
+  # A checkout unzipped from a browser download is quarantined, and install
+  # copies that mark: the icon would then be stopped by Gatekeeper.
+  xattr -d com.apple.quarantine "$ROOT/Opengrader.command" "$ROOT/bootstrap.sh" 2>/dev/null || true
 
   cat >"$APP/Contents/MacOS/opengrader" <<EOF
 #!/bin/bash

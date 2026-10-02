@@ -999,7 +999,8 @@ class SetupScreen(Vertical):
                         "Run it first on a new computer, and any time something "
                         "misbehaves — empty answers after extraction, answer "
                         "images showing as coloured blocks, or auto-grading "
-                        "refusing to start. It changes nothing.",
+                        "refusing to start. It changes nothing unless you press "
+                        "its Install Tesseract button (Mac with Homebrew).",
                         classes="card-hint",
                     )
                     yield self._card_actions(

@@ -699,7 +699,9 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "display answer crops. Run it on a new machine, and any time something "
         "misbehaves for no obvious reason. Add --smoke to build a template PDF "
         "end to end. Read-only. CLI: doctor. Also in Tools (F3, classic) as "
-        "'Check this computer'.",
+        "'Check this computer', which on a Mac with Homebrew adds an Install "
+        "Tesseract button when Tesseract is missing — the one thing there "
+        "that changes this computer, and only when pressed.",
     ),
     (
         "AI providers",

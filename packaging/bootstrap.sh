@@ -11,7 +11,8 @@ else
   exit 1
 fi
 
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+# Homebrew last: only a fallback for a PATH that does not already have it.
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH:/opt/homebrew/bin:/usr/local/bin"
 
 LOG="${TMPDIR:-/tmp}/opengrader-bootstrap.log"
 : >"$LOG"

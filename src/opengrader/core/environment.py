@@ -20,6 +20,7 @@ _STATUS_ORDER: dict[CheckStatus, int] = {
 }
 
 MINIMUM_TESSERACT_VERSION = (4, 0)
+TESSERACT_CHECK_NAME = "Tesseract OCR"
 
 
 @dataclass(frozen=True)
@@ -111,7 +112,7 @@ def evaluate_tesseract(probe: ToolProbe) -> EnvironmentCheck:
     fix = install_hint(brew="tesseract", apt="tesseract-ocr", winget="UB-Mannheim.TesseractOCR")
     if probe.error is not None and not probe.found:
         return EnvironmentCheck(
-            name="Tesseract OCR",
+            name=TESSERACT_CHECK_NAME,
             status="unknown",
             detail=f"could not be checked: {probe.error}",
             impact="Scan extraction, boundary detection and the scan pre-flight may not work.",
@@ -119,7 +120,7 @@ def evaluate_tesseract(probe: ToolProbe) -> EnvironmentCheck:
         )
     if not probe.found:
         return EnvironmentCheck(
-            name="Tesseract OCR",
+            name=TESSERACT_CHECK_NAME,
             status="broken",
             detail="not installed",
             impact="Scanned exams extract to empty answers; scan pre-flight cannot check rotation.",
@@ -129,14 +130,14 @@ def evaluate_tesseract(probe: ToolProbe) -> EnvironmentCheck:
     if probe.version is not None and probe.version[:2] < MINIMUM_TESSERACT_VERSION:
         minimum = ".".join(str(part) for part in MINIMUM_TESSERACT_VERSION)
         return EnvironmentCheck(
-            name="Tesseract OCR",
+            name=TESSERACT_CHECK_NAME,
             status="degraded",
             detail=f"{probe.version_text}{where} — older than {minimum}",
             impact="Page-orientation detection (the scan pre-flight's rotation check) needs 4.0+.",
             fix=fix,
         )
     return EnvironmentCheck(
-        name="Tesseract OCR",
+        name=TESSERACT_CHECK_NAME,
         status="ready",
         detail=f"{probe.version_text or 'installed'}{where}",
     )

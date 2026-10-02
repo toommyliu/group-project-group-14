@@ -40,7 +40,10 @@ dependencies = [
   "itsdangerous>=2.2,<3",
   "pydantic-settings>=2.6,<3",
   "rapidocr>=3.9,<4",
-  "onnxruntime>=1.22,<2",
+  # onnxruntime stopped shipping Intel-Mac wheels after 1.23, and has no
+  # source distribution to build from instead.
+  "onnxruntime>=1.22,<2; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+  "onnxruntime>=1.22,<1.24; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]

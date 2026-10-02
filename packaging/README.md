@@ -21,7 +21,27 @@ account only.
 computer (for example, downloaded with `git clone` — see the main
 [README](../README.md#installation)).
 
-Open a terminal in that folder and run the one line for your system:
+**Without a terminal (macOS and Windows):** open the Opengrader folder and
+double-click the installer for your system:
+
+| System | Double-click |
+| --- | --- |
+| macOS | **Install Opengrader (Mac)** |
+| Windows | **Install Opengrader (Windows)** — extract the ZIP first; it can't run from inside it |
+
+Your computer will probably ask whether you trust it, because it was
+downloaded and isn't signed:
+
+- **macOS:** if it says the file can't be opened, go to **System Settings →
+  Privacy & Security**, scroll down, and press **Open Anyway**. (On older
+  versions of macOS: right-click the file and choose **Open**.) macOS may also
+  ask to let Terminal use your Desktop folder — allow it, that's where the icon
+  goes.
+- **Windows:** if you see *Windows protected your PC*, press **More info**,
+  then **Run anyway**.
+
+**With a terminal (any system):** open a terminal in that folder and run the
+one line for your system:
 
 | System | Run this once |
 | --- | --- |
@@ -47,7 +67,9 @@ while Opengrader gets itself ready:
    pages — automatically on Windows, and on macOS if Homebrew is installed. On Linux it asks
    before installing, because that needs your password. If it can't be
    installed, Opengrader still opens; only reading scans is unavailable until
-   you install it.
+   you install it. On a Mac you can do that from inside the app later: once
+   Homebrew is installed, **Tools → Check this computer** shows an
+   **Install Tesseract** button.
 6. **Checks for Ollama**, the program that runs the AI model that reads
    handwriting. Ollama is **not** installed for you (its models are several GB),
    so if it's missing you'll see a note with the download link:
@@ -182,7 +204,7 @@ can't find any working setup, it tells you the exact command to create one.
 | Problem | What to do |
 | --- | --- |
 | The desktop app stops on a step with an error | The window stays open and shows the last lines of its log. The full log is `opengrader-bootstrap.log` in your temporary folder (`$TMPDIR` on macOS/Linux, `%TEMP%` on Windows). |
-| "Tesseract OCR not found" | Opengrader works, but can't read scanned pages. Install Tesseract (`brew install tesseract` on macOS; your package manager on Linux), then relaunch. |
+| "Tesseract OCR not found" | Opengrader works, but can't read scanned pages. **On a Mac:** open Tools → *Check this computer*. If Homebrew is installed, press **Install Tesseract** and wait for the check to run again — no relaunch needed. If it isn't, the check says so: install Homebrew from <https://brew.sh> (it asks for your Mac password), then run the check again and the button appears. **Elsewhere:** install Tesseract with your package manager, then relaunch. |
 | "Ollama not found" | Handwriting reading is unavailable. Install Ollama from <https://ollama.com>, then relaunch. |
 | Is my computer set up correctly? | Run `opengrader doctor` (or open Tools → *Check this computer* in the app). It lists anything missing and how to fix it. |
 | Scanned answers look blocky | Your terminal can't show full images. Press **`o`** while grading to open the image in your normal image viewer, or install a terminal such as iTerm2, Ghostty or WezTerm. `opengrader tui --check-graphics` shows what was detected. |
@@ -203,6 +225,8 @@ installer again. To make the `.ico` from the PNG with Python's Pillow library:
 ### Files in this folder
 
 ```
+Install Opengrader (Mac).command     # double-click: runs packaging/install.sh
+Install Opengrader (Windows).bat     # double-click: runs packaging\install.ps1
 packaging/
 ├── install.sh            # one-time desktop-app installer (macOS, Linux)
 ├── install.ps1           # one-time desktop-app installer (Windows)
@@ -221,6 +245,15 @@ packaging/
 
 ### The desktop app
 
+0. **The double-click installers** sit at the top of the checkout, where
+   someone who unzipped a download will see them. Each only finds the folder
+   it is in and runs `install.*` from there, then waits for a key so the
+   result can be read. The `.command` must be executable **in git**
+   (`git add --chmod=+x`): a ZIP download takes its file modes from the index,
+   and a checkout on an exFAT drive reports every file as executable, which
+   hides a missing bit. `install.sh` also removes the download quarantine mark
+   from the two launchers it copies — `install(1)` carries it over, and the
+   icon would otherwise be stopped by Gatekeeper on every click.
 1. **`install.*` (run once)** copies the checkout into a per-user folder
    (`rsync`, or `tar` when rsync is missing; `robocopy` on Windows — `.git`,
    `.venv`, caches and `node_modules` excluded), records the checkout's path in

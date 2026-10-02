@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 from textual.app import App
 from textual.widgets import Button, Checkbox
 
-from opengrader.core.environment import EnvironmentCheck, EnvironmentReport
+from opengrader.core.environment import (
+    TESSERACT_CHECK_NAME,
+    EnvironmentCheck,
+    EnvironmentReport,
+)
+from opengrader.core.tesseract_install import TesseractInstallError
 from opengrader.tui.ui.screens import doctor_screen
 from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
 
@@ -40,6 +46,8 @@ def _stub_engine(monkeypatch: pytest.MonkeyPatch, report: EnvironmentReport) -> 
         return report
 
     monkeypatch.setattr(doctor_screen, "build_environment_report", fake_build)
+    # Whether this machine happens to have Homebrew must not change a test.
+    monkeypatch.setattr(doctor_screen, "find_homebrew", lambda: None)
     return recorded
 
 
@@ -164,3 +172,169 @@ def test_buttons_come_back_after_a_run(monkeypatch: pytest.MonkeyPatch) -> None:
             assert not screen.query_one("#doctor-close", Button).disabled
 
     asyncio.run(run())
+
+
+def _missing_tesseract_report() -> EnvironmentReport:
+    return EnvironmentReport(
+        checks=(
+            EnvironmentCheck(
+                name=TESSERACT_CHECK_NAME,
+                status="broken",
+                detail="not installed",
+                impact="Scanned exams extract to empty answers.",
+                fix="brew install tesseract",
+            ),
+        )
+    )
+
+
+def _log_words(screen: DoctorScreen) -> str:
+    # The log wraps long lines; rejoin them so a sentence can be asserted on.
+    lines = screen.query_one("#doctor-log").lines
+    return " ".join(" ".join(line.text for line in lines).split())
+
+
+def _install_button(screen: DoctorScreen) -> Button:
+    return screen.query_one("#doctor-install-tesseract", Button)
+
+
+def test_no_install_button_when_tesseract_is_there(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_engine(monkeypatch, _ready_report())
+    monkeypatch.setattr(doctor_screen, "find_homebrew", lambda: "/opt/homebrew/bin/brew")
+
+    async def run() -> None:
+        screen = DoctorScreen()
+        app = _Host(screen)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _settle(pilot, lambda: "Python" in _log_text(screen))
+            assert _install_button(screen).display is False
+
+    asyncio.run(run())
+
+
+def test_missing_tesseract_without_homebrew_points_at_homebrew(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_engine(monkeypatch, _missing_tesseract_report())
+    monkeypatch.setattr(doctor_screen.sys, "platform", "darwin")
+
+    async def run() -> None:
+        screen = DoctorScreen()
+        app = _Host(screen)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _settle(pilot, lambda: "Tesseract" in _log_text(screen))
+            assert _install_button(screen).display is False
+            assert "https://brew.sh" in _log_words(screen)
+
+    asyncio.run(run())
+
+
+def test_missing_tesseract_with_homebrew_installs_it_and_checks_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = _stub_engine(monkeypatch, _missing_tesseract_report())
+    monkeypatch.setattr(doctor_screen, "find_homebrew", lambda: "/opt/homebrew/bin/brew")
+    installs: list[str] = []
+
+    def fake_install(brew, *, on_line=None, on_start=None) -> None:  # noqa: ANN001
+        installs.append(brew)
+        on_line("==> Pouring tesseract")
+        # Installed: the next check finds it.
+        _stub_engine(monkeypatch, _ready_report())
+
+    monkeypatch.setattr(doctor_screen, "install_tesseract", fake_install)
+
+    async def run() -> None:
+        screen = DoctorScreen()
+        app = _Host(screen)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _settle(pilot, lambda: "Tesseract" in _log_text(screen))
+            assert _install_button(screen).display is True
+            assert "press Install Tesseract below" in _log_words(screen)
+            assert installs == []
+            assert recorded
+
+            await pilot.click("#doctor-install-tesseract")
+            await _settle(pilot, lambda: "Python" in _log_text(screen))
+
+            assert installs == ["/opt/homebrew/bin/brew"]
+            assert "Everything Opengrader needs" in _log_text(screen)
+            assert _install_button(screen).display is False
+            assert not screen.query_one("#doctor-run", Button).disabled
+
+    asyncio.run(run())
+
+
+def test_a_failed_install_shows_why_and_can_be_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_engine(monkeypatch, _missing_tesseract_report())
+    monkeypatch.setattr(doctor_screen, "find_homebrew", lambda: "/usr/local/bin/brew")
+
+    def fake_install(brew, *, on_line=None, on_start=None) -> None:  # noqa: ANN001
+        on_line("Error: no bottle available")
+        raise TesseractInstallError("`brew install tesseract` failed (exit 1).")
+
+    monkeypatch.setattr(doctor_screen, "install_tesseract", fake_install)
+
+    async def run() -> None:
+        screen = DoctorScreen()
+        app = _Host(screen)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _settle(pilot, lambda: "Tesseract" in _log_text(screen))
+            await pilot.click("#doctor-install-tesseract")
+            await _settle(pilot, lambda: "was not installed" in _log_text(screen))
+
+            text = _log_words(screen)
+            assert "Error: no bottle available" in text
+            assert "failed (exit 1)" in text
+            button = _install_button(screen)
+            assert button.display is True
+            assert not button.disabled
+
+    asyncio.run(run())
+
+
+def test_closing_the_check_stops_a_running_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_engine(monkeypatch, _missing_tesseract_report())
+    monkeypatch.setattr(doctor_screen, "find_homebrew", lambda: "/usr/local/bin/brew")
+    release = threading.Event()
+
+    class _Process:
+        terminated = False
+
+        def poll(self) -> None:
+            return None
+
+        def terminate(self) -> None:
+            self.terminated = True
+            release.set()
+
+    process = _Process()
+
+    def fake_install(brew, *, on_line=None, on_start=None) -> None:  # noqa: ANN001
+        on_start(process)
+        release.wait(timeout=10)
+        raise TesseractInstallError("stopped")
+
+    monkeypatch.setattr(doctor_screen, "install_tesseract", fake_install)
+
+    async def run() -> None:
+        screen = DoctorScreen()
+        app = _Host(screen)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await _settle(pilot, lambda: "Tesseract" in _log_text(screen))
+            await pilot.click("#doctor-install-tesseract")
+            await _settle(pilot, lambda: screen._install_process is not None)
+            await pilot.press("escape")
+            await _settle(pilot, lambda: process.terminated)
+            assert process.terminated
+
+    try:
+        asyncio.run(run())
+    finally:
+        release.set()
