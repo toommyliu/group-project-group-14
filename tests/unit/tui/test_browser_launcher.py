@@ -9,8 +9,8 @@ from textual.widgets import Checkbox, Input, Static
 
 import opengrader.server.workspace.client as service_client
 import opengrader.tui.main as launcher
-from opengrader.core import browser_app
-from opengrader.core.browser_app import BrowserPreferences
+from opengrader.core import browser_app, homebrew
+from opengrader.core.browser_app import BrowserPreferences, WebBuildError
 from opengrader.core.recents import load_recents
 from opengrader.server.workspace.client import ServiceConnection
 from opengrader.tui.tui import TuiApp
@@ -24,6 +24,12 @@ def _connection(root: Path) -> ServiceConnection:
     return ServiceConnection(
         root=str(root), url="http://localhost:5555", pid=1, workspace_id="w"
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_homebrew(monkeypatch):  # noqa: ANN001, ANN202
+    """No Homebrew unless a test says so — whatever this machine has."""
+    monkeypatch.setattr(homebrew, "find_homebrew", lambda: None)
 
 
 @pytest.fixture
@@ -126,9 +132,14 @@ def test_open_in_browser_imports_the_folder_and_shows_open_and_stop(
     assert hidden_after_stop
     root = str(service["root"].resolve())
     assert browser_app.load_browser_preferences().last_workspace == str(service["root"])
-    assert [(i.kind, i.path, i.assignment) for i in load_recents()] == [
-        ("workspace", root, "a1")
+    recents = load_recents()
+    assert [(i.kind, i.path, i.assignment) for i in recents] == [
+        ("workspace", root, "a1"),
+        # Classic's Start grading card lists it too, with the pair to reopen.
+        ("folder", str(Path("/tmp/course").resolve()), ""),
     ]
+    assert recents[1].qa_file == str(Path("/tmp/course/qa.md").resolve())
+    assert recents[1].submissions == str(Path("/tmp/course/submissions").resolve())
 
 
 def test_a_service_left_running_earlier_can_still_be_stopped(service) -> None:  # noqa: ANN001
@@ -231,14 +242,129 @@ def test_declining_the_build_installs_nothing(service, monkeypatch) -> None:  # 
             _fill_card(app)
             app.query_one("#browser-open-button").press()
             await pilot.pause()
-            # No pnpm: the dialog only explains, with Close.
+            # No pnpm and no Homebrew: the dialog only explains, with Close.
             assert not app.screen.query("#bb-build")
+            assert not app.screen.query("#bb-install")
             app.screen.query_one("#bb-cancel").press()
             await pilot.pause()
             await app.workers.wait_for_complete()
 
     asyncio.run(run())
     assert service["imports"] == []
+
+
+def _missing_tools_with_homebrew(monkeypatch) -> dict:  # noqa: ANN001
+    """An unbuilt app, no pnpm, and a Homebrew that can install it."""
+    done = {"installs": [], "builds": 0, "order": []}
+    monkeypatch.setattr(
+        browser_app,
+        "web_dist_state",
+        lambda source=None: "ready" if done["builds"] else "missing",
+    )
+    monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
+    monkeypatch.setattr(browser_app, "pnpm_command", lambda: None)
+    monkeypatch.setattr(homebrew, "find_homebrew", lambda: "/opt/homebrew/bin/brew")
+
+    def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
+        done["installs"].append(brew)
+        done["order"].append("install")
+        on_line("==> Pouring node")
+
+    def _build(source=None, *, on_line=None, log=None):  # noqa: ANN001, ANN202
+        done["builds"] += 1
+        done["order"].append("build")
+
+    monkeypatch.setattr(browser_app, "install_tools", _install)
+    monkeypatch.setattr(browser_app, "build_web", _build)
+    return done
+
+
+def test_missing_tools_are_installed_then_built_only_after_the_user_agrees(
+    service, monkeypatch  # noqa: ANN001
+) -> None:
+    done = _missing_tools_with_homebrew(monkeypatch)
+
+    async def run() -> tuple[bool, list[str], str]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            _fill_card(app)
+            app.query_one("#browser-open-button").press()
+            await pilot.pause()
+            asked = isinstance(app.screen, BrowserBuildScreen)
+            before_answer = list(done["order"])
+            # Installing software is never what Enter does by accident.
+            focused = app.screen.focused.id
+            app.screen.query_one("#bb-install").press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            return asked, before_answer, focused
+
+    asked, before_answer, focused = asyncio.run(run())
+
+    assert asked and before_answer == []
+    assert focused == "bb-cancel"
+    assert done["installs"] == ["/opt/homebrew/bin/brew"]
+    assert done["order"] == ["install", "build"]
+    assert service["browsed"] == ["http://localhost:5555/assignments/a1"]
+
+
+def test_declining_the_install_changes_nothing(service, monkeypatch) -> None:  # noqa: ANN001
+    done = _missing_tools_with_homebrew(monkeypatch)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            _fill_card(app)
+            app.query_one("#browser-open-button").press()
+            await pilot.pause()
+            app.screen.query_one("#bb-cancel").press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+    asyncio.run(run())
+
+    assert done["order"] == []
+    assert service["imports"] == []
+
+
+def test_a_failed_install_says_why_and_builds_nothing(
+    service, monkeypatch  # noqa: ANN001
+) -> None:
+    done = _missing_tools_with_homebrew(monkeypatch)
+
+    def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
+        raise WebBuildError("Node.js and pnpm were not installed.", "Error: no bottle")
+
+    monkeypatch.setattr(browser_app, "install_tools", _install)
+    notices: list[tuple[str, str]] = []
+
+    async def run() -> bool:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            monkeypatch.setattr(
+                app,
+                "notify",
+                lambda message, **kw: notices.append((str(message), kw.get("severity", ""))),
+            )
+            _fill_card(app)
+            app.query_one("#browser-open-button").press()
+            await pilot.pause()
+            app.screen.query_one("#bb-install").press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            return app.query_one(BrowserLauncher).busy
+
+    still_busy = asyncio.run(run())
+
+    assert not still_busy
+    assert done["builds"] == 0 and service["imports"] == []
+    assert notices and notices[-1][1] == "error"
+    assert "were not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
 
 
 def test_a_stale_build_opens_anyway_without_rebuilding(
@@ -455,3 +581,27 @@ def test_classic_opening_a_shared_workspace_folder_warns_once(tmp_path, monkeypa
 
     assert asyncio.run(run())
     assert len([n for n in notices if "written back" in n]) == 1
+
+
+def test_a_folder_opened_in_the_browser_is_on_the_start_grading_card_next_time(
+    service, monkeypatch  # noqa: ANN001
+) -> None:
+    from opengrader.tui.ui.widgets.recent_list import RecentList
+
+    _open_from_card(service, monkeypatch)
+
+    async def run() -> list[tuple[str, str]]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            assert not app.query_one("#launch-recents").has_class("hidden")
+            items = app.query_one("#launch-recent-list", RecentList).items
+            return [(item.qa_file, item.submissions) for item in items]
+
+    assert asyncio.run(run()) == [
+        (
+            str((service["root"] / "qa.md").resolve()),
+            str((service["root"] / "submissions").resolve()),
+        )
+    ]

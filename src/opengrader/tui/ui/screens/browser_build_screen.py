@@ -19,16 +19,18 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
 # What the user chose: "cancel" (dismissed/closed, do nothing), "open" (use
-# the build that's there, stale or not) or "build" (build/rebuild, then open).
-BrowserBuildChoice = Literal["cancel", "open", "build"]
+# the build that's there, stale or not), "build" (build/rebuild, then open) or
+# "install" (install Node.js and pnpm with Homebrew, then build and open).
+BrowserBuildChoice = Literal["cancel", "open", "build", "install"]
 
 
 class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
     """Dismisses with the user's choice; see `BrowserBuildChoice`.
 
-    With no pnpm (or corepack) on this machine there is nothing to build:
-    the dialog says what to install and offers only Close. This never
-    happens for the stale variant — the caller only shows it once it has
+    With no pnpm (or corepack) on this machine there is nothing to build
+    with. On a Mac that has Homebrew (`can_install`) the dialog offers to
+    install Node.js and pnpm first; otherwise it says what to install and
+    offers only Close. Neither happens for the stale variant — the caller only shows it once it has
     already confirmed pnpm is there (see `browser_launcher.open_folder`).
     """
 
@@ -71,10 +73,14 @@ class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
     }
     """
 
-    def __init__(self, *, can_build: bool, stale: bool = False) -> None:
+    def __init__(
+        self, *, can_build: bool, stale: bool = False, can_install: bool = False
+    ) -> None:
         super().__init__()
         self._can_build = can_build
         self._stale = stale
+        # Only ever acted on when there is nothing to build with.
+        self._can_install = can_install and not can_build and not stale
 
     def compose(self) -> ComposeResult:
         with Vertical(id="bb-dialog") as dialog:
@@ -105,6 +111,20 @@ class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
                     "two. Grading in this window keeps working meanwhile.",
                     classes="bb-muted",
                 )
+            elif self._can_install:
+                yield Static(
+                    "The browser app is not built on this computer yet. It is "
+                    "built once, the first time you open it, and then starts "
+                    "in seconds."
+                )
+                yield Static(
+                    "Building needs Node.js and pnpm, which are not installed. "
+                    "Homebrew is on this Mac, so Opengrader can install them "
+                    "for you (brew install node pnpm) and then build the app. "
+                    "Both need the internet and together take several "
+                    "minutes. Grading in this window keeps working meanwhile.",
+                    classes="bb-muted",
+                )
             else:
                 yield Static(
                     "The browser app is not built on this computer yet. It is "
@@ -132,18 +152,31 @@ class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
                     yield Button(
                         "Build and open", id="bb-build", variant="primary", compact=True
                     )
+                elif self._can_install:
+                    yield Button("Not now", id="bb-cancel", compact=True)
+                    yield Button(
+                        "Install and build",
+                        id="bb-install",
+                        variant="primary",
+                        compact=True,
+                    )
                 else:
                     yield Button("Close", id="bb-cancel", variant="primary", compact=True)
 
     def on_mount(self) -> None:
         # Rebuilding is the safer default for a stale copy; for a missing one
-        # it's Build when there's something to build, else the only button.
+        # it's Build when there's something to build with. Installing software
+        # is never the default: that one takes a deliberate press.
         default = "#bb-build" if (self._stale or self._can_build) else "#bb-cancel"
         self.query_one(default, Button).focus()
 
     @on(Button.Pressed, "#bb-build")
     def _build(self) -> None:
         self.dismiss("build")
+
+    @on(Button.Pressed, "#bb-install")
+    def _install(self) -> None:
+        self.dismiss("install")
 
     @on(Button.Pressed, "#bb-open")
     def _open_anyway(self) -> None:

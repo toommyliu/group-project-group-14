@@ -4,7 +4,9 @@
 nothing about whether the thing it opens actually works on this computer.
 This widget answers that: is Node.js here, is pnpm here, and is the built
 bundle (`web/dist/`) the one the current sources would produce, or one built
-before they last changed (`core/browser_app.web_dist_state`).
+before they last changed (`core/browser_app.web_dist_state`). When a tool is
+missing on a Mac that has Homebrew, it also offers to install it
+(`browser_app.install_tools`) — nothing is installed without that press.
 
 Composed into `#section-browser` but otherwise self-contained: `SetupScreen`
 only shows or hides it (`set_enabled`) from `_set_browser_enabled` and the
@@ -16,6 +18,8 @@ never turns the browser app on) never pays for it.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from dataclasses import dataclass
 
 from textual import on, work
@@ -23,12 +27,20 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
-from opengrader.core import browser_app
+from opengrader.core import browser_app, homebrew
 
 INSTALL_HINT = (
     "Install Node.js from https://nodejs.org (bundles pnpm via corepack) — "
     "or `brew install node pnpm` — or on MacPorts: "
     "`sudo port install nodejs22 pnpm`."
+)
+INSTALL_OFFER = (
+    "Homebrew is installed, so Opengrader can do this for you: press "
+    "Install Node.js and pnpm below."
+)
+HOMEBREW_HINT = (
+    f"With Homebrew ({homebrew.HOMEBREW_URL}) on this Mac, an Install button "
+    "appears here after Check again."
 )
 
 
@@ -37,6 +49,8 @@ class _Snapshot:
     tools: browser_app.ToolStatus
     dist_state: str
     buildable: bool
+    # Where Homebrew is, when it is there to install a missing tool with.
+    brew: str | None = None
 
 
 def _gather() -> _Snapshot:
@@ -45,6 +59,7 @@ def _gather() -> _Snapshot:
         tools=browser_app.tool_status(),
         dist_state=browser_app.web_dist_state(),
         buildable=browser_app.web_buildable(),
+        brew=homebrew.find_homebrew(),
     )
 
 
@@ -95,6 +110,8 @@ class BrowserHealth(Vertical):
     def __init__(self, **kwargs) -> None:  # noqa: ANN003
         super().__init__(**kwargs)
         self._busy = False
+        self._brew: str | None = None
+        self._install_process: subprocess.Popen[str] | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("Checking…", id="browser-health-rows", markup=False)
@@ -106,6 +123,14 @@ class BrowserHealth(Vertical):
             yield Button(
                 "Build browser app", id="browser-build", compact=True, disabled=True
             )
+            install = Button(
+                "Install Node.js and pnpm",
+                id="browser-install-tools",
+                variant="success",
+                compact=True,
+            )
+            install.display = False
+            yield install
 
     def on_mount(self) -> None:
         # Composed hidden or shown per the saved preference (see setup_screen);
@@ -147,8 +172,14 @@ class BrowserHealth(Vertical):
             _tool_line("Node.js", snapshot.tools.node),
             _tool_line("pnpm", snapshot.tools.pnpm),
         ]
-        if snapshot.tools.node is None or snapshot.tools.pnpm is None:
+        missing = bool(browser_app.missing_tool_formulae(snapshot.tools))
+        self._brew = snapshot.brew if missing else None
+        if self._brew:
+            lines.append(INSTALL_OFFER)
+        elif missing:
             lines.append(INSTALL_HINT)
+            if sys.platform == "darwin":
+                lines.append(HOMEBREW_HINT)
         lines.append(_build_line(snapshot.dist_state))
         self.query_one("#browser-health-rows", Static).update("\n".join(lines))
 
@@ -159,6 +190,74 @@ class BrowserHealth(Vertical):
             else "Rebuild browser app"
         )
         build_button.disabled = snapshot.tools.pnpm is None or not snapshot.buildable
+        install_button = self.query_one("#browser-install-tools", Button)
+        install_button.display = bool(self._brew)
+        install_button.disabled = False
+
+    # -- install Node.js and pnpm --------------------------------------------
+
+    @on(Button.Pressed, "#browser-install-tools")
+    def _on_install_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        brew = self._brew
+        if self._busy or brew is None:
+            return
+        self._set_busy(True)
+        progress = self.query_one("#browser-health-progress", Static)
+        progress.update(
+            "Installing Node.js and pnpm with Homebrew. This needs the "
+            "internet and can take a few minutes…"
+        )
+        progress.remove_class("hidden")
+        self._install_worker(brew)
+
+    @work(thread=True, exclusive=True, group="browser-health-install")
+    def _install_worker(self, brew: str) -> None:
+        app = self.app
+
+        def on_line(line: str) -> None:
+            if self.is_attached:
+                app.call_from_thread(self._progress, line)
+
+        error: browser_app.WebBuildError | None = None
+        try:
+            browser_app.install_tools(
+                brew, on_line=on_line, on_start=self._remember_install
+            )
+        except browser_app.WebBuildError as exc:
+            error = exc
+        self._install_process = None
+        # Quit mid-install: the panel is gone and nobody is left to tell.
+        if not self.is_attached:
+            return
+        snapshot = _gather()
+        app.call_from_thread(self._install_done, error, snapshot)
+
+    def _remember_install(self, process: subprocess.Popen[str]) -> None:
+        self._install_process = process
+
+    def _install_done(
+        self, error: browser_app.WebBuildError | None, snapshot: _Snapshot
+    ) -> None:
+        if not self.is_attached:
+            return
+        self._set_busy(False)
+        self.query_one("#browser-health-progress").add_class("hidden")
+        self._apply_snapshot(snapshot)
+        if error is None:
+            self.app.notify(
+                "Node.js and pnpm installed. The browser app can be built now."
+            )
+        else:
+            detail = f"\n{error.tail}" if error.tail else ""
+            self.app.notify(f"{error}{detail}", severity="error", timeout=15)
+
+    def on_unmount(self) -> None:
+        # A worker thread cannot be cancelled; ending the install is what
+        # lets it, and the app, finish.
+        process = self._install_process
+        if process is not None and process.poll() is None:
+            process.terminate()
 
     # -- build ---------------------------------------------------------------
 
@@ -216,4 +315,5 @@ class BrowserHealth(Vertical):
         self.query_one("#browser-check", Button).disabled = busy
         if busy:
             self.query_one("#browser-build", Button).disabled = True
+            self.query_one("#browser-install-tools", Button).disabled = True
         # else: `_apply_snapshot` sets the build button's disabled state itself.

@@ -11,7 +11,9 @@ not UI:
   `core/recents.py`;
 - whether the web app is built (`web/dist/index.html`), and building it on
   first use with the user's own Node.js + pnpm, so neither is ever needed by
-  someone who never opens the browser app.
+  someone who never opens the browser app;
+- installing those two when they are missing and the user asks, on a Mac
+  that has Homebrew (`core/homebrew`).
 """
 
 from __future__ import annotations
@@ -42,6 +44,8 @@ __all__ = [
     "web_buildable",
     "pnpm_command",
     "tool_status",
+    "missing_tool_formulae",
+    "install_tools",
     "source_fingerprint",
     "build_log_path",
     "build_web",
@@ -299,6 +303,51 @@ def tool_status() -> ToolStatus:
                 pnpm = ToolInfo(path="via corepack", version=version)
 
     return ToolStatus(node=node, pnpm=pnpm)
+
+
+def missing_tool_formulae(status: ToolStatus) -> tuple[str, ...]:
+    """The Homebrew formulae that would supply what `status` lacks.
+
+    Both are named when both are missing: Homebrew's pnpm does not bring
+    Node.js with it.
+    """
+    formulae: list[str] = []
+    if status.node is None:
+        formulae.append("node")
+    if status.pnpm is None:
+        formulae.append("pnpm")
+    return tuple(formulae)
+
+
+def install_tools(
+    brew: str,
+    *,
+    on_line: Callable[[str], None] | None = None,
+    on_start: Callable[[subprocess.Popen[str]], None] | None = None,
+) -> None:
+    """Install whichever of Node.js and pnpm is missing, with Homebrew.
+
+    Checks again afterwards, so "installed" means the build can find and run
+    them, not just that Homebrew exited cleanly. Raises `WebBuildError`.
+    """
+    from opengrader.core.homebrew import HomebrewError, brew_install
+
+    formulae = missing_tool_formulae(tool_status())
+    if not formulae:
+        return
+    try:
+        brew_install(brew, formulae, on_line=on_line, on_start=on_start)
+    except HomebrewError as exc:
+        raise WebBuildError(
+            f"Node.js and pnpm were not installed. {exc}", exc.tail
+        ) from exc
+    still_missing = missing_tool_formulae(tool_status())
+    if still_missing:
+        raise WebBuildError(
+            f"Homebrew finished, but {' and '.join(still_missing)} still cannot "
+            f"be run here. Try `brew install {' '.join(still_missing)}` in a "
+            "terminal to see why."
+        )
 
 
 def _tool_path() -> str:

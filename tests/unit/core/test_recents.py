@@ -106,3 +106,22 @@ def test_an_entry_written_before_assignments_were_recorded_still_loads() -> None
 
     [item] = recents.load_recents()
     assert (item.path, item.assignment, item.assignment_title) == ("/ws", "", "")
+
+
+def test_a_class_folder_is_recorded_at_the_common_parent_with_its_pair(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.recents import load_recents, record_class_folder
+
+    store = tmp_path / "recent.json"
+    course = tmp_path / "course"
+    (course / "out" / "student-submissions").mkdir(parents=True)
+    (course / "qa.md").write_text("---\ntitle: Quiz 1\n---\n\n- (1 points) Q\n")
+
+    record_class_folder(
+        course / "qa.md", course / "out" / "student-submissions", store=store
+    )
+
+    [item] = load_recents(store)
+    assert (item.kind, item.path) == ("folder", str(course.resolve()))
+    assert item.qa_file == str((course / "qa.md").resolve())
+    assert item.submissions == str((course / "out" / "student-submissions").resolve())
+    assert item.exists()

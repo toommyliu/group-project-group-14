@@ -9,7 +9,8 @@ malformed or unwritable file costs the list, never the app.
 opened in it; outside any workspace it offers them back
 (`tui/recent_workspaces.py`), and a workspace's assignment list starts on
 the assignment you were last grading. `opengrader classic` records each class
-folder it grades and lists the last few on its Start grading card. Both lists
+folder it grades — or opens in the browser — and lists the last few on its
+Start grading card. Both lists
 are the same widget (`tui/ui/widgets/recent_list.py`).
 """
 
@@ -29,6 +30,7 @@ __all__ = [
     "recents_path",
     "load_recents",
     "record_recent",
+    "record_class_folder",
     "forget_recent",
     "recent_workspace",
     "short_path",
@@ -139,6 +141,31 @@ def record_recent(
     )
     items = [item, *(old for old in existing if old.key != item.key)]
     _write(target, items[:MAX_RECENTS])
+
+
+def record_class_folder(
+    qa_file: str | Path, submissions: str | Path, *, store: Path | None = None
+) -> None:
+    """List this class folder on classic's Start grading card next time.
+
+    The entry points at the class folder — the common parent of answer
+    key and submissions — and keeps both paths, so choosing it later
+    reopens exactly this pair. Best effort, like everything in recents.
+    """
+    qa, where = Path(qa_file), Path(submissions)
+    try:
+        from opengrader.core.qa_file import load_qa_markdown
+
+        title = load_qa_markdown(qa).title or ""
+    except Exception:  # noqa: BLE001 - a title is only a label
+        title = ""
+    try:
+        folder = Path(os.path.commonpath([qa.parent, where]))
+    except ValueError:  # different drives (Windows): no common parent
+        folder = where.parent
+    record_recent(
+        "folder", folder, title=title, qa_file=qa, submissions=where, store=store
+    )
 
 
 def recent_workspace(path: str | Path, *, store: Path | None = None) -> RecentItem | None:

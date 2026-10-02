@@ -273,3 +273,108 @@ def test_tool_status_is_none_when_the_version_call_fails(only_these_tools) -> No
     _tool(only_these_tools, "node", "exit 1\n")
 
     assert browser_app.tool_status().node is None
+
+
+# -- installing Node.js and pnpm ----------------------------------------------
+
+
+def _fake_brew(bin_dir: Path, *, installs: bool = True, exit_code: int = 0) -> Path:
+    """A stand-in `brew` that records its arguments and, when `installs`,
+    leaves a runnable tool behind for each formula it was asked for."""
+    create = (
+        'for f in "$@"; do\n'
+        '  [ "$f" = install ] && continue\n'
+        f'  printf \'#!/bin/sh\\necho 1.0\\n\' > "{bin_dir}/$f"\n'
+        f'  /bin/chmod +x "{bin_dir}/$f"\n'
+        "done\n"
+        if installs
+        else ""
+    )
+    return _tool(
+        bin_dir,
+        "brew",
+        f'echo "$*" >> "{bin_dir}/brew-calls"\n'
+        'echo "==> Pouring $*"\n'
+        f"{create}"
+        f"exit {exit_code}\n",
+    )
+
+
+def _brew_calls(bin_dir: Path) -> list[str]:
+    record = bin_dir / "brew-calls"
+    return record.read_text().splitlines() if record.exists() else []
+
+
+def test_missing_tools_name_the_formulae_that_supply_them() -> None:
+    node = browser_app.ToolInfo(path="/bin/node", version="v22")
+    pnpm = browser_app.ToolInfo(path="/bin/pnpm", version="10")
+
+    assert browser_app.missing_tool_formulae(ToolStatus(None, None)) == ("node", "pnpm")
+    assert browser_app.missing_tool_formulae(ToolStatus(node, None)) == ("pnpm",)
+    assert browser_app.missing_tool_formulae(ToolStatus(None, pnpm)) == ("node",)
+    assert browser_app.missing_tool_formulae(ToolStatus(node, pnpm)) == ()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_install_tools_asks_homebrew_for_both_and_reports_its_output(
+    only_these_tools,  # noqa: ANN001
+) -> None:
+    brew = _fake_brew(only_these_tools)
+    lines: list[str] = []
+    started: list[object] = []
+
+    browser_app.install_tools(str(brew), on_line=lines.append, on_start=started.append)
+
+    assert _brew_calls(only_these_tools) == ["install node pnpm"]
+    assert lines == ["==> Pouring install node pnpm"]
+    assert len(started) == 1
+    status = browser_app.tool_status()
+    assert status.node is not None and status.pnpm is not None
+    assert browser_app.pnpm_command() == [str(only_these_tools / "pnpm")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_install_tools_only_installs_what_is_missing(only_these_tools) -> None:  # noqa: ANN001
+    _tool(only_these_tools, "node", 'echo "v22.22.2"\n')
+    brew = _fake_brew(only_these_tools)
+
+    browser_app.install_tools(str(brew))
+
+    assert _brew_calls(only_these_tools) == ["install pnpm"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_install_tools_leaves_homebrew_alone_when_nothing_is_missing(
+    only_these_tools,  # noqa: ANN001
+) -> None:
+    _tool(only_these_tools, "node", 'echo "v22.22.2"\n')
+    _tool(only_these_tools, "pnpm", 'echo "12.6.0"\n')
+    brew = _fake_brew(only_these_tools)
+
+    browser_app.install_tools(str(brew))
+
+    assert _brew_calls(only_these_tools) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_a_failed_tool_install_is_reported_with_the_end_of_homebrews_output(
+    only_these_tools,  # noqa: ANN001
+) -> None:
+    brew = _fake_brew(only_these_tools, installs=False, exit_code=1)
+
+    with pytest.raises(WebBuildError) as caught:
+        browser_app.install_tools(str(brew))
+
+    assert "were not installed" in str(caught.value)
+    assert "exit 1" in str(caught.value)
+    assert caught.value.tail == "==> Pouring install node pnpm"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_a_clean_homebrew_exit_that_left_no_tools_is_still_a_failure(
+    only_these_tools,  # noqa: ANN001
+) -> None:
+    brew = _fake_brew(only_these_tools, installs=False)
+
+    with pytest.raises(WebBuildError, match="still cannot be run"):
+        browser_app.install_tools(str(brew))

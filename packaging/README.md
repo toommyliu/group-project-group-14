@@ -108,6 +108,13 @@ installed, whether the browser version is built and up to date, and has
 **Check again** and **Build / Rebuild** buttons. If you press **Open in
 browser** before it's built, Opengrader offers to build it for you.
 
+**Missing Node.js or pnpm on a Mac?** If Homebrew is installed, the same
+section shows an **Install Node.js and pnpm** button, and **Open in browser**
+offers **Install and build**. Nothing is installed until you press one of
+them; it needs the internet and takes a few minutes. Without Homebrew the
+section says what to install instead: Homebrew from <https://brew.sh> (it
+asks for your Mac password), or Node.js from <https://nodejs.org>.
+
 **Setting it up for someone else?** Build it before you install, so they never
 see that step:
 

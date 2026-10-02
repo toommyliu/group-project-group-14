@@ -16,11 +16,11 @@ from opengrader.core.environment import (
     EnvironmentReport,
     build_environment_report,
 )
-from opengrader.core.tesseract_install import (
+from opengrader.core.homebrew import (
     HOMEBREW_URL,
-    TesseractInstallError,
+    HomebrewError,
+    brew_install,
     find_homebrew,
-    install_tesseract,
 )
 from opengrader.tui.formatting import (
     format_environment_check,
@@ -221,13 +221,14 @@ class DoctorScreen(ModalScreen[None]):
 
     def _install(self, brew: str) -> None:
         try:
-            install_tesseract(
+            brew_install(
                 brew,
+                ("tesseract",),
                 on_line=self._relay_line,
                 on_start=self._remember_install,
             )
-        except TesseractInstallError as exc:
-            error: TesseractInstallError | None = exc
+        except HomebrewError as exc:
+            error: HomebrewError | None = exc
         else:
             error = None
         self._install_process = None
@@ -247,7 +248,7 @@ class DoctorScreen(ModalScreen[None]):
         if self.is_attached:
             self.query_one("#doctor-log", RichLog).write(line)
 
-    def _install_finished(self, error: TesseractInstallError | None) -> None:
+    def _install_finished(self, error: HomebrewError | None) -> None:
         if not self.is_attached:
             return
         log = self.query_one("#doctor-log", RichLog)

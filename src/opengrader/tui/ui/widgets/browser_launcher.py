@@ -5,7 +5,9 @@ browser* once the user ticks it in Tools. Pressing it imports the folder into
 a workspace — the same import `opengrader tui FOLDER` does, grades already in
 the files kept — starts that workspace's local service (detached, so it
 outlives this window) and opens the assignment in the default browser. The
-first time, when the web app is not built yet, it offers to build it.
+first time, when the web app is not built yet, it offers to build it — and,
+on a Mac that has Homebrew, to install Node.js and pnpm first if the build
+has nothing to run with.
 
 A folder opened this way is a *folder session* (`core/workspace/folder_session`):
 every grade saved in the browser is written straight into the student's
@@ -24,6 +26,7 @@ service goes away on its own (`opengrader stop`, a reboot).
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,7 +35,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
-from opengrader.core import browser_app
+from opengrader.core import browser_app, homebrew
 from opengrader.core.recents import short_path
 
 POLL_SECONDS = 15.0
@@ -80,6 +83,7 @@ class BrowserLauncher(Vertical):
         self._root: Path | None = None
         self._url: str | None = None
         self._folder_session = False
+        self._install_process: subprocess.Popen[str] | None = None
         self.busy = False
 
     def compose(self) -> ComposeResult:
@@ -106,7 +110,8 @@ class BrowserLauncher(Vertical):
         """What *Open in browser* does with the card's answer key + submissions.
 
         `web_dist_state()` decides what happens: missing asks to build first
-        (or just says why it can't); stale — sources have changed since the
+        (offering to install Node.js and pnpm when Homebrew can, or else just
+        saying why it can't); stale — sources have changed since the
         last build — offers a rebuild but doesn't force one, since a stale
         bundle still mostly works; ready opens straight away.
         """
@@ -141,21 +146,62 @@ class BrowserLauncher(Vertical):
 
         from opengrader.tui.ui.screens.browser_build_screen import BrowserBuildScreen
 
+        # Nothing to build with: Homebrew, when it is here, can fix that.
+        brew = None if can_build else homebrew.find_homebrew()
+
         def _answer(choice: str | None) -> None:
             if choice == "build":
                 self._open_worker(str(qa_path), str(submissions_path), True)
+            elif choice == "install" and brew:
+                self._open_worker(str(qa_path), str(submissions_path), True, brew)
             elif choice == "open":
                 self._open_worker(str(qa_path), str(submissions_path), False)
 
         self.app.push_screen(
-            BrowserBuildScreen(can_build=can_build, stale=state == "stale"),
+            BrowserBuildScreen(
+                can_build=can_build, stale=state == "stale", can_install=bool(brew)
+            ),
             _answer,
         )
 
     @work(thread=True, exclusive=True, group="browser-launch")
-    def _open_worker(self, qa_path: str, submissions_path: str, build: bool) -> None:
+    def _open_worker(
+        self,
+        qa_path: str,
+        submissions_path: str,
+        build: bool,
+        install_with: str | None = None,
+    ) -> None:
+        """`install_with` is Homebrew's path when Node.js and pnpm go in first."""
         app = self.app
         app.call_from_thread(self._set_busy, "Starting the browser app…")
+        if install_with:
+
+            def on_install_line(line: str) -> None:
+                if self.is_attached:
+                    app.call_from_thread(
+                        self._set_busy,
+                        f"Installing Node.js and pnpm (one time) — {line}",
+                    )
+
+            app.call_from_thread(
+                self._set_busy,
+                "Installing Node.js and pnpm with Homebrew (one time, a few minutes)…",
+            )
+            try:
+                browser_app.install_tools(
+                    install_with,
+                    on_line=on_install_line,
+                    on_start=self._remember_install,
+                )
+            except browser_app.WebBuildError as exc:
+                # Quit mid-install: the card is gone and nobody is left to tell.
+                if self.is_attached:
+                    detail = f"\n{exc.tail}" if exc.tail else ""
+                    app.call_from_thread(self._fail, f"{exc}{detail}")
+                return
+            finally:
+                self._install_process = None
         if build:
 
             def on_line(line: str) -> None:
@@ -197,17 +243,31 @@ class BrowserLauncher(Vertical):
                 severity="warning",
                 timeout=15,
             )
-        self._remember(root, assignment_id)
+        self._remember(root, assignment_id, qa_path, submissions_path)
         page = f"{connection.url}/assignments/{assignment_id}"
         opened = self._open_url(page)
         app.call_from_thread(
             self._show_running, root, connection.url, page, opened, folder_session
         )
 
-    @staticmethod
-    def _remember(root: Path, assignment_id: str) -> None:
-        from opengrader.core.recents import record_recent
+    def _remember_install(self, process: subprocess.Popen[str]) -> None:
+        self._install_process = process
 
+    def on_unmount(self) -> None:
+        # A worker thread cannot be cancelled; ending the install is what
+        # lets it, and the app, finish.
+        process = self._install_process
+        if process is not None and process.poll() is None:
+            process.terminate()
+
+    @staticmethod
+    def _remember(
+        root: Path, assignment_id: str, qa_path: str, submissions_path: str
+    ) -> None:
+        from opengrader.core.recents import record_class_folder, record_recent
+
+        # The Start grading card lists it, as if it had been graded here.
+        record_class_folder(qa_path, submissions_path)
         # `opengrader tui` lists it, so writing grades back (W) is one step away.
         record_recent("workspace", root, assignment=assignment_id)
         try:

@@ -433,34 +433,14 @@ class TuiApp(App[Literal["switch_assignment"]]):
         )
 
     def _remember_folder(self) -> None:
-        """List this class folder on the Start grading card next time.
-
-        The entry points at the class folder — the common parent of answer
-        key and submissions — and keeps both paths, so choosing it later
-        reopens exactly this pair. Best effort, like everything in recents.
-        """
-        import os
-
-        from opengrader.core.recents import record_recent
+        """List this class folder on the Start grading card next time."""
+        from opengrader.core.recents import record_class_folder
 
         qa = getattr(self.data_provider, "qa_file_path", None)
         submissions = getattr(self.data_provider, "submissions_path", None)
         if qa is None or submissions is None:
             return
-        qa, submissions = Path(qa), Path(submissions)
-        try:
-            from opengrader.core.qa_file import load_qa_markdown
-
-            title = load_qa_markdown(qa).title or ""
-        except Exception:  # noqa: BLE001 - a title is only a label
-            title = ""
-        try:
-            folder = Path(os.path.commonpath([qa.parent, submissions]))
-        except ValueError:  # different drives (Windows): no common parent
-            folder = submissions.parent
-        record_recent(
-            "folder", folder, title=title, qa_file=qa, submissions=submissions
-        )
+        record_class_folder(qa, submissions)
 
     def _toggle_start_page(self) -> None:
         """F3 (folder mode only): Tools and its helper tools, and back again."""
