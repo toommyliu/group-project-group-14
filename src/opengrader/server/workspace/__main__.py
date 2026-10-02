@@ -9,8 +9,10 @@ import click
 from opengrader.server.workspace.client import ServiceConnection, exclusive_lock
 
 
-def serve(root: Path, *, port: int = 0) -> None:
+def serve(root: Path, *, port: int = 0, detached: bool) -> None:
+    import structlog
     import uvicorn
+    from opengrader.server import logs
     from opengrader.server.auth import RemoteAuthGuard
     from opengrader.server.settings import ServerSettings
     from opengrader.server.workspace.app import create_app
@@ -18,6 +20,8 @@ def serve(root: Path, *, port: int = 0) -> None:
     root = root.resolve()
     with exclusive_lock(root / ".opengrader/service.lock"):
         settings = ServerSettings()
+        logs.configure(settings.log_level, workspace=root, detached=detached)
+        logger = structlog.stdlib.get_logger("opengrader.server.workspace.__main__")
         app = create_app(root, settings=settings)
         if not settings.auth_enabled:
             app.add_middleware(RemoteAuthGuard)
@@ -30,6 +34,8 @@ def serve(root: Path, *, port: int = 0) -> None:
                 proxy_headers=True,
                 forwarded_allow_ips="127.0.0.1",
                 timeout_graceful_shutdown=3,
+                log_config=None,
+                access_log=False,
             )
         )
         app.state.shutdown = lambda: setattr(server, "should_exit", True)
@@ -57,16 +63,21 @@ def serve(root: Path, *, port: int = 0) -> None:
                 stream.write(connection.model_dump_json())
             temporary.replace(record)
             print(f"Workspace: {root}\nOpen {connection.url}", flush=True)
+            logger.info(
+                "server.started", url=connection.url, workspace=str(root),
+                pid=connection.pid, mode="hosted" if settings.auth_enabled else "local",
+            )
             try:
                 server.run(sockets=[listener])
             finally:
                 record.unlink(missing_ok=True)
+                logger.info("server.stopped")
 
 
 @click.command(help=__doc__)
 @click.argument("workspace", type=click.Path(path_type=Path))
 def command(workspace: Path) -> None:
-    serve(workspace)
+    serve(workspace, detached=True)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 """Run the local API and Vite app together with source reload."""
 
-import logging
 import os
 from pathlib import Path
 import shutil
@@ -9,8 +8,10 @@ import subprocess
 import sys
 import time
 
+import structlog
 
-logger = logging.getLogger(__name__)
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 def _stop(process: subprocess.Popen, *, timeout: float = 5) -> None:
@@ -31,11 +32,7 @@ def _stop(process: subprocess.Popen, *, timeout: float = 5) -> None:
     try:
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        logger.warning(
-            "Process %s did not stop within %gs; forcing shutdown.",
-            process.pid,
-            timeout,
-        )
+        logger.warning("dev.stop_forced", pid=process.pid)
         if os.name == "nt":
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False
@@ -129,24 +126,19 @@ def run_dev(port: int, *, workspace: Path | None = None) -> int:
         while True:
             code = frontend.poll()
             if code is not None:
-                logger.error(
-                    "Vite exited with status %s; stopping development servers.", code
-                )
+                logger.error("dev.exited", process="vite", status=code, pid=frontend.pid)
                 return code if code > 0 else 1
             if api is not None:
                 code = api.poll()
                 if code is not None:
-                    logger.error(
-                        "API exited with status %s; stopping development servers.",
-                        code,
-                    )
+                    logger.error("dev.exited", process="api", status=code, pid=api.pid)
                     return code if code > 0 else 1
             updated = _python_snapshot(source)
             if updated != snapshot:
                 snapshot = updated
                 changed_at = time.monotonic()
             elif changed_at is not None and time.monotonic() - changed_at >= 0.5:
-                logger.info("Python source changed; restarting API and Vite...")
+                logger.info("dev.restarting")
                 _stop(frontend)
                 frontend = None
                 if api is not None:

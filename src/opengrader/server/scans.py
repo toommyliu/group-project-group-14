@@ -1,12 +1,13 @@
 """HTTP intake endpoints; all processing runs outside request handlers."""
 
 import hashlib
-import logging
 import shutil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import RLock
 from typing import Callable, Literal
+
+import structlog
 
 import fitz
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -21,6 +22,9 @@ from opengrader.server.scan_models import (
 )
 from opengrader.server.scan_store import ScanStore
 from uuid import uuid4
+
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 def render_scan_page(source: Path, page_number: int, edge: int) -> bytes:
@@ -200,7 +204,7 @@ def add_scan_routes(
         try:
             shutil.rmtree(deleted)
         except OSError:
-            logging.getLogger(__name__).exception("Could not clean deleted scan %s", deleted)
+            logger.warning("scan.cleanup_failed", directory=str(deleted), exc_info=True)
         return Response(status_code=204)
 
     @api.post("/assignments/{assignment_id}/scans/{batch_id}/restore")

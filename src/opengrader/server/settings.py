@@ -1,8 +1,11 @@
 import re
-from typing import Annotated, Iterable, Self
+from typing import Annotated, Iterable, Literal, Self
 
 from pydantic import SecretStr, StringConstraints, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+LogLevel = Literal["debug", "info", "warning", "error"]
 
 
 def on_domain(email: str, domain: str) -> bool:
@@ -19,6 +22,7 @@ class ServerSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
+    log_level: LogLevel = "info"
     auth_enabled: bool = False
     google_client_id: str = ""
     google_client_secret: SecretStr = SecretStr("")
@@ -26,6 +30,14 @@ class ServerSettings(BaseSettings):
     google_domain: Annotated[str, StringConstraints(to_lower=True)] = "sjsu.edu"
     instructors: Annotated[frozenset[str], NoDecode] = frozenset()
     secure_cookie: bool = False
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def parse_log_level(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.lower()
+            return "warning" if value == "warn" else value
+        return value
 
     @field_validator("instructors", mode="before")
     @classmethod

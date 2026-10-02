@@ -74,3 +74,15 @@ def test_invalid_boolean_is_reported_without_exposing_credentials(monkeypatch):
         ServerSettings(_env_file=None)
     assert "auth_enabled" in str(error.value)
     assert "private-client-secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("level", ["WaRnInG", "warn"])
+def test_log_level_accepts_case_insensitive_environment(monkeypatch, level):
+    monkeypatch.setenv("OPENGRADER_LOG_LEVEL", level)
+    assert ServerSettings(_env_file=None).log_level == "warning"
+
+
+@pytest.mark.parametrize("level", ["trace", "", 20])
+def test_log_level_rejects_unsupported_values(level):
+    with pytest.raises(ValidationError, match="log_level"):
+        ServerSettings(_env_file=None, log_level=level)

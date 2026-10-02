@@ -1,6 +1,5 @@
 """Bounded background intake jobs, independent of a browser connection."""
 
-import logging
 from pathlib import Path
 from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -8,6 +7,8 @@ from multiprocessing import get_context
 from threading import RLock
 from typing import Callable
 from uuid import uuid4
+
+import structlog
 
 from opengrader.core.pages.catalog import CATALOG_DIRNAME, ensure_catalog, is_scan, load_catalog
 from opengrader.core.pages.split import plan_scan
@@ -19,7 +20,7 @@ from opengrader.server.scan_models import PageSelection, ScanBatch, ScanFinding,
 from opengrader.core.submissions.intake import SubmissionIntake
 from opengrader.server.scan_store import ScanStore
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class ScanCancelled(Exception):
@@ -98,7 +99,7 @@ class ScanJobs:
             if isinstance(exc, BrokenProcessPool):
                 self.processing.shutdown(wait=False)
                 self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
-            logger.exception("Scan job failed: %s", batch_id)
+            logger.exception("scan.failed", assignment_id=assignment_id, batch_id=batch_id)
             if batch is None:
                 return
             batch.status = "failed"
@@ -206,7 +207,7 @@ class ScanJobs:
                 if isinstance(exc, BrokenProcessPool):
                     self.processing.shutdown(wait=False)
                     self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
-                logger.exception("Submission extraction failed: %s", name)
+                logger.exception("scan.submission_failed", assignment_id=assignment_id, batch_id=batch.id, index=index)
                 group.error = str(exc) if isinstance(exc, ValueError) else "Could not read this submission. Check its pages and retry."
             self.save(assignment_id, batch)
         failed = sum(bool(group.error) for group in batch.groups)

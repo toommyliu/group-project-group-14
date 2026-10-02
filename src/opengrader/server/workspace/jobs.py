@@ -1,13 +1,14 @@
 """Regenerate feedback after a committed grade without holding its transaction."""
 
-import logging
 from pathlib import Path
 from threading import Event, Thread
+
+import structlog
 
 from opengrader.core.workspace.store import Workspace, record_event
 from opengrader.core.workspace.models import FeedbackJob
 
-logger = logging.getLogger(__name__)
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class FeedbackJobs:
@@ -36,7 +37,7 @@ class FeedbackJobs:
                     if job.status == "pending":
                         self.process(job)
             except Exception:
-                logger.exception("Could not check feedback jobs")
+                logger.exception("feedback.check_failed")
             self.stopped.wait(0.5)
 
     def process(self, job: FeedbackJob) -> None:
@@ -56,7 +57,7 @@ class FeedbackJobs:
                 self._render(job).relative_to(workspace.root / ".opengrader").as_posix()
             )
         except Exception as exc:
-            logger.exception("Feedback generation failed")
+            logger.exception("feedback.failed")
             error = str(exc)
         with workspace.connect(write=True) as db:
             # An older render cannot mark a newer grade's feedback ready.
