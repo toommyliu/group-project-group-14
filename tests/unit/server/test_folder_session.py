@@ -239,6 +239,10 @@ def test_a_removed_file_is_reported_not_fatal(session) -> None:
 
 
 def test_a_question_the_file_lacks_is_reported(session) -> None:
+    path = session["files"][0]
+    before, remainder = path.read_text().split("- q5a:", 1)
+    _, after = remainder.split("- q5b:", 1)
+    path.write_text(before + "- q5b:" + after)
     response = _save(session, "q5a", points_awarded=1)
 
     assert response.json()["folder"]["status"] == "failed"
