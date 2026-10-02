@@ -1535,6 +1535,7 @@ dependencies = [
     { name = "rapidocr" },
     { name = "rich" },
     { name = "segno" },
+    { name = "structlog" },
     { name = "textual" },
     { name = "textual-image" },
     { name = "typing-extensions" },
@@ -1589,6 +1590,7 @@ requires-dist = [
     { name = "rapidocr", specifier = ">=3.9,<4" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "segno", specifier = ">=1.6.0,<2.0.0" },
+    { name = "structlog", specifier = ">=26.1,<27" },
     { name = "textual", specifier = ">=8.1.1,<9.0.0" },
     { name = "textual-image", specifier = ">=0.8.5,<0.9.0" },
     { name = "typing-extensions", specifier = ">=4.4.0" },
@@ -2379,6 +2381,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ea/49/33b6ae80a5551df8ffe11a1ed5f3d560914f37d8ceeffe152c3ffa16e899/stringzilla-5.1.1-cp312-cp312-win32.whl", hash = "sha256:fb4cc8167ae62803fd057b2b4f44e79731039b8c3cffbd8bf307232304d69eb3", size = 310091, upload-time = "2026-08-05T20:27:06.251Z" },
     { url = "https://files.pythonhosted.org/packages/28/e2/eee5e62102b12c22805ff8942a27b02a9843e1ebb0f29bd3aa78ed23bc99/stringzilla-5.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:e16d8fdbfcb7b4ff97b262646a607d5644f54541cd7069fe495b8252cb4bcd1d", size = 516156, upload-time = "2026-08-05T20:27:07.656Z" },
     { url = "https://files.pythonhosted.org/packages/63/6d/ae7d663d166f1b05e1b11a8d4a1bb3a250a6864e716b7887488525e1e019/stringzilla-5.1.1-cp312-cp312-win_arm64.whl", hash = "sha256:da54926326c2f0f27065daf88ddc12c9b57f069cd7b1a42fce12c2978fbea66a", size = 422241, upload-time = "2026-08-05T20:27:09.103Z" },
+]
+
+[[package]]
+name = "structlog"
+version = "26.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5e/89/b4a0bcfdf4f71a3dea31379f095929613d7e4528a0996bca6aa964cd0dca/structlog-26.1.0.tar.gz", hash = "sha256:f63a716cbd1b1291cf7661de7794b455acfa4c43c5bcf1630e6ad5ddc1adb3b7", size = 1459881, upload-time = "2026-06-06T07:33:39.348Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/18/489c97b834dfff9cf2fc2507cede4bcd4b11e67f84bc462acd1992496f86/structlog-26.1.0-py3-none-any.whl", hash = "sha256:e081a26d6c373e6d201eca24eede26d8ffab07f88f477822e679183428d3d91e", size = 73764, upload-time = "2026-06-06T07:33:38.046Z" },
 ]
 
 [[package]]
