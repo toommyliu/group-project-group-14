@@ -28,7 +28,7 @@ def serve(root: Path, *, port: int = 0, detached: bool) -> None:
         workspace = app.state.workspace
         server = uvicorn.Server(
             uvicorn.Config(
-                app,
+                logs.observe(app),
                 host="127.0.0.1",
                 port=0,
                 proxy_headers=True,

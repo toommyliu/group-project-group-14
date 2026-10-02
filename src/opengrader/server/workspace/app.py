@@ -9,6 +9,8 @@ import secrets
 import shutil
 from threading import RLock
 
+import structlog
+
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -70,6 +72,9 @@ from opengrader.server.scan_jobs import ScanJobs
 from opengrader.server.scans import add_scan_routes
 from opengrader.server.web import add_web_routes
 from opengrader.server.workspace.jobs import FeedbackJobs
+
+
+logger = structlog.stdlib.get_logger(__name__)
 
 
 class AssignmentUpdate(AssignmentInput):
@@ -232,6 +237,7 @@ def create_app(
 
     @app.exception_handler(ValueError)
     async def invalid(_request: Request, exc: ValueError):
+        logger.debug("request.rejected", error=type(exc).__name__, exc_info=exc)
         content: dict[str, object] = {"detail": str(exc)}
         if isinstance(exc, QAParseError):
             content["location"] = asdict(exc.location)

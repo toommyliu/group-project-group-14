@@ -4,6 +4,8 @@ from html import escape
 from threading import Lock
 from typing import Annotated, Literal, Mapping
 
+import structlog
+
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -157,6 +159,8 @@ class RemoteAuthGuard:
             if user is not None and self.access.role(user.email) is None:
                 connection.session.clear()
                 user = None
+            if user is not None:
+                structlog.contextvars.bind_contextvars(user=user.email)
         if is_local(connection) or scope["path"].startswith("/auth/") or user:
             await self.app(scope, receive, send)
         elif self.access is None:
