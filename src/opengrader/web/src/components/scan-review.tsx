@@ -552,7 +552,7 @@ function GroupRow({
   const title = `Submission ${groupIndex + 1}`;
   return (
     <li
-      className="grid gap-3 p-4 [contain-intrinsic-size:auto_11rem] [content-visibility:auto] @min-[48rem]:grid-cols-[11rem_minmax(0,1fr)]"
+      className="grid gap-x-8 gap-y-3 p-4 [contain-intrinsic-size:auto_11rem] [content-visibility:auto] @min-[48rem]:grid-cols-[11rem_minmax(0,1fr)]"
       aria-label={title}
     >
       <div className="grid content-start gap-2 @min-[48rem]:sticky @min-[48rem]:top-4 @min-[48rem]:self-start">
@@ -588,10 +588,10 @@ function GroupRow({
             onChange={onVersion}
           />
         )}
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-2">
           {groupIndex > 0 && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               disabled={busy}
               onClick={onMerge}
@@ -602,7 +602,7 @@ function GroupRow({
             </Button>
           )}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             disabled={busy}
             onClick={() =>
@@ -686,6 +686,7 @@ function PageThumb({
     disabled: busy,
   });
   const label = `Page ${page.number}`;
+  const next = group.pages[index + 1];
 
   return (
     <li
@@ -693,25 +694,6 @@ function PageThumb({
       aria-label={flags ? `${label}, flagged: ${flags.join(' ')}` : label}
       className={cn('flex outline-none', isDragging && 'z-10 opacity-60')}
     >
-      {index > 0 ? (
-        <button
-          type="button"
-          disabled={busy}
-          className="group/split relative w-6 cursor-pointer self-stretch outline-none disabled:cursor-default"
-          aria-label={`Split before page ${page.number}`}
-          onClick={() => onSplit(index)}
-        >
-          <span className="absolute inset-y-0 left-1/2 -translate-x-1/2 border-l-2 border-dashed border-transparent group-hover/split:border-foreground group-focus-visible/split:border-ring group-disabled/split:border-transparent" />
-          <span className="absolute top-1/2 left-1/2 flex size-6 -translate-1/2 items-center justify-center rounded-full bg-foreground text-background opacity-0 group-hover/split:opacity-100 group-focus-visible/split:opacity-100 group-disabled/split:opacity-0">
-            <Scissors className="size-3.5 -rotate-90" aria-hidden="true" />
-          </span>
-          <span className="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 text-xs font-medium whitespace-nowrap opacity-0 group-hover/split:opacity-100 group-focus-visible/split:opacity-100 group-disabled/split:opacity-0">
-            Split here
-          </span>
-        </button>
-      ) : (
-        <span className="w-6" aria-hidden="true" />
-      )}
       <div
         className={cn(
           'group/page relative w-24 cursor-grab border bg-white active:cursor-grabbing',
@@ -805,6 +787,23 @@ function PageThumb({
           </DropdownMenu>
         </div>
       </div>
+      {next && (
+        <button
+          type="button"
+          disabled={busy}
+          className="group/split relative w-6 cursor-pointer self-stretch outline-none disabled:cursor-default"
+          aria-label={`Split before page ${next.number}`}
+          onClick={() => onSplit(index + 1)}
+        >
+          <span className="absolute inset-y-0 left-1/2 -translate-x-1/2 border-l-2 border-dashed border-transparent group-hover/split:border-foreground group-focus-visible/split:border-ring group-disabled/split:border-transparent" />
+          <span className="absolute top-1/2 left-1/2 flex size-6 -translate-1/2 items-center justify-center rounded-full bg-foreground text-background opacity-0 group-hover/split:opacity-100 group-focus-visible/split:opacity-100 group-disabled/split:opacity-0">
+            <Scissors className="size-3.5 -rotate-90" aria-hidden="true" />
+          </span>
+          <span className="absolute top-full left-1/2 mt-0.5 -translate-x-1/2 text-xs font-medium whitespace-nowrap opacity-0 group-hover/split:opacity-100 group-focus-visible/split:opacity-100 group-disabled/split:opacity-0">
+            Split here
+          </span>
+        </button>
+      )}
     </li>
   );
 }
