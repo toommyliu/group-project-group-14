@@ -5,7 +5,9 @@ let api: typeof import('./client');
 let queries: typeof import('./queries');
 
 beforeAll(async () => {
-  vi.stubGlobal('window', { location: { origin: 'http://localhost' } });
+  vi.stubGlobal('window', {
+    location: { origin: 'http://localhost', pathname: '/' },
+  });
   api = await import('./client');
   queries = await import('./queries');
 });

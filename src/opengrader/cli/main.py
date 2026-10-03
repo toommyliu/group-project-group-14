@@ -67,12 +67,13 @@ class Subcommand:
 
 
 COMMANDS: tuple[Subcommand, ...] = (
-    Subcommand(name="web", target="opengrader.cli.web:open_command", summary="open this workspace in a browser", section=SECTION_START),
-    Subcommand(name="stop", target="opengrader.cli.web:stop_command", summary="stop this workspace's service", section=SECTION_META),
+    Subcommand(name="workspace", target="opengrader.cli.workspace:command", summary="create, register, or list workspaces", section=SECTION_START),
+    Subcommand(name="web", target="opengrader.cli.web:open_command", summary="open Opengrader in a browser", section=SECTION_START),
+    Subcommand(name="stop", target="opengrader.cli.web:stop_command", summary="stop the server for all workspaces", section=SECTION_META),
     Subcommand(
         name="serve",
         target="opengrader.cli.serve:command",
-        summary="run the workspace service in this terminal",
+        summary="run the Opengrader server in this terminal",
         section=SECTION_START,
     ),
     Subcommand(

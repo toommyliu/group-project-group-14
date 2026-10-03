@@ -5,7 +5,9 @@ import sys
 import pytest
 
 from opengrader.server import dev
-from opengrader.server.workspace.client import WorkspaceInUse, exclusive_lock
+from opengrader.server.workspace.client import exclusive_lock
+from opengrader.server.client import ServerInUse
+from opengrader.server.home import resolve_data_home
 
 
 @pytest.mark.parametrize("api_exit", [0, 7])
@@ -57,8 +59,8 @@ def test_dev_refuses_workspace_in_use_before_starting(tmp_path, monkeypatch):
 
     root = tmp_path / "workspace"
     with (
-        exclusive_lock(root / ".opengrader/service.lock"),
-        pytest.raises(WorkspaceInUse, match=r"^Another process is using this workspace\.$"),
+        exclusive_lock(resolve_data_home() / "run/server.lock"),
+        pytest.raises(ServerInUse, match="already running"),
     ):
         dev.run_dev(8000, root)
 

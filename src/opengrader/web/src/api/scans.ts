@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { components } from './schema';
-import { ApiError, client, readData } from './client';
+import { ApiError, client, readData, workspaceUrl } from './client';
 
 export type ScanBatch = components['schemas']['ScanBatch'];
 export type ScanPage = ScanBatch['groups'][number]['pages'][number];
@@ -33,7 +33,9 @@ export function scanBusy(batch: ScanBatch) {
 }
 
 export function scanUrl(assignmentId: string, batchId: string) {
-  return `/api/assignments/${encodeURIComponent(assignmentId)}/scans/${encodeURIComponent(batchId)}`;
+  return workspaceUrl(
+    `/api/assignments/${encodeURIComponent(assignmentId)}/scans/${encodeURIComponent(batchId)}`
+  );
 }
 
 export function scanPageUrl(
@@ -54,7 +56,9 @@ export function uploadScan(
     const request = new XMLHttpRequest();
     request.open(
       'POST',
-      `/api/assignments/${encodeURIComponent(assignmentId)}/scans?filename=${encodeURIComponent(file.name)}`
+      workspaceUrl(
+        `/api/assignments/${encodeURIComponent(assignmentId)}/scans?filename=${encodeURIComponent(file.name)}`
+      )
     );
     request.setRequestHeader('Content-Type', 'application/pdf');
     request.responseType = 'json';

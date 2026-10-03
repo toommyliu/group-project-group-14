@@ -1,3 +1,4 @@
+import { workspaceUrl } from '@/api/client';
 import type { ReactNode } from 'react';
 import type { Answer, Question } from '@/api/queries';
 import { GradingText } from './grading-text';
@@ -68,7 +69,7 @@ export function AnswerView({
               {answer.response_image_url ? (
                 <AnswerCrop
                   key={answer.response_image_url}
-                  url={answer.response_image_url}
+                  url={workspaceUrl(answer.response_image_url)}
                   width={answer.response_image_width}
                   height={answer.response_image_height}
                   submissionId={submissionId}

@@ -1,3 +1,4 @@
+import { workspaceUrl } from '@/api/client';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { feedbackJobsQuery, retryFeedback } from '@/api/queries';
 import { Button } from './ui/button';
@@ -43,7 +44,9 @@ export function FeedbackStatus({
       {job?.status === 'ready' && (
         <a
           className="underline"
-          href={`/api/assignments/${encodeURIComponent(assignmentId)}/submissions/${submissionId}/feedback`}
+          href={workspaceUrl(
+            `/api/assignments/${encodeURIComponent(assignmentId)}/submissions/${submissionId}/feedback`
+          )}
         >
           Download feedback PDF
         </a>

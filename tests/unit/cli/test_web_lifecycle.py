@@ -9,6 +9,7 @@ import pytest
 import psutil
 
 from opengrader.cli.web import open_command, stop_command
+from opengrader.core.workspace.store import Workspace
 from opengrader.server.workspace.client import (
     WorkspaceClient,
     running_service,
@@ -19,6 +20,7 @@ from opengrader.server.workspace.client import (
 @pytest.fixture
 def web_process(tmp_path):
     root = tmp_path / "workspace"
+    Workspace.create(root)
     processes = []
 
     def start(*arguments, script=None):
@@ -241,6 +243,7 @@ def test_web_opens_browser_only_after_service_is_ready(tmp_path, monkeypatch):
     import webbrowser
 
     root = tmp_path / "workspace"
+    Workspace.create(root)
     opened = []
 
     def open_browser(url):
@@ -257,3 +260,27 @@ def test_web_opens_browser_only_after_service_is_ready(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert len(opened) == 1
     assert workspace_free(root)
+
+
+def test_two_workspaces_share_one_server_and_one_shutdown(web_process, tmp_path):
+    from opengrader.server.workspace.client import ensure_service
+    from opengrader.server.client import server_free
+
+    root, start = web_process
+    process = start("--no-open")
+    first = _wait_for_service(process, root)
+    second_root = tmp_path / "second-workspace"
+    second = ensure_service(second_root)
+    assert first.pid == second.pid == process.pid
+    assert first.server_url == second.server_url
+    assert first.url != second.url
+    assert first.workspace_id != second.workspace_id
+    assert not (second_root / ".opengrader/service.json").exists()
+    assert not (second_root / ".opengrader/port").exists()
+    assert not workspace_free(second_root)
+    result = CliRunner().invoke(stop_command, [])
+    assert result.exit_code == 0, result.output
+    process.communicate(timeout=10)
+    assert server_free()
+    assert workspace_free(root)
+    assert workspace_free(second_root)

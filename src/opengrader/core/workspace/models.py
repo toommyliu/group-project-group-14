@@ -122,6 +122,7 @@ class FolderSyncResult(BaseModel):
 
 class WorkspaceInfo(BaseModel):
     id: str
+    name: str | None = None
     actor: str
     event_cursor: int
     folder_session: FolderSessionInfo | None = None

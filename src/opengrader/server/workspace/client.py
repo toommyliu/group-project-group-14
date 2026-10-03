@@ -2,22 +2,20 @@
 
 from contextlib import ExitStack, contextmanager
 from http.client import HTTPException
-import json
 import errno
 import logging
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 from threading import Event, Thread
 from typing import Callable, Iterator
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel
 
-from opengrader.core.workspace.models import Answer, WorkspaceEvent, WorkspaceInfo
+from opengrader.core.workspace.models import WorkspaceEvent, WorkspaceInfo
+from opengrader.server.transport import ServiceError, request
 
 logger = logging.getLogger(__name__)
 SERVICE_LOCK = Path(".opengrader/service.lock")
@@ -30,6 +28,7 @@ class ServiceConnection(BaseModel):
     workspace_id: str
     # service.json from a server started before tokens existed has none.
     token: str = ""
+    server_url: str = ""
 
 
 class WorkspaceInUse(RuntimeError):
@@ -40,11 +39,6 @@ class WorkspaceInUse(RuntimeError):
         super().__init__(message + ".")
 
 
-class ServiceError(RuntimeError):
-    def __init__(self, status: int, message: str, current: Answer | None = None):
-        super().__init__(message)
-        self.status = status
-        self.current = current
 
 
 class WorkspaceClient:
@@ -59,38 +53,8 @@ class WorkspaceClient:
         *,
         timeout: float = 10,
     ) -> bytes:
-        if not path.startswith("/") or path.startswith("//"):
-            raise ValueError("Expected a workspace API path.")
-        headers = {"Content-Type": "application/json"}
-        if self.connection.token:
-            headers["Authorization"] = f"Bearer {self.connection.token}"
-        request = Request(
-            self.connection.url + path,
-            data=body.model_dump_json().encode() if body else None,
-            method=method,
-            headers=headers,
-        )
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                return response.read()
-        except HTTPError as exc:
-            try:
-                data = json.loads(exc.read())
-            except ValueError:
-                data = {}
-            if not isinstance(data, dict):
-                data = {}
-            current = (
-                Answer.model_validate(data["current"]) if data.get("current") else None
-            )
-            raise ServiceError(
-                exc.code, str(data.get("detail", "Workspace request failed.")), current
-            ) from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            raise ServiceError(
-                0,
-                "Could not reach the workspace service. Your pending edits are preserved; reconnect and retry.",
-            ) from exc
+        base = self.connection.server_url if path == "/api/shutdown" and self.connection.server_url else self.connection.url
+        return request(base, self.connection.token, method, path, body, timeout=timeout)
 
     def observe(
         self, after: int, callback: Callable[[WorkspaceEvent], None]
@@ -103,7 +67,8 @@ class WorkspaceClient:
             while not stopped.is_set():
                 try:
                     with urlopen(
-                        f"{self.connection.url}/api/events?after={cursor}", timeout=20
+                        Request(f"{self.connection.url}/api/events?after={cursor}",
+                                headers={"Authorization": f"Bearer {self.connection.token}"}), timeout=20
                     ) as stream:
                         for line in stream:
                             if stopped.is_set():
@@ -160,7 +125,16 @@ def own_workspace(root: Path) -> Iterator[None]:
         try:
             stack.enter_context(exclusive_lock(root / SERVICE_LOCK))
         except BlockingIOError:
-            raise WorkspaceInUse(running_service(root)) from None
+            from opengrader.server.client import running_server
+            from opengrader.server.registry import WorkspaceRegistry
+
+            server = running_server()
+            owner = None
+            if server is not None:
+                item = next((item for item in WorkspaceRegistry(Path(server.home)).list() if item.path == str(root.resolve())), None)
+                if item is not None:
+                    owner = server.workspace(item)
+            raise WorkspaceInUse(owner) from None
         yield
 
 
@@ -173,16 +147,22 @@ def workspace_free(root: Path) -> bool:
 
 
 def running_service(root: Path) -> ServiceConnection | None:
+    from opengrader.server.client import running_server
+    from opengrader.server.registry import WorkspaceRegistry
+
+    active = running_server()
+    if active is None:
+        return None
+    root = root.expanduser().resolve()
     try:
-        record = ServiceConnection.model_validate_json(
-            (root / ".opengrader/service.json").read_bytes()
-        )
-        if record.root != str(root.resolve()):
+        item = next((item for item in WorkspaceRegistry(Path(active.home)).list() if item.path == str(root)), None)
+        if item is None:
             return None
+        connection = active.workspace(item)
         info = WorkspaceInfo.model_validate_json(
-            WorkspaceClient(record).request("GET", "/api/workspace", timeout=0.5)
+            WorkspaceClient(connection).request("GET", "/api/workspace", timeout=0.5)
         )
-        return record if info.id == record.workspace_id else None
+        return connection if info.id == item.id else None
     except (OSError, ValueError, ServiceError):
         return None
 
@@ -204,62 +184,27 @@ def _last_log_line(path: Path, start: int = 0, *, limit: int = 200) -> str:
 
 
 def ensure_service(root: Path) -> ServiceConnection:
-    """Attach to one service, or start it detached from the terminal lifetime."""
-    root = root.expanduser().resolve()
-    from opengrader.core.workspace.store import Workspace
+    """Compatibility for explicit folder/pipeline entry points.
 
+    Those workflows already create grading data in their selected folder.
+    Browser and server startup never call this to create a workspace.
+    """
+    from opengrader.core.workspace.store import DATABASE, Workspace
+    from opengrader.server.client import ensure_server, register_workspace
+
+    root = root.expanduser().resolve()
     deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        active = running_service(root)
-        if active:
-            return active
+    while True:
         try:
             with exclusive_lock(root / ".opengrader/startup.lock"):
-                active = running_service(root)
-                if active:
-                    return active
-                from opengrader.core.workspace.store import DATABASE
-
                 if not (root / DATABASE).exists():
                     Workspace.create(root)
-                log_path = root / ".opengrader/service.log"
-                log_start = log_path.stat().st_size if log_path.exists() else 0
-                with log_path.open("ab") as log:
-                    process = subprocess.Popen(
-                        [
-                            sys.executable,
-                            "-m",
-                            "opengrader.server.workspace",
-                            str(root),
-                        ],
-                        stdin=subprocess.DEVNULL,
-                        stdout=log,
-                        stderr=log,
-                        start_new_session=os.name != "nt",
-                        creationflags=(
-                            subprocess.CREATE_NEW_PROCESS_GROUP
-                            | subprocess.DETACHED_PROCESS
-                        )
-                        if os.name == "nt"
-                        else 0,
-                    )
-                while time.monotonic() < deadline:
-                    active = running_service(root)
-                    if active:
-                        return active
-                    if process.poll() is not None:
-                        reason = _last_log_line(log_path, log_start)
-                        raise RuntimeError(
-                            "The workspace service could not start"
-                            + (f" ({reason})" if reason else "")
-                            + f". Check {log_path}."
-                        )
-                    time.sleep(0.1)
-                process.terminate()
-                process.wait(timeout=5)
-                break
+            break
         except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Another client is still preparing this workspace. Try again.") from None
             time.sleep(0.1)
-    raise RuntimeError(
-        "The workspace service did not become ready. Check .opengrader/service.log."
-    )
+    connection = register_workspace(ensure_server(), root)
+    # Activate the workspace before callers publish or subscribe to it.
+    WorkspaceClient(connection).request("GET", "/api/workspace", timeout=20)
+    return connection

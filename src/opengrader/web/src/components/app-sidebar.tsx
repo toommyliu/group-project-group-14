@@ -1,20 +1,15 @@
+import { workspaceBase } from '@/api/client';
 import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import {
-  BookOpen,
-  ChartColumn,
-  LayoutGrid,
-  PenLine,
-  ScanLine,
-  Users,
-} from 'lucide-react';
+import { BookOpen, ChartColumn, FileText, PenLine, Users } from 'lucide-react';
 import { authQuery } from '@/api/auth';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { useFolderSession } from '@/hooks/use-folder-session';
 import { ModeToggle } from './mode-toggle';
 import { AuthControl } from './auth-control';
+import { ScansIcon } from './scans-icon';
 import {
   Sidebar,
   SidebarContent,
@@ -52,11 +47,17 @@ export function AppSidebar() {
       : {};
   const { setOpenMobile, isMobile, open, openMobile } = useSidebar();
   const browsing =
+    (Boolean(workspaceBase) &&
+      Boolean(matchRoute({ to: '/', pending: true }))) ||
     Boolean(matchRoute({ to: '/assignments', pending: true })) ||
     Boolean(matchRoute({ to: '/assignments/new', pending: true }));
-  const managesPeople = useQuery(authQuery).data?.role === 'instructor';
+  const auth = useQuery(authQuery);
+  const managesPeople =
+    Boolean(workspaceBase) && auth.data?.role === 'instructor';
   const onPeople = Boolean(matchRoute({ to: '/people', pending: true }));
   const expanded = isMobile ? openMobile : open;
+  const courseLinks =
+    Boolean(workspaceBase) && (!folderSession || managesPeople);
   const close = () => setOpenMobile(false);
   const destinations = (
     [
@@ -68,7 +69,7 @@ export function AppSidebar() {
       {
         to: '/assignments/$assignmentId/scans',
         title: 'Scans',
-        icon: ScanLine,
+        icon: ScansIcon,
       },
       {
         to: '/assignments/$assignmentId/grade',
@@ -104,17 +105,13 @@ export function AppSidebar() {
               Opengrader
             </Link>
           ) : (
-            <Link
-              to="/"
-              onClick={close}
-              className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden hover:underline"
-            >
+            <span className="-ms-2 min-w-0 truncate text-sm font-medium group-data-[collapsible=icon]:hidden">
               Opengrader
-            </Link>
+            </span>
           )}
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pt-2">
-          {(!folderSession || managesPeople) && (
+          {courseLinks && (
             <nav aria-label="Workspace" className="w-full">
               <SidebarGroup className="px-2 py-0">
                 <SidebarMenu>
@@ -122,15 +119,15 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                       <SidebarMenuButton
                         className={menuButtonClass}
-                        tooltip="All assignments"
-                        aria-label="All assignments"
+                        tooltip="Assignments"
+                        aria-label="Assignments"
                         isActive={browsing}
                         render={<Link to="/assignments" onClick={close} />}
                         aria-current={browsing ? 'page' : undefined}
                       >
-                        <LayoutGrid aria-hidden="true" />
+                        <FileText aria-hidden="true" />
                         <span className="group-data-[collapsible=icon]:hidden">
-                          All assignments
+                          Assignments
                         </span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>

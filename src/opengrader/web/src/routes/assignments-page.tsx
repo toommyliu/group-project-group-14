@@ -40,7 +40,10 @@ function isComplete(assignment: AssignmentSummary) {
 }
 
 export default function AssignmentsPage() {
-  const loaded = assignmentsRoute.useLoaderData();
+  return <AssignmentsList loaded={assignmentsRoute.useLoaderData()} />;
+}
+
+export function AssignmentsList({ loaded }: { loaded: AssignmentSummary[] }) {
   const query = useQuery({
     ...assignmentSummariesQuery,
     initialData: loaded,

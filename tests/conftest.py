@@ -12,3 +12,9 @@ def _isolate_ai_settings(
     directory = tmp_path_factory.mktemp("ai-settings")
     monkeypatch.setattr(app_config, "_config_dir", lambda: directory)
 
+
+
+@pytest.fixture(autouse=True)
+def _isolate_server_home(tmp_path_factory, monkeypatch):
+    directory = tmp_path_factory.mktemp("server-home")
+    monkeypatch.setenv("OPENGRADER_SERVER_HOME", str(directory))

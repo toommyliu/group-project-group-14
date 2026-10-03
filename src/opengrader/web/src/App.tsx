@@ -1,3 +1,4 @@
+import { workspaceBase } from '@/api/client';
 import type { CSSProperties, PropsWithChildren } from 'react';
 import { useMatchRoute, useRouterState } from '@tanstack/react-router';
 import { cn } from 'cn';
@@ -6,6 +7,7 @@ import { useFolderSession } from '@/hooks/use-folder-session';
 import { AppSidebar } from '@/components/app-sidebar';
 import { FolderSessionBanner } from '@/components/folder-session-banner';
 import { GraderViewToolbar } from '@/components/grader-view-toolbar';
+import { CourseBreadcrumb } from '@/components/course-breadcrumb';
 import {
   SidebarInset,
   SidebarProvider,
@@ -49,7 +51,8 @@ export function App({ children }: PropsWithChildren) {
     select: ({ matches }) =>
       matches.some((match) => match.status === 'notFound' || match._notFound),
   });
-  const standalone = !assignment && (pathname === '/' || notFound);
+  const standalone =
+    !assignment && ((!workspaceBase && pathname === '/') || notFound);
   return (
     <TooltipProvider>
       <SidebarProvider
@@ -99,6 +102,7 @@ export function App({ children }: PropsWithChildren) {
             tabIndex={-1}
           >
             {!standalone && <MobileSidebarTrigger />}
+            {!standalone && !folderSession && <CourseBreadcrumb />}
             <GraderViewToolbar />
             {folderSession && assignment && (
               <FolderSessionBanner session={folderSession} />
