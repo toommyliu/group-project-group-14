@@ -60,25 +60,27 @@ def command(port: int, dev: bool, workspace: Path | None) -> None:
     }
     logging.config.dictConfig(log_config)
 
+    from opengrader.core.workspace.store import discover_workspace
+    from opengrader.server.workspace.client import WorkspaceInUse
+
+    root = workspace or discover_workspace(Path.cwd()) or Path.cwd()
     if dev:
         if port == 0:
             raise click.UsageError("--dev requires a fixed, nonzero API port")
         from opengrader.server.dev import run_dev
 
         try:
-            code = run_dev(port, workspace=workspace)
-        except (OSError, ValueError) as exc:
+            code = run_dev(port, root)
+        except (OSError, ValueError, WorkspaceInUse) as exc:
             click.echo(f"error: {exc}", err=True)
             sys.exit(2)
         sys.exit(code)
 
-    from opengrader.core.workspace.store import discover_workspace
     from opengrader.server.workspace.__main__ import serve
 
     try:
-        root = workspace or discover_workspace(Path.cwd()) or Path.cwd()
         serve(root, port=port)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, WorkspaceInUse) as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(2)
 

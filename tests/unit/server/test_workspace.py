@@ -484,6 +484,45 @@ def test_launchers_share_service_and_events_resume_after_restart(tmp_path):
         shutdown(active)
 
 
+def test_workspace_in_use_without_service(tmp_path):
+    from opengrader.server.workspace.__main__ import serve
+    from opengrader.server.workspace.client import WorkspaceInUse, exclusive_lock
+
+    root = tmp_path / "workspace"
+    with (
+        exclusive_lock(root / ".opengrader/service.lock"),
+        pytest.raises(WorkspaceInUse) as failure,
+    ):
+        serve(root)
+    assert str(failure.value) == "Another process is using this workspace."
+
+
+def test_workspace_in_use_reports_live_owner(tmp_path):
+    import time
+
+    from opengrader.server.workspace.__main__ import serve
+    from opengrader.server.workspace.client import (
+        WorkspaceClient,
+        WorkspaceInUse,
+        ensure_service,
+    )
+
+    root = tmp_path / "workspace"
+    connection = ensure_service(root)
+    try:
+        with pytest.raises(WorkspaceInUse) as failure:
+            serve(root)
+        assert str(failure.value) == (
+            f"Another process is using this workspace (pid {connection.pid}, {connection.url})."
+        )
+    finally:
+        WorkspaceClient(connection).request("POST", "/api/shutdown")
+        deadline = time.monotonic() + 10
+        while (root / ".opengrader/service.json").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not (root / ".opengrader/service.json").exists()
+
+
 def test_event_listener_resumes_after_a_truncated_http_stream(monkeypatch, tmp_path):
     from contextlib import contextmanager
     from http.client import IncompleteRead

@@ -1,6 +1,7 @@
 """Bounded background intake jobs, independent of a browser connection."""
 
 import logging
+import signal
 from pathlib import Path
 from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -22,6 +23,22 @@ from opengrader.server.scan_store import ScanStore
 logger = logging.getLogger(__name__)
 
 
+def _defer_terminal_shutdown() -> None:
+    # The server drains these jobs before closing the pool. Terminal signals
+    # reach the workers too, but must not interrupt an extraction halfway through.
+    for name in ("SIGINT", "SIGHUP", "SIGBREAK"):
+        if (sig := getattr(signal, name, None)) is not None:
+            signal.signal(sig, signal.SIG_IGN)
+
+
+def _process_pool() -> ProcessPoolExecutor:
+    return ProcessPoolExecutor(
+        max_workers=1,
+        mp_context=get_context("spawn"),
+        initializer=_defer_terminal_shutdown,
+    )
+
+
 class ScanCancelled(Exception):
     """Stop a job at a publication boundary when its assignment is being deleted."""
 
@@ -36,8 +53,8 @@ class ScanJobs:
         # One active batch bounds OCR/LLM load while request threads remain available.
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="scan-intake")
         # PyMuPDF must not run concurrently in request threads.
-        self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
-        self.previews = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+        self.processing = _process_pool()
+        self.previews = _process_pool()
 
     def close(self) -> None:
         self.executor.shutdown(wait=True)
@@ -97,7 +114,7 @@ class ScanJobs:
         except (Exception, SystemExit) as exc:
             if isinstance(exc, BrokenProcessPool):
                 self.processing.shutdown(wait=False)
-                self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+                self.processing = _process_pool()
             logger.exception("Scan job failed: %s", batch_id)
             if batch is None:
                 return
@@ -205,7 +222,7 @@ class ScanJobs:
             except (Exception, SystemExit) as exc:
                 if isinstance(exc, BrokenProcessPool):
                     self.processing.shutdown(wait=False)
-                    self.processing = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+                    self.processing = _process_pool()
                 logger.exception("Submission extraction failed: %s", name)
                 group.error = str(exc) if isinstance(exc, ValueError) else "Could not read this submission. Check its pages and retry."
             self.save(assignment_id, batch)

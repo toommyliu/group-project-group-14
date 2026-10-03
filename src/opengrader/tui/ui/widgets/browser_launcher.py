@@ -39,7 +39,6 @@ from opengrader.core import browser_app, homebrew
 from opengrader.core.recents import short_path
 
 POLL_SECONDS = 15.0
-STOP_WAIT_SECONDS = 5.0
 
 
 class BrowserLauncher(Vertical):
@@ -366,20 +365,37 @@ class BrowserLauncher(Vertical):
     def _stop_worker(self, root: Path) -> None:
         import time
 
-        from opengrader.server.workspace.client import WorkspaceClient, running_service
+        from textual.worker import get_current_worker
+
+        from opengrader.server.workspace.client import (
+            WorkspaceClient,
+            running_service,
+            workspace_free,
+        )
 
         app = self.app
+        worker = get_current_worker()
         try:
             connection = running_service(root)
             if connection:
                 WorkspaceClient(connection).request("POST", "/api/shutdown")
+                waiting_at = time.monotonic() + 1
+                reported_wait = False
+                while not workspace_free(root):
+                    if worker.is_cancelled:
+                        return
+                    if not reported_wait and time.monotonic() >= waiting_at:
+                        app.call_from_thread(
+                            self._set_busy, "Waiting for running jobs to finish…"
+                        )
+                        reported_wait = True
+                    time.sleep(0.2)
         except Exception as exc:  # noqa: BLE001 - shown to the user
-            app.call_from_thread(self._fail, f"Could not stop the browser app: {exc}")
+            if not worker.is_cancelled:
+                app.call_from_thread(self._fail, f"Could not stop the browser app: {exc}")
             return
-        deadline = time.monotonic() + STOP_WAIT_SECONDS
-        while running_service(root) and time.monotonic() < deadline:
-            time.sleep(0.2)
-        app.call_from_thread(self._stopped)
+        if not worker.is_cancelled:
+            app.call_from_thread(self._stopped)
 
     def _stopped(self) -> None:
         self.busy = False

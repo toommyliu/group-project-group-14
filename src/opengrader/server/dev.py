@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 
+from opengrader.server.workspace.client import own_workspace
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +74,7 @@ def _python_snapshot(source: Path) -> dict[Path, tuple[int, int, int]]:
     return snapshot
 
 
-def _start_api(port: int, workspace: Path | None = None) -> subprocess.Popen:
+def _start_api(port: int, root: Path) -> subprocess.Popen:
     return subprocess.Popen(
         [
             sys.executable,
@@ -80,7 +82,8 @@ def _start_api(port: int, workspace: Path | None = None) -> subprocess.Popen:
             "opengrader.cli.serve",
             "--port",
             str(port),
-            *(["--workspace", str(workspace)] if workspace else []),
+            "--workspace",
+            str(root),
         ],
         start_new_session=os.name == "posix",
     )
@@ -101,7 +104,7 @@ def _start_vite(node: str, web: Path, port: int) -> subprocess.Popen:
     )
 
 
-def run_dev(port: int, *, workspace: Path | None = None) -> int:
+def run_dev(port: int, root: Path) -> int:
     """Restart both servers on Python edits; Vite handles frontend-only changes."""
     source = Path(__file__).resolve().parents[1]
     web = source / "web"
@@ -114,6 +117,9 @@ def run_dev(port: int, *, workspace: Path | None = None) -> int:
             "'pnpm --dir src/opengrader/web install --frozen-lockfile'."
         )
 
+    with own_workspace(root):
+        pass
+
     snapshot = _python_snapshot(source)
     changed_at: float | None = None
     api = None
@@ -124,7 +130,7 @@ def run_dev(port: int, *, workspace: Path | None = None) -> int:
 
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
-        api = _start_api(port, workspace)
+        api = _start_api(port, root)
         frontend = _start_vite(node, web, port)
         while True:
             code = frontend.poll()
@@ -153,7 +159,7 @@ def run_dev(port: int, *, workspace: Path | None = None) -> int:
                     _stop(api)
                     api = None
                 changed_at = None
-                api = _start_api(port, workspace)
+                api = _start_api(port, root)
                 frontend = _start_vite(node, web, port)
             time.sleep(0.5)
     except KeyboardInterrupt:
