@@ -21,6 +21,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarResizeHandle,
+  SidebarSeparator,
   useSidebar,
   SidebarTrigger,
 } from './ui/sidebar';
@@ -155,20 +156,11 @@ export function AppSidebar() {
           )}
           {assignment && (
             <nav aria-label={assignment.title} className="w-full">
-              <SidebarGroup className="px-2 pt-2 pb-0">
-                <div
-                  title={assignment.title}
-                  className="flex h-6 shrink-0 items-center px-4 text-xs font-medium text-sidebar-foreground/70 select-none group-data-[collapsible=icon]:px-2"
-                >
-                  <span className="truncate group-data-[collapsible=icon]:hidden">
-                    {assignment.title}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="hidden h-px w-full bg-sidebar-border group-data-[collapsible=icon]:block"
-                  />
-                </div>
-                <SidebarGroupContent className="mt-1">
+              <SidebarGroup className="px-2 py-0">
+                {courseLinks && (
+                  <SidebarSeparator className="mx-4 my-2 group-data-[collapsible=icon]:mx-2" />
+                )}
+                <SidebarGroupContent>
                   <SidebarMenu>
                     {destinations.map(({ to, title, icon: Icon }) => {
                       const active = Boolean(matchRoute({ to, pending: true }));

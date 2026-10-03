@@ -29,8 +29,7 @@ export default function AssignmentStatisticsPage() {
   return (
     <>
       <PageHeading
-        title="Assignment statistics"
-        description={assignment.title}
+        title="Statistics"
         actions={
           reports.length > 1 && (
             <div className="flex flex-wrap items-center gap-3">

@@ -286,7 +286,6 @@ export default function GradePage({
       <PageHeading
         className="mb-4"
         title="Grade"
-        description={assignment.title}
         actions={<GradingShortcuts />}
       />
       {submission ? (

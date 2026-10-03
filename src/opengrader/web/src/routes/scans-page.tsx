@@ -182,9 +182,7 @@ export default function ScansPage({
       <PageHeading
         title="Scans"
         description={
-          empty ? (
-            assignment.title
-          ) : (
+          empty ? undefined : (
             <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span>{summary}</span>
               {published > 0 && (
