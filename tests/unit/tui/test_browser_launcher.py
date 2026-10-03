@@ -142,6 +142,32 @@ def test_open_in_browser_imports_the_folder_and_shows_open_and_stop(
     assert recents[1].submissions == str(Path("/tmp/course/submissions").resolve())
 
 
+def test_stop_says_it_is_waiting_until_the_service_exits(
+    service, monkeypatch  # noqa: ANN001
+) -> None:
+    monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "ready")
+    lock = service_client.exclusive_lock(service["root"] / ".opengrader/service.lock")
+
+    async def run() -> tuple[str, bool, bool]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            _fill_card(app)
+            app.query_one("#browser-open-button").press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            with lock:
+                app.query_one("#browser-stop").press()
+                await pilot.pause(1.5)
+                waiting = str(app.query_one("#browser-status-text", Static).render())
+                hidden_while_held = app.query_one(BrowserLauncher).has_class("hidden")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            return waiting, hidden_while_held, app.query_one(BrowserLauncher).has_class("hidden")
+
+    assert asyncio.run(run()) == ("Waiting for running jobs to finish…", False, True)
+
+
 def test_a_service_left_running_earlier_can_still_be_stopped(service) -> None:  # noqa: ANN001
     browser_app.save_browser_preferences(
         BrowserPreferences(last_workspace=str(service["root"]))

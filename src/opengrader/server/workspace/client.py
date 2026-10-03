@@ -1,6 +1,6 @@
 """Local workspace connections shared by terminal entry points."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from http.client import HTTPException
 import json
 import errno
@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from opengrader.core.workspace.models import Answer, WorkspaceEvent, WorkspaceInfo
 
 logger = logging.getLogger(__name__)
+SERVICE_LOCK = Path(".opengrader/service.lock")
 
 
 class ServiceConnection(BaseModel):
@@ -29,6 +30,14 @@ class ServiceConnection(BaseModel):
     workspace_id: str
     # service.json from a server started before tokens existed has none.
     token: str = ""
+
+
+class WorkspaceInUse(RuntimeError):
+    def __init__(self, owner: ServiceConnection | None):
+        message = "Another process is using this workspace"
+        if owner is not None:
+            message += f" (pid {owner.pid}, {owner.url})"
+        super().__init__(message + ".")
 
 
 class ServiceError(RuntimeError):
@@ -143,6 +152,24 @@ def exclusive_lock(path: Path) -> Iterator[None]:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def own_workspace(root: Path) -> Iterator[None]:
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(exclusive_lock(root / SERVICE_LOCK))
+        except BlockingIOError:
+            raise WorkspaceInUse(running_service(root)) from None
+        yield
+
+
+def workspace_free(root: Path) -> bool:
+    try:
+        with exclusive_lock(root / SERVICE_LOCK):
+            return True
+    except BlockingIOError:
+        return False
 
 
 def running_service(root: Path) -> ServiceConnection | None:
