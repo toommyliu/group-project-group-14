@@ -342,7 +342,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
         title={overview ? 'Overview' : 'Create assignment'}
         description={
           overview
-            ? overview.assignment.title
+            ? undefined
             : 'Build questions visually or write Markdown. You can also drop in an existing answer key.'
         }
         actions={

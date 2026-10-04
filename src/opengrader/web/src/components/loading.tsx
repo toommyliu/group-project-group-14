@@ -36,10 +36,7 @@ export function AssignmentsLoading() {
 export function AssignmentLoading() {
   return (
     <div aria-busy="true" aria-label="Loading assignment">
-      <PageHeading
-        title={<Skeleton className="h-9 w-72 max-w-full" />}
-        description={<Skeleton className="h-5 w-48 max-w-full" />}
-      />
+      <PageHeading title={<Skeleton className="h-9 w-40 max-w-full" />} />
       <div
         className="flex flex-wrap items-end gap-6 border-b pb-6"
         aria-hidden="true"
@@ -84,11 +81,7 @@ export function GradeLoading() {
       aria-busy="true"
       aria-label="Loading grading"
     >
-      <PageHeading
-        className="mb-4"
-        title="Grade"
-        description={<Skeleton className="h-5 w-48 max-w-full" />}
-      />
+      <PageHeading className="mb-4" title="Grade" />
       <div
         className="grid gap-8 border-t pt-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)] lg:grid-rows-[minmax(0,1fr)] lg:gap-0"
         aria-hidden="true"
