@@ -90,7 +90,7 @@ class BrowserLauncher(Vertical):
             yield Static("", id="browser-status-text", markup=False)
             with Horizontal(id="browser-status-actions"):
                 yield Button("Open", id="browser-reopen", compact=True)
-                yield Button("Stop", id="browser-stop", variant="error", compact=True)
+                yield Button("Stop server", id="browser-stop", variant="error", compact=True)
 
     def on_mount(self) -> None:
         saved = browser_app.load_browser_preferences()
@@ -336,7 +336,7 @@ class BrowserLauncher(Vertical):
             grades = "Grades saved there stay in the workspace until written back."
         self.query_one("#browser-status-text", Static).update(
             f"● {kind} running at {url} — {where}. {grades} It keeps running "
-            "after you close Opengrader; Stop ends it."
+            "after you close Opengrader; Stop server disconnects all workspaces."
         )
         self.query_one("#browser-status-actions").display = True
         self.remove_class("hidden")
@@ -358,7 +358,7 @@ class BrowserLauncher(Vertical):
         event.stop()
         if self._root is None or self.busy:
             return
-        self._set_busy("Stopping the browser app…")
+        self._set_busy("Stopping the server for all workspaces…")
         self._stop_worker(self._root)
 
     @work(thread=True, exclusive=True, group="browser-launch")
@@ -401,7 +401,7 @@ class BrowserLauncher(Vertical):
         self.busy = False
         self.remove_class("busy")
         self._hide()
-        self.app.notify("Browser app stopped. Your grades are saved.")
+        self.app.notify("Server stopped for all workspaces. Your grades are saved.")
 
     def _poll(self) -> None:
         if self._root is not None and not self.busy:

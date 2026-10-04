@@ -1,0 +1,345 @@
+import json
+import shutil
+from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+from fastapi.testclient import TestClient
+from itsdangerous import TimestampSigner
+
+from opengrader.cli.web import _root
+from opengrader.cli.workspace import command
+from opengrader.core.workspace.store import Workspace
+from opengrader.server.app import create_app
+from opengrader.server.home import resolve_data_home
+from opengrader.server.registry import WorkspaceRegistry
+from opengrader.server.settings import ServerSettings
+from opengrader.server.workspace.client import exclusive_lock
+
+
+def local_client(app):
+    return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 1234))
+
+
+def test_server_home_does_not_use_launcher_override(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENGRADER_SERVER_HOME")
+    monkeypatch.setenv("OPENGRADER_HOME", str(tmp_path / "checkout"))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert resolve_data_home() == tmp_path / ".opengrader"
+    monkeypatch.setenv("OPENGRADER_SERVER_HOME", str(tmp_path / "hosted"))
+    assert resolve_data_home() == tmp_path / "hosted"
+
+
+def test_creation_registration_and_recent_order_survive_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "opengrader.server.registry.default_workspaces_dir",
+        lambda: tmp_path / "Opengrader",
+    )
+    registry = WorkspaceRegistry(tmp_path / "server")
+    created = registry.create("CS101")
+    existing = Workspace.create(tmp_path / "course-on-disk")
+    registered = registry.register(existing.root, "CS201")
+    assert created.path == str(tmp_path / "Opengrader/CS101")
+    assert registered.path == str(existing.root)
+    registry.opened(registered.id)
+    registry.opened(created.id)
+    reopened = WorkspaceRegistry(registry.home)
+    assert reopened.id == registry.id
+    assert [item.id for item in reopened.list()] == [created.id, registered.id]
+    assert reopened.get(created.id).last_opened is not None
+    assert reopened.register(existing.root).name == "CS201"
+
+
+def test_registry_concurrent_registration_and_duplicate_copies(tmp_path):
+    workspace = Workspace.create(tmp_path / "data")
+    home = tmp_path / "server"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        items = list(
+            pool.map(
+                lambda _: WorkspaceRegistry(home).register(workspace.root), range(4)
+            )
+        )
+    assert len({item.id for item in items}) == 1
+    registry = WorkspaceRegistry(home)
+    copied = tmp_path / "copy"
+    shutil.copytree(workspace.root, copied)
+    with pytest.raises(ValueError, match="Another copy"):
+        registry.register(copied)
+    shutil.rmtree(workspace.root)
+    assert registry.register(copied).path == str(copied)
+    assert len(registry.list()) == 1
+
+
+@pytest.mark.parametrize(
+    "name", ["", "..", "../escape", "a/b", "a\\b", "CON", "name.", "x" * 121]
+)
+def test_create_rejects_unsafe_names(tmp_path, name):
+    with pytest.raises(ValueError):
+        WorkspaceRegistry(tmp_path / "server").create(name)
+
+
+def test_opening_server_and_unknown_cwd_does_not_create_workspace(
+    tmp_path, monkeypatch
+):
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    assert _root(None) is None
+    with pytest.raises(ValueError, match="No workspace"):
+        _root(cwd)
+    app = create_app(tmp_path / "server", process_jobs=False)
+    with local_client(app) as client:
+        assert client.get("/api/workspaces").json() == []
+        assert client.get("/courses/unknown/api/workspace").status_code == 404
+        assert (
+            client.post(
+                "/api/workspaces", json={"name": "Course", "path": str(cwd)}
+            ).status_code
+            == 422
+        )
+    assert not (cwd / ".opengrader").exists()
+
+
+def test_scoped_workspaces_share_workers_but_not_data_or_assets(tmp_path):
+    app = create_app(tmp_path / "server", process_jobs=False)
+    registry = app.state.registry
+    workspaces = [Workspace.create(tmp_path / name) for name in ["A", "B"]]
+    items = [registry.register(workspace.root) for workspace in workspaces]
+    with local_client(app) as client:
+        for item in items:
+            response = client.post(
+                item.url_path + "/api/assignments",
+                json={
+                    "qa_markdown": f"---\ntitle: {item.name}\n---\n- (1 point) Question\n"
+                },
+            )
+            assert response.status_code == 201, response.text
+            assignment_id = response.json()["id"]
+            other = next(other for other in items if other.id != item.id)
+            assert (
+                client.get(
+                    other.url_path + f"/api/assignments/{assignment_id}/qa"
+                ).status_code
+                == 404
+            )
+            assets = Path(item.path) / ".opengrader/assets"
+            assets.mkdir(exist_ok=True)
+            (assets / "same.txt").write_text(item.name)
+        for item in items:
+            assert client.get(item.url_path + "/api/assets/same.txt").text == item.name
+            assert (
+                client.get(item.url_path + "/api/workspace").json()["name"] == item.name
+            )
+            assert len(client.get(item.url_path + "/api/assignments").json()) == 1
+        apps = app.state.workspaces.apps
+        assert (
+            apps[items[0].id].state.scan_jobs.workers
+            is apps[items[1].id].state.scan_jobs.workers
+        )
+        assert client.get("/api/assignments").status_code == 404
+        assert client.post(items[0].url_path + "/api/shutdown").status_code == 404
+
+
+def test_missing_or_locked_workspace_does_not_stop_another(tmp_path):
+    app = create_app(tmp_path / "server", process_jobs=False)
+    good = app.state.registry.register(Workspace.create(tmp_path / "good").root)
+    missing = app.state.registry.register(Workspace.create(tmp_path / "missing").root)
+    shutil.rmtree(missing.path)
+    with local_client(app) as client:
+        assert client.get(missing.url_path + "/api/workspace").status_code == 409
+        assert not Path(missing.path).exists()
+        with exclusive_lock(Path(good.path) / ".opengrader/service.lock"):
+            assert client.get(good.url_path + "/api/workspace").status_code == 409
+        assert client.get(good.url_path + "/api/workspace").status_code == 200
+
+
+def test_unavailable_course_pages_load_the_app_and_apis_stay_json(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<title>Opengrader</title>")
+    app = create_app(tmp_path / "server", web_dist=dist, process_jobs=False)
+    missing = app.state.registry.register(Workspace.create(tmp_path / "missing").root)
+    shutil.rmtree(missing.path)
+    with local_client(app) as client:
+        page = client.get("/courses/unknown/assignments/quiz/grade")
+        assert page.status_code == 404
+        assert page.text == "<title>Opengrader</title>"
+        api = client.get("/courses/unknown/api/workspace")
+        assert api.status_code == 404
+        assert api.json() == {"detail": "Workspace is not registered with this server."}
+        page = client.get(missing.url_path + "/assignments")
+        assert page.status_code == 409
+        assert page.text == "<title>Opengrader</title>"
+
+
+def cookie(settings, email):
+    return (
+        TimestampSigner(settings.session_secret.get_secret_value())
+        .sign(
+            b64encode(
+                json.dumps(
+                    {"user": {"id": email, "email": email, "name": "Grader"}}
+                ).encode()
+            )
+        )
+        .decode()
+    )
+
+
+def test_hosted_access_filters_catalog_and_every_workspace_resource(tmp_path):
+    settings = ServerSettings(
+        _env_file=None,
+        auth_enabled=True,
+        google_client_id="id",
+        google_client_secret="secret",
+        session_secret="session",
+        instructors="prof@sjsu.edu",
+    )
+    app = create_app(tmp_path / "server", settings=settings, process_jobs=False)
+    a = Workspace.create(tmp_path / "A")
+    b = Workspace.create(tmp_path / "B")
+    a.add_grader("grader@sjsu.edu")
+    first, second = [app.state.registry.register(w.root) for w in [a, b]]
+    with TestClient(app) as client:
+        assert client.get(first.url_path + "/api/workspace").status_code == 401
+        client.cookies.set("opengrader_session", cookie(settings, "grader@sjsu.edu"))
+        assert [item["id"] for item in client.get("/api/workspaces").json()] == [
+            first.id
+        ]
+        assert client.get(first.url_path + "/api/workspace").status_code == 200
+        for path in [
+            "/api/workspace",
+            "/api/assignments",
+            "/api/assets/secret.png",
+            "/api/events",
+            "/api/jobs",
+            "/auth/me",
+            "/assignments",
+        ]:
+            assert client.get(second.url_path + path).status_code == 403, path
+        assert second.id not in app.state.workspaces.apps
+        assert (
+            client.get(first.url_path + "/api/workspace").status_code == 200
+        )  # Denial did not log out the grader.
+        assert (
+            client.post("/api/workspaces", json={"name": "Unauthorized"}).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/server/workspaces/register", json={"path": str(b.root)}
+            ).status_code
+            == 404
+        )
+        assert client.post("/api/shutdown").status_code == 404
+        a.remove_grader("grader@sjsu.edu")
+        assert client.get(first.url_path + "/api/workspace").status_code == 401
+
+
+def test_register_requires_control_token_and_browser_creation_uses_default(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "opengrader.server.registry.default_workspaces_dir",
+        lambda: tmp_path / "Opengrader",
+    )
+    app = create_app(tmp_path / "server", process_jobs=False)
+    workspace = Workspace.create(tmp_path / "existing")
+    with local_client(app) as client:
+        assert (
+            client.post(
+                "/api/server/workspaces/register", json={"path": str(workspace.root)}
+            ).status_code
+            == 404
+        )
+        response = client.post(
+            "/api/server/workspaces/register",
+            json={"path": str(workspace.root)},
+            headers={"Authorization": f"Bearer {app.state.shutdown_token}"},
+        )
+        assert response.status_code == 200
+        created = client.post("/api/workspaces", json={"name": "Course"})
+        assert created.status_code == 201
+        assert "path" not in created.json()
+        assert (tmp_path / "Opengrader/Course/.opengrader/workspace.sqlite3").is_file()
+        assert (
+            client.post("/api/workspaces", json={"name": "Course"}).status_code == 409
+        )
+
+
+def test_explicit_cli_create_and_register(tmp_path):
+    runner = CliRunner()
+    root = tmp_path / "chosen"
+    result = runner.invoke(command, ["create", "A course", "--directory", str(root)])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(command, ["add", str(root), "--name", "Renamed"])
+    assert result.exit_code == 0, result.output
+    assert "Renamed" in runner.invoke(command, ["list"]).output
+    assert _root(root) == root
+
+
+def test_server_configuration_is_independent_of_cwd(tmp_path, monkeypatch):
+    home = tmp_path / "server"
+    home.mkdir()
+    (home / "server.env").write_text("OPENGRADER_GOOGLE_DOMAIN=example.edu\n")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / ".env").write_text("OPENGRADER_AUTH_ENABLED=invalid-boolean\n")
+    monkeypatch.chdir(cwd)
+    app = create_app(home, process_jobs=False)
+    assert app.state.workspaces.settings.google_domain == "example.edu"
+    assert not app.state.workspaces.settings.auth_enabled
+
+
+def test_mounted_folder_session_still_refuses_assignment_changes(tmp_path):
+    from opengrader.core.workspace.folder_session import start_folder_session
+
+    app = create_app(tmp_path / "server", process_jobs=False)
+    workspace = Workspace.create(tmp_path / "data")
+    assignment = workspace.create_assignment("- (1 point) Question\n")
+    start_folder_session(workspace.root, assignment.id)
+    item = app.state.registry.register(workspace.root)
+    with local_client(app) as client:
+        response = client.post(
+            item.url_path + "/api/assignments",
+            json={"qa_markdown": "- (2 points) Other\n"},
+        )
+        assert response.status_code == 409
+        assert "folder" in response.json()["detail"]
+
+
+def test_two_tabs_open_workspace_once_and_resume_pending_feedback(
+    tmp_path, monkeypatch
+):
+    from threading import Event
+
+    from opengrader.server.workspace.jobs import FeedbackJobs
+
+    app = create_app(tmp_path / "server")
+    workspace = Workspace.create(tmp_path / "data")
+    item = app.state.registry.register(workspace.root)
+    recovered = Event()
+    original = FeedbackJobs.__init__
+
+    def initialize(self, saved):
+        original(self, saved)
+        recovered.set()
+
+    monkeypatch.setattr(FeedbackJobs, "__init__", initialize)
+    # A saved feedback queue must be resumed without opening a browser first.
+    monkeypatch.setattr(
+        Workspace, "jobs", lambda self: [type("Job", (), {"status": "running"})()]
+    )
+    with local_client(app) as client:
+        assert recovered.wait(timeout=3)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(
+                pool.map(
+                    lambda _: client.get(item.url_path + "/api/workspace"), range(2)
+                )
+            )
+        assert all(result.status_code == 200 for result in results)
+        assert len(app.state.workspaces.apps) == 1
+        assert len(app.state.workspaces.feedback.jobs) == 1

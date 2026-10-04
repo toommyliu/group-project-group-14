@@ -9,7 +9,8 @@ import subprocess
 import sys
 import time
 
-from opengrader.server.workspace.client import own_workspace
+from opengrader.server.client import own_server
+from opengrader.server.home import resolve_data_home
 
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ def _python_snapshot(source: Path) -> dict[Path, tuple[int, int, int]]:
     return snapshot
 
 
-def _start_api(port: int, root: Path) -> subprocess.Popen:
+def _start_api(port: int, root: Path | None) -> subprocess.Popen:
     return subprocess.Popen(
         [
             sys.executable,
@@ -82,8 +83,7 @@ def _start_api(port: int, root: Path) -> subprocess.Popen:
             "opengrader.cli.serve",
             "--port",
             str(port),
-            "--workspace",
-            str(root),
+            *(["--workspace", str(root)] if root is not None else []),
         ],
         start_new_session=os.name == "posix",
     )
@@ -104,7 +104,7 @@ def _start_vite(node: str, web: Path, port: int) -> subprocess.Popen:
     )
 
 
-def run_dev(port: int, root: Path) -> int:
+def run_dev(port: int, root: Path | None = None) -> int:
     """Restart both servers on Python edits; Vite handles frontend-only changes."""
     source = Path(__file__).resolve().parents[1]
     web = source / "web"
@@ -117,7 +117,7 @@ def run_dev(port: int, root: Path) -> int:
             "'pnpm --dir src/opengrader/web install --frozen-lockfile'."
         )
 
-    with own_workspace(root):
+    with own_server(resolve_data_home()):
         pass
 
     snapshot = _python_snapshot(source)

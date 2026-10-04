@@ -20,6 +20,7 @@ import { authQuery } from './api/auth';
 import { peopleQuery } from './api/people';
 import { scansQuery } from './api/scans';
 import { workspaceQuery } from './api/workspace';
+import { workspaceBase } from './api/client';
 import {
   loadAssignment,
   requireAssignment,
@@ -43,19 +44,32 @@ const rootRoute = createRootRouteWithContext<{
 }>()({
   // Not-found pages under an assignment need it on first render; assignment pages report load errors.
   loader: async ({ context, location }) => {
-    if (location.pathname.startsWith('/assignments/'))
+    if (!workspaceBase && location.pathname.startsWith('/assignments'))
+      throw redirect({ to: '/courses' });
+    if (
+      workspaceBase &&
+      location.pathname.slice(workspaceBase.length).startsWith('/assignments/')
+    )
       await context.queryClient
         .ensureQueryData(assignmentsQuery)
         .catch(() => undefined);
   },
   notFoundComponent: RouteNotFound,
-  component: lazyRouteComponent(() => import('./components/workspace')),
+  component: lazyRouteComponent(() => import('./components/root-layout')),
 });
+
+async function canOpenCourses(queryClient: QueryClient) {
+  const auth = await queryClient
+    .ensureQueryData(authQuery)
+    .catch(() => undefined);
+  return auth ? !auth.enabled || Boolean(auth.role) : false;
+}
 
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: async ({ context }) => {
+    if (!workspaceBase) return;
     const assignmentId = await folderSessionAssignmentId(context.queryClient);
     if (assignmentId)
       throw redirect({
@@ -63,7 +77,26 @@ export const indexRoute = createRoute({
         params: { assignmentId },
       });
   },
-  component: lazyRouteComponent(() => import('./routes/home-page')),
+  loader: ({ context }) =>
+    workspaceBase
+      ? context.queryClient.fetchQuery({
+          ...assignmentSummariesQuery,
+          staleTime: 0,
+        })
+      : null,
+  pendingComponent: AssignmentsLoading,
+  component: lazyRouteComponent(() => import('./routes/index-page')),
+  errorComponent: RouteError,
+});
+
+export const coursesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/courses',
+  beforeLoad: async ({ context }) => {
+    if (!(await canOpenCourses(context.queryClient)))
+      throw redirect({ to: '/' });
+  },
+  component: lazyRouteComponent(() => import('./routes/workspace-list')),
   errorComponent: RouteError,
 });
 
@@ -230,8 +263,10 @@ export const peopleRoute = createRoute({
 
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
+    basepath: workspaceBase || '/',
     routeTree: rootRoute.addChildren([
       indexRoute,
+      coursesRoute,
       assignmentsRoute,
       newAssignmentRoute,
       gradeRoute,

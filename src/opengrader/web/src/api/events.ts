@@ -1,12 +1,14 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { client, readData } from './client';
+import { client, readData, workspaceUrl } from './client';
 import { workspaceQuery } from './workspace';
 
 /** Subscribe before starting route loads so a change cannot fall between them. */
 export async function observeWorkspace(queries: QueryClient) {
   const info = readData(await client.GET('/api/workspace'));
   queries.setQueryData(workspaceQuery.queryKey, info);
-  const events = new EventSource(`/api/events?after=${info.event_cursor}`);
+  const events = new EventSource(
+    workspaceUrl(`/api/events?after=${info.event_cursor}`)
+  );
   const pending = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   events.onmessage = (message) => {

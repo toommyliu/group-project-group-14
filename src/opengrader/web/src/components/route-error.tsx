@@ -30,7 +30,7 @@ export function RouteError({ error }: ErrorComponentProps) {
           to="/assignments"
           className="inline-flex min-h-11 items-center underline underline-offset-4"
         >
-          All assignments
+          Back to assignments
         </Link>
       </div>
     </>
@@ -105,7 +105,7 @@ export function RouteNotFound({ data }: NotFoundRouteProps) {
         </Link>
       ) : (
         <Link to="/assignments" className={buttonVariants({ size: 'lg' })}>
-          All assignments
+          Back to assignments
         </Link>
       )}
     </div>

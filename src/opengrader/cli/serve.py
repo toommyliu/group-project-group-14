@@ -30,11 +30,12 @@ from opengrader.cli import CONTEXT_SETTINGS
     help="Workspace directory. Defaults to the current workspace.",
 )
 def command(port: int, dev: bool, workspace: Path | None) -> None:
-    """Run this workspace service on localhost."""
+    """Run the Opengrader server on localhost."""
     from opengrader.server.settings import ServerSettings
+    from opengrader.server.home import resolve_data_home
 
     try:
-        ServerSettings()
+        ServerSettings(_env_file=resolve_data_home() / "server.env")
     except ValueError as exc:
         raise click.UsageError(str(exc)) from None
 
@@ -60,10 +61,17 @@ def command(port: int, dev: bool, workspace: Path | None) -> None:
     }
     logging.config.dictConfig(log_config)
 
-    from opengrader.core.workspace.store import discover_workspace
+    from opengrader.cli.web import _root
+    from opengrader.server.registry import WorkspaceRegistry
+    from opengrader.server.client import ServerInUse
     from opengrader.server.workspace.client import WorkspaceInUse
 
-    root = workspace or discover_workspace(Path.cwd()) or Path.cwd()
+    try:
+        root = _root(workspace)
+        if root is not None:
+            WorkspaceRegistry().register(root)
+    except (OSError, ValueError) as exc:
+        raise click.UsageError(str(exc)) from exc
     if dev:
         if port == 0:
             raise click.UsageError("--dev requires a fixed, nonzero API port")
@@ -71,16 +79,16 @@ def command(port: int, dev: bool, workspace: Path | None) -> None:
 
         try:
             code = run_dev(port, root)
-        except (OSError, ValueError, WorkspaceInUse) as exc:
+        except (OSError, ValueError, WorkspaceInUse, ServerInUse) as exc:
             click.echo(f"error: {exc}", err=True)
             sys.exit(2)
         sys.exit(code)
 
-    from opengrader.server.workspace.__main__ import serve
+    from opengrader.server.__main__ import serve
 
     try:
-        serve(root, port=port)
-    except (OSError, ValueError, WorkspaceInUse) as exc:
+        serve(port=port)
+    except (OSError, ValueError, WorkspaceInUse, ServerInUse) as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(2)
 

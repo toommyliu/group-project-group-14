@@ -48,30 +48,44 @@ export class NetworkError extends Error {
   }
 }
 
-export const client = createClient<paths>({
-  baseUrl: window.location.origin,
-  fetch: async (request) => {
-    try {
-      return await globalThis.fetch(request);
-    } catch (error) {
-      if (request.signal.aborted) throw error;
-      if (error instanceof TypeError) throw new NetworkError(error);
-      throw error;
-    }
-  },
-});
+export const workspaceBase =
+  window.location.pathname.match(/^\/courses\/[^/]+(?=\/|$)/)?.[0] ?? '';
 
-client.use({
-  async onResponse({ request, response }) {
-    if (response.ok) return;
-    // Decode errors before openapi-fetch parses the body.
-    const body: unknown = await response.json().catch((error: unknown) => {
-      if (request.signal.aborted) throw error;
-      return undefined;
-    });
-    throw new ApiError(response.status, body);
-  },
-});
+export function workspaceUrl(path: string) {
+  return workspaceBase + path;
+}
+
+function makeClient(baseUrl: string) {
+  const instance = createClient<paths>({
+    baseUrl,
+    fetch: async (request) => {
+      try {
+        return await globalThis.fetch(request);
+      } catch (error) {
+        if (request.signal.aborted) throw error;
+        if (error instanceof TypeError) throw new NetworkError(error);
+        throw error;
+      }
+    },
+  });
+
+  instance.use({
+    async onResponse({ request, response }) {
+      if (response.ok) return;
+      // Decode errors before openapi-fetch parses the body.
+      const body: unknown = await response.json().catch((error: unknown) => {
+        if (request.signal.aborted) throw error;
+        return undefined;
+      });
+      throw new ApiError(response.status, body);
+    },
+  });
+
+  return instance;
+}
+
+export const client = makeClient(window.location.origin + workspaceBase);
+export const serverClient = makeClient(window.location.origin);
 
 /** Require data from a successful client request; bodyless operations skip this. */
 export function readData<T>({ data }: { data?: T }): T {

@@ -440,11 +440,10 @@ def test_launchers_share_service_and_events_resume_after_restart(tmp_path):
     def shutdown(connection):
         WorkspaceClient(connection).request("POST", "/api/shutdown")
         deadline = time.monotonic() + 10
-        while (
-            root / ".opengrader/service.json"
-        ).exists() and time.monotonic() < deadline:
+        from opengrader.server.client import server_free
+        while not server_free() and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert not (root / ".opengrader/service.json").exists()
+        assert server_free()
 
     active = first
     replay_stop = lambda: None
@@ -518,9 +517,10 @@ def test_workspace_in_use_reports_live_owner(tmp_path):
     finally:
         WorkspaceClient(connection).request("POST", "/api/shutdown")
         deadline = time.monotonic() + 10
-        while (root / ".opengrader/service.json").exists() and time.monotonic() < deadline:
+        from opengrader.server.client import server_free
+        while not server_free() and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert not (root / ".opengrader/service.json").exists()
+        assert server_free()
 
 
 def test_event_listener_resumes_after_a_truncated_http_stream(monkeypatch, tmp_path):
@@ -547,7 +547,8 @@ def test_event_listener_resumes_after_a_truncated_http_stream(monkeypatch, tmp_p
         raise IncompleteRead(b"partial chunk")
 
     @contextmanager
-    def open_stream(url, *, timeout):
+    def open_stream(request, *, timeout):
+        url = request.full_url
         urls.put(url)
         yield (
             interrupted()
@@ -572,11 +573,11 @@ def test_event_listener_resumes_after_a_truncated_http_stream(monkeypatch, tmp_p
 
 
 def test_a_service_that_dies_on_start_reports_why(monkeypatch, tmp_path):
-    from opengrader.server.workspace import client
+    from opengrader.server import client
 
     root = tmp_path / "course"
-    (root / ".opengrader").mkdir(parents=True)
-    log = root / ".opengrader/service.log"
+    (root / "logs").mkdir(parents=True)
+    log = root / "logs/server.log"
     log.write_text("PermissionError: an earlier, unrelated failure\n")
 
     class Crashed:
@@ -594,7 +595,7 @@ def test_a_service_that_dies_on_start_reports_why(monkeypatch, tmp_path):
     monkeypatch.setattr(client.subprocess, "Popen", Crashed)
 
     with pytest.raises(RuntimeError) as failure:
-        client.ensure_service(root)
+        client.ensure_server(root)
 
     message = str(failure.value)
     assert "No module named 'httpx'" in message
@@ -605,11 +606,11 @@ def test_a_service_that_dies_on_start_reports_why(monkeypatch, tmp_path):
 def test_a_service_that_dies_silently_does_not_blame_an_earlier_run(
     monkeypatch, tmp_path
 ):
-    from opengrader.server.workspace import client
+    from opengrader.server import client
 
     root = tmp_path / "course"
-    (root / ".opengrader").mkdir(parents=True)
-    (root / ".opengrader/service.log").write_text("PermissionError: last week\n")
+    (root / "logs").mkdir(parents=True)
+    (root / "logs/server.log").write_text("PermissionError: last week\n")
 
     class Silent:
         def __init__(self, argv, **kwargs):
@@ -620,7 +621,7 @@ def test_a_service_that_dies_silently_does_not_blame_an_earlier_run(
 
     monkeypatch.setattr(client.subprocess, "Popen", Silent)
 
-    with pytest.raises(RuntimeError, match=r"could not start\. Check ") as failure:
-        client.ensure_service(root)
+    with pytest.raises(RuntimeError, match=r"could not start: ") as failure:
+        client.ensure_server(root)
 
     assert "last week" not in str(failure.value)

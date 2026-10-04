@@ -1,4 +1,4 @@
-import { ApiError } from '@/api/client';
+import { ApiError, workspaceBase } from '@/api/client';
 import { observeWorkspace } from '@/api/events';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -8,6 +8,7 @@ import './index.css';
 import { RouterProvider } from '@tanstack/react-router';
 import { createAppRouter } from './router';
 import { syncTheme } from '@/lib/theme';
+import { StartupError } from '@/components/startup-error';
 
 function mayPassOnRetry(error: unknown) {
   if (!(error instanceof ApiError)) return true;
@@ -29,8 +30,10 @@ const stopTheme = syncTheme();
 import.meta.hot?.dispose(stopTheme);
 
 async function start() {
-  const stop = await observeWorkspace(queryClient);
-  import.meta.hot?.dispose(stop);
+  if (workspaceBase) {
+    const stop = await observeWorkspace(queryClient);
+    import.meta.hot?.dispose(stop);
+  }
   const router = createAppRouter(queryClient);
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
@@ -42,10 +45,9 @@ async function start() {
 }
 
 void start().catch((error: unknown) => {
-  const root = document.getElementById('root');
-  if (root)
-    root.textContent =
-      error instanceof Error
-        ? error.message
-        : 'Could not connect. Reload this page to retry.';
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <StartupError error={error} />
+    </StrictMode>
+  );
 });

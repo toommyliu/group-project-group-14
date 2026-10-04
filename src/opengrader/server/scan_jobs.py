@@ -43,16 +43,11 @@ class ScanCancelled(Exception):
     """Stop a job at a publication boundary when its assignment is being deleted."""
 
 
-class ScanJobs:
-    def __init__(self, store: ScanStore, lock: RLock, refresh: Callable[[str, Path], int]):
-        self.store = store
-        self.lock = lock
-        self.refresh = refresh
-        self.stopping: set[str] = set()
-        self.futures: dict[str, set[Future[None]]] = {}
-        # One active batch bounds OCR/LLM load while request threads remain available.
+class ScanWorkers:
+    """One bounded set of intake and PDF workers for the server instance."""
+
+    def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="scan-intake")
-        # PyMuPDF must not run concurrently in request threads.
         self.processing = _process_pool()
         self.previews = _process_pool()
 
@@ -60,6 +55,34 @@ class ScanJobs:
         self.executor.shutdown(wait=True)
         self.processing.shutdown(wait=True)
         self.previews.shutdown(wait=True)
+
+
+class ScanJobs:
+    def __init__(self, store: ScanStore, lock: RLock, refresh: Callable[[str, Path], int], *, workers: ScanWorkers | None = None):
+        self.store = store
+        self.lock = lock
+        self.refresh = refresh
+        self.stopping: set[str] = set()
+        self.futures: dict[str, set[Future[None]]] = {}
+        self.workers = workers or ScanWorkers()
+        self._owns_workers = workers is None
+        self.executor = self.workers.executor
+
+    @property
+    def processing(self):
+        return self.workers.processing
+
+    @processing.setter
+    def processing(self, pool):
+        self.workers.processing = pool
+
+    @property
+    def previews(self):
+        return self.workers.previews
+
+    def close(self) -> None:
+        if self._owns_workers:
+            self.workers.close()
 
     def submit(self, assignment_id: str, batch_id: str, *, analyze: bool) -> None:
         with self.lock:

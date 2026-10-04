@@ -10,6 +10,9 @@ export default defineConfig({
     // Allow Tailscale MagicDNS / Serve hostnames for testing on other devices.
     allowedHosts: ['.ts.net'],
     proxy: {
+      '^/courses/[^/]+/(api|auth)(/|$)': {
+        target: process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
+      },
       '/api': {
         target: process.env.OPENGRADER_API_URL ?? 'http://127.0.0.1:8000',
       },

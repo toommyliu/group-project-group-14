@@ -1,16 +1,19 @@
 """Google OpenID Connect routes, browser session identity, and roles."""
 
 from html import escape
+import re
 from threading import Lock
-from typing import Annotated, Literal, Mapping
+from typing import Annotated, Literal, Mapping, Protocol
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette._utils import get_route_path
 
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.settings import ServerSettings, on_domain
@@ -135,8 +138,12 @@ class Access:
             self.graders -= {email}
 
 
+class Roles(Protocol):
+    def role(self, email: str) -> Role | None: ...
+
+
 class RemoteAuthGuard:
-    def __init__(self, app: ASGIApp, *, access: Access | None = None) -> None:
+    def __init__(self, app: ASGIApp, *, access: Roles | None = None) -> None:
         self.app = app
         self.access = access
 
@@ -154,17 +161,17 @@ class RemoteAuthGuard:
         user = None
         if self.access is not None:
             user = signed_in(connection)
-            if user is not None and self.access.role(user.email) is None:
+            if user is not None and await run_in_threadpool(self.access.role, user.email) is None:
                 connection.session.clear()
                 user = None
-        if is_local(connection) or scope["path"].startswith("/auth/") or user:
+        if is_local(connection) or get_route_path(scope).startswith("/auth/") or user:
             await self.app(scope, receive, send)
         elif self.access is None:
             await JSONResponse(
                 {"detail": "Remote access is disabled for this workspace."},
                 status_code=403,
             )(scope, receive, send)
-        elif scope["path"] == "/api" or scope["path"].startswith("/api/"):
+        elif get_route_path(scope) == "/api" or get_route_path(scope).startswith("/api/") or re.match(r"/courses/[^/]+/(api|auth)(/|$)", get_route_path(scope)):
             await JSONResponse(
                 {"detail": "Sign in with Google to access this workspace."},
                 status_code=401,
@@ -185,11 +192,15 @@ def refused(message: str) -> HTMLResponse:
 
 
 def add_auth_routes(
-    app: FastAPI, settings: ServerSettings, workspace: Workspace
+    app: FastAPI, settings: ServerSettings, workspace: Workspace | None = None,
+    *, access: Roles | None = None, shared_session: bool = False,
 ) -> None:
-    access = Access(workspace, settings) if settings.auth_enabled else None
+    if workspace is not None:
+        access = Access(workspace, settings) if settings.auth_enabled else None
+    app.state.access = access
     if access is not None:
         app.add_middleware(RemoteAuthGuard, access=access)
+    if access is not None and not shared_session:
         app.add_middleware(
             SessionMiddleware,
             secret_key=settings.session_secret.get_secret_value(),
@@ -243,6 +254,8 @@ def add_auth_routes(
 
     @app.get("/auth/login", include_in_schema=False, response_model=None)
     async def login(request: Request) -> RedirectResponse:
+        if shared_session:
+            return RedirectResponse("/auth/login", status_code=303)
         if access is None:
             raise HTTPException(503, "Google sign-in is not configured.")
         redirect_uri = str(request.url_for("auth_callback"))
@@ -272,7 +285,7 @@ def add_auth_routes(
         except ValueError as exc:
             return refused(str(exc))
         request.session["user"] = user.model_dump()
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/" if workspace else "/courses", status_code=303)
 
     @app.post("/auth/logout", status_code=204)
     def logout(request: Request) -> Response:
@@ -281,8 +294,8 @@ def add_auth_routes(
         return Response(status_code=204)
 
     def managed_access(status: Viewer) -> Access:
-        if access is None:
-            raise HTTPException(404, "People are managed only when sign-in is on.")
+        if not isinstance(access, Access):
+            raise HTTPException(404, "People are managed within a workspace when sign-in is on.")
         if status.role != "instructor":
             raise HTTPException(403, "Only instructors can manage people.")
         return access

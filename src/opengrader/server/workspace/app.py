@@ -12,6 +12,7 @@ from threading import RLock
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette._utils import get_route_path
 
 from opengrader.core.grading.edits import GradeEdit
 from opengrader.core.qa_file.errors import QAParseError
@@ -66,7 +67,8 @@ from opengrader.server.assignment_qa import (
 from opengrader.server.auth import add_auth_routes, signed_in
 from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
-from opengrader.server.scan_jobs import ScanJobs
+from opengrader.server.scan_jobs import ScanJobs, ScanWorkers
+from opengrader.server.feedback import FeedbackScheduler
 from opengrader.server.scans import add_scan_routes
 from opengrader.server.web import add_web_routes
 from opengrader.server.workspace.jobs import FeedbackJobs
@@ -129,7 +131,7 @@ class FolderSessionGuard:
 
     async def __call__(self, scope, receive, send):  # noqa: ANN001
         if scope["type"] == "http":
-            message = folder_session_refusal(scope["method"], scope["path"])
+            message = folder_session_refusal(scope["method"], get_route_path(scope))
             if message is not None and load_folder_session(self.root) is not None:
                 response = JSONResponse({"detail": message}, status_code=409)
                 await response(scope, receive, send)
@@ -143,12 +145,17 @@ def create_app(
     web_dist: Path | None = None,
     process_jobs: bool = True,
     settings: ServerSettings | None = None,
+    shared_session: bool = False,
+    workers: ScanWorkers | None = None,
+    feedback_scheduler: FeedbackScheduler | None = None,
+    create: bool = True,
+    display_name: str | None = None,
 ) -> FastAPI:
     root = root.resolve()
     from opengrader.core.workspace.store import DATABASE
 
     workspace = (
-        Workspace(root) if (root / DATABASE).exists() else Workspace.create(root)
+        Workspace(root) if not create or (root / DATABASE).exists() else Workspace.create(root)
     )
     jobs = FeedbackJobs(workspace)
     assignments_dir = root / ".opengrader/assignments"
@@ -167,7 +174,7 @@ def create_app(
             source_key=markdown.parent.name,
         )
 
-    scan_jobs = ScanJobs(scan_store, registry_lock, publish)
+    scan_jobs = ScanJobs(scan_store, registry_lock, publish, workers=workers)
 
     def require_assignment(assignment_id: str) -> None:
         workspace.assignment_source(assignment_id)
@@ -198,21 +205,25 @@ def create_app(
         loop = asyncio.get_running_loop()
         workspace.on_commit = lambda: loop.call_soon_threadsafe(notify)
         if process_jobs:
-            jobs.start()
+            if feedback_scheduler is not None:
+                feedback_scheduler.add(jobs)
+            else:
+                jobs.start()
         try:
             yield
         finally:
             await run_in_threadpool(scan_jobs.close)
-            if process_jobs:
+            if process_jobs and feedback_scheduler is None:
                 await run_in_threadpool(jobs.close)
             workspace.on_commit = None
 
     app = FastAPI(title="Opengrader workspace", lifespan=lifespan)
     app.add_middleware(FolderSessionGuard, root=root)
     api = APIRouter(prefix="/api")
-    add_auth_routes(app, settings or ServerSettings(_env_file=None), workspace)
+    add_auth_routes(app, settings or ServerSettings(_env_file=None), workspace, shared_session=shared_session)
 
     app.state.workspace = workspace
+    app.state.workspace_name = display_name or root.name
     app.state.scan_jobs = scan_jobs
     app.state.shutdown_token = secrets.token_urlsafe(32)
 
@@ -240,7 +251,7 @@ def create_app(
     @api.get("/workspace")
     def get_workspace() -> WorkspaceInfo:
         return workspace.info().model_copy(
-            update={"folder_session": folder_session_info(workspace)}
+            update={"folder_session": folder_session_info(workspace), "name": app.state.workspace_name}
         )
 
     def require_folder_session() -> str:
