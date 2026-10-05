@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowRight, LoaderCircle } from 'lucide-react';
+import { ArrowRight, GraduationCap, LoaderCircle } from 'lucide-react';
 import { cn } from 'cn';
 import { authQuery } from '@/api/auth';
 import {
@@ -20,7 +20,6 @@ import {
   type CourseDraftErrors,
 } from '@/lib/course-draft';
 import { ErrorAlert } from '@/components/error-alert';
-import { HowItWorks } from '@/components/how-it-works';
 import { PageHeading } from '@/components/page-heading';
 import { SteadyLabel } from '@/components/steady-label';
 import { RemoveCourseButton } from '@/components/remove-course-button';
@@ -34,6 +33,14 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { FieldError } from '@/components/ui/field';
 import {
   Select,
@@ -149,7 +156,7 @@ export default function WorkspaceList() {
               </SelectContent>
             </Select>
           )}
-          {canCreate && (
+          {canCreate && courses?.length !== 0 && (
             <AlertDialogTrigger render={<Button className="shrink-0" />}>
               Create course
             </AlertDialogTrigger>
@@ -195,15 +202,26 @@ export default function WorkspaceList() {
         </div>
       )}
       {courses?.length === 0 && (
-        <div className="min-h-80 space-y-4 border-t py-8">
-          <h2 className="text-base font-semibold">No courses yet</h2>
-          <p>
-            {canCreate
-              ? 'Create a course to start adding assignments.'
-              : 'Ask an instructor to add you to a course.'}
-          </p>
-          {canCreate && <HowItWorks className="pt-4" />}
-        </div>
+        <Empty className="border py-16">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <GraduationCap />
+            </EmptyMedia>
+            <EmptyTitle>No courses yet</EmptyTitle>
+            <EmptyDescription>
+              {canCreate
+                ? 'Create a course to start adding assignments.'
+                : 'Ask an instructor to add you to a course.'}
+            </EmptyDescription>
+          </EmptyHeader>
+          {canCreate && (
+            <EmptyContent>
+              <AlertDialogTrigger render={<Button />}>
+                Create course
+              </AlertDialogTrigger>
+            </EmptyContent>
+          )}
+        </Empty>
       )}
       {canCreate && (
         <AlertDialogContent initialFocus={numberInput}>
