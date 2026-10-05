@@ -110,7 +110,7 @@ def command():
 @click.option(
     "--directory",
     type=click.Path(path_type=Path),
-    help=f"Folder to create the course in. Defaults to {default_workspaces_dir() / 'NUMBER TERM YEAR'}.",
+    help=f"Folder to create the course in. Defaults to {default_workspaces_dir() / 'number-term-year'}.",
 )
 @dry_run_option
 def create(directory: Path | None, dry_run: bool, **fields):

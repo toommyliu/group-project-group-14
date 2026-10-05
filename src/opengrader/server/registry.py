@@ -52,20 +52,16 @@ def current_term(today: date) -> tuple[Term, int]:
 
 
 def folder_name(course: CourseDetails) -> str:
-    label = str(course)
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", label).rstrip(". ")
-    if not name or len(name) > 255 or name.split(".")[0].upper() in {
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        *(f"COM{i}" for i in range(1, 10)),
-        *(f"LPT{i}" for i in range(1, 10)),
-    }:
-        raise ValueError(
-            f"The course number {course.number} can't be used. Choose a different one."
-        )
-    return name
+    slug = re.sub(r"[^a-z0-9]+", "-", str(course).lower()).strip("-")
+    reserved = {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
+    return slug if slug and slug not in reserved else "course"
 
 
 class WorkspaceRegistry:
@@ -192,24 +188,17 @@ class WorkspaceRegistry:
             raise LookupError("This course isn't registered with this server.")
 
     def destination(self, course: CourseDetails, root: Path | None = None) -> Path:
-        destination = (
-            (root or default_workspaces_dir() / folder_name(course))
-            .expanduser()
-            .resolve()
-        )
-        registered = any(item.path == str(destination) for item in self.list())
-        if root is not None and registered:
+        registered = {item.path for item in self.list()}
+        if root is None:
+            parent = default_workspaces_dir().expanduser().resolve()
+            name = folder_name(course)
+            destination, suffix = parent / name, 2
+            while destination.exists() or str(destination) in registered:
+                destination, suffix = parent / f"{name}-{suffix}", suffix + 1
+            return destination
+        destination = root.expanduser().resolve()
+        if str(destination) in registered:
             raise ValueError("This folder is already registered as another course.")
-        # Default creation must not silently adopt an existing course directory.
-        if root is None and destination.exists():
-            label = str(course)
-            if registered:
-                raise ValueError(
-                    f"{label} already exists. Change the course number, term, or year."
-                )
-            raise ValueError(
-                f"Files for {label} already exist. Change the course number, term, or year, or ask whoever set up this server to restore that course."
-            )
         if (destination / DATABASE).exists():
             raise ValueError(
                 f"{destination} already has a course. Add it with `opengrader course add` instead."

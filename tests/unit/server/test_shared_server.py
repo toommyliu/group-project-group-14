@@ -44,7 +44,7 @@ def test_creation_registration_and_recent_order_survive_restart(tmp_path, monkey
     )
     existing = Workspace.create(tmp_path / "course-on-disk")
     registered = registry.register(existing.root, CourseDetails(number="CS201"))
-    assert created.path == str(tmp_path / "Opengrader/CS101 Fall 2026")
+    assert created.path == str(tmp_path / "Opengrader/cs101-fall-2026")
     assert registered.path == str(existing.root)
     registry.opened(registered.id)
     registry.opened(created.id)
@@ -103,12 +103,11 @@ def test_registry_concurrent_registration_and_duplicate_copies(tmp_path):
 def test_course_folder_names_are_safe_on_every_platform():
     assert (
         folder_name(CourseDetails(number="C/C++: Intro", term="spring", year=2026))
-        == "C-C++- Intro Spring 2026"
+        == "c-c-intro-spring-2026"
     )
-    assert folder_name(CourseDetails(number="CS 101.")) == "CS 101"
-    for number in ["..", "CON", "lpt1"]:
-        with pytest.raises(ValueError):
-            folder_name(CourseDetails(number=number))
+    assert folder_name(CourseDetails(number="CS 101.")) == "cs-101"
+    for number in ["..", "CON", "lpt1", "日本語"]:
+        assert folder_name(CourseDetails(number=number)) == "course"
 
 
 def test_opening_server_and_unknown_cwd_does_not_create_workspace(
@@ -300,11 +299,13 @@ def test_register_requires_control_token_and_browser_creation_uses_default(
         assert created.status_code == 201
         assert "path" not in created.json()
         assert (
-            tmp_path / "Opengrader/CS101 Fall 2026/.opengrader/workspace.sqlite3"
+            tmp_path / "Opengrader/cs101-fall-2026/.opengrader/workspace.sqlite3"
         ).is_file()
         duplicate = client.post("/api/workspaces", json=course)
-        assert duplicate.status_code == 409
-        assert duplicate.json()["detail"].startswith("CS101 Fall 2026 already exists.")
+        assert duplicate.status_code == 201
+        assert (
+            tmp_path / "Opengrader/cs101-fall-2026-2/.opengrader/workspace.sqlite3"
+        ).is_file()
         updated = client.put(
             f"/api/workspaces/{created.json()['id']}",
             json={**course, "name": "Programming", "term": None},
@@ -321,14 +322,14 @@ def test_register_requires_control_token_and_browser_creation_uses_default(
         assert course_id not in [item["id"] for item in client.get("/api/workspaces").json()]
         assert client.get(f"/courses/{course_id}/api/workspace").status_code == 404
         assert (
-            tmp_path / "Opengrader/CS101 Fall 2026/.opengrader/workspace.sqlite3"
+            tmp_path / "Opengrader/cs101-fall-2026/.opengrader/workspace.sqlite3"
         ).is_file()
         assert client.delete(f"/api/workspaces/{course_id}").status_code == 404
         recreated = client.post("/api/workspaces", json=course)
-        assert recreated.status_code == 409
-        assert recreated.json()["detail"].startswith(
-            "Files for CS101 Fall 2026 already exist."
-        )
+        assert recreated.status_code == 201
+        assert (
+            tmp_path / "Opengrader/cs101-fall-2026-3/.opengrader/workspace.sqlite3"
+        ).is_file()
 
 
 def test_explicit_cli_create_and_register(tmp_path, monkeypatch):
