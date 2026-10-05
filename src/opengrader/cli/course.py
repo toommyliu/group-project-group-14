@@ -10,7 +10,7 @@ from opengrader.cli import CONTEXT_SETTINGS
 from opengrader.core.workspace.models import CourseDetails, Term
 from opengrader.core.workspace.store import DATABASE, discover_workspace
 from opengrader.server.home import default_workspaces_dir
-from opengrader.server.registry import WorkspaceRegistry, current_term
+from opengrader.server.registry import RegisteredWorkspace, WorkspaceRegistry, current_term
 
 dry_run_option = click.option(
     "--dry-run", is_flag=True, help="Print the result without changing anything."
@@ -50,26 +50,27 @@ def course(**fields) -> CourseDetails:
         ) from exc
 
 
-def table(
-    courses: list[tuple[CourseDetails, str | Path]], *, availability: bool = False
-) -> None:
+def display_path(path: str | Path) -> str:
+    path, home = Path(path), Path.home().resolve()
+    return str(Path("~") / path.relative_to(home)) if path.is_relative_to(home) else str(path)
+
+
+def report(action: str, details: CourseDetails, path: str | Path) -> None:
+    click.echo(f"{action}: {details} ({display_path(path)})")
+
+
+def table(items: list[RegisteredWorkspace]) -> None:
     rows = [("Number", "Name", "Term", "Folder")] + [
         (
-            details.number,
-            details.name or "",
+            item.number,
+            item.name or "",
             " ".join(
-                str(part)
-                for part in (details.term and details.term.title(), details.year)
-                if part
+                str(part) for part in (item.term and item.term.title(), item.year) if part
             ),
-            str(path)
-            + (
-                " (unavailable)"
-                if availability and not (Path(path) / DATABASE).is_file()
-                else ""
-            ),
+            display_path(item.path)
+            + ("" if (Path(item.path) / DATABASE).is_file() else " (unavailable)"),
         )
-        for details, path in courses
+        for item in items
     ]
     widths = [max(len(row[column]) for row in rows) for column in range(3)]
     for row in rows:
@@ -78,20 +79,25 @@ def table(
         )
 
 
-def show(details: CourseDetails, path: str | Path, *, dry_run: bool = False) -> None:
-    table([(details, path)])
-    if dry_run:
-        click.echo("Dry run: nothing changed.", err=True)
-
-
 def update(root: Path, changes: dict, *, dry_run: bool) -> None:
     registry = WorkspaceRegistry()
+    previous = {item.id: item for item in registry.list()}
     item = registry.register(root, dry_run=dry_run)
     changes = {key: value for key, value in changes.items() if value is not None}
     details = course(**{**item.course.model_dump(), **changes})
     if changes and not dry_run:
         item = registry.update(item.id, details)
-    show(details, item.path, dry_run=dry_run)
+    before = previous.get(item.id)
+    if before is None:
+        return report("Would add" if dry_run else "Added", details, item.path)
+    old = {**before.course.model_dump(), "folder": display_path(before.path)}
+    new = {**details.model_dump(), "folder": display_path(item.path)}
+    changed = [key for key in new if old[key] != new[key]]
+    if not changed:
+        return report("Unchanged", details, item.path)
+    report("Would update" if dry_run else "Updated", details, item.path)
+    for key in changed:
+        click.echo(f"  {key.capitalize()}: {'(none)' if old[key] is None else old[key]} -> {new[key]}")
 
 
 @click.group(context_settings=CONTEXT_SETTINGS)
@@ -114,11 +120,11 @@ def create(directory: Path | None, dry_run: bool, **fields):
     registry = WorkspaceRegistry()
     try:
         if dry_run:
-            return show(details, registry.destination(details, directory), dry_run=True)
+            return report("Would create", details, registry.destination(details, directory))
         item = registry.create(details, directory)
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    show(item, item.path)
+    report("Created", item, item.path)
 
 
 @command.command("add")
@@ -173,7 +179,7 @@ def remove(directory: Path, dry_run: bool):
         raise click.ClickException(f"No registered course at {root}.")
     if not dry_run:
         registry.remove(item.id)
-    show(item, item.path, dry_run=dry_run)
+    report("Would remove" if dry_run else "Removed", item, item.path)
 
 
 @command.command("list")
@@ -202,7 +208,7 @@ def list_courses(term: Term | None, year: int | None, as_json: bool):
             )
         )
     elif items:
-        table([(item, item.path) for item in items], availability=True)
+        table(items)
     elif term or year:
         click.echo("No courses match.")
     else:
