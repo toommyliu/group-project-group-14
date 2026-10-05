@@ -30,13 +30,14 @@ class WorkspaceProvider:
         self.client = client
         self.assignment = assignment
         self.assignment_label = assignment.title
-        self.course_label = Path(client.connection.root).name
         self.base = f"/api/assignments/{assignment.id}"
         self.cache = Path(client.connection.root) / ".opengrader/client-cache"
         self.journal = DraftJournal(self.cache.parent / "drafts", assignment.id)
-        self.cursor = WorkspaceInfo.model_validate_json(
-            client.request("GET", "/api/workspace")
-        ).event_cursor
+        info = WorkspaceInfo.model_validate_json(client.request("GET", "/api/workspace"))
+        self.course_label = (
+            info.course.number if info.course else Path(client.connection.root).name
+        )
+        self.cursor = info.event_cursor
         self.loaded: dict[str, Answer] = {}
         self.conflict: tuple[str, Answer] | None = None
         self._submissions: list[Submission] | None = None
