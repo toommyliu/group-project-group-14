@@ -70,10 +70,11 @@ def _prepare(
 # What a grading session returns on F2 in a workspace: show the list again.
 SWITCH = "switch_assignment"
 
-_NO_WORKSPACE = """\
-error: no workspace in {here} or any folder above it.
-  opengrader tui FOLDER     open FOLDER as a workspace (created if needed)
-  opengrader classic        Tools & Settings, and grading folders without a workspace
+_NO_COURSES = """\
+error: no course in {here} or any folder above it, and no courses yet.
+  opengrader course create  create a course
+  opengrader tui FOLDER     open FOLDER as a course (created if needed)
+  opengrader classic        Tools & Settings, and grading folders without a course
 """
 
 
@@ -134,9 +135,7 @@ def tui_command(
         target = (folder or workspace or Path.cwd()).expanduser().resolve()
         root = workspace or _workspace_for(target)
         if root is None and folder is None:
-            # A bare `tui` never turns the current directory into a workspace
-            # behind the user's back: offer the ones already opened instead.
-            root = _choose_recent_workspace(target)
+            root = _choose_course(target)
             if root is None:
                 return
             target = root
@@ -182,16 +181,15 @@ def classic_command(
         sys.exit(2)
 
 
-def _choose_recent_workspace(here: Path) -> Path | None:
-    """A workspace opened before; with none on record, exit 2 with the pointer."""
-    from opengrader.core.recents import load_recents
-    from opengrader.tui.recent_workspaces import RecentWorkspaces
+def _choose_course(here: Path) -> Path | None:
+    from opengrader.server.registry import WorkspaceRegistry
+    from opengrader.tui.course_chooser import CourseChooser
 
-    recent = [item for item in load_recents() if item.kind == "workspace"]
-    if not recent:
-        click.echo(_NO_WORKSPACE.format(here=here), err=True, nl=False)
+    courses = WorkspaceRegistry().list()
+    if not courses:
+        click.echo(_NO_COURSES.format(here=here), err=True, nl=False)
         sys.exit(2)
-    return RecentWorkspaces(recent, here=here).run()
+    return CourseChooser(courses).run()
 
 
 def _workspace_for(folder: Path) -> Path | None:

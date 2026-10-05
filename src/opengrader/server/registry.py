@@ -51,16 +51,8 @@ def current_term(today: date) -> tuple[Term, int]:
     return term, today.year
 
 
-def course_label(course: CourseDetails) -> str:
-    return " ".join(
-        str(part)
-        for part in (course.number, course.term and course.term.title(), course.year)
-        if part
-    )
-
-
 def folder_name(course: CourseDetails) -> str:
-    label = course_label(course)
+    label = str(course)
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", label).rstrip(". ")
     if not name or len(name) > 255 or name.split(".")[0].upper() in {
         "CON",
@@ -210,7 +202,7 @@ class WorkspaceRegistry:
             raise ValueError("This folder is already registered as another course.")
         # Default creation must not silently adopt an existing course directory.
         if root is None and destination.exists():
-            label = course_label(course)
+            label = str(course)
             if registered:
                 raise ValueError(
                     f"{label} already exists. Change the course number, term, or year."

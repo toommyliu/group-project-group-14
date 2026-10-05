@@ -1,19 +1,3 @@
-"""What this user opened recently, newest first — one small per-user file.
-
-Kept beside the AI settings (`recent.json`), never inside an assignment
-folder, so it can hold paths from many courses and is never shared by a
-backup or a grader packet. Every read and write is best effort: a missing,
-malformed or unwritable file costs the list, never the app.
-
-`opengrader tui` records each workspace it opens, with the assignment last
-opened in it; outside any workspace it offers them back
-(`tui/recent_workspaces.py`), and a workspace's assignment list starts on
-the assignment you were last grading. `opengrader classic` records each class
-folder it grades — or opens in the browser — and lists the last few on its
-Start grading card. Both lists
-are the same widget (`tui/ui/widgets/recent_list.py`).
-"""
-
 from __future__ import annotations
 
 import json
