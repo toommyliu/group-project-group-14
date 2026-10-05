@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict
 from starlette._utils import get_route_path
 
+from opengrader.core.workspace.models import CourseDetails, CourseText
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.auth import RemoteAuthGuard, add_auth_routes, is_local, signed_in
 from opengrader.server.feedback import FeedbackScheduler
@@ -26,19 +27,17 @@ from opengrader.server.workspace.client import SERVICE_LOCK, exclusive_lock
 logger = logging.getLogger(__name__)
 
 
-class CreateWorkspace(BaseModel):
+class CourseForm(CourseDetails):
     model_config = ConfigDict(extra="forbid")
-    name: str
+    name: CourseText
 
 
 class RegisterWorkspace(BaseModel):
     path: str
-    name: str | None = None
 
 
-class WorkspaceSummary(BaseModel):
+class WorkspaceSummary(CourseDetails):
     id: str
-    name: str
     url: str
     last_opened: str | None
     available: bool
@@ -100,7 +99,7 @@ class Workspaces:
                 async with AsyncExitStack() as pending:
                     root = Path(item.path)
                     if not (root / ".opengrader/workspace.sqlite3").is_file():
-                        raise ValueError("Workspace folder is unavailable.")
+                        raise ValueError("Course folder is unavailable.")
                     pending.enter_context(exclusive_lock(root / SERVICE_LOCK))
                     app = await run_in_threadpool(
                         create_workspace_app,
@@ -112,11 +111,11 @@ class Workspaces:
                         workers=self.workers,
                         feedback_scheduler=self.feedback,
                         create=False,
-                        display_name=item.name,
+                        course=item.course,
                     )
                     if app.state.workspace.info().id != item.id:
                         raise ValueError(
-                            "The workspace at this location has changed. Register its new location."
+                            "The course in this folder has changed. Register its new location."
                         )
                     await pending.enter_async_context(app.router.lifespan_context(app))
                     self.stack.push_async_callback(pending.pop_all().aclose)
@@ -124,9 +123,9 @@ class Workspaces:
             app = self.apps[item.id]
             if app.state.workspace.root != Path(item.path):
                 raise ValueError(
-                    "This workspace moved while it was open. Restart Opengrader to use its new location."
+                    "This course moved while it was open. Restart the server to use its new location."
                 )
-            app.state.workspace_name = item.name
+            app.state.course = item.course
             return app
 
     async def resume_feedback(self) -> None:
@@ -179,7 +178,7 @@ class Workspaces:
                 )
             ):
                 await self.refuse(
-                    scope, 403, "You do not have access to this workspace."
+                    scope, 403, "You do not have access to this course."
                 )(scope, receive, send)
                 return
             app = await self.open(item)
@@ -193,7 +192,7 @@ class Workspaces:
             await self.refuse(
                 scope,
                 409,
-                "This workspace could not be opened. Its folder may be unavailable or another server may be using it.",
+                "This course could not be opened. Its folder may be unavailable or another server may be using it.",
             )(scope, receive, send)
             return
         await app(scope, receive, send)
@@ -245,7 +244,7 @@ def create_app(
 
     def instructor(request: Request):
         if request.scope.get("session", {}).get("view_as_grader"):
-            raise HTTPException(403, "Only instructors can create workspaces.")
+            raise HTTPException(403, "Only instructors can manage courses.")
         user = signed_in(request)
         if settings.auth_enabled and not (
             user
@@ -253,12 +252,12 @@ def create_app(
             or user is None
             and is_local(request)
         ):
-            raise HTTPException(403, "Only instructors can create workspaces.")
+            raise HTTPException(403, "Only instructors can manage courses.")
 
-    def summary(item):
+    def summary(item: RegisteredWorkspace):
         return WorkspaceSummary(
+            **item.course.model_dump(),
             id=item.id,
-            name=item.name,
             url=item.url_path + "/",
             last_opened=item.last_opened,
             available=(Path(item.path) / ".opengrader/workspace.sqlite3").is_file(),
@@ -279,10 +278,10 @@ def create_app(
         ]
 
     @app.post("/api/workspaces", status_code=201)
-    def create_workspace(body: CreateWorkspace, request: Request) -> WorkspaceSummary:
+    def create_workspace(body: CourseForm, request: Request) -> WorkspaceSummary:
         instructor(request)
         try:
-            return summary(registry.create(body.name))
+            return summary(registry.create(body))
         except (ValueError, FileExistsError) as exc:
             raise HTTPException(409, str(exc)) from exc
         except OSError as exc:
@@ -292,13 +291,32 @@ def create_app(
                 "The course could not be created. Check that the server's storage is available and writable.",
             ) from exc
 
+    @app.put("/api/workspaces/{workspace_id}")
+    def update_workspace(
+        workspace_id: str, body: CourseForm, request: Request
+    ) -> WorkspaceSummary:
+        instructor(request)
+        try:
+            return summary(registry.update(workspace_id, body))
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.delete("/api/workspaces/{workspace_id}", status_code=204)
+    def remove_workspace(workspace_id: str, request: Request) -> Response:
+        instructor(request)
+        try:
+            registry.remove(workspace_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return Response(status_code=204)
+
     @app.post("/api/server/workspaces/register", include_in_schema=False)
     def register_workspace(
         body: RegisterWorkspace, request: Request
     ) -> RegisteredWorkspace:
         control(request)
         try:
-            item = registry.register(Path(body.path), body.name)
+            item = registry.register(Path(body.path))
             registry.opened(item.id)
             return item
         except (ValueError, OSError) as exc:

@@ -702,6 +702,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Workspace */
+        put: operations["update_workspace_api_workspaces__workspace_id__put"];
+        post?: never;
+        /** Remove Workspace */
+        delete: operations["remove_workspace_api_workspaces__workspace_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -846,6 +864,17 @@ export interface components {
             email: string;
             /** Name */
             name: string;
+        };
+        /** CourseDetails */
+        CourseDetails: {
+            /** Number */
+            number: string;
+            /** Name */
+            name?: string | null;
+            /** Term */
+            term?: ("winter" | "spring" | "summer" | "fall") | null;
+            /** Year */
+            year?: number | null;
         };
         /** DocumentEdit */
         DocumentEdit: {
@@ -1489,18 +1518,23 @@ export interface components {
         WorkspaceInfo: {
             /** Id */
             id: string;
-            /** Name */
-            name?: string | null;
+            course?: components["schemas"]["CourseDetails"] | null;
             /** Actor */
             actor: string;
             /** Event Cursor */
             event_cursor: number;
             folder_session?: components["schemas"]["FolderSessionInfo"] | null;
         };
-        /** CreateWorkspace */
-        CreateWorkspace: {
+        /** CourseForm */
+        CourseForm: {
+            /** Number */
+            number: string;
             /** Name */
             name: string;
+            /** Term */
+            term?: ("winter" | "spring" | "summer" | "fall") | null;
+            /** Year */
+            year?: number | null;
         };
         /** ServerInfo */
         ServerInfo: {
@@ -1509,10 +1543,16 @@ export interface components {
         };
         /** WorkspaceSummary */
         WorkspaceSummary: {
+            /** Number */
+            number: string;
+            /** Name */
+            name?: string | null;
+            /** Term */
+            term?: ("winter" | "spring" | "summer" | "fall") | null;
+            /** Year */
+            year?: number | null;
             /** Id */
             id: string;
-            /** Name */
-            name: string;
             /** Url */
             url: string;
             /** Last Opened */
@@ -2878,7 +2918,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateWorkspace"];
+                "application/json": components["schemas"]["CourseForm"];
             };
         };
         responses: {
@@ -2890,6 +2930,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WorkspaceSummary"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_workspace_api_workspaces__workspace_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CourseForm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_workspace_api_workspaces__workspace_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

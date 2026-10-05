@@ -3,12 +3,25 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { ArrowRight, LoaderCircle } from 'lucide-react';
 import { cn } from 'cn';
 import { authQuery } from '@/api/auth';
-import { readData, serverClient } from '@/api/client';
-import { coursesQuery, type CourseSummary } from '@/api/workspace';
+import {
+  courseTerm,
+  coursesQuery,
+  createCourse,
+  currentTerm,
+  terms,
+  type CourseSummary,
+} from '@/api/workspace';
 import { CourseAvatar } from '@/components/course-avatar';
+import { CourseFields } from '@/components/course-fields';
+import {
+  courseDraftErrors,
+  type CourseDraft,
+  type CourseDraftErrors,
+} from '@/lib/course-draft';
 import { ErrorAlert } from '@/components/error-alert';
 import { HowItWorks } from '@/components/how-it-works';
 import { PageHeading } from '@/components/page-heading';
+import { SteadyLabel } from '@/components/steady-label';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -19,48 +32,68 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { Field, FieldError, FieldLabel } from '@/components/ui/field';
-import { Input } from '@/components/ui/input';
+import { FieldError } from '@/components/ui/field';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const openedAt = new Intl.DateTimeFormat(undefined, {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-});
+function newCourse(): CourseDraft {
+  return { number: '', name: '', ...currentTerm() };
+}
+
+function byTerm(courses: CourseSummary[]) {
+  const groups = new Map<string, CourseSummary[]>();
+  for (const course of courses) {
+    const label = courseTerm(course);
+    groups.set(label, [...(groups.get(label) ?? []), course]);
+  }
+  const rank = ({ year, term }: CourseSummary) =>
+    (year ?? 0) * 10 + (term ? terms.indexOf(term) + 1 : 0);
+  return [...groups.entries()]
+    .map(([label, members]) => ({
+      label: label || 'No term',
+      courses: members,
+    }))
+    .sort((a, b) => rank(b.courses[0]) - rank(a.courses[0]));
+}
 
 export default function WorkspaceList() {
   const workspaces = useQuery(coursesQuery);
   const auth = useQuery(authQuery);
   const canCreate =
     auth.data && (!auth.data.enabled || auth.data.role === 'instructor');
-  const [name, setName] = useState('');
-  const [nameError, setNameError] = useState('');
+  const [draft, setDraft] = useState(newCourse);
+  const [errors, setErrors] = useState<CourseDraftErrors>({});
+  const numberInput = useRef<HTMLInputElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const create = useMutation({
-    mutationFn: async () =>
-      readData(await serverClient.POST('/api/workspaces', { body: { name } })),
+    mutationFn: () =>
+      createCourse({
+        ...draft,
+        number: draft.number.trim(),
+        name: draft.name.trim(),
+      }),
     onSuccess: (workspace) => window.location.assign(workspace.url),
-    onError: () => nameInput.current?.focus(),
+    onError: () => numberInput.current?.focus(),
   });
   function submit(event: FormEvent) {
     event.preventDefault();
     if (create.isPending) return;
-    if (!name.trim()) {
-      setNameError('Enter a course name.');
-      nameInput.current?.focus();
-      return;
-    }
-    setNameError('');
+    const next = courseDraftErrors(draft);
+    setErrors(next);
+    if (next.number) return numberInput.current?.focus();
+    if (next.name) return nameInput.current?.focus();
     create.mutate();
   }
-  const error = nameError || create.error?.message;
   const courses = workspaces.data;
 
   return (
     <AlertDialog
-      onOpenChange={(_, details) => {
-        if (create.isPending) details.cancel();
+      onOpenChange={(open, details) => {
+        if (create.isPending) return details.cancel();
+        if (open) {
+          setDraft(newCourse());
+          setErrors({});
+          create.reset();
+        }
       }}
     >
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -90,14 +123,21 @@ export default function WorkspaceList() {
         </ErrorAlert>
       )}
       {courses && courses.length > 0 && (
-        <div className="@container">
-          <ul className="grid grid-cols-1 gap-4 @xl:grid-cols-2 @5xl:grid-cols-3">
-            {courses.map((workspace) => (
-              <li key={workspace.id}>
-                <CourseCard course={workspace} />
-              </li>
-            ))}
-          </ul>
+        <div className="@container space-y-8">
+          {byTerm(courses).map((group) => (
+            <section key={group.label} aria-label={group.label}>
+              <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+                {group.label}
+              </h2>
+              <ul className="grid grid-cols-1 gap-4 @xl:grid-cols-2 @5xl:grid-cols-3">
+                {group.courses.map((workspace) => (
+                  <li key={workspace.id}>
+                    <CourseCard course={workspace} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </div>
       )}
       {courses?.length === 0 && (
@@ -112,44 +152,42 @@ export default function WorkspaceList() {
         </div>
       )}
       {canCreate && (
-        <AlertDialogContent initialFocus={nameInput}>
+        <AlertDialogContent initialFocus={numberInput}>
           <form noValidate onSubmit={submit} className="grid gap-4">
             <AlertDialogHeader>
               <AlertDialogTitle>Create a course</AlertDialogTitle>
             </AlertDialogHeader>
-            <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor="workspace-name">Course name</FieldLabel>
-              <Input
-                ref={nameInput}
-                id="workspace-name"
-                name="workspace-name"
-                value={name}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  setNameError('');
-                  if (create.isError) create.reset();
-                }}
-                aria-required="true"
-                readOnly={create.isPending}
-                maxLength={120}
-                placeholder="CS101 Fall 2026"
-                aria-invalid={Boolean(error) || undefined}
-                aria-describedby={error ? 'workspace-error' : undefined}
-              />
-              <FieldError id="workspace-error">{error}</FieldError>
-            </Field>
+            <CourseFields
+              draft={draft}
+              onChange={(next) => {
+                setDraft(next);
+                setErrors({});
+                if (create.isError) create.reset();
+              }}
+              errors={errors}
+              readOnly={create.isPending}
+              numberInput={numberInput}
+              nameInput={nameInput}
+            />
+            <FieldError>{create.error?.message}</FieldError>
             <AlertDialogFooter>
               <AlertDialogCancel disabled={create.isPending}>
                 Cancel
               </AlertDialogCancel>
               <Button type="submit" disabled={create.isPending}>
-                {create.isPending && (
-                  <LoaderCircle
-                    aria-hidden="true"
-                    className="motion-safe:animate-spin"
-                  />
-                )}
-                {create.isPending ? 'Creating course…' : 'Create course'}
+                <SteadyLabel
+                  busy={create.isPending}
+                  idle="Create course"
+                  working={
+                    <>
+                      <LoaderCircle
+                        aria-hidden="true"
+                        className="motion-safe:animate-spin"
+                      />
+                      Creating course…
+                    </>
+                  }
+                />
               </Button>
             </AlertDialogFooter>
           </form>
@@ -170,29 +208,33 @@ function CourseCard({ course }: { course: CourseSummary }) {
     >
       <CourseAvatar
         id={course.id}
-        name={course.name}
+        name={course.number}
         muted={!course.available}
       />
       <div className="min-w-0 flex-1">
-        <h2 className="truncate text-base font-medium" title={course.name}>
+        <h3 className="truncate text-base font-medium" title={course.number}>
           {course.available ? (
             <a
               href={course.url}
               className="outline-none after:absolute after:inset-0"
             >
-              {course.name}
+              {course.number}
             </a>
           ) : (
-            course.name
+            course.number
           )}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {!course.available
-            ? 'Folder unavailable. Ask the person who set up Opengrader to reconnect it.'
-            : course.last_opened
-              ? `Opened ${openedAt.format(new Date(course.last_opened))}`
-              : 'Not opened yet'}
-        </p>
+        </h3>
+        {course.name && (
+          <p className="truncate text-sm" title={course.name}>
+            {course.name}
+          </p>
+        )}
+        {!course.available && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Folder unavailable. Ask the person who set up Opengrader to
+            reconnect it.
+          </p>
+        )}
       </div>
       {course.available && (
         <ArrowRight

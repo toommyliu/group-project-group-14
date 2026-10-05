@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { cn } from 'cn';
 import { Check, ChevronsUpDown, Library } from 'lucide-react';
 import { workspaceBase } from '@/api/client';
-import { coursesQuery, workspaceQuery } from '@/api/workspace';
+import { courseTitle, coursesQuery, workspaceQuery } from '@/api/workspace';
 import { CourseAvatar } from './course-avatar';
 import { Button } from './ui/button';
 import {
@@ -23,7 +23,10 @@ export function CourseSwitcher({ className }: { className?: string }) {
   }).data;
   const courses = useQuery(coursesQuery).data;
   if (workspaceBase && !current) return null;
-  const name = current ? current.name || 'Untitled course' : 'All courses';
+  const name = current
+    ? current.course?.number || 'Untitled course'
+    : 'All courses';
+  const title = current?.course ? courseTitle(current.course) : name;
   const others =
     courses?.filter(
       (course) => course.available && course.id !== current?.id
@@ -40,8 +43,8 @@ export function CourseSwitcher({ className }: { className?: string }) {
             )}
           />
         }
-        aria-label={`${name}, switch course`}
-        title={name}
+        aria-label={`${title}, switch course`}
+        title={title}
       >
         {current ? (
           <CourseAvatar id={current.id} name={name} size="sm" />
@@ -65,7 +68,7 @@ export function CourseSwitcher({ className }: { className?: string }) {
             <DropdownMenuItem
               className="min-h-9 text-sm"
               aria-current="page"
-              title={name}
+              title={title}
             >
               <CourseAvatar id={current.id} name={name} size="sm" />
               <span className="min-w-0 flex-1 truncate">{name}</span>
@@ -77,10 +80,10 @@ export function CourseSwitcher({ className }: { className?: string }) {
               key={course.id}
               href={course.url}
               className="min-h-9 text-sm"
-              title={course.name}
+              title={courseTitle(course)}
             >
-              <CourseAvatar id={course.id} name={course.name} size="sm" />
-              <span className="min-w-0 flex-1 truncate">{course.name}</span>
+              <CourseAvatar id={course.id} name={course.number} size="sm" />
+              <span className="min-w-0 flex-1 truncate">{course.number}</span>
             </DropdownMenuLinkItem>
           ))}
         </DropdownMenuGroup>

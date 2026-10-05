@@ -42,6 +42,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { PageHeading } from '@/components/page-heading';
+import { SteadyLabel } from '@/components/steady-label';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -103,27 +104,6 @@ const columns = column.columns([
     enableGlobalFilter: false,
   }),
 ]);
-
-function SteadyLabel({
-  busy,
-  idle,
-  working,
-}: {
-  busy: boolean;
-  idle: string;
-  working: string;
-}) {
-  return (
-    <span className="grid justify-items-center">
-      <span className={cn('col-start-1 row-start-1', busy && 'invisible')}>
-        {idle}
-      </span>
-      <span className={cn('col-start-1 row-start-1', !busy && 'invisible')}>
-        {working}
-      </span>
-    </span>
-  );
-}
 
 const copyLabels = {
   idle: 'Copy email',

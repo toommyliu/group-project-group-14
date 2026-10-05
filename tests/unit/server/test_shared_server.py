@@ -11,10 +11,11 @@ from itsdangerous import TimestampSigner
 
 from opengrader.cli.web import _root
 from opengrader.cli.workspace import command
+from opengrader.core.workspace.models import CourseDetails
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.app import create_app
 from opengrader.server.home import resolve_data_home
-from opengrader.server.registry import WorkspaceRegistry
+from opengrader.server.registry import WorkspaceRegistry, folder_name
 from opengrader.server.settings import ServerSettings
 from opengrader.server.workspace.client import exclusive_lock
 
@@ -38,10 +39,12 @@ def test_creation_registration_and_recent_order_survive_restart(tmp_path, monkey
         lambda: tmp_path / "Opengrader",
     )
     registry = WorkspaceRegistry(tmp_path / "server")
-    created = registry.create("CS101")
+    created = registry.create(
+        CourseDetails(number="CS101", name="Intro", term="fall", year=2026)
+    )
     existing = Workspace.create(tmp_path / "course-on-disk")
-    registered = registry.register(existing.root, "CS201")
-    assert created.path == str(tmp_path / "Opengrader/CS101")
+    registered = registry.register(existing.root, CourseDetails(number="CS201"))
+    assert created.path == str(tmp_path / "Opengrader/CS101 Fall 2026")
     assert registered.path == str(existing.root)
     registry.opened(registered.id)
     registry.opened(created.id)
@@ -49,7 +52,32 @@ def test_creation_registration_and_recent_order_survive_restart(tmp_path, monkey
     assert reopened.id == registry.id
     assert [item.id for item in reopened.list()] == [created.id, registered.id]
     assert reopened.get(created.id).last_opened is not None
-    assert reopened.register(existing.root).name == "CS201"
+    assert reopened.register(existing.root).number == "CS201"
+
+
+def test_registry_upgrade_keeps_existing_names_as_course_numbers(tmp_path):
+    import sqlite3
+
+    workspace = Workspace.create(tmp_path / "data")
+    home = tmp_path / "server"
+    home.mkdir()
+    with sqlite3.connect(home / "registry.sqlite3") as db:
+        db.executescript("""
+            CREATE TABLE instance (id TEXT NOT NULL);
+            INSERT INTO instance VALUES ('server');
+            CREATE TABLE workspaces (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                path TEXT NOT NULL UNIQUE, last_opened TEXT
+            );
+        """)
+        db.execute(
+            "INSERT INTO workspaces VALUES (?, 'CMPE 195', ?, NULL)",
+            (workspace.info().id, str(workspace.root)),
+        )
+    db.close()
+    registry = WorkspaceRegistry(home)
+    assert registry.id == "server"
+    assert registry.get(workspace.info().id).course == CourseDetails(number="CMPE 195")
 
 
 def test_registry_concurrent_registration_and_duplicate_copies(tmp_path):
@@ -72,12 +100,15 @@ def test_registry_concurrent_registration_and_duplicate_copies(tmp_path):
     assert len(registry.list()) == 1
 
 
-@pytest.mark.parametrize(
-    "name", ["", "..", "../escape", "a/b", "a\\b", "CON", "name.", "x" * 121]
-)
-def test_create_rejects_unsafe_names(tmp_path, name):
-    with pytest.raises(ValueError):
-        WorkspaceRegistry(tmp_path / "server").create(name)
+def test_course_folder_names_are_safe_on_every_platform():
+    assert (
+        folder_name(CourseDetails(number="C/C++: Intro", term="spring", year=2026))
+        == "C-C++- Intro Spring 2026"
+    )
+    assert folder_name(CourseDetails(number="CS 101.")) == "CS 101"
+    for number in ["..", "CON", "lpt1"]:
+        with pytest.raises(ValueError):
+            folder_name(CourseDetails(number=number))
 
 
 def test_opening_server_and_unknown_cwd_does_not_create_workspace(
@@ -112,7 +143,7 @@ def test_scoped_workspaces_share_workers_but_not_data_or_assets(tmp_path):
             response = client.post(
                 item.url_path + "/api/assignments",
                 json={
-                    "qa_markdown": f"---\ntitle: {item.name}\n---\n- (1 point) Question\n"
+                    "qa_markdown": f"---\ntitle: {item.number}\n---\n- (1 point) Question\n"
                 },
             )
             assert response.status_code == 201, response.text
@@ -126,11 +157,12 @@ def test_scoped_workspaces_share_workers_but_not_data_or_assets(tmp_path):
             )
             assets = Path(item.path) / ".opengrader/assets"
             assets.mkdir(exist_ok=True)
-            (assets / "same.txt").write_text(item.name)
+            (assets / "same.txt").write_text(item.number)
         for item in items:
-            assert client.get(item.url_path + "/api/assets/same.txt").text == item.name
+            assert client.get(item.url_path + "/api/assets/same.txt").text == item.number
             assert (
-                client.get(item.url_path + "/api/workspace").json()["name"] == item.name
+                client.get(item.url_path + "/api/workspace").json()["course"]["number"]
+                == item.number
             )
             assert len(client.get(item.url_path + "/api/assignments").json()) == 1
         apps = app.state.workspaces.apps
@@ -168,7 +200,7 @@ def test_unavailable_course_pages_load_the_app_and_apis_stay_json(tmp_path):
         assert page.text == "<title>Opengrader</title>"
         api = client.get("/courses/unknown/api/workspace")
         assert api.status_code == 404
-        assert api.json() == {"detail": "Workspace is not registered with this server."}
+        assert api.json() == {"detail": "This course isn't registered with this server."}
         page = client.get(missing.url_path + "/assignments")
         assert page.status_code == 409
         assert page.text == "<title>Opengrader</title>"
@@ -223,10 +255,10 @@ def test_hosted_access_filters_catalog_and_every_workspace_resource(tmp_path):
         assert (
             client.get(first.url_path + "/api/workspace").status_code == 200
         )  # Denial did not log out the grader.
-        assert (
-            client.post("/api/workspaces", json={"name": "Unauthorized"}).status_code
-            == 403
-        )
+        course = {"number": "CS101", "name": "Unauthorized"}
+        assert client.post("/api/workspaces", json=course).status_code == 403
+        assert client.put(f"/api/workspaces/{first.id}", json=course).status_code == 403
+        assert client.delete(f"/api/workspaces/{first.id}").status_code == 403
         assert (
             client.post(
                 "/api/server/workspaces/register", json={"path": str(b.root)}
@@ -260,23 +292,55 @@ def test_register_requires_control_token_and_browser_creation_uses_default(
             headers={"Authorization": f"Bearer {app.state.shutdown_token}"},
         )
         assert response.status_code == 200
-        created = client.post("/api/workspaces", json={"name": "Course"})
+        course = {"number": "CS101", "name": "Intro", "term": "fall", "year": 2026}
+        assert (
+            client.post("/api/workspaces", json={"name": "Intro"}).status_code == 422
+        )
+        created = client.post("/api/workspaces", json=course)
         assert created.status_code == 201
         assert "path" not in created.json()
-        assert (tmp_path / "Opengrader/Course/.opengrader/workspace.sqlite3").is_file()
         assert (
-            client.post("/api/workspaces", json={"name": "Course"}).status_code == 409
+            tmp_path / "Opengrader/CS101 Fall 2026/.opengrader/workspace.sqlite3"
+        ).is_file()
+        duplicate = client.post("/api/workspaces", json=course)
+        assert duplicate.status_code == 409
+        assert duplicate.json()["detail"].startswith("CS101 Fall 2026 already exists.")
+        updated = client.put(
+            f"/api/workspaces/{created.json()['id']}",
+            json={**course, "name": "Programming", "term": None},
+        )
+        assert updated.status_code == 200, updated.text
+        assert [
+            (item["number"], item["name"], item["term"], item["year"])
+            for item in client.get("/api/workspaces").json()
+            if item["id"] == created.json()["id"]
+        ] == [("CS101", "Programming", None, 2026)]
+        assert client.put("/api/workspaces/unknown", json=course).status_code == 404
+        course_id = created.json()["id"]
+        assert client.delete(f"/api/workspaces/{course_id}").status_code == 204
+        assert course_id not in [item["id"] for item in client.get("/api/workspaces").json()]
+        assert client.get(f"/courses/{course_id}/api/workspace").status_code == 404
+        assert (
+            tmp_path / "Opengrader/CS101 Fall 2026/.opengrader/workspace.sqlite3"
+        ).is_file()
+        assert client.delete(f"/api/workspaces/{course_id}").status_code == 404
+        recreated = client.post("/api/workspaces", json=course)
+        assert recreated.status_code == 409
+        assert recreated.json()["detail"].startswith(
+            "Files for CS101 Fall 2026 already exist."
         )
 
 
 def test_explicit_cli_create_and_register(tmp_path):
     runner = CliRunner()
     root = tmp_path / "chosen"
-    result = runner.invoke(command, ["create", "A course", "--directory", str(root)])
+    result = runner.invoke(
+        command, ["create", "CS 101", "Intro", "--directory", str(root)]
+    )
     assert result.exit_code == 0, result.output
-    result = runner.invoke(command, ["add", str(root), "--name", "Renamed"])
+    result = runner.invoke(command, ["add", str(root), "--number", "CS 102"])
     assert result.exit_code == 0, result.output
-    assert "Renamed" in runner.invoke(command, ["list"]).output
+    assert runner.invoke(command, ["list"]).output == f"CS 102\t{root}\n"
     assert _root(root) == root
 
 
