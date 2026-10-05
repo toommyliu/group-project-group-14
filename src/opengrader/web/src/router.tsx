@@ -92,6 +92,10 @@ export const indexRoute = createRoute({
 export const coursesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/courses',
+  validateSearch: (search: Record<string, unknown>): { term?: string } => ({
+    term:
+      typeof search.term === 'string' && search.term ? search.term : undefined,
+  }),
   beforeLoad: async ({ context }) => {
     if (!(await canOpenCourses(context.queryClient)))
       throw redirect({ to: '/' });
@@ -261,6 +265,19 @@ export const peopleRoute = createRoute({
   errorComponent: RouteError,
 });
 
+export const courseSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  beforeLoad: async ({ context }) => {
+    const auth = await context.queryClient.ensureQueryData(authQuery);
+    if (auth.role !== 'instructor') throw notFound();
+  },
+  loader: ({ context }) =>
+    context.queryClient.fetchQuery({ ...workspaceQuery, staleTime: 0 }),
+  component: lazyRouteComponent(() => import('./routes/course-settings-page')),
+  errorComponent: RouteError,
+});
+
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
     basepath: workspaceBase || '/',
@@ -274,6 +291,7 @@ export function createAppRouter(queryClient: QueryClient) {
       overviewRoute,
       statisticsRoute,
       peopleRoute,
+      courseSettingsRoute,
     ]),
     context: { queryClient },
     // Fuzzy mode runs the parent assignment route's loader, and Workspace renders that page.
