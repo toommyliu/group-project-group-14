@@ -4,19 +4,34 @@ import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from pydantic import BaseModel
-
+from opengrader.core.workspace.models import CourseDetails, Term
 from opengrader.core.workspace.store import DATABASE, Workspace
 from opengrader.server.home import default_workspaces_dir, resolve_data_home
 
 
-class RegisteredWorkspace(BaseModel):
+_MIGRATIONS: tuple[tuple[str, ...], ...] = (
+    (
+        "CREATE TABLE IF NOT EXISTS instance (id TEXT NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS workspaces (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE, last_opened TEXT
+        )""",
+    ),
+    (
+        "ALTER TABLE workspaces RENAME COLUMN name TO number",
+        "ALTER TABLE workspaces ADD COLUMN name TEXT",
+        "ALTER TABLE workspaces ADD COLUMN term TEXT",
+        "ALTER TABLE workspaces ADD COLUMN year INTEGER",
+    ),
+)
+
+
+class RegisteredWorkspace(CourseDetails):
     id: str
-    name: str
     path: str
     last_opened: str | None = None
 
@@ -24,27 +39,39 @@ class RegisteredWorkspace(BaseModel):
     def url_path(self) -> str:
         return f"/courses/{self.id}"
 
+    @property
+    def course(self) -> CourseDetails:
+        return CourseDetails(**self.model_dump(include=set(CourseDetails.model_fields)))
 
-def workspace_name(name: str) -> str:
-    name = name.strip()
-    if (
-        not name
-        or len(name) > 120
-        or name in {".", ".."}
-        or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
-        or name.endswith(".")
-        or name.split(".")[0].upper()
-        in {
-            "CON",
-            "PRN",
-            "AUX",
-            "NUL",
-            *(f"COM{i}" for i in range(1, 10)),
-            *(f"LPT{i}" for i in range(1, 10)),
-        }
-    ):
+
+def current_term(today: date) -> tuple[Term, int]:
+    term: Term = (
+        "spring" if today.month <= 5 else "summer" if today.month <= 7 else "fall"
+    )
+    return term, today.year
+
+
+def course_label(course: CourseDetails) -> str:
+    return " ".join(
+        str(part)
+        for part in (course.number, course.term and course.term.title(), course.year)
+        if part
+    )
+
+
+def folder_name(course: CourseDetails) -> str:
+    label = course_label(course)
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", label).rstrip(". ")
+    if not name or len(name) > 255 or name.split(".")[0].upper() in {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }:
         raise ValueError(
-            "Choose a workspace name of 1–120 characters without filename punctuation."
+            f"The course number {course.number} can't be used. Choose a different one."
         )
     return name
 
@@ -55,14 +82,16 @@ class WorkspaceRegistry:
         self.home.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.database = self.home / "registry.sqlite3"
         with self.connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS instance (id TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS workspaces (
-                    id TEXT PRIMARY KEY, name TEXT NOT NULL,
-                    path TEXT NOT NULL UNIQUE, last_opened TEXT
-                );
-            """)
             db.execute("BEGIN IMMEDIATE")
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version > len(_MIGRATIONS):
+                raise ValueError(
+                    f"{self.database} was written by a newer version. Update and try again."
+                )
+            for statements in _MIGRATIONS[version:]:
+                for statement in statements:
+                    db.execute(statement)
+            db.execute(f"PRAGMA user_version = {len(_MIGRATIONS)}")
             if db.execute("SELECT id FROM instance").fetchone() is None:
                 db.execute("INSERT INTO instance VALUES (?)", (str(uuid4()),))
         self.database.chmod(0o600)
@@ -87,7 +116,7 @@ class WorkspaceRegistry:
             return [
                 RegisteredWorkspace(**dict(row))
                 for row in db.execute(
-                    "SELECT * FROM workspaces ORDER BY last_opened DESC, name COLLATE NOCASE, id"
+                    "SELECT * FROM workspaces ORDER BY last_opened DESC, number COLLATE NOCASE, id"
                 )
             ]
 
@@ -97,10 +126,12 @@ class WorkspaceRegistry:
                 "SELECT * FROM workspaces WHERE id=?", (workspace_id,)
             ).fetchone()
         if row is None:
-            raise LookupError("Workspace is not registered with this server.")
+            raise LookupError("This course isn't registered with this server.")
         return RegisteredWorkspace(**dict(row))
 
-    def register(self, root: Path, name: str | None = None) -> RegisteredWorkspace:
+    def register(
+        self, root: Path, course: CourseDetails | None = None, *, dry_run: bool = False
+    ) -> RegisteredWorkspace:
         root = root.expanduser().resolve()
         workspace = Workspace(root)  # Never create on registration or discovery.
         workspace_id = workspace.info().id
@@ -115,37 +146,90 @@ class WorkspaceRegistry:
                 and (Path(previous["path"]) / DATABASE).exists()
             ):
                 raise ValueError(
-                    "Another copy of this workspace is already registered. Open the registered copy."
+                    "Another copy of this course is already registered. Open the registered copy."
                 )
-            display_name = (
-                workspace_name(name)
-                if name
-                else previous["name"]
-                if previous
-                else root.name
+            course = (
+                course
+                or (previous and RegisteredWorkspace(**dict(previous)).course)
+                or CourseDetails(number=root.name[:120])
             )
+            if dry_run:
+                taken = db.execute(
+                    "SELECT 1 FROM workspaces WHERE path=? AND id!=?",
+                    (str(root), workspace_id),
+                ).fetchone()
+                if taken:
+                    raise ValueError(
+                        "This folder is already registered as another course."
+                    )
+                return RegisteredWorkspace(
+                    **course.model_dump(),
+                    id=workspace_id,
+                    path=str(root),
+                    last_opened=previous["last_opened"] if previous else None,
+                )
             try:
                 db.execute(
-                    "INSERT INTO workspaces(id, name, path) VALUES (?, ?, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET name=excluded.name, path=excluded.path",
-                    (workspace_id, display_name, str(root)),
+                    "INSERT INTO workspaces(id, path, number, name, term, year) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET path=excluded.path, number=excluded.number, "
+                    "name=excluded.name, term=excluded.term, year=excluded.year",
+                    (workspace_id, str(root), course.number, course.name, course.term, course.year),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(
-                    "This location is already registered as another workspace."
+                    "This folder is already registered as another course."
                 ) from exc
         return self.get(workspace_id)
 
-    def create(self, name: str, root: Path | None = None) -> RegisteredWorkspace:
-        name = workspace_name(name)
-        destination = (root or default_workspaces_dir() / name).expanduser().resolve()
+    def update(self, workspace_id: str, course: CourseDetails) -> RegisteredWorkspace:
+        with self.connect() as db:
+            changed = db.execute(
+                "UPDATE workspaces SET number=?, name=?, term=?, year=? WHERE id=?",
+                (course.number, course.name, course.term, course.year, workspace_id),
+            ).rowcount
+        if not changed:
+            raise LookupError("This course isn't registered with this server.")
+        return self.get(workspace_id)
+
+    def remove(self, workspace_id: str) -> None:
+        with self.connect() as db:
+            removed = db.execute(
+                "DELETE FROM workspaces WHERE id=?", (workspace_id,)
+            ).rowcount
+        if not removed:
+            raise LookupError("This course isn't registered with this server.")
+
+    def destination(self, course: CourseDetails, root: Path | None = None) -> Path:
+        destination = (
+            (root or default_workspaces_dir() / folder_name(course))
+            .expanduser()
+            .resolve()
+        )
+        registered = any(item.path == str(destination) for item in self.list())
+        if root is not None and registered:
+            raise ValueError("This folder is already registered as another course.")
         # Default creation must not silently adopt an existing course directory.
         if root is None and destination.exists():
+            label = course_label(course)
+            if registered:
+                raise ValueError(
+                    f"{label} already exists. Change the course number, term, or year."
+                )
             raise ValueError(
-                "A folder with that name already exists. Choose another name or register the existing workspace."
+                f"Files for {label} already exist. Change the course number, term, or year, or ask whoever set up this server to restore that course."
             )
+        if (destination / DATABASE).exists():
+            raise ValueError(
+                f"{destination} already has a course. Add it with `opengrader course add` instead."
+            )
+        return destination
+
+    def create(
+        self, course: CourseDetails, root: Path | None = None
+    ) -> RegisteredWorkspace:
+        destination = self.destination(course, root)
         Workspace.create(destination)
-        return self.register(destination, name)
+        return self.register(destination, course)
 
     def opened(self, workspace_id: str) -> None:
         with self.connect() as db:

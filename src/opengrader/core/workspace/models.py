@@ -1,7 +1,8 @@
 """Typed grading records shared by workspace operations and their clients."""
 
-from pydantic import BaseModel
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field, StringConstraints
 
 from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
 from opengrader.core.question_types import QuestionType
@@ -120,9 +121,22 @@ class FolderSyncResult(BaseModel):
     problems: list[str] = []
 
 
+CourseText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)
+]
+Term = Literal["winter", "spring", "summer", "fall"]
+
+
+class CourseDetails(BaseModel):
+    number: CourseText
+    name: CourseText | None = None
+    term: Term | None = None
+    year: Annotated[int, Field(ge=2000, le=2100)] | None = None
+
+
 class WorkspaceInfo(BaseModel):
     id: str
-    name: str | None = None
+    course: CourseDetails | None = None
     actor: str
     event_cursor: int
     folder_session: FolderSessionInfo | None = None
