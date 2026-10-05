@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 
 from opengrader.cli.web import _root
-from opengrader.cli.workspace import command
+from opengrader.cli.course import command
 from opengrader.core.workspace.models import CourseDetails
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.app import create_app
@@ -332,15 +332,54 @@ def test_register_requires_control_token_and_browser_creation_uses_default(
 
 
 def test_explicit_cli_create_and_register(tmp_path):
-    runner = CliRunner()
+    runner = CliRunner(mix_stderr=False)
     root = tmp_path / "chosen"
-    result = runner.invoke(
-        command, ["create", "CS 101", "Intro", "--directory", str(root)]
-    )
+
+    def courses():
+        return [
+            (item["number"], item["name"], item["term"], item["year"], item["path"])
+            for item in json.loads(runner.invoke(command, ["list", "--json"]).stdout)
+        ]
+
+    details = ["--number", "CS 101", "--name", "Intro", "--term", "Spring", "--year", "2026"]
+    result = runner.invoke(command, ["create", *details, "--directory", str(root), "--dry-run"])
     assert result.exit_code == 0, result.output
-    result = runner.invoke(command, ["add", str(root), "--number", "CS 102"])
+    assert "Spring 2026" in result.stdout
+    assert result.stderr == "Dry run: nothing changed.\n"
+    assert not root.exists()
+    assert courses() == []
+    result = runner.invoke(command, ["create", *details, "--directory", str(root)])
     assert result.exit_code == 0, result.output
-    assert runner.invoke(command, ["list"]).output == f"CS 102\t{root}\n"
+    result = runner.invoke(command, ["add", str(root), "--name", "Renamed"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(command, ["edit", str(root), "--year", "2030", "--dry-run"])
+    assert "Spring 2030" in result.stdout
+    result = runner.invoke(command, ["remove", str(root), "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert courses() == [("CS 101", "Renamed", "spring", 2026, str(root))]
+    result = runner.invoke(command, ["create", *details, "--directory", str(root), "--dry-run"])
+    assert result.exit_code == 1 and "already registered as another course" in result.stderr
+    (root / ".opengrader").rename(root / ".hidden")
+    result = runner.invoke(command, ["create", *details, "--directory", str(root)])
+    assert result.exit_code == 1 and "already registered as another course" in result.stderr
+    assert not (root / ".opengrader").exists()
+    (root / ".hidden").rename(root / ".opengrader")
+    (root / "notes").mkdir()
+    result = runner.invoke(command, ["edit", str(root / "notes"), "--year", "2027"])
+    assert result.exit_code == 0, result.output
+    assert courses() == [("CS 101", "Renamed", "spring", 2027, str(root))]
+    filtered = runner.invoke(command, ["list", "--term", "fall", "--year", "2027"])
+    assert filtered.stdout == "No courses match.\n"
+    assert "CS 101" in runner.invoke(command, ["list", "--term", "Spring"]).stdout
+    assert runner.invoke(command, ["edit", str(root), "--number", " "]).exit_code == 2
+    shutil.rmtree(root / "notes")
+    shutil.move(root, tmp_path / "moved")
+    assert runner.invoke(command, ["list"]).stdout.endswith(f"{root} (unavailable)\n")
+    result = runner.invoke(command, ["remove", str(root)])
+    assert result.exit_code == 0, result.output
+    assert courses() == []
+    assert runner.invoke(command, ["remove", str(root)]).exit_code == 1
+    root = tmp_path / "moved"
     assert _root(root) == root
 
 
