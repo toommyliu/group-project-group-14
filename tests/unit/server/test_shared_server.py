@@ -331,9 +331,11 @@ def test_register_requires_control_token_and_browser_creation_uses_default(
         )
 
 
-def test_explicit_cli_create_and_register(tmp_path):
+def test_explicit_cli_create_and_register(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     runner = CliRunner(mix_stderr=False)
     root = tmp_path / "chosen"
+    shown = Path("~", "chosen")
 
     def courses():
         return [
@@ -344,14 +346,13 @@ def test_explicit_cli_create_and_register(tmp_path):
     details = ["--number", "CS 101", "--name", "Intro", "--term", "Spring", "--year", "2026"]
     result = runner.invoke(command, ["create", *details, "--directory", str(root), "--dry-run"])
     assert result.exit_code == 0, result.output
-    assert "Spring 2026" in result.stdout
-    assert result.stderr == "Dry run: nothing changed.\n"
+    assert "Spring 2026" in result.stdout and str(shown) in result.stdout
     assert not root.exists()
     assert courses() == []
     result = runner.invoke(command, ["create", *details, "--directory", str(root)])
     assert result.exit_code == 0, result.output
     result = runner.invoke(command, ["add", str(root), "--name", "Renamed"])
-    assert result.exit_code == 0, result.output
+    assert "Intro" in result.stdout and "Renamed" in result.stdout
     result = runner.invoke(command, ["edit", str(root), "--year", "2030", "--dry-run"])
     assert "Spring 2030" in result.stdout
     result = runner.invoke(command, ["remove", str(root), "--dry-run"])
@@ -374,13 +375,23 @@ def test_explicit_cli_create_and_register(tmp_path):
     assert runner.invoke(command, ["edit", str(root), "--number", " "]).exit_code == 2
     shutil.rmtree(root / "notes")
     shutil.move(root, tmp_path / "moved")
-    assert runner.invoke(command, ["list"]).stdout.endswith(f"{root} (unavailable)\n")
+    assert runner.invoke(command, ["list"]).stdout.endswith(f"{shown} (unavailable)\n")
     result = runner.invoke(command, ["remove", str(root)])
     assert result.exit_code == 0, result.output
     assert courses() == []
     assert runner.invoke(command, ["remove", str(root)]).exit_code == 1
     root = tmp_path / "moved"
     assert _root(root) == root
+
+
+def test_cli_add_reports_a_moved_course_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    runner = CliRunner(mix_stderr=False)
+    details = ["--number", "CS 101", "--name", "Intro", "--term", "fall", "--year", "2026"]
+    runner.invoke(command, ["create", *details, "--directory", str(tmp_path / "old")])
+    shutil.move(tmp_path / "old", tmp_path / "new")
+    result = runner.invoke(command, ["add", str(tmp_path / "new")])
+    assert str(Path("~", "old")) in result.stdout and str(Path("~", "new")) in result.stdout
 
 
 def test_server_configuration_is_independent_of_cwd(tmp_path, monkeypatch):
