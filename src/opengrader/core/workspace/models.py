@@ -133,6 +133,13 @@ class CourseDetails(BaseModel):
     term: Term | None = None
     year: Annotated[int, Field(ge=2000, le=2100)] | None = None
 
+    def __str__(self) -> str:
+        return " ".join(
+            str(part)
+            for part in (self.number, self.term and self.term.title(), self.year)
+            if part
+        )
+
 
 class WorkspaceInfo(BaseModel):
     id: str

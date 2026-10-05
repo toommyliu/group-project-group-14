@@ -221,7 +221,7 @@ def test_a_bare_tui_outside_a_workspace_explains_itself_and_creates_nothing(
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "no workspace" in err and "opengrader classic" in err
+    assert "no course" in err and "opengrader course create" in err
     app_cls.assert_not_called()
     assert not (no_service / ".opengrader").exists()  # no workspace created
 
@@ -415,43 +415,42 @@ def test_classic_rejects_half_a_folder_and_workspace_flags(no_service, argv) -> 
     assert exc.value.code == 2
 
 
-def test_a_bare_tui_outside_a_workspace_offers_the_recent_ones(
+def test_a_bare_tui_outside_a_workspace_offers_the_registered_courses(
     service, tmp_path_factory, monkeypatch
 ) -> None:
-    from opengrader.core.recents import record_recent
+    from opengrader.server.registry import WorkspaceRegistry
 
-    record_recent("workspace", service.root)
+    WorkspaceRegistry().register(Path(service.root))
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     monkeypatch.chdir(elsewhere)
     with (
         patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
-        patch("opengrader.tui.recent_workspaces.RecentWorkspaces", autospec=True) as recent_cls,
+        patch("opengrader.tui.course_chooser.CourseChooser", autospec=True) as chooser_cls,
         patch("opengrader.tui.workspace_home.WorkspaceHome", autospec=True) as home_cls,
     ):
-        recent_cls.return_value.run.return_value = Path(service.root)
+        chooser_cls.return_value.run.return_value = Path(service.root)
         home_cls.return_value.run.return_value = None
         run_command(tui_command, [])
 
-    [item] = recent_cls.call_args.args[0]
-    assert Path(item.path) == Path(service.root).resolve()
-    assert recent_cls.call_args.kwargs["here"] == elsewhere.resolve()
+    [course] = chooser_cls.call_args.args[0]
+    assert Path(course.path) == Path(service.root).resolve()
     home_cls.assert_called_once()  # two assignments: the list, as usual
     app_cls.assert_not_called()
     assert not (elsewhere / ".opengrader").exists()
 
 
-def test_quitting_the_recent_list_quits_quietly(
+def test_quitting_the_course_chooser_quits_quietly(
     service, tmp_path_factory, monkeypatch
 ) -> None:
-    from opengrader.core.recents import record_recent
+    from opengrader.server.registry import WorkspaceRegistry
 
-    record_recent("workspace", service.root)
+    WorkspaceRegistry().register(Path(service.root))
     monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
     with (
         patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
-        patch("opengrader.tui.recent_workspaces.RecentWorkspaces", autospec=True) as recent_cls,
+        patch("opengrader.tui.course_chooser.CourseChooser", autospec=True) as chooser_cls,
     ):
-        recent_cls.return_value.run.return_value = None
+        chooser_cls.return_value.run.return_value = None
         run_command(tui_command, [])
 
     app_cls.assert_not_called()
