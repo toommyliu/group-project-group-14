@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from '@tanstack/react-router';
 import { ArrowRight, LoaderCircle } from 'lucide-react';
 import { cn } from 'cn';
 import { authQuery } from '@/api/auth';
@@ -22,6 +23,7 @@ import { ErrorAlert } from '@/components/error-alert';
 import { HowItWorks } from '@/components/how-it-works';
 import { PageHeading } from '@/components/page-heading';
 import { SteadyLabel } from '@/components/steady-label';
+import { RemoveCourseButton } from '@/components/remove-course-button';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -33,7 +35,17 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { FieldError } from '@/components/ui/field';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { coursesRoute } from '@/router';
+
+const allTerms = 'all';
 
 function newCourse(): CourseDraft {
   return { number: '', name: '', ...currentTerm() };
@@ -84,6 +96,19 @@ export default function WorkspaceList() {
     create.mutate();
   }
   const courses = workspaces.data;
+  const { term } = coursesRoute.useSearch();
+  const navigate = useNavigate();
+  const groups = courses ? byTerm(courses) : [];
+  const shown = term ? groups.filter((group) => group.label === term) : groups;
+  const termItems = [
+    { value: allTerms, label: 'All terms' },
+    ...groups.map((group) => ({ value: group.label, label: group.label })),
+  ];
+  const filterTerm = (next: string | null) =>
+    void navigate({
+      to: '/courses',
+      search: { term: next && next !== allTerms ? next : undefined },
+    });
 
   return (
     <AlertDialog
@@ -102,13 +127,34 @@ export default function WorkspaceList() {
           title="Courses"
           description="Open a course to manage its assignments and grading."
         />
-        {canCreate && (
-          <AlertDialogTrigger
-            render={<Button className="shrink-0 self-start sm:self-auto" />}
-          >
-            Create course
-          </AlertDialogTrigger>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {(groups.length > 1 || term) && (
+            <Select
+              items={termItems}
+              value={term ?? allTerms}
+              onValueChange={filterTerm}
+            >
+              <SelectTrigger
+                aria-label="Filter by term"
+                className="min-h-11 min-w-36 px-3 text-sm data-[size=default]:h-auto"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {termItems.map((item) => (
+                  <SelectItem key={item.label} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {canCreate && (
+            <AlertDialogTrigger render={<Button className="shrink-0" />}>
+              Create course
+            </AlertDialogTrigger>
+          )}
+        </div>
       </div>
       {workspaces.isPending && <CoursesLoading />}
       {workspaces.isError && (
@@ -122,9 +168,17 @@ export default function WorkspaceList() {
           </Button>
         </ErrorAlert>
       )}
-      {courses && courses.length > 0 && (
+      {courses && courses.length > 0 && term && shown.length === 0 && (
+        <div className="space-y-4 border-t py-8">
+          <p>No courses in {term}.</p>
+          <Button variant="outline" onClick={() => filterTerm(null)}>
+            Show all terms
+          </Button>
+        </div>
+      )}
+      {shown.length > 0 && (
         <div className="@container space-y-8">
-          {byTerm(courses).map((group) => (
+          {shown.map((group) => (
             <section key={group.label} aria-label={group.label}>
               <h2 className="mb-3 text-sm font-medium text-muted-foreground">
                 {group.label}
@@ -132,7 +186,7 @@ export default function WorkspaceList() {
               <ul className="grid grid-cols-1 gap-4 @xl:grid-cols-2 @5xl:grid-cols-3">
                 {group.courses.map((workspace) => (
                   <li key={workspace.id}>
-                    <CourseCard course={workspace} />
+                    <CourseCard course={workspace} canRemove={canCreate} />
                   </li>
                 ))}
               </ul>
@@ -197,7 +251,14 @@ export default function WorkspaceList() {
   );
 }
 
-function CourseCard({ course }: { course: CourseSummary }) {
+function CourseCard({
+  course,
+  canRemove,
+}: {
+  course: CourseSummary;
+  canRemove: boolean | undefined;
+}) {
+  const queryClient = useQueryClient();
   return (
     <article
       className={cn(
@@ -234,6 +295,16 @@ function CourseCard({ course }: { course: CourseSummary }) {
             Folder unavailable. Ask the person who set up Opengrader to
             reconnect it.
           </p>
+        )}
+        {!course.available && canRemove && (
+          <RemoveCourseButton
+            size="sm"
+            className="mt-3"
+            course={course}
+            onRemoved={() =>
+              queryClient.invalidateQueries({ queryKey: coursesQuery.queryKey })
+            }
+          />
         )}
       </div>
       {course.available && (

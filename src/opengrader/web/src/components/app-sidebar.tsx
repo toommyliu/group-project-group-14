@@ -3,7 +3,14 @@ import { useContext } from 'react';
 import { WorkspacePages } from '@/lib/workspace-pages';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, ChartColumn, FileText, PenLine, Users } from 'lucide-react';
+import {
+  BookOpen,
+  ChartColumn,
+  FileText,
+  PenLine,
+  Settings,
+  Users,
+} from 'lucide-react';
 import { authQuery } from '@/api/auth';
 import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { useFolderSession } from '@/hooks/use-folder-session';
@@ -56,6 +63,7 @@ export function AppSidebar() {
   const managesPeople =
     Boolean(workspaceBase) && auth.data?.role === 'instructor';
   const onPeople = Boolean(matchRoute({ to: '/people', pending: true }));
+  const onSettings = Boolean(matchRoute({ to: '/settings', pending: true }));
   const expanded = isMobile ? openMobile : open;
   const courseLinks =
     Boolean(workspaceBase) && (!folderSession || managesPeople);
@@ -113,7 +121,7 @@ export function AppSidebar() {
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pt-2">
           {courseLinks && (
-            <nav aria-label="Workspace" className="w-full">
+            <nav aria-label="Course" className="w-full">
               <SidebarGroup className="px-2 py-0">
                 <SidebarMenu>
                   {!folderSession && (
@@ -146,6 +154,23 @@ export function AppSidebar() {
                         <Users aria-hidden="true" />
                         <span className="group-data-[collapsible=icon]:hidden">
                           People
+                        </span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
+                  {managesPeople && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        className={menuButtonClass}
+                        tooltip="Settings"
+                        aria-label="Settings"
+                        isActive={onSettings}
+                        render={<Link to="/settings" onClick={close} />}
+                        aria-current={onSettings ? 'page' : undefined}
+                      >
+                        <Settings aria-hidden="true" />
+                        <span className="group-data-[collapsible=icon]:hidden">
+                          Settings
                         </span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
