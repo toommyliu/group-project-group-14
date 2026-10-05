@@ -31,11 +31,6 @@ class AuthStatus(BaseModel):
     enabled: bool
     user: AuthUser | None = None
     role: Role | None = None
-    viewing_as_grader: bool = False
-
-
-class ViewAs(BaseModel):
-    role: Role
 
 
 class Grader(BaseModel):
@@ -228,29 +223,13 @@ def add_auth_routes(
             role = access.role(user.email)
         else:
             role = "instructor" if is_local(request) else None
-        viewing = role == "instructor" and bool(request.session.get("view_as_grader"))
-        return AuthStatus(
-            enabled=True,
-            user=user,
-            role="grader" if viewing else role,
-            viewing_as_grader=viewing,
-        )
+        return AuthStatus(enabled=True, user=user, role=role)
 
     Viewer = Annotated[AuthStatus, Depends(viewer)]
 
     @app.get("/auth/me")
     def auth_status(status: Viewer) -> AuthStatus:
         return status
-
-    @app.post("/auth/view-as", status_code=204)
-    def view_as(request: Request, choice: ViewAs, status: Viewer) -> Response:
-        if status.role != "instructor" and not status.viewing_as_grader:
-            raise HTTPException(403, "Only instructors can switch views.")
-        if choice.role == "grader":
-            request.session["view_as_grader"] = True
-        else:
-            request.session.pop("view_as_grader", None)
-        return Response(status_code=204)
 
     @app.get("/auth/login", include_in_schema=False, response_model=None)
     async def login(request: Request) -> RedirectResponse:

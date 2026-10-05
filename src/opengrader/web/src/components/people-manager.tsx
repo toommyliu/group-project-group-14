@@ -212,13 +212,11 @@ export function PeopleManager({
   me,
   onAdd,
   onRemove,
-  onViewAsGrader,
 }: {
   people: People;
   me?: string;
   onAdd: (email: string) => Promise<void>;
   onRemove: (email: string) => Promise<void>;
-  onViewAsGrader: () => Promise<void>;
 }) {
   'use no memo';
 
@@ -226,7 +224,6 @@ export function PeopleManager({
   const [email, setEmail] = useState('');
   const [addError, setAddError] = useState('');
   const [addNotice, setAddNotice] = useState('');
-  const [actionError, setActionError] = useState('');
   const [confirming, setConfirming] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState('');
   const [announcement, setAnnouncement] = useState('');
@@ -294,7 +291,6 @@ export function PeopleManager({
     setPending(action);
     setAddError('');
     setAddNotice('');
-    setActionError('');
     setRemoveError('');
     setAnnouncement('');
   }
@@ -344,37 +340,11 @@ export function PeopleManager({
     }
   }
 
-  async function viewAsGrader() {
-    if (busy.current) return;
-    start('view');
-    try {
-      await onViewAsGrader();
-    } catch (cause) {
-      setActionError(errorMessage(cause, 'Could not switch views. Try again.'));
-    } finally {
-      finish();
-    }
-  }
-
   return (
     <>
       <PageHeading
         title="People"
         description="Everyone listed here can sign in and grade every assignment."
-        actions={
-          <Button
-            type="button"
-            variant="outline"
-            disabled={pending === 'view'}
-            onClick={() => void viewAsGrader()}
-          >
-            <SteadyLabel
-              busy={pending === 'view'}
-              idle="View as grader"
-              working="Switching…"
-            />
-          </Button>
-        }
       />
 
       <section aria-labelledby={`${id}-add`} className="space-y-4 pb-8">
@@ -494,8 +464,6 @@ export function PeopleManager({
             <span className="invisible col-start-1 row-start-1">{summary}</span>
           </p>
         </div>
-
-        {actionError && <ErrorAlert error={actionError} />}
 
         <p role="status" className="sr-only">
           {announcement}

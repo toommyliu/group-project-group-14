@@ -18,7 +18,6 @@ def test_auth_is_optional_for_offline_use(tmp_path):
             "enabled": False,
             "user": None,
             "role": None,
-            "viewing_as_grader": False,
         }
         response = client.get("/auth/login")
         assert response.status_code == 503
@@ -42,7 +41,6 @@ def test_saved_credentials_only_enable_sign_in_when_requested(tmp_path, monkeypa
             "enabled": enabled,
             "user": None,
             "role": None,
-            "viewing_as_grader": False,
         }
 
 
@@ -88,7 +86,6 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
                 "name": "Test Grader",
             },
             "role": "instructor",
-            "viewing_as_grader": False,
         }
         assert client.get("/api/assignments").status_code == 200
         response = client.post("/auth/logout")
@@ -121,7 +118,6 @@ def test_remote_requests_require_sign_in(tmp_path):
             "enabled": True,
             "user": None,
             "role": None,
-            "viewing_as_grader": False,
         }
 
 

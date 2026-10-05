@@ -126,27 +126,6 @@ def test_sign_in_admits_only_people_on_the_list(tmp_path, monkeypatch):
         assert client.get("/auth/me").json()["role"] == "instructor"
 
 
-def test_signing_in_starts_in_the_instructor_view(tmp_path, monkeypatch):
-    async def token(self, request, **kwargs):
-        return {
-            "userinfo": {
-                "sub": "prof",
-                "email": "prof@sjsu.edu",
-                "email_verified": True,
-                "hd": "sjsu.edu",
-            }
-        }
-
-    monkeypatch.setattr(StarletteOAuth2App, "authorize_access_token", token)
-    with hosted(tmp_path) as client:
-        sign_in(client, "prof@sjsu.edu")
-        assert client.post("/auth/view-as", json={"role": "grader"}).status_code == 204
-
-        assert client.get("/auth/callback", follow_redirects=False).status_code == 303
-        status = client.get("/auth/me").json()
-        assert (status["role"], status["viewing_as_grader"]) == ("instructor", False)
-
-
 def test_saved_grades_record_the_signed_in_grader(tmp_path):
     folder = tmp_path / "scans"
     folder.mkdir()
@@ -218,20 +197,3 @@ def test_people_are_not_managed_when_sign_in_is_off(tmp_path):
         assert client.get("/api/people").status_code == 404
 
 
-def test_instructors_can_view_the_app_as_a_grader(tmp_path):
-    Workspace.create(tmp_path).add_grader("ta@sjsu.edu")
-    with hosted(tmp_path) as client:
-        sign_in(client, "prof@sjsu.edu")
-        assert client.post("/auth/view-as", json={"role": "grader"}).status_code == 204
-        status = client.get("/auth/me").json()
-        assert (status["role"], status["viewing_as_grader"]) == ("grader", True)
-        assert client.get("/api/people").status_code == 403
-
-        assert client.post("/auth/view-as", json={"role": "instructor"}).status_code == 204
-        assert client.get("/auth/me").json()["role"] == "instructor"
-        assert client.get("/api/people").status_code == 200
-
-        sign_in(client, "ta@sjsu.edu")
-        switch = client.post("/auth/view-as", json={"role": "instructor"})
-        assert switch.status_code == 403
-        assert client.get("/api/people").status_code == 403

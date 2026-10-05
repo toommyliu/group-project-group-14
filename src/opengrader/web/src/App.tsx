@@ -6,7 +6,6 @@ import { useAssignmentNavigation } from '@/hooks/use-assignment-navigation';
 import { useFolderSession } from '@/hooks/use-folder-session';
 import { AppSidebar } from '@/components/app-sidebar';
 import { FolderSessionBanner } from '@/components/folder-session-banner';
-import { GraderViewToolbar } from '@/components/grader-view-toolbar';
 import { CourseBreadcrumb } from '@/components/course-breadcrumb';
 import {
   SidebarInset,
@@ -103,7 +102,6 @@ export function App({ children }: PropsWithChildren) {
           >
             {!standalone && <MobileSidebarTrigger />}
             {!standalone && !folderSession && <CourseBreadcrumb />}
-            <GraderViewToolbar />
             {folderSession && assignment && (
               <FolderSessionBanner session={folderSession} />
             )}

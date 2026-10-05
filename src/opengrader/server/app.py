@@ -243,8 +243,6 @@ def create_app(
             raise HTTPException(404)
 
     def instructor(request: Request):
-        if request.scope.get("session", {}).get("view_as_grader"):
-            raise HTTPException(403, "Only instructors can manage courses.")
         user = signed_in(request)
         if settings.auth_enabled and not (
             user
