@@ -78,6 +78,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   source,
   preview,
   disabled,
+  structureLocked,
   scrollElementRef,
   onPending,
   onResult,
@@ -91,6 +92,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
   source: string;
   preview: QAPreview;
   disabled: boolean;
+  structureLocked: boolean;
   scrollElementRef?: RefObject<HTMLElement | null>;
   onPending: () => void;
   onResult: (result: VisualEditResult) => void;
@@ -341,7 +343,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
       <SortableQuestionList
         ref={parent === null ? questionListRef : undefined}
         questions={questions}
-        disabled={disabled}
+        disabled={disabled || structureLocked}
         compact={compact}
         scrollElementRef={parent === null ? scrollElementRef : undefined}
         offsetElementRef={parent === null ? editorHeaderRef : undefined}
@@ -410,7 +412,11 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
                 deferOffscreen={!scrollElementRef && parent === null}
                 disabled={disabled}
                 onChange={change}
-                onRemove={() => change({ ...edit, remove: true })}
+                onRemove={
+                  structureLocked
+                    ? undefined
+                    : () => change({ ...edit, remove: true })
+                }
               />
             </div>
           );
@@ -453,6 +459,7 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
         questionCounts={questionCounts}
         selected={version}
         disabled={disabled}
+        structureLocked={structureLocked}
         onSelect={setVersion}
         onChange={(versions) => {
           revision.current += 1;
@@ -464,16 +471,18 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
         (activeGroup.questions.length ? (
           <div className="space-y-4">
             {renderQuestions(activeGroup.questions, activeGroup.key)}
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-dashed"
-              disabled={disabled}
-              onClick={addQuestion}
-            >
-              <Plus aria-hidden="true" />
-              Add question
-            </Button>
+            {!structureLocked && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-dashed"
+                disabled={disabled}
+                onClick={addQuestion}
+              >
+                <Plus aria-hidden="true" />
+                Add question
+              </Button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3 border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
@@ -482,15 +491,17 @@ export const VisualAssignmentEditor = memo(function VisualAssignmentEditor({
                 ? `Version ${activeGroup.label} has no questions yet.`
                 : 'This answer key has no questions yet.'}
             </p>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={disabled}
-              onClick={addQuestion}
-            >
-              <Plus aria-hidden="true" />
-              Add question
-            </Button>
+            {!structureLocked && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={addQuestion}
+              >
+                <Plus aria-hidden="true" />
+                Add question
+              </Button>
+            )}
           </div>
         ))}
     </div>

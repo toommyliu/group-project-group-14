@@ -41,6 +41,7 @@ export type AssignmentDraftOptions =
         qa: QAPreview;
         editUnavailableReason?: string;
         hideDelete?: boolean;
+        structureLocked?: boolean;
       };
     };
 
@@ -288,7 +289,7 @@ export function useAssignmentDraft({
           setSaveMessage('Changes saved.');
         } else {
           await router.navigate({
-            to: '/assignments/$assignmentId',
+            to: '/assignments/$assignmentId/outline',
             params: { assignmentId: assignment.id },
           });
         }

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { OutlineEntry } from '@/lib/assignment-outline';
 import { buttonVariants } from '@/components/ui/button';
+import { usePortalContainer } from '@/lib/portal-container';
 
 export type OutlineProps = {
   entries: OutlineEntry[];
@@ -278,7 +279,7 @@ export function QAOutlinePopover(props: OutlineProps) {
           {activeEntry?.number}
         </span>
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={usePortalContainer()}>
         <Popover.Positioner
           side="bottom"
           align="end"

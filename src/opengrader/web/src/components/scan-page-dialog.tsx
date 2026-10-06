@@ -2,6 +2,7 @@ import { Dialog } from '@base-ui/react/dialog';
 import { ChevronLeft, ChevronRight, XIcon } from 'lucide-react';
 import { scanPageUrl, type ScanPage } from '@/api/scans';
 import { Button } from './ui/button';
+import { usePortalContainer } from '@/lib/portal-container';
 
 export type PreviewPage = ScanPage & { label: string };
 
@@ -35,7 +36,7 @@ export function ScanPageDialog({
         if (!open) onIndexChange(null);
       }}
     >
-      <Dialog.Portal>
+      <Dialog.Portal container={usePortalContainer()}>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/80 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup
           className="fixed inset-0 z-50 flex flex-col text-white outline-none"

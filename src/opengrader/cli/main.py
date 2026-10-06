@@ -68,6 +68,7 @@ class Subcommand:
 
 COMMANDS: tuple[Subcommand, ...] = (
     Subcommand(name="course", target="opengrader.cli.course:command", summary="manage courses", section=SECTION_START),
+    Subcommand(name="roster", target="opengrader.cli.roster:command", summary="import, add, and list a course's students", section=SECTION_START),
     Subcommand(name="web", target="opengrader.cli.web:open_command", summary="open Opengrader in a browser", section=SECTION_START),
     Subcommand(name="stop", target="opengrader.cli.web:stop_command", summary="stop the server for all workspaces", section=SECTION_META),
     Subcommand(

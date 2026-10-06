@@ -309,7 +309,7 @@ function ScanSubmissions({
   run: (action: () => Promise<ScanBatch>) => Promise<void>;
 }) {
   const [defaultVersion, setDefaultVersion] = useState(
-    batch.assignment_version ?? ''
+    batch.assignment_version ?? versions[0] ?? ''
   );
   const [groupVersions, setGroupVersions] = useState<
     Record<string, string | null>
@@ -321,10 +321,12 @@ function ScanSubmissions({
   const active = scanBusy(batch);
   const retrying = batch.status === 'failed' && versions.length > 0;
   const [preview, setPreview] = useState<number | null>(null);
+  const title = (group: ScanBatch['groups'][number], index: number) =>
+    group.student?.name ?? `Submission ${index + 1}`;
   const previewPages: PreviewPage[] = batch.groups.flatMap((group, index) =>
     group.pages.map((page) => ({
       ...page,
-      label: `Submission ${index + 1} · Scan page ${page.number}`,
+      label: `${title(group, index)} · Scan page ${page.number}`,
     }))
   );
 
@@ -367,7 +369,7 @@ function ScanSubmissions({
                 <button
                   type="button"
                   className="shrink-0 cursor-zoom-in"
-                  aria-label={`View pages of Submission ${index + 1}`}
+                  aria-label={`View pages of ${title(group, index)}`}
                   onClick={() =>
                     setPreview(
                       previewPages.findIndex(
@@ -386,7 +388,7 @@ function ScanSubmissions({
                 </button>
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">Submission {index + 1}</p>
+                <p className="text-sm font-medium">{title(group, index)}</p>
                 <p className="truncate text-xs text-muted-foreground">
                   Scan pages{' '}
                   {pageRanges(group.pages.map((page) => page.number))}
@@ -464,7 +466,6 @@ function ScanSubmissions({
                   assignmentId,
                   batch,
                   true,
-                  batch.auto_grade,
                   defaultVersion,
                   groupVersions
                 )

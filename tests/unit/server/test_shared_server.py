@@ -240,6 +240,10 @@ def test_hosted_access_filters_catalog_and_every_workspace_resource(tmp_path):
             first.id
         ]
         assert client.get(first.url_path + "/api/workspace").status_code == 200
+        assert client.get(first.url_path + "/api/roster").status_code == 403
+        client.cookies.set("opengrader_session", cookie(settings, "prof@sjsu.edu"))
+        assert client.get(first.url_path + "/api/roster").status_code == 200
+        client.cookies.set("opengrader_session", cookie(settings, "grader@sjsu.edu"))
         for path in [
             "/api/workspace",
             "/api/assignments",

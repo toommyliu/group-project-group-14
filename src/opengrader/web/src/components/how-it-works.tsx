@@ -14,25 +14,24 @@ const STEP_DURATION_MS = 6000;
 
 const steps = [
   {
-    title: 'Add your answer key',
-    description: 'Create an assignment from the questions and answers.',
+    title: 'Outline the template',
+    description: 'Upload the blank exam and draw a box around each question.',
     Illustration: AnswerKeyIllustration,
   },
   {
     title: 'Upload scans',
     description:
-      'Opengrader splits the stack by student and reads each answer.',
+      'Opengrader splits the stack by student and cuts out each answer.',
     Illustration: UploadScansIllustration,
   },
   {
     title: 'Grade',
-    description:
-      'Score answers against your rubric. Answers that match the key can be scored for you.',
+    description: 'Score each question across the class against your rubric.',
     Illustration: GradeIllustration,
   },
   {
     title: 'Review',
-    description: 'See how the class did on each question.',
+    description: 'Check every score, then see how the class did.',
     Illustration: ReviewIllustration,
   },
 ];

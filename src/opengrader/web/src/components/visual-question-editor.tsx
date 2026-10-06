@@ -328,7 +328,7 @@ export function VisualQuestionEditor({
   deferOffscreen: boolean;
   disabled: boolean;
   onChange: (edit: QuestionEdit) => void;
-  onRemove: () => void;
+  onRemove?: () => void;
 }) {
   const promptId = useId();
   function update(change: Partial<QuestionEdit>) {
@@ -356,28 +356,30 @@ export function VisualQuestionEditor({
         {!compact && (
           <>
             <PointsField edit={edit} disabled={disabled} onChange={update} />
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                disabled={disabled}
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`${label} options`}
-                    title={`${label} options`}
-                  />
-                }
-              >
-                <Ellipsis aria-hidden="true" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuItem variant="destructive" onClick={onRemove}>
-                  <Trash2 aria-hidden="true" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {onRemove && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={disabled}
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${label} options`}
+                      title={`${label} options`}
+                    />
+                  }
+                >
+                  <Ellipsis aria-hidden="true" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem variant="destructive" onClick={onRemove}>
+                    <Trash2 aria-hidden="true" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </>
         )}
       </div>

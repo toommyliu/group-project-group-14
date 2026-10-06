@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import openapiTS, { astToString } from 'openapi-typescript';
+import ts from 'typescript';
 
 const schema = execFileSync(
   'uv',
@@ -12,7 +13,14 @@ const schema = execFileSync(
 );
 const output =
   '// Generated from FastAPI. Run pnpm generate:api to update.\n' +
-  astToString(await openapiTS(schema));
+  astToString(
+    await openapiTS(schema, {
+      transform: (schemaObject) =>
+        schemaObject.format === 'binary'
+          ? ts.factory.createTypeReferenceNode('Blob')
+          : undefined,
+    })
+  );
 const target = new URL('../src/api/schema.d.ts', import.meta.url);
 
 if (process.argv.includes('--check')) {

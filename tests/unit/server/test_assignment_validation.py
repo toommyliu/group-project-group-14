@@ -72,12 +72,12 @@ def test_visual_edit_locates_nested_rubric_item_after_source_lines_shift(tmp_pat
         "subquestion 'q1a' rubric item 'Another step' must stay within -10 to +10 points"
     )
     assert result["validation_location"] == {
-        "line": 16,
+        "line": 14,
         "version": "",
         "question_path": [0, 0],
         "rubric_path": [2, 1],
     }
-    assert result["qa_markdown"].splitlines()[15].strip() == "- Another step (-20)"
+    assert result["qa_markdown"].splitlines()[13].strip() == "- Another step (-20)"
 
 
 def test_question_errors_keep_a_navigation_target(tmp_path):

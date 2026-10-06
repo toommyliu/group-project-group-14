@@ -2,6 +2,31 @@ import { LoaderCircle } from 'lucide-react';
 import { PageHeading } from './page-heading';
 import { Skeleton } from './ui/skeleton';
 
+export function CoursesLoading() {
+  return (
+    <div aria-busy="true" aria-label="Loading courses">
+      <PageHeading
+        className="mb-6"
+        title="Courses"
+        description="Open a course to manage its assignments and grading."
+      />
+      <div className="@container" aria-hidden="true">
+        <div className="grid grid-cols-1 gap-4 @xl:grid-cols-2 @5xl:grid-cols-3">
+          {[0, 1, 2].map((item) => (
+            <div key={item} className="flex gap-4 rounded-lg border p-5">
+              <Skeleton className="size-10 shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-6 w-48 max-w-full" />
+                <Skeleton className="h-5 w-32 max-w-full" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AssignmentsLoading() {
   return (
     <div aria-busy="true" aria-label="Loading assignments">
@@ -104,6 +129,20 @@ export function GradeLoading() {
       >
         <Skeleton className="h-11 w-60" />
         <Skeleton className="ms-auto h-11 w-72" />
+      </div>
+    </div>
+  );
+}
+
+export function PeopleLoading() {
+  return (
+    <div aria-busy="true" aria-label="Loading people">
+      <PageHeading title="People" />
+      <div className="space-y-3" aria-hidden="true">
+        <Skeleton className="h-11 w-72 max-w-full" />
+        {[0, 1, 2, 3, 4].map((item) => (
+          <Skeleton key={item} className="h-11 w-full" />
+        ))}
       </div>
     </div>
   );

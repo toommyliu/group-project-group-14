@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from opengrader.core.submissions.scan_plan import ScanPage, validate_scan_plan
 from opengrader.server.scan_jobs import ScanJobs
 from opengrader.server.scan_models import (
-    MAX_SCAN_BYTES, AnalyzeScan, ProcessScan, ReviewScan,
+    MAX_SCAN_BYTES, AnalyzeScan, PageSelection, ProcessScan, ReviewScan,
     ScanBatch, ScanGroup, ScanList, ScanRevision,
 )
 from opengrader.server.scan_store import ScanStore
@@ -24,7 +24,7 @@ from uuid import uuid4
 
 
 def render_scan_page(source: Path, page_number: int, edge: int) -> bytes:
-    """Render in the preview process so OCR cannot block page review."""
+    """Render in the preview process so cropping cannot block page review."""
     with fitz.open(source) as document:
         page = document[page_number - 1]
         scale = edge / max(page.rect.width, page.rect.height)
@@ -57,7 +57,11 @@ def add_scan_routes(
     @api.post("/assignments/{assignment_id}/scans", response_model=ScanBatch, openapi_extra={
         "requestBody": {"required": True, "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}}},
     })
-    async def upload_scan(assignment_id: str, request: Request, filename: str = Query(min_length=1, max_length=255)) -> ScanBatch:
+    async def upload_scan(
+        assignment_id: str, request: Request, filename: str = Query(min_length=1, max_length=255),
+        student_id: str | None = Query(None, min_length=1, max_length=64),
+        assignment_version: str | None = Query(None, max_length=20),
+    ) -> ScanBatch:
         require_assignment(assignment_id)
         filename = filename.replace("\\", "/").rsplit("/", 1)[-1]
         if not filename.lower().endswith(".pdf"):
@@ -77,7 +81,37 @@ def add_scan_routes(
             def accept() -> ScanBatch:
                 with lock:
                     require_assignment(assignment_id)
-                    return store.accept(assignment_id, path, filename, digest.hexdigest())
+                    if student_id is None:
+                        return store.accept(assignment_id, path, filename, digest.hexdigest())
+                    try:
+                        student = jobs.inputs(assignment_id, assignment_version, student_id).student
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
+                    assert student is not None
+                    if any(
+                        batch.status != "removed" and any(
+                            group.student is not None and group.student.student_id == student_id
+                            and group.submission_id is None
+                            for group in batch.groups
+                        )
+                        for batch in store.list(assignment_id)
+                    ):
+                        raise HTTPException(409, f"An upload for {student.name} is already on the Scans page.")
+                    batch = store.accept(assignment_id, path, filename, digest.hexdigest())
+                    if batch.started or batch.status != "uploaded":
+                        raise HTTPException(409, "This PDF was already uploaded. Find it on the Scans page.")
+                    batch.mode = "individual"
+                    batch.groups = [ScanGroup(
+                        key=str(uuid4()), student=student, assignment_version=assignment_version,
+                        pages=[PageSelection(number=page) for page in range(1, batch.page_count + 1)],
+                    )]
+                    batch.started = True
+                    batch.assignment_version = assignment_version
+                    batch.status = "queued"
+                    batch.message = f"Waiting to process the submission for {student.name}."
+                    jobs.save(assignment_id, batch)
+                    jobs.submit(assignment_id, batch.id, analyze=False)
+                    return batch
             return await run_in_threadpool(accept)
         finally:
             path.unlink(missing_ok=True)
@@ -139,8 +173,12 @@ def add_scan_routes(
             for group in batch.groups:
                 if group.key in request.group_versions and group.submission_id is None:
                     group.assignment_version = request.group_versions[group.key]
+                if group.submission_id is None:
+                    try:
+                        jobs.inputs(assignment_id, group.assignment_version or request.assignment_version, None)
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
             batch.started = True
-            batch.auto_grade = request.auto_grade
             batch.assignment_version = request.assignment_version
             batch.status = "queued"
             batch.message = "Waiting to process submissions. You can leave this page."

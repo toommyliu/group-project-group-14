@@ -7,7 +7,7 @@ export default function AssignmentOverviewPage({
 }: {
   data: typeof overviewRoute.types.loaderData;
 }) {
-  const { assignment, qa, scans, submissions, source } = data;
+  const { assignment, qa, scans, submissions, source, outline } = data;
   const folderSession = useFolderSession();
   // TODO: allow with confirmation
   const editUnavailableReason = folderSession
@@ -27,6 +27,7 @@ export default function AssignmentOverviewPage({
         qa,
         editUnavailableReason,
         hideDelete: !!folderSession,
+        structureLocked: outline.versions_with_template.length > 0,
       }}
     />
   );

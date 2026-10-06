@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useRouterState } from '@tanstack/react-router';
-import { ChevronLeft, ChevronRight, CircleCheck } from 'lucide-react';
+import { Link, useRouterState } from '@tanstack/react-router';
+import { ChevronLeft, ChevronRight, CircleCheck, PenLine } from 'lucide-react';
 import {
   useGradingShortcutHints,
   useGradingHotkeys,
@@ -15,6 +15,14 @@ import { GradingShortcuts } from '@/components/grading-shortcuts';
 import { LoadingIndicator } from '@/components/loading';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Label } from '@/components/ui/label';
 import { Kbd } from '@/components/ui/kbd';
 import type { GradingAction } from '@/lib/grading-shortcuts';
@@ -26,8 +34,26 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 
-function submissionLabel({ id, version }: Submission) {
-  return `Submission ${id}${version ? ` · Version ${version}` : ''}`;
+function submissionName({ id, student_name }: Submission) {
+  return student_name.trim() || `Submission ${id}`;
+}
+
+function submissionDetail({ id, student_name, version }: Submission) {
+  return [student_name.trim() && `#${id}`, version && `Version ${version}`]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function SubmissionLabel({ submission }: { submission: Submission }) {
+  const detail = submissionDetail(submission);
+  return (
+    <>
+      <span className="truncate">{submissionName(submission)}</span>
+      {detail && (
+        <span className="shrink-0 text-muted-foreground">{detail}</span>
+      )}
+    </>
+  );
 }
 
 export default function GradePage({
@@ -284,7 +310,7 @@ export default function GradePage({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeading
-        className="mb-4"
+        className={submission && 'mb-4'}
         title="Grade"
         actions={<GradingShortcuts />}
       />
@@ -321,13 +347,16 @@ export default function GradePage({
             >
               <SelectTrigger
                 id="submission"
-                title={submissionLabel(submission)}
-                className="min-h-11 min-w-0 flex-1 text-sm sm:w-60 sm:flex-none"
+                title={[
+                  submissionName(submission),
+                  submissionDetail(submission),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                className="min-h-11 min-w-0 flex-1 text-sm sm:w-72 sm:flex-none"
               >
                 <SelectValue className="min-w-0">
-                  <span className="truncate">
-                    {submissionLabel(submission)}
-                  </span>
+                  <SubmissionLabel submission={submission} />
                 </SelectValue>
                 <LoadingIndicator
                   loading={loadingSubmission}
@@ -345,7 +374,7 @@ export default function GradePage({
                     value={item.id}
                     className="[&>div]:min-w-0 [&>div]:shrink"
                   >
-                    <span className="truncate">{submissionLabel(item)}</span>
+                    <SubmissionLabel submission={item} />
                     {question && (
                       <span className="ms-auto shrink-0 ps-4 text-muted-foreground tabular-nums">
                         {!(question.id in item.question_scores)
@@ -390,9 +419,29 @@ export default function GradePage({
           </div>
         </>
       ) : (
-        <p className="border-t pt-6 text-muted-foreground">
-          No submissions yet.
-        </p>
+        <Empty className="border py-16">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <PenLine />
+            </EmptyMedia>
+            <EmptyTitle>Nothing to grade yet</EmptyTitle>
+            <EmptyDescription>
+              Answers show up here once scans are split into submissions.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button
+              render={
+                <Link
+                  to="/assignments/$assignmentId/submissions"
+                  params={{ assignmentId: assignment.id }}
+                />
+              }
+            >
+              Go to submissions
+            </Button>
+          </EmptyContent>
+        </Empty>
       )}
     </div>
   );

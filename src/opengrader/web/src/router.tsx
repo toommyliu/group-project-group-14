@@ -17,9 +17,11 @@ import {
   submissionsQuery,
 } from './api/queries';
 import { authQuery } from './api/auth';
+import { outlineQuery } from './api/outline';
 import { peopleQuery } from './api/people';
+import { rosterQuery } from './api/roster';
 import { scansQuery } from './api/scans';
-import { workspaceQuery } from './api/workspace';
+import { coursesQuery, workspaceQuery } from './api/workspace';
 import { workspaceBase } from './api/client';
 import {
   loadAssignment,
@@ -29,7 +31,9 @@ import {
 import {
   AssignmentLoading,
   AssignmentsLoading,
+  CoursesLoading,
   GradeLoading,
+  PeopleLoading,
 } from './components/loading';
 import { RouteError, RouteNotFound } from './components/route-error';
 
@@ -57,6 +61,13 @@ const rootRoute = createRootRouteWithContext<{
   notFoundComponent: RouteNotFound,
   component: lazyRouteComponent(() => import('./components/root-layout')),
 });
+
+async function loadRoster(queryClient: QueryClient) {
+  const auth = await queryClient.ensureQueryData(authQuery);
+  return workspaceBase && (!auth.enabled || auth.role === 'instructor')
+    ? queryClient.fetchQuery({ ...rosterQuery, staleTime: 0 })
+    : null;
+}
 
 async function canOpenCourses(queryClient: QueryClient) {
   const auth = await queryClient
@@ -100,6 +111,10 @@ export const coursesRoute = createRoute({
     if (!(await canOpenCourses(context.queryClient)))
       throw redirect({ to: '/' });
   },
+  // The page shows its own error and retry for a failed load.
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(coursesQuery).catch(() => undefined),
+  pendingComponent: CoursesLoading,
   component: lazyRouteComponent(() => import('./routes/workspace-list')),
   errorComponent: RouteError,
 });
@@ -128,6 +143,9 @@ export const assignmentsRoute = createRoute({
 export const newAssignmentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/new',
+  validateSearch: (search: Record<string, unknown>): { write?: true } => ({
+    write: search.write === true || search.write === 'true' ? true : undefined,
+  }),
   beforeLoad: async ({ context }) => {
     // A folder session grades one existing assignment; it cannot create another.
     const assignmentId = await folderSessionAssignmentId(context.queryClient);
@@ -180,15 +198,23 @@ export const scansRoute = createRoute({
       context.queryClient,
       assignmentId
     );
-    const [scans, qa] = await Promise.all([
+    const [scans, qa, outline] = await Promise.all([
       context.queryClient.fetchQuery(scansQuery(assignmentId)),
       context.queryClient.ensureQueryData(assignmentQAQuery(assignmentId)),
+      context.queryClient.fetchQuery({
+        ...outlineQuery(assignmentId),
+        staleTime: 0,
+      }),
       page,
     ]);
     return {
       assignment,
       scans,
       versions: Object.keys(qa.document.version_questions ?? {}),
+      templatePages: outline.template?.page_count ?? null,
+      unoutlined: outline.versions.filter(
+        (version) => !outline.versions_with_regions.includes(version)
+      ),
     };
   },
   pendingComponent: AssignmentLoading,
@@ -206,7 +232,7 @@ export const overviewRoute = createRoute({
       context.queryClient,
       assignmentId
     );
-    const [qa, scans, submissions, source] = await Promise.all([
+    const [qa, scans, submissions, source, outline] = await Promise.all([
       context.queryClient.fetchQuery({
         ...assignmentQAQuery(assignmentId),
         staleTime: 0,
@@ -220,10 +246,102 @@ export const overviewRoute = createRoute({
         ...assignmentSourceQuery(assignmentId),
         staleTime: 0,
       }),
+      context.queryClient.fetchQuery({
+        ...outlineQuery(assignmentId),
+        staleTime: 0,
+      }),
       page,
     ]);
-    return { assignment, qa, scans, submissions, source };
+    return { assignment, qa, scans, submissions, source, outline };
   },
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
+});
+
+export const outlineRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assignments/$assignmentId/outline',
+  validateSearch: (search: Record<string, unknown>): { version?: string } => ({
+    version:
+      typeof search.version === 'string' && search.version
+        ? search.version
+        : undefined,
+  }),
+  loaderDeps: ({ search }) => search,
+  remountDeps: ({ params }) => params.assignmentId,
+  beforeLoad: async ({ context, params: { assignmentId } }) => {
+    const workspace = await context.queryClient.ensureQueryData(workspaceQuery);
+    if (workspace.folder_session)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId },
+      });
+  },
+  loader: async ({ context, params: { assignmentId }, deps }) => {
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const outline = await context.queryClient.fetchQuery({
+      ...outlineQuery(assignmentId, deps.version),
+      staleTime: 0,
+    });
+    return { assignment, outline };
+  },
+  component: lazyRouteComponent(() => import('./routes/outline-page')),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
+});
+
+export const submissionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assignments/$assignmentId/submissions',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId } }) => {
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const [submissions, students] = await Promise.all([
+      context.queryClient.fetchQuery({
+        ...submissionsQuery(assignmentId),
+        staleTime: 0,
+      }),
+      loadRoster(context.queryClient),
+    ]);
+    return { assignment, submissions, students };
+  },
+  component: lazyRouteComponent(() => import('./routes/submissions-page')),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
+});
+
+export const reviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assignments/$assignmentId/review',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId } }) => {
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const [submissions, qa, students] = await Promise.all([
+      context.queryClient.fetchQuery({
+        ...submissionsQuery(assignmentId),
+        staleTime: 0,
+      }),
+      context.queryClient.fetchQuery({
+        ...assignmentQAQuery(assignmentId),
+        staleTime: 0,
+      }),
+      loadRoster(context.queryClient),
+    ]);
+    return { assignment, submissions, qa, students };
+  },
+  component: lazyRouteComponent(() => import('./routes/review-page')),
   pendingComponent: AssignmentLoading,
   errorComponent: RouteError,
   notFoundComponent: RouteNotFound,
@@ -257,10 +375,20 @@ export const peopleRoute = createRoute({
   path: '/people',
   beforeLoad: async ({ context }) => {
     const auth = await context.queryClient.ensureQueryData(authQuery);
-    if (auth.role !== 'instructor') throw notFound();
+    if (!workspaceBase || (auth.enabled && auth.role !== 'instructor'))
+      throw notFound();
+    return { staffAccess: auth.enabled };
   },
-  loader: ({ context }) =>
-    context.queryClient.fetchQuery({ ...peopleQuery, staleTime: 0 }),
+  loader: async ({ context }) => {
+    const [students, staff] = await Promise.all([
+      context.queryClient.fetchQuery({ ...rosterQuery, staleTime: 0 }),
+      context.staffAccess
+        ? context.queryClient.fetchQuery({ ...peopleQuery, staleTime: 0 })
+        : null,
+    ]);
+    return { students, staff };
+  },
+  pendingComponent: PeopleLoading,
   component: lazyRouteComponent(() => import('./routes/people-page')),
   errorComponent: RouteError,
 });
@@ -289,6 +417,9 @@ export function createAppRouter(queryClient: QueryClient) {
       gradeRoute,
       scansRoute,
       overviewRoute,
+      outlineRoute,
+      submissionsRoute,
+      reviewRoute,
       statisticsRoute,
       peopleRoute,
       courseSettingsRoute,

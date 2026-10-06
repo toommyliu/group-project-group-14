@@ -4,10 +4,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from opengrader.core.submissions.region_crop import RosterStudent
 
 MAX_SCAN_BYTES = 250 * 1024 * 1024
 MAX_SCAN_PAGES = 3000
 ScanMode = Literal["automatic", "fixed", "individual"]
+SplitMode = Literal["fixed", "individual"]
 ScanStatus = Literal["uploaded", "checking", "review", "queued", "processing", "ready", "failed", "removed"]
 
 
@@ -27,6 +29,7 @@ class ScanGroup(ScanModel):
     scan_warnings: list[str] = Field(default_factory=list)
     error: str = ""
     assignment_version: str | None = None
+    student: RosterStudent | None = None
 
 
 class ScanFinding(ScanModel):
@@ -43,14 +46,13 @@ class ScanBatch(ScanModel):
     created_at: str
     status: ScanStatus = "uploaded"
     revision: int = 1
-    mode: ScanMode = "automatic"
+    mode: ScanMode = "fixed"
     pages_per_submission: int | None = None
     groups: list[ScanGroup] = Field(default_factory=list)
     excluded_pages: list[int] = Field(default_factory=list)
     findings: list[ScanFinding] = Field(default_factory=list)
     message: str = "Choose how to separate this scan."
     started: bool = False
-    auto_grade: bool = False
     assignment_version: str | None = None
 
 
@@ -62,7 +64,7 @@ class ScanList(ScanModel):
 
 class AnalyzeScan(BaseModel):
     expected_revision: int
-    mode: ScanMode = "automatic"
+    mode: SplitMode = "fixed"
     pages_per_submission: int | None = Field(default=None, ge=1, le=MAX_SCAN_PAGES)
 
 
@@ -75,7 +77,6 @@ class ReviewScan(BaseModel):
 class ProcessScan(BaseModel):
     expected_revision: int
     acknowledge_findings: bool = False
-    auto_grade: bool = False
     assignment_version: str | None = None
     group_versions: dict[str, str | None] = Field(default_factory=dict)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -211,7 +212,7 @@ def _build_template_doc(
     doc = fitz.Document()
     page = create_page(doc, page_w, page_h)
     register_page_fonts(page, fonts)
-    start_y, _ = build_info_section(
+    start_y, fields = build_info_section(
         page,
         name,
         student_id,
@@ -225,6 +226,7 @@ def _build_template_doc(
     page_number = 1
     current_page = page
     current_start_y = start_y
+    drawn: list[dict] = []
 
     if not start_questions_on_first_page and remaining:
         page_number = 2
@@ -238,7 +240,7 @@ def _build_template_doc(
         )
 
     while remaining:
-        drawn_count, _ = draw_questions_on_page(
+        drawn_count, page_meta = draw_questions_on_page(
             current_page,
             page_number,
             remaining,
@@ -249,6 +251,7 @@ def _build_template_doc(
         )
         if drawn_count <= 0:
             raise ValueError("No questions could be drawn on the current page")
+        drawn.extend(page_meta)
         remaining = remaining[drawn_count:]
         if not remaining:
             break
@@ -263,7 +266,60 @@ def _build_template_doc(
             fonts=fonts,
         )
 
-    return doc
+    return doc, TemplateLayout(page_w, page_h, fields, drawn)
+
+
+@dataclass(frozen=True)
+class TemplateLayout:
+    """Where the generator drew each field and question, in PDF points."""
+
+    page_w: float
+    page_h: float
+    fields: dict[str, tuple[float, float, float, float]]
+    drawn: list[dict]
+
+    def _box(self, page: int, rect: tuple[float, float, float, float]):
+        from opengrader.core.region_map import RegionBox
+
+        x0, y0, x1, y1 = rect
+        return RegionBox(
+            page,
+            (
+                round(x0 / self.page_w, 4),
+                round(y0 / self.page_h, 4),
+                round((x1 - x0) / self.page_w, 4),
+                round((y1 - y0) / self.page_h, 4),
+            ),
+        )
+
+    @property
+    def name_field(self):
+        rect = self.fields.get("student_name")
+        return self._box(1, rect) if rect else None
+
+    @property
+    def student_id_field(self):
+        rect = self.fields.get("student_id")
+        return self._box(1, rect) if rect else None
+
+    @property
+    def questions(self):
+        from opengrader.core.region_map import MappedQuestion
+
+        graded = [
+            (part["id"], question["page_number"], part["rect"])
+            for question in self.drawn
+            for part in question["subquestions"] or [question]
+        ]
+        return tuple(
+            MappedQuestion(
+                question_id=question_id,
+                number=number,
+                page=page,
+                bbox=self._box(page, rect).bbox,
+            )
+            for number, (question_id, page, rect) in enumerate(graded, start=1)
+        )
 
 
 def _stamp_qr_codes(
@@ -297,14 +353,14 @@ def generate_template_pdf(
     font_bold_file: str | Path | None = None,
     start_questions_on_first_page: bool = True,
     qr: bool = False,
-) -> None:
+) -> TemplateLayout:
     fonts = resolve_template_fonts(
         regular_file=font_regular_file, bold_file=font_bold_file
     )
     if fonts.warning:
         print(fonts.warning, file=sys.stderr)
 
-    doc = _build_template_doc(
+    doc, layout = _build_template_doc(
         "",
         "",
         questions,
@@ -321,6 +377,7 @@ def generate_template_pdf(
 
     doc.save(str(output_path), garbage=4, deflate=True)
     doc.close()
+    return layout
 
 
 def generate_submission_pdf(
@@ -344,7 +401,7 @@ def generate_submission_pdf(
     if fonts.warning:
         print(fonts.warning, file=sys.stderr)
 
-    doc = _build_template_doc(
+    doc, _ = _build_template_doc(
         name,
         student_id,
         questions,
@@ -405,7 +462,7 @@ def generate_personalized_batch(
 
     composed_title = f"{title} ({version})"
     for student in assigned:
-        student_doc = _build_template_doc(
+        student_doc, _ = _build_template_doc(
             "",
             student.student_id,
             questions,

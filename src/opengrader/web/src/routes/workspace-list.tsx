@@ -49,7 +49,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
 import { coursesRoute } from '@/router';
 
 const allTerms = 'all';
@@ -163,7 +162,6 @@ export default function WorkspaceList() {
           )}
         </div>
       </div>
-      {workspaces.isPending && <CoursesLoading />}
       {workspaces.isError && (
         <ErrorAlert
           className="mb-6"
@@ -332,26 +330,5 @@ function CourseCard({
         />
       )}
     </article>
-  );
-}
-
-function CoursesLoading() {
-  return (
-    <div className="@container" aria-busy="true" aria-label="Loading courses">
-      <div
-        className="grid grid-cols-1 gap-4 @xl:grid-cols-2 @5xl:grid-cols-3"
-        aria-hidden="true"
-      >
-        {[0, 1, 2].map((item) => (
-          <div key={item} className="flex gap-4 rounded-lg border p-5">
-            <Skeleton className="size-10 shrink-0" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-6 w-48 max-w-full" />
-              <Skeleton className="h-5 w-32 max-w-full" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }

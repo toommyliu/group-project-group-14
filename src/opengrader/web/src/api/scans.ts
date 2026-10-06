@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { components } from './schema';
-import { ApiError, client, readData, workspaceUrl } from './client';
+import { client, readData, uploadPdf, workspaceUrl } from './client';
 
 export type ScanBatch = components['schemas']['ScanBatch'];
 export type ScanPage = ScanBatch['groups'][number]['pages'][number];
@@ -50,35 +50,33 @@ export function scanPageUrl(
 export function uploadScan(
   assignmentId: string,
   file: File,
-  progress: (percent: number) => void
+  progress?: (percent: number) => void,
+  student?: { sid: string; version: string }
 ): Promise<ScanBatch> {
-  return new Promise((resolve, reject) => {
-    const request = new XMLHttpRequest();
-    request.open(
-      'POST',
-      workspaceUrl(
-        `/api/assignments/${encodeURIComponent(assignmentId)}/scans?filename=${encodeURIComponent(file.name)}`
-      )
-    );
-    request.setRequestHeader('Content-Type', 'application/pdf');
-    request.responseType = 'json';
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable)
-        progress(Math.round((event.loaded / event.total) * 100));
-    };
-    request.onerror = () =>
-      reject(
-        new Error(
-          'Upload interrupted. Retry this file; completed uploads are preserved.'
-        )
-      );
-    request.onload = () => {
-      if (request.status >= 200 && request.status < 300)
-        return resolve(request.response as ScanBatch);
-      reject(new ApiError(request.status, request.response));
-    };
-    request.send(file);
-  });
+  const query = new URLSearchParams({ filename: file.name });
+  if (student) query.set('student_id', student.sid);
+  if (student?.version) query.set('assignment_version', student.version);
+  return uploadPdf(
+    'POST',
+    `/api/assignments/${encodeURIComponent(assignmentId)}/scans?${query}`,
+    file,
+    progress
+  );
+}
+
+export type StudentUpload = {
+  batch: ScanBatch;
+  group: ScanBatch['groups'][number];
+};
+
+export function studentUploads(batches: ScanBatch[]) {
+  const latest = new Map<string, StudentUpload>();
+  for (const batch of batches)
+    if (batch.status !== 'removed')
+      for (const group of batch.groups)
+        if (group.student)
+          latest.set(group.student.student_id, { batch, group });
+  return latest;
 }
 
 export async function analyzeScan(
@@ -127,7 +125,6 @@ export async function processScan(
   assignmentId: string,
   batch: ScanBatch,
   acknowledge: boolean,
-  autoGrade: boolean,
   version: string,
   groupVersions: Record<string, string | null> = {}
 ) {
@@ -139,7 +136,6 @@ export async function processScan(
         body: {
           expected_revision: batch.revision,
           acknowledge_findings: acknowledge,
-          auto_grade: autoGrade,
           assignment_version: version || null,
           group_versions: groupVersions,
         },

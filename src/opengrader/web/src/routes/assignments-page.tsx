@@ -99,7 +99,9 @@ export function AssignmentsList({ loaded }: { loaded: AssignmentSummary[] }) {
       ) : (
         <div className="min-h-80 space-y-4 border-t py-8">
           <h2 className="text-base font-semibold">No assignments yet</h2>
-          <p>Create an assignment from your answer key to get started.</p>
+          <p>
+            Create an assignment from the PDF students write on to get started.
+          </p>
           <Button
             variant="outline"
             onClick={() => {

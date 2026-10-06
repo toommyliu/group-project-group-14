@@ -1,10 +1,20 @@
 """Typed grading records shared by workspace operations and their clients."""
 
+import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    StringConstraints,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from opengrader.core.qa_file.scoring import RubricOptionKind, RubricSelectionMode
+from opengrader.core.submissions.student_file import IdentityCandidate
 from opengrader.core.question_types import QuestionType
 
 
@@ -69,6 +79,11 @@ class Submission(BaseModel):
     student_id: str = ""
     id: int
     version: str | None
+    name_image_url: str | None
+    id_image_url: str | None
+    # Set when the name was filled in from the roster and no grader has confirmed it.
+    match_percent: float | None
+    candidates: list[IdentityCandidate]
     question_scores: dict[str, float | None]
 
 
@@ -141,6 +156,94 @@ class CourseDetails(BaseModel):
         )
 
 
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def _roster_text(label: str, limit: int) -> AfterValidator:
+    def check(value: str) -> str:
+        value = value.strip()
+        if len(value) > limit:
+            raise PydanticCustomError(
+                "too_long", f"{label} can be at most {limit} characters."
+            )
+        if _CONTROL_CHARACTERS.search(value):
+            raise PydanticCustomError(
+                "control_character", f"{label} can't contain line breaks or tabs."
+            )
+        return value
+
+    return AfterValidator(check)
+
+
+def _required_sid(value: str) -> str:
+    if not value:
+        raise PydanticCustomError("missing_sid", "Enter an SID.")
+    return value
+
+
+def _email(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    value = value.strip().lower()
+    if not value:
+        return None
+    if len(value) > 254:
+        raise PydanticCustomError("too_long", "Email can be at most 254 characters.")
+    if not _EMAIL.fullmatch(value):
+        raise PydanticCustomError(
+            "email", "{email} isn't a valid email address.", {"email": value}
+        )
+    return value
+
+
+class StudentDetails(BaseModel):
+    sid: Annotated[str, _roster_text("SID", 64), AfterValidator(_required_sid)]
+    first_name: Annotated[str, _roster_text("First name", 200)] = ""
+    last_name: Annotated[str, _roster_text("Last name", 200)] = ""
+    email: Annotated[str | None, BeforeValidator(_email)] = None
+
+    @model_validator(mode="after")
+    def _named(self) -> "StudentDetails":
+        if not (self.first_name or self.last_name):
+            raise PydanticCustomError("missing_name", "Enter a first or last name.")
+        return self
+
+    @property
+    def name(self) -> str:
+        return " ".join(part for part in (self.first_name, self.last_name) if part)
+
+    def __str__(self) -> str:
+        return f"{self.name} (SID {self.sid})"
+
+
+class Student(StudentDetails):
+    id: str
+    revision: int
+
+
+class StudentEdit(StudentDetails):
+    expected_revision: int
+
+
+class RosterProblem(BaseModel):
+    row: int | None = None
+    message: str
+
+
+class RosterUpdate(BaseModel):
+    before: StudentDetails
+    after: StudentDetails
+
+
+class RosterImport(BaseModel):
+    added: list[StudentDetails]
+    updated: list[RosterUpdate]
+    unchanged: int
+    problems: list[RosterProblem]
+    fingerprint: str
+
+
 class WorkspaceInfo(BaseModel):
     id: str
     course: CourseDetails | None = None
@@ -150,7 +253,7 @@ class WorkspaceInfo(BaseModel):
 
 
 class WorkspaceEvent(BaseModel):
-    kind: Literal["grade", "assignment", "submission", "feedback"] = "grade"
+    kind: Literal["grade", "assignment", "submission", "feedback", "roster"] = "grade"
     cursor: int
     assignment_id: str
     submission_id: int

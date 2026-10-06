@@ -10,19 +10,8 @@ from fastapi.testclient import TestClient
 from pypdf import PdfReader
 
 from opengrader.core.submissions.scan_plan import ScanPage, validate_scan_plan, write_scan_submission
-from opengrader.core.submissions.scan_check import build_scan_report, PageScanFeatures
 from opengrader.server.workspace.app import create_app
 from opengrader.server.scan_store import ScanStore
-
-
-QA = """---
-title: Scan test
----
-
-- (2 points) What is two plus two?
-  - **Answer**
-    - 4
-"""
 
 
 def pdf_bytes(pages: int = 4) -> bytes:
@@ -33,20 +22,46 @@ def pdf_bytes(pages: int = 4) -> bytes:
         return document.tobytes()
 
 
+OUTLINE = {
+    "name_box": {"page": 1, "bbox": [0.1, 0.05, 0.5, 0.05]},
+    "id_box": None,
+    "questions": [
+        {"title": "What is two plus two?", "points": 2, "boxes": [{"page": 1, "bbox": [0.1, 0.2, 0.8, 0.3]}]},
+        {"title": "Show your work", "points": 3, "boxes": [{"page": 2, "bbox": [0.1, 0.1, 0.8, 0.3]}]},
+    ],
+}
+
+
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     from opengrader.server import scan_jobs
 
     monkeypatch.setattr(scan_jobs, "ProcessPoolExecutor", lambda **_: ThreadPoolExecutor(max_workers=1))
-    monkeypatch.setattr(scan_jobs, "analyze_scan_pdf", lambda path, **_: build_scan_report([
-        PageScanFeatures(page=index + 1) for index in range(len(PdfReader(path).pages))
-    ], source=str(path)))
     app = create_app(tmp_path)
     with TestClient(app) as client:
-        result = client.post("/api/assignments", json={"qa_markdown": QA})
+        result = client.post(
+            "/api/assignments/from-template",
+            params={"title": "Scan test", "filename": "template.pdf"},
+            content=pdf_bytes(2),
+        )
         assert result.status_code == 201, result.text
         assignment_id = result.json()["id"]
+        outline = client.get(f"/api/assignments/{assignment_id}/outline").json()
+        saved = client.put(
+            f"/api/assignments/{assignment_id}/outline",
+            json={"version": outline["version"], "revision": outline["revision"], "outline": OUTLINE},
+        )
+        assert saved.status_code == 200, saved.text
         yield client, app, assignment_id, tmp_path
+
+
+def source(client, assignment_id):
+    return client.get(f"/api/assignments/{assignment_id}/source").json()["qa_markdown"]
+
+
+def edit(client, assignment_id):
+    qa = source(client, assignment_id)
+    return client.put(f"/api/assignments/{assignment_id}", json={"qa_markdown": qa, "expected_qa_markdown": qa})
 
 
 def upload(client, assignment_id, content=None, name="scans.pdf"):
@@ -68,8 +83,8 @@ def drain(app):
     app.state.scan_jobs.executor.submit(lambda: None).result(timeout=10)
 
 
-def analyze(client, app, assignment_id, batch):
-    result = client.post(batch_url(assignment_id, batch) + "/analyze", json={"expected_revision": batch["revision"], "mode": "fixed", "pages_per_submission": 2})
+def analyze(client, app, assignment_id, batch, pages=2):
+    result = client.post(batch_url(assignment_id, batch) + "/analyze", json={"expected_revision": batch["revision"], "mode": "fixed", "pages_per_submission": pages})
     assert result.status_code == 202, result.text
     drain(app)
     result = current(client, assignment_id, batch)
@@ -77,20 +92,11 @@ def analyze(client, app, assignment_id, batch):
     return result
 
 
-def fake_extract(pdf, output, **_):
-    directory = output / pdf.stem
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{pdf.stem}.submission.md").write_text("""---
-student_name: Test student
-student_id: '123'
-assignment_title: Scan test
----
-- q1:
-  - Prompt: What is two plus two?
-  - Possible points: 2
-  - Response text: 4
-""")
-    return directory
+def process(client, app, assignment_id, batch):
+    response = client.post(batch_url(assignment_id, batch) + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True})
+    assert response.status_code == 202, response.text
+    drain(app)
+    return current(client, assignment_id, batch)
 
 
 def test_upload_is_deduplicated_and_retains_original(workspace):
@@ -102,11 +108,50 @@ def test_upload_is_deduplicated_and_retains_original(workspace):
     assert client.get(batch_url(assignment_id, first) + "/pdf").content == content
     assert client.get(batch_url(assignment_id, first) + "/pages/1").headers["content-type"] == "image/png"
     assert client.get(batch_url(assignment_id, first) + "/pages/5").status_code == 404
-    assert client.put(f"/api/assignments/{assignment_id}", json={"qa_markdown": QA, "expected_qa_markdown": QA}).status_code == 409
-    other = client.post("/api/assignments", json={"qa_markdown": QA}).json()["id"]
+    assert edit(client, assignment_id).status_code == 409
+    other = client.post("/api/assignments/from-template", params={"title": "Other", "filename": "t.pdf"}, content=pdf_bytes(1)).json()["id"]
     assert client.get(batch_url(other, first) + "/pdf").status_code == 404
     with TestClient(create_app(root)) as restarted:
         assert current(restarted, assignment_id, first)["sha256"] == first["sha256"]
+
+
+def test_split_uses_page_counts_and_flags_short_submissions(workspace):
+    client, app, assignment_id, _ = workspace
+    batch = analyze(client, app, assignment_id, upload(client, assignment_id, pdf_bytes(5)))
+    assert [[page["number"] for page in group["pages"]] for group in batch["groups"]] == [[1, 2], [3, 4], [5]]
+    assert [bool(group["scan_warnings"]) for group in batch["groups"]] == [False, False, True]
+    assert "1 of 2 expected pages" in batch["groups"][2]["scan_warnings"][0]
+    whole = upload(client, assignment_id, pdf_bytes(3), "whole.pdf")
+    response = client.post(batch_url(assignment_id, whole) + "/analyze", json={"expected_revision": whole["revision"], "mode": "individual"})
+    assert response.status_code == 202
+    drain(app)
+    assert [[page["number"] for page in group["pages"]] for group in current(client, assignment_id, whole)["groups"]] == [[1, 2, 3]]
+    stale = client.post(batch_url(assignment_id, whole) + "/analyze", json={"expected_revision": whole["revision"], "mode": "automatic"})
+    assert stale.status_code == 422
+
+
+def test_processing_crops_each_region_without_reading_text(workspace):
+    client, app, assignment_id, root = workspace
+    batch = process(client, app, assignment_id, analyze(client, app, assignment_id, upload(client, assignment_id)))
+    assert batch["status"] == "ready", batch
+    submissions = client.get(f"/api/assignments/{assignment_id}/submissions").json()
+    assert [item["id"] for item in submissions] == [1, 2]
+    assert submissions[0]["name_image_url"].startswith("/api/assets/")
+    assert submissions[0]["id_image_url"] is None
+    for question in ("q1", "q2"):
+        answer = client.get(f"/api/assignments/{assignment_id}/submissions/1/answers/{question}").json()
+        assert answer["response_text"] == ""
+        assert answer["response_image_width"] > answer["response_image_height"] > 0
+        assert client.get(answer["response_image_url"]).headers["content-type"] == "image/png"
+    named = client.put(
+        f"/api/assignments/{assignment_id}/submissions/2/student",
+        json={"student_name": "  Ada   Lovelace ", "student_id": " 0042 "},
+    )
+    assert named.status_code == 200
+    assert (named.json()["student_name"], named.json()["student_id"]) == ("Ada Lovelace", "0042")
+    with TestClient(create_app(root)) as restarted:
+        listed = restarted.get(f"/api/assignments/{assignment_id}/submissions").json()
+        assert listed[1]["student_name"] == "Ada Lovelace"
 
 
 def test_review_rejects_lost_pages_duplicates_and_stale_writes(workspace):
@@ -154,7 +199,7 @@ def test_delete_scan_erases_files_and_unlocks_empty_assignment(workspace, remove
     assert not ScanStore(root / ".opengrader" / "assignments").directory(assignment_id, batch["id"]).exists()
     assert client.get(url + "/pdf").status_code == 404
     assert client.get(f"/api/assignments/{assignment_id}/scans").json()["batches"] == []
-    assert client.put(f"/api/assignments/{assignment_id}", json={"qa_markdown": QA, "expected_qa_markdown": QA}).status_code == 200
+    assert edit(client, assignment_id).status_code == 200
     replacement = upload(client, assignment_id, content)
     assert replacement["id"] != batch["id"]
     assert client.delete(batch_url(assignment_id, replacement), params={"expected_revision": replacement["revision"]}).status_code == 204
@@ -166,18 +211,15 @@ def test_failed_scan_deletion_includes_published_files_even_without_recorded_ids
     client, app, assignment_id, root = workspace
     from opengrader.server import scan_jobs
 
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda *args, **kwargs: None)
-    def fail(self, *args, **kwargs):
-        raise ValueError("Assignment version could not be matched.")
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", fail)
-    batch = analyze(client, app, assignment_id, upload(client, assignment_id))
+    def fail(*args, **kwargs):
+        raise ValueError("Unreadable scan.")
+    monkeypatch.setattr(scan_jobs, "crop_submission", fail)
+    batch = process(client, app, assignment_id, analyze(client, app, assignment_id, upload(client, assignment_id)))
     url = batch_url(assignment_id, batch)
-    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
-    drain(app)
-    batch = current(client, assignment_id, batch)
     assert batch["status"] == "failed"
     assert batch["started"]
     assert all(group["submission_id"] is None for group in batch["groups"])
+    assert batch["groups"][0]["error"] == "Unreadable scan."
     if published:
         destination = root / ".opengrader" / "assignments" / assignment_id / "submissions" / f"scan-{batch['id']}-{batch['groups'][0]['key']}"
         destination.mkdir()
@@ -194,18 +236,16 @@ def test_partial_failure_retry_preserves_published_work_and_ids(workspace, monke
     from opengrader.server import scan_jobs
 
     calls = []
-    def extract(intake, pdf, *args, **kwargs):
-        calls.append((pdf.name, intake.assignment_version))
+    crop = scan_jobs.crop_submission
+    def flaky(pdf, *args, **kwargs):
+        calls.append(pdf.name)
         if len(calls) == 2:
             raise ValueError("Unreadable page")
-        return fake_extract(pdf, *args, **kwargs)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda self, *args, assignment_version, **kwargs: setattr(self, "assignment_version", assignment_version))
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", lambda self, *args, **kwargs: extract(self, *args, **kwargs))
+        return crop(pdf, *args, **kwargs)
+    monkeypatch.setattr(scan_jobs, "crop_submission", flaky)
     batch = analyze(client, app, assignment_id, upload(client, assignment_id))
     url = batch_url(assignment_id, batch)
-    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True, "assignment_version": "A", "group_versions": {batch["groups"][1]["key"]: "B"}}).status_code == 202
-    drain(app)
-    failed = current(client, assignment_id, batch)
+    failed = process(client, app, assignment_id, batch)
     assert failed["status"] == "failed"
     assert failed["groups"][0]["submission_id"] == 1
     first = next((root / ".opengrader" / "assignments" / assignment_id / "submissions").glob("*/*.submission.md"))
@@ -219,11 +259,9 @@ def test_partial_failure_retry_preserves_published_work_and_ids(workspace, monke
     })
     assert saved.status_code == 200
     before = first.read_bytes()
-    assert client.post(url + "/process", json={"expected_revision": failed["revision"], "acknowledge_findings": True}).status_code == 202
-    drain(app)
-    ready = current(client, assignment_id, batch)
+    ready = process(client, app, assignment_id, failed)
     assert ready["status"] == "ready"
-    assert [version for _, version in calls] == ["A", "B", "B"]
+    assert len(calls) == 3 and calls[1] == calls[2]
     assert first.read_bytes() == before
     assert [group["submission_id"] for group in ready["groups"]] == [1, 2]
     assert client.post(url + "/analyze", json={"expected_revision": ready["revision"]}).status_code == 409
@@ -232,9 +270,7 @@ def test_partial_failure_retry_preserves_published_work_and_ids(workspace, monke
     assert first.read_bytes() == before
     ready = client.post(url + "/restore", json={"expected_revision": removed["revision"]}).json()
     assert ready["status"] == "ready"
-    later = analyze(client, app, assignment_id, upload(client, assignment_id, pdf_bytes(2), "late.pdf"))
-    client.post(batch_url(assignment_id, later) + "/process", json={"expected_revision": later["revision"], "acknowledge_findings": True})
-    drain(app)
+    process(client, app, assignment_id, analyze(client, app, assignment_id, upload(client, assignment_id, pdf_bytes(2), "late.pdf")))
     with TestClient(create_app(root)) as restarted:
         ids = restarted.get(f"/api/assignments/{assignment_id}/submissions").json()
         assert [item["id"] for item in ids] == [1, 2, 3]
@@ -248,17 +284,113 @@ def test_partial_failure_retry_preserves_published_work_and_ids(workspace, monke
         assert [item["id"] for item in restarted.get(f"/api/assignments/{assignment_id}/submissions").json()] == [3]
 
 
+def test_scans_uploaded_before_the_outline_wait_for_its_regions(workspace):
+    client, app, _, _ = workspace
+    bare = client.post("/api/assignments/from-template", params={"title": "Bare", "filename": "t.pdf"}, content=pdf_bytes(2)).json()["id"]
+    batch = analyze(client, app, bare, upload(client, bare))
+    response = client.post(batch_url(bare, batch) + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Draw the outline before creating submissions."
+    assert current(client, bare, batch)["status"] == "review"
+    outline = client.get(f"/api/assignments/{bare}/outline").json()
+    assert outline["lock"] is None
+    assert outline["versions_with_regions"] == []
+    nan = client.put(
+        f"/api/assignments/{bare}/outline",
+        content='{"version": "", "revision": "%s", "outline": {"questions": [{"title": "", "points": 1, "boxes": [{"page": 1, "bbox": [NaN, 0.1, 0.2, 0.2]}]}]}}' % outline["revision"],
+        headers={"content-type": "application/json"},
+    )
+    assert nan.status_code == 422
+    assert nan.json()["detail"] == "Question 1 has a box with an invalid position."
+    saved = client.put(f"/api/assignments/{bare}/outline", json={"version": "", "revision": outline["revision"], "outline": OUTLINE})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["versions_with_regions"] == [""]
+    assert process(client, app, bare, current(client, bare, batch))["status"] == "ready"
+    assert client.get(f"/api/assignments/{bare}/outline").json()["lock"]["scope"] == "questions"
+
+
+def test_moved_boxes_crop_again_after_a_restart_a_failure_and_a_deleted_scan(workspace, monkeypatch):
+    client, app, assignment_id, root = workspace
+    from opengrader.server import scan_jobs
+
+    batch = process(client, app, assignment_id, analyze(client, app, assignment_id, upload(client, assignment_id)))
+    url = f"/api/assignments/{assignment_id}/outline"
+
+    def move(height):
+        current = client.get(url).json()
+        outline = current["outline"]
+        outline["questions"][1]["boxes"][0]["bbox"][3] = height
+        return client.put(url, json={"version": "", "revision": current["revision"], "outline": outline})
+
+    def heights(api=client):
+        return [
+            api.get(f"/api/assignments/{assignment_id}/submissions/{number}/answers/q2").json()["response_image_height"]
+            for number in (1, 2)
+        ]
+
+    original = heights()
+    paused = Event()
+    app.state.scan_jobs.executor.submit(paused.wait, 30)
+    try:
+        saved = move(0.6)
+        assert saved.status_code == 200, saved.text
+        assert (saved.json()["lock"]["scope"], saved.json()["recut"]) == ("outline", {"done": 0, "remaining": 2, "failures": []})
+        with TestClient(create_app(root)) as restarted:
+            drain(restarted.app)
+            assert restarted.get(url).json()["recut"] is None
+            assert [round(new / old, 2) for new, old in zip(heights(restarted), original)] == [2.0, 2.0]
+    finally:
+        paused.set()
+    drain(app)
+
+    calls = []
+    crop = scan_jobs.crop_submission
+
+    def unreadable_once(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise ValueError("Could not read this scan.")
+        return crop(*args)
+
+    monkeypatch.setattr(scan_jobs, "crop_submission", unreadable_once)
+    assert move(0.45).status_code == 200
+    drain(app)
+    failed = client.get(url).json()
+    assert (failed["lock"]["scope"], failed["recut"]) == (
+        "questions",
+        {"done": 1, "remaining": 0, "failures": [{"submission_id": 1, "student_name": "", "error": "Could not read this scan."}]},
+    )
+    assert sorted(round(new / old, 2) for new, old in zip(heights(), original)) == [1.5, 2.0]
+    retried = client.post(url + "/recut")
+    assert retried.status_code == 200, retried.text
+    drain(app)
+    assert client.get(url).json()["recut"] is None
+    assert [round(new / old, 2) for new, old in zip(heights(), original)] == [1.5, 1.5]
+
+    paused = Event()
+    app.state.scan_jobs.executor.submit(paused.wait, 30)
+    try:
+        assert move(0.3).status_code == 200
+        batch = current(client, assignment_id, batch)
+        assert client.delete(batch_url(assignment_id, batch), params={"expected_revision": batch["revision"]}).status_code == 204
+        assert client.get(url).json()["lock"] is None
+    finally:
+        paused.set()
+    drain(app)
+    assert client.get(f"/api/assignments/{assignment_id}/submissions").json() == []
+
+
 def test_accepted_job_does_not_block_requests_or_allow_duplicate_start(workspace, monkeypatch):
     client, app, assignment_id, _ = workspace
     from opengrader.server import scan_jobs
 
     entered, release = Event(), Event()
+    crop = scan_jobs.crop_submission
     def held(*args, **kwargs):
         entered.set()
         assert release.wait(5)
-        return fake_extract(*args, **kwargs)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda *args, **kwargs: None)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", lambda self, *args, **kwargs: held(*args, **kwargs))
+        return crop(*args, **kwargs)
+    monkeypatch.setattr(scan_jobs, "crop_submission", held)
     batch = analyze(client, app, assignment_id, upload(client, assignment_id))
     request = {"expected_revision": batch["revision"], "acknowledge_findings": True}
     try:
@@ -269,7 +401,7 @@ def test_accepted_job_does_not_block_requests_or_allow_duplicate_start(workspace
         active = current(client, assignment_id, batch)
         assert active["status"] == "processing"
         assert client.delete(batch_url(assignment_id, active), params={"expected_revision": active["revision"]}).status_code == 409
-        assert client.put(f"/api/assignments/{assignment_id}", json={"qa_markdown": QA, "expected_qa_markdown": QA}).status_code == 409
+        assert edit(client, assignment_id).status_code == 409
     finally:
         release.set()
     drain(app)
@@ -281,15 +413,8 @@ def test_accepted_job_does_not_block_requests_or_allow_duplicate_start(workspace
 
 def test_delete_rolls_back_submissions_if_scan_cannot_be_unpublished(workspace, monkeypatch):
     client, app, assignment_id, root = workspace
-    from opengrader.server import scan_jobs
-
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda *args, **kwargs: None)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", lambda self, *args, **kwargs: fake_extract(*args, **kwargs))
-    batch = analyze(client, app, assignment_id, upload(client, assignment_id))
+    batch = process(client, app, assignment_id, analyze(client, app, assignment_id, upload(client, assignment_id)))
     url = batch_url(assignment_id, batch)
-    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
-    drain(app)
-    batch = current(client, assignment_id, batch)
     directory = ScanStore(root / ".opengrader" / "assignments").directory(assignment_id, batch["id"])
     rename = Path.rename
     def fail_scan_rename(path, target):
@@ -314,18 +439,11 @@ def test_restart_marks_interrupted_work_retryable(workspace):
         assert current(restarted, assignment_id, batch)["status"] == "failed"
 
 
-def test_delete_assignment_removes_scans_submissions_and_grades_only_for_that_assignment(workspace, monkeypatch):
+def test_delete_assignment_removes_scans_submissions_and_grades_only_for_that_assignment(workspace):
     client, app, assignment_id, root = workspace
-    from opengrader.server import scan_jobs
-
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda *args, **kwargs: None)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", lambda self, *args, **kwargs: fake_extract(*args, **kwargs))
     content = pdf_bytes()
-    batch = analyze(client, app, assignment_id, upload(client, assignment_id, content))
-    assert client.post(batch_url(assignment_id, batch) + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
-    drain(app)
+    batch = process(client, app, assignment_id, analyze(client, app, assignment_id, upload(client, assignment_id, content)))
     directory = root / ".opengrader" / "assignments" / assignment_id
-    first = next((directory / "submissions").glob("*/*.submission.md"))
     answer_url = f"/api/assignments/{assignment_id}/submissions/1/answers/q1"
     answer = client.get(answer_url).json()
     from uuid import uuid4
@@ -335,15 +453,16 @@ def test_delete_assignment_removes_scans_submissions_and_grades_only_for_that_as
         "score_mode": "manual", "points_awarded": 1, "analysis": "Reviewed",
     })
     assert saved.status_code == 200
-    other = client.post("/api/assignments", json={"qa_markdown": QA}).json()["id"]
+    other = client.post("/api/assignments/from-template", params={"title": "Other", "filename": "t.pdf"}, content=pdf_bytes(2)).json()["id"]
     other_batch = upload(client, other, content)
-    assert client.put(f"/api/assignments/{assignment_id}", json={"qa_markdown": QA, "expected_qa_markdown": QA}).status_code == 409
+    assert edit(client, assignment_id).status_code == 409
     assert client.delete(f"/api/assignments/{assignment_id}").status_code == 204
     assert not directory.exists()
     assert client.get(f"/api/assignments/{assignment_id}/submissions").status_code == 404
+    assert client.get(f"/api/assignments/{assignment_id}/outline").status_code == 404
     assert client.get(batch_url(assignment_id, batch) + "/pdf").status_code == 404
     assert client.get(batch_url(other, other_batch) + "/pdf").content == content
-    replacement = client.post("/api/assignments", json={"qa_markdown": QA}).json()["id"]
+    replacement = client.post("/api/assignments/from-template", params={"title": "Again", "filename": "t.pdf"}, content=pdf_bytes(2)).json()["id"]
     assert upload(client, replacement, content)["id"] != batch["id"]
     with TestClient(create_app(root)) as restarted:
         assert assignment_id not in {item["id"] for item in restarted.get("/api/assignments").json()}
@@ -355,13 +474,13 @@ def test_delete_assignment_stops_active_and_queued_work_before_removing_files(wo
 
     entered, release, stopping = Event(), Event(), Event()
     calls = []
-    def held(self, pdf, output, **kwargs):
+    crop = scan_jobs.crop_submission
+    def held(pdf, *args, **kwargs):
         calls.append(pdf)
         entered.set()
         assert release.wait(5)
-        return fake_extract(pdf, output, **kwargs)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda *args, **kwargs: None)
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", held)
+        return crop(pdf, *args, **kwargs)
+    monkeypatch.setattr(scan_jobs, "crop_submission", held)
     jobs = app.state.scan_jobs
     stop = jobs.stop_assignment
     def observed_stop(identifier):
@@ -414,91 +533,3 @@ def test_materialized_plan_preserves_source_and_page_ownership(tmp_path):
     assert pages[0].rotation == 90
     assert "Source page 1" in pages[1].extract_text()
     assert source.read_bytes() == original
-
-
-def test_automatic_split_keeps_a_short_submission_and_preserves_its_warning(workspace, monkeypatch):
-    from opengrader.core.submissions import boundary
-    from opengrader.core.submissions.splitter import read_scan_warnings
-    from opengrader.server.scan_jobs import SubmissionIntake
-
-    client, app, assignment_id, root = workspace
-    monkeypatch.setattr(boundary, "_analyze_pages", lambda *args, **kwargs: [
-        (True, 1), (True, 3), (True, 1), (True, 2), (True, 3),
-    ])
-    batch = upload(client, assignment_id, pdf_bytes(5))
-    url = batch_url(assignment_id, batch)
-    response = client.post(url + "/analyze", json={
-        "expected_revision": batch["revision"], "mode": "automatic", "pages_per_submission": 3,
-    })
-    assert response.status_code == 202
-    drain(app)
-    batch = current(client, assignment_id, batch)
-    assert [[page["number"] for page in group["pages"]] for group in batch["groups"]] == [[1, 2], [3, 4, 5]]
-    assert "2 of 3 expected pages" in batch["groups"][0]["scan_warnings"][0]
-    assert "missing printed page(s) 2" in batch["groups"][0]["scan_warnings"][1]
-    assert batch["groups"][1]["scan_warnings"] == []
-    response = client.put(url + "/groups", json={
-        "expected_revision": batch["revision"], "groups": [group["pages"] for group in batch["groups"]],
-    })
-    assert response.status_code == 200
-    batch = response.json()
-    assert "missing printed page(s) 2" in batch["groups"][0]["scan_warnings"][1]
-    seen = []
-    def extract(_self, pdf, output, **kwargs):
-        seen.append(read_scan_warnings(pdf))
-        return fake_extract(pdf, output)
-    monkeypatch.setattr(SubmissionIntake, "extract", extract)
-    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
-    drain(app)
-    assert "2 of 3 expected pages" in seen[0][0]
-    assert seen[1] == ()
-    assert current(client, assignment_id, batch)["status"] == "ready"
-
-
-def scanned_pdf_bytes(pages: int = 5) -> bytes:
-    from io import BytesIO
-
-    from PIL import Image, ImageDraw
-
-    with fitz.open() as document:
-        for index in range(pages):
-            image = Image.new("RGB", (850, 1100), "white")
-            ImageDraw.Draw(image).text((80, 80), f"Scanned page {index + 1}", fill="black")
-            buffer = BytesIO()
-            image.save(buffer, "PNG")
-            page = document.new_page()
-            page.insert_image(page.rect, stream=buffer.getvalue())
-        return document.tobytes()
-
-
-def test_automatic_split_of_a_scan_groups_by_page_matching_and_extracts_with_its_catalog(workspace, monkeypatch):
-    from opengrader.core.pages.catalog import PageCatalog
-    from opengrader.core.pages.split import ScanGroupPlan
-    from opengrader.server import scan_jobs
-
-    client, app, assignment_id, root = workspace
-    monkeypatch.setattr(scan_jobs, "plan_scan", lambda source, directory, expected_count=None: ([
-        ScanGroupPlan(((1, 0), (2, 180), (3, 0)), ()),
-        ScanGroupPlan(((4, 0), (5, 0)), ("Missing page(s) 2: this submission has 2 of 3 printed pages.",)),
-    ], 3))
-    catalog = PageCatalog(groups={}, matches=[])
-    monkeypatch.setattr(scan_jobs, "ensure_catalog", lambda source, directory: directory)
-    monkeypatch.setattr(scan_jobs, "load_catalog", lambda directory: catalog)
-    batch = upload(client, assignment_id, scanned_pdf_bytes(5))
-    url = batch_url(assignment_id, batch)
-
-    assert client.post(url + "/analyze", json={"expected_revision": batch["revision"], "mode": "automatic"}).status_code == 202
-    drain(app)
-    batch = current(client, assignment_id, batch)
-    assert [[(p["number"], p["rotation"]) for p in g["pages"]] for g in batch["groups"]] == [[(1, 0), (2, 180), (3, 0)], [(4, 0), (5, 0)]]
-    assert batch["groups"][1]["scan_warnings"] == ["Missing page(s) 2: this submission has 2 of 3 printed pages."]
-    assert batch["pages_per_submission"] == 3
-
-    catalogs = []
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "__init__", lambda self, *a, assignment_version, page_catalog=None, **k: (
-        catalogs.append(page_catalog), setattr(self, "assignment_version", assignment_version))[-1])
-    monkeypatch.setattr(scan_jobs.SubmissionIntake, "extract", lambda self, pdf, output, **k: fake_extract(pdf, output))
-    assert client.post(url + "/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True}).status_code == 202
-    drain(app)
-    assert catalogs and all(c is catalog for c in catalogs)
-    assert current(client, assignment_id, batch)["status"] == "ready"

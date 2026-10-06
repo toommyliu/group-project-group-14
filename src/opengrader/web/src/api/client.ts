@@ -23,14 +23,37 @@ function serverMessage(body: unknown): string | undefined {
   }
 }
 
+function fieldMessages(body: unknown): Partial<Record<string, string>> {
+  if (!body || typeof body !== 'object' || !('detail' in body)) return {};
+  if (!Array.isArray(body.detail)) return {};
+  const issues: unknown[] = body.detail;
+  const fields: Partial<Record<string, string>> = {};
+  for (const issue of issues) {
+    if (
+      issue &&
+      typeof issue === 'object' &&
+      'loc' in issue &&
+      Array.isArray(issue.loc) &&
+      issue.loc[0] === 'body' &&
+      typeof issue.loc[1] === 'string' &&
+      'msg' in issue &&
+      typeof issue.msg === 'string'
+    )
+      fields[issue.loc[1]] ??= issue.msg.trim();
+  }
+  return fields;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly location: ValidationLocation | null;
+  readonly fields: Partial<Record<string, string>>;
 
   constructor(status: number, body?: unknown) {
     super(serverMessage(body) ?? `Request failed with status ${status}.`);
     this.name = 'ApiError';
     this.status = status;
+    this.fields = fieldMessages(body);
     this.location = parseValidationLocation(
       body && typeof body === 'object' && 'location' in body
         ? body.location
@@ -92,4 +115,35 @@ export function readData<T>({ data }: { data?: T }): T {
   if (data === undefined)
     throw new Error('The server returned an empty response. Try again.');
   return data;
+}
+
+/** POST or PUT a PDF as the raw request body, reporting upload progress. */
+export function uploadPdf<T>(
+  method: 'POST' | 'PUT',
+  path: string,
+  file: File,
+  progress?: (percent: number) => void
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open(method, workspaceUrl(path));
+    request.setRequestHeader('Content-Type', 'application/pdf');
+    request.responseType = 'json';
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && progress)
+        progress(Math.round((event.loaded / event.total) * 100));
+    };
+    request.onerror = () =>
+      reject(
+        new Error(
+          'Upload interrupted. Retry this file; completed uploads are preserved.'
+        )
+      );
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300)
+        return resolve(request.response as T);
+      reject(new ApiError(request.status, request.response));
+    };
+    request.send(file);
+  });
 }

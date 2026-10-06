@@ -48,6 +48,9 @@ Use inline points in the question text:
 
 - `(10 points) What is ...?`
 
+The text after the points is optional, so `- (10 points)` is a complete
+question. The web app's outline shows this text as the question title.
+
 ### Subquestions
 
 Subquestions are nested bullets directly under a question (and are treated as question parts).

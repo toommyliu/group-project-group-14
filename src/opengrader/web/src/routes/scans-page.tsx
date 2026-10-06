@@ -1,12 +1,20 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, FileText, FileUp, Upload, X } from 'lucide-react';
+import {
+  ArrowRight,
+  CircleAlert,
+  FileText,
+  FileUp,
+  Upload,
+  X,
+} from 'lucide-react';
 import type { scansRoute } from '@/router';
 import { analyzeScan, scansQuery, uploadScan } from '@/api/scans';
 import { PageHeading } from '@/components/page-heading';
 import { ScanBatchCard } from '@/components/scan-batch';
 import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Empty,
   EmptyContent,
@@ -35,7 +43,7 @@ export default function ScansPage({
 }: {
   data: typeof scansRoute.types.loaderData;
 }) {
-  const { assignment, versions } = data;
+  const { assignment, versions, templatePages, unoutlined } = data;
   const query = useQuery(scansQuery(assignment.id));
   const client = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
@@ -132,11 +140,18 @@ export default function ScansPage({
           const batch = await uploadScan(assignment.id, item.file, (percent) =>
             update(item.id, { percent })
           );
-          if (batch.status === 'uploaded' && !batch.groups.length) {
-            // Start splitting right away; the scan card shows any failure.
-            await analyzeScan(assignment.id, batch, 'automatic', null).catch(
-              () => undefined
-            );
+          if (
+            batch.status === 'uploaded' &&
+            !batch.groups.length &&
+            templatePages
+          ) {
+            // Split by template length right away; the scan card shows any failure.
+            await analyzeScan(
+              assignment.id,
+              batch,
+              'fixed',
+              Math.min(templatePages, batch.page_count)
+            ).catch(() => undefined);
           }
           setTransfers((previous) =>
             previous.filter((transfer) => transfer.id !== item.id)
@@ -219,6 +234,27 @@ export default function ScansPage({
           event.target.value = '';
         }}
       />
+      {unoutlined.length > 0 && (
+        <Alert className="mb-4">
+          <CircleAlert aria-hidden="true" />
+          <AlertTitle>
+            {unoutlined[0]
+              ? `Draw the outline for ${unoutlined.length === 1 ? 'version' : 'versions'} ${unoutlined.join(', ')} before creating ${unoutlined.length === 1 ? 'its' : 'their'} submissions`
+              : 'Draw the outline before creating submissions'}
+          </AlertTitle>
+          <AlertDescription>
+            Answers are cut out using the boxes on the outline. You can upload
+            and split scans now.{' '}
+            <Link
+              to="/assignments/$assignmentId/outline"
+              params={{ assignmentId: assignment.id }}
+              className="text-foreground underline underline-offset-4"
+            >
+              Open the outline
+            </Link>
+          </AlertDescription>
+        </Alert>
+      )}
       {(query.isError || refreshError) && (
         <ErrorAlert
           className="mb-4"
@@ -309,9 +345,11 @@ export default function ScansPage({
             </EmptyMedia>
             <EmptyTitle>Upload scanned exams</EmptyTitle>
             <EmptyDescription>
-              Drop PDFs anywhere on this page. One PDF can hold a whole class:
-              Opengrader finds where each student's work starts, and you check
-              the split before any submissions are created.
+              Drop PDFs anywhere on this page. One PDF can hold a whole class.
+              {templatePages
+                ? ` Opengrader starts a new submission every ${templatePages} ${templatePages === 1 ? 'page' : 'pages'}, the length of the template.`
+                : ' Opengrader splits it into submissions with the same number of pages each.'}{' '}
+              You check the split before any submissions are created.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>

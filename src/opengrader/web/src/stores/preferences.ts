@@ -12,6 +12,7 @@ export type Preferences = {
   sidebarWidth: number;
   sidebarExpanded: boolean;
   pdfAction: 'download' | 'open';
+  rosterNameOrder: 'last' | 'first';
   theme: 'dark' | 'light' | 'system';
 };
 
@@ -81,6 +82,13 @@ const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
     defaultValue: 'download',
     parse: (value) =>
       value === 'open' || value === 'download' ? value : undefined,
+    serialize: (value) => value,
+  },
+  rosterNameOrder: {
+    storageKey: 'opengrader.roster-name-order',
+    defaultValue: 'last',
+    parse: (value) =>
+      value === 'last' || value === 'first' ? value : undefined,
     serialize: (value) => value,
   },
   theme: {

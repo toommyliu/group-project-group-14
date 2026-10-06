@@ -38,6 +38,29 @@ existing local, signed-out behavior.
 
 ## Setting up assignments
 
+An assignment follows the same steps as the sidebar:
+
+1. **Outline.** Upload the blank PDF students write on, or let Opengrader
+   generate one from the answer key. Draw a region around each question, plus
+   the name and ID fields. The outline sets which questions exist and their
+   points. Each template and its regions are stored as a region map, the same
+   format the `region-map` CLI writes.
+2. **Answer key.** Add expected answers and rubric items to the outline's
+   questions.
+3. **Scans.** Upload scanned PDFs. Each scan is split every _n_ pages, where
+   _n_ is the template's page count. Fix the split, page order, and rotation
+   before creating submissions. Creating a submission crops every region from
+   its pages. No text is read.
+4. **Submissions.** Type each student's name and ID next to the name region.
+5. **Grade** each question across the class, then **Review grades** and
+   download them as CSV.
+
+The answer key is locked once scans are uploaded, and the outline's questions
+once submissions exist. You can still move the outline's boxes. Saving asks for
+confirmation, then crops every submission of that version again from its scan.
+Scores, comments, and students picked by hand stay. If the name or ID box
+moved, submissions matched automatically are matched to the roster again.
+
 ```text
 <data home>/assignments/<assignment-id>/
   qa.md

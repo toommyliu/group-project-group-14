@@ -76,8 +76,9 @@ export function AnswerView({
                   questionId={question.id}
                 />
               ) : (
-                <p className="pt-4 pb-8 text-muted-foreground">
-                  No answer image available.
+                <p className="max-w-prose pt-4 pb-8 text-muted-foreground">
+                  Nothing to show for this question. The outline had no box for
+                  it when this submission was created.
                 </p>
               )}
             </>

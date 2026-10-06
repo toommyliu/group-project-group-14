@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { client, readData, workspaceUrl } from './client';
+import { rosterQuery } from './roster';
 import { workspaceQuery } from './workspace';
 
 /** Subscribe before starting route loads so a change cannot fall between them. */
@@ -13,6 +14,15 @@ export async function observeWorkspace(queries: QueryClient) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   events.onmessage = (message) => {
     const value: unknown = JSON.parse(message.data);
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'kind' in value &&
+      value.kind === 'roster'
+    ) {
+      void queries.invalidateQueries({ queryKey: rosterQuery.queryKey });
+      return;
+    }
     if (
       typeof value !== 'object' ||
       value === null ||

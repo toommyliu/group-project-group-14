@@ -1,4 +1,5 @@
-import { Activity, Suspense, useState } from 'react';
+import { Activity, Suspense, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { assignmentsQuery } from '@/api/queries';
@@ -11,6 +12,7 @@ import {
   pageKey,
   type WorkspacePage,
 } from '@/lib/workspace-pages';
+import { PortalContainer } from '@/lib/portal-container';
 import { AssignmentLoading } from './loading';
 
 /** Retain visited pages; fresh route loaders still supply data on every return. */
@@ -72,9 +74,9 @@ export default function Workspace() {
     <WorkspacePages value={pages}>
       <App>
         {pages.map((page) => (
-          <Activity
+          <RetainedPage
             key={pageKey(page)}
-            mode={pageKey(page) === activeKey ? 'visible' : 'hidden'}
+            active={pageKey(page) === activeKey}
           >
             <Suspense fallback={<AssignmentLoading />}>
               {page.path === '/assignments/$assignmentId' ? (
@@ -85,10 +87,30 @@ export default function Workspace() {
                 <GradePage data={page.data} />
               )}
             </Suspense>
-          </Activity>
+          </RetainedPage>
         ))}
         <Outlet />
       </App>
     </WorkspacePages>
+  );
+}
+
+// Activity does not hide portal content, so popups open in a hidden page
+// render into a container that hides with it.
+function RetainedPage({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  return (
+    <>
+      {createPortal(<div ref={setContainer} hidden={!active} />, document.body)}
+      <Activity mode={active ? 'visible' : 'hidden'}>
+        <PortalContainer value={container}>{children}</PortalContainer>
+      </Activity>
+    </>
   );
 }

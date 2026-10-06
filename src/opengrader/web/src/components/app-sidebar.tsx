@@ -6,9 +6,12 @@ import { useQuery } from '@tanstack/react-query';
 import {
   BookOpen,
   ChartColumn,
+  ClipboardCheck,
   FileText,
+  Files,
   PenLine,
   Settings,
+  SquareDashedMousePointer,
   Users,
 } from 'lucide-react';
 import { authQuery } from '@/api/auth';
@@ -60,19 +63,24 @@ export function AppSidebar() {
     Boolean(matchRoute({ to: '/assignments', pending: true })) ||
     Boolean(matchRoute({ to: '/assignments/new', pending: true }));
   const auth = useQuery(authQuery);
+  const instructor = Boolean(workspaceBase) && auth.data?.role === 'instructor';
   const managesPeople =
-    Boolean(workspaceBase) && auth.data?.role === 'instructor';
+    instructor || (Boolean(workspaceBase) && auth.data?.enabled === false);
   const onPeople = Boolean(matchRoute({ to: '/people', pending: true }));
   const onSettings = Boolean(matchRoute({ to: '/settings', pending: true }));
   const expanded = isMobile ? openMobile : open;
-  const courseLinks =
-    Boolean(workspaceBase) && (!folderSession || managesPeople);
+  const courseLinks = Boolean(workspaceBase) && (!folderSession || instructor);
   const close = () => setOpenMobile(false);
   const destinations = (
     [
       {
+        to: '/assignments/$assignmentId/outline',
+        title: 'Outline',
+        icon: SquareDashedMousePointer,
+      },
+      {
         to: '/assignments/$assignmentId',
-        title: 'Overview',
+        title: 'Answer key',
         icon: BookOpen,
       },
       {
@@ -81,9 +89,19 @@ export function AppSidebar() {
         icon: ScansIcon,
       },
       {
+        to: '/assignments/$assignmentId/submissions',
+        title: 'Submissions',
+        icon: Files,
+      },
+      {
         to: '/assignments/$assignmentId/grade',
         title: 'Grade',
         icon: PenLine,
+      },
+      {
+        to: '/assignments/$assignmentId/review',
+        title: 'Review grades',
+        icon: ClipboardCheck,
       },
       {
         to: '/assignments/$assignmentId/statistics',
@@ -91,7 +109,11 @@ export function AppSidebar() {
         icon: ChartColumn,
       },
     ] as const
-  ).filter((destination) => !folderSession || destination.title !== 'Scans');
+  ).filter(
+    (destination) =>
+      !folderSession ||
+      (destination.title !== 'Scans' && destination.title !== 'Outline')
+  );
   return (
     <>
       <Sidebar
@@ -158,7 +180,7 @@ export function AppSidebar() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
-                  {managesPeople && (
+                  {instructor && (
                     <SidebarMenuItem>
                       <SidebarMenuButton
                         className={menuButtonClass}

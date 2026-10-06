@@ -276,6 +276,9 @@ def _parse_frontmatter(lines: list[str]) -> tuple[Frontmatter, int]:
 
 
 def _render_frontmatter_field(lines: list[str], key: str, value: str) -> None:
+    if "\n" not in value and value.strip() not in ("", "|"):
+        lines.append(f"{key}: {value.strip()}")
+        return
     is_multiline = "\n" in value
     lines.append(f"{key}: {'|' if is_multiline else ''}")
     if is_multiline:
@@ -945,7 +948,7 @@ def _parse_subquestion_item(
     item: _BulletItem, *, parent_id: str, index: int
 ) -> QASubquestion:
     prompt, inline_points = _strip_inline_points(item.text)
-    if not prompt:
+    if not prompt and inline_points is None:
         raise ValueError(f"subquestion at line {item.line_no} is missing prompt text")
 
     correct_values: list[str] = []
@@ -1039,7 +1042,7 @@ def _parse_subquestion_item(
 
 def _parse_question_item(item: _BulletItem, *, index: int) -> QAQuestion:
     prompt, inline_points = _strip_inline_points(item.text)
-    if not prompt:
+    if not prompt and inline_points is None:
         raise ValueError(f"question at line {item.line_no} is missing prompt text")
 
     qid = f"q{index}"

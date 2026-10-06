@@ -339,7 +339,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
     >
       <PageHeading
         className="mb-8"
-        title={overview ? 'Overview' : 'Create assignment'}
+        title={overview ? 'Answer key' : 'Create assignment'}
         description={
           overview
             ? undefined
@@ -403,6 +403,20 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
           <p className="text-muted-foreground">
             {overview?.editUnavailableReason} Showing the answer key as graders
             see it.
+          </p>
+        )}
+        {!readOnly && overview?.structureLocked && (
+          <p className="text-muted-foreground">
+            The outline sets which questions exist. Edit answers and rubrics
+            here; add, remove, or reorder questions on the{' '}
+            <Link
+              to="/assignments/$assignmentId/outline"
+              params={{ assignmentId: overview.assignment.id }}
+              className="text-foreground underline underline-offset-4"
+            >
+              Outline
+            </Link>
+            .
           </p>
         )}
         {(saving || saveMessage || reading || uploadedFileName) && (
@@ -570,6 +584,7 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                                   source={visualBaseline.source}
                                   preview={visualBaseline.preview}
                                   disabled={readOnly || busy}
+                                  structureLocked={!!overview?.structureLocked}
                                   scrollElementRef={editorScrollRef}
                                   onPending={markVisualPending}
                                   onResult={acceptVisualEdit}

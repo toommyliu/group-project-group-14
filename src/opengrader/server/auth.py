@@ -175,6 +175,21 @@ class RemoteAuthGuard:
             await RedirectResponse("/auth/login", status_code=303)(scope, receive, send)
 
 
+def viewer(request: Request) -> AuthStatus:
+    access: Roles | None = request.app.state.access
+    if access is None:
+        return AuthStatus(enabled=False)
+    user = signed_in(request)
+    if user is not None:
+        role = access.role(user.email)
+    else:
+        role = "instructor" if is_local(request) else None
+    return AuthStatus(enabled=True, user=user, role=role)
+
+
+Viewer = Annotated[AuthStatus, Depends(viewer)]
+
+
 def refused(message: str) -> HTMLResponse:
     return HTMLResponse(
         "<!doctype html><html lang='en'><title>Opengrader</title>"
@@ -214,18 +229,6 @@ def add_auth_routes(
             server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
             client_kwargs={"scope": "openid email profile"},
         )
-
-    def viewer(request: Request) -> AuthStatus:
-        if access is None:
-            return AuthStatus(enabled=False)
-        user = signed_in(request)
-        if user is not None:
-            role = access.role(user.email)
-        else:
-            role = "instructor" if is_local(request) else None
-        return AuthStatus(enabled=True, user=user, role=role)
-
-    Viewer = Annotated[AuthStatus, Depends(viewer)]
 
     @app.get("/auth/me")
     def auth_status(status: Viewer) -> AuthStatus:

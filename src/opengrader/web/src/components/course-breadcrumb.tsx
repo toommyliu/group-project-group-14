@@ -7,7 +7,7 @@ export function CourseBreadcrumb() {
   return (
     <nav
       aria-label="Breadcrumb"
-      className="mb-4 flex min-w-0 shrink-0 items-center gap-1"
+      className="flex min-w-0 flex-1 items-center gap-1"
     >
       <CourseSwitcher
         className={assignment ? '-ms-2 sm:max-w-[min(18rem,45%)]' : '-ms-2'}

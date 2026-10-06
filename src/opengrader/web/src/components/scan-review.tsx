@@ -103,9 +103,8 @@ export function ScanReview({
   const [revision, setRevision] = useState(batch.revision);
   const [groups, setGroups] = useState(() => groupsFrom(batch));
   const [excluded, setExcluded] = useState(batch.excluded_pages);
-  const [autoGrade, setAutoGrade] = useState(batch.auto_grade);
   const [defaultVersion, setDefaultVersion] = useState(
-    batch.assignment_version ?? ''
+    batch.assignment_version ?? versions[0] ?? ''
   );
   const [checked, setChecked] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
@@ -194,7 +193,6 @@ export function ScanReview({
         assignmentId,
         current,
         checked,
-        autoGrade,
         defaultVersion,
         Object.fromEntries(
           current.groups.map((group) => [
@@ -272,10 +270,6 @@ export function ScanReview({
               <li key={index}>{finding.detail}</li>
             ))}
           </ul>
-          <p className="mt-2 pl-6 text-xs text-muted-foreground">
-            Blank pages may be unanswered work, so they are never removed
-            automatically.
-          </p>
         </div>
       )}
 
@@ -417,14 +411,6 @@ export function ScanReview({
       )}
 
       <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t bg-card px-4 py-3">
-        <Label className="flex min-h-8 items-center gap-2 text-sm leading-normal">
-          <Checkbox
-            checked={autoGrade}
-            disabled={busy}
-            onCheckedChange={setAutoGrade}
-          />
-          Auto-grade matching answers
-        </Label>
         {versions.length > 0 && (
           <VersionSelect
             id={`version-${batch.id}`}

@@ -21,13 +21,11 @@ function MobileSidebarTrigger() {
   const { openMobile } = useSidebar();
 
   return (
-    <div className="mb-6 flex min-h-11 items-center md:hidden">
-      <SidebarTrigger
-        className="h-11 w-12 bg-sidebar active:translate-y-0!"
-        aria-label="Open navigation"
-        aria-expanded={openMobile}
-      />
-    </div>
+    <SidebarTrigger
+      className="-ms-3.5 size-11 shrink-0 active:translate-y-0! md:hidden"
+      aria-label="Open navigation"
+      aria-expanded={openMobile}
+    />
   );
 }
 
@@ -39,14 +37,31 @@ export function App({ children }: PropsWithChildren) {
   const matchRoute = useMatchRoute();
   const overview =
     Boolean(matchRoute({ to: '/assignments/new' })) ||
-    (assignment && Boolean(matchRoute({ to: '/assignments/$assignmentId' })));
+    (assignment &&
+      (Boolean(matchRoute({ to: '/assignments/$assignmentId' })) ||
+        Boolean(matchRoute({ to: '/assignments/$assignmentId/outline' }))));
+  const nothingToGrade = useRouterState({
+    select: ({ matches }) =>
+      matches.some(
+        (match) =>
+          match.routeId === '/assignments/$assignmentId/grade' &&
+          match.loaderData !== undefined &&
+          !match.loaderData.submission
+      ),
+  });
   const grading =
     assignment &&
+    !nothingToGrade &&
     Boolean(matchRoute({ to: '/assignments/$assignmentId/grade' }));
-  const fill =
-    Boolean(matchRoute({ to: '/courses' })) ||
+  const scans =
+    assignment &&
+    Boolean(matchRoute({ to: '/assignments/$assignmentId/scans' }));
+  const courses = Boolean(matchRoute({ to: '/courses' }));
+  const scrollingTable =
+    Boolean(matchRoute({ to: '/people' })) ||
     (assignment &&
-      Boolean(matchRoute({ to: '/assignments/$assignmentId/scans' })));
+      (Boolean(matchRoute({ to: '/assignments/$assignmentId/submissions' })) ||
+        Boolean(matchRoute({ to: '/assignments/$assignmentId/review' }))));
   const notFound = useRouterState({
     select: ({ matches }) =>
       matches.some((match) => match.status === 'notFound' || match._notFound),
@@ -64,7 +79,7 @@ export function App({ children }: PropsWithChildren) {
           } as CSSProperties
         }
         className={cn(
-          overview
+          overview || scrollingTable
             ? 'h-svh min-h-0 overflow-hidden'
             : grading
               ? 'lg:h-svh lg:min-h-0 lg:overflow-hidden'
@@ -83,7 +98,7 @@ export function App({ children }: PropsWithChildren) {
         {!standalone && <AppSidebar />}
         <SidebarInset
           className={
-            overview
+            overview || scrollingTable
               ? 'h-full min-h-0 min-w-0 overflow-hidden'
               : grading
                 ? 'min-w-0 lg:h-full lg:min-h-0 lg:overflow-hidden'
@@ -95,14 +110,23 @@ export function App({ children }: PropsWithChildren) {
           <div
             className={
               !standalone
-                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : grading ? 'pb-16 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:pb-4' : fill ? 'flex flex-1 flex-col pb-4 md:pb-8' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
+                ? `mx-auto w-full max-w-[90rem] px-4 pt-4 ${overview ? 'flex h-full min-h-0 flex-col overflow-hidden' : scrollingTable ? 'flex h-full min-h-0 flex-col overflow-hidden pb-4 md:pb-8' : grading ? 'pb-16 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-hidden lg:pb-4' : scans || courses || nothingToGrade ? 'flex flex-1 flex-col pb-4 md:pb-8' : 'pb-16'} focus:outline-none sm:px-8 md:pt-8`
                 : 'mx-auto w-full max-w-[90rem] px-4 pt-8 pb-16 focus:outline-none sm:px-8 lg:px-14'
             }
             id="content"
             tabIndex={-1}
           >
-            {!standalone && <MobileSidebarTrigger />}
-            {!standalone && !folderSession && <CourseBreadcrumb />}
+            {!standalone && (
+              <div
+                className={cn(
+                  'flex min-w-0 shrink-0 items-center gap-2',
+                  folderSession ? 'mb-6 md:hidden' : 'mb-4'
+                )}
+              >
+                <MobileSidebarTrigger />
+                {!folderSession && <CourseBreadcrumb />}
+              </div>
+            )}
             {folderSession && assignment && (
               <FolderSessionBanner session={folderSession} />
             )}

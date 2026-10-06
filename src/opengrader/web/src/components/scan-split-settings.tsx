@@ -12,7 +12,6 @@ import {
 } from './ui/select';
 
 const scanModes = [
-  { value: 'automatic', label: 'Find each first page automatically' },
   { value: 'fixed', label: 'Same number of pages each' },
   { value: 'individual', label: 'Whole PDF is one submission' },
 ] satisfies { value: ScanMode; label: string }[];
@@ -30,7 +29,9 @@ export function ScanSplitSettings({
   note?: ReactNode;
   onSubmit: (mode: ScanMode, pages: number | null) => void;
 }) {
-  const [mode, setMode] = useState<ScanMode>(batch.mode);
+  const [mode, setMode] = useState<ScanMode>(
+    batch.mode === 'individual' ? 'individual' : 'fixed'
+  );
   const [pages, setPages] = useState(
     batch.pages_per_submission?.toString() ?? ''
   );
@@ -50,12 +51,7 @@ export function ScanSplitSettings({
           value={mode}
           disabled={busy}
           onValueChange={(value) => {
-            if (
-              value === 'automatic' ||
-              value === 'fixed' ||
-              value === 'individual'
-            )
-              setMode(value);
+            if (value === 'fixed' || value === 'individual') setMode(value);
           }}
         >
           <SelectTrigger id={`mode-${batch.id}`} className="w-full">
@@ -72,35 +68,20 @@ export function ScanSplitSettings({
       </div>
       {mode !== 'individual' && (
         <div className="grid gap-2">
-          <Label htmlFor={`pages-${batch.id}`}>
-            {mode === 'fixed'
-              ? 'Pages per submission'
-              : 'Expected pages per submission'}
-          </Label>
+          <Label htmlFor={`pages-${batch.id}`}>Pages per submission</Label>
           <Input
             id={`pages-${batch.id}`}
             className="w-28"
             type="number"
             inputMode="numeric"
             min="1"
-            max={mode === 'fixed' ? batch.page_count : undefined}
+            max={batch.page_count}
             step="1"
-            required={mode === 'fixed'}
-            aria-describedby={
-              mode === 'automatic' ? `pages-help-${batch.id}` : undefined
-            }
+            required
             value={pages}
             disabled={busy}
             onChange={(event) => setPages(event.target.value)}
           />
-          {mode === 'automatic' && (
-            <p
-              id={`pages-help-${batch.id}`}
-              className="text-xs text-muted-foreground"
-            >
-              Optional. Flags submissions with missing or extra pages.
-            </p>
-          )}
         </div>
       )}
       {note && <p className="text-xs text-muted-foreground">{note}</p>}

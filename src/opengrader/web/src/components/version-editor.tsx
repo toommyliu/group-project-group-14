@@ -43,6 +43,7 @@ export function VersionBar({
   questionCounts,
   selected,
   disabled,
+  structureLocked = false,
   onChange,
   onSelect,
 }: {
@@ -51,6 +52,7 @@ export function VersionBar({
   questionCounts: Record<string, number>;
   selected: string;
   disabled: boolean;
+  structureLocked?: boolean;
   onChange: (versions: Version[]) => void;
   onSelect: (key: string) => void;
 }) {
@@ -105,10 +107,11 @@ export function VersionBar({
       {versions.length === 1 ? (
         <>
           <p className="text-sm text-muted-foreground">
-            Every student gets the same questions. Add a version to give some
-            students different ones.
+            {structureLocked
+              ? 'Every student gets the same questions. Add versions on the Outline page.'
+              : 'Every student gets the same questions. Add a version to give some students different ones.'}
           </p>
-          {add}
+          {!structureLocked && add}
         </>
       ) : (
         <>
@@ -139,7 +142,10 @@ export function VersionBar({
               );
             })}
           </div>
-          <div className="ms-auto flex items-center gap-1">
+          <div
+            className="ms-auto flex items-center gap-1"
+            hidden={structureLocked}
+          >
             {add}
             <DropdownMenu>
               <DropdownMenuTrigger

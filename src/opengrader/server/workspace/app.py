@@ -15,7 +15,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from starlette._utils import get_route_path
 
 from opengrader.core.grading.edits import GradeEdit
+from opengrader.core.outline import outline_versions
+from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.qa_file.errors import QAParseError
+from opengrader.core.submissions.region_crop import CropInputs, RosterStudent
+from opengrader.core.workspace import roster
 from opengrader.core.analytics.assignment_statistics import (
     AssignmentVersionStatistics,
 )
@@ -35,8 +39,10 @@ from opengrader.core.workspace.folder_session import (
     sync_folder,
     write_through,
 )
+from opengrader.core.workspace.roster import RosterConflict
 from opengrader.core.workspace.writeback import WriteBackError
 from opengrader.core.workspace.intake import publish_pipeline, publish_submission
+from opengrader.core.workspace.recut import recutting_assignments
 from opengrader.core.submissions import load_student_submission_markdown
 from opengrader.core.workspace.models import (
     Answer,
@@ -62,15 +68,20 @@ from opengrader.server.assignment_qa import (
     QAPreview,
     VisualEditInput,
     VisualEditResult,
+    parse_preview,
     preview_qa,
     edit_assignment_draft,
 )
 from opengrader.server.auth import add_auth_routes, signed_in
+from opengrader.server.roster import add_roster_routes
+from opengrader.server.students import add_student_routes
 from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
 from opengrader.server.scan_jobs import ScanJobs, ScanWorkers
 from opengrader.server.feedback import FeedbackScheduler
 from opengrader.server.scans import add_scan_routes
+from opengrader.server.outline import add_outline_routes
+from opengrader.server.recut import start_recut
 from opengrader.server.web import add_web_routes
 from opengrader.server.workspace.jobs import FeedbackJobs
 
@@ -86,7 +97,7 @@ _NOT_IN_FOLDER_SESSION = "Create a workspace first to do this."
 _FOLDER_SESSION_REFUSALS = (
     (
         "POST",
-        re.compile(r"/api/assignments/?"),
+        re.compile(r"/api/assignments(/from-template)?/?"),
         "This browser session grades one class folder, so it cannot add "
         "assignments. " + _NOT_IN_FOLDER_SESSION,
     ),
@@ -106,6 +117,18 @@ _FOLDER_SESSION_REFUSALS = (
         None,
         re.compile(r"/api/assignments/[^/]+/scans(/.*)?"),
         "Scans cannot be added to a folder session. " + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        None,
+        re.compile(r"/api/assignments/[^/]+/(outline|template|versions)(/.*)?"),
+        "In a folder session the assignment comes from the class folder, so "
+        "its outline cannot be edited here. " + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        None,
+        re.compile(r"/api/assignments/[^/]+/submissions/(match|[^/]+/student)"),
+        "In a folder session student names come from the class folder files. "
+        + _NOT_IN_FOLDER_SESSION,
     ),
 )
 
@@ -175,7 +198,32 @@ def create_app(
             source_key=markdown.parent.name,
         )
 
-    scan_jobs = ScanJobs(scan_store, registry_lock, publish, workers=workers)
+    def crop_inputs(assignment_id: str, version: str | None, student_id: str | None) -> CropInputs:
+        document = parse_qa_markdown(workspace.assignment_source(assignment_id))
+        if (version or "") not in outline_versions(document):
+            raise ValueError("Choose the assignment version for this submission.")
+        stored = workspace.outlines(assignment_id).get(version or "")
+        if stored is None or not stored.regions.questions:
+            raise ValueError("Draw the outline before creating submissions.")
+        students = tuple(RosterStudent(student.sid, student.name) for student in roster.students(workspace))
+        student = None
+        if student_id is not None:
+            student = next((item for item in students if item.student_id == student_id), None)
+            if student is None:
+                raise ValueError(f"No student on the roster has SID {student_id}.")
+            if any(item.student_id == student_id for item in workspace.submissions(assignment_id)):
+                raise ValueError(f"{student.name} already has a submission.")
+        return CropInputs(
+            regions=stored.regions,
+            title=document.title or "Untitled assignment",
+            version=version,
+            roster=students,
+            student=student,
+        )
+
+    scan_jobs = ScanJobs(
+        scan_store, registry_lock, publish, crop_inputs, workspace.submission_for_source, workers=workers
+    )
 
     def require_assignment(assignment_id: str) -> None:
         workspace.assignment_source(assignment_id)
@@ -205,6 +253,8 @@ def create_app(
     async def lifespan(_app: FastAPI):
         loop = asyncio.get_running_loop()
         workspace.on_commit = lambda: loop.call_soon_threadsafe(notify)
+        for assignment_id in recutting_assignments(workspace):
+            start_recut(workspace, scan_jobs, assignment_id)
         if process_jobs:
             if feedback_scheduler is not None:
                 feedback_scheduler.add(jobs)
@@ -235,6 +285,13 @@ def create_app(
                 "detail": str(exc),
                 "current": exc.current.model_dump(mode="json") if exc.current else None,
             },
+            status_code=409,
+        )
+
+    @app.exception_handler(RosterConflict)
+    async def roster_conflict(_request: Request, exc: RosterConflict):
+        return JSONResponse(
+            {"detail": [{"loc": ["body", exc.field], "msg": str(exc), "type": "conflict"}]},
             status_code=409,
         )
 
@@ -371,11 +428,12 @@ def create_app(
 
     @api.get("/assignments/{assignment_id}/qa")
     def qa(assignment_id: str) -> QAPreview:
-        return preview_qa(workspace.assignment_source(assignment_id))
+        return parse_preview(workspace.assignment_source(assignment_id))
 
     @api.get("/assignments/{assignment_id}/pdf")
     def pdf(assignment_id: str, version: str | None = None) -> Response:
-        return assignment_pdf_response(qa(assignment_id).document, version)
+        document = preview_qa(workspace.assignment_source(assignment_id)).document
+        return assignment_pdf_response(document, version)
 
     @api.get("/assignments/{assignment_id}/submissions")
     def submissions(assignment_id: str) -> list[Submission]:
@@ -519,6 +577,11 @@ def create_app(
             assignment_id, [p.name for p in directories]
         ),
     )
+    add_outline_routes(
+        api, workspace, scan_jobs, registry_lock, require_assignment, extraction_source
+    )
+    add_roster_routes(api, workspace)
+    add_student_routes(api, workspace, scan_jobs, require_assignment)
     # Included last: the router copies its routes at inclusion time.
     app.include_router(api)
     add_web_routes(app, web_dist or Path(__file__).parents[2] / "web" / "dist")

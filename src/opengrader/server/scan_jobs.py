@@ -1,7 +1,9 @@
 """Bounded background intake jobs, independent of a browser connection."""
 
 import logging
+import shutil
 import signal
+from functools import partial
 from pathlib import Path
 from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -10,14 +12,11 @@ from threading import RLock
 from typing import Callable
 from uuid import uuid4
 
-from opengrader.core.pages.catalog import CATALOG_DIRNAME, ensure_catalog, is_scan, load_catalog
-from opengrader.core.pages.split import plan_scan
-from opengrader.core.submissions.boundary import plan_boundary_ranges
-from opengrader.core.submissions.scan_check import analyze_scan_pdf
+from opengrader.core.submissions.boundary import submission_warnings
+from opengrader.core.submissions.region_crop import CropInputs, crop_submission
 from opengrader.core.submissions.scan_plan import ScanPage, write_scan_submissions
-from opengrader.core.submissions.splitter import plan_submission_ranges, write_scan_warnings
-from opengrader.server.scan_models import PageSelection, ScanBatch, ScanFinding, ScanGroup
-from opengrader.core.submissions.intake import SubmissionIntake
+from opengrader.core.submissions.splitter import plan_submission_ranges
+from opengrader.server.scan_models import PageSelection, ScanBatch, ScanGroup
 from opengrader.server.scan_store import ScanStore
 
 logger = logging.getLogger(__name__)
@@ -58,10 +57,21 @@ class ScanWorkers:
 
 
 class ScanJobs:
-    def __init__(self, store: ScanStore, lock: RLock, refresh: Callable[[str, Path], int], *, workers: ScanWorkers | None = None):
+    def __init__(
+        self,
+        store: ScanStore,
+        lock: RLock,
+        refresh: Callable[[str, Path], int],
+        inputs: Callable[[str, str | None, str | None], CropInputs],
+        published: Callable[[str, str], int | None],
+        *,
+        workers: ScanWorkers | None = None,
+    ):
         self.store = store
         self.lock = lock
         self.refresh = refresh
+        self.inputs = inputs
+        self.published = published
         self.stopping: set[str] = set()
         self.futures: dict[str, set[Future[None]]] = {}
         self.workers = workers or ScanWorkers()
@@ -85,10 +95,13 @@ class ScanJobs:
             self.workers.close()
 
     def submit(self, assignment_id: str, batch_id: str, *, analyze: bool) -> None:
+        self.start(assignment_id, partial(self._run, assignment_id, batch_id, analyze))
+
+    def start(self, assignment_id: str, work: Callable[[], None]) -> None:
         with self.lock:
             self.check_running(assignment_id)
             futures = self.futures.setdefault(assignment_id, set())
-            future = self.executor.submit(self._run, assignment_id, batch_id, analyze)
+            future = self.executor.submit(work)
             futures.add(future)
             def finished(completed: Future[None]) -> None:
                 with self.lock:
@@ -115,6 +128,14 @@ class ScanJobs:
                 future.result()
             except CancelledError:
                 pass
+
+    def crop(self, pdf: Path, inputs: CropInputs, output: Path) -> Path:
+        try:
+            return self.processing.submit(crop_submission, pdf, inputs, output).result()
+        except BrokenProcessPool:
+            self.processing.shutdown(wait=False)
+            self.processing = _process_pool()
+            raise
 
     def save(self, assignment_id: str, batch: ScanBatch) -> None:
         with self.lock:
@@ -148,52 +169,20 @@ class ScanJobs:
                     self.save(assignment_id, batch)
 
     def _analyze(self, assignment_id: str, batch: ScanBatch) -> None:
-        source = self.store.directory(assignment_id, batch.id) / "original.pdf"
-        batch.status = "checking"
-        batch.message = "Checking scan quality and submission boundaries."
-        self.save(assignment_id, batch)
-        report = self.processing.submit(
-            analyze_scan_pdf,
-            source,
-            pages_per_submission=batch.pages_per_submission if batch.mode == "fixed" else None,
-            single_submission=batch.mode == "individual",
-        ).result()
-        findings = [ScanFinding(page=issue.page, severity=issue.severity, detail=issue.detail) for issue in report.issues]
-        if not report.orientation_available:
-            findings.append(ScanFinding(severity="warning", detail=report.orientation_note or "Page orientation could not be checked."))
-        if batch.mode == "automatic" and is_scan(source):
-            plans, expected = self.processing.submit(
-                plan_scan, source, source.parent / CATALOG_DIRNAME, batch.pages_per_submission,
-            ).result()
-            batch.pages_per_submission = batch.pages_per_submission or expected
-            batch.groups = [
-                ScanGroup(key=str(uuid4()), pages=[PageSelection(number=number, rotation=rotation) for number, rotation in plan.pages],
-                          scan_warnings=list(plan.warnings))
-                for plan in plans
-            ]
-            batch.excluded_pages = []
-            batch.findings = findings
-            batch.status = "review"
-            batch.message = "Review the page groups before creating submissions."
-            self.save(assignment_id, batch)
-            return
-        if batch.mode == "automatic":
-            ranges, _warnings = self.processing.submit(
-                plan_boundary_ranges, source, expected_pages=batch.pages_per_submission,
-            ).result()
-            if ranges:
-                batch.pages_per_submission = ranges[0].expected_pages
-        else:
-            ranges = plan_submission_ranges(
-                total_pages=batch.page_count,
-                pages_per_submission=batch.pages_per_submission if batch.mode == "fixed" else batch.page_count,
-            )
+        ranges = plan_submission_ranges(
+            total_pages=batch.page_count,
+            pages_per_submission=batch.pages_per_submission if batch.mode == "fixed" else batch.page_count,
+        )
         batch.groups = [
-            ScanGroup(key=str(uuid4()), pages=[PageSelection(number=page) for page in range(group.start_page, group.end_page + 1)], scan_warnings=list(group.warnings))
+            ScanGroup(
+                key=str(uuid4()),
+                pages=[PageSelection(number=page) for page in range(group.start_page, group.end_page + 1)],
+                scan_warnings=list(submission_warnings(group.end_page - group.start_page + 1, batch.pages_per_submission)),
+            )
             for group in ranges
         ]
         batch.excluded_pages = []
-        batch.findings = findings
+        batch.findings = []
         batch.status = "review"
         batch.message = "Review the page groups before creating submissions."
         self.save(assignment_id, batch)
@@ -211,43 +200,36 @@ class ScanJobs:
         }
         if missing:
             write_scan_submissions(directory / "original.pdf", missing)
-        catalog = None
-        if is_scan(directory / "original.pdf"):
-            batch.message = "Learning the printed pages from the scan."
-            self.save(assignment_id, batch)
-            catalog = load_catalog(self.processing.submit(ensure_catalog, directory / "original.pdf", directory / CATALOG_DIRNAME).result())
-        intakes: dict[str | None, SubmissionIntake] = {}
         for index, group in enumerate(batch.groups, start=1):
             name = f"scan-{batch.id}-{group.key}"
             destination = assignment / "submissions" / name
             markdown = destination / f"{name}.submission.md"
-            batch.message = f"Reading answers: {index} of {len(batch.groups)} submissions."
+            batch.message = f"Cropping answers and matching names: {index} of {len(batch.groups)} submissions."
             group.error = ""
             self.save(assignment_id, batch)
             try:
-                if not markdown.exists():
-                    pdf = directory / "split" / f"{name}.pdf"
-                    write_scan_warnings(pdf, tuple(group.scan_warnings))
-                    version = group.assignment_version or batch.assignment_version
-                    if version not in intakes:
-                        intakes[version] = SubmissionIntake(assignment / "qa.md", auto_grade=batch.auto_grade, assignment_version=version, page_catalog=catalog)
-                    intake = intakes[version]
-                    staging = self.processing.submit(intake.extract, pdf, directory / "extracted").result()
-                    with self.lock:
-                        self.check_running(assignment_id)
-                        if not destination.exists():
-                            staging.rename(destination)
                 with self.lock:
                     self.check_running(assignment_id)
-                    group.submission_id = self.refresh(assignment_id, markdown)
+                    group.submission_id = self.published(assignment_id, name)
+                if group.submission_id is None:
+                    inputs = self.inputs(
+                        assignment_id,
+                        group.assignment_version or batch.assignment_version,
+                        group.student.student_id if group.student else None,
+                    )
+                    staging = self.crop(directory / "split" / f"{name}.pdf", inputs, directory / "extracted")
+                    with self.lock:
+                        self.check_running(assignment_id)
+                        if destination.exists():
+                            shutil.rmtree(destination)
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        staging.rename(destination)
+                        group.submission_id = self.refresh(assignment_id, markdown)
             except ScanCancelled:
                 raise
             except (Exception, SystemExit) as exc:
-                if isinstance(exc, BrokenProcessPool):
-                    self.processing.shutdown(wait=False)
-                    self.processing = _process_pool()
-                logger.exception("Submission extraction failed: %s", name)
-                group.error = str(exc) if isinstance(exc, ValueError) else "Could not read this submission. Check its pages and retry."
+                logger.exception("Submission cropping failed: %s", name)
+                group.error = str(exc) if isinstance(exc, ValueError) else "Could not crop this submission. Check its pages and retry."
             self.save(assignment_id, batch)
         failed = sum(bool(group.error) for group in batch.groups)
         batch.status = "failed" if failed else "ready"

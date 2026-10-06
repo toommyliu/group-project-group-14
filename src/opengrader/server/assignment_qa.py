@@ -32,7 +32,7 @@ class VisualEditResult(AssignmentInput):
 def edit_assignment_draft(request: VisualEditInput) -> VisualEditResult:
     source = edit_qa_markdown(request.qa_markdown, request.edits, request.metadata)
     try:
-        preview = _parse_preview(source)
+        preview = parse_preview(source)
     except ValueError as exc:
         return VisualEditResult(
             qa_markdown=source,
@@ -48,7 +48,7 @@ def edit_assignment_draft(request: VisualEditInput) -> VisualEditResult:
 
 
 def preview_qa(content: str) -> QAPreview:
-    preview = _parse_preview(content)
+    preview = parse_preview(content)
     error = _question_validation_error(preview.document)
     if error:
         raise ValueError(error)
@@ -64,7 +64,7 @@ def _question_validation_error(document: QADocument) -> str | None:
     return None
 
 
-def _parse_preview(content: str) -> QAPreview:
+def parse_preview(content: str) -> QAPreview:
     document = parse_qa_markdown(content)
     warnings = []
     if "![" in content or "<img" in content.lower():

@@ -72,6 +72,10 @@ it('wraps the ungraded queue, skipping zero scores, missing responses, and the c
       student_id: '',
       id: 1,
       version: null,
+      name_image_url: null,
+      id_image_url: null,
+      match_percent: null,
+      candidates: [],
       question_scores: { q1: null },
     },
     {
@@ -79,6 +83,10 @@ it('wraps the ungraded queue, skipping zero scores, missing responses, and the c
       student_id: '',
       id: 2,
       version: 'B',
+      name_image_url: null,
+      id_image_url: null,
+      match_percent: null,
+      candidates: [],
       question_scores: {},
     },
     {
@@ -86,6 +94,10 @@ it('wraps the ungraded queue, skipping zero scores, missing responses, and the c
       student_id: '',
       id: 3,
       version: null,
+      name_image_url: null,
+      id_image_url: null,
+      match_percent: null,
+      candidates: [],
       question_scores: { q1: 0 },
     },
     {
@@ -93,6 +105,10 @@ it('wraps the ungraded queue, skipping zero scores, missing responses, and the c
       student_id: '',
       id: 4,
       version: null,
+      name_image_url: null,
+      id_image_url: null,
+      match_percent: null,
+      candidates: [],
       question_scores: { q1: null },
     },
   ];

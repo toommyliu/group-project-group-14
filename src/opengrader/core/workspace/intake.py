@@ -3,8 +3,6 @@
 from dataclasses import replace
 import hashlib
 from pathlib import Path
-import os
-from tempfile import TemporaryDirectory
 from urllib.parse import quote
 
 from PIL import Image
@@ -126,8 +124,6 @@ def publish_submission(
     """Publish an extraction once; a retried job must never replace saved grades."""
     source = workspace.assignment_source(assignment_id)
     qa = parse_qa_markdown(source)
-    assets = workspace.root / ".opengrader" / "assets"
-    assets.mkdir(exist_ok=True)
     copied: dict[Path, str] = {}
 
     def copy_asset(raw: str | None, base: Path) -> str | None:
@@ -140,20 +136,7 @@ def publish_submission(
                 f"An extraction asset is missing: {path}. Run extraction again."
             )
         if path not in copied:
-            with TemporaryDirectory(dir=assets) as staging:
-                temporary = Path(staging) / "asset"
-                digest = hashlib.sha256()
-                with path.open("rb") as source, temporary.open("xb") as output:
-                    while chunk := source.read(1024 * 1024):
-                        digest.update(chunk)
-                        output.write(chunk)
-                    output.flush()
-                    os.fsync(output.fileno())
-                name = digest.hexdigest() + path.suffix.lower()
-                destination = assets / name
-                if not destination.exists():
-                    temporary.replace(destination)
-            copied[path] = f"assets/{name}"
+            copied[path] = workspace.add_asset(path)
         return copied[path]
 
     version, questions = questions_for_submission(qa, document)

@@ -1,5 +1,6 @@
 import { Popover as PopoverPrimitive } from '@base-ui/react/popover';
 import { cn } from 'cn';
+import { usePortalContainer } from '@/lib/portal-container';
 
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;
@@ -8,19 +9,23 @@ export const PopoverTitle = PopoverPrimitive.Title;
 export function PopoverContent({
   className,
   align = 'end',
+  side,
   sideOffset = 8,
+  anchor,
   collisionAvoidance,
   ...props
 }: PopoverPrimitive.Popup.Props &
   Pick<
     PopoverPrimitive.Positioner.Props,
-    'align' | 'sideOffset' | 'collisionAvoidance'
+    'align' | 'side' | 'sideOffset' | 'anchor' | 'collisionAvoidance'
   >) {
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={usePortalContainer()}>
       <PopoverPrimitive.Positioner
         align={align}
+        side={side}
         sideOffset={sideOffset}
+        anchor={anchor}
         collisionAvoidance={collisionAvoidance}
         className="z-50"
       >
