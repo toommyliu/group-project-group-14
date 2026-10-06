@@ -278,12 +278,16 @@ def test_tool_status_is_none_when_the_version_call_fails(only_these_tools) -> No
 # -- installing Node.js and pnpm ----------------------------------------------
 
 
-def _fake_brew(bin_dir: Path, *, installs: bool = True, exit_code: int = 0) -> Path:
+def _fake_brew(
+    bin_dir: Path, *, installs: bool = True, exit_code: int = 0, skip: str = ""
+) -> Path:
     """A stand-in `brew` that records its arguments and, when `installs`,
-    leaves a runnable tool behind for each formula it was asked for."""
+    leaves a runnable tool behind for each formula it was asked for — except
+    `skip`, the one whose download "failed"."""
     create = (
         'for f in "$@"; do\n'
         '  [ "$f" = install ] && continue\n'
+        f'  [ "$f" = "{skip}" ] && continue\n'
         f'  printf \'#!/bin/sh\\necho 1.0\\n\' > "{bin_dir}/$f"\n'
         f'  /bin/chmod +x "{bin_dir}/$f"\n'
         "done\n"
@@ -378,3 +382,116 @@ def test_a_clean_homebrew_exit_that_left_no_tools_is_still_a_failure(
 
     with pytest.raises(WebBuildError, match="still cannot be run"):
         browser_app.install_tools(str(brew))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_a_half_finished_install_names_only_what_is_still_missing(
+    tmp_path, only_these_tools  # noqa: ANN001
+) -> None:
+    brew = _fake_brew(only_these_tools, exit_code=1, skip="node")
+    log = tmp_path / "install.log"
+
+    with pytest.raises(WebBuildError) as caught:
+        browser_app.install_tools(str(brew), log=log)
+
+    message = str(caught.value)
+    assert message.startswith("Node.js was not installed.")
+    assert "pnpm" not in message.split("`")[0]
+    assert str(log) in message
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_a_homebrew_that_complains_but_leaves_both_tools_working_has_not_failed(
+    tmp_path, only_these_tools  # noqa: ANN001
+) -> None:
+    brew = _fake_brew(only_these_tools, exit_code=1)
+
+    browser_app.install_tools(str(brew), log=tmp_path / "install.log")
+
+    status = browser_app.tool_status()
+    assert status.node is not None and status.pnpm is not None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_a_new_tool_that_fails_its_first_start_is_asked_again(
+    tmp_path, only_these_tools  # noqa: ANN001
+) -> None:
+    # What a just-installed `node` can do: nothing the first time it is run.
+    started = only_these_tools / "node-started"
+    flaky_node = (
+        f'if [ ! -e "{started}" ]; then : > "{started}"; exit 1; fi\\necho v22.22.2\\n'
+    )
+    brew = _tool(
+        only_these_tools,
+        "brew",
+        f'printf \'#!/bin/sh\\n{flaky_node}\' > "{only_these_tools}/node"\n'
+        f'printf \'#!/bin/sh\\necho 12.6.0\\n\' > "{only_these_tools}/pnpm"\n'
+        f'/bin/chmod +x "{only_these_tools}/node" "{only_these_tools}/pnpm"\n',
+    )
+
+    browser_app.install_tools(str(brew), log=tmp_path / "install.log")
+
+    assert started.exists()
+    assert browser_app.tool_status().node is not None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_the_check_after_an_install_waits_longer_than_the_panels(
+    tmp_path, only_these_tools, monkeypatch  # noqa: ANN001
+) -> None:
+    brew = _fake_brew(only_these_tools)
+    real = browser_app.tool_status
+    timeouts: list[float] = []
+
+    def _status(*, timeout: float = browser_app._TOOL_CHECK_SECONDS) -> ToolStatus:
+        timeouts.append(timeout)
+        return real(timeout=timeout)
+
+    monkeypatch.setattr(browser_app, "tool_status", _status)
+
+    browser_app.install_tools(str(brew), log=tmp_path / "install.log")
+
+    assert timeouts == [
+        browser_app._TOOL_CHECK_SECONDS,
+        browser_app._FIRST_RUN_CHECK_SECONDS,
+    ]
+    assert browser_app._FIRST_RUN_CHECK_SECONDS > browser_app._TOOL_CHECK_SECONDS
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_the_install_log_keeps_a_failed_try_after_the_retry_that_worked(
+    tmp_path, only_these_tools  # noqa: ANN001
+) -> None:
+    log = tmp_path / "install.log"
+    with pytest.raises(WebBuildError):
+        browser_app.install_tools(
+            str(_fake_brew(only_these_tools, exit_code=1, skip="node")), log=log
+        )
+
+    browser_app.install_tools(str(_fake_brew(only_these_tools)), log=log)
+
+    text = log.read_text()
+    assert "install node pnpm" in text and "failed (exit 1)" in text
+    assert "Node.js: cannot be run" in text
+    # The second press only asks for what the first one did not leave behind.
+    assert _brew_calls(only_these_tools) == ["install node pnpm", "install node"]
+    assert text.rstrip().endswith("pnpm: 1.0 (" + str(only_these_tools / "pnpm") + ")")
+
+
+def test_the_install_log_lives_beside_the_build_log() -> None:
+    assert browser_app.install_log_path().parent == browser_app.build_log_path().parent
+    assert browser_app.install_log_path() != browser_app.build_log_path()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
+def test_a_log_that_cannot_be_written_does_not_stop_the_install(
+    tmp_path, only_these_tools  # noqa: ANN001
+) -> None:
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("")
+
+    browser_app.install_tools(
+        str(_fake_brew(only_these_tools)), log=blocker / "install.log"
+    )
+
+    assert browser_app.tool_status().node is not None

@@ -11,7 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
 from opengrader.core import app_config
-from opengrader.core.app_config import AISettings, ResolvedAI, consent
+from opengrader.core.app_config import AISettings, ResolvedAI, consent, keystore
 from opengrader.core.ocr.math_ocr import (
     DEFAULT_MATH_BACKEND,
     MATH_BACKEND_NAMES,
@@ -443,11 +443,15 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         env = current.provider.api_key_env
         if not env:
             return ""
+        source = app_config.api_key_source(current.provider)
+        if source == "keystore":
+            return f"Saved in {keystore.status().name}."
         if current.api_key:
             return f"Found in {env}."
         return (
-            f"Not set. Opengrader never stores a key — put it in the {env} "
-            "environment variable and it is picked up from there."
+            "Not set. Paste one under AI providers → Set up a provider (it "
+            "is kept in this computer's password store, never in an "
+            f"Opengrader file), or put it in the {env} environment variable."
         )
 
 

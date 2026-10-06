@@ -309,7 +309,9 @@ packaging/
    fallback starts clean). A stale build is detected by comparing the web
    sources' fingerprint with the stamp `build_web` writes into `dist/` (file
    modification times for a hand-built `dist/` without a stamp). Builds started
-   from inside the app are logged to `web-build.log` beside the AI settings.
+   from inside the app are logged to `web-build.log` beside the AI settings,
+   and Homebrew installs of Node.js and pnpm to `tools-install.log` there
+   (appended, so a failed try is still readable after a retry).
 
 ### The `opengrader` command
 

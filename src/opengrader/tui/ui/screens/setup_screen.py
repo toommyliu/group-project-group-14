@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from dataclasses import replace
 
-from textual import work
+from textual import events, work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll, Horizontal
 from textual.message import Message
@@ -15,8 +15,6 @@ from textual.widgets import (
     Checkbox,
     Input,
     ProgressBar,
-    RadioButton,
-    RadioSet,
     Static,
     TextArea,
     Collapsible,
@@ -33,7 +31,16 @@ from opengrader.core.pipeline import (
     StagePlan,
     StageStatus,
     plan_pipeline,
+    refine_argv,
     run_pipeline,
+)
+from opengrader.core.pipeline_settings import (
+    FolderPipelineSettings,
+    MachinePipelineSettings,
+    load_folder_settings,
+    load_machine_settings,
+    save_folder_settings,
+    save_machine_settings,
 )
 from opengrader.core.policy import GradingPolicy, read_policy, write_policy
 from opengrader.core.submissions import ExtractionProgress
@@ -44,17 +51,16 @@ from opengrader.core.submissions.photo_intake import (
     import_photos,
 )
 from opengrader.cli.submission_extractor import run_cli as run_extractor_cli
-from opengrader.cli.submission_splitter import run_cli as run_splitter_cli
 from opengrader.cli.answer_key import run_cli as run_answer_key_cli
-from opengrader.cli.automated_grading import (
-    GradingProgress,
-    run_cli as run_grading_cli,
-)
 from opengrader.cli import run_command
 from opengrader.cli.qa_file import command as qa_file_command
 from opengrader.core.cloud_preflight import CloudConfirmationNeeded
 from opengrader.core.class_folder import (
     GRADING_ROLES,
+    ROLE_QA,
+    ROLE_ROSTER,
+    ROLE_SCAN,
+    ROLE_TEMPLATE,
     ClassFolderScan,
     describe_class_folder,
     scan_class_folder,
@@ -69,6 +75,7 @@ from opengrader.tui.ui.screens.course_grades_screen import CourseGradesScreen
 from opengrader.tui.ui.screens.handoff_screen import GraderPacketScreen, MergeScreen
 from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.provider_screen import ProviderScreen
+from opengrader.tui.ui.screens.page_order_screen import PageOrderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
 from opengrader.tui.ui.widgets.browser_health import BrowserHealth
@@ -272,18 +279,9 @@ class SetupScreen(Vertical):
         margin-left: 1;
     }
 
-    SetupScreen #split-pages {
-        width: 24;
-    }
-
-    SetupScreen #ext-parallel-options,
-    SetupScreen #ext-refine-options {
-        height: auto;
-    }
-
-    SetupScreen #ext-roster-area,
-    SetupScreen #ext-one-section,
-    SetupScreen #ext-many-section,
+    SetupScreen #pipe-parallel-options,
+    SetupScreen #pipe-region-map-area,
+    SetupScreen #pipe-rosters-area,
     SetupScreen #tmpl-bubble-note,
     SetupScreen #tmpl-batch-area,
     SetupScreen #tmpl-copies-area,
@@ -291,13 +289,7 @@ class SetupScreen(Vertical):
         height: auto;
     }
 
-    SetupScreen #ext-roster-mode {
-        width: 100%;
-        height: auto;
-        margin-top: 1;
-    }
-
-    SetupScreen #ext-roster-list {
+    SetupScreen #pipe-roster-list {
         height: 6;
         margin-top: 1;
     }
@@ -315,23 +307,13 @@ class SetupScreen(Vertical):
     """
 
     _PATH_FIELDS: dict[str, tuple[PathPickMode, str]] = {
-        "split-input": ("file", "Choose the scanned submissions PDF"),
-        "split-output": ("directory", "Choose the split output directory"),
-        "split-template-path": ("file", "Choose the blank template PDF"),
-        "ext-input": ("directory", "Choose the directory of split PDFs"),
-        "ext-output": ("directory", "Choose the extraction output directory"),
-        "ext-template-path": ("file", "Choose the blank template PDF"),
-        "ext-id-path": ("file", "Choose the roster/ID file"),
         "photo-input": ("any", "Choose the folder of photos (or one photo)"),
         "photo-output": ("directory", "Choose the directory for the per-student PDFs"),
         "region-pdf": ("file", "Choose the blank assignment PDF"),
         "region-map-path": ("any", "Choose an existing region map (.regions.json)"),
-        "ext-region-map-path": ("file", "Choose the region map (.regions.json)"),
         "ak-input": ("file", "Choose the answer-key source (.md/.txt/.pdf)"),
         "ak-output": ("any", "Choose the output QA markdown file"),
         "ak-template-path": ("file", "Choose the blank template PDF"),
-        "grade-solutions": ("file", "Choose the solutions markdown file"),
-        "grade-input": ("any", "Choose the submissions file or directory"),
         "tmpl-qa-input": ("file", "Choose the QA markdown file"),
         "tmpl-output": ("any", "Choose the output template PDF"),
         "policy-submissions": ("directory", "Choose the submissions directory"),
@@ -340,12 +322,12 @@ class SetupScreen(Vertical):
         "tui-class-folder": ("directory", "Choose the class folder"),
         "tui-qa-path": ("file", "Choose the QA markdown file"),
         "tui-sub-path": ("any", "Choose the submissions file or directory"),
-        "ext-qa": ("file", "Choose the QA markdown file"),
         "pipe-scan": ("any", "Choose the scanned bundle PDF, or a folder of split PDFs"),
         "pipe-qa": ("file", "Choose the answer-key markdown file"),
         "pipe-out": ("directory", "Choose the class folder"),
         "pipe-roster": ("file", "Choose the roster/ID file (.tsv)"),
         "pipe-template": ("file", "Choose the blank template PDF"),
+        "pipe-region-map": ("file", "Choose the region map (.regions.json)"),
     }
 
     class LaunchRequested(Message):
@@ -393,15 +375,16 @@ class SetupScreen(Vertical):
     def _auto_ollama_argv(self) -> list[str]:
         return ["--auto-ollama"] if self._ai().auto_start else []
 
-    def _jobs_argv(self) -> list[str] | None:
-        if not self.query_one("#ext-parallel", Checkbox).value:
-            return []
-        jobs = self.query_one("#ext-jobs", Input).value.strip()
-        if not jobs:
-            return []
-        if not jobs.isdigit() or int(jobs) < 1:
+    def _pipe_jobs(self) -> int | None:
+        """The parallel-jobs override: None for automatic, -1 for a bad entry."""
+        if not self.query_one("#pipe-parallel", Checkbox).value:
             return None
-        return ["--jobs", jobs]
+        jobs = self.query_one("#pipe-jobs", Input).value.strip()
+        if not jobs:
+            return None
+        if not jobs.isdigit() or int(jobs) < 1:
+            return -1
+        return int(jobs)
 
     @staticmethod
     def _app_version() -> str:
@@ -428,8 +411,8 @@ class SetupScreen(Vertical):
                     launch_card.border_title = "▸ Start grading"
                     yield Static(
                         "Choose a class folder (or a grader packet) — its answer "
-                        "key and submissions are found for you. New scans? Run "
-                        "the pipeline below first.",
+                        "key and submissions are found for you. New scans? "
+                        "Prepare the assignment below first.",
                         classes="card-hint",
                     )
                     # What is open right now; hidden while nothing is.
@@ -484,31 +467,31 @@ class SetupScreen(Vertical):
                     yield BrowserLauncher(id="browser-launcher")
 
                 yield Static(
-                    "[b]RUN THE WHOLE PIPELINE[/b]", id="pipeline-heading",
+                    "[b]PREPARE AN ASSIGNMENT[/b]", id="pipeline-heading",
                     classes="section-heading",
                 )
                 yield Static(
-                    "Start here. One scanned bundle in, graded work out: the "
-                    "scan is checked, split, extracted and auto-graded in "
-                    "order, and you never hand the output of one step to the "
-                    "next. Re-run it safely — a second run reuses whatever "
-                    "still stands.",
+                    "New scans start here. One scanned bundle in, graded work "
+                    "out: the scan is checked, split, extracted and auto-graded "
+                    "in order. Run it again any time — after an interruption, a "
+                    "changed answer key, or late submissions — and it works out "
+                    "what is left to do and reuses the rest.",
                     id="pipeline-caption",
                     classes="section-caption",
                 )
 
                 with Collapsible(
-                    title="Run every step — one scan in, graded work out",
+                    title="Run it — one scan in, graded work out",
                     id="section-pipeline",
                     collapsed=True,
                 ):
                     yield Static(
-                        "Choose the class folder and press Scan: the scanned "
-                        "bundle, answer key, roster and blank template inside "
-                        "it are filled in below, and split/, submissions/ and "
-                        "the run record are built there too. Check what it "
-                        "found, change anything it got wrong, then press Run. "
-                        "Preview shows the plan without writing anything.",
+                        "Choose the class folder and press Run Pipeline: the "
+                        "scanned bundle, answer key, roster and blank template "
+                        "inside it are found for you, and split/, submissions/ "
+                        "and the run record are built there too. Preview shows "
+                        "the plan without writing anything. What you set here is "
+                        "remembered for this folder.",
                         classes="card-hint",
                     )
                     yield self._field_label(
@@ -516,99 +499,216 @@ class SetupScreen(Vertical):
                         "holds the scan, answer key and roster; results are built here",
                     )
                     yield self._path_row("Path to the class folder…", "pipe-out")
-                    yield self._card_actions(
-                        Button("Scan folder", id="pipe-scan-folder", compact=True)
-                    )
                     yield Static(
                         "",
                         id="pipe-folder-summary",
                         classes="card-hint hidden",
                         markup=False,
                     )
-                    yield self._field_label(
-                        "Scanned bundle",
-                        "bulk-scan PDF, or a folder of already-split PDFs",
-                    )
-                    yield self._path_row(
-                        "Path to the scanned PDF or split-PDF folder…", "pipe-scan"
-                    )
-                    yield self._field_label(
-                        "Answer key",
-                        "optional — without it, the run stops after extraction",
-                    )
-                    yield self._path_row("Path to QA markdown file…", "pipe-qa")
-
-                    yield Checkbox(
-                        "Match student names against a roster", id="pipe-use-roster"
-                    )
-                    yield self._path_row(
-                        "Path to roster file (.tsv)…", "pipe-roster", hidden=True
+                    yield Static(
+                        "No answer key in this folder yet. [b]Create answer "
+                        "key[/b] in Helper Tools below writes one from a "
+                        "plain-text assignment or a scanned key.",
+                        id="pipe-qa-hint",
+                        classes="card-hint hidden",
                     )
 
-                    yield Checkbox(
-                        "Align with a blank template PDF", id="pipe-use-template"
-                    )
-                    yield self._path_row(
-                        "Path to blank template PDF…", "pipe-template", hidden=True
-                    )
+                    with Collapsible(
+                        title="Settings — pages, roster, template, how it runs",
+                        id="pipe-settings",
+                        collapsed=True,
+                    ):
+                        yield self._field_label(
+                            "Pages per submission", "leave blank to auto-detect"
+                        )
+                        yield Input(
+                            placeholder="e.g. 6", id="pipe-pages"
+                        )
+                        yield Static(
+                            "This is also what lets the scan pre-flight catch a "
+                            "wrong page count or a swapped pair before anything is "
+                            "graded — without it, that check can't run at all.",
+                            classes="card-hint",
+                        )
+
+                        yield Checkbox(
+                            "Match student names against a roster", id="pipe-use-roster"
+                        )
+                        yield self._path_row(
+                            "Path to roster file (.tsv)…", "pipe-roster", hidden=True
+                        )
+
+                        yield Checkbox(
+                            "Align with a blank template PDF", id="pipe-use-template"
+                        )
+                        yield self._path_row(
+                            "Path to blank template PDF…", "pipe-template", hidden=True
+                        )
+
+                        yield Checkbox(
+                            "Start grading as submissions arrive",
+                            id="pipe-grade-asap",
+                            value=True,
+                        )
+                        yield Static(
+                            "On: opens the grading workspace the moment the first "
+                            "submission is ready, while the rest keep extracting "
+                            "behind it. Off: waits for the whole run to finish "
+                            "first. Either way, opening "
+                            "automatically needs an answer key.",
+                            classes="card-hint",
+                        )
+
+                        yield Checkbox("Sort out-of-order pages", id="pipe-reorder")
+                        yield Static(
+                            "Off, pages are never moved without asking: when a "
+                            "submission looks out of order the run pauses before "
+                            "extraction and you choose which to sort, keep them as "
+                            "scanned, or stop and rearrange the PDFs yourself. Tick "
+                            "this to sort them without being asked. With a blank "
+                            "template above, the template supplies the order.",
+                            classes="card-hint",
+                        )
+
+                        yield Checkbox(
+                            "Draft missing rubric items with AI first",
+                            id="pipe-draft-rubrics",
+                        )
+                        yield Static(
+                            "Before auto-grading, the AI drafts partial-credit "
+                            "rubric items for written questions that have none and "
+                            "writes them into the answer key. The run then stops "
+                            "and opens grading so you can check them (press e on a "
+                            "question); press Y there to have the AI grade with "
+                            "them, or run the pipeline again.",
+                            classes="card-hint",
+                        )
+
+                    with Collapsible(
+                        title="Advanced settings — overrides, your own assignment, sections, speed",
+                        id="pipe-advanced",
+                        collapsed=True,
+                    ):
+                        yield Static(
+                            "[b]Override what was found[/b] — only when the "
+                            "folder holds more than one candidate, or the scan "
+                            "or answer key lives somewhere else. Left blank, "
+                            "the class folder's own files are used.",
+                            classes="card-hint",
+                        )
+                        yield self._field_label(
+                            "Scanned bundle",
+                            "bulk-scan PDF, or a folder of already-split PDFs",
+                        )
+                        yield self._path_row(
+                            "Path to the scanned PDF or split-PDF folder…", "pipe-scan"
+                        )
+                        yield self._field_label(
+                            "Answer key",
+                            "optional — without it, the run stops after extraction",
+                        )
+                        yield self._path_row("Path to QA markdown file…", "pipe-qa")
+
+                        yield Checkbox(
+                            "Use a region map (your own assignment)",
+                            id="pipe-use-region-map",
+                        )
+                        with Vertical(id="pipe-region-map-area", classes="hidden"):
+                            yield self._path_row(
+                                "Path to the region map (.regions.json)…",
+                                "pipe-region-map",
+                            )
+                            yield Static(
+                                "For an assignment Opengrader didn't generate: the "
+                                "boxes you drew on a blank copy are where the answers "
+                                "are, so it needs no text layer of its own. Draw or fix "
+                                "one with [b]Draw answer regions[/b] in Helper Tools "
+                                "below. This replaces the blank template in Settings — they "
+                                "both answer the same question, so only one is used.",
+                                classes="card-hint",
+                            )
+
+                        yield Checkbox(
+                            "This stack mixes several class sections",
+                            id="pipe-many-rosters",
+                        )
+                        with Vertical(id="pipe-rosters-area", classes="hidden"):
+                            yield Static(
+                                "One roster per line, in the form "
+                                "[b]path/to/roster.tsv=SectionName[/b]. The "
+                                "'=SectionName' is optional — omit it to name the "
+                                "section after the roster filename. Each student is "
+                                "routed to the section whose roster holds their ID; "
+                                "anyone in no roster is tagged 'unassigned'. These "
+                                "are used instead of the single roster in Settings.",
+                                classes="card-hint",
+                            )
+                            yield TextArea(id="pipe-roster-list")
+                            yield self._card_actions(
+                                Button(
+                                    "Browse & add roster",
+                                    id="browse-pipe-roster-list",
+                                    classes="browse-button",
+                                    compact=True,
+                                )
+                            )
+
+                        yield Checkbox(
+                            "Set how many to extract at once",
+                            id="pipe-parallel",
+                        )
+                        yield Static(
+                            "Extraction already runs on several CPU cores at once. "
+                            "Left unchecked, Opengrader picks a safe number for "
+                            "this machine — tick this only to override it.",
+                            classes="card-hint",
+                        )
+                        with Vertical(id="pipe-parallel-options", classes="hidden"):
+                            yield self._field_label(
+                                "Parallel jobs",
+                                f"blank = automatic (this machine has {_CPU_COUNT} cores)",
+                            )
+                            yield Input(
+                                placeholder=f"1–{_CPU_COUNT}",
+                                id="pipe-jobs",
+                                classes="path-input",
+                            )
+                            yield Static(
+                                "Lower this if the machine runs short on memory during "
+                                "a big batch, or set 1 to extract one submission at a "
+                                "time. Going higher than the automatic number rarely "
+                                "helps: with the vision model on, the limit is how many "
+                                "requests Ollama serves at once, not the CPU.",
+                                classes="card-hint",
+                            )
+
+                        yield Checkbox(
+                            "Grade it anyway (ignore scan warnings)", id="pipe-force"
+                        )
+                        yield Static(
+                            "The scan pre-flight can stop the run over a "
+                            "high-severity finding — pages upside down, wildly out "
+                            "of order, unreadable. Tick this only after reading "
+                            "what it found (it still gets reported) and deciding "
+                            "to grade the scan as it is.",
+                            classes="card-hint",
+                        )
+
+                        yield Checkbox(
+                            "Start over (ignore the earlier run)", id="pipe-fresh"
+                        )
+                        yield Static(
+                            "A run normally reuses every stage whose inputs haven't "
+                            "changed. Tick this to check and split the scan again "
+                            "and auto-grade again regardless. Submissions already "
+                            "extracted from an unchanged PDF are still kept, so "
+                            "grades you have entered are never extracted over.",
+                            classes="card-hint",
+                        )
 
                     yield Static(
                         self._ai_status_text("pipe"),
                         id="pipe-ai-status",
-                        classes="card-hint",
-                    )
-
-                    yield self._field_label(
-                        "Pages per submission", "leave blank to auto-detect"
-                    )
-                    yield Input(
-                        placeholder="e.g. 6 (blank = auto-detect)", id="pipe-pages"
-                    )
-                    yield Static(
-                        "This is also what lets the scan pre-flight catch a "
-                        "wrong page count or a swapped pair before anything is "
-                        "graded — without it, that check can't run at all.",
-                        classes="card-hint",
-                    )
-
-                    yield Checkbox(
-                        "Start grading as submissions arrive",
-                        id="pipe-grade-asap",
-                        value=True,
-                    )
-                    yield Static(
-                        "On: opens the grading workspace the moment the first "
-                        "submission is ready, while the rest keep extracting "
-                        "behind it — the same background extraction the "
-                        "numbered Extract step offers. Off: waits for the "
-                        "whole run to finish first. Either way, opening "
-                        "automatically needs the answer key above.",
-                        classes="card-hint",
-                    )
-
-                    yield Checkbox(
-                        "Grade it anyway (ignore scan warnings)", id="pipe-force"
-                    )
-                    yield Static(
-                        "The scan pre-flight can stop the run over a "
-                        "high-severity finding — pages upside down, wildly out "
-                        "of order, unreadable. Tick this only after reading "
-                        "what it found (it still gets reported) and deciding "
-                        "to grade the scan as it is.",
-                        classes="card-hint",
-                    )
-
-                    yield Checkbox(
-                        "Draft missing rubric items with AI first",
-                        id="pipe-draft-rubrics",
-                    )
-                    yield Static(
-                        "Before auto-grading, the AI drafts partial-credit "
-                        "rubric items for written questions that have none and "
-                        "writes them into the answer key. The run then stops "
-                        "and opens grading so you can check them (press e on a "
-                        "question); press Y there to have the AI grade with "
-                        "them, or run the pipeline again.",
                         classes="card-hint",
                     )
 
@@ -628,348 +728,6 @@ class SetupScreen(Vertical):
                         )
                         yield Static("", id="pipe-progress-status", classes="card-hint")
                         yield Static("", id="pipe-stage-log", classes="card-hint")
-
-                yield Static(
-                    "[b]PREPARE AN ASSIGNMENT[/b]", id="steps-heading",
-                    classes="section-heading",
-                )
-                yield Static(
-                    "The same work as above, one stage at a time — for when "
-                    "that is what you actually want: a class that arrives as "
-                    "photos, a scan you split last week, an answer key still "
-                    "to write, or a re-run of just one stage.",
-                    id="steps-caption",
-                    classes="section-caption",
-                )
-
-                with Collapsible(
-                    title="1 · Split — one scanned bundle into per-student PDFs",
-                    id="section-splitter",
-                    collapsed=True,
-                ):
-                    yield self._field_label("Scanned bundle", "PDF from the bulk scanner")
-                    yield self._path_row("Path to scanned PDF…", "split-input")
-                    yield self._field_label("Output directory")
-                    yield self._path_row("Where to write per-student PDFs…", "split-output")
-                    yield self._field_label(
-                        "Expected pages per submission", "optional when detecting boundaries"
-                    )
-                    yield Input(placeholder="e.g. 3", id="split-pages")
-                    yield Checkbox("Detect submission boundaries", value=True, id="split-detect-boundaries")
-                    yield Static(
-                        "Detect boundaries from page numbers and Name/ID headers. "
-                        "The expected count flags incomplete scans. Turn off detection "
-                        "to split into fixed groups of that size.",
-                        classes="card-hint",
-                    )
-                    # Checkbox labels cannot wrap.
-                    yield Checkbox(
-                        "Check the scan before splitting",
-                        id="split-scan-check",
-                        value=True,
-                    )
-                    yield Static(
-                        "Reads every page once before anything is cut up: turns "
-                        "upside-down sheets upright, puts out-of-order pages back "
-                        "in order, and reports blanks, low resolution and clipped "
-                        "margins. Corrections go to a copy — your original scan is "
-                        "never modified. Pages are re-sorted only where their page "
-                        "numbers are certain (QR codes, a PDF text layer, or a "
-                        "blank template); otherwise it reports what it saw and "
-                        "leaves them alone, since a misread number would move a "
-                        "page that was already right. Page order needs the page "
-                        "count or template above to know how long a submission is.",
-                        classes="card-hint",
-                    )
-                    yield Checkbox("Always reorder pages", id="split-reorder")
-                    yield Static(
-                        "Sorts every submission's pages whether or not the check "
-                        "above found a problem. This is the answer to the case it "
-                        "deliberately declines: page numbers legible enough to "
-                        "sort by, but only by reading the scan. Order is taken "
-                        "from the text layer first, then QR codes, then Tesseract "
-                        "OCR, then the vision model.",
-                        classes="card-hint",
-                    )
-                    yield Checkbox("Align with a blank template PDF", id="split-use-template")
-                    yield self._path_row(
-                        "Path to blank template PDF…", "split-template-path", hidden=True
-                    )
-                    yield Checkbox(
-                        "Submissions have extra work pages",
-                        id="split-extra-pages",
-                    )
-                    yield Static(
-                        "Moves any page that can't be matched to the template "
-                        "sequence — scratch work, 'continued on back' — to the end, "
-                        "so extraction handles the graded pages first. They stay "
-                        "reachable while grading with w on the grade screen.",
-                        classes="card-hint",
-                    )
-                    yield Static(
-                        self._ai_status_text("split"),
-                        id="split-ai-status",
-                        classes="card-hint",
-                    )
-                    yield self._card_actions(
-                        Button("Run Splitter", id="run-splitter", variant="primary", compact=True)
-                    )
-                    with Vertical(id="split-progress", classes="hidden"):
-                        yield Static("", id="split-progress-status", classes="card-hint")
-
-                with Collapsible(
-                    title="2 · Extract — read answers with OCR + vision model",
-                    id="section-extractor",
-                    collapsed=True,
-                ):
-                    yield self._field_label("Split PDFs", "directory from step 1")
-                    yield self._path_row("Path to split PDFs directory…", "ext-input")
-                    yield self._field_label("Output directory")
-                    yield self._path_row("Where to write .submission.md files…", "ext-output")
-                    yield Checkbox("Align with a blank template PDF", id="ext-use-template")
-                    yield self._path_row(
-                        "Path to blank template PDF…", "ext-template-path", hidden=True
-                    )
-                    yield Checkbox(
-                        "Use a region map (your own assignment)",
-                        id="ext-use-region-map",
-                    )
-                    with Vertical(id="ext-region-map-area", classes="hidden"):
-                        yield self._path_row(
-                            "Path to the region map (.regions.json)…",
-                            "ext-region-map-path",
-                        )
-                        yield Static(
-                            "For an assignment Opengrader didn't generate: the "
-                            "boxes you drew on a blank copy are where the answers "
-                            "are, so it needs no text layer of its own. Draw or fix "
-                            "one with [b]Draw answer regions[/b] in Helper Tools "
-                            "below. "
-                            "This replaces the blank template above — they both "
-                            "answer the same question, so only one is used.",
-                            classes="card-hint",
-                        )
-                    yield Checkbox("Match student names against a roster", id="ext-use-id")
-                    with Vertical(id="ext-roster-area", classes="hidden"):
-                        yield Static(
-                            "One assignment, multiple class sections? Choose how "
-                            "these PDFs are organized so each student is tagged "
-                            "with their section.",
-                            classes="card-hint",
-                        )
-                        with RadioSet(id="ext-roster-mode"):
-                            yield RadioButton(
-                                "These PDFs are all one section",
-                                value=True,
-                                id="ext-mode-one",
-                            )
-                            yield RadioButton(
-                                "These PDFs contain multiple sections (route by roster)",
-                                id="ext-mode-many",
-                            )
-                        with Vertical(id="ext-one-section"):
-                            yield self._path_row(
-                                "Path to roster file (.tsv)…", "ext-id-path"
-                            )
-                            yield self._field_label(
-                                "Section name", "optional — defaults to the roster filename"
-                            )
-                            yield Input(
-                                placeholder="e.g. SectionA (leave blank to use the filename)",
-                                id="ext-section-name",
-                                classes="path-input",
-                            )
-                        with Vertical(id="ext-many-section", classes="hidden"):
-                            yield Static(
-                                "One roster per line, in the form "
-                                "[b]path/to/roster.tsv=SectionName[/b]. The "
-                                "'=SectionName' is optional — omit it to name the "
-                                "section after the roster filename. Use Browse to "
-                                "add a roster, then type '=SectionName' after it if "
-                                "you want to override the name. Each student is "
-                                "routed to the section whose roster holds their ID; "
-                                "anyone in no roster is tagged 'unassigned'.",
-                                classes="card-hint",
-                            )
-                            yield TextArea(id="ext-roster-list")
-                            yield self._card_actions(
-                                Button(
-                                    "Browse & add roster",
-                                    id="browse-ext-roster-list",
-                                    classes="browse-button",
-                                    compact=True,
-                                )
-                            )
-                    yield Static(
-                        self._ai_status_text("ext"),
-                        id="ext-ai-status",
-                        classes="card-hint",
-                    )
-                    yield Checkbox(
-                        "Set how many to extract at once",
-                        id="ext-parallel",
-                    )
-                    yield Static(
-                        "Extraction already runs on several CPU cores at once, "
-                        "which is typically several times faster on a full class "
-                        "stack. Left unchecked, Opengrader picks a safe number "
-                        "for this machine — tick this only to override it.",
-                        classes="card-hint",
-                    )
-                    with Vertical(id="ext-parallel-options", classes="hidden"):
-                        yield self._field_label(
-                            "Parallel jobs",
-                            f"blank = automatic (this machine has {_CPU_COUNT} cores)",
-                        )
-                        yield Input(
-                            placeholder=f"1–{_CPU_COUNT}",
-                            id="ext-jobs",
-                            classes="path-input",
-                        )
-                        yield Static(
-                            "Lower this if the machine runs short on memory during "
-                            "a big batch, or set 1 to extract one submission at a "
-                            "time. Going higher than the automatic number rarely "
-                            "helps: with the vision model on, the limit is how many "
-                            "requests Ollama serves at once, not the CPU.",
-                            classes="card-hint",
-                        )
-                    yield Checkbox(
-                        "Resume: skip submissions already extracted",
-                        id="ext-resume",
-                    )
-                    yield Static(
-                        "Re-uses an earlier run's work when the scan, the settings, "
-                        "and the output files are all unchanged, so an interrupted "
-                        "run picks up where it stopped instead of starting over. "
-                        "Grading already entered is never re-extracted over.",
-                        classes="card-hint",
-                    )
-                    yield Checkbox(
-                        "Re-read only the unclear answers",
-                        id="ext-refine",
-                    )
-                    yield Static(
-                        "A second pass over an extraction you already have: only "
-                        "the submissions holding a low-confidence transcription "
-                        "are re-read, and the new reading is kept only where it "
-                        "beats the old one. Grades, comments and every answer "
-                        "that was already clear are left alone. Give it something "
-                        "the first pass didn't have — a higher DPI is the cheapest "
-                        "thing that helps.",
-                        classes="card-hint",
-                    )
-                    with Vertical(id="ext-refine-options", classes="hidden"):
-                        yield self._field_label(
-                            "Re-read at DPI",
-                            "blank = the same resolution as the first pass",
-                        )
-                        yield Input(
-                            placeholder="e.g. 450",
-                            id="ext-refine-dpi",
-                            classes="path-input",
-                        )
-                    yield Checkbox(
-                        "Lock anonymous grading for TAs",
-                        id="ext-lock-anon",
-                    )
-                    yield Static(
-                        "Graders opening this folder can't reveal names or view "
-                        "grade history. You can change this later under "
-                        "\"Set grading policy\".",
-                        classes="card-hint",
-                    )
-                    yield self._card_actions(
-                        Button("Run Extractor", id="run-extractor", variant="primary", compact=True)
-                    )
-                    with Vertical(id="ext-progress", classes="hidden"):
-                        yield ProgressBar(
-                            id="ext-progress-bar", total=None, show_eta=True
-                        )
-                        yield Static("", id="ext-progress-status", classes="card-hint")
-                        yield Static(
-                            "The first submission is gradeable the moment it "
-                            "lands — no need to wait for the whole batch.",
-                            classes="card-hint",
-                        )
-                        yield self._field_label(
-                            "Answer key", "needed to grade while extraction runs"
-                        )
-                        yield self._path_row("Path to QA markdown file…", "ext-qa")
-                        yield self._card_actions(
-                            Button(
-                                "Grade what's ready →",
-                                id="grade-while-extracting",
-                                variant="success",
-                                compact=True,
-                            )
-                        )
-
-                with Collapsible(
-                    title="3 · Create answer key — from a plain-text assignment or a scanned PDF",
-                    id="section-answer-key",
-                    collapsed=True,
-                ):
-                    yield self._field_label(
-                        "Answer-key source",
-                        "a plain-text assignment (.md/.txt) or a scanned answer-key PDF",
-                    )
-                    yield self._path_row("Path to answer-key source…", "ak-input")
-                    yield self._field_label("Output QA markdown")
-                    yield self._path_row("Where to write the answer key…", "ak-output")
-                    yield self._field_label("Title", "optional")
-                    yield Input(placeholder="e.g. CS 146 Quiz 1", id="ak-title")
-                    yield Checkbox(
-                        "Scanned PDF: align with a blank template", id="ak-use-template"
-                    )
-                    yield self._path_row(
-                        "Path to blank template PDF…", "ak-template-path", hidden=True
-                    )
-                    yield Static(
-                        self._ai_status_text("ak"),
-                        id="ak-ai-status",
-                        classes="card-hint",
-                    )
-                    yield Static(
-                        "Plain-text files are read exactly. A born-digital PDF is "
-                        "read directly from its text layer (fast, exact); a scanned "
-                        "or image PDF is read with OCR, and with the handwriting "
-                        "model from [b]AI setup[/b] when it is turned on, into a "
-                        "draft to review. New to the format? "
-                        "Press [b]t[/b] for copy-paste templates.",
-                        classes="card-hint",
-                    )
-                    yield self._card_actions(
-                        Button("Create answer key", id="run-answer-key", variant="primary", compact=True)
-                    )
-                    with Vertical(id="ak-progress", classes="hidden"):
-                        yield ProgressBar(
-                            id="ak-progress-bar", total=None, show_eta=True
-                        )
-                        yield Static("", id="ak-progress-status", classes="card-hint")
-
-                with Collapsible(
-                    title="4 · Auto-grade — score exact matches before manual review",
-                    id="section-grading",
-                    collapsed=True,
-                ):
-                    yield self._field_label("Solutions", "QA markdown with correct answers")
-                    yield self._path_row("Path to solutions markdown…", "grade-solutions")
-                    yield self._field_label("Submissions", "directory from step 2")
-                    yield self._path_row("Path to submissions directory…", "grade-input")
-                    yield Static(
-                        self._ai_status_text("grade"),
-                        id="grade-ai-status",
-                        classes="card-hint",
-                    )
-                    yield self._card_actions(
-                        Button("Run Auto-Grader", id="run-grading", variant="primary", compact=True)
-                    )
-                    with Vertical(id="autograde-progress", classes="hidden"):
-                        yield ProgressBar(
-                            id="autograde-progress-bar", total=None, show_eta=True
-                        )
-                        yield Static("", id="autograde-progress-status", classes="card-hint")
 
                 yield Static(
                     "[b]HELPER TOOLS[/b]", id="helpers-heading",
@@ -1028,8 +786,8 @@ class SetupScreen(Vertical):
                         classes="card-hint",
                     )
                     yield Static(
-                        "What you save here applies everywhere: the steps "
-                        "above, the one-shot run in step 0, and the same "
+                        "What you save here applies everywhere: Prepare an "
+                        "assignment above, the tools below, and the same "
                         "commands run from a terminal. Test connection says "
                         "whether the models are actually there before a long "
                         "run finds out for you.",
@@ -1057,10 +815,12 @@ class SetupScreen(Vertical):
                     yield Static(
                         "Opengrader's AI runs on this computer unless you add "
                         "another service here: a small file naming where the "
-                        "service is, which models to ask for, and which "
-                        "environment variable holds your key. The key itself "
-                        "is never written down. Once added, a provider appears "
-                        "in AI setup, where you choose it.",
+                        "service is and which models to ask for. 'Set up a "
+                        "provider' walks you through it: pick the service, "
+                        "paste its key, test it. The key is kept in this "
+                        "computer's password store, never in an Opengrader "
+                        "file. Once added, a provider appears in AI setup, "
+                        "where you choose it.",
                         classes="card-hint",
                     )
                     yield Static(
@@ -1128,10 +888,11 @@ class SetupScreen(Vertical):
                         classes="card-hint",
                     )
                     yield Static(
-                        "What comes out is what step 1 above produces, so carry "
-                        "on at [b]2 · Extract[/b] with this output directory as "
-                        "its input. iPhone photos in HEIC format need one extra "
-                        "install; if yours are, the exact command is named.",
+                        "What comes out is a folder of per-student PDFs, which "
+                        "[b]Prepare an assignment[/b] above takes as its scanned "
+                        "bundle — it is filled in there for you. iPhone photos "
+                        "in HEIC format need one extra install; if yours are, "
+                        "the exact command is named.",
                         classes="card-hint",
                     )
                     yield self._field_label(
@@ -1225,6 +986,49 @@ class SetupScreen(Vertical):
                     )
 
                 with Collapsible(
+                    title="Create answer key — from a plain-text assignment or a scanned PDF",
+                    id="section-answer-key",
+                    collapsed=True,
+                ):
+                    yield self._field_label(
+                        "Answer-key source",
+                        "a plain-text assignment (.md/.txt) or a scanned answer-key PDF",
+                    )
+                    yield self._path_row("Path to answer-key source…", "ak-input")
+                    yield self._field_label("Output QA markdown")
+                    yield self._path_row("Where to write the answer key…", "ak-output")
+                    yield self._field_label("Title", "optional")
+                    yield Input(placeholder="e.g. CS 146 Quiz 1", id="ak-title")
+                    yield Checkbox(
+                        "Scanned PDF: align with a blank template", id="ak-use-template"
+                    )
+                    yield self._path_row(
+                        "Path to blank template PDF…", "ak-template-path", hidden=True
+                    )
+                    yield Static(
+                        self._ai_status_text("ak"),
+                        id="ak-ai-status",
+                        classes="card-hint",
+                    )
+                    yield Static(
+                        "Plain-text files are read exactly. A born-digital PDF is "
+                        "read directly from its text layer (fast, exact); a scanned "
+                        "or image PDF is read with OCR, and with the handwriting "
+                        "model from [b]AI setup[/b] when it is turned on, into a "
+                        "draft to review. New to the format? "
+                        "Press [b]t[/b] for copy-paste templates.",
+                        classes="card-hint",
+                    )
+                    yield self._card_actions(
+                        Button("Create answer key", id="run-answer-key", variant="primary", compact=True)
+                    )
+                    with Vertical(id="ak-progress", classes="hidden"):
+                        yield ProgressBar(
+                            id="ak-progress-bar", total=None, show_eta=True
+                        )
+                        yield Static("", id="ak-progress-status", classes="card-hint")
+
+                with Collapsible(
                     title="Generate template — printable blank PDF from a QA file",
                     id="section-template",
                     collapsed=True,
@@ -1307,6 +1111,55 @@ class SetupScreen(Vertical):
                     yield self._card_actions(
                         Button("Generate Template", id="run-template", variant="primary", compact=True)
                     )
+
+                with Collapsible(
+                    title="Re-read unclear answers — a second pass over what was extracted",
+                    id="section-refine",
+                    collapsed=True,
+                ):
+                    yield Static(
+                        "For a class already prepared above: only the "
+                        "submissions holding a low-confidence transcription are "
+                        "re-read, and the new reading is kept only where it "
+                        "beats the old one. Grades, comments and every answer "
+                        "that was already clear are left alone. Give it "
+                        "something the first pass didn't have — a higher DPI is "
+                        "the cheapest thing that helps.",
+                        classes="card-hint",
+                    )
+                    yield Static(
+                        "It reads the class folder, template, region map and "
+                        "rosters chosen in [b]Prepare an assignment[/b] above, "
+                        "so the second pass crops exactly where the first did.",
+                        classes="card-hint",
+                    )
+                    yield self._field_label(
+                        "Re-read at DPI",
+                        "blank = the same resolution as the first pass",
+                    )
+                    yield Input(
+                        placeholder="e.g. 450",
+                        id="refine-dpi",
+                        classes="path-input",
+                    )
+                    yield Static(
+                        self._ai_status_text("ext"),
+                        id="refine-ai-status",
+                        classes="card-hint",
+                    )
+                    yield self._card_actions(
+                        Button(
+                            "Re-read unclear answers",
+                            id="run-refine",
+                            variant="primary",
+                            compact=True,
+                        )
+                    )
+                    with Vertical(id="refine-progress", classes="hidden"):
+                        yield ProgressBar(
+                            id="refine-progress-bar", total=None, show_eta=True
+                        )
+                        yield Static("", id="refine-progress-status", classes="card-hint")
 
                 with Collapsible(
                     title="Calibrate AI grading — how far can you trust the model?",
@@ -1489,43 +1342,36 @@ class SetupScreen(Vertical):
                         )
                     )
 
+    def on_mount(self) -> None:
+        self._restore_machine_settings()
+
+    def on_descendant_blur(self, event: events.DescendantBlur) -> None:
+        # Leaving the class-folder box counts as choosing that folder.
+        if event.widget.id == "pipe-out":
+            self._load_class_folder(only_if_changed=True)
+
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
-        if event.checkbox.id == "split-use-template":
-            self.query_one("#split-template-path-row").set_class(not event.value, "hidden")
-        elif event.checkbox.id == "ext-use-template":
-            self.query_one("#ext-template-path-row").set_class(not event.value, "hidden")
-            if event.value:
-                self.query_one("#ext-use-region-map", Checkbox).value = False
-        elif event.checkbox.id == "ext-use-region-map":
-            self.query_one("#ext-region-map-area").set_class(not event.value, "hidden")
-            if event.value:
-                self.query_one("#ext-use-template", Checkbox).value = False
-        elif event.checkbox.id == "ext-use-id":
-            self.query_one("#ext-roster-area").set_class(not event.value, "hidden")
-        elif event.checkbox.id in ("tmpl-qr", "tmpl-bubble-sheet", "tmpl-shuffle"):
+        if event.checkbox.id in ("tmpl-qr", "tmpl-bubble-sheet", "tmpl-shuffle"):
             self._sync_template_options()
         elif event.checkbox.id == "ak-use-template":
             self.query_one("#ak-template-path-row").set_class(not event.value, "hidden")
-        elif event.checkbox.id == "ext-parallel":
-            self.query_one("#ext-parallel-options").set_class(not event.value, "hidden")
-        elif event.checkbox.id == "ext-refine":
-            self.query_one("#ext-refine-options").set_class(not event.value, "hidden")
-            if event.value:
-                self.query_one("#ext-resume", Checkbox).value = False
-        elif event.checkbox.id == "ext-resume" and event.value:
-            self.query_one("#ext-refine", Checkbox).value = False
         elif event.checkbox.id == "pipe-use-roster":
             self.query_one("#pipe-roster-row").set_class(not event.value, "hidden")
         elif event.checkbox.id == "pipe-use-template":
             self.query_one("#pipe-template-row").set_class(not event.value, "hidden")
+            # A template and a region map answer the same question.
+            if event.value:
+                self.query_one("#pipe-use-region-map", Checkbox).value = False
+        elif event.checkbox.id == "pipe-use-region-map":
+            self.query_one("#pipe-region-map-area").set_class(not event.value, "hidden")
+            if event.value:
+                self.query_one("#pipe-use-template", Checkbox).value = False
+        elif event.checkbox.id == "pipe-many-rosters":
+            self.query_one("#pipe-rosters-area").set_class(not event.value, "hidden")
+        elif event.checkbox.id == "pipe-parallel":
+            self.query_one("#pipe-parallel-options").set_class(not event.value, "hidden")
         elif event.checkbox.id == "browser-enabled":
             self._set_browser_enabled(event.value)
-
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        if event.radio_set.id == "ext-roster-mode":
-            one_section = event.pressed.id == "ext-mode-one"
-            self.query_one("#ext-one-section").set_class(not one_section, "hidden")
-            self.query_one("#ext-many-section").set_class(one_section, "hidden")
 
     def _open_path_picker(self, input_id: str) -> None:
         mode, title = self._PATH_FIELDS[input_id]
@@ -1548,7 +1394,7 @@ class SetupScreen(Vertical):
             if input_id == "policy-submissions":
                 self._sync_policy_checkbox()
             elif input_id == "pipe-out":
-                self._scan_class_folder()
+                self._load_class_folder()
             elif input_id == "tui-class-folder":
                 self._scan_launch_folder()
 
@@ -1558,7 +1404,7 @@ class SetupScreen(Vertical):
         )
 
     def _append_roster_path(self) -> None:
-        text_area = self.query_one("#ext-roster-list", TextArea)
+        text_area = self.query_one("#pipe-roster-list", TextArea)
 
         def _apply(path: Path | None) -> None:
             if path is None:
@@ -1575,7 +1421,7 @@ class SetupScreen(Vertical):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
-        if button_id == "browse-ext-roster-list":
+        if button_id == "browse-pipe-roster-list":
             event.stop()
             self._append_roster_path()
             return
@@ -1589,16 +1435,10 @@ class SetupScreen(Vertical):
             self._launch_grading()
         elif event.button.id == "browser-open-button":
             self._open_in_browser()
-        elif event.button.id == "run-splitter":
-            self._run_splitter()
-        elif event.button.id == "run-extractor":
-            self._run_extractor()
-        elif event.button.id == "grade-while-extracting":
-            self._open_grade_while_extracting()
         elif event.button.id == "run-answer-key":
             self._run_answer_key()
-        elif event.button.id == "run-grading":
-            self._run_grading()
+        elif event.button.id == "run-refine":
+            self._run_refine()
         elif event.button.id == "run-template":
             self._run_template()
         elif event.button.id == "run-llm-eval":
@@ -1627,8 +1467,6 @@ class SetupScreen(Vertical):
             self._run_pipeline()
         elif event.button.id == "pipe-preview":
             self._run_pipeline_preview()
-        elif event.button.id == "pipe-scan-folder":
-            self._scan_class_folder()
 
     def _handoff_submissions(self, input_id: str) -> str:
         own = self._clean_path(self.query_one(f"#{input_id}", Input).value)
@@ -1682,8 +1520,10 @@ class SetupScreen(Vertical):
             if saved is None:
                 return
             self.query_one("#region-map-path", Input).value = str(saved)
-            self.query_one("#ext-region-map-path", Input).value = str(saved)
-            self.query_one("#ext-use-region-map", Checkbox).value = True
+            # Hand it to the pipeline card, and open the block it lives in.
+            self.query_one("#pipe-region-map", Input).value = str(saved)
+            self.query_one("#pipe-use-region-map", Checkbox).value = True
+            self.query_one("#pipe-advanced", Collapsible).collapsed = False
 
         self.app.push_screen(
             RegionMapScreen(pdf_path, existing or None),
@@ -1722,18 +1562,7 @@ class SetupScreen(Vertical):
         current = self._ai()
         change_here = "Change this in [b]AI setup[/b] under Helper Tools below."
 
-        if step == "split":
-            if current.read_handwriting:
-                body = (
-                    "AI: hard-to-read page numbers will be read with the "
-                    "handwriting model."
-                )
-            else:
-                body = (
-                    "AI: off — page numbers are read from the text layer, QR "
-                    "codes and text recognition only."
-                )
-        elif step == "ext":
+        if step == "ext":
             if current.read_handwriting:
                 scope = (
                     "only the answers OCR read badly"
@@ -1763,23 +1592,6 @@ class SetupScreen(Vertical):
                     "AI: off — a scanned answer key is read by text "
                     "recognition only."
                 )
-        elif step == "grade":
-            if current.grade_written:
-                calibration = (
-                    "a measured confidence is required"
-                    if current.require_calibration
-                    else "no measurement is required"
-                )
-                body = (
-                    f"AI: {current.text_model} suggests grades for written "
-                    f"answers at {current.min_confidence:g}+ confidence; "
-                    f"{calibration}."
-                )
-            else:
-                body = (
-                    "AI: off — only answers your rubric can settle outright "
-                    "are scored."
-                )
         elif step == "pipe":
             handwriting = (
                 "reads hard-to-read handwriting"
@@ -1794,8 +1606,8 @@ class SetupScreen(Vertical):
             auto_grade = (
                 "auto-grade runs automatically once extraction finishes"
                 if current.auto_grade
-                else "auto-grade does not run automatically — run it "
-                "yourself when you're ready"
+                else "auto-grade is turned off — turn it on in AI setup and "
+                "run again to score what your rubric settles outright"
             )
             body = f"AI: {handwriting}, {grading}, and {auto_grade}."
         else:
@@ -1807,10 +1619,8 @@ class SetupScreen(Vertical):
 
     def _refresh_ai_displays(self) -> None:
         self.query_one("#ai-current-summary", Static).update(self._ai_summary_text())
-        self.query_one("#split-ai-status", Static).update(self._ai_status_text("split"))
-        self.query_one("#ext-ai-status", Static).update(self._ai_status_text("ext"))
+        self.query_one("#refine-ai-status", Static).update(self._ai_status_text("ext"))
         self.query_one("#ak-ai-status", Static).update(self._ai_status_text("ak"))
-        self.query_one("#grade-ai-status", Static).update(self._ai_status_text("grade"))
         self.query_one("#pipe-ai-status", Static).update(self._ai_status_text("pipe"))
         # Avoid importing TuiApp here — it would import this module back in.
         refresh_banner = getattr(self.app, "refresh_ai_banner", None)
@@ -1840,8 +1650,14 @@ class SetupScreen(Vertical):
         self.app.push_screen(CourseGradesScreen(course_path=prefill))
 
     def _open_llm_eval(self) -> None:
-        solutions = self._clean_path(self.query_one("#grade-solutions", Input).value)
-        submissions = self._clean_path(self.query_one("#grade-input", Input).value)
+        # The folder being graded, else the one being prepared above.
+        solutions, submissions = self._session_paths()
+        if not solutions:
+            solutions = self._clean_path(self.query_one("#pipe-qa", Input).value)
+        if not submissions:
+            class_folder = self._clean_path(self.query_one("#pipe-out", Input).value)
+            if class_folder:
+                submissions = str(PipelineRequest(Path(), Path(class_folder)).submissions_dir)
 
         def _apply(recommended: float | None) -> None:
             if recommended is None:
@@ -1874,70 +1690,6 @@ class SetupScreen(Vertical):
             ),
             _apply,
         )
-
-    def _run_splitter(self) -> None:
-        input_pdf = self._clean_path(self.query_one("#split-input", Input).value)
-        output_dir = self._clean_path(self.query_one("#split-output", Input).value)
-        pages = self.query_one("#split-pages", Input).value
-        detect_boundaries = self.query_one("#split-detect-boundaries", Checkbox).value
-        if not input_pdf or not output_dir:
-            self.app.notify("Input PDF and output directory are required.", severity="error")
-            return
-        if not detect_boundaries and not pages.strip():
-            self.app.notify("Enter a page count for fixed groups, or turn on boundary detection.", severity="error")
-            return
-
-        use_template = self.query_one("#split-use-template", Checkbox).value
-        template = self._clean_path(self.query_one("#split-template-path", Input).value)
-        if use_template and not template:
-            self.app.notify("Choose a blank template PDF, or uncheck the template option.", severity="error")
-            return
-
-        argv = ["--input", input_pdf, "--output", output_dir]
-        if pages.strip():
-            argv.extend(["--pages-per-submission", pages.strip()])
-        if detect_boundaries:
-            argv.append("--detect-boundaries")
-
-        if use_template and template:
-            argv.extend(["--blank-template", template])
-        if self.query_one("#split-scan-check", Checkbox).value:
-            argv.extend(["--fix-rotation", "--fix-order"])
-        if self.query_one("#split-reorder", Checkbox).value:
-            argv.append("--reorder")
-        if self.query_one("#split-extra-pages", Checkbox).value:
-            argv.append("--extra-work-pages")
-        argv.extend(self._auto_ollama_argv())
-
-        self.query_one("#split-progress-status", Static).update("Splitting…")
-        self.query_one("#split-progress").remove_class("hidden")
-        self.query_one("#run-splitter", Button).disabled = True
-        self._splitter_worker(argv)
-
-    @work(thread=True, exclusive=True, group="splitter")
-    def _splitter_worker(self, argv: list[str]) -> None:
-        app = self.app
-
-        def on_status(message: str) -> None:
-            app.call_from_thread(self._split_set_status, message)
-
-        try:
-            run_splitter_cli(argv, status_callback=on_status)
-        except SystemExit as exc:
-            app.call_from_thread(self._split_finish, f"Splitter failed (exit {exc.code}).", True)
-            return
-        except Exception as exc:
-            app.call_from_thread(self._split_finish, f"Splitter error: {exc}", True)
-            return
-        app.call_from_thread(self._split_finish, "Splitting complete.", False)
-
-    def _split_set_status(self, message: str) -> None:
-        self.query_one("#split-progress-status", Static).update(message.strip())
-
-    def _split_finish(self, message: str, is_error: bool) -> None:
-        self.query_one("#run-splitter", Button).disabled = False
-        self.query_one("#split-progress").add_class("hidden")
-        self.app.notify(message, severity="error" if is_error else "information")
 
     def _run_photo_import(self) -> None:
         input_path = self._clean_path(self.query_one("#photo-input", Input).value)
@@ -2033,115 +1785,63 @@ class SetupScreen(Vertical):
         self.query_one("#photo-progress").add_class("hidden")
         self.app.notify(message, severity="error" if is_error else "information")
         if report is not None and report.submissions:
-            extractor_input = self.query_one("#ext-input", Input)
-            if not extractor_input.value.strip():
-                extractor_input.value = str(report.output_dir)
+            scan_input = self.query_one("#pipe-scan", Input)
+            if not scan_input.value.strip():
+                scan_input.value = str(report.output_dir)
 
-    def _roster_argv(self) -> list[str]:
-        multi = self.query_one("#ext-mode-many", RadioButton).value
-        if multi:
-            raw = self.query_one("#ext-roster-list", TextArea).text
-            args: list[str] = []
-            for line in raw.splitlines():
-                entry = line.strip()
-                if entry:
-                    args.extend(["--id-file", entry])
-            return args
+    def _section_rosters(self) -> tuple[str, ...]:
+        """The `TSV[=SECTION]` lines of a mixed stack, or () when not in use."""
+        if not self.query_one("#pipe-many-rosters", Checkbox).value:
+            return ()
+        raw = self.query_one("#pipe-roster-list", TextArea).text
+        return tuple(line.strip() for line in raw.splitlines() if line.strip())
 
-        roster = self._clean_path(self.query_one("#ext-id-path", Input).value)
-        name = self.query_one("#ext-section-name", Input).value.strip()
-        if roster:
-            section = name or Path(roster).stem
-            return ["--id-file", f"{roster}={section}"]
-        if name:
-            return ["--section", name]
-        return []
-
-    def _run_extractor(self) -> None:
-        input_dir = self._clean_path(self.query_one("#ext-input", Input).value)
-        output_dir = self._clean_path(self.query_one("#ext-output", Input).value)
-        if not input_dir or not output_dir:
-            self.app.notify("Both input and output directories are required.", severity="error")
+    def _run_refine(self) -> None:
+        request = self._build_pipeline_request()
+        if request is None:
             return
-
-        argv = ["--input", input_dir, "--output", output_dir]
-
-        if self.query_one("#ext-use-template", Checkbox).value:
-            template = self._clean_path(self.query_one("#ext-template-path", Input).value)
-            if template:
-                argv.extend(["--blank-template", template])
-
-        if self.query_one("#ext-use-region-map", Checkbox).value:
-            region_map = self._clean_path(
-                self.query_one("#ext-region-map-path", Input).value
-            )
-            if not region_map:
-                self.app.notify(
-                    "Choose the region map, or untick "
-                    '"Use a region map (your own assignment)".',
-                    severity="error",
-                )
-                return
-            argv.extend(["--region-map", region_map])
-
-        if self.query_one("#ext-use-id", Checkbox).value:
-            argv.extend(self._roster_argv())
-
-
-        jobs_argv = self._jobs_argv()
-        if jobs_argv is None:
+        if not any(request.submissions_dir.rglob("*.submission.md")):
             self.app.notify(
-                f"Parallel jobs must be a whole number from 1 to {_CPU_COUNT} "
-                "(or blank to choose automatically).",
+                f"Nothing has been extracted in {request.output_dir} yet — run "
+                "Prepare an assignment first.",
                 severity="error",
             )
             return
-        argv.extend(jobs_argv)
 
-        if self.query_one("#ext-resume", Checkbox).value:
-            argv.append("--resume")
+        refine_dpi = self.query_one("#refine-dpi", Input).value.strip()
+        if refine_dpi and (not refine_dpi.isdigit() or int(refine_dpi) < 1):
+            self.app.notify(
+                "Re-read DPI must be a whole number (or blank to reuse "
+                "the first pass's resolution).",
+                severity="error",
+            )
+            return
 
-        if self.query_one("#ext-refine", Checkbox).value:
-            argv.append("--refine")
-            refine_dpi = self.query_one("#ext-refine-dpi", Input).value.strip()
-            if refine_dpi:
-                if not refine_dpi.isdigit() or int(refine_dpi) < 1:
-                    self.app.notify(
-                        "Re-read DPI must be a whole number (or blank to reuse "
-                        "the first pass's resolution).",
-                        severity="error",
-                    )
-                    return
-                argv.extend(["--refine-dpi", refine_dpi])
+        # [1:] drops the command name; run_cli takes only its arguments.
+        argv = list(refine_argv(request, dpi=int(refine_dpi) if refine_dpi else None)[1:])
 
-        argv.extend(self._auto_ollama_argv())
-
-        lock_anon = self.query_one("#ext-lock-anon", Checkbox).value
-
-        self._ext_total = 0
-        bar = self.query_one("#ext-progress-bar", ProgressBar)
+        self._refine_total = 0
+        bar = self.query_one("#refine-progress-bar", ProgressBar)
         bar.update(total=None, progress=0)
-        self.query_one("#ext-progress-status", Static).update("Starting…")
-        self.query_one("#ext-progress").remove_class("hidden")
-        self.query_one("#run-extractor", Button).disabled = True
+        self.query_one("#refine-progress-status", Static).update("Starting…")
+        self.query_one("#refine-progress").remove_class("hidden")
+        self.query_one("#run-refine", Button).disabled = True
         self.extraction_in_progress = True
 
-        self._extractor_worker(argv, output_dir, lock_anon)
+        self._refine_worker(argv)
 
-    @work(thread=True, exclusive=True, group="extractor")
-    def _extractor_worker(
-        self, argv: list[str], output_dir: str, lock_anon: bool
-    ) -> None:
+    @work(thread=True, exclusive=True, group="refine")
+    def _refine_worker(self, argv: list[str]) -> None:
         app = self.app
 
         def on_file_start(_pdf_name: str, count: int) -> None:
-            app.call_from_thread(self._ext_add_total, count)
+            app.call_from_thread(self._refine_add_total, count)
 
         def on_response(pdf_name: str, question_id: str) -> None:
-            app.call_from_thread(self._ext_advance, pdf_name, question_id)
+            app.call_from_thread(self._refine_advance, pdf_name, question_id)
 
         def on_status(message: str) -> None:
-            app.call_from_thread(self._ext_set_status, message)
+            app.call_from_thread(self._refine_set_status, message)
 
         progress = ExtractionProgress(on_file_start=on_file_start, on_response=on_response)
         try:
@@ -2151,63 +1851,41 @@ class SetupScreen(Vertical):
                 status_callback=on_status,
                 prompt_cloud_send=False,
             )
-            if lock_anon:
-                write_policy(output_dir, GradingPolicy(mode="multi", anonymity_locked=True))
         except CloudConfirmationNeeded as needed:
             app.call_from_thread(
                 self._confirm_tool_cloud_send,
                 needed,
-                "#ext-progress-status",
-                lambda: self._extractor_worker(
-                    [*argv, "--yes-send-to-cloud"], output_dir, lock_anon
-                ),
-                lambda message: self._ext_finish(message, False),
+                "#refine-progress-status",
+                lambda: self._refine_worker([*argv, "--yes-send-to-cloud"]),
+                lambda message: self._refine_finish(message, False),
             )
             return
         except SystemExit as exc:
-            app.call_from_thread(self._ext_finish, f"Extractor failed (exit {exc.code}).", True)
+            app.call_from_thread(self._refine_finish, f"Re-read failed (exit {exc.code}).", True)
             return
         except Exception as exc:
-            app.call_from_thread(self._ext_finish, f"Extractor error: {exc}", True)
+            app.call_from_thread(self._refine_finish, f"Re-read error: {exc}", True)
             return
-        app.call_from_thread(self._ext_finish, "Extraction complete.", False)
+        app.call_from_thread(self._refine_finish, "Re-read complete.", False)
 
-    def _ext_add_total(self, count: int) -> None:
-        self._ext_total = getattr(self, "_ext_total", 0) + count
-        self.query_one("#ext-progress-bar", ProgressBar).update(total=self._ext_total)
+    def _refine_add_total(self, count: int) -> None:
+        self._refine_total = getattr(self, "_refine_total", 0) + count
+        self.query_one("#refine-progress-bar", ProgressBar).update(total=self._refine_total)
 
-    def _ext_advance(self, pdf_name: str, question_id: str) -> None:
-        self.query_one("#ext-progress-bar", ProgressBar).advance(1)
-        self.query_one("#ext-progress-status", Static).update(
-            f"Transcribing {pdf_name} · {question_id}"
+    def _refine_advance(self, pdf_name: str, question_id: str) -> None:
+        self.query_one("#refine-progress-bar", ProgressBar).advance(1)
+        self.query_one("#refine-progress-status", Static).update(
+            f"Re-reading {pdf_name} · {question_id}"
         )
 
-    def _ext_set_status(self, message: str) -> None:
-        self.query_one("#ext-progress-status", Static).update(message.strip())
+    def _refine_set_status(self, message: str) -> None:
+        self.query_one("#refine-progress-status", Static).update(message.strip())
 
-    def _ext_finish(self, message: str, is_error: bool) -> None:
-        self.query_one("#run-extractor", Button).disabled = False
-        self.query_one("#ext-progress").add_class("hidden")
+    def _refine_finish(self, message: str, is_error: bool) -> None:
+        self.query_one("#run-refine", Button).disabled = False
+        self.query_one("#refine-progress").add_class("hidden")
         self.extraction_in_progress = False
         self.app.notify(message, severity="error" if is_error else "information")
-
-    def _open_grade_while_extracting(self) -> None:
-        qa_path = self._clean_path(self.query_one("#ext-qa", Input).value)
-        qa_path = qa_path or self._session_paths()[0]
-        output_dir = self._clean_path(self.query_one("#ext-output", Input).value)
-        if not qa_path:
-            self.app.notify(
-                "Set the answer key below the progress bar first.",
-                severity="error",
-            )
-            return
-        if not output_dir:
-            self.app.notify(
-                "Set the extraction output directory first.", severity="error"
-            )
-            return
-        self.post_message(self.GradeWhileExtractingRequested(qa_path, output_dir))
-
 
     def _scan_class_folder(self) -> ClassFolderScan | None:
         folder = self._clean_path(self.query_one("#pipe-out", Input).value)
@@ -2232,7 +1910,133 @@ class SetupScreen(Vertical):
         summary = self.query_one("#pipe-folder-summary", Static)
         summary.update("\n".join(describe_class_folder(found)))
         summary.remove_class("hidden")
+        has_key = bool(self.query_one("#pipe-qa", Input).value.strip())
+        self.query_one("#pipe-qa-hint").set_class(has_key, "hidden")
+
+        # The scan and answer-key fields are tucked away; show them only when
+        # the folder could not answer for itself.
+        has_scan = bool(self.query_one("#pipe-scan", Input).value.strip())
+        if not has_scan or found.ambiguity(ROLE_SCAN) or found.ambiguity(ROLE_QA):
+            self.query_one("#pipe-advanced", Collapsible).collapsed = False
+        if found.ambiguity(ROLE_ROSTER) or found.ambiguity(ROLE_TEMPLATE):
+            self.query_one("#pipe-settings", Collapsible).collapsed = False
         return found
+
+    def _load_class_folder(self, *, only_if_changed: bool = False) -> None:
+        """Scan the chosen class folder and bring back what was saved for it.
+
+        Saved settings are applied once per folder, when it is first chosen, so
+        they never overwrite what the user has changed since.
+        """
+        folder = self._clean_path(self.query_one("#pipe-out", Input).value)
+        loaded = getattr(self, "_pipe_folder_loaded", None)
+        if only_if_changed and (folder == loaded or not Path(folder).is_dir()):
+            return
+        if self._scan_class_folder() is None:
+            return
+        if folder == loaded:
+            return
+        self._pipe_folder_loaded = folder
+        saved = load_folder_settings(folder)
+        if saved is not None:
+            self._apply_folder_settings(saved)
+
+    def _apply_folder_settings(self, saved: FolderPipelineSettings) -> None:
+        def fill(input_id: str, value: str) -> None:
+            if value:
+                self.query_one(f"#{input_id}", Input).value = value
+
+        def tick(checkbox_id: str, value: bool) -> None:
+            self.query_one(f"#{checkbox_id}", Checkbox).value = value
+
+        # A saved scan or answer key is one the user chose by hand: it is not
+        # recorded as auto-filled, so a later re-scan leaves it alone.
+        fill("pipe-scan", saved.scan)
+        fill("pipe-qa", saved.qa_file)
+        if saved.qa_file:
+            self.query_one("#pipe-qa-hint").add_class("hidden")
+        self.query_one("#pipe-pages", Input).value = (
+            str(saved.pages_per_submission) if saved.pages_per_submission else ""
+        )
+        fill("pipe-roster", saved.roster)
+        tick("pipe-use-roster", saved.use_roster)
+        fill("pipe-template", saved.blank_template)
+        tick("pipe-use-template", saved.use_template)
+        fill("pipe-region-map", saved.region_map)
+        tick("pipe-use-region-map", saved.use_region_map)
+        self.query_one("#pipe-roster-list", TextArea).text = "".join(
+            f"{entry}\n" for entry in saved.section_rosters
+        )
+        tick("pipe-many-rosters", saved.use_section_rosters)
+        tick("pipe-reorder", saved.reorder_pages)
+        tick("pipe-draft-rubrics", saved.draft_rubrics)
+
+    def _folder_settings(self) -> FolderPipelineSettings:
+        """The card as it stands, in the shape that is saved with the folder."""
+
+        def path(input_id: str) -> str:
+            return self._clean_path(self.query_one(f"#{input_id}", Input).value)
+
+        def ticked(checkbox_id: str) -> bool:
+            return self.query_one(f"#{checkbox_id}", Checkbox).value
+
+        def override(input_id: str) -> str:
+            # What the folder scan filled in is found again next time; only a
+            # path the user chose instead is worth remembering.
+            value = self.query_one(f"#{input_id}", Input).value.strip()
+            autofilled = getattr(self, "_autofilled", {}).get(input_id)
+            return "" if value == autofilled else path(input_id)
+
+        pages = self.query_one("#pipe-pages", Input).value.strip()
+        raw_rosters = self.query_one("#pipe-roster-list", TextArea).text
+        return FolderPipelineSettings(
+            scan=override("pipe-scan"),
+            qa_file=override("pipe-qa"),
+            pages_per_submission=int(pages) if pages.isdigit() and int(pages) >= 1 else None,
+            use_roster=ticked("pipe-use-roster"),
+            roster=path("pipe-roster"),
+            use_template=ticked("pipe-use-template"),
+            blank_template=path("pipe-template"),
+            use_region_map=ticked("pipe-use-region-map"),
+            region_map=path("pipe-region-map"),
+            use_section_rosters=ticked("pipe-many-rosters"),
+            section_rosters=tuple(
+                line.strip() for line in raw_rosters.splitlines() if line.strip()
+            ),
+            reorder_pages=ticked("pipe-reorder"),
+            draft_rubrics=ticked("pipe-draft-rubrics"),
+        )
+
+    def _restore_machine_settings(self) -> None:
+        saved = load_machine_settings()
+        self.query_one("#pipe-grade-asap", Checkbox).value = saved.grade_as_ready
+        if saved.jobs:
+            self.query_one("#pipe-jobs", Input).value = str(saved.jobs)
+            self.query_one("#pipe-parallel", Checkbox).value = True
+        last = saved.last_class_folder
+        if last and Path(last).is_dir():
+            self.query_one("#pipe-out", Input).value = last
+            self._load_class_folder()
+
+    def _save_pipeline_settings(self, request: PipelineRequest) -> None:
+        """Remember this run's settings: the assignment's with its folder, the
+        rest for this computer. "Grade it anyway" and "Start over" are one-shot
+        and never saved."""
+        try:
+            save_folder_settings(request.output_dir, self._folder_settings())
+            save_machine_settings(
+                MachinePipelineSettings(
+                    grade_as_ready=self.query_one("#pipe-grade-asap", Checkbox).value,
+                    jobs=request.jobs,
+                    last_class_folder=str(request.output_dir),
+                )
+            )
+        except OSError as exc:
+            # Remembering is a convenience; the run itself goes ahead.
+            self.app.notify(
+                f"Could not save these settings for next time: {exc}",
+                severity="warning",
+            )
 
     def show_session(
         self, qa_file: str | Path | None, submissions: str | Path | None
@@ -2394,12 +2198,22 @@ class SetupScreen(Vertical):
     def _build_pipeline_request(self) -> PipelineRequest | None:
         scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
         out = self._clean_path(self.query_one("#pipe-out", Input).value)
-        if not scan and out and Path(out).is_dir():
-            self._scan_class_folder()
+        if out and Path(out).is_dir():
+            # A folder typed and run without leaving the box, or one whose scan
+            # has not been found yet: read it now.
+            if not scan:
+                self._load_class_folder()
+            else:
+                self._load_class_folder(only_if_changed=True)
             scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
-        if not scan or not out:
+        if not out:
+            self.app.notify("Choose the class folder first.", severity="error")
+            return None
+        if not scan:
+            self.query_one("#pipe-advanced", Collapsible).collapsed = False
             self.app.notify(
-                "The scanned bundle and the class folder are both required.",
+                "No scanned bundle was found in that folder. Choose it under "
+                "Advanced settings.",
                 severity="error",
             )
             return None
@@ -2432,6 +2246,40 @@ class SetupScreen(Vertical):
                 return None
             template = Path(template_path)
 
+        region_map: Path | None = None
+        if self.query_one("#pipe-use-region-map", Checkbox).value:
+            region_map_path = self._clean_path(
+                self.query_one("#pipe-region-map", Input).value
+            )
+            if not region_map_path:
+                self.app.notify(
+                    "Choose the region map, or untick "
+                    '"Use a region map (your own assignment)".',
+                    severity="error",
+                )
+                return None
+            region_map = Path(region_map_path)
+            # The two boxes untick each other; this covers a state set in code.
+            template = None
+
+        section_rosters = self._section_rosters()
+        if self.query_one("#pipe-many-rosters", Checkbox).value and not section_rosters:
+            self.app.notify(
+                'Add at least one roster, or untick "This stack mixes several '
+                'class sections".',
+                severity="error",
+            )
+            return None
+
+        jobs = self._pipe_jobs()
+        if jobs == -1:
+            self.app.notify(
+                f"Parallel jobs must be a whole number from 1 to {_CPU_COUNT} "
+                "(or blank to choose automatically).",
+                severity="error",
+            )
+            return None
+
         pages_str = self.query_one("#pipe-pages", Input).value.strip()
         pages: int | None = None
         if pages_str:
@@ -2457,11 +2305,16 @@ class SetupScreen(Vertical):
             output_dir=Path(out),
             qa_file=Path(qa) if qa else None,
             roster=roster,
+            section_rosters=section_rosters,
             blank_template=template,
+            region_map=region_map,
             pages_per_submission=pages,
+            reorder_pages=self.query_one("#pipe-reorder", Checkbox).value,
             llm=llm,
+            jobs=jobs,
             auto_grade=current.auto_grade,
             force=self.query_one("#pipe-force", Checkbox).value,
+            fresh=self.query_one("#pipe-fresh", Checkbox).value,
             draft_rubrics=self.query_one("#pipe-draft-rubrics", Checkbox).value,
         )
 
@@ -2514,13 +2367,15 @@ class SetupScreen(Vertical):
         if request is None:
             return
 
+        self._save_pipeline_settings(request)
+
         asap = self.query_one("#pipe-grade-asap", Checkbox).value
         qa_path = str(request.qa_file) if request.qa_file is not None else ""
         if asap and not qa_path:
             self.app.notify(
                 "No answer key set — grading will open once the whole run "
-                "finishes instead of as submissions arrive. Add an answer "
-                "key above to grade sooner.",
+                "finishes instead of as submissions arrive. Put an answer "
+                "key in the class folder to grade sooner.",
             )
 
         self._pipe_log_lines: list[str] = []
@@ -2671,6 +2526,10 @@ class SetupScreen(Vertical):
             self.app.notify(f"Pipeline failed: {message}", severity="error")
             return
 
+        if report.page_order_review_needed:
+            self._confirm_page_order_and_rerun(request, asap, qa_path)
+            return
+
         if report.paused_for_review:
             paused = next(
                 o for o in report.stages if o.status is StageStatus.PAUSED
@@ -2708,8 +2567,8 @@ class SetupScreen(Vertical):
         if report.ready_to_grade:
             self.app.notify(
                 f"{report.submission_count} submission(s) ready in "
-                f"{report.submissions_dir}. Add an answer key above, or open "
-                'them from "Start grading".'
+                f"{report.submissions_dir}. Put an answer key in the class folder, or "
+                'open them from "Start grading".'
             )
             return
 
@@ -2787,6 +2646,55 @@ class SetupScreen(Vertical):
         self.extraction_in_progress = True
         self._pipeline_worker(confirmed_request, asap, qa_path)
 
+    def _confirm_page_order_and_rerun(
+        self, request: PipelineRequest, asap: bool, qa_path: str
+    ) -> None:
+        self.query_one("#pipe-progress-status", Static).update(
+            "Waiting for you to confirm the page order…"
+        )
+        self.run_worker(
+            self._ask_page_order(request, asap, qa_path),
+            exclusive=True,
+            group="pipeline-page-order",
+        )
+
+    async def _ask_page_order(
+        self, request: PipelineRequest, asap: bool, qa_path: str
+    ) -> None:
+        """The pipeline paused before extraction: ask which submissions to sort,
+        apply the answer to the split PDFs, and run again (the split is reused)."""
+        import asyncio
+
+        from opengrader.core.pages.order_review import (
+            keep_pages,
+            pending_findings,
+            sort_pages,
+        )
+
+        split_dir = request.extract_source
+        pending = await asyncio.to_thread(pending_findings, split_dir)
+        chosen: tuple[str, ...] | None = ()
+        if pending:
+            chosen = await self.app.push_screen_wait(PageOrderScreen(pending, split_dir))
+        if chosen is None:
+            self._pipe_reset_buttons()
+            self.query_one("#pipe-progress-status", Static).update(
+                f"Paused before extraction — nothing was moved. Check the PDFs in "
+                f"{split_dir}, rearrange any that need it, then run again."
+            )
+            return
+        names = [finding.name for finding in pending]
+        done = await asyncio.to_thread(sort_pages, split_dir, chosen)
+        await asyncio.to_thread(
+            keep_pages, split_dir, [name for name in names if name not in done]
+        )
+        self.query_one("#pipe-progress").remove_class("hidden")
+        self.query_one("#pipe-progress-status", Static).update("Starting…")
+        self.query_one("#pipe-run", Button).disabled = True
+        self.query_one("#pipe-preview", Button).disabled = True
+        self.extraction_in_progress = True
+        self._pipeline_worker(request, asap, qa_path)
+
     def _confirm_tool_cloud_send(
         self,
         needed: CloudConfirmationNeeded,
@@ -2796,7 +2704,7 @@ class SetupScreen(Vertical):
     ) -> None:
         """Ask before a tool run sends to the cloud; the tool itself stopped first.
 
-        The Extractor and Answer key run their CLI in-process with
+        The re-read and Answer key tools run their CLI in-process with
         `prompt_cloud_send=False`, so instead of an `input()` prompt the
         Textual worker cannot answer, the CLI raises before sending anything.
         Confirming re-runs it with `--yes-send-to-cloud`; declining calls
@@ -2901,88 +2809,6 @@ class SetupScreen(Vertical):
         self.query_one("#ak-progress").add_class("hidden")
         self.app.notify(message, severity="error" if is_error else "information")
 
-    def _run_grading(self) -> None:
-        solutions = self._clean_path(self.query_one("#grade-solutions", Input).value)
-        input_dir = self._clean_path(self.query_one("#grade-input", Input).value)
-
-        if not solutions or not input_dir:
-            self.app.notify("Solutions file and Student Submissions directory are required.", severity="error")
-            return
-
-        argv = ["--solutions", solutions, "--input", input_dir]
-
-
-        self._grade_prefix = ""
-        bar = self.query_one("#autograde-progress-bar", ProgressBar)
-        bar.update(total=None, progress=0)
-        self.query_one("#autograde-progress-status", Static).update("Starting…")
-        self.query_one("#autograde-progress").remove_class("hidden")
-        self.query_one("#run-grading", Button).disabled = True
-        self._grading_worker(argv, probe_llm=self._ai().grade_written)
-
-    @work(thread=True, exclusive=True, group="grading")
-    def _grading_worker(self, argv: list[str], *, probe_llm: bool = False) -> None:
-        app = self.app
-
-        if probe_llm:
-            try:
-                app_config.ensure_ready(purpose="text")
-            except app_config.AIUnavailableError:
-                argv = [*argv, *self._auto_ollama_argv()]
-
-        def on_file_start(file_name: str, index: int, total: int) -> None:
-            app.call_from_thread(self._grade_file_start, file_name, index, total)
-
-        def on_question(_file_name: str, question_id: str) -> None:
-            app.call_from_thread(self._grade_question, question_id)
-
-        def on_status(message: str) -> None:
-            app.call_from_thread(self._grade_set_status, message)
-
-        progress = GradingProgress(
-            on_file_start=on_file_start, on_question=on_question
-        )
-        try:
-            run_grading_cli(argv, progress=progress, status_callback=on_status)
-        except SystemExit as exc:
-            app.call_from_thread(
-                self._grade_finish, f"Grading failed (exit {exc.code}).", True
-            )
-            return
-        except Exception as exc:
-            app.call_from_thread(self._grade_finish, f"Grading error: {exc}", True)
-            return
-        app.call_from_thread(self._grade_finish, "Automated grading complete.", False)
-
-    def _grade_file_start(self, file_name: str, index: int, total: int) -> None:
-        bar = self.query_one("#autograde-progress-bar", ProgressBar)
-        bar.update(total=total, progress=index - 1)
-        self._grade_prefix = f"{index}/{total} · {file_name}"
-        self.query_one("#autograde-progress-status", Static).update(
-            f"Grading {self._grade_prefix}"
-        )
-
-    def _grade_question(self, question_id: str) -> None:
-        prefix = getattr(self, "_grade_prefix", "")
-        text = (
-            f"Grading {prefix} · {question_id}"
-            if prefix
-            else f"Grading · {question_id}"
-        )
-        self.query_one("#autograde-progress-status", Static).update(text)
-
-    def _grade_set_status(self, message: str) -> None:
-        self.query_one("#autograde-progress-status", Static).update(message.strip())
-
-    def _grade_finish(self, message: str, is_error: bool) -> None:
-        if not is_error:
-            bar = self.query_one("#autograde-progress-bar", ProgressBar)
-            if bar.total is not None:
-                bar.update(progress=bar.total)
-        self.query_one("#run-grading", Button).disabled = False
-        self.query_one("#autograde-progress").add_class("hidden")
-        self.app.notify(message, severity="error" if is_error else "information")
-
     def _sync_template_options(self) -> None:
         bubble = self.query_one("#tmpl-bubble-sheet", Checkbox).value
         qr = self.query_one("#tmpl-qr", Checkbox).value
@@ -3085,7 +2911,7 @@ class SetupScreen(Vertical):
         if event.input.id == "policy-submissions":
             self._sync_policy_checkbox()
         elif event.input.id == "pipe-out":
-            self._scan_class_folder()
+            self._load_class_folder()
         elif event.input.id == "tui-class-folder":
             self._scan_launch_folder()
 

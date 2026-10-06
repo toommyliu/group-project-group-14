@@ -242,6 +242,20 @@ def _resolve_auto_reorder(
     return False
 
 
+def _names(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(name.strip() for value in values for name in value.split(",") if name.strip())
+
+
+def _existing_template(blank_template: str | None) -> Path | None:
+    if not blank_template:
+        return None
+    path = Path(blank_template)
+    if not path.exists():
+        print(f"Error: Blank template file not found at {path}", file=sys.stderr)
+        sys.exit(1)
+    return path
+
+
 def _is_scan(pdf: Path) -> bool:
     from opengrader.core.pages.catalog import is_scan
 
@@ -258,11 +272,21 @@ def _split_by_page_catalog(
     zero_pad_width: int,
     pages_per_submission: int | None,
     extra_work_pages: bool,
+    reorder: bool,
+    reorder_only: tuple[str, ...],
+    blank_template: Path | None,
+    interactive: bool,
 ) -> None:
     import os
 
     from opengrader.core.pages.catalog import CATALOG_DIRNAME, build_catalog, scan_pages
-    from opengrader.core.pages.split import plan_submissions, write_sidecar, write_split_pdf
+    from opengrader.core.pages.split import (
+        plan_submissions,
+        shared_order_note,
+        template_positions,
+        write_sidecar,
+        write_split_pdf,
+    )
     from opengrader.core.submissions.splitter import write_scan_warnings
 
     emit("Matching scanned pages to each other…")
@@ -272,8 +296,17 @@ def _split_by_page_catalog(
         workers=min(8, os.cpu_count() or 4),
         emit=emit,
     )
+    positions = None
+    if blank_template is not None:
+        emit("Matching the printed pages to the blank template…")
+        positions = template_positions(catalog, blank_template)
+        emit(f"  {len(positions)} of {len(catalog.groups)} printed page(s) found in the blank template")
+        if not positions:
+            print("Warning: no scanned page matched the blank template; page order is judged by the "
+                  "page numbers read off the scan instead.", file=sys.stderr)
     planned = plan_submissions(catalog, prefix=filename_prefix, pad=zero_pad_width,
-                               expected_count=pages_per_submission)
+                               expected_count=pages_per_submission, reorder=reorder,
+                               template_positions=positions)
     expected = catalog.expected_pages
     if pages_per_submission and expected and len(expected) != pages_per_submission:
         print(f"Warning: the scan shows {len(expected)} printed page(s) per submission, but "
@@ -285,6 +318,7 @@ def _split_by_page_catalog(
         emit(f"  - {submission.name}: scan pages {pages}")
         for warning in submission.warnings:
             print(f"Warning: {submission.name}: {warning}", file=sys.stderr)
+    _report_scan_order(planned, emit, shared_note=shared_order_note(planned))
     if dry_run:
         emit("Dry run complete. No files written.")
         return
@@ -300,6 +334,67 @@ def _split_by_page_catalog(
         write_extra_pages_map(output, extra_pages)
     flagged = sum(1 for submission in planned if submission.warnings)
     emit(f"Wrote {len(planned)} split PDFs to: {output}" + (f" ({flagged} flagged for review)" if flagged else ""))
+    _review_scan_order(planned, positions, emit, output=output, reorder_only=reorder_only, interactive=interactive)
+
+
+def _review_scan_order(
+    planned,
+    positions: dict[str, int] | None,
+    emit: Callable[[str], None],
+    *,
+    output: Path,
+    reorder_only: tuple[str, ...],
+    interactive: bool,
+) -> None:
+    from opengrader.core.pages.order_review import (
+        OrderFinding,
+        pending_findings,
+        review_in_terminal,
+        sort_pages,
+        write_order_review,
+    )
+
+    write_order_review(
+        output,
+        [
+            OrderFinding(
+                name=submission.name,
+                keys=submission.order_keys,
+                by_template=submission.order_by_template,
+                shared=submission.order_shared,
+                warning=submission.order_warning,
+            )
+            for submission in planned
+            if submission.order_breaks and not submission.reordered
+        ],
+        positions,
+    )
+    if reorder_only:
+        wanted = {Path(name).stem for name in reorder_only}
+        done = sort_pages(output, wanted)
+        if done:
+            emit(f"Sorted the pages of: {', '.join(done)}")
+        for name in sorted(wanted - set(done)):
+            print(f"Warning: --reorder-only {name}: not a submission that looks out of order; "
+                  "nothing was moved.", file=sys.stderr)
+    if interactive and pending_findings(output):
+        review_in_terminal(output, ask=input, write=emit)
+
+
+def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str | None) -> None:
+    if shared_note:
+        print(f"Warning: {shared_note}", file=sys.stderr)
+    sorted_count = sum(1 for submission in planned if submission.reordered)
+    if sorted_count:
+        emit(f"Sorted the pages of {sorted_count} submission(s) that looked out of order.")
+        return
+    left = [s.name for s in planned if s.order_breaks and not s.order_shared]
+    if left:
+        emit(
+            f"{len(left)} submission(s) look out of order and were left as scanned: "
+            f"{', '.join(left)}. Check them, then re-run with --reorder to sort them "
+            "(or --reorder-only to pick which)."
+        )
 
 
 @click.command("submission-splitter", context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
@@ -347,10 +442,26 @@ def _split_by_page_catalog(
     "--reorder",
     is_flag=True,
     help=(
-        "Always reorder pages within each split PDF (text layer → QR → OCR → "
-        "Ollama VLM), whether or not the pre-flight saw anything wrong. Use "
-        "when you know the scan is jumbled and its page numbers are hard to "
-        "read; see --fix-order for the version that only acts on evidence."
+        "Sort each submission's pages without asking. Without it a scan's "
+        "pages are never moved unprompted: a submission that looks out of "
+        "order is reported and left as scanned, because a misread page number "
+        "would move a page that was already right, and in a terminal you are "
+        "then asked which to sort. For scans the order comes from --blank-template when "
+        "one is given (pages are matched to it by their print), otherwise from "
+        "the page numbers read off the scan. For typed PDFs and "
+        "--detect-boundaries it reorders every split PDF (text layer → QR → "
+        "OCR → Ollama VLM) whether or not the pre-flight saw anything wrong; "
+        "see --fix-order for the version that only acts on evidence."
+    ),
+)
+@click.option(
+    "--reorder-only",
+    multiple=True,
+    metavar="NAME[,NAME…]",
+    help=(
+        "Sort only these submissions of a scan (e.g. submission-0007), and "
+        "only if they look out of order. Every other submission is left as "
+        "scanned. Repeat the flag or separate names with commas."
     ),
 )
 @click.option(
@@ -369,10 +480,10 @@ def _split_by_page_catalog(
     "--extra-work-pages",
     is_flag=True,
     help=(
-        "Submissions may contain extra student-work/scratch pages. Move any "
-        "page that can't be matched to the template sequence to the end, so "
-        "extraction processes the graded pages first. Implies --reorder; "
-        "works best with --blank-template."
+        "Submissions may contain extra student-work/scratch pages. Record "
+        "which pages match no printed page so extraction skips them. For "
+        "typed PDFs and --detect-boundaries this needs --blank-template (or "
+        "--reorder), and moves those pages to the end."
     ),
 )
 @click.option(
@@ -406,7 +517,8 @@ def _split_by_page_catalog(
         "numbers were merely OCR'd off a scan, the finding is reported and "
         "nothing is moved, because a misread number would shift a page that "
         "was in the right place. Implies --scan-check; use --reorder to "
-        "reorder regardless of evidence."
+        "reorder regardless of evidence. Scans split by matching their pages "
+        "skip this pre-flight and are sorted only by --reorder."
     ),
 )
 @click.option(
@@ -430,8 +542,10 @@ def _split_by_page_catalog(
     metavar="PDF",
     help=(
         "Path to a blank version of the assignment template PDF. "
-        "Used to locate page numbers more accurately for reordering. "
-        "Providing this implicitly enables --reorder."
+        "For scans, pages are matched to it to judge page order (and to sort "
+        "by, with --reorder). For typed PDFs and --detect-boundaries it "
+        "locates page numbers more accurately and implicitly enables "
+        "--reorder."
     ),
 )
 @click.option(
@@ -481,6 +595,7 @@ def command(
     zero_pad_width: int,
     dry_run: bool,
     reorder: bool,
+    reorder_only: tuple[str, ...],
     detect_boundaries: bool,
     extra_work_pages: bool,
     scan_check: bool,
@@ -524,6 +639,12 @@ def command(
             zero_pad_width=zero_pad_width,
             pages_per_submission=pages_per_submission,
             extra_work_pages=extra_work_pages,
+            reorder=reorder,
+            reorder_only=_names(reorder_only),
+            blank_template=_existing_template(blank_template),
+            # Asked only when a person ran this in a terminal: under the pipeline
+            # or the app the same question is put by whoever started the run.
+            interactive=status_callback is None and not dry_run and sys.stdin.isatty(),
         )
         return
 
@@ -545,15 +666,14 @@ def command(
         )
 
     blank_template_layout = None
-    if blank_template:
-        blank_template_path = Path(blank_template)
-        if not blank_template_path.exists():
-            print(f"Error: Blank template file not found at {blank_template_path}", file=sys.stderr)
-            sys.exit(1)
+    blank_template_path = _existing_template(blank_template)
+    if blank_template_path is not None:
         blank_template_layout = _load_page_number_layout(blank_template_path)
 
     use_boundary = detect_boundaries or pages_per_submission is None
-    uses_ordering_pass = reorder or blank_template or extra_work_pages or auto_reorder
+    # --extra-work-pages alone does not sort: with no template to say which pages are
+    # extra, sorting only pushes pages whose number went unread to the end.
+    uses_ordering_pass = reorder or blank_template or auto_reorder
     may_use_vlm = llm_page_numbers and (use_boundary or uses_ordering_pass)
 
     ollama_server_proc = None
@@ -664,6 +784,12 @@ def command(
                     f"Recorded extra work pages for {marked} of "
                     f"{len(extra_pages_by_stem)} submission(s): {map_path}"
                 )
+        elif extra_work_pages:
+            write_extra_pages_map(Path(output), {pdf_path.stem: () for pdf_path in created})
+            emit(
+                "No extra work pages recorded: telling them apart needs --blank-template "
+                "(or --reorder). Pages were left as scanned."
+            )
     finally:
         if ollama_server_proc:
             emit("Stopping auto-started Ollama server...")

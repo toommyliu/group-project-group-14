@@ -7,6 +7,8 @@ bundle (`web/dist/`) the one the current sources would produce, or one built
 before they last changed (`core/browser_app.web_dist_state`). When a tool is
 missing on a Mac that has Homebrew, it also offers to install it
 (`browser_app.install_tools`) — nothing is installed without that press.
+A failed install or build stays written in the panel until the next attempt:
+a notification is gone before a Homebrew error can be read.
 
 Composed into `#section-browser` but otherwise self-contained: `SetupScreen`
 only shows or hides it (`set_enabled`) from `_set_browser_enabled` and the
@@ -96,6 +98,13 @@ class BrowserHealth(Vertical):
         margin-top: 1;
     }
 
+    BrowserHealth #browser-health-error {
+        width: 100%;
+        height: auto;
+        color: $error;
+        margin-top: 1;
+    }
+
     BrowserHealth #browser-health-actions {
         width: 100%;
         height: auto;
@@ -118,6 +127,9 @@ class BrowserHealth(Vertical):
         yield Static(
             "", id="browser-health-progress", classes="hidden", markup=False
         )
+        error = Static("", id="browser-health-error", markup=False)
+        error.display = False
+        yield error
         with Horizontal(id="browser-health-actions"):
             yield Button("Check again", id="browser-check", compact=True)
             yield Button(
@@ -155,6 +167,7 @@ class BrowserHealth(Vertical):
     def check_again(self) -> None:
         if self._busy:
             return
+        self._show_error(None)
         self._set_busy(True)
         self._check_worker()
 
@@ -202,6 +215,7 @@ class BrowserHealth(Vertical):
         brew = self._brew
         if self._busy or brew is None:
             return
+        self._show_error(None)
         self._set_busy(True)
         progress = self.query_one("#browser-health-progress", Static)
         progress.update(
@@ -244,6 +258,7 @@ class BrowserHealth(Vertical):
         self._set_busy(False)
         self.query_one("#browser-health-progress").add_class("hidden")
         self._apply_snapshot(snapshot)
+        self._show_error(error)
         if error is None:
             self.app.notify(
                 "Node.js and pnpm installed. The browser app can be built now."
@@ -269,6 +284,7 @@ class BrowserHealth(Vertical):
     def _start_build(self) -> None:
         if self._busy:
             return
+        self._show_error(None)
         self._set_busy(True)
         progress = self.query_one("#browser-health-progress", Static)
         progress.update("Starting…")
@@ -302,11 +318,23 @@ class BrowserHealth(Vertical):
         self._set_busy(False)
         self.query_one("#browser-health-progress").add_class("hidden")
         self._apply_snapshot(snapshot)
+        self._show_error(error)
         if error is None:
             self.app.notify("Browser app built and ready.")
         else:
             detail = f"\n{error.tail}" if error.tail else ""
             self.app.notify(f"{error}{detail}", severity="error", timeout=15)
+
+    # -- what went wrong, kept on screen ---------------------------------
+
+    def _show_error(self, error: browser_app.WebBuildError | None) -> None:
+        box = self.query_one("#browser-health-error", Static)
+        if error is None:
+            box.display = False
+            return
+        detail = f"\n{error.tail}" if error.tail else ""
+        box.update(f"✗ {error}{detail}")
+        box.display = True
 
     # -- shared busy state -----------------------------------------------
 

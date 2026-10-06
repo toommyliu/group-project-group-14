@@ -473,3 +473,142 @@ def test_no_preflight_runs_unless_asked(tmp_path: Path, monkeypatch) -> None:
         ],
         status_callback=lambda _message: None,
     )
+
+
+def _scanned_catalog(monkeypatch, bundle: Path, sequence: list[int]) -> None:
+    import numpy as np
+
+    from opengrader.core.pages import catalog as catalog_module
+    from opengrader.core.pages.catalog import PageCatalog, PageGroup, PageMatch, ScanPage
+    from opengrader.core.pages.layout import PageLayout
+
+    groups = {
+        f"g{n}": PageGroup(id=f"g{n}", reference=ScanPage(bundle, 0), reference_turns=0,
+                           layout=PageLayout(), page_number=n)
+        for n in sorted(set(sequence))
+    }
+    matches = [PageMatch(ScanPage(bundle, index), f"g{n}", np.eye(3), 100) for index, n in enumerate(sequence)]
+    monkeypatch.setattr(submission_splitter, "_is_scan", lambda _pdf: True)
+    monkeypatch.setattr(
+        catalog_module, "build_catalog",
+        lambda pages, directory=None, **_kwargs: PageCatalog(groups=groups, matches=matches, directory=directory),
+    )
+
+
+def test_a_scan_that_looks_out_of_order_is_reported_and_left_as_scanned(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from opengrader.core.submissions.splitter import read_scan_warnings
+
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2, 1, 2, 3])
+    _scanned_catalog(monkeypatch, bundle, [1, 3, 2, 1, 2, 3])
+    out = tmp_path / "split"
+    messages: list[str] = []
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out)], status_callback=messages.append
+    )
+
+    assert _footers(out / "submission-0001.pdf") == ["Page 1", "Page 3", "Page 2"]
+    assert _footers(out / "submission-0002.pdf") == ["Page 1", "Page 2", "Page 3"]
+    assert "left as scanned" in read_scan_warnings(out / "submission-0001.pdf")[0]
+    assert not read_scan_warnings(out / "submission-0002.pdf")
+    assert "--reorder" in _messages(messages)
+    assert "left as scanned" in capsys.readouterr().err
+
+
+def test_reorder_sorts_a_scan_that_looks_out_of_order(tmp_path: Path, monkeypatch) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2, 1, 2, 3])
+    _scanned_catalog(monkeypatch, bundle, [1, 3, 2, 1, 2, 3])
+    out = tmp_path / "split"
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out), "--reorder"],
+        status_callback=lambda _message: None,
+    )
+
+    assert _footers(out / "submission-0001.pdf") == ["Page 1", "Page 2", "Page 3"]
+
+
+def test_a_break_shared_by_the_class_is_called_a_misread_number(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 2, 3] * 3)
+    _scanned_catalog(monkeypatch, bundle, [1, 8, 3] * 3)
+    out = tmp_path / "split"
+    messages: list[str] = []
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out)], status_callback=messages.append
+    )
+
+    assert _footers(out / "submission-0002.pdf") == ["Page 1", "Page 2", "Page 3"]
+    assert "3 of 3 submissions" in capsys.readouterr().err
+    assert "--reorder" not in _messages(messages)
+
+
+def test_extra_work_pages_alone_no_longer_sorts_a_typed_bundle(tmp_path: Path, monkeypatch) -> None:
+    _no_ollama(monkeypatch)
+    seen = _record_reorder_calls(monkeypatch)
+    bundle = _bundle(tmp_path / "scans.pdf", 4)
+
+    submission_splitter.run_cli(
+        [
+            "--input", str(bundle),
+            "--output", str(tmp_path / "split"),
+            "--pages-per-submission", "2",
+            "--extra-work-pages",
+        ],
+        status_callback=lambda _message: None,
+    )
+
+    assert seen == []
+
+
+def test_a_scan_left_as_scanned_is_recorded_for_review_before_extraction(tmp_path: Path, monkeypatch) -> None:
+    from opengrader.core.pages.order_review import pending_findings
+
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2, 1, 2, 3])
+    _scanned_catalog(monkeypatch, bundle, [1, 3, 2, 1, 2, 3])
+    out = tmp_path / "split"
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out)], status_callback=lambda _message: None
+    )
+
+    (finding,) = pending_findings(out)
+    assert (finding.name, finding.keys, finding.recommended) == ("submission-0001", (1, 3, 2), False)
+
+
+def test_reorder_leaves_nothing_to_review(tmp_path: Path, monkeypatch) -> None:
+    from opengrader.core.pages.order_review import pending_findings
+
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2, 1, 2, 3])
+    _scanned_catalog(monkeypatch, bundle, [1, 3, 2, 1, 2, 3])
+    out = tmp_path / "split"
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out), "--reorder"], status_callback=lambda _message: None
+    )
+
+    assert pending_findings(out) == []
+
+
+def test_reorder_only_sorts_the_named_submission_and_leaves_the_rest(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from opengrader.core.pages.order_review import pending_findings
+
+    bundle = _numbered_bundle(tmp_path / "scans.pdf", [1, 3, 2, 2, 1, 3])
+    _scanned_catalog(monkeypatch, bundle, [1, 3, 2, 2, 1, 3])
+    out = tmp_path / "split"
+
+    submission_splitter.run_cli(
+        ["--input", str(bundle), "--output", str(out), "--reorder-only", "submission-0002,submission-0007"],
+        status_callback=lambda _message: None,
+    )
+
+    assert _footers(out / "submission-0001.pdf") == ["Page 1", "Page 3", "Page 2"]
+    assert _footers(out / "submission-0002.pdf") == ["Page 1", "Page 2", "Page 3"]
+    assert [finding.name for finding in pending_findings(out)] == ["submission-0001"]
+    assert "submission-0007" in capsys.readouterr().err

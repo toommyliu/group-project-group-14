@@ -3,13 +3,17 @@ from __future__ import annotations
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, RichLog, Select, Static
+from textual.widgets import Button, Collapsible, OptionList, Select, Static
+from textual.widgets.option_list import Option
 
 from opengrader.core import app_config
+from opengrader.core.app_config import keystore
 from opengrader.core.app_config import manifests as ai_manifests
+from opengrader.core.app_config import setup as ai_setup
 from opengrader.tui.ui.screens.cloud_consent_screen import CredentialConsentScreen
+from opengrader.tui.ui.screens.provider_setup_screen import ProviderSetupScreen
 
 
 class ProviderScreen(ModalScreen[bool]):
@@ -32,13 +36,59 @@ class ProviderScreen(ModalScreen[bool]):
         padding: 1 2;
     }
 
+    /* A provider's details and file path can run to many lines, and the
+       Advanced card opens downwards: this part scrolls, so Close is never
+       pushed off the screen. */
+    #prov-body {
+        height: 1fr;
+    }
+
+    #prov-list-title {
+        margin-top: 1;
+        text-style: bold;
+    }
+
+    #prov-list {
+        height: auto;
+        max-height: 9;
+    }
+
+    #prov-actions {
+        height: auto;
+        align-horizontal: right;
+        margin-top: 1;
+    }
+
+    #prov-actions Button {
+        margin-left: 1;
+    }
+
     #prov-hint, #prov-problems, #prov-details {
         width: 100%;
         height: auto;
     }
 
-    #prov-hint, #prov-problems {
+    #prov-hint, #prov-problems, #prov-setup-hint {
         color: $text-muted;
+    }
+
+    #prov-setup-hint {
+        width: 1fr;
+        height: auto;
+    }
+
+    #prov-advanced {
+        margin-top: 1;
+    }
+
+    #prov-files-hint {
+        width: 100%;
+        height: auto;
+        color: $text-muted;
+    }
+
+    #prov-reload-row {
+        align-horizontal: right;
     }
 
     #prov-details {
@@ -59,8 +109,8 @@ class ProviderScreen(ModalScreen[bool]):
     }
 
     #prov-log {
-        height: 1fr;
-        min-height: 5;
+        width: 100%;
+        height: auto;
         margin-top: 1;
         border: round $surface-lighten-2;
         border-title-align: left;
@@ -86,86 +136,227 @@ class ProviderScreen(ModalScreen[bool]):
         super().__init__()
         self._changed = False
         self._armed: tuple[str, str] | None = None
+        self._log_lines: list[str] = []
+        # What each local provider said it has installed: name -> (models,
+        # why not). A name that is absent has not answered yet.
+        self._local: dict[str, tuple[tuple[str, ...], str]] = {}
 
     def compose(self) -> ComposeResult:
         examples = ai_manifests.example_names()
         with Vertical(id="prov-dialog") as dialog:
             dialog.border_title = "▸ AI providers"
-            yield Static(
-                "Opengrader runs its AI on this computer by default. To use a "
-                "service your department runs or one you pay for, add a "
-                "provider here: a small file that says where the service is "
-                "and which models to ask for. It never holds your key, only "
-                "the name of the variable the key is in. Choose which "
-                "provider to use in AI setup.\n"
-                f"Provider files live in {app_config.manifests_dir()}",
-                id="prov-hint",
-            )
-            with Horizontal(classes="prov-row"):
-                yield Select(
-                    self._provider_options(),
-                    value=app_config.DEFAULT_PROVIDER,
-                    allow_blank=False,
-                    id="prov-select",
+            # Everything above Close scrolls as one piece, so that Close
+            # stays where it is when Advanced is opened.
+            with VerticalScroll(id="prov-body"):
+                yield Static(
+                    "Opengrader runs its AI on this computer by default. To use a "
+                    "service your department runs or one you pay for, add a "
+                    "provider here: a small file that says where the service is "
+                    "and which models to ask for. It never holds your key — that "
+                    "is kept in this computer's password store, or in an "
+                    "environment variable. Choose which provider to use in AI "
+                    "setup.",
+                    id="prov-hint",
                 )
-                yield Button("Test", id="prov-test", compact=True)
-                yield Button("Remove", id="prov-remove", variant="error", compact=True)
-            yield Static("", id="prov-details")
-            yield Static("", id="prov-problems")
-            with Horizontal(classes="prov-row"):
-                yield Select(
-                    [(name, name) for name in examples],
-                    prompt="Start from an example…",
-                    id="prov-example",
-                )
-                yield Button(
-                    "Add example",
-                    id="prov-add-example",
-                    variant="primary",
-                    compact=True,
-                    disabled=not examples,
-                )
-            log = RichLog(id="prov-log", wrap=True, auto_scroll=True, markup=False)
-            log.border_title = "Result"
-            yield log
+                with Horizontal(classes="prov-row"):
+                    # The words first and the button at the right edge, like
+                    # every other row of this dialog.
+                    yield Static(
+                        "Add a service: pick it from a list, paste its key, test it.",
+                        id="prov-setup-hint",
+                    )
+                    yield Button(
+                        "Set up a provider…",
+                        id="prov-setup",
+                        variant="primary",
+                        compact=True,
+                    )
+                # Every provider at a glance — where it runs and whether it
+                # is ready — rather than one at a time behind a dropdown.
+                yield Static("Your providers", id="prov-list-title")
+                yield OptionList(id="prov-list")
+                with Horizontal(id="prov-actions"):
+                    yield Button("Test", id="prov-test", compact=True)
+                    yield Button("Forget key", id="prov-forget-key", compact=True)
+                    yield Button("Remove", id="prov-remove", variant="error", compact=True)
+                # What the last button press did, right under the buttons
+                # that cause it. Hidden until there is something to say.
+                log = Static("", id="prov-log", markup=False)
+                log.border_title = "Result"
+                yield log
+                yield Static("", id="prov-details")
+                yield Static("", id="prov-problems")
+                # Everything for someone who edits provider files by hand, folded
+                # away: 'Set up a provider' above does all of it for everyone else.
+                with Collapsible(
+                    title="Advanced — provider files, for editing by hand",
+                    id="prov-advanced",
+                    collapsed=True,
+                ):
+                    yield Static(
+                        f"Provider files live in {app_config.manifests_dir()}\n"
+                        "Start one from an example, or edit a file there, then "
+                        "press 'Re-read provider files'.",
+                        id="prov-files-hint",
+                    )
+                    yield from self._compose_advanced(examples)
             with Horizontal(id="prov-buttons"):
-                yield Button("Re-read provider files", id="prov-reload", compact=True)
                 yield Button("Close", id="prov-close", compact=True)
 
-    def on_mount(self) -> None:
-        self._show_selected()
-        self._show_problems()
-
     @staticmethod
-    def _provider_options() -> list[tuple[str, str]]:
-        options = []
-        for spec in app_config.registered_providers():
-            suffix = "  (cloud)" if spec.sends_data_off_machine else ""
-            options.append((f"{spec.label}{suffix}", spec.name))
-        return options
+    def _compose_advanced(examples: tuple[str, ...]) -> ComposeResult:
+        with Horizontal(classes="prov-row"):
+            # An example that signs in with a cloud account instead of a key
+            # is marked, since it needs setup outside Opengrader.
+            yield Select(
+                [
+                    (
+                        f"{name} (advanced)"
+                        if ai_setup.is_advanced_example(name)
+                        else name,
+                        name,
+                    )
+                    for name in examples
+                ],
+                prompt="Start from an example file…",
+                id="prov-example",
+            )
+            yield Button(
+                "Add example",
+                id="prov-add-example",
+                compact=True,
+                disabled=not examples,
+            )
+        with Horizontal(classes="prov-row", id="prov-reload-row"):
+            yield Button("Re-read provider files", id="prov-reload", compact=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#prov-log", Static).display = False
+        self._refresh_providers(select=app_config.DEFAULT_PROVIDER)
+
+    def _row(self, spec: app_config.ProviderSpec, width: int, in_use: str) -> str:
+        status = ai_setup.provider_status(
+            spec, local=self._local.get(spec.name), in_use=spec.name == in_use
+        )
+        return f"{spec.label:<{width}}  {status}"
+
+    def _rows(self) -> list[tuple[str, str]]:
+        """(provider name, the line the list shows for it), Ollama first."""
+        specs = app_config.registered_providers()
+        width = max((len(spec.label) for spec in specs), default=0)
+        in_use = app_config.resolve().provider.name
+        return [(spec.name, self._row(spec, width, in_use)) for spec in specs]
+
+    def _fill_list(self, select: str) -> None:
+        """Rebuild the list from the registry and put the highlight on `select`."""
+        rows = self._rows()
+        listing = self.query_one("#prov-list", OptionList)
+        listing.clear_options()
+        listing.add_options([Option(text, id=name) for name, text in rows])
+        names = [name for name, _text in rows]
+        listing.highlighted = names.index(select) if select in names else 0
+
+    def _update_rows(self) -> None:
+        """Rewrite each row's status where it stands.
+
+        Not a rebuild: that would move the highlight, and moving the
+        highlight cancels a Remove or Forget key waiting for its second press.
+        """
+        listing = self.query_one("#prov-list", OptionList)
+        shown = {
+            listing.get_option_at_index(index).id
+            for index in range(listing.option_count)
+        }
+        for name, text in self._rows():
+            if name in shown:
+                listing.replace_option_prompt(name, text)
+
+    def select_provider(self, name: str) -> None:
+        """Move the highlight to a provider, as clicking its row does."""
+        listing = self.query_one("#prov-list", OptionList)
+        for index in range(listing.option_count):
+            if listing.get_option_at_index(index).id == name:
+                listing.highlighted = index
+                return
 
     def _selected(self) -> app_config.ProviderSpec | None:
-        value = self.query_one("#prov-select", Select).value
-        if not isinstance(value, str):
+        listing = self.query_one("#prov-list", OptionList)
+        if listing.highlighted is None:
             return None
+        value = listing.get_option_at_index(listing.highlighted).id
         for spec in app_config.registered_providers():
             if spec.name == value:
                 return spec
         return None
 
+    def _probe_local(self) -> None:
+        """Ask each provider on this computer what it has installed, off the UI thread.
+
+        Cloud providers are never asked here — `local_models` answers None
+        for them without sending anything — because a request to one carries
+        the API key. A group of its own, so Test (which is exclusive in the
+        default group) and this do not cancel each other.
+        """
+        names = [
+            spec.name
+            for spec in app_config.registered_providers()
+            if not spec.sends_data_off_machine
+        ]
+        if names:
+            self.run_worker(
+                lambda: self._local_worker(names),
+                thread=True,
+                exclusive=True,
+                group="prov-local",
+            )
+
+    def _local_worker(self, names: list[str]) -> None:
+        for name in names:
+            found = ai_setup.local_models(name)
+            if found is not None:
+                self.app.call_from_thread(self._show_local, name, found)
+
+    def _show_local(self, name: str, found: tuple[tuple[str, ...], str]) -> None:
+        if not self.is_attached:
+            return
+        self._local[name] = found
+        self._update_rows()
+        self._show_selected()
+
     def _show_selected(self) -> None:
         spec = self._selected()
         details = self.query_one("#prov-details", Static)
         remove = self.query_one("#prov-remove", Button)
+        forget = self.query_one("#prov-forget-key", Button)
         if spec is None:
             details.update("")
             remove.disabled = True
+            forget.disabled = True
             return
+        # Only a key Opengrader itself saved can be forgotten here; one in an
+        # environment variable is not ours to remove.
+        forget.disabled = self._saved_key(spec) is None
         rows = ai_manifests.describe_provider(spec)
+        found = self._local.get(spec.name)
+        if found is not None:
+            models, why_not = found
+            rows.append(
+                (
+                    "installed",
+                    ", ".join(models)
+                    or (f"could not ask it: {why_not}" if why_not else "no models yet"),
+                )
+            )
         width = max(len(label) for label, _ in rows) + 2
         lines = [f"{label + ':':<{width}}{value}" for label, value in rows]
         details.update("\n".join(lines))
         remove.disabled = spec.source != "user"
+
+    @staticmethod
+    def _saved_key(spec: app_config.ProviderSpec) -> str | None:
+        if not spec.api_key_env:
+            return None
+        return keystore.lookup(keystore.account_for(spec))
 
     def _show_problems(self) -> None:
         problems = app_config.manifest_problems()
@@ -175,22 +366,23 @@ class ProviderScreen(ModalScreen[bool]):
         self.query_one("#prov-problems", Static).update(text)
 
     def _refresh_providers(self, *, select: str | None = None) -> None:
-        picker = self.query_one("#prov-select", Select)
-        options = self._provider_options()
-        names = {name for _label, name in options}
-        keep = select if select in names else picker.value
-        picker.set_options(options)
-        picker.value = keep if keep in names else app_config.DEFAULT_PROVIDER
+        current = self._selected()
+        names = {spec.name for spec in app_config.registered_providers()}
+        keep = select if select in names else (current.name if current else "")
+        self._fill_list(keep if keep in names else app_config.DEFAULT_PROVIDER)
         self._armed = None
         self._show_selected()
         self._show_problems()
+        self._probe_local()
 
     def _log(self, *lines: str, clear: bool = True) -> None:
-        log = self.query_one("#prov-log", RichLog)
+        log = self.query_one("#prov-log", Static)
         if clear:
-            log.clear()
-        for line in lines:
-            log.write(line)
+            self._log_lines = []
+        self._log_lines.extend(lines)
+        log.update("\n".join(self._log_lines))
+        log.display = True
+        log.scroll_visible(animate=False)
 
     def _arm(self, action: str, name: str) -> bool:
         """True if this press confirms an earlier one; otherwise arms it."""
@@ -200,11 +392,62 @@ class ProviderScreen(ModalScreen[bool]):
         self._armed = (action, name)
         return False
 
-    @on(Select.Changed, "#prov-select")
-    def _on_select(self, event: Select.Changed) -> None:
+    @on(OptionList.OptionHighlighted, "#prov-list")
+    def _on_select(self, event: OptionList.OptionHighlighted) -> None:
         event.stop()
         self._armed = None
         self._show_selected()
+
+    @on(Collapsible.Expanded, "#prov-advanced")
+    def _on_advanced_opened(self, event: Collapsible.Expanded) -> None:
+        event.stop()
+        # The card opens downwards, usually past the bottom of the scrolling
+        # part, and it is the last thing in it: go to the end, or it looks
+        # like nothing happened. scroll_end waits for the new layout itself.
+        self.query_one("#prov-body", VerticalScroll).scroll_end(animate=False)
+
+    @on(Button.Pressed, "#prov-setup")
+    def _on_setup(self, event: Button.Pressed) -> None:
+        event.stop()
+        self._armed = None
+        spec = self._selected()
+        preselect = spec.name if spec is not None and spec.source == "user" else ""
+
+        def _done(name: str | None) -> None:
+            if not name:
+                return
+            self._changed = True
+            self._refresh_providers(select=name)
+            self._log(
+                f"{name} is set up. Choose it in AI setup when you want to use it."
+            )
+
+        self.app.push_screen(ProviderSetupScreen(preselect=preselect), _done)
+
+    @on(Button.Pressed, "#prov-forget-key")
+    def _on_forget_key(self, event: Button.Pressed) -> None:
+        event.stop()
+        spec = self._selected()
+        if spec is None or self._saved_key(spec) is None:
+            return
+        store = keystore.status().name
+        if not self._arm("forget", spec.name):
+            self._log(
+                f"Press Forget key again to delete {spec.label}'s key from "
+                f"{store}. The key itself still works until you revoke it on "
+                "the service's website."
+            )
+            return
+        try:
+            keystore.delete(keystore.account_for(spec))
+        except keystore.KeyStoreError as exc:
+            self._log(f"The key was not removed: {exc}")
+            return
+        app_config.clear_credential_cache()
+        self._changed = True
+        self._update_rows()
+        self._show_selected()
+        self._log(f"Removed {spec.label}'s key from {store}.")
 
     @on(Button.Pressed, "#prov-add-example")
     def _on_add_example(self, event: Button.Pressed) -> None:
@@ -233,8 +476,9 @@ class ProviderScreen(ModalScreen[bool]):
             )
         if spec.api_key_env:
             lines.append(
-                f"Set {spec.api_key_env} in the environment Opengrader starts "
-                "from, then use Test."
+                f"It needs a key: use 'Set up a provider…' to paste one, or "
+                f"set {spec.api_key_env} in the environment Opengrader starts "
+                "from. Then use Test."
             )
         lines.append(
             "Edit the file to change its host or models, then press "
@@ -259,10 +503,21 @@ class ProviderScreen(ModalScreen[bool]):
         except ai_manifests.ManifestError as exc:
             self._log(str(exc))
             return
+        lines = [f"Removed {spec.label} ({path})."]
+        # A key saved for a provider that no longer exists would sit in the
+        # password store for good, with nothing left on screen to remove it.
+        if spec.api_key_env:
+            try:
+                if keystore.delete(keystore.account_for(spec)):
+                    lines.append(
+                        f"Its saved key was removed from {keystore.status().name}."
+                    )
+            except keystore.KeyStoreError as exc:
+                lines.append(f"Its saved key could not be removed: {exc}")
+            app_config.clear_credential_cache()
         app_config.reload_manifests()
         self._changed = True
         self._refresh_providers(select=app_config.DEFAULT_PROVIDER)
-        lines = [f"Removed {spec.label} ({path})."]
         if app_config.load_settings().provider == spec.name:
             lines.append(
                 f"It was the provider chosen in AI setup, so Opengrader falls "
@@ -336,23 +591,8 @@ class ProviderScreen(ModalScreen[bool]):
         self.run_worker(lambda: self._test(spec.name), thread=True, exclusive=True)
 
     def _test(self, name: str) -> None:
-        resolved = app_config.for_provider(name)
-        lines: list[str] = []
-        try:
-            app_config.ensure_ready(resolved, purpose="text")
-        except app_config.AIUnavailableError as exc:
-            lines.append(str(exc))
-            self.app.call_from_thread(self._finish_test, lines)
-            return
-        measurement = app_config.measure_generate_latency(
-            resolved, role="grading", prompt=ai_manifests.CONNECTION_TEST_PROMPT
-        )
-        lines.append(measurement.describe())
-        if measurement.ok:
-            lines.append(f"{resolved.provider.label} is reachable and answering.")
-        elif resolved.provider.setup_hint:
-            lines.append(resolved.provider.setup_hint)
-        self.app.call_from_thread(self._finish_test, lines)
+        result = ai_setup.probe_provider(name)
+        self.app.call_from_thread(self._finish_test, list(result.lines))
 
     def _finish_test(self, lines: list[str]) -> None:
         if not self.is_attached:

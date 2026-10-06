@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Select, Static
 
+from opengrader.tui.clipboard import copy_text
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
 _SYNTAX_ROWS: list[tuple[str, str]] = [
@@ -442,7 +443,7 @@ class FormatGuideScreen(ModalScreen[None]):
             counter += 1
 
     def _copy(self, text: str, label: str) -> None:
-        self.app.copy_to_clipboard(text)
+        copy_text(self.app, text)
         self.app.notify(
             f"{label} template copied. Paste it into a .txt or .md file.",
         )

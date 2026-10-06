@@ -22,6 +22,17 @@ def read_roster(path: str | Path) -> list[dict[str, str]]:
         return rows
 
 
+def parse_roster_arg(value: str) -> tuple[Path, str | None]:
+    """`TSV[=SECTION]` → (roster path, explicit section name or None).
+
+    A path that exists is taken whole, so a filename containing `=` still works.
+    """
+    if Path(value).exists() or "=" not in value:
+        return Path(value), None
+    path_str, name = value.rsplit("=", 1)
+    return Path(path_str), (name.strip() or None)
+
+
 @dataclass(frozen=True)
 class RosterStudent:
     student_id: str

@@ -1,7 +1,7 @@
 import asyncio
 
 from textual.containers import VerticalScroll
-from textual.widgets import Button, Checkbox, Collapsible, Input, RadioButton, Static
+from textual.widgets import Button, Checkbox, Collapsible, Input, Static
 
 import opengrader.tui.ui.screens.setup_screen as setup_screen
 from opengrader.core import app_config
@@ -27,43 +27,6 @@ def test_setup_scroll_reaches_the_very_last_section() -> None:
             assert last.region.y + last.region.height <= app.size.height
 
     asyncio.run(run())
-
-
-def test_setup_grading_never_passes_llm_and_probes_the_saved_model(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_grading_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", argv),
-    )
-
-    def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
-        captured["model"] = (resolved or app_config.resolve()).text_model
-
-    monkeypatch.setattr(app_config, "ensure_ready", _probe)
-    app_config.save_settings(
-        app_config.AISettings(text_model="llama3.1", grade_written=True)
-    )
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-
-    argv = captured.get("argv")
-    assert argv == ["--solutions", "/tmp/sol.md", "--input", "/tmp/subs"]
-    assert "--llm-model" not in argv
-    assert captured["model"] == "llama3.1"
 
 
 def test_template_qr_checkbox_reveals_roster_and_builds_argv(monkeypatch) -> None:
@@ -108,331 +71,120 @@ def test_template_qr_checkbox_reveals_roster_and_builds_argv(monkeypatch) -> Non
     asyncio.run(run())
 
 
-def test_setup_grading_defaults_model_when_no_ai_settings_are_saved(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_grading_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", argv),
-    )
+def _pipe_request(tmp_path, setup=lambda _app: None, *, notes=None):  # noqa: ANN001, ANN202
+    """The request the pipeline card builds after `setup` has filled it in."""
 
-    def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
-        captured["model"] = (resolved or app_config.resolve()).text_model
-
-    monkeypatch.setattr(app_config, "ensure_ready", _probe)
-    app_config.save_settings(app_config.AISettings(grade_written=True))
-
-    async def run() -> None:
+    async def run():  # noqa: ANN202
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-
-    assert captured["model"] == app_config.DEFAULT_TEXT_MODEL
-    assert captured["argv"] == ["--solutions", "/tmp/sol.md", "--input", "/tmp/subs"]
-    assert "--llm-model" not in captured["argv"]
-
-
-def test_setup_splitter_never_passes_a_model_and_auto_starts_per_saved_setting(
-    monkeypatch, tmp_path
-) -> None:
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_splitter_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
-    )
-    pdf = tmp_path / "scan.pdf"
-    pdf.write_bytes(b"%PDF-1.4")
-    out = tmp_path / "out"
-
-    async def run(*, auto_start: bool) -> None:
-        app_config.save_settings(
-            app_config.AISettings(
-                text_model="minicpm-v", auto_start=auto_start, read_handwriting=True
-            )
-        )
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#split-input", Input).value = str(pdf)
-            app.query_one("#split-output", Input).value = str(out)
-            screen._run_splitter()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run(auto_start=True))
-    argv = captured["argv"]
-    assert "--auto-ollama" in argv
-    assert "--ollama-model" not in argv
-    assert "--ollama-host" not in argv
-
-    asyncio.run(run(auto_start=False))
-    assert "--auto-ollama" not in captured["argv"]
-
-
-def test_setup_splitter_checks_the_scan_by_default(monkeypatch, tmp_path) -> None:
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_splitter_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
-    )
-    pdf = tmp_path / "scan.pdf"
-    pdf.write_bytes(b"%PDF-1.4")
-
-    async def run(*, checked: bool) -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#split-input", Input).value = str(pdf)
-            app.query_one("#split-output", Input).value = str(tmp_path / "out")
-            box = app.query_one("#split-scan-check", Checkbox)
-            assert box.value is True, "the scan check should default to on"
-            box.value = checked
-            await pilot.pause()
-            screen._run_splitter()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run(checked=True))
-    assert "--fix-rotation" in captured["argv"]
-    assert "--fix-order" in captured["argv"]
-    assert "--reorder" not in captured["argv"]
-
-    asyncio.run(run(checked=False))
-    assert "--fix-rotation" not in captured["argv"]
-    assert "--fix-order" not in captured["argv"]
-
-
-def test_setup_grading_progress_shows_file_and_question() -> None:
-    from textual.widgets import ProgressBar, Static
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-
-            assert screen.query_one("#autograde-progress").has_class("hidden")
-
-            screen.query_one("#autograde-progress").remove_class("hidden")
-            screen._grade_file_start("bob.submission.md", 2, 5)
-            screen._grade_question("q3")
-
-            bar = screen.query_one("#autograde-progress-bar", ProgressBar)
-            assert bar.total == 5
-            assert bar.progress == 1
-            status = str(screen.query_one("#autograde-progress-status", Static).render())
-            assert "2/5" in status
-            assert "bob.submission.md" in status
-            assert "q3" in status
-
-    asyncio.run(run())
-
-
-def test_setup_grading_runs_in_background_with_progress(monkeypatch) -> None:
-    from opengrader.cli.automated_grading import GradingProgress
-
-    seen: dict[str, object] = {}
-
-    def fake_run(
-        argv, *, progress: GradingProgress | None = None, status_callback=None
-    ) -> None:
-        seen["argv"] = argv
-        seen["has_progress"] = isinstance(progress, GradingProgress)
-        seen["has_status_callback"] = callable(status_callback)
-        progress.file_start("only.submission.md", 1, 1)
-        progress.question("only.submission.md", "q1")
-
-    monkeypatch.setattr(setup_screen, "run_grading_cli", fake_run)
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-            assert screen.query_one("#autograde-progress").has_class("hidden")
-
-    asyncio.run(run())
-
-    assert seen.get("has_progress") is True
-    assert seen.get("has_status_callback") is True
-    assert seen.get("argv") == ["--solutions", "/tmp/sol.md", "--input", "/tmp/subs"]
-
-
-def test_setup_llm_unavailable_triggers_auto_ollama(monkeypatch) -> None:
-    def _raise(resolved=None, *, purpose="text") -> None:
-        raise app_config.AIUnavailableError("model 'llama3.1' is not available")
-
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_grading_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", argv),
-    )
-    monkeypatch.setattr(app_config, "ensure_ready", _raise)
-    app_config.save_settings(app_config.AISettings(grade_written=True))
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-
-    assert "--auto-ollama" in captured["argv"]
-    assert "--llm" not in captured["argv"]
-
-
-def _run_extractor_argv(monkeypatch, setup) -> list[str] | None:
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_extractor_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
-    )
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            app.query_one("#ext-input", Input).value = "/tmp/scans"
-            app.query_one("#ext-output", Input).value = "/tmp/subs"
+            if notes is not None:
+                app.notify = lambda message, **kwargs: notes.append(str(message))
+            app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+            app.query_one("#pipe-out", Input).value = str(tmp_path / "class")
             setup(app)
             await pilot.pause()
-            app.query_one(SetupScreen)._run_extractor()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
+            return app.query_one(SetupScreen)._build_pipeline_request()
 
-    asyncio.run(run())
-    return captured.get("argv")  # type: ignore[return-value]
+    return asyncio.run(run())
 
 
-def _set_jobs(app, value: str) -> None:
-    app.query_one("#ext-parallel", Checkbox).value = True
-    app.query_one("#ext-jobs", Input).value = value
+def _set_jobs(app, value: str) -> None:  # noqa: ANN001
+    app.query_one("#pipe-parallel", Checkbox).value = True
+    app.query_one("#pipe-jobs", Input).value = value
 
 
-def test_extractor_defaults_to_auto_jobs_and_no_resume(monkeypatch) -> None:
-    argv = _run_extractor_argv(monkeypatch, lambda _app: None)
-    assert argv is not None
-    assert "--jobs" not in argv
-    assert "--resume" not in argv
+def test_the_pipeline_picks_the_job_count_itself_by_default(tmp_path) -> None:  # noqa: ANN001
+    request = _pipe_request(tmp_path)
+    assert request is not None
+    assert request.jobs is None
+    assert request.fresh is False
 
 
-def test_extractor_passes_jobs_and_resume(monkeypatch) -> None:
-    def setup(app) -> None:
-        _set_jobs(app, "4")
-        app.query_one("#ext-resume", Checkbox).value = True
-
-    argv = _run_extractor_argv(monkeypatch, setup)
-    assert argv is not None
-    assert argv[argv.index("--jobs") + 1] == "4"
-    assert "--resume" in argv
+def test_a_job_count_reaches_the_pipeline_request(tmp_path) -> None:  # noqa: ANN001
+    request = _pipe_request(tmp_path, lambda app: _set_jobs(app, "4"))
+    assert request is not None
+    assert request.jobs == 4
 
 
-def test_a_ticked_but_blank_job_count_stays_automatic(monkeypatch) -> None:
-    argv = _run_extractor_argv(
-        monkeypatch, lambda app: setattr(app.query_one("#ext-parallel", Checkbox), "value", True)
+def test_a_ticked_but_blank_job_count_stays_automatic(tmp_path) -> None:  # noqa: ANN001
+    request = _pipe_request(
+        tmp_path,
+        lambda app: setattr(app.query_one("#pipe-parallel", Checkbox), "value", True),
     )
-    assert argv is not None and "--jobs" not in argv
+    assert request is not None and request.jobs is None
 
 
-def test_unticking_the_box_ignores_a_number_left_behind(monkeypatch) -> None:
-    def setup(app) -> None:
+def test_unticking_the_box_ignores_a_number_left_behind(tmp_path) -> None:  # noqa: ANN001
+    def setup(app) -> None:  # noqa: ANN001
         _set_jobs(app, "4")
-        app.query_one("#ext-parallel", Checkbox).value = False
+        app.query_one("#pipe-parallel", Checkbox).value = False
 
-    argv = _run_extractor_argv(monkeypatch, setup)
-    assert argv is not None and "--jobs" not in argv
-
-
-def test_extractor_rejects_a_nonsense_job_count(monkeypatch) -> None:
-    argv = _run_extractor_argv(monkeypatch, lambda app: _set_jobs(app, "-2"))
-    assert argv is None
+    request = _pipe_request(tmp_path, setup)
+    assert request is not None and request.jobs is None
 
 
-def test_roster_argv_one_section_uses_named_id_file() -> None:
-    async def run() -> list[str]:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#ext-id-path", Input).value = "/tmp/roster.tsv"
-            app.query_one("#ext-section-name", Input).value = "SectionA"
-            return screen._roster_argv()
-
-    argv = asyncio.run(run())
-    assert argv == ["--id-file", "/tmp/roster.tsv=SectionA"]
+def test_a_nonsense_job_count_is_refused(tmp_path) -> None:  # noqa: ANN001
+    notes: list[str] = []
+    assert _pipe_request(tmp_path, lambda app: _set_jobs(app, "-2"), notes=notes) is None
+    assert notes
 
 
-def test_roster_argv_one_section_defaults_name_to_filename() -> None:
-    async def run() -> list[str]:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#ext-id-path", Input).value = "/tmp/rosterMW.tsv"
-            return screen._roster_argv()
-
-    argv = asyncio.run(run())
-    assert argv == ["--id-file", "/tmp/rosterMW.tsv=rosterMW"]
+def test_start_over_reaches_the_pipeline_request(tmp_path) -> None:  # noqa: ANN001
+    request = _pipe_request(
+        tmp_path,
+        lambda app: setattr(app.query_one("#pipe-fresh", Checkbox), "value", True),
+    )
+    assert request is not None and request.fresh is True
 
 
-def test_roster_argv_multi_section_emits_one_id_file_per_line() -> None:
-    from textual.widgets import RadioButton, TextArea
+def test_a_mixed_stack_sends_one_roster_per_line(tmp_path) -> None:  # noqa: ANN001
+    from textual.widgets import TextArea
 
-    async def run() -> list[str]:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#ext-mode-many", RadioButton).value = True
-            await pilot.pause()
-            app.query_one("#ext-roster-list", TextArea).text = (
-                "/tmp/mw.tsv=MW\n/tmp/tth.tsv\n"
-            )
-            return screen._roster_argv()
+    def setup(app) -> None:  # noqa: ANN001
+        app.query_one("#pipe-many-rosters", Checkbox).value = True
+        app.query_one("#pipe-roster-list", TextArea).text = (
+            "/tmp/mw.tsv=MW\n\n  /tmp/tth.tsv  \n"
+        )
 
-    argv = asyncio.run(run())
-    assert argv == [
-        "--id-file", "/tmp/mw.tsv=MW",
-        "--id-file", "/tmp/tth.tsv",
-    ]
+    request = _pipe_request(tmp_path, setup)
+    assert request is not None
+    assert request.section_rosters == ("/tmp/mw.tsv=MW", "/tmp/tth.tsv")
+
+
+def test_rosters_left_in_the_list_are_ignored_once_the_box_is_unticked(tmp_path) -> None:  # noqa: ANN001
+    from textual.widgets import TextArea
+
+    def setup(app) -> None:  # noqa: ANN001
+        app.query_one("#pipe-roster-list", TextArea).text = "/tmp/mw.tsv=MW\n"
+
+    request = _pipe_request(tmp_path, setup)
+    assert request is not None
+    assert request.section_rosters == ()
+
+
+def test_a_mixed_stack_with_no_rosters_is_refused(tmp_path) -> None:  # noqa: ANN001
+    notes: list[str] = []
+    request = _pipe_request(
+        tmp_path,
+        lambda app: setattr(app.query_one("#pipe-many-rosters", Checkbox), "value", True),
+        notes=notes,
+    )
+    assert request is None
+    assert notes
 
 
 def test_browse_appends_roster_lines(monkeypatch) -> None:
     from pathlib import Path
 
-    from textual.widgets import RadioButton, TextArea
+    from textual.widgets import TextArea
 
     async def run() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            app.query_one("#ext-mode-many", RadioButton).value = True
+            app.query_one("#pipe-many-rosters", Checkbox).value = True
             await pilot.pause()
 
             captured: dict[str, object] = {}
@@ -449,7 +201,7 @@ def test_browse_appends_roster_lines(monkeypatch) -> None:
             captured["cb"](Path("/tmp/tth.tsv"))
             await pilot.pause()
 
-            text = app.query_one("#ext-roster-list", TextArea).text
+            text = app.query_one("#pipe-roster-list", TextArea).text
             assert text == "/tmp/mw.tsv\n/tmp/tth.tsv\n"
 
     asyncio.run(run())
@@ -738,69 +490,14 @@ def test_unticking_scramble_ignores_a_count_left_behind(monkeypatch) -> None:
     assert "--bubble-sheet" in argv
 
 
-def _stub_grading_cli(monkeypatch) -> dict[str, object]:  # noqa: ANN001
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_grading_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", argv),
-    )
-    monkeypatch.setattr(
-        app_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
-    )
-    return captured
-
-
-def test_min_confidence_is_omitted_when_none_is_saved(monkeypatch) -> None:  # noqa: ANN001
-    captured = _stub_grading_cli(monkeypatch)
-    app_config.save_settings(app_config.AISettings(grade_written=True))
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-    assert "--llm-min-confidence" not in captured["argv"]
-
-
-def test_min_confidence_never_becomes_a_cli_flag_even_when_saved(monkeypatch) -> None:  # noqa: ANN001
-    captured = _stub_grading_cli(monkeypatch)
-    app_config.save_settings(
-        app_config.AISettings(min_confidence=0.85, grade_written=True)
-    )
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-    argv = captured["argv"]
-    assert "--llm-min-confidence" not in argv
-    assert "--llm" not in argv
-
-
 def test_calibration_opens_prefilled_and_saves_its_answer_to_ai_setup() -> None:
     async def run() -> tuple[str, str, float]:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
+            app.query_one("#tui-qa-path", Input).value = "/tmp/sol.md"
+            app.query_one("#tui-sub-path", Input).value = "/tmp/subs"
             await pilot.pause()
 
             screen._open_llm_eval()
@@ -820,14 +517,34 @@ def test_calibration_opens_prefilled_and_saves_its_answer_to_ai_setup() -> None:
     assert saved == 0.75
 
 
+def test_calibration_falls_back_to_the_class_being_prepared() -> None:
+    async def run() -> tuple[str, str]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#pipe-qa", Input).value = "/tmp/class/qa.md"
+            app.query_one("#pipe-out", Input).value = "/tmp/class"
+            await pilot.pause()
+
+            app.query_one(SetupScreen)._open_llm_eval()
+            await pilot.pause()
+            modal = app.screen
+            paths = modal._solutions_path, modal._submissions_path
+            modal.dismiss(None)
+            await pilot.pause()
+            return paths
+
+    assert asyncio.run(run()) == ("/tmp/class/qa.md", "/tmp/class/submissions")
+
+
 def test_calibration_accept_marks_the_confidence_measured_and_wants_ai_grading() -> None:
     async def run() -> app_config.AISettings:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
+            app.query_one("#tui-qa-path", Input).value = "/tmp/sol.md"
+            app.query_one("#tui-sub-path", Input).value = "/tmp/subs"
             await pilot.pause()
 
             screen._open_llm_eval()
@@ -934,20 +651,85 @@ def test_opening_a_handoff_tool_with_no_folder_is_refused_not_blank() -> None:
     assert asyncio.run(run()) == 0
 
 
-def test_extractor_never_emits_llm_responses_escalate_or_math_flags(monkeypatch) -> None:
-    app_config.save_settings(
-        app_config.AISettings(
-            read_handwriting=True, escalate_only=True, transcribe_math=True
-        )
+def _prepared_class(app, tmp_path) -> None:  # noqa: ANN001
+    """Point the pipeline card at a class folder that already has an extraction."""
+    submission = tmp_path / "class" / "submissions" / "s1" / "s1.submission.md"
+    submission.parent.mkdir(parents=True)
+    submission.write_text("", encoding="utf-8")
+    app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+    app.query_one("#pipe-out", Input).value = str(tmp_path / "class")
+
+
+def _run_refine_argv(monkeypatch, tmp_path, setup=lambda _app: None, *, prepared=True):  # noqa: ANN001, ANN202
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        setup_screen,
+        "run_extractor_cli",
+        lambda argv, **kwargs: captured.__setitem__("argv", list(argv)),
     )
-    argv = _run_extractor_argv(monkeypatch, lambda _app: None)
-    assert argv is not None
-    for flag in ("--llm-responses", "--llm-escalate", "--llm-math"):
-        assert flag not in argv
-    assert "--math-backend" not in argv
+    notes: list[str] = []
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.notify = lambda message, **kwargs: notes.append(str(message))
+            if prepared:
+                _prepared_class(app, tmp_path)
+            else:
+                app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+                app.query_one("#pipe-out", Input).value = str(tmp_path / "class")
+            setup(app)
+            await pilot.pause()
+            app.query_one(SetupScreen)._run_refine()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(run())
+    captured["notes"] = notes
+    return captured
 
 
-def test_extraction_in_progress_flag_tracks_the_extractor_worker(monkeypatch) -> None:
+def test_the_re_read_reuses_the_pipeline_cards_folders_and_never_resumes(
+    monkeypatch, tmp_path
+) -> None:
+    argv = _run_refine_argv(monkeypatch, tmp_path)["argv"]
+    assert argv[argv.index("--input") + 1] == str(tmp_path / "class" / "split")
+    assert argv[argv.index("--output") + 1] == str(tmp_path / "class" / "submissions")
+    assert "--refine" in argv
+    # The extractor refuses --refine with --resume.
+    assert "--resume" not in argv
+    assert "--refine-dpi" not in argv
+
+
+def test_the_re_read_passes_its_dpi_and_the_region_map(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    def setup(app) -> None:  # noqa: ANN001
+        app.query_one("#refine-dpi", Input).value = "450"
+        app.query_one("#pipe-use-region-map", Checkbox).value = True
+        app.query_one("#pipe-region-map", Input).value = "/tmp/midterm.regions.json"
+
+    argv = _run_refine_argv(monkeypatch, tmp_path, setup)["argv"]
+    assert argv[argv.index("--refine-dpi") + 1] == "450"
+    assert argv[argv.index("--region-map") + 1] == "/tmp/midterm.regions.json"
+
+
+def test_the_re_read_refuses_a_nonsense_dpi(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    captured = _run_refine_argv(
+        monkeypatch,
+        tmp_path,
+        lambda app: setattr(app.query_one("#refine-dpi", Input), "value", "sharp"),
+    )
+    assert "argv" not in captured
+    assert captured["notes"]
+
+
+def test_the_re_read_refuses_a_class_with_nothing_extracted(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    captured = _run_refine_argv(monkeypatch, tmp_path, prepared=False)
+    assert "argv" not in captured
+    assert "Prepare an assignment" in captured["notes"][-1]
+
+
+def test_extraction_in_progress_flag_tracks_the_re_read_worker(monkeypatch, tmp_path) -> None:  # noqa: ANN001
     monkeypatch.setattr(setup_screen, "run_extractor_cli", lambda argv, **kwargs: None)
 
     async def run() -> None:
@@ -955,11 +737,10 @@ def test_extraction_in_progress_flag_tracks_the_extractor_worker(monkeypatch) ->
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-            app.query_one("#ext-input", Input).value = "/tmp/scans"
-            app.query_one("#ext-output", Input).value = "/tmp/subs"
+            _prepared_class(app, tmp_path)
 
             assert getattr(screen, "extraction_in_progress", False) is False
-            screen._run_extractor()
+            screen._run_refine()
             assert screen.extraction_in_progress is True
 
             await app.workers.wait_for_complete()
@@ -967,58 +748,6 @@ def test_extraction_in_progress_flag_tracks_the_extractor_worker(monkeypatch) ->
             assert screen.extraction_in_progress is False
 
     asyncio.run(run())
-
-
-def test_grade_while_extracting_requires_an_answer_key_path() -> None:
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            notices: list[tuple[str, str]] = []
-            monkeypatch_notify = app.notify
-            app.notify = lambda message, **kwargs: notices.append(  # type: ignore[method-assign]
-                (str(message), kwargs.get("severity", "information"))
-            )
-            try:
-                app.query_one("#ext-output", Input).value = "/tmp/subs"
-                screen._open_grade_while_extracting()
-            finally:
-                app.notify = monkeypatch_notify  # type: ignore[method-assign]
-
-            assert notices
-            message, severity = notices[-1]
-            assert "answer key" in message.lower()
-            assert severity == "error"
-
-    asyncio.run(run())
-
-
-def test_grade_while_extracting_posts_the_current_paths() -> None:
-    events: list[tuple[str, str]] = []
-    original = SetupScreen.GradeWhileExtractingRequested.__init__
-
-    def _spy(self, qa_path: str, submissions_path: str) -> None:  # noqa: ANN001
-        events.append((qa_path, submissions_path))
-        original(self, qa_path, submissions_path)
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#ext-qa", Input).value = "/tmp/qa.md"
-            app.query_one("#ext-output", Input).value = "/tmp/subs"
-            screen._open_grade_while_extracting()
-            await pilot.pause()
-
-    SetupScreen.GradeWhileExtractingRequested.__init__ = _spy  # type: ignore[method-assign]
-    try:
-        asyncio.run(run())
-    finally:
-        SetupScreen.GradeWhileExtractingRequested.__init__ = original  # type: ignore[method-assign]
-
-    assert events == [("/tmp/qa.md", "/tmp/subs")]
 
 
 def _stub_photo_import(monkeypatch, report=None, error=None) -> dict[str, object]:  # noqa: ANN001
@@ -1080,7 +809,7 @@ def _run_photo_form(monkeypatch, fill, *, report=None, error=None):  # noqa: ANN
             app.query_one(SetupScreen)._run_photo_import()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            captured["ext_input"] = app.query_one("#ext-input", Input).value
+            captured["pipe_scan"] = app.query_one("#pipe-scan", Input).value
 
     asyncio.run(run())
     captured["notes"] = notes
@@ -1140,7 +869,7 @@ def test_photo_import_requires_both_paths(monkeypatch) -> None:  # noqa: ANN001
     assert captured["notes"]
 
 
-def test_photo_import_points_extract_at_what_it_wrote(monkeypatch) -> None:  # noqa: ANN001
+def test_photo_import_hands_what_it_wrote_to_the_pipeline_card(monkeypatch) -> None:  # noqa: ANN001
 
     def fill(app) -> None:  # noqa: ANN001
         app.query_one("#photo-input", Input).value = "/tmp/photos"
@@ -1148,19 +877,19 @@ def test_photo_import_points_extract_at_what_it_wrote(monkeypatch) -> None:  # n
 
     captured = _run_photo_form(monkeypatch, fill, report=_photo_report("/tmp/split"))
 
-    assert captured["ext_input"] == "/tmp/split"
+    assert captured["pipe_scan"] == "/tmp/split"
 
 
-def test_photo_import_leaves_an_extract_path_the_user_typed(monkeypatch) -> None:  # noqa: ANN001
+def test_photo_import_leaves_a_scan_path_the_user_typed(monkeypatch) -> None:  # noqa: ANN001
 
     def fill(app) -> None:  # noqa: ANN001
         app.query_one("#photo-input", Input).value = "/tmp/photos"
         app.query_one("#photo-output", Input).value = "/tmp/split"
-        app.query_one("#ext-input", Input).value = "/tmp/mine"
+        app.query_one("#pipe-scan", Input).value = "/tmp/mine"
 
     captured = _run_photo_form(monkeypatch, fill, report=_photo_report("/tmp/split"))
 
-    assert captured["ext_input"] == "/tmp/mine"
+    assert captured["pipe_scan"] == "/tmp/mine"
 
 
 def test_photo_import_reports_skipped_photos_not_only_successes(monkeypatch) -> None:  # noqa: ANN001
@@ -1190,7 +919,7 @@ def test_photo_import_shows_the_tools_own_error_verbatim(monkeypatch) -> None:  
     )
 
     assert any("no images found in /tmp/photos" == note for note in captured["notes"])
-    assert captured["ext_input"] == ""
+    assert captured["pipe_scan"] == ""
 
 
 def _blank_assignment_pdf(tmp_path) -> str:  # noqa: ANN001
@@ -1224,11 +953,11 @@ def test_region_map_editor_needs_the_assignment_pdf() -> None:
     assert notes
 
 
-def test_a_saved_region_map_lands_in_the_extract_step(tmp_path) -> None:  # noqa: ANN001
+def test_a_saved_region_map_lands_in_the_pipeline_card(tmp_path) -> None:  # noqa: ANN001
     pdf = _blank_assignment_pdf(tmp_path)
     saved = tmp_path / "midterm.regions.json"
 
-    async def run() -> tuple[str, bool, bool]:
+    async def run() -> tuple[str, bool, bool, bool]:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -1240,15 +969,18 @@ def test_a_saved_region_map_lands_in_the_extract_step(tmp_path) -> None:  # noqa
             app.screen.dismiss(saved)
             await pilot.pause()
             return (
-                app.query_one("#ext-region-map-path", Input).value,
-                app.query_one("#ext-use-region-map", Checkbox).value,
-                app.query_one("#ext-use-template", Checkbox).value,
+                app.query_one("#pipe-region-map", Input).value,
+                app.query_one("#pipe-use-region-map", Checkbox).value,
+                app.query_one("#pipe-use-template", Checkbox).value,
+                app.query_one("#pipe-advanced", Collapsible).collapsed,
             )
 
-    path_value, region_on, template_on = asyncio.run(run())
+    path_value, region_on, template_on, more_collapsed = asyncio.run(run())
     assert path_value == str(saved)
     assert region_on is True
     assert template_on is False
+    # The box it just ticked is inside Advanced settings: show it.
+    assert more_collapsed is False
 
 
 def test_cancelling_the_region_map_editor_changes_nothing(tmp_path) -> None:  # noqa: ANN001
@@ -1265,38 +997,24 @@ def test_cancelling_the_region_map_editor_changes_nothing(tmp_path) -> None:  # 
             app.screen.dismiss(None)
             await pilot.pause()
             return (
-                app.query_one("#ext-region-map-path", Input).value,
-                app.query_one("#ext-use-region-map", Checkbox).value,
+                app.query_one("#pipe-region-map", Input).value,
+                app.query_one("#pipe-use-region-map", Checkbox).value,
             )
 
     assert asyncio.run(run()) == ("", False)
 
 
-def test_the_region_map_reaches_the_extractor(monkeypatch) -> None:  # noqa: ANN001
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_extractor_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", argv),
-    )
+def test_the_region_map_reaches_the_pipeline_request(tmp_path) -> None:  # noqa: ANN001
+    from pathlib import Path
 
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            app.query_one("#ext-input", Input).value = "/tmp/split"
-            app.query_one("#ext-output", Input).value = "/tmp/out"
-            app.query_one("#ext-use-region-map", Checkbox).value = True
-            await pilot.pause()
-            app.query_one("#ext-region-map-path", Input).value = "/tmp/midterm.regions.json"
-            app.query_one(SetupScreen)._run_extractor()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
+    def setup(app) -> None:  # noqa: ANN001
+        app.query_one("#pipe-use-region-map", Checkbox).value = True
+        app.query_one("#pipe-region-map", Input).value = "/tmp/midterm.regions.json"
 
-    asyncio.run(run())
-    argv = captured["argv"]
-    assert argv[argv.index("--region-map") + 1] == "/tmp/midterm.regions.json"
-    assert "--blank-template" not in argv
+    request = _pipe_request(tmp_path, setup)
+    assert request is not None
+    assert request.region_map == Path("/tmp/midterm.regions.json")
+    assert request.blank_template is None
 
 
 def test_the_two_layout_sources_untick_each_other() -> None:
@@ -1304,49 +1022,33 @@ def test_the_two_layout_sources_untick_each_other() -> None:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            app.query_one("#ext-use-template", Checkbox).value = True
+            app.query_one("#pipe-use-template", Checkbox).value = True
             await pilot.pause()
-            app.query_one("#ext-use-region-map", Checkbox).value = True
+            app.query_one("#pipe-use-region-map", Checkbox).value = True
             await pilot.pause()
             after_region = (
-                app.query_one("#ext-use-template", Checkbox).value,
-                app.query_one("#ext-use-region-map", Checkbox).value,
+                app.query_one("#pipe-use-template", Checkbox).value,
+                app.query_one("#pipe-use-region-map", Checkbox).value,
             )
-            app.query_one("#ext-use-template", Checkbox).value = True
+            app.query_one("#pipe-use-template", Checkbox).value = True
             await pilot.pause()
             after_template = (
-                app.query_one("#ext-use-template", Checkbox).value,
-                app.query_one("#ext-use-region-map", Checkbox).value,
+                app.query_one("#pipe-use-template", Checkbox).value,
+                app.query_one("#pipe-use-region-map", Checkbox).value,
             )
             return (*after_region, *after_template)
 
     assert asyncio.run(run()) == (False, True, True, False)
 
 
-def test_a_ticked_region_map_with_no_path_is_refused(monkeypatch) -> None:  # noqa: ANN001
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        setup_screen,
-        "run_extractor_cli",
-        lambda argv, **kwargs: captured.__setitem__("argv", argv),
-    )
+def test_a_ticked_region_map_with_no_path_is_refused(tmp_path) -> None:  # noqa: ANN001
     notes: list[str] = []
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            app.notify = lambda message, **kwargs: notes.append(str(message))
-            app.query_one("#ext-input", Input).value = "/tmp/split"
-            app.query_one("#ext-output", Input).value = "/tmp/out"
-            app.query_one("#ext-use-region-map", Checkbox).value = True
-            await pilot.pause()
-            app.query_one(SetupScreen)._run_extractor()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-    assert "argv" not in captured
+    request = _pipe_request(
+        tmp_path,
+        lambda app: setattr(app.query_one("#pipe-use-region-map", Checkbox), "value", True),
+        notes=notes,
+    )
+    assert request is None
     assert notes
 
 
@@ -1612,6 +1314,30 @@ def test_scanning_the_class_folder_fills_the_pipeline_fields(tmp_path) -> None: 
     assert seen["summary_hidden"] is False
 
 
+def test_a_folder_with_no_answer_key_says_where_to_make_one(tmp_path) -> None:  # noqa: ANN001
+    folder = _pipe_class_folder(tmp_path)
+
+    async def run() -> tuple[bool, bool, bool]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            hint = app.query_one("#pipe-qa-hint")
+            before = hint.has_class("hidden")
+
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._scan_class_folder()
+            await pilot.pause()
+            with_key = hint.has_class("hidden")
+
+            (folder / "qa.md").unlink()
+            screen._scan_class_folder()
+            await pilot.pause()
+            return before, with_key, hint.has_class("hidden")
+
+    assert asyncio.run(run()) == (True, True, False)
+
+
 def test_a_rescan_keeps_what_the_user_typed_but_replaces_what_it_filled(
     tmp_path,
 ) -> None:  # noqa: ANN001
@@ -1824,6 +1550,273 @@ def test_pipeline_asap_without_an_answer_key_notifies_instead_of_ignoring_it(
     assert any("answer key" in message.lower() for message, _severity in notices)
 
 
+def _stub_pipeline_run(monkeypatch) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline import PipelineReport, StageOutcome, StageStatus
+
+    def fake_run_pipeline(request, *, progress=None):  # noqa: ANN001, ANN202
+        return PipelineReport(
+            stages=(StageOutcome(stage="extract", status=StageStatus.RAN, message="ok"),),
+            submissions_dir=request.submissions_dir,
+            qa_file=request.qa_file,
+        )
+
+    monkeypatch.setattr(setup_screen, "run_pipeline", fake_run_pipeline)
+
+
+def test_the_card_has_no_scan_button_and_tucks_the_file_fields_away() -> None:
+    async def run() -> tuple[int, bool, bool]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            advanced = app.query_one("#pipe-advanced", Collapsible)
+            return (
+                len(app.query("#pipe-scan-folder")),
+                advanced.collapsed,
+                # The scan and answer-key fields live inside Advanced settings.
+                app.query_one("#pipe-scan") in advanced.query(Input)
+                and app.query_one("#pipe-qa") in advanced.query(Input),
+            )
+
+    assert asyncio.run(run()) == (0, True, True)
+
+
+def test_advanced_settings_open_only_when_the_folder_cannot_answer_for_itself(
+    tmp_path,
+) -> None:
+    clear = _pipe_class_folder(tmp_path)
+    unclear = tmp_path / "unclear"
+    unclear.mkdir()
+    (unclear / "qa.md").write_text(_PIPE_QA_TEXT, encoding="utf-8")
+
+    async def run() -> tuple[bool, bool]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            advanced = app.query_one("#pipe-advanced", Collapsible)
+
+            app.query_one("#pipe-out", Input).value = str(clear)
+            screen._load_class_folder()
+            await pilot.pause()
+            after_clear = advanced.collapsed
+
+            # No scan in this one: the field to choose it has to be shown.
+            app.query_one("#pipe-out", Input).value = str(unclear)
+            screen._load_class_folder()
+            await pilot.pause()
+            return after_clear, advanced.collapsed
+
+    assert asyncio.run(run()) == (True, False)
+
+
+def test_running_remembers_the_settings_but_never_the_one_shot_overrides(
+    monkeypatch, tmp_path
+) -> None:
+    from opengrader.core.pipeline_settings import (
+        folder_settings_path,
+        load_folder_settings,
+        load_machine_settings,
+    )
+
+    _stub_pipeline_run(monkeypatch)
+    folder = _pipe_class_folder(tmp_path)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+
+            app.query_one("#pipe-pages", Input).value = "6"
+            app.query_one("#pipe-use-roster", Checkbox).value = False
+            app.query_one("#pipe-reorder", Checkbox).value = True
+            app.query_one("#pipe-grade-asap", Checkbox).value = False
+            app.query_one("#pipe-parallel", Checkbox).value = True
+            app.query_one("#pipe-jobs", Input).value = "3"
+            app.query_one("#pipe-force", Checkbox).value = True
+            app.query_one("#pipe-fresh", Checkbox).value = True
+            await pilot.pause()
+
+            screen._run_pipeline()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(run())
+
+    saved = load_folder_settings(folder)
+    assert saved is not None
+    assert saved.pages_per_submission == 6
+    assert saved.use_roster is False
+    assert saved.use_template is True
+    assert saved.reorder_pages is True
+    # What the folder scan found is found again next time; it is not an override.
+    assert saved.scan == "" and saved.qa_file == ""
+    stored = folder_settings_path(folder).read_text(encoding="utf-8")
+    assert "force" not in stored and "fresh" not in stored
+
+    machine = load_machine_settings()
+    assert machine.grade_as_ready is False
+    assert machine.jobs == 3
+    assert machine.last_class_folder == str(folder)
+
+
+def test_preview_saves_nothing(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import folder_settings_path
+
+    monkeypatch.setattr(setup_screen, "plan_pipeline", lambda request: ())
+    folder = _pipe_class_folder(tmp_path)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#pipe-out", Input).value = str(folder)
+            app.query_one(SetupScreen)._run_pipeline_preview()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert not folder_settings_path(folder).exists()
+
+
+def test_choosing_a_folder_brings_back_what_was_saved_for_it(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import (
+        FolderPipelineSettings,
+        save_folder_settings,
+    )
+
+    folder = _pipe_class_folder(tmp_path)
+    elsewhere = tmp_path / "keys" / "final-key.md"
+    save_folder_settings(
+        folder,
+        FolderPipelineSettings(
+            qa_file=str(elsewhere),
+            pages_per_submission=6,
+            # The folder has a roster, but last time the box was unticked.
+            use_roster=False,
+            use_template=True,
+            blank_template=str(folder / "blank-template.pdf"),
+            use_section_rosters=True,
+            section_rosters=("/rosters/mw.tsv=MW",),
+            reorder_pages=True,
+            draft_rubrics=True,
+        ),
+    )
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+            return screen._build_pipeline_request()
+
+    request = asyncio.run(run())
+    assert request is not None
+    assert request.scan == folder / "scans.pdf"
+    assert request.qa_file == elsewhere
+    assert request.pages_per_submission == 6
+    assert request.roster is None
+    assert request.blank_template == folder / "blank-template.pdf"
+    assert request.section_rosters == ("/rosters/mw.tsv=MW",)
+    assert request.reorder_pages is True
+    assert request.draft_rubrics is True
+    # Never remembered, so never restored.
+    assert request.force is False and request.fresh is False
+
+
+def test_saved_settings_are_applied_once_and_never_over_a_later_change(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import (
+        FolderPipelineSettings,
+        save_folder_settings,
+    )
+
+    folder = _pipe_class_folder(tmp_path)
+    save_folder_settings(folder, FolderPipelineSettings(pages_per_submission=6))
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            app.query_one("#pipe-out", Input).value = str(folder)
+            screen._load_class_folder()
+            await pilot.pause()
+            app.query_one("#pipe-pages", Input).value = "8"
+            # Building the request loads the folder again; the 8 must survive.
+            return screen._build_pipeline_request()
+
+    request = asyncio.run(run())
+    assert request is not None and request.pages_per_submission == 8
+
+
+def test_the_app_opens_on_the_class_folder_and_preferences_used_last(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import (
+        FolderPipelineSettings,
+        MachinePipelineSettings,
+        save_folder_settings,
+        save_machine_settings,
+    )
+
+    folder = _pipe_class_folder(tmp_path)
+    save_folder_settings(folder, FolderPipelineSettings(pages_per_submission=6))
+    save_machine_settings(
+        MachinePipelineSettings(
+            grade_as_ready=False, jobs=3, last_class_folder=str(folder)
+        )
+    )
+
+    async def run() -> tuple[str, str, str, bool, bool, str]:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            return (
+                app.query_one("#pipe-out", Input).value,
+                app.query_one("#pipe-scan", Input).value,
+                app.query_one("#pipe-pages", Input).value,
+                app.query_one("#pipe-grade-asap", Checkbox).value,
+                app.query_one("#pipe-parallel", Checkbox).value,
+                app.query_one("#pipe-jobs", Input).value,
+            )
+
+    assert asyncio.run(run()) == (
+        str(folder),
+        str(folder / "scans.pdf"),
+        "6",
+        False,
+        True,
+        "3",
+    )
+
+
+def test_a_last_class_folder_that_is_gone_is_quietly_forgotten(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import (
+        MachinePipelineSettings,
+        save_machine_settings,
+    )
+
+    save_machine_settings(
+        MachinePipelineSettings(last_class_folder=str(tmp_path / "deleted"))
+    )
+    notes: list[str] = []
+
+    async def run() -> str:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        app.notify = lambda message, **kwargs: notes.append(str(message))  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            return app.query_one("#pipe-out", Input).value
+
+    assert asyncio.run(run()) == ""
+    # Other start-up notices are fine; none may be about the missing folder.
+    assert not any("class folder" in note for note in notes)
+
+
 def test_pipeline_preview_calls_plan_pipeline_and_writes_nothing(
     monkeypatch, tmp_path
 ) -> None:
@@ -1908,49 +1901,29 @@ def test_refresh_ai_displays_updates_every_status_line_and_the_summary() -> None
             await pilot.pause()
             ids = (
                 "ai-current-summary",
-                "split-ai-status",
-                "ext-ai-status",
+                "refine-ai-status",
                 "ak-ai-status",
-                "grade-ai-status",
                 "pipe-ai-status",
             )
             return tuple(
                 str(app.query_one(f"#{node_id}", Static).render()) for node_id in ids
             )
 
-    (
-        summary,
-        split_status,
-        ext_status,
-        ak_status,
-        grade_status,
-        pipe_status,
-    ) = asyncio.run(run())
+    summary, refine_status, ak_status, pipe_status = asyncio.run(run())
     assert "llama3.1" in summary
-    assert "AI: off" not in split_status
-    assert "AI: off" not in ext_status
+    assert "AI: off" not in refine_status
     assert "AI: off" not in ak_status
-    assert "AI: off" not in grade_status
     assert "reads hard-to-read handwriting" in pipe_status
 
 
-def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
+def test_the_answer_key_tool_never_emits_a_model_host_or_feature_flag(
     monkeypatch, tmp_path
 ) -> None:
     captured: dict[str, list[str]] = {}
-
-    def _capture(name: str):
-        def _fn(argv, **kwargs) -> None:  # noqa: ANN001
-            captured[name] = list(argv)
-
-        return _fn
-
-    monkeypatch.setattr(setup_screen, "run_splitter_cli", _capture("split"))
-    monkeypatch.setattr(setup_screen, "run_extractor_cli", _capture("extract"))
-    monkeypatch.setattr(setup_screen, "run_answer_key_cli", _capture("answer_key"))
-    monkeypatch.setattr(setup_screen, "run_grading_cli", _capture("grade"))
     monkeypatch.setattr(
-        app_config, "ensure_ready", lambda resolved=None, *, purpose="text": None
+        setup_screen,
+        "run_answer_key_cli",
+        lambda argv, **kwargs: captured.__setitem__("answer_key", list(argv)),
     )
 
     app_config.save_settings(
@@ -1965,8 +1938,6 @@ def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
         )
     )
 
-    pdf = tmp_path / "scan.pdf"
-    pdf.write_bytes(b"%PDF-1.4")
     ak_input = tmp_path / "assignment.md"
     ak_input.write_text("# stub")
 
@@ -1975,21 +1946,6 @@ def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             screen = app.query_one(SetupScreen)
-
-            app.query_one("#split-input", Input).value = str(pdf)
-            app.query_one("#split-output", Input).value = str(tmp_path / "split-out")
-            await pilot.pause()
-            screen._run_splitter()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-            app.query_one("#ext-input", Input).value = str(tmp_path / "split-out")
-            app.query_one("#ext-output", Input).value = str(tmp_path / "ext-out")
-            await pilot.pause()
-            screen._run_extractor()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
             app.query_one("#ak-input", Input).value = str(ak_input)
             app.query_one("#ak-output", Input).value = str(tmp_path / "qa.md")
             await pilot.pause()
@@ -1997,16 +1953,8 @@ def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
             await app.workers.wait_for_complete()
             await pilot.pause()
 
-            app.query_one("#grade-solutions", Input).value = str(tmp_path / "qa.md")
-            app.query_one("#grade-input", Input).value = str(tmp_path / "ext-out")
-            await pilot.pause()
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
     asyncio.run(run())
 
-    assert set(captured) == {"split", "extract", "answer_key", "grade"}
     banned = (
         "--ollama-model",
         "--ollama-host",
@@ -2018,68 +1966,8 @@ def test_no_step_ever_emits_a_model_host_confidence_or_feature_flag(
         "--llm-escalate",
         "--llm-math",
     )
-    for step, argv in captured.items():
-        for flag in banned:
-            assert flag not in argv, f"{step} argv unexpectedly carries {flag}: {argv}"
-
-
-def test_the_llm_readiness_probe_runs_off_the_ui_thread(monkeypatch) -> None:
-    import threading
-
-    seen: dict[str, object] = {}
-
-    def _probe(resolved=None, *, purpose="text"):  # noqa: ANN001, ANN202
-        seen["on_main_thread"] = (
-            threading.current_thread() is threading.main_thread()
-        )
-
-    monkeypatch.setattr(setup_screen, "run_grading_cli", lambda argv, **kwargs: None)
-    monkeypatch.setattr(app_config, "ensure_ready", _probe)
-    app_config.save_settings(app_config.AISettings(grade_written=True))
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-
-    assert seen.get("on_main_thread") is False, (
-        "the readiness probe ran on the UI thread — a slow or black-holed host "
-        "would freeze the whole app"
-    )
-
-
-def test_the_llm_probe_is_skipped_entirely_when_the_ai_is_not_wanted(monkeypatch) -> None:
-    calls: list[object] = []
-
-    monkeypatch.setattr(setup_screen, "run_grading_cli", lambda argv, **kwargs: None)
-    monkeypatch.setattr(
-        app_config,
-        "ensure_ready",
-        lambda resolved=None, *, purpose="text": calls.append(resolved),
-    )
-
-    async def run() -> None:
-        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
-        async with app.run_test(size=(120, 40)) as pilot:
-            await pilot.pause()
-            screen = app.query_one(SetupScreen)
-            app.query_one("#grade-solutions", Input).value = "/tmp/sol.md"
-            app.query_one("#grade-input", Input).value = "/tmp/subs"
-            screen._run_grading()
-            await app.workers.wait_for_complete()
-            await pilot.pause()
-
-    asyncio.run(run())
-
-    assert calls == []
+    for flag in banned:
+        assert flag not in captured["answer_key"]
 
 
 def test_a_run_paused_for_rubric_review_opens_grading_to_check_the_drafts(tmp_path) -> None:  # noqa: ANN001

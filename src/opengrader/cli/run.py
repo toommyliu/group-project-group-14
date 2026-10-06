@@ -211,6 +211,20 @@ def _print_summary(report: PipelineReport) -> None:
         # by _resolve_cloud_confirmation before this summary ran.
         return
 
+    if report.page_order_review_needed:
+        paused = next(o for o in report.stages if o.status is StageStatus.PAUSED)
+        print("\nPaused before extraction: some submissions look out of order.")
+        for line in paused.detail.splitlines()[1:]:
+            print(f"  {line}")
+        print(
+            "Nothing was moved or extracted. Run the same command again with one of:\n"
+            "  --reorder          sort them (into the blank template's order when one is given)\n"
+            "  --keep-page-order  leave them as scanned; they are in order, or it does not matter\n"
+            "or rearrange those PDFs yourself and run again: pages you put in order are\n"
+            "not asked about, and in a terminal you can choose submission by submission."
+        )
+        return
+
     if report.paused_for_review:
         print(
             "\nPaused for review: the AI drafted rubric items into "
@@ -422,6 +436,31 @@ def _resolve_cloud_confirmation(
     confirmed_request = replace(request, send_to_cloud_confirmed=True)
     new_report = _run_pipeline(confirmed_request, narrator, as_json=as_json)
     return confirmed_request, new_report
+
+
+def _resolve_page_order(
+    request: PipelineRequest,
+    report: PipelineReport,
+    narrator: "_Narrator",
+    *,
+    as_json: bool,
+) -> PipelineReport:
+    """`report` paused before extraction because some submissions look out of
+    order. A TTY without --json is asked what to do and the run carries on;
+    anything else is told how to answer and stays paused."""
+    from opengrader.core.pages.order_review import review_in_terminal
+
+    stream = sys.stderr if as_json else sys.stdout
+
+    def write(line: str) -> None:
+        stream.write(f"{line}\n")
+        stream.flush()
+
+    if not (sys.stdin.isatty() and not as_json):
+        return report
+    if not review_in_terminal(request.extract_source, ask=input, write=write):
+        return report
+    return _run_pipeline(request, narrator, as_json=as_json)
 
 
 def _run_pipeline(
@@ -715,6 +754,26 @@ def _save_inputs(
     ),
 )
 @click.option(
+    "--reorder",
+    "reorder_pages",
+    is_flag=True,
+    help=(
+        "Sort each submission's pages when splitting. Without it pages are "
+        "left as scanned and a submission that looks out of order is "
+        "reported, because a misread page number would move a page that was "
+        "already right. With --blank-template the template supplies the order."
+    ),
+)
+@click.option(
+    "--keep-page-order",
+    is_flag=True,
+    help=(
+        "Leave submissions that look out of order as scanned and carry on. "
+        "Without this or --reorder the run pauses before extraction so you "
+        "can confirm, sort, or rearrange them (asked here in a terminal)."
+    ),
+)
+@click.option(
     "--force",
     is_flag=True,
     help=(
@@ -768,6 +827,8 @@ def command(
     llm_min_confidence: float | None,
     auto_grade: bool,
     draft_rubrics: bool,
+    reorder_pages: bool,
+    keep_page_order: bool,
     force: bool,
     fresh: bool,
     dry_run: bool,
@@ -813,6 +874,8 @@ def command(
         roster=Path(inputs.roster) if inputs.roster else None,
         blank_template=Path(inputs.blank_template) if inputs.blank_template else None,
         pages_per_submission=inputs.pages_per_submission,
+        reorder_pages=reorder_pages,
+        keep_page_order=keep_page_order,
         llm=LlmOptions(
             read_handwriting=llm if llm is not None else ai.read_handwriting,
             grade_written=llm if llm is not None else ai.grade_written,
@@ -847,6 +910,9 @@ def command(
         request, report = _resolve_cloud_confirmation(
             request, report, narrator, as_json=as_json
         )
+
+    if report.page_order_review_needed:
+        report = _resolve_page_order(request, report, narrator, as_json=as_json)
 
     report = replace(report, workspace=root)
     # A paused run published nothing on purpose: the answer key is about to be

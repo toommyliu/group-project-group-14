@@ -20,8 +20,9 @@ Safeguards live here structurally, not in the screens:
 
 No client or SDK is imported at module scope: this module is imported at TUI
 startup and by every CLI parser (tests/unit/tui/test_startup_imports.py).
-API keys are read from the environment (or a consented credential command)
-and never persisted.
+API keys are read from the environment, from the operating system's own
+password store (`keystore.py`: a key the user pasted into the setup screen),
+or from a consented credential command. Opengrader never writes one to a file.
 """
 
 from __future__ import annotations
@@ -76,6 +77,8 @@ __all__ = [
     "available_models",
     "ensure_ready",
     "resolve_api_key",
+    "api_key_source",
+    "missing_key_help",
     "load_settings",
     "save_settings",
     "settings_path",
@@ -726,9 +729,8 @@ class ResolvedAI:
             and not credential_problem
         ):
             found.append(
-                f"{self.provider.label} needs an API key. Set the "
-                f"{self.provider.api_key_env} environment variable, then "
-                "re-open this screen."
+                f"{self.provider.label} needs an API key. "
+                f"{missing_key_help(self.provider)} Then re-open this screen."
             )
         if (
             self.grade_written
@@ -784,9 +786,12 @@ _CREDENTIAL_LOCK = threading.Lock()
 
 
 def clear_credential_cache() -> None:
-    """Forget credential-command results, so the next resolve runs them again."""
+    """Forget credential-command and key-store results, so the next resolve asks again."""
     with _CREDENTIAL_LOCK:
         _CREDENTIAL_CACHE.clear()
+    from . import keystore
+
+    keystore.clear_cache()
 
 
 def _redact(text: str) -> str:
@@ -883,6 +888,46 @@ def _credential_problem(resolved: ResolvedAI) -> str:
     return ""
 
 
+def _stored_api_key(
+    provider: ProviderSpec, environ: dict[str, str] | None = None
+) -> str | None:
+    """A key the user saved for this provider in the OS password store, if any.
+
+    Only a provider that names an `api_key_env` is looked up: that is how a
+    manifest says "I take a key", and it keeps the built-in local provider —
+    resolved on every screen — from ever starting a keychain lookup.
+    """
+    if not provider.api_key_env or not _selectable(provider, environ):
+        return None
+    from . import keystore
+
+    return keystore.lookup(keystore.account_for(provider))
+
+
+def api_key_source(
+    provider: ProviderSpec, *, environ: dict[str, str] | None = None
+) -> Literal["environment", "keystore", ""]:
+    """Where this provider's key would come from right now ("" = nowhere).
+
+    A credential command is not reported here: whether it yields a key is
+    only known by running it, which needs its own consent.
+    """
+    env = os.environ if environ is None else environ
+    if provider.api_key_env and env.get(provider.api_key_env, "").strip():
+        return "environment"
+    if _stored_api_key(provider, environ):
+        return "keystore"
+    return ""
+
+
+def missing_key_help(provider: ProviderSpec) -> str:
+    """The one sentence every surface uses to say how to give a provider its key."""
+    return (
+        "Save one in Helper Tools → AI providers → Set up a provider, or set "
+        f"the {provider.api_key_env} environment variable."
+    )
+
+
 def resolve_api_key(
     provider: ProviderSpec,
     *,
@@ -891,12 +936,14 @@ def resolve_api_key(
 ) -> str | None:
     """The provider's key, registered for redaction. Never read from or written to disk.
 
-    Order: the `api_key_env` variable if set and non-blank; otherwise the
-    provider's `credential_command`, but ONLY when `settings` holds a
-    credential consent for exactly that argv, and the cloud kill switch does
-    not forbid the provider. Without `settings`, no command ever runs. A failed
-    command returns None and is reported, redacted, by `ResolvedAI.problems()`
-    — never raised.
+    Order: the `api_key_env` variable if set and non-blank; then a key saved
+    in the operating system's password store for this provider and host
+    (`keystore.py`), unless the cloud kill switch forbids the provider;
+    otherwise the provider's `credential_command`, but ONLY when `settings`
+    holds a credential consent for exactly that argv, and the cloud kill
+    switch does not forbid the provider. Without `settings`, no command ever
+    runs. A failed command returns None and is reported, redacted, by
+    `ResolvedAI.problems()` — never raised.
     """
     env = os.environ if environ is None else environ
     if provider.api_key_env:
@@ -904,6 +951,10 @@ def resolve_api_key(
         if value:
             _register_secret(value)
             return value
+    stored = _stored_api_key(provider, environ)
+    if stored:
+        _register_secret(stored)
+        return stored
     if (
         provider.credential_command
         and settings is not None
@@ -1250,8 +1301,8 @@ def ensure_ready(
         if credential_problem:
             raise AIUnavailableError(credential_problem)
         raise AIUnavailableError(
-            f"{provider.label} needs an API key. Set the "
-            f"{provider.api_key_env} environment variable. {provider.setup_hint}"
+            f"{provider.label} needs an API key. {missing_key_help(provider)} "
+            f"{provider.setup_hint}"
         )
 
     if not provider.supports_model_listing:

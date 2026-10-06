@@ -503,6 +503,15 @@ def _fake_tool_cli(calls: list):  # noqa: ANN202
     return fake
 
 
+def _prepared_class(app, tmp_path) -> None:  # noqa: ANN001
+    """Point the pipeline card at a class folder that already has an extraction."""
+    submission = tmp_path / "class" / "submissions" / "s1" / "s1.submission.md"
+    submission.parent.mkdir(parents=True)
+    submission.write_text("", encoding="utf-8")
+    app.query_one("#pipe-scan", Input).value = str(tmp_path / "scan.pdf")
+    app.query_one("#pipe-out", Input).value = str(tmp_path / "class")
+
+
 async def _answer_modal(app, pilot, button: str) -> str:  # noqa: ANN001
     await app.workers.wait_for_complete()
     await _settle(pilot, lambda: _has(app, "#cloud-preflight-dialog"))
@@ -515,8 +524,8 @@ async def _answer_modal(app, pilot, button: str) -> str:  # noqa: ANN001
 
 
 @pytest.mark.parametrize("button", ["#consent-accept", "#consent-cancel"])
-def test_extractor_asks_in_a_modal_and_reruns_only_when_confirmed(
-    monkeypatch: pytest.MonkeyPatch, button: str
+def test_the_re_read_asks_in_a_modal_and_reruns_only_when_confirmed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, button: str
 ) -> None:
     calls: list = []
     monkeypatch.setattr(setup_screen, "run_extractor_cli", _fake_tool_cli(calls))
@@ -528,13 +537,12 @@ def test_extractor_asks_in_a_modal_and_reruns_only_when_confirmed(
             await pilot.pause()
             monkeypatch.setattr(app, "notify", lambda message, **_k: notices.append(message))
             screen = app.query_one(SetupScreen)
-            app.query_one("#ext-input", Input).value = "/tmp/scans"
-            app.query_one("#ext-output", Input).value = "/tmp/subs"
-            screen._run_extractor()
+            _prepared_class(app, tmp_path)
+            screen._run_refine()
             statement = await _answer_modal(app, pilot, button)
             return (
                 statement,
-                app.query_one("#run-extractor", Button).disabled,
+                app.query_one("#run-refine", Button).disabled,
                 screen.extraction_in_progress,
             )
 
@@ -543,10 +551,11 @@ def test_extractor_asks_in_a_modal_and_reruns_only_when_confirmed(
     assert "Consent wording." in statement
     assert all(kwargs["prompt_cloud_send"] is False for _argv, kwargs in calls)
     assert "--yes-send-to-cloud" not in calls[0][0]
+    assert "--refine" in calls[0][0]
     if button == "#consent-accept":
         assert len(calls) == 2
         assert calls[1][0] == [*calls[0][0], "--yes-send-to-cloud"]
-        assert notices[-1] == "Extraction complete."
+        assert notices[-1] == "Re-read complete."
     else:
         assert len(calls) == 1
         assert "declined" in notices[-1]
@@ -586,8 +595,8 @@ def test_answer_key_asks_in_a_modal_and_reruns_only_when_confirmed(
     assert button_disabled is False
 
 
-def test_extractor_refusal_resets_the_form_instead_of_escaping_the_worker(
-    monkeypatch: pytest.MonkeyPatch,
+def test_a_re_read_refusal_resets_the_form_instead_of_escaping_the_worker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     # SystemExit is not an Exception: it used to slip past the worker's handler.
     def refuse(argv, **kwargs):  # noqa: ANN001, ANN003
@@ -601,12 +610,11 @@ def test_extractor_refusal_resets_the_form_instead_of_escaping_the_worker(
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
             monkeypatch.setattr(app, "notify", lambda message, **_k: notices.append(message))
-            app.query_one("#ext-input", Input).value = "/tmp/scans"
-            app.query_one("#ext-output", Input).value = "/tmp/subs"
-            app.query_one(SetupScreen)._run_extractor()
+            _prepared_class(app, tmp_path)
+            app.query_one(SetupScreen)._run_refine()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            return app.query_one("#run-extractor", Button).disabled
+            return app.query_one("#run-refine", Button).disabled
 
     assert asyncio.run(run()) is False
-    assert notices[-1] == "Extractor failed (exit 2)."
+    assert notices[-1] == "Re-read failed (exit 2)."

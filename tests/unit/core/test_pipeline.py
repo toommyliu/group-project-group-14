@@ -178,6 +178,21 @@ def test_split_argv_always_fixes_rotation_and_order(tmp_path) -> None:
     )
 
 
+def test_split_never_sorts_pages_unless_asked(tmp_path) -> None:
+    assert "--reorder" not in plan_pipeline(_request(tmp_path))[1].argv
+    assert plan_pipeline(_request(tmp_path, reorder_pages=True))[1].argv[-1] == "--reorder"
+
+
+def test_turning_reordering_on_redoes_the_split_but_leaving_it_off_does_not(tmp_path) -> None:
+    from opengrader.core.pipeline import _stage_ledger_key
+
+    request = _request(tmp_path)
+    off = _stage_ledger_key(request, STAGE_SPLIT)
+
+    assert _stage_ledger_key(replace(request, reorder_pages=True), STAGE_SPLIT) != off
+    assert _stage_ledger_key(replace(request, reorder_pages=False), STAGE_SPLIT) == off
+
+
 def test_extract_argv_reads_the_split_dir_and_always_resumes(tmp_path) -> None:
     request = _request(tmp_path, roster=tmp_path / "roster.tsv", jobs=4)
     plan = plan_pipeline(request)[2]
@@ -193,6 +208,68 @@ def test_extract_argv_reads_the_split_dir_and_always_resumes(tmp_path) -> None:
         "--jobs",
         "4",
     )
+
+
+def test_a_region_map_reaches_the_extractor_and_only_the_extractor(tmp_path) -> None:
+    region_map = tmp_path / "midterm.regions.json"
+    request = _request(tmp_path, region_map=region_map)
+
+    split, extract = plan_pipeline(request)[1:3]
+    assert extract.argv[extract.argv.index("--region-map") + 1] == str(region_map)
+    assert "--blank-template" not in extract.argv
+    assert "--region-map" not in split.argv
+
+
+def test_a_region_map_and_a_blank_template_together_are_refused(tmp_path) -> None:
+    with pytest.raises(ValueError, match="one or the other"):
+        _request(
+            tmp_path,
+            region_map=tmp_path / "midterm.regions.json",
+            blank_template=tmp_path / "template.pdf",
+        )
+
+
+def test_section_rosters_replace_the_single_roster_one_id_file_each(tmp_path) -> None:
+    request = _request(
+        tmp_path,
+        roster=tmp_path / "roster.tsv",
+        section_rosters=("/rosters/mw.tsv=MW", "/rosters/tth.tsv"),
+    )
+    argv = _stage_plan(request, STAGE_EXTRACT).argv
+    id_files = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--id-file"]
+    assert id_files == ["/rosters/mw.tsv=MW", "/rosters/tth.tsv"]
+
+
+def test_new_extract_options_change_the_ledger_key_only_when_used(tmp_path) -> None:
+    from opengrader.core.pipeline import _stage_ledger_key
+
+    mw = tmp_path / "mw.tsv"
+    mw.write_text("1\tAda\n", encoding="utf-8")
+    region_map = tmp_path / "midterm.regions.json"
+    region_map.write_text("{}", encoding="utf-8")
+
+    request = _request(tmp_path)
+    plain = _stage_ledger_key(request, STAGE_EXTRACT)
+    # Unused, they leave the key alone: a ledger from before they existed still matches.
+    assert _stage_ledger_key(replace(request, section_rosters=()), STAGE_EXTRACT) == plain
+
+    with_map = _stage_ledger_key(replace(request, region_map=region_map), STAGE_EXTRACT)
+    as_mw = _stage_ledger_key(replace(request, section_rosters=(f"{mw}=MW",)), STAGE_EXTRACT)
+    as_tth = _stage_ledger_key(replace(request, section_rosters=(f"{mw}=TTh",)), STAGE_EXTRACT)
+    assert len({plain, with_map, as_mw, as_tth}) == 4
+
+
+def test_refine_argv_is_the_extract_command_re_reading_instead_of_resuming(tmp_path) -> None:
+    from opengrader.core.pipeline import refine_argv
+
+    request = _request(tmp_path, roster=tmp_path / "roster.tsv")
+    extract = _stage_plan(request, STAGE_EXTRACT).argv
+
+    assert refine_argv(request) == (
+        *[arg for arg in extract if arg != "--resume"],
+        "--refine",
+    )
+    assert refine_argv(request, dpi=450)[-3:] == ("--refine", "--refine-dpi", "450")
 
 
 def test_extract_argv_reads_an_already_split_directory_directly(tmp_path) -> None:
@@ -768,3 +845,85 @@ def test_failed_drafts_alone_do_not_pause(tmp_path, stages, clean_scan, monkeypa
     assert outcome.status is StageStatus.RAN
     assert "could not draft rubric items for q2" in outcome.message
     assert stages.stages()[-1] == STAGE_AUTO_GRADE
+
+
+def _out_of_order(split_dir: Path, name: str = "submission-0001") -> Path:
+    from opengrader.core.pages.order_review import OrderFinding, write_order_review
+
+    pdf = _pdf(split_dir / f"{name}.pdf", pages=3)
+    write_order_review(split_dir, [OrderFinding(name=name, keys=(1, 3, 2), warning="out of order")])
+    return pdf
+
+
+def _numbers(pdf: Path) -> list[str]:
+    with fitz.open(str(pdf)) as doc:
+        return [page.get_text().strip() for page in doc]
+
+
+def test_a_submission_that_looks_out_of_order_pauses_the_run_before_extraction(
+    tmp_path, stages, clean_scan
+) -> None:
+    request = _request(tmp_path)
+    stages.split_count = 0
+    pdf = _out_of_order(request.split_dir)
+
+    report = run_pipeline(request)
+
+    assert report.page_order_review_needed and report.paused_for_review and report.ok
+    assert STAGE_EXTRACT not in stages.stages()
+    assert "submission-0001.pdf" in report.stage(STAGE_EXTRACT).detail
+    assert _numbers(pdf) == ["page 1", "page 2", "page 3"]
+
+
+def test_once_the_order_is_answered_the_same_run_carries_on(tmp_path, stages, clean_scan) -> None:
+    from opengrader.core.pages.order_review import keep_pages
+
+    request = _request(tmp_path)
+    stages.split_count = 0
+    _out_of_order(request.split_dir)
+    assert run_pipeline(request).page_order_review_needed
+
+    keep_pages(request.split_dir, ["submission-0001"])
+    report = run_pipeline(request)
+
+    assert not report.page_order_review_needed
+    assert stages.stages().count(STAGE_SPLIT) == 1
+    assert STAGE_EXTRACT in stages.stages()
+
+
+def test_keep_page_order_answers_up_front_and_moves_nothing(tmp_path, stages, clean_scan) -> None:
+    request = _request(tmp_path, keep_page_order=True)
+    stages.split_count = 0
+    pdf = _out_of_order(request.split_dir)
+
+    report = run_pipeline(request)
+
+    assert not report.paused_for_review and STAGE_EXTRACT in stages.stages()
+    assert _numbers(pdf) == ["page 1", "page 2", "page 3"]
+
+
+def test_reorder_pages_sorts_what_is_still_unanswered_instead_of_pausing(tmp_path, stages, clean_scan) -> None:
+    request = _request(tmp_path, reorder_pages=True)
+    stages.split_count = 0
+    pdf = _out_of_order(request.split_dir)
+
+    report = run_pipeline(request)
+
+    assert not report.paused_for_review and STAGE_EXTRACT in stages.stages()
+    assert _numbers(pdf) == ["page 1", "page 3", "page 2"]
+
+
+def test_a_template_checks_a_bundle_by_submission_length_not_its_whole_page_count(
+    tmp_path, stages, monkeypatch
+) -> None:
+    seen: dict[str, object] = {}
+
+    def analyze(_path, **kwargs):
+        seen.update(kwargs)
+        return _report()
+
+    monkeypatch.setattr(scan_check_module, "analyze_scan_pdf", analyze)
+
+    run_pipeline(_request(tmp_path, blank_template=_pdf(tmp_path / "blank.pdf", pages=2)))
+
+    assert seen["pages_per_submission"] == 2 and seen["expected_page_count"] is None

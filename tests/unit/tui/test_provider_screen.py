@@ -5,7 +5,7 @@ import json
 
 import pytest
 from textual.app import App
-from textual.widgets import Button, RichLog, Select, Static
+from textual.widgets import Button, Collapsible, Select, Static
 
 from opengrader.core import app_config
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
@@ -48,7 +48,7 @@ async def _settle(pilot, predicate, limit: int = 100) -> None:  # noqa: ANN001
 
 
 def _log(screen: ProviderScreen) -> str:
-    return " ".join(str(line) for line in screen.query_one("#prov-log", RichLog).lines)
+    return " ".join(screen._log_lines)
 
 
 async def _press(pilot, screen, button_id: str) -> None:  # noqa: ANN001
@@ -129,12 +129,15 @@ def test_adding_an_example_registers_it_and_states_it_is_cloud(no_network) -> No
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             screen = app.screen
+            screen.query_one("#prov-advanced", Collapsible).collapsed = False
             screen.query_one("#prov-example", Select).value = "openai"
+            # Opening the card scrolls it into view; give that a moment.
+            await pilot.pause()
             await pilot.pause()
             await pilot.click("#prov-add-example")
             await pilot.pause()
             log, details = _log(screen), _details(screen)
-            assert screen.query_one("#prov-select", Select).value == "openai"
+            assert screen._selected().name == "openai"
             assert not screen.query_one("#prov-remove", Button).disabled
             await pilot.click("#prov-close")
             await _settle(pilot, lambda: app.dismissed)
@@ -158,7 +161,7 @@ def test_removing_needs_a_second_press(no_network) -> None:
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen.query_one("#prov-select", Select).value = "zephyr-labs"
+            screen.select_provider("zephyr-labs")
             await pilot.pause()
             await _press(pilot, screen, "prov-remove")
             still_there = (app_config.manifests_dir() / "zephyr.toml").exists()
@@ -203,7 +206,7 @@ def test_testing_a_cloud_provider_needs_a_second_press(monkeypatch) -> None:
         async with app.run_test(size=_SIZE) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen.query_one("#prov-select", Select).value = "zephyr-labs"
+            screen.select_provider("zephyr-labs")
             await pilot.pause()
             await _press(pilot, screen, "prov-test")
             after_first, warning = len(sent), _log(screen)
@@ -233,6 +236,9 @@ def test_a_broken_file_is_listed_with_its_reason(no_network) -> None:
     async def run() -> str:
         app = _Host(ProviderScreen())
         async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            app.screen.query_one("#prov-advanced", Collapsible).collapsed = False
+            await pilot.pause()
             await pilot.pause()
             await pilot.click("#prov-reload")
             await pilot.pause()

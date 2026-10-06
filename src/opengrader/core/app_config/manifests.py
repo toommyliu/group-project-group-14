@@ -21,6 +21,7 @@ __all__ = [
     "render_manifest",
     "install_manifest",
     "remove_manifest",
+    "set_manifest_models",
     "describe_provider",
     "example_names",
     "example_text",
@@ -703,6 +704,71 @@ def remove_manifest(spec: ProviderSpec) -> Path:
     return path
 
 
+# One top-level `vision_model = "..."` / `text_model = "..."` line: what is
+# before the value, the quoted value, and whatever follows it (a comment).
+_MODEL_LINE_RE = re.compile(
+    r"""^(?P<lead>\s*(?P<key>vision_model|text_model)\s*=\s*)"""
+    r"""(?P<value>"(?:[^"\\]|\\.)*"|'[^']*')(?P<tail>.*)$"""
+)
+
+
+def set_manifest_models(
+    spec: ProviderSpec, *, vision_model: str, text_model: str
+) -> ProviderSpec:
+    """Change which models a provider file asks for, and nothing else in it.
+
+    A surgical rewrite of the two lines: the file's comments, spacing and
+    every other key are left exactly as they were, because a user may have
+    written them. The result is validated before it replaces the file, so a
+    value the format would reject never reaches the disk.
+    """
+    if spec.source != "user" or not spec.manifest_path:
+        raise ManifestError(
+            f"{spec.name!r} is a built-in provider; its models are chosen in AI setup."
+        )
+    path = Path(spec.manifest_path)
+    try:
+        original = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ManifestError(f"{path}: could not read the file: {exc}") from exc
+
+    wanted = {"vision_model": vision_model.strip(), "text_model": text_model.strip()}
+    replaced: set[str] = set()
+    lines = original.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        body = line.rstrip("\r\n")
+        if body.lstrip().startswith("["):
+            # A [table] header: every key after it belongs to that table.
+            break
+        match = _MODEL_LINE_RE.match(body)
+        if match is None or match.group("key") in replaced:
+            continue
+        key = match.group("key")
+        ending = line[len(body):]
+        lines[index] = (
+            f"{match.group('lead')}{json.dumps(wanted[key])}{match.group('tail')}{ending}"
+        )
+        replaced.add(key)
+    missing = sorted(set(wanted) - replaced)
+    if missing:
+        raise ManifestError(
+            f"{path}: could not find the {' and '.join(missing)} line to change. "
+            "Edit the file by hand, then press 'Re-read provider files'."
+        )
+    text = "".join(lines)
+    updated = parse_text(text, path=path)
+    if (
+        updated.default_vision_model != wanted["vision_model"]
+        or updated.default_text_model != wanted["text_model"]
+    ):
+        raise ManifestError(f"{path}: the models could not be changed safely.")
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise ManifestError(f"could not write {path}: {exc}") from exc
+    return updated
+
+
 def describe_provider(spec: ProviderSpec) -> list[tuple[str, str]]:
     if spec.sends_data_off_machine:
         where = f"CLOUD: data leaves this machine and is sent to {spec.default_host}"
@@ -710,10 +776,14 @@ def describe_provider(spec: ProviderSpec) -> list[tuple[str, str]]:
         where = "LOCAL: nothing leaves this machine"
 
     if spec.api_key_env:
-        from . import resolve_api_key
+        from . import api_key_source, keystore
 
-        state = "set" if resolve_api_key(spec) else "not set"
-        key = f"{spec.api_key_env} ({state})"
+        source = api_key_source(spec)
+        if source == "keystore":
+            key = f"saved in {keystore.status().name}"
+        else:
+            state = "set" if source == "environment" else "not set"
+            key = f"{spec.api_key_env} ({state})"
     elif spec.credential_command:
         key = "no environment variable; uses credential_command"
     elif spec.dialect == PYDANTIC_AI_DIALECT:

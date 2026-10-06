@@ -357,6 +357,20 @@ def _validate_one(path: Path) -> bool:
     return True
 
 
+@command.command("prompt")
+def prompt_command() -> None:
+    """Print a prompt for an AI assistant that writes a provider file for you.
+
+    Paste the output into ChatGPT, Claude, Gemini or any other assistant,
+    answer its questions, and save the file it gives you with
+    `opengrader providers add --from FILE`. The setup screen's "My service is not
+    in this list" does the same with a Copy button and a box to paste into.
+    """
+    from opengrader.core.app_config import setup as ai_setup
+
+    click.echo(ai_setup.assistant_prompt(), nl=False)
+
+
 @command.command("validate")
 @click.argument("target", required=False, default="")
 def validate_command(*, target: str) -> None:

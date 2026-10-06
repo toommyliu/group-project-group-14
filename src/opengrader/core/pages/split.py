@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .catalog import PageCatalog, PageMatch
 
 SIDECAR_SUFFIX = ".pages.json"
+# A break counts as class-wide, not one student's shuffle, at this many submissions and share.
+_SHARED_MIN_SUBMISSIONS = 3
+_SHARED_SHARE = 0.5
+_TEMPLATE_INLIERS = 40
+_TEMPLATE_RUNNER_UP = 0.6
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,14 @@ class PlannedSubmission:
     name: str
     pages: list[PageMatch] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Where the scan runs backwards: (page read, page read right after it).
+    order_breaks: tuple[tuple[int, int], ...] = ()
+    order_shared: bool = False
+    reordered: bool = False
+    # What order was judged by, per page as scanned: template positions or printed numbers.
+    order_keys: tuple[int | None, ...] = ()
+    order_by_template: bool = False
+    order_warning: str = ""
 
     def page_numbers(self, catalog: PageCatalog) -> list[int | None]:
         return [catalog.groups[m.group].page_number if m.group else None for m in self.pages]
@@ -41,18 +56,34 @@ class PlannedSubmission:
 
 def plan_submissions(
     catalog: PageCatalog, *, prefix: str = "submission", pad: int = 4, expected_count: int | None = None,
+    reorder: bool = False, template_positions: Mapping[str, int] | None = None,
 ) -> list[PlannedSubmission]:
+    # Pages stay in scan order unless reorder is set: extraction finds each page by its print,
+    # so a misread number moving a correct page costs more than a shuffled one left alone.
     runs = _segments(catalog)
     expected = catalog.expected_pages
+    keyed = [_order_keys(catalog, run, template_positions) for run in runs]
+    breaks = [_order_breaks([key for key in keys if key is not None]) for keys, _ in keyed]
+    shared = _shared_breaks(breaks)
     planned: list[PlannedSubmission] = []
     for index, run in enumerate(runs, start=1):
         submission = PlannedSubmission(f"{prefix}-{index:0{pad}d}")
-        numbered = [(number_of(catalog, m), position, m) for position, m in enumerate(run)]
-        in_order = sorted(numbered, key=lambda item: (item[0] is None, item[0] or 0, item[1]))
-        submission.pages = [m for _, _, m in in_order]
-        numbers = [n for n, _, _ in numbered if n is not None]
-        if numbers != sorted(numbers):
-            submission.warnings.append("Pages were out of order in the scan; they have been put back in page order.")
+        keys, by_template = keyed[index - 1]
+        submission.order_keys, submission.order_by_template = tuple(keys), by_template
+        submission.order_breaks = breaks[index - 1]
+        submission.order_shared = bool(submission.order_breaks) and all(b in shared for b in submission.order_breaks)
+        submission.reordered = reorder and bool(submission.order_breaks)
+        if submission.reordered:
+            submission.pages = [run[i] for i in sorted_order(keys)]
+        else:
+            submission.pages = list(run)
+        if submission.order_breaks:
+            submission.order_warning = order_warning(
+                keys, by_template=by_template, reordered=submission.reordered,
+                shared=submission.order_shared, total=len(runs),
+            )
+            submission.warnings.append(submission.order_warning)
+        numbers = [n for n in (number_of(catalog, m) for m in run) if n is not None]
         missing = [n for n in _expected_for(catalog, run, expected) if n not in numbers]
         if missing:
             listed = ", ".join(str(n) for n in missing)
@@ -66,10 +97,115 @@ def plan_submissions(
                                        "check for extra, duplicate or missing pages.")
         unknown = sum(1 for m in run if m.group is None)
         if unknown:
+            where = "they are kept at the end" if submission.reordered else "they were left where they were scanned"
             submission.warnings.append(f"{unknown} page(s) did not match any printed page (blank, extra work, or another document); "
-                                       "they are kept at the end.")
+                                       f"{where}.")
         planned.append(submission)
     return planned
+
+
+def shared_order_note(planned: Sequence[PlannedSubmission]) -> str | None:
+    affected = [s for s in planned if s.order_shared]
+    if not affected:
+        return None
+    pairs = sorted({b for s in affected for b in s.order_breaks})
+    listed = "; ".join(f"page {after} right after page {before}" for before, after in pairs)
+    action = (
+        "They were sorted because reordering is on; if the scan was in order, split again without it."
+        if any(s.reordered for s in affected)
+        else "Pages were left as scanned."
+    )
+    return (f"{len(affected)} of {len(planned)} submissions have the same pages out of sequence ({listed}). A whole class "
+            f"rarely shuffles the same way, so a page number was probably misread and the scan is fine. {action}")
+
+
+def template_positions(catalog: PageCatalog, template: Path, *, dpi: int = 150) -> dict[str, int]:
+    # Group id -> 1-based template page, matched by print rather than by a page number read
+    # off a scan. A group that matches no template page is left out.
+    import fitz
+
+    from opengrader.core.pdf_utils import render_page_to_image
+
+    from .catalog import ensure_features
+    from .features import align, gray_for_matching, page_features
+
+    with fitz.open(str(template)) as doc:
+        references = [
+            page_features(gray_for_matching(render_page_to_image(doc, index, dpi=dpi, cache=False)[0]))
+            for index in range(len(doc))
+        ]
+    positions: dict[str, int] = {}
+    for group in catalog.groups.values():
+        features = ensure_features(group).features
+        scores = [
+            (alignment.inliers if (alignment := align(features, reference)) is not None else 0, position)
+            for position, reference in enumerate(references, start=1)
+        ]
+        ranked = sorted(scores, reverse=True)
+        if not ranked or ranked[0][0] < _TEMPLATE_INLIERS:
+            continue
+        # Two template pages that look alike cannot say which one this is.
+        if len(ranked) > 1 and ranked[1][0] > _TEMPLATE_RUNNER_UP * ranked[0][0]:
+            continue
+        positions[group.id] = ranked[0][1]
+    return positions
+
+
+def _order_keys(
+    catalog: PageCatalog, run: list[PageMatch], positions: Mapping[str, int] | None
+) -> tuple[list[int | None], bool]:
+    return order_keys(catalog, [m.group for m in run], positions)
+
+
+def order_keys(
+    catalog: PageCatalog, groups: Sequence[str | None], positions: Mapping[str, int] | None
+) -> tuple[list[int | None], bool]:
+    matched = [gid for gid in groups if gid is not None]
+    if positions and matched and all(gid in positions for gid in matched):
+        return [positions[gid] if gid else None for gid in groups], True
+    return [catalog.groups[gid].page_number if gid else None for gid in groups], False
+
+
+def sorted_order(keys: Sequence[int | None]) -> list[int]:
+    return sorted(range(len(keys)), key=lambda i: (keys[i] is None, keys[i] or 0, i))
+
+
+def order_breaks(keys: Sequence[int | None]) -> tuple[tuple[int, int], ...]:
+    return _order_breaks([key for key in keys if key is not None])
+
+
+def _order_breaks(keys: Sequence[int]) -> tuple[tuple[int, int], ...]:
+    return tuple((before, after) for before, after in zip(keys, keys[1:]) if after < before)
+
+
+def _shared_breaks(breaks: Sequence[tuple[tuple[int, int], ...]]) -> set[tuple[int, int]]:
+    counts = Counter(pair for found in breaks for pair in set(found))
+    return {
+        pair for pair, count in counts.items()
+        if count >= _SHARED_MIN_SUBMISSIONS and count >= _SHARED_SHARE * len(breaks)
+    }
+
+
+def describe_order(keys: Sequence[int | None], by_template: bool) -> str:
+    listed = ", ".join(str(key) for key in keys if key is not None)
+    return f"matched to blank-template pages {listed}" if by_template else f"page numbers read as {listed}"
+
+
+def order_warning(
+    keys: Sequence[int | None], *, by_template: bool, reordered: bool = False, shared: bool = False, total: int = 1,
+) -> str:
+    read = describe_order(keys, by_template)
+    if reordered:
+        text = f"Pages looked out of order in the scan ({read}); they have been sorted" + (
+            " into the template's order." if by_template else " by page number.")
+        if shared:
+            text += " Most submissions show the same break, so check that a page number was not misread."
+        return text
+    if shared:
+        return (f"Pages look out of order ({read}), but most of the {total} submissions show the same break, so a page "
+                "number was probably misread and the scan is fine. Pages were left as scanned.")
+    return (f"Pages look out of order in the scan ({read}); they were left as scanned. Check them by eye; "
+            "they can be sorted before extraction (--reorder when splitting).")
 
 
 def number_of(catalog: PageCatalog, match: PageMatch) -> int | None:

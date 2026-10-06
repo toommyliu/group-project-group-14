@@ -22,7 +22,7 @@ Opengrader is a local, offline-first exam-grading toolchain — think Gradescope
 ## Capabilities
 
 - **Template generation** — turn a QA-format markdown answer key into printable exam PDFs (Computer Modern fonts, answer boxes, multi-version exams). Draft the QA file itself from an existing answer-key PDF or a text2qti exam.
-- **Scan ingestion** — split a bulk scanner PDF into per-student PDFs and crop every answer, name and ID, with no blank template and no QR codes: the scanned pages are matched to each other, so every copy of a printed page is cropped along the same questions (read from the print with PaddleOCR's PP-OCR models), turned upright, and put back in page order. Missing, repeated and unrecognized pages are flagged. Each student's name and ID (vision LLM, or PP-OCR without one) and printed title (subscript form markers included) are always read; answers are transcribed only when asked, for automated grading. Everything lands in structured per-student markdown files.
+- **Scan ingestion** — split a bulk scanner PDF into per-student PDFs and crop every answer, name and ID, with no blank template and no QR codes: the scanned pages are matched to each other, so every copy of a printed page is cropped along the same questions (read from the print with PaddleOCR's PP-OCR models), and turned upright. Pages stay in the order they were scanned: a submission that looks out of order is flagged, and sorted only when you ask (`--reorder`). Missing, repeated and unrecognized pages are flagged. Each student's name and ID (vision LLM, or PP-OCR without one) and printed title (subscript form markers included) are always read; answers are transcribed only when asked, for automated grading. Everything lands in structured per-student markdown files.
 - **Grading TUI** — Gradescope-style question-by-question rubric grading in the terminal: in-terminal response images, rubric editing, per-question statistics, anonymous grading by default (teacher mode reveals names), and automatic write-back of grades to submission files and annotated PDFs.
 - **Automated grading** — auto-score submissions against a solutions file (exact, numeric, and true/false answer matching). With `--llm`, an AI model suggests grades for free responses, tagged `[AI]` for you to review; anything it isn't confident about is left for manual grading. The AI can also draft partial-credit rubric items from the answers students gave and a first-pass grade for each answer, which you review and confirm.
 - **Canvas export** — push scores and per-question comments to Canvas LMS via `canvas-sak`, from the CLI or from inside the TUI.
@@ -227,8 +227,9 @@ Run from `quiz-1/` or `quiz-2/` to select that assignment. From `course/`,
 pass `--assignment <id>` when there are several. Re-running with unchanged inputs
 reuses completed pipeline steps and keeps saved grades. If an input changes,
 `opengrader run` asks for `--fresh`; that starts a new assignment and preserves
-the old grading work. Add `--dry-run` to preview the pipeline. The TUI setup
-screen also provides "Run every step — one scan in, graded work out".
+the old grading work. Add `--dry-run` to preview the pipeline. In `opengrader classic`
+the same run is the one card under *Prepare an assignment* ("Run it — one scan
+in, graded work out"); running it again does only what is left.
 
 Add `--draft-rubrics` to have the AI draft partial-credit rubric items for
 written questions that don't have any yet. The run writes them into your
@@ -244,7 +245,7 @@ door (`uv run opengrader <name> ...`) — same code, same flags, either
 spelling. The one exception is `classic`, which only exists as
 `uv run opengrader classic`.
 
-- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, `--draft-rubrics` drafts missing rubric items and pauses for you to review them before grading, and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
+- `opengrader-run` (`opengrader run`, alias `pipeline`): The whole pre-grading pipeline in one resumable command — scan check → split → extract → auto-grade, then the grading app opens on what it built. Give it an assignment folder and it finds the inputs itself, or pass them explicitly: `--scan` takes your scanned bundle or a folder of already-split per-student PDFs; `--qa` is optional (without it the run stops after reading the answers). `--dry-run` prints the plan, `--fresh` redoes everything and creates a new assignment when inputs change, `--no-auto-grade` stops after extraction, `--draft-rubrics` drafts missing rubric items and pauses for you to review them before grading, submissions that look out of order pause the run before extraction until you sort or confirm them (`--reorder` / `--keep-page-order` answer up front), and a scan with a serious problem stops the run before anything is graded until you fix it or pass `--force`.
 - `tui`: Open a workspace in the TUI — an assignment or workspace folder, or `--workspace` and `--assignment`. `--qa-file` + `--submissions` still grade one folder directly, the classic way.
 - `classic` (`opengrader classic`): Tools & Settings and folder grading with no workspace; what the desktop icon opens.
 - `qa-file`: Work with QA markdown files.
@@ -302,12 +303,30 @@ Without a page count, the splitter matches the scanned pages to each other: ever
 copy of a printed page lines up with every other copy, so it learns the assignment's
 printed pages from the scans themselves (no blank template, no QR codes). Each
 student starts at a copy of page 1 (or wherever a printed page repeats); pages
-are turned upright and put back in printed order; missing, repeated and
-unrecognized pages are flagged. What it learned is saved in
-`split/.opengrader-pages/` and reused by `submission-extractor`.
+are turned upright; missing, repeated and unrecognized pages are flagged. What it
+learned is saved in `split/.opengrader-pages/` and reused by `submission-extractor`.
+
+Pages are left in the order they were scanned. Extraction finds each page by its
+print, not its position, so a shuffled submission is still cropped against the right
+questions — whereas sorting on a misread page number would move pages that were
+already right. A submission that looks out of order gets a warning naming what was
+read; when most of the class shows the same break, the warning says a page number
+was probably misread instead.
+
+Those submissions are then put to you before anything is extracted. In a terminal
+the splitter (and `opengrader run`) asks: sort the recommended ones, sort all, keep
+all as scanned, choose which, or stop. In the app the pipeline shows the same choice
+as a checklist. Sorting is only the suggested answer when a blank template supplied
+the order; page numbers read off a scan start unticked. Stopping moves nothing: open
+the split PDFs, rearrange any that need it in a PDF viewer, and run again — pages you
+put in order yourself are recognised and not asked about. `opengrader run` does not
+extract until every flagged submission has an answer; unattended runs give it up
+front with `--reorder` (sort) or `--keep-page-order` (leave as scanned).
 
 Useful `submission-splitter` options:
 - `--pages-per-submission <N>`: How many pages each submission should have. For scans it checks the split (a submission of another length is flagged); pages are still matched to decide it. For typed PDFs it is a fixed split size.
+- `--reorder`: Sort each submission's pages without asking. With `--blank-template`, scanned pages are matched to the template by their print and put in its order; otherwise the page numbers read off the scan are used. `opengrader run --reorder` does the same for the whole pipeline.
+- `--reorder-only submission-0007,submission-0012`: Sort only the named submissions (and only if they look out of order); the rest are left as scanned.
 - `--detect-boundaries`: The older boundary detection: QR/printed page-number restarts and Name/ID headers read with Tesseract. Combine with `--pages-per-submission 3` to flag short scans while keeping each student's pages together. A blank template supplies an expected count, not fixed groups.
 - Missing-page and duplicate-page warnings are saved beside each split PDF in `.scan.json` files and carried into extracted submissions and the review queue. Keep these sidecars with the split PDFs. Unnumbered scans with identical headers on every page may still need manual split review.
 - `--start-page <N>` and `--end-page <N>`: Split only a page range, using 1-indexed page numbers.
@@ -419,7 +438,7 @@ before processing submissions.
 
 Opengrader saves your AI configuration once in `config.json` in your user config directory (`~/Library/Application Support/Opengrader/config.json` on macOS, `~/.config/opengrader/config.json` on Linux, `%APPDATA%\Opengrader\config.json` on Windows). The file points to a local JSON Schema for editor completion and validation. Blank fields follow Opengrader's recommended defaults.
 
-Settings are resolved in this order: explicit command flags, saved settings, then Opengrader's built-in defaults. Provider credentials can still come from the provider's credential environment variable.
+Settings are resolved in this order: explicit command flags, saved settings, then Opengrader's built-in defaults. A provider's API key is never written to an Opengrader file: paste it under **AI providers → Set up a provider…** and it is kept in the operating system's password store (macOS Keychain, Windows Credential Manager, or the Linux keyring via `secret-tool`), or supply it in the provider's credential environment variable, which is used first when set.
 
 Edit the settings from the TUI: run `opengrader classic` and open the "AI setup" tool under "Helper Tools".
 

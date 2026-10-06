@@ -381,7 +381,7 @@ def evaluate_provider(resolved: "ResolvedAI") -> tuple[EnvironmentCheck, ...]:
                 status="degraded",
                 detail=f"{provider.label} needs an API key.",
                 impact="AI features are unavailable until a key is set.",
-                fix=f"Set the {provider.api_key_env} environment variable, then re-run doctor.",
+                fix=f"{app_config.missing_key_help(provider)} Then re-run doctor.",
             ),
         )
 

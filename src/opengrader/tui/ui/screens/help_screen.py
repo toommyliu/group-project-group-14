@@ -392,85 +392,100 @@ _RUBRIC_EDITOR_ROWS: list[tuple[str, str]] = [
 
 _PIPELINE_ROWS: list[tuple[str, str]] = [
     (
-        "All of it, one command",
-        "Steps 1, 2 and 4 in a single command, then the app opens on the "
-        "result: 'opengrader-run class/' finds the scan, answer key, roster "
-        "and blank template inside the class folder and builds there "
-        "('--scan bundle.pdf --qa qa.md --out class/' still works, and any "
-        "flag overrides what the folder offered). In Tools (F3, classic) it has a "
-        "section of its own, RUN THE WHOLE PIPELINE, near the top: open "
-        "'Run every step — one scan in, graded work out', "
-        "choose the class folder and press Scan folder to fill in the rest. "
-        "It checks the scan, splits it, extracts every submission and "
-        "auto-grades what it can, and you never have to hand the output of one "
-        "step to the next. --scan also takes a folder of already-split "
-        "per-student PDFs, in which case the split step is skipped. "
-        "Interrupted, or something changed and you want to run it again? Re-run "
-        "the identical command: every step it can reuse, it reuses instead of "
-        "repeating, and the summary at the end says which — so a re-run of an "
-        "unchanged class takes seconds rather than starting over. --dry-run "
-        "prints what it would do without doing any of it, --no-auto-grade stops "
-        "after extraction, --fresh redoes everything, and a scan with a serious "
-        "problem stops the run before anything is graded until you fix it or "
-        "pass --force. CLI: opengrader-run.",
+        "Prepare an assignment",
+        "One card in Tools (F3, classic), under PREPARE AN ASSIGNMENT: open "
+        "'Run it — one scan in, graded work out', choose the class folder and "
+        "press Run Pipeline. The scan, answer key, roster and blank template "
+        "inside the folder are found for you and listed under the box; the "
+        "run then checks the scan, splits it, extracts every submission and "
+        "auto-grades what it can, and grading opens on the result. Preview "
+        "shows the plan without writing anything. If the folder holds more "
+        "than one candidate, or the scan or answer key lives somewhere else, "
+        "Advanced settings opens so you can choose. The scanned bundle can "
+        "also be a folder of already-split per-student PDFs (what Import "
+        "phone photos writes), in which case nothing is split. CLI: opengrader-run class/ ('--scan bundle.pdf "
+        "--qa qa.md --out class/' still works, and any flag overrides what "
+        "the folder offered).",
     ),
     (
-        "1 · Split",
-        "Cut one bulk scanner PDF into per-student PDFs by pages per "
-        "submission; can OCR printed page numbers to fix out-of-order "
-        "scans. Tick 'Check the scan before splitting' first: a stack fed in "
-        "upside down still splits and still extracts, it just transcribes to "
-        "nothing and grades to zeros, so the check turns those pages upright "
-        "before anything reads them (and reports blank sheets, low-resolution "
-        "pages, clipped margins and a page count that isn't a whole number of "
-        "submissions). CLI: submission-splitter --fix-rotation.",
+        "Running it again",
+        "There is no separate button per stage: run the same card again and "
+        "it works out what is left. An unchanged scan is not checked or split "
+        "twice, a submission already extracted is skipped (so an interrupted "
+        "run picks up where it stopped, and anything you have graded is never "
+        "extracted over), and auto-grading runs again only when the answer "
+        "key or the set of submissions changed. The log names each stage as "
+        "run or reused. Tick 'Start over (ignore the earlier run)' under Advanced "
+        "settings to check, split and auto-grade again regardless (--fresh). A "
+        "scan with a serious problem stops the run before anything is graded "
+        "until you fix it or tick 'Grade it anyway' (--force).",
     ),
     (
-        "2 · Extract",
-        "Read each student PDF with OCR and — when 'Read handwriting on "
-        "scans' is on in AI setup — the handwriting model too, into "
-        "gradable .submission.md files plus response images. That switch "
-        "lives in AI setup rather than here because it is a fact about this "
-        "computer, and the same answer then reaches this step, the pipeline "
-        "and submission-extractor run from a terminal. With "
-        "--id-file, a name found without a usable ID is matched to the roster "
-        "and its ID filled in; --interactive-roster prompts you when a name is "
-        "shared by several students, otherwise the tied names are saved for you "
-        "to resolve later in the review queue (Shift+R). Grading one assignment "
-        "across "
-        "several class sections? Choose 'one section' (name it, or default to the "
-        "roster filename) or 'multiple sections' (one roster per section — each "
-        "student is routed by which roster holds their ID); the section is saved "
-        "on every submission and can scope item analysis (s, then f). This is the "
-        "longest step, so submissions are extracted several at a time across CPU "
-        "cores — tick 'Set how many to extract at once' only to "
-        "override the automatic count (--jobs). If a long run is interrupted, "
-        "tick 'Resume: skip submissions already extracted' (--resume) to pick "
-        "it up where it stopped instead of "
-        "starting over; anything you have already graded is never re-extracted "
-        "over. Don't wait for it to finish: while it runs, the 'Grade what's "
-        "ready' button opens the grading workspace on what is already done, and "
-        "the rest of the class appears as each submission lands. Grading an "
-        "assignment Opengrader didn't print? Tick 'Use a region map (your own "
-        "assignment)' instead of "
-        "a blank template — see Region map below. CLI: submission-extractor.",
+        "What each stage does",
+        "Scan check: turns upside-down pages upright and reports blank "
+        "sheets, low resolution, clipped margins and a page count that isn't "
+        "a whole number of submissions. Split: cuts the bundle into "
+        "per-student PDFs at the boundaries it detects from page numbers and "
+        "Name/ID headers. Extract: reads each PDF with OCR — and the "
+        "handwriting model when 'Read handwriting on scans' is on in AI setup "
+        "— into gradable .submission.md files plus response images; with a "
+        "roster, a name found without a usable ID is matched and its ID "
+        "filled in, and tied names are saved for you to resolve in the review "
+        "queue (Shift+R). Auto-grade: scores the answers your rubric settles "
+        "outright and, with 'Suggest grades for written answers' on in AI "
+        "setup, suggests rubric choices for the rest — see AI SETUP below. "
+        "CLI: scan-check, submission-splitter, submission-extractor, "
+        "automated-grading.",
     ),
     (
-        "3 · Create answer key",
-        "Build the QA answer-key markdown from a plain-text assignment file "
-        "(.md/.txt) or a PDF. A born-digital PDF is read directly from its text "
-        "layer; a scanned or image-based PDF is read with OCR, and with the "
-        "handwriting model too when 'Read handwriting on scans' is on in AI "
-        "setup (--llm-read-scans). On the start-up page, press t for "
-        "copy-paste format templates. CLI: create-answer-key.",
+        "Grade while it runs",
+        "Extraction is the longest stage, so don't wait for it: with 'Start "
+        "grading as submissions arrive' ticked (the default) the grading "
+        "workspace opens on the first submission that is ready, and the rest "
+        "of the class appears as each one lands. It needs the answer key.",
     ),
     (
-        "4 · Auto-grade",
-        "Pre-score answers that exactly match a solutions file; everything "
-        "else is left for manual grading. Turn on 'Suggest grades for "
-        "written answers' in AI setup (--llm) to have the grading model "
-        "suggest rubric choices for the free responses matching cannot "
-        "settle — see AI SETUP below. CLI: automated-grading.",
+        "Settings, and what is remembered",
+        "Settings holds what most runs need: pages per submission, the roster, "
+        "the blank template, grading as submissions arrive, sorting "
+        "out-of-order pages and drafting rubric items. Each Run Pipeline "
+        "saves what you chose. What describes the assignment is saved inside "
+        "the class folder (.opengrader/pipeline-settings.json) and comes back "
+        "when you choose that folder again; parallel jobs, grading as "
+        "submissions arrive and the folder you used last are saved for this "
+        "computer. 'Grade it anyway' and 'Start over' are never remembered.",
+    ),
+    (
+        "Advanced settings",
+        "Collapsed at the bottom of the card. 'Override what was found' "
+        "points the run at a scan or answer key the folder scan did not pick. "
+        "'Use a region map (your own "
+        "assignment)' is for a paper Opengrader didn't print, instead of a "
+        "blank template — see Region map below. 'This stack mixes several "
+        "class sections' takes one roster per section and routes each student "
+        "by which roster holds their ID; the section is saved on every "
+        "submission and can scope item analysis (s, then f). 'Set how many to "
+        "extract at once' overrides the automatic count of CPU cores "
+        "(--jobs).",
+    ),
+    (
+        "Create answer key",
+        "In Helper Tools, beside Generate template — the two things you do "
+        "before the exam is printed. Builds the QA answer-key markdown from a "
+        "plain-text assignment file (.md/.txt) or a PDF. A born-digital PDF "
+        "is read directly from its text layer; a scanned or image-based PDF "
+        "is read with OCR, and with the handwriting model too when 'Read "
+        "handwriting on scans' is on in AI setup (--llm-read-scans). On the "
+        "start-up page, press t for copy-paste format templates. CLI: "
+        "create-answer-key.",
+    ),
+    (
+        "Re-read unclear answers",
+        "In Helper Tools. A second pass over a class already prepared: only "
+        "the submissions holding a low-confidence transcription are re-read, "
+        "and a new reading is kept only where it beats the old one. It uses "
+        "the class folder and options set in Prepare an assignment. CLI: "
+        "submission-extractor --refine --refine-dpi 450.",
     ),
 ]
 
@@ -480,7 +495,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "One place: 'AI setup' under Helper Tools in Tools (F3, classic). Which "
         "provider, which two models, which server, and how confident a grade "
         "suggestion has to be — answered once, saved for this computer, and "
-        "read by everything: every step above, the whole-pipeline run, and the "
+        "read by everything: Prepare an assignment, the helper tools, and the "
         "same commands run from a terminal. No step asks you about a model, "
         "because which model you have installed is a fact about the machine, "
         "not about today's assignment.",
@@ -642,8 +657,9 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "shape — if a hosted provider is ever added it appears there with its "
         "own models and its own API-key row, and the screen states plainly "
         "that choosing it sends student handwriting off this computer. "
-        "Offline stays the default, and a key would be read from an "
-        "environment variable, never stored by Opengrader.",
+        "Offline stays the default, and a key is read from this computer's "
+        "password store or an environment variable, never written to an "
+        "Opengrader file.",
     ),
     (
         "If it isn't ready",
@@ -774,8 +790,9 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "Each photo is straightened — by the sheet's corner registration marks "
         "when it has them, by the page's own edges otherwise — and the photos "
         "belonging to one student are bound into a single PDF. That is exactly "
-        "what Split produces, so carry on at Extract and nothing downstream "
-        "ever learns the pages came from a phone. Students are grouped by "
+        "what splitting a scan produces, so Prepare an assignment takes that "
+        "folder as its scanned bundle (it is filled in for you) and nothing "
+        "downstream ever learns the pages came from a phone. Students are grouped by "
         "subfolder if there is one each, otherwise by the leading part of the "
         "filename (s1234-p1.jpg, s1234-p2.jpg), or set a fixed number of photos "
         "per student. HEIC (iPhone) photos need one extra install, and it names "
@@ -793,8 +810,9 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "the boxes already proposed for you to correct — j/k select, arrows "
         "move, shift+arrows resize, and the panel on the right sets each "
         "question's number, points and type. Saving is refused while anything "
-        "would crop the wrong thing. The map it writes fills straight into "
-        "Extract's 'Use a region map' box (which replaces the blank template — "
+        "would crop the wrong thing. The map it writes fills straight into the "
+        "'Use a region map' box under Advanced settings in Prepare an assignment "
+        "(which replaces the blank template — "
         "they answer the same question, so only one is used). A map is tied to "
         "the exact PDF it was drawn on and is refused on any other, because a "
         "re-export moves the boxes and a mis-crop is silent. "
@@ -1220,14 +1238,13 @@ class HelpScreen(ModalScreen[None]):
                 )
                 yield from self._section(
                     "PIPELINE",
-                    "Prepare an assignment: the whole thing in one command, or "
-                    "one stage at a time. Both are on the start-up screen — "
-                    "RUN THE WHOLE PIPELINE and PREPARE AN ASSIGNMENT — and "
-                    "each also runs in a terminal: uv run opengrader --help "
-                    "lists every command, grouped in this same order, and "
-                    "uv run opengrader <command> --help explains one. The "
-                    "standalone names (uv run submission-splitter, …) still "
-                    "work too.",
+                    "Prepare an assignment: one card on the start-up screen "
+                    "takes a scan all the way to graded work, and running it "
+                    "again does only what is left. Each stage is also a "
+                    "command for a terminal: uv run opengrader --help lists "
+                    "every one, and uv run opengrader <command> --help "
+                    "explains one. The standalone names (uv run "
+                    "submission-splitter, …) still work too.",
                     _PIPELINE_ROWS,
                     key_class="help-tool",
                 )

@@ -13,7 +13,8 @@ not UI:
   first use with the user's own Node.js + pnpm, so neither is ever needed by
   someone who never opens the browser app;
 - installing those two when they are missing and the user asks, on a Mac
-  that has Homebrew (`core/homebrew`).
+  that has Homebrew (`core/homebrew`), with Homebrew's output kept in
+  `tools-install.log` beside the build log.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Literal
+from typing import IO, Callable, Literal
 
 __all__ = [
     "BrowserPreferences",
@@ -48,11 +49,13 @@ __all__ = [
     "install_tools",
     "source_fingerprint",
     "build_log_path",
+    "install_log_path",
     "build_web",
 ]
 
 PREFERENCES_FILENAME = "browser.json"
 BUILD_LOG_FILENAME = "web-build.log"
+INSTALL_LOG_FILENAME = "tools-install.log"
 # Written into dist/ right after a successful build, so a later run can tell
 # "built" from "built from sources that have since changed" without needing
 # to ask pnpm anything.
@@ -77,6 +80,16 @@ _EXTRA_TOOL_DIRS = (
     "/opt/local/bin",
     str(Path.home() / ".local/bin"),
 )
+
+# How long a `--version` call may take. The health panel asks often and must
+# not hang on a broken tool, so its limit is short.
+_TOOL_CHECK_SECONDS = 5.0
+# The first run of a tool Homebrew has just installed can be much slower than
+# that (macOS checks a new binary before letting it start), and calling a
+# working install "failed" sends the user off to fix nothing.
+_FIRST_RUN_CHECK_SECONDS = 30.0
+
+_FORMULA_NAMES = {"node": "Node.js", "pnpm": "pnpm"}
 
 
 @dataclass(frozen=True)
@@ -250,7 +263,9 @@ class ToolStatus:
     pnpm: ToolInfo | None
 
 
-def _tool_version(argv: list[str], env: dict[str, str]) -> str | None:
+def _tool_version(
+    argv: list[str], env: dict[str, str], timeout: float = _TOOL_CHECK_SECONDS
+) -> str | None:
     try:
         result = subprocess.run(
             argv,
@@ -258,7 +273,7 @@ def _tool_version(argv: list[str], env: dict[str, str]) -> str | None:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -268,11 +283,12 @@ def _tool_version(argv: list[str], env: dict[str, str]) -> str | None:
     return text or None
 
 
-def tool_status() -> ToolStatus:
+def tool_status(*, timeout: float = _TOOL_CHECK_SECONDS) -> ToolStatus:
     """Node and pnpm as this machine actually has them — for the health panel.
 
-    A tool counts only if its `--version` call also succeeds: a `node` on
-    PATH that can't run is no better than no `node` at all.
+    A tool counts only if its `--version` call also succeeds within `timeout`
+    seconds: a `node` on PATH that can't run is no better than no `node` at
+    all.
     """
     search = _tool_path()
     env = {
@@ -285,20 +301,20 @@ def tool_status() -> ToolStatus:
     node: ToolInfo | None = None
     node_path = shutil.which("node", path=search)
     if node_path:
-        version = _tool_version([node_path, "--version"], env)
+        version = _tool_version([node_path, "--version"], env, timeout)
         if version:
             node = ToolInfo(path=node_path, version=version)
 
     pnpm: ToolInfo | None = None
     pnpm_path = shutil.which("pnpm", path=search)
     if pnpm_path:
-        version = _tool_version([pnpm_path, "--version"], env)
+        version = _tool_version([pnpm_path, "--version"], env, timeout)
         if version:
             pnpm = ToolInfo(path=pnpm_path, version=version)
     else:
         corepack_path = shutil.which("corepack", path=search)
         if corepack_path:
-            version = _tool_version([corepack_path, "pnpm", "--version"], env)
+            version = _tool_version([corepack_path, "pnpm", "--version"], env, timeout)
             if version:
                 pnpm = ToolInfo(path="via corepack", version=version)
 
@@ -319,35 +335,113 @@ def missing_tool_formulae(status: ToolStatus) -> tuple[str, ...]:
     return tuple(formulae)
 
 
+def install_log_path() -> Path:
+    from opengrader.core.app_config import settings_path
+
+    return settings_path().parent / INSTALL_LOG_FILENAME
+
+
+def _open_install_log(target: Path) -> IO[str] | None:
+    """Appends, so a retry that works does not erase why the first try failed.
+
+    Best effort: a log that cannot be written must not stop the install.
+    """
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return target.open("a", encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _tool_status_after_install() -> ToolStatus:
+    """The tools as a fresh install leaves them: patient, and asked twice.
+
+    Homebrew's pnpm is itself run by Node.js, so one slow or failed first
+    start of `node` can make either tool look missing when both are fine.
+    """
+    status = tool_status(timeout=_FIRST_RUN_CHECK_SECONDS)
+    if missing_tool_formulae(status):
+        status = tool_status(timeout=_FIRST_RUN_CHECK_SECONDS)
+    return status
+
+
+def _tool_report(label: str, info: ToolInfo | None) -> str:
+    if info is None:
+        return f"{label}: cannot be run"
+    return f"{label}: {info.version} ({info.path})"
+
+
 def install_tools(
     brew: str,
     *,
     on_line: Callable[[str], None] | None = None,
     on_start: Callable[[subprocess.Popen[str]], None] | None = None,
+    log: Path | None = None,
 ) -> None:
     """Install whichever of Node.js and pnpm is missing, with Homebrew.
 
-    Checks again afterwards, so "installed" means the build can find and run
-    them, not just that Homebrew exited cleanly. Raises `WebBuildError`.
+    What counts is the check afterwards, not Homebrew's exit code: "installed"
+    means the build can find and run both, and a Homebrew that complained but
+    left both working has not failed. Raises `WebBuildError` naming only what
+    is still missing; Homebrew's whole output is appended to `log`.
     """
     from opengrader.core.homebrew import HomebrewError, brew_install
 
     formulae = missing_tool_formulae(tool_status())
     if not formulae:
         return
+    target = log or install_log_path()
+    stream = _open_install_log(target)
+
+    def record(text: str) -> None:
+        if stream is None:
+            return
+        try:
+            stream.write(text + "\n")
+            stream.flush()
+        except OSError:
+            pass
+
+    def relay(text: str) -> None:
+        record(text)
+        if on_line:
+            on_line(text)
+
     try:
-        brew_install(brew, formulae, on_line=on_line, on_start=on_start)
-    except HomebrewError as exc:
-        raise WebBuildError(
-            f"Node.js and pnpm were not installed. {exc}", exc.tail
-        ) from exc
-    still_missing = missing_tool_formulae(tool_status())
-    if still_missing:
-        raise WebBuildError(
-            f"Homebrew finished, but {' and '.join(still_missing)} still cannot "
-            f"be run here. Try `brew install {' '.join(still_missing)}` in a "
-            "terminal to see why."
+        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        record(f"[{started}] $ {brew} install {' '.join(formulae)}")
+        failure: HomebrewError | None = None
+        try:
+            brew_install(brew, formulae, on_line=relay, on_start=on_start)
+        except HomebrewError as exc:
+            failure = exc
+            record(str(exc))
+        status = _tool_status_after_install()
+        record(
+            "Afterwards — "
+            f"{_tool_report('Node.js', status.node)}; {_tool_report('pnpm', status.pnpm)}\n"
         )
+    finally:
+        if stream is not None:
+            stream.close()
+
+    still_missing = missing_tool_formulae(status)
+    if not still_missing:
+        return
+    names = " and ".join(_FORMULA_NAMES[formula] for formula in still_missing)
+    where = f"The full output is in {target}." if stream is not None else ""
+    if failure is not None:
+        verb = "were" if len(still_missing) > 1 else "was"
+        raise WebBuildError(
+            f"{names} {verb} not installed. {failure} Trying again often "
+            f"fixes a download that failed. {where}".rstrip(),
+            failure.tail,
+        ) from failure
+    raise WebBuildError(
+        f"Homebrew finished, but {names} still cannot be run here. Try "
+        f"`brew install {' '.join(still_missing)}` in a terminal to see why. "
+        f"{where}".rstrip()
+    )
 
 
 def _tool_path() -> str:

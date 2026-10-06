@@ -950,3 +950,83 @@ def test_a_paused_run_says_so_in_json(tmp_path, captured, capsys) -> None:
     assert code == 0
     assert payload["paused_for_review"] is True
     assert payload["stages"][-1]["status"] == "paused"
+
+
+def _page_order_pause(tmp_path: Path) -> PipelineReport:
+    paused = StageOutcome(
+        stage=STAGE_EXTRACT,
+        status=StageStatus.PAUSED,
+        message="1 submission(s) look out of order — confirm their page order before extraction",
+        detail="page-order:\n1. submission-0001.pdf  page numbers read as 1, 3, 2\nin split",
+    )
+    return _report(tmp_path, _outcome(STAGE_SPLIT, StageStatus.RAN), paused, submissions=0)
+
+
+def test_the_page_order_answers_land_in_the_request(tmp_path, captured) -> None:
+    run_command(run_module.command, _argv(tmp_path))
+    assert (captured["request"].reorder_pages, captured["request"].keep_page_order) == (False, False)
+
+    run_command(run_module.command, _argv(tmp_path, "--reorder"))
+    assert captured["request"].reorder_pages is True
+
+    run_command(run_module.command, _argv(tmp_path, "--keep-page-order"))
+    assert captured["request"].keep_page_order is True
+
+
+def test_a_run_paused_on_page_order_says_how_to_answer_when_nobody_can_be_asked(
+    tmp_path, captured, capsys
+) -> None:
+    captured["report"] = _page_order_pause(tmp_path)
+
+    code = _exit_status(_argv(tmp_path, "--qa", str(tmp_path / "qa.md")))
+
+    out = capsys.readouterr().out
+    assert code == 0 and "publication" not in captured
+    assert "submission-0001.pdf" in out
+    assert "--reorder" in out and "--keep-page-order" in out
+    assert "Paused for review" not in out
+
+
+def test_in_a_terminal_the_page_order_is_asked_and_the_run_carries_on(tmp_path, monkeypatch, capsys) -> None:
+    from opengrader.core.pages import order_review
+
+    calls: list[PipelineRequest] = []
+    asked: list[Path] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request)
+        if len(calls) == 1:
+            return _page_order_pause(tmp_path)
+        return _report(tmp_path, _outcome(STAGE_EXTRACT, StageStatus.RAN, "ok"))
+
+    def review(split_dir, *, ask, write):
+        asked.append(Path(split_dir))
+        return True
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(order_review, "review_in_terminal", review)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+
+    report = run_command(run_module.command, _argv(tmp_path))
+
+    assert asked == [tmp_path / "cohort" / "split"]
+    assert len(calls) == 2 and calls[0] == calls[1]
+    assert not report.page_order_review_needed
+
+
+def test_stopping_at_the_page_order_question_leaves_the_run_paused(tmp_path, monkeypatch, capsys) -> None:
+    from opengrader.core.pages import order_review
+
+    calls: list[PipelineRequest] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request)
+        return _page_order_pause(tmp_path)
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(order_review, "review_in_terminal", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+
+    report = run_command(run_module.command, _argv(tmp_path))
+
+    assert len(calls) == 1 and report.page_order_review_needed

@@ -14,10 +14,20 @@ def _setup_app() -> TuiApp:
     return TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
 
 
-async def _expand_splitter_section(app: TuiApp, pilot: Pilot) -> None:
-    app.query_one("#section-splitter", Collapsible).collapsed = False
+async def _expand_pipeline_section(app: TuiApp, pilot: Pilot) -> None:
+    app.query_one("#section-pipeline", Collapsible).collapsed = False
+    # The answer-key field lives under Advanced settings.
+    app.query_one("#pipe-advanced", Collapsible).collapsed = False
     await pilot.pause()
     await pilot.wait_for_scheduled_animations()
+    await pilot.pause()
+
+
+async def _click_browse(app: TuiApp, pilot: Pilot, input_id: str) -> None:
+    # The card is taller than the screen: bring the row into view first.
+    app.query_one(f"#browse-{input_id}").scroll_visible(animate=False)
+    await pilot.pause()
+    await pilot.click(f"#browse-{input_id}")
     await pilot.pause()
 
 
@@ -29,13 +39,12 @@ def test_browse_button_opens_picker_and_file_click_fills_input(tmp_path: Path) -
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await _expand_splitter_section(app, pilot)
+            await _expand_pipeline_section(app, pilot)
 
-            split_input = app.query_one("#split-input", Input)
-            split_input.value = str(tmp_path)
+            file_input = app.query_one("#pipe-qa", Input)
+            file_input.value = str(tmp_path)
 
-            await pilot.click("#browse-split-input")
-            await pilot.pause()
+            await _click_browse(app, pilot, "pipe-qa")
             assert isinstance(app.screen, PathPickerScreen)
 
             await pilot.pause()
@@ -43,7 +52,7 @@ def test_browse_button_opens_picker_and_file_click_fills_input(tmp_path: Path) -
             await pilot.pause()
 
             assert not isinstance(app.screen, PathPickerScreen)
-            assert split_input.value == str(sample_pdf)
+            assert file_input.value == str(sample_pdf)
 
     asyncio.run(run())
 
@@ -53,20 +62,19 @@ def test_picker_escape_cancels_without_touching_input(tmp_path: Path) -> None:
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await _expand_splitter_section(app, pilot)
+            await _expand_pipeline_section(app, pilot)
 
-            split_input = app.query_one("#split-input", Input)
-            split_input.value = str(tmp_path)
+            file_input = app.query_one("#pipe-qa", Input)
+            file_input.value = str(tmp_path)
 
-            await pilot.click("#browse-split-input")
-            await pilot.pause()
+            await _click_browse(app, pilot, "pipe-qa")
             assert isinstance(app.screen, PathPickerScreen)
 
             await pilot.press("escape")
             await pilot.pause()
 
             assert not isinstance(app.screen, PathPickerScreen)
-            assert split_input.value == str(tmp_path)
+            assert file_input.value == str(tmp_path)
 
     asyncio.run(run())
 
@@ -78,13 +86,12 @@ def test_directory_mode_select_button_confirms_highlighted_directory(
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await _expand_splitter_section(app, pilot)
+            await _expand_pipeline_section(app, pilot)
 
-            output_input = app.query_one("#split-output", Input)
+            output_input = app.query_one("#pipe-out", Input)
             output_input.value = str(tmp_path)
 
-            await pilot.click("#browse-split-output")
-            await pilot.pause()
+            await _click_browse(app, pilot, "pipe-out")
             assert isinstance(app.screen, PathPickerScreen)
 
             await pilot.click("#path-picker-select")
@@ -101,19 +108,18 @@ def test_file_mode_select_button_rejects_directory(tmp_path: Path) -> None:
         app = _setup_app()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
-            await _expand_splitter_section(app, pilot)
+            await _expand_pipeline_section(app, pilot)
 
-            split_input = app.query_one("#split-input", Input)
-            split_input.value = str(tmp_path)
+            file_input = app.query_one("#pipe-qa", Input)
+            file_input.value = str(tmp_path)
 
-            await pilot.click("#browse-split-input")
-            await pilot.pause()
+            await _click_browse(app, pilot, "pipe-qa")
 
             await pilot.click("#path-picker-select")
             await pilot.pause()
 
             assert isinstance(app.screen, PathPickerScreen)
-            assert split_input.value == str(tmp_path)
+            assert file_input.value == str(tmp_path)
 
             await pilot.press("escape")
             await pilot.pause()

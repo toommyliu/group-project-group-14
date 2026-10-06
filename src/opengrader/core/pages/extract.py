@@ -77,9 +77,17 @@ def crop_submission(
         result.title_text = identity.group.layout.title
 
     by_number = {p.group.page_number: p for p in pages if p.group is not None}
-    next_layouts = [_continued_by(pages, index) for index in range(len(pages))]
+    following = [_continued_by(page, by_number) for page in pages]
+    next_layouts = [after.group.layout if after is not None else None for after in following]
     questions: dict[str, StudentSubmissionQuestion] = {}
-    for index, page in enumerate(pages):
+    # Printed order, not scan order: a submission left as scanned still lists q1, q2, …
+    in_print_order = sorted(
+        range(len(pages)),
+        key=lambda i: (pages[i].group is None or pages[i].group.page_number is None,
+                       (pages[i].group.page_number or 0) if pages[i].group is not None else 0, i),
+    )
+    for index in in_print_order:
+        page = pages[index]
         if page.group is None:
             continue
         for region, continuation in question_regions(page.group.layout, next_layouts[index]):
@@ -87,7 +95,7 @@ def crop_submission(
                 continue
             parts = [(page, region.box)]
             if continuation is not None:
-                parts.append((pages[index + 1], continuation))
+                parts.append((following[index], continuation))
             questions[region.key] = _question(region, parts, page.group, responses_dir)
 
     for number in catalog.expected_pages:
@@ -109,20 +117,25 @@ def crop_submission(
     return result
 
 
-def _continued_by(pages: list[AlignedPage], index: int):
-    page = pages[index]
-    following = pages[index + 1] if index + 1 < len(pages) else None
-    if page.group is None or following is None or following.group is None or page.group.page_number is None:
+def _continued_by(page: AlignedPage, by_number: dict[int | None, AlignedPage]) -> AlignedPage | None:
+    # Found by number, not position, so the scan's page order does not matter.
+    if page.group is None or page.group.page_number is None:
         return None
-    return following.group.layout if following.group.page_number == page.group.page_number + 1 else None
+    return by_number.get(page.group.page_number + 1)
 
 
-def _align_pages(pdf_path: Path, catalog: PageCatalog, dpi: int) -> list[AlignedPage]:
+def page_groups(pdf_path: Path, catalog: PageCatalog, *, dpi: int = 150) -> list[str | None]:
+    # Which printed page each page of a split PDF is, read from the pages themselves: the
+    # sidecar's hints go by position, so they are wrong once someone has rearranged the PDF.
+    return [page.group.id if page.group is not None else None for page in _align_pages(pdf_path, catalog, dpi, hints=False)]
+
+
+def _align_pages(pdf_path: Path, catalog: PageCatalog, dpi: int, *, hints: bool = True) -> list[AlignedPage]:
     import fitz
 
     from opengrader.core.pdf_utils import render_page_to_image
 
-    sidecar = read_sidecar(pdf_path) or {}
+    sidecar = (read_sidecar(pdf_path) or {}) if hints else {}
     hinted = [entry.get("group") for entry in sidecar.get("pages", [])]
     pages: list[AlignedPage] = []
     with fitz.open(str(pdf_path)) as doc:

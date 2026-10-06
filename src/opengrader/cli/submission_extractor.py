@@ -38,6 +38,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from opengrader.core.roster import parse_roster_arg as _parse_roster_arg
 from opengrader.core.region_map import (
     RegionMapError,
     load_verified_region_map,
@@ -257,6 +258,25 @@ def _bubble_layout_fingerprint(layout) -> str:  # noqa: ANN001
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
+def _note_unconfirmed_page_order(input_path: str) -> None:
+    """`opengrader run` pauses on these; run directly, extraction only says so.
+    Answers are found by their print, so the result is right either way."""
+    from opengrader.core.pages.order_review import pending_findings
+
+    directory = Path(input_path)
+    if not directory.is_dir():
+        return
+    pending = pending_findings(directory)
+    if pending:
+        names = ", ".join(finding.name for finding in pending)
+        print(
+            f"Warning: {len(pending)} submission(s) look out of order and were never "
+            f"confirmed: {names}. They are extracted as scanned; to sort them first, "
+            "split again with --reorder (or --reorder-only).",
+            file=sys.stderr,
+        )
+
+
 def _resolve_page_catalog(input_path: str, pdfs: list[Path], output_dir: Path, emit: Callable[[str], None]):
     import os
 
@@ -286,13 +306,6 @@ def _catalog_fingerprint(catalog: PageCatalog | None) -> str:
     if catalog is None or catalog.directory is None:
         return ""
     return file_fingerprint(catalog.directory / "catalog.json")
-
-
-def _parse_roster_arg(value: str) -> tuple[Path, str | None]:
-    if Path(value).exists() or "=" not in value:
-        return Path(value), None
-    path_str, name = value.rsplit("=", 1)
-    return Path(path_str), (name.strip() or None)
 
 
 JOURNAL_ACTOR_REFINE = "submission-extractor:refine"
@@ -1265,6 +1278,7 @@ def command(
             vision_reader = None
 
     print(f"Found {len(pdfs)} submission PDF(s)")
+    _note_unconfirmed_page_order(input_path)
 
     external_progress = hooks.progress is not None
     vlm_possible = bool(vision_reader) and not no_ollama_qa

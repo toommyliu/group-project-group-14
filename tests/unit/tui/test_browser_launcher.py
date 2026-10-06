@@ -367,7 +367,7 @@ def test_a_failed_install_says_why_and_builds_nothing(
     monkeypatch.setattr(browser_app, "install_tools", _install)
     notices: list[tuple[str, str]] = []
 
-    async def run() -> bool:
+    async def run() -> tuple[bool, bool, str]:
         app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause()
@@ -383,14 +383,19 @@ def test_a_failed_install_says_why_and_builds_nothing(
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
-            return app.query_one(BrowserLauncher).busy
+            launcher = app.query_one(BrowserLauncher)
+            status = str(launcher.query_one("#browser-status-text").render())
+            return launcher.busy, launcher.has_class("hidden"), status
 
-    still_busy = asyncio.run(run())
+    still_busy, hidden, status = asyncio.run(run())
 
     assert not still_busy
     assert done["builds"] == 0 and service["imports"] == []
     assert notices and notices[-1][1] == "error"
     assert "were not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
+    # The notification goes away; the status line keeps what it said.
+    assert not hidden
+    assert "were not installed" in status and "no bottle" in status
 
 
 def test_a_stale_build_opens_anyway_without_rebuilding(

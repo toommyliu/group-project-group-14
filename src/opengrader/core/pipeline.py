@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
 from opengrader.core import egress
+from opengrader.core.roster import parse_roster_arg
 from opengrader.core.submissions.manifest import (
     RUN_LEDGER_FILENAME,
     ExtractionRecord,
@@ -49,14 +50,19 @@ _STAGE_COMMANDS = {
 }
 
 
+# Prefix of the PAUSED extract outcome's detail when page order needs confirming.
+PAGE_ORDER_DETAIL = "page-order:"
+
+
 class StageStatus(str, Enum):
     RAN = "ran"
     REUSED = "reused"
     SKIPPED = "skipped"
     BLOCKED = "blocked"
     FAILED = "failed"
-    # Stopped on purpose for a person to review (drafted rubrics): not a
-    # failure, but nothing after it runs and nothing is published.
+    # Stopped on purpose for a person to review (drafted rubrics, or pages that
+    # look out of order): not a failure, but nothing after it runs and nothing
+    # is published.
     PAUSED = "paused"
 
 
@@ -81,8 +87,24 @@ class PipelineRequest:
     output_dir: Path
     qa_file: Path | None = None
     roster: Path | None = None
+    # A mixed stack of several class sections: one `TSV[=SECTION]` entry per
+    # roster, exactly as submission-extractor's --id-file takes them. Each
+    # student is routed to the section whose roster holds their ID. When given,
+    # these are used instead of `roster`.
+    section_rosters: tuple[str, ...] = ()
     blank_template: Path | None = None
+    # Answer boxes for an assignment Opengrader did not generate. It answers
+    # the same question as `blank_template` (where are the answers?), so the
+    # two cannot be combined — the extractor refuses the pair.
+    region_map: Path | None = None
     pages_per_submission: int | None = None
+    # Sort each submission's pages. Off by default: a scan's pages are left as
+    # scanned and a submission that looks out of order is reported instead.
+    reorder_pages: bool = False
+    # The answer to "these submissions look out of order" given up front: leave
+    # them as scanned and carry on. Without it (or reorder_pages) the run pauses
+    # before extraction for a person to confirm, sort, or rearrange them.
+    keep_page_order: bool = False
     llm: LlmOptions = LlmOptions()
     jobs: int | None = None
     auto_grade: bool = True
@@ -97,6 +119,13 @@ class PipelineRequest:
     # names and IDs are never sent to the cloud — there is no separate
     # override for that, and none should be added here.
     send_to_cloud_confirmed: bool = False
+
+    def __post_init__(self) -> None:
+        if self.blank_template is not None and self.region_map is not None:
+            raise ValueError(
+                "A blank template and a region map both say where the answers "
+                "are; give one or the other."
+            )
 
     @property
     def split_dir(self) -> Path:
@@ -185,6 +214,15 @@ class PipelineReport:
     @property
     def paused_for_review(self) -> bool:
         return any(outcome.status is StageStatus.PAUSED for outcome in self.stages)
+
+    @property
+    def page_order_review_needed(self) -> bool:
+        """True when the run paused before extraction because some split
+        submissions look out of order and nobody has confirmed them yet."""
+        return any(
+            outcome.status is StageStatus.PAUSED and outcome.detail.startswith(PAGE_ORDER_DETAIL)
+            for outcome in self.stages
+        )
 
     def stage(self, name: str) -> StageOutcome | None:
         for outcome in self.stages:
@@ -348,6 +386,8 @@ def _split_argv(request: PipelineRequest) -> tuple[str, ...]:
         argv += ["--pages-per-submission", str(request.pages_per_submission)]
     if request.blank_template is not None:
         argv += ["--blank-template", str(request.blank_template)]
+    if request.reorder_pages:
+        argv.append("--reorder")
     # No --yes-send-to-cloud here: the splitter's only vision calls are
     # whole-page reads (page numbers, Name/ID headers), which
     # GuardedVisionReader always routes to a local reader — a split run
@@ -365,10 +405,15 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
         str(request.submissions_dir),
         "--resume",
     ]
-    if request.roster is not None:
+    if request.section_rosters:
+        for entry in request.section_rosters:
+            argv += ["--id-file", entry]
+    elif request.roster is not None:
         argv += ["--id-file", str(request.roster)]
     if request.blank_template is not None:
         argv += ["--blank-template", str(request.blank_template)]
+    if request.region_map is not None:
+        argv += ["--region-map", str(request.region_map)]
     if request.jobs:
         argv += ["--jobs", str(request.jobs)]
     if request.llm.read_handwriting:
@@ -381,6 +426,21 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv.append("--auto-ollama")
     if request.send_to_cloud_confirmed:
         argv.append("--yes-send-to-cloud")
+    return tuple(argv)
+
+
+def refine_argv(request: PipelineRequest, *, dpi: int | None = None) -> tuple[str, ...]:
+    """A second reading of this request's low-confidence answers only.
+
+    The extract stage's own arguments with --resume swapped for --refine (the
+    extractor refuses the pair), so the second pass crops against the same
+    template, region map and rosters as the first. Not a pipeline stage: it
+    only makes sense on an extraction a person has already looked at.
+    """
+    argv = [arg for arg in _extract_argv(request) if arg != "--resume"]
+    argv.append("--refine")
+    if dpi:
+        argv += ["--refine-dpi", str(dpi)]
     return tuple(argv)
 
 
@@ -451,34 +511,40 @@ def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
         )
 
     if stage == STAGE_SPLIT:
-        return (
-            input_fingerprint(request.scan),
-            settings_fingerprint(
-                {
-                    "pages_per_submission": request.pages_per_submission,
-                    "blank_template": template,
-                    "fix_rotation": True,
-                    "fix_order": True,
-                    "extra_work_pages": True,
-                }
-            ),
-        )
+        settings = {
+            "pages_per_submission": request.pages_per_submission,
+            "blank_template": template,
+            "fix_rotation": True,
+            "fix_order": True,
+            "extra_work_pages": True,
+        }
+        # Only when on, so ledgers written before the option existed still match.
+        if request.reorder_pages:
+            settings["reorder"] = True
+        return (input_fingerprint(request.scan), settings_fingerprint(settings))
 
     if stage == STAGE_EXTRACT:
+        settings = {
+            "roster": (
+                file_fingerprint(request.roster)
+                if request.roster is not None
+                else ""
+            ),
+            "blank_template": template,
+            "llm_escalate": llm.read_handwriting,
+            "vision_model": llm.vision_model,
+        }
+        # Only when given, so ledgers written before these options existed still match.
+        if request.section_rosters:
+            settings["section_rosters"] = [
+                [section or "", file_fingerprint(path)]
+                for path, section in map(parse_roster_arg, request.section_rosters)
+            ]
+        if request.region_map is not None:
+            settings["region_map"] = file_fingerprint(request.region_map)
         return (
             input_fingerprint(request.extract_source),
-            settings_fingerprint(
-                {
-                    "roster": (
-                        file_fingerprint(request.roster)
-                        if request.roster is not None
-                        else ""
-                    ),
-                    "blank_template": template,
-                    "llm_escalate": llm.read_handwriting,
-                    "vision_model": llm.vision_model,
-                }
-            ),
+            settings_fingerprint(settings),
         )
 
     return (
@@ -705,7 +771,13 @@ def _run_scan_check(
     bundle_pages = request.pages_per_submission if is_bundle else None
     per_file_pages = request.pages_per_submission if not is_bundle else None
     if request.blank_template is not None:
-        per_file_pages = _template_page_count(request.blank_template)
+        # The template is one submission long: that is a bundle's submission
+        # length, never its whole page count.
+        template_pages = _template_page_count(request.blank_template)
+        if is_bundle:
+            bundle_pages = bundle_pages or template_pages
+        else:
+            per_file_pages = template_pages
 
     reports = []
     for index, path in enumerate(paths, start=1):
@@ -808,6 +880,10 @@ def _run_extract(
     from opengrader.cli import submission_extractor
     from opengrader.core.submissions.processor import ExtractionProgress
 
+    paused = _page_order_gate(request, plan, progress, started)
+    if paused is not None:
+        return paused
+
     source, settings_id = _stage_ledger_key(request, plan.stage)
     submission_extractor.run_cli(
         list(plan.argv[1:]),
@@ -834,6 +910,48 @@ def _run_extract(
         message=f"{len(outputs)} submission(s) ready to grade",
         duration_seconds=duration,
         outputs=tuple(str(path) for path in outputs),
+    )
+
+
+def _page_order_gate(
+    request: PipelineRequest,
+    plan: StagePlan,
+    progress: PipelineProgress,
+    started: float,
+) -> StageOutcome | None:
+    """Extraction waits until every submission that looks out of order has been
+    confirmed, sorted, or rearranged by hand. Sorting afterwards would mean
+    extracting again, since an answer's source page is recorded by position."""
+    from opengrader.core.pages.order_review import (
+        describe_pending,
+        keep_pages,
+        pending_findings,
+        sort_pages,
+    )
+
+    split_dir = request.extract_source
+    if not split_dir.is_dir():
+        return None
+    progress.status("Checking for submissions whose page order needs confirming…")
+    pending = pending_findings(split_dir)
+    if not pending:
+        return None
+    names = [finding.name for finding in pending]
+    if request.reorder_pages:
+        sort_pages(split_dir, names)
+        return None
+    if request.keep_page_order:
+        keep_pages(split_dir, names)
+        return None
+    return StageOutcome(
+        stage=plan.stage,
+        status=StageStatus.PAUSED,
+        message=(
+            f"{len(pending)} submission(s) look out of order — confirm their page "
+            "order before extraction"
+        ),
+        detail="\n".join([PAGE_ORDER_DETAIL, *describe_pending(pending), f"in {split_dir}"]),
+        duration_seconds=time.monotonic() - started,
     )
 
 

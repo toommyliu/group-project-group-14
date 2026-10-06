@@ -55,6 +55,10 @@ class BrowserLauncher(Vertical):
         border-left: tall $warning;
     }
 
+    BrowserLauncher.failed {
+        border-left: tall $error;
+    }
+
     BrowserLauncher #browser-status-row {
         width: 100%;
         height: auto;
@@ -197,7 +201,7 @@ class BrowserLauncher(Vertical):
                 # Quit mid-install: the card is gone and nobody is left to tell.
                 if self.is_attached:
                     detail = f"\n{exc.tail}" if exc.tail else ""
-                    app.call_from_thread(self._fail, f"{exc}{detail}")
+                    app.call_from_thread(self._fail, f"{exc}{detail}", keep=True)
                 return
             finally:
                 self._install_process = None
@@ -212,7 +216,7 @@ class BrowserLauncher(Vertical):
                 browser_app.build_web(on_line=on_line)
             except browser_app.WebBuildError as exc:
                 detail = f"\n{exc.tail}" if exc.tail else ""
-                app.call_from_thread(self._fail, f"{exc}{detail}")
+                app.call_from_thread(self._fail, f"{exc}{detail}", keep=True)
                 return
             app.call_from_thread(self._set_busy, "Starting the browser app…")
         try:
@@ -295,16 +299,28 @@ class BrowserLauncher(Vertical):
     def _set_busy(self, message: str) -> None:
         self.busy = True
         self.add_class("busy")
+        self.remove_class("failed")
         self.remove_class("hidden")
         self.query_one("#browser-status-text", Static).update(message)
         self.query_one("#browser-status-actions").display = False
 
-    def _fail(self, message: str) -> None:
+    def _fail(self, message: str, *, keep: bool = False) -> None:
+        """`keep` leaves the message in the status line until the next try.
+
+        For a failed install or build: Homebrew's and pnpm's errors are too
+        long to read off a notification before it goes. A running service
+        keeps its own status line (and its Stop button) instead.
+        """
         self.busy = False
         self.remove_class("busy")
         self.app.notify(message, severity="error", timeout=15)
         if self._url:
             self._show(self._url)
+        elif keep:
+            self.add_class("failed")
+            self.query_one("#browser-status-text", Static).update(f"✗ {message}")
+            self.query_one("#browser-status-actions").display = False
+            self.remove_class("hidden")
         else:
             self.add_class("hidden")
 
@@ -339,10 +355,12 @@ class BrowserLauncher(Vertical):
             "after you close Opengrader; Stop server disconnects all workspaces."
         )
         self.query_one("#browser-status-actions").display = True
+        self.remove_class("failed")
         self.remove_class("hidden")
 
     def _hide(self) -> None:
         self._url = None
+        self.remove_class("failed")
         self.add_class("hidden")
 
     # -- open again, stop, notice it stopped -----------------------------

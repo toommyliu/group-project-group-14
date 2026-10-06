@@ -233,6 +233,10 @@ def _install_button(app: App) -> Button:
     return app.query_one("#browser-install-tools", Button)
 
 
+def _error_box(app: App) -> Static:
+    return app.query_one("#browser-health-error", Static)
+
+
 def test_no_install_button_without_homebrew(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub(monkeypatch, node=None, pnpm=None)
 
@@ -343,12 +347,89 @@ def test_a_failed_install_says_why_and_can_be_retried(
             await _settle(pilot)
             await app.workers.wait_for_complete()
             await pilot.pause()
-            return _install_button(app).display, _install_button(app).disabled
+            return (
+                _install_button(app).display,
+                _install_button(app).disabled,
+                _error_box(app).display,
+                str(_error_box(app).render()),
+            )
 
-    shown, disabled = asyncio.run(run())
+    shown, disabled, error_shown, error_text = asyncio.run(run())
     assert shown is True and not disabled
     assert notices and notices[-1][1] == "error"
     assert "were not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
+    # The notification goes away; the panel keeps what it said.
+    assert error_shown is True
+    assert "were not installed" in error_text and "no bottle" in error_text
+
+
+def test_the_kept_error_goes_once_a_retry_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = {"status": ToolStatus(node=None, pnpm=None)}
+    monkeypatch.setattr(browser_app, "tool_status", lambda: tools["status"])
+    monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "missing")
+    monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
+    monkeypatch.setattr(homebrew, "find_homebrew", lambda: BREW)
+    presses = {"n": 0}
+
+    def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
+        presses["n"] += 1
+        if presses["n"] == 1:
+            tools["status"] = ToolStatus(node=None, pnpm=PNPM)
+            raise WebBuildError("Node.js was not installed.", "Error: no bottle")
+        tools["status"] = ToolStatus(node=NODE, pnpm=PNPM)
+
+    monkeypatch.setattr(browser_app, "install_tools", _install)
+
+    async def run() -> tuple[bool, bool, bool]:
+        app = _Host()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await _settle(pilot)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            _install_button(app).press()
+            await _settle(pilot)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            after_failure = _error_box(app).display
+            _install_button(app).press()
+            await _settle(pilot)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            return after_failure, _error_box(app).display, _install_button(app).display
+
+    after_failure, after_retry, install_shown = asyncio.run(run())
+    assert after_failure is True
+    assert after_retry is False and install_shown is False
+
+
+def test_a_failed_build_stays_written_in_the_panel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub(monkeypatch, node=NODE, pnpm=PNPM)
+
+    def _build(source=None, *, on_line=None, log=None):  # noqa: ANN001, ANN202
+        raise WebBuildError("Installing packages failed (exit 1).", "ERR_PNPM_FETCH")
+
+    monkeypatch.setattr(browser_app, "build_web", _build)
+
+    async def run() -> tuple[bool, str]:
+        app = _Host()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await _settle(pilot)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            monkeypatch.setattr(app, "notify", lambda message, **kw: None)
+            _build_button(app).press()
+            await _settle(pilot)
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            return _error_box(app).display, str(_error_box(app).render())
+
+    shown, text = asyncio.run(run())
+    assert shown is True
+    assert "Installing packages failed" in text and "ERR_PNPM_FETCH" in text
 
 
 def test_quitting_stops_a_running_install(monkeypatch: pytest.MonkeyPatch) -> None:
