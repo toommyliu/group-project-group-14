@@ -244,6 +244,9 @@ class RosterImport(BaseModel):
     fingerprint: str
 
 
+StaffRole = Literal["instructor", "grader"]
+
+
 class WorkspaceInfo(BaseModel):
     id: str
     course: CourseDetails | None = None

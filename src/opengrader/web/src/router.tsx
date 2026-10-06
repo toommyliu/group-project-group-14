@@ -16,11 +16,11 @@ import {
   assignmentStatisticsQuery,
   submissionsQuery,
 } from './api/queries';
-import { authQuery } from './api/auth';
+import { authQuery, admitted } from './api/auth';
 import { outlineQuery } from './api/outline';
-import { peopleQuery } from './api/people';
 import { rosterQuery } from './api/roster';
 import { scansQuery } from './api/scans';
+import { staffQuery } from './api/staff';
 import { coursesQuery, workspaceQuery } from './api/workspace';
 import { workspaceBase } from './api/client';
 import {
@@ -73,7 +73,7 @@ async function canOpenCourses(queryClient: QueryClient) {
   const auth = await queryClient
     .ensureQueryData(authQuery)
     .catch(() => undefined);
-  return auth ? !auth.enabled || Boolean(auth.role) : false;
+  return auth ? admitted(auth) : false;
 }
 
 export const indexRoute = createRoute({
@@ -383,7 +383,7 @@ export const peopleRoute = createRoute({
     const [students, staff] = await Promise.all([
       context.queryClient.fetchQuery({ ...rosterQuery, staleTime: 0 }),
       context.staffAccess
-        ? context.queryClient.fetchQuery({ ...peopleQuery, staleTime: 0 })
+        ? context.queryClient.fetchQuery({ ...staffQuery, staleTime: 0 })
         : null,
     ]);
     return { students, staff };

@@ -13,9 +13,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict
 from starlette._utils import get_route_path
 
-from opengrader.core.workspace.models import CourseDetails, CourseText
+from opengrader.core.workspace.models import CourseDetails, CourseText, StaffRole
 from opengrader.core.workspace.store import Workspace
-from opengrader.server.auth import RemoteAuthGuard, add_auth_routes, is_local, signed_in
+from opengrader.server.auth import (
+    RemoteAuthGuard,
+    add_auth_routes,
+    course_role,
+    is_local,
+    signed_in,
+)
 from opengrader.server.feedback import FeedbackScheduler
 from opengrader.server.registry import RegisteredWorkspace, WorkspaceRegistry
 from opengrader.server.scan_jobs import ScanWorkers
@@ -50,25 +56,24 @@ class ServerInfo(BaseModel):
 class ServerAccess:
     def __init__(self, registry: WorkspaceRegistry, settings: ServerSettings):
         self.registry = registry
-        self.settings = settings
+        self.admins = settings.admins
 
-    def role(self, email: str):
-        if email in self.settings.instructors:
-            return "instructor"
-        return (
-            "grader"
-            if any(self.can_open(item, email) for item in self.registry.list())
-            else None
+    def role(self, email: str) -> StaffRole | None:
+        return "instructor" if email in self.admins else None
+
+    def admits(self, email: str) -> bool:
+        return email in self.admins or any(
+            self.course_role(item, email) for item in self.registry.list()
         )
 
-    def can_open(self, item: RegisteredWorkspace, email: str) -> bool:
-        if email in self.settings.instructors:
-            return True
+    def course_role(self, item: RegisteredWorkspace, email: str) -> StaffRole | None:
         try:
             workspace = Workspace(Path(item.path))
-            return workspace.info().id == item.id and email in workspace.graders()
+            if workspace.info().id != item.id:
+                return None
+            return course_role(self.admins, workspace, email)
         except (OSError, ValueError, sqlite3.Error):
-            return False
+            return None
 
 
 def _page_request(scope) -> bool:
@@ -171,7 +176,7 @@ class Workspaces:
                 and (
                     user is None
                     or not await run_in_threadpool(
-                        ServerAccess(self.registry, self.settings).can_open,
+                        ServerAccess(self.registry, self.settings).course_role,
                         item,
                         user.email,
                     )
@@ -242,15 +247,27 @@ def create_app(
         ):
             raise HTTPException(404)
 
-    def instructor(request: Request):
+    def owner(request: Request) -> bool:
+        return not settings.auth_enabled or (
+            signed_in(request) is None and is_local(request)
+        )
+
+    def admin(request: Request) -> None:
         user = signed_in(request)
-        if settings.auth_enabled and not (
-            user
-            and user.email in settings.instructors
-            or user is None
-            and is_local(request)
+        if not (owner(request) or user and user.email in settings.admins):
+            raise HTTPException(403, "Only admins can add or remove courses.")
+
+    def course_instructor(request: Request, workspace_id: str) -> None:
+        try:
+            item = registry.get(workspace_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        user = signed_in(request)
+        if not (
+            owner(request)
+            or user and access.course_role(item, user.email) == "instructor"
         ):
-            raise HTTPException(403, "Only instructors can manage courses.")
+            raise HTTPException(403, "Only this course's instructors can edit it.")
 
     def summary(item: RegisteredWorkspace):
         return WorkspaceSummary(
@@ -272,12 +289,12 @@ def create_app(
             summary(item)
             for item in registry.list()
             if (user is None and is_local(request))
-            or (user is not None and access.can_open(item, user.email))
+            or (user is not None and access.course_role(item, user.email))
         ]
 
     @app.post("/api/workspaces", status_code=201)
     def create_workspace(body: CourseForm, request: Request) -> WorkspaceSummary:
-        instructor(request)
+        admin(request)
         try:
             return summary(registry.create(body))
         except (ValueError, FileExistsError) as exc:
@@ -293,7 +310,7 @@ def create_app(
     def update_workspace(
         workspace_id: str, body: CourseForm, request: Request
     ) -> WorkspaceSummary:
-        instructor(request)
+        course_instructor(request, workspace_id)
         try:
             return summary(registry.update(workspace_id, body))
         except LookupError as exc:
@@ -301,7 +318,7 @@ def create_app(
 
     @app.delete("/api/workspaces/{workspace_id}", status_code=204)
     def remove_workspace(workspace_id: str, request: Request) -> Response:
-        instructor(request)
+        admin(request)
         try:
             registry.remove(workspace_id)
         except LookupError as exc:

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from base64 import b64encode
 from uuid import uuid4
 
@@ -15,14 +16,14 @@ from opengrader.server.workspace.app import create_app
 SECRET = "test-session-secret"
 
 
-def hosted(root, instructors="prof@sjsu.edu", **client):
+def hosted(root, admins="prof@sjsu.edu", **client):
     settings = ServerSettings(
         _env_file=None,
         auth_enabled=True,
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret=SECRET,
-        instructors=instructors,
+        admins=admins,
     )
     return TestClient(create_app(root, settings=settings, process_jobs=False), **client)
 
@@ -33,71 +34,103 @@ def sign_in(client, email):
     client.cookies.set("opengrader_session", cookie.decode(), domain="testserver.local")
 
 
-def test_instructors_manage_graders_and_graders_cannot(tmp_path):
+def test_course_instructors_manage_staff_and_graders_cannot(tmp_path):
     with hosted(tmp_path) as client:
         sign_in(client, "prof@sjsu.edu")
-        assert client.get("/api/people").json() == {
+        assert client.get("/auth/me").json()["admin"] is True
+        assert client.get("/api/staff").json() == {
             "domain": "sjsu.edu",
-            "instructors": ["prof@sjsu.edu"],
-            "graders": [],
+            "admins": ["prof@sjsu.edu"],
+            "staff": [],
         }
-        response = client.post("/api/people/graders", json={"email": " TA@SJSU.edu"})
-        assert response.json() == {
-            "domain": "sjsu.edu",
-            "instructors": ["prof@sjsu.edu"],
-            "graders": ["ta@sjsu.edu"],
-        }
+        added = client.post(
+            "/api/staff", json={"email": " Co@SJSU.edu", "role": "instructor"}
+        )
+        assert added.json()["staff"] == [{"email": "co@sjsu.edu", "role": "instructor"}]
+
+        sign_in(client, "co@sjsu.edu")
+        me = client.get("/auth/me").json()
+        assert (me["role"], me["admin"]) == ("instructor", False)
+        assert client.get("/api/roster").status_code == 200
+        client.post("/api/staff", json={"email": "ta@sjsu.edu", "role": "grader"})
+        client.put("/api/staff/role", json={"email": "ta@sjsu.edu", "role": "instructor"})
+        client.put("/api/staff/role", json={"email": "ta@sjsu.edu", "role": "grader"})
+        assert client.get("/api/staff").json()["staff"] == [
+            {"email": "co@sjsu.edu", "role": "instructor"},
+            {"email": "ta@sjsu.edu", "role": "grader"},
+        ]
 
         sign_in(client, "ta@sjsu.edu")
         assert client.get("/auth/me").json()["role"] == "grader"
         assert client.get("/api/assignments").status_code == 200
-        assert client.get("/api/people").status_code == 403
-        add = client.post("/api/people/graders", json={"email": "other@sjsu.edu"})
-        assert add.status_code == 403
-        remove = client.post("/api/people/graders/remove", json={"email": "ta@sjsu.edu"})
+        assert client.get("/api/roster").status_code == 403
+        assert client.get("/api/staff").status_code == 403
+        promote = {"email": "ta@sjsu.edu", "role": "instructor"}
+        assert client.put("/api/staff/role", json=promote).status_code == 403
+        add = {"email": "other@sjsu.edu", "role": "grader"}
+        assert client.post("/api/staff", json=add).status_code == 403
+        remove = client.post("/api/staff/remove", json={"email": "co@sjsu.edu"})
         assert remove.status_code == 403
 
 
-def test_graders_must_be_one_address_on_the_domain(tmp_path):
+def test_staff_must_be_one_new_address_on_the_domain(tmp_path):
+    Workspace.create(tmp_path).add_staff("ta@sjsu.edu", "grader")
     with hosted(tmp_path) as client:
         sign_in(client, "prof@sjsu.edu")
         for email in (
             "ta@gmail.com",
             "ta@sjsu.edu, tb@sjsu.edu",
             "prof@sjsu.edu",
+            "TA@sjsu.edu",
             "a" * 65 + "@sjsu.edu",
             "mailto:ta@sjsu.edu",
         ):
-            response = client.post("/api/people/graders", json={"email": email})
+            response = client.post("/api/staff", json={"email": email, "role": "grader"})
             assert response.status_code == 422, email
-        assert client.get("/api/people").json()["graders"] == []
+        response = client.post("/api/staff", json={"email": "tb@sjsu.edu", "role": "admin"})
+        assert response.status_code == 422
+        assert client.get("/api/staff").json()["staff"] == [
+            {"email": "ta@sjsu.edu", "role": "grader"}
+        ]
 
 
-def test_promoting_a_grader_replaces_their_grader_access(tmp_path):
-    Workspace.create(tmp_path).add_grader("ta@sjsu.edu")
-    with hosted(tmp_path, instructors="prof@sjsu.edu,ta@sjsu.edu") as client:
-        sign_in(client, "prof@sjsu.edu")
-        assert client.get("/api/people").json()["graders"] == []
-        remove = client.post(
-            "/api/people/graders/remove", json={"email": "ta@sjsu.edu"}
-        )
+def test_nobody_changes_their_own_access_or_an_admins(tmp_path):
+    Workspace.create(tmp_path).add_staff("co@sjsu.edu", "instructor")
+    with hosted(tmp_path) as client:
+        sign_in(client, "co@sjsu.edu")
+        demote = {"email": "co@sjsu.edu", "role": "grader"}
+        assert client.put("/api/staff/role", json=demote).status_code == 422
+        leave = client.post("/api/staff/remove", json={"email": "co@sjsu.edu"})
+        assert leave.status_code == 422
+        demote = {"email": "prof@sjsu.edu", "role": "grader"}
+        assert client.put("/api/staff/role", json=demote).status_code == 422
+        remove = client.post("/api/staff/remove", json={"email": "prof@sjsu.edu"})
         assert remove.status_code == 422
+        assert client.get("/auth/me").json()["role"] == "instructor"
+
+
+def test_admins_are_instructors_whatever_their_course_role(tmp_path):
+    Workspace.create(tmp_path).add_staff("ta@sjsu.edu", "grader")
+    with hosted(tmp_path, admins="prof@sjsu.edu,ta@sjsu.edu") as client:
+        sign_in(client, "ta@sjsu.edu")
+        assert client.get("/auth/me").json()["role"] == "instructor"
+        assert client.get("/api/staff").json()["admins"] == ["prof@sjsu.edu", "ta@sjsu.edu"]
 
     with hosted(tmp_path) as client:
         sign_in(client, "ta@sjsu.edu")
-        assert client.get("/api/assignments").status_code == 401
+        assert client.get("/auth/me").json()["role"] == "grader"
 
 
-def test_removing_a_grader_ends_their_session(tmp_path):
-    Workspace.create(tmp_path).add_grader("ta@sjsu.edu")
+def test_removing_staff_ends_their_session(tmp_path):
+    Workspace.create(tmp_path).add_staff("ta@sjsu.edu", "grader")
     with hosted(tmp_path) as client:
         sign_in(client, "ta@sjsu.edu")
         grader_cookie = client.cookies.get("opengrader_session")
         assert client.get("/api/assignments").status_code == 200
 
         sign_in(client, "prof@sjsu.edu")
-        removed = client.post("/api/people/graders/remove", json={"email": "ta@sjsu.edu"})
-        assert removed.json()["graders"] == []
+        removed = client.post("/api/staff/remove", json={"email": "ta@sjsu.edu"})
+        assert removed.json()["staff"] == []
 
         client.cookies.set("opengrader_session", grader_cookie, domain="testserver.local")
         response = client.get("/api/assignments")
@@ -105,7 +138,8 @@ def test_removing_a_grader_ends_their_session(tmp_path):
         assert "opengrader_session=null" in response.headers["set-cookie"]
 
 
-def test_sign_in_admits_only_people_on_the_list(tmp_path, monkeypatch):
+def test_sign_in_admits_only_admins_and_staff(tmp_path, monkeypatch):
+    Workspace.create(tmp_path).add_staff("co@sjsu.edu", "instructor")
     claims = {"email_verified": True, "hd": "sjsu.edu", "name": "Someone"}
 
     async def token(self, request, **kwargs):
@@ -120,10 +154,21 @@ def test_sign_in_admits_only_people_on_the_list(tmp_path, monkeypatch):
         assert "Ask an instructor to add you." in response.text
         assert client.get("/auth/me").json()["user"] is None
 
-        claims["email"] = "prof@sjsu.edu"
-        response = client.get("/auth/callback", follow_redirects=False)
-        assert response.status_code == 303
-        assert client.get("/auth/me").json()["role"] == "instructor"
+        for email in ("prof@sjsu.edu", "co@sjsu.edu"):
+            claims["email"] = email
+            response = client.get("/auth/callback", follow_redirects=False)
+            assert response.status_code == 303
+            assert client.get("/auth/me").json()["role"] == "instructor"
+
+
+def test_upgrading_keeps_existing_graders(tmp_path):
+    workspace = Workspace.create(tmp_path)
+    with sqlite3.connect(workspace.database) as db:
+        db.executescript(
+            "DROP TABLE staff; CREATE TABLE graders (email TEXT PRIMARY KEY);"
+            "INSERT INTO graders VALUES ('ta@sjsu.edu'); PRAGMA user_version = 8;"
+        )
+    assert Workspace(tmp_path).staff() == {"ta@sjsu.edu": "grader"}
 
 
 def test_saved_grades_record_the_signed_in_grader(tmp_path):
@@ -145,7 +190,7 @@ def test_saved_grades_record_the_signed_in_grader(tmp_path):
         asset_root=folder,
         source_key="one",
     )
-    workspace.add_grader("ta@sjsu.edu")
+    workspace.add_staff("ta@sjsu.edu", "grader")
     url = f"/api/assignments/{assignment.id}/submissions/1/answers/q1"
     with hosted(tmp_path) as client:
         sign_in(client, "ta@sjsu.edu")
@@ -191,9 +236,9 @@ def test_only_callers_with_the_service_token_can_stop_the_server(tmp_path):
         assert stopped == [True]
 
 
-def test_people_are_not_managed_when_sign_in_is_off(tmp_path):
+def test_staff_is_not_managed_when_sign_in_is_off(tmp_path):
     app = create_app(tmp_path, settings=ServerSettings(_env_file=None), process_jobs=False)
     with TestClient(app) as client:
-        assert client.get("/api/people").status_code == 404
+        assert client.get("/api/staff").status_code == 404
 
 

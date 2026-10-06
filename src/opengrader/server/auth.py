@@ -2,8 +2,7 @@
 
 from html import escape
 import re
-from threading import Lock
-from typing import Annotated, Literal, Mapping, Protocol
+from typing import Annotated, Mapping, Protocol
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -15,11 +14,9 @@ from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette._utils import get_route_path
 
+from opengrader.core.workspace.models import StaffRole
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.settings import ServerSettings, on_domain
-
-Role = Literal["instructor", "grader"]
-
 
 class AuthUser(BaseModel):
     id: str
@@ -30,17 +27,22 @@ class AuthUser(BaseModel):
 class AuthStatus(BaseModel):
     enabled: bool
     user: AuthUser | None = None
-    role: Role | None = None
+    admin: bool = False
+    role: StaffRole | None = None
 
 
-class Grader(BaseModel):
+class StaffEmail(BaseModel):
     email: str
 
 
-class People(BaseModel):
+class StaffMember(StaffEmail):
+    role: StaffRole
+
+
+class Staff(BaseModel):
     domain: str
-    instructors: list[str]
-    graders: list[str]
+    admins: list[str]
+    staff: list[StaffMember]
 
 
 def user_from_claims(claims: Mapping[str, object], hosted_domain: str) -> AuthUser:
@@ -91,50 +93,67 @@ def signed_in(connection: HTTPConnection) -> AuthUser | None:
     return AuthUser.model_validate(user) if user else None
 
 
-class Access:
-    def __init__(self, workspace: Workspace, settings: ServerSettings) -> None:
-        self._workspace = workspace
-        self._domain = settings.google_domain
-        self._lock = Lock()
-        self.instructors = settings.instructors
-        graders = frozenset(workspace.graders())
-        for email in graders & self.instructors:
-            workspace.remove_grader(email)
-        self.graders = graders - self.instructors
-
-    def role(self, email: str) -> Role | None:
-        if email in self.instructors:
-            return "instructor"
-        return "grader" if email in self.graders else None
-
-    def people(self) -> People:
-        return People(
-            domain=self._domain,
-            instructors=sorted(self.instructors),
-            graders=sorted(self.graders),
-        )
-
-    def add_grader(self, email: str) -> None:
-        email = email.strip().lower()
-        if not on_domain(email, self._domain):
-            raise ValueError(f"Enter one @{self._domain} email address.")
-        if email in self.instructors:
-            raise ValueError(f"{email} is already an instructor.")
-        with self._lock:
-            self._workspace.add_grader(email)
-            self.graders |= {email}
-
-    def remove_grader(self, email: str) -> None:
-        email = email.strip().lower()
-        if email in self.instructors:
-            raise ValueError(f"{email} is an instructor, not a grader.")
-        with self._lock:
-            self._workspace.remove_grader(email)
-            self.graders -= {email}
+def course_role(admins: frozenset[str], workspace: Workspace, email: str) -> StaffRole | None:
+    return "instructor" if email in admins else workspace.staff().get(email)
 
 
 class Roles(Protocol):
-    def role(self, email: str) -> Role | None: ...
+    admins: frozenset[str]
+
+    def role(self, email: str) -> StaffRole | None: ...
+
+    def admits(self, email: str) -> bool: ...
+
+
+class CourseAccess:
+    def __init__(self, workspace: Workspace, settings: ServerSettings) -> None:
+        self._workspace = workspace
+        self._domain = settings.google_domain
+        self.admins = settings.admins
+
+    def role(self, email: str) -> StaffRole | None:
+        return course_role(self.admins, self._workspace, email)
+
+    def admits(self, email: str) -> bool:
+        return self.role(email) is not None
+
+    def staff(self) -> Staff:
+        return Staff(
+            domain=self._domain,
+            admins=sorted(self.admins),
+            staff=[
+                StaffMember(email=email, role=role)
+                for email, role in self._workspace.staff().items()
+                if email not in self.admins
+            ],
+        )
+
+    def add(self, member: StaffMember) -> None:
+        email = member.email.strip().lower()
+        if not on_domain(email, self._domain):
+            raise ValueError(f"Enter one @{self._domain} email address.")
+        if email in self.admins:
+            raise ValueError(f"{email} is an admin, so they're already an instructor.")
+        if not self._workspace.add_staff(email, member.role):
+            raise ValueError(f"{email} is already on the staff.")
+
+    def change_role(self, member: StaffMember, *, by: str | None) -> None:
+        email = self._editable(member.email, by)
+        if not self._workspace.change_staff_role(email, member.role):
+            raise ValueError(f"{email} isn't on the staff.")
+
+    def remove(self, email: str, *, by: str | None) -> None:
+        email = self._editable(email, by)
+        if not self._workspace.remove_staff(email):
+            raise ValueError(f"{email} isn't on the staff.")
+
+    def _editable(self, email: str, by: str | None) -> str:
+        email = email.strip().lower()
+        if email == by:
+            raise ValueError("You can't change your own access. Ask another instructor.")
+        if email in self.admins:
+            raise ValueError(f"{email} is an admin. Admins are set in the server settings.")
+        return email
 
 
 class RemoteAuthGuard:
@@ -156,7 +175,7 @@ class RemoteAuthGuard:
         user = None
         if self.access is not None:
             user = signed_in(connection)
-            if user is not None and await run_in_threadpool(self.access.role, user.email) is None:
+            if user is not None and not await run_in_threadpool(self.access.admits, user.email):
                 connection.session.clear()
                 user = None
         if is_local(connection) or get_route_path(scope).startswith("/auth/") or user:
@@ -181,10 +200,15 @@ def viewer(request: Request) -> AuthStatus:
         return AuthStatus(enabled=False)
     user = signed_in(request)
     if user is not None:
-        role = access.role(user.email)
-    else:
-        role = "instructor" if is_local(request) else None
-    return AuthStatus(enabled=True, user=user, role=role)
+        return AuthStatus(
+            enabled=True,
+            user=user,
+            admin=user.email in access.admins,
+            role=access.role(user.email),
+        )
+    if is_local(request):
+        return AuthStatus(enabled=True, admin=True, role="instructor")
+    return AuthStatus(enabled=True)
 
 
 Viewer = Annotated[AuthStatus, Depends(viewer)]
@@ -206,7 +230,7 @@ def add_auth_routes(
     *, access: Roles | None = None, shared_session: bool = False,
 ) -> None:
     if workspace is not None:
-        access = Access(workspace, settings) if settings.auth_enabled else None
+        access = CourseAccess(workspace, settings) if settings.auth_enabled else None
     app.state.access = access
     if access is not None:
         app.add_middleware(RemoteAuthGuard, access=access)
@@ -259,7 +283,7 @@ def add_auth_routes(
         request.session.clear()
         try:
             user = user_from_claims(token.get("userinfo") or {}, settings.google_domain)
-            if access.role(user.email) is None:
+            if not access.admits(user.email):
                 raise ValueError(
                     f"{user.email} hasn't been added yet. "
                     "Ask an instructor to add you."
@@ -275,25 +299,30 @@ def add_auth_routes(
             request.session.clear()
         return Response(status_code=204)
 
-    def managed_access(status: Viewer) -> Access:
-        if not isinstance(access, Access):
-            raise HTTPException(404, "People are managed within a workspace when sign-in is on.")
+    def managed_access(status: Viewer) -> CourseAccess:
+        if not isinstance(access, CourseAccess):
+            raise HTTPException(404, "Staff is managed within a course when sign-in is on.")
         if status.role != "instructor":
-            raise HTTPException(403, "Only instructors can manage people.")
+            raise HTTPException(403, "Only instructors can manage staff.")
         return access
 
-    Managed = Annotated[Access, Depends(managed_access)]
+    Managed = Annotated[CourseAccess, Depends(managed_access)]
 
-    @app.get("/api/people")
-    def people(managed: Managed) -> People:
-        return managed.people()
+    @app.get("/api/staff")
+    def staff(managed: Managed) -> Staff:
+        return managed.staff()
 
-    @app.post("/api/people/graders")
-    def add_grader(grader: Grader, managed: Managed) -> People:
-        managed.add_grader(grader.email)
-        return managed.people()
+    @app.post("/api/staff")
+    def add_staff(member: StaffMember, managed: Managed) -> Staff:
+        managed.add(member)
+        return managed.staff()
 
-    @app.post("/api/people/graders/remove")
-    def remove_grader(grader: Grader, managed: Managed) -> People:
-        managed.remove_grader(grader.email)
-        return managed.people()
+    @app.put("/api/staff/role")
+    def change_staff_role(member: StaffMember, managed: Managed, status: Viewer) -> Staff:
+        managed.change_role(member, by=status.user and status.user.email)
+        return managed.staff()
+
+    @app.post("/api/staff/remove")
+    def remove_staff(person: StaffEmail, managed: Managed, status: Viewer) -> Staff:
+        managed.remove(person.email, by=status.user and status.user.email)
+        return managed.staff()

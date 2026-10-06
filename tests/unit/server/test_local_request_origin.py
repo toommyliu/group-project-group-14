@@ -25,7 +25,7 @@ def local_app(tmp_path, request):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     web = tmp_path / "web"
     web.mkdir()
@@ -157,7 +157,7 @@ def test_hosted_session_rejects_cross_origin_mutations(tmp_path, headers):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     session = {"user": {"id": "prof", "email": "prof@sjsu.edu", "name": "Professor"}}
     cookie = TimestampSigner("test-session-secret").sign(
@@ -212,7 +212,7 @@ def test_google_callback_allows_cross_site_navigation(tmp_path, monkeypatch):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     app = create_app(tmp_path, settings=settings, process_jobs=False)
     with TestClient(

@@ -11,15 +11,23 @@ uv run opengrader serve # Serves
 
 ## Google sign-in
 
-Google sign-in is optional. Set all three required variables before starting the
-server to enable it:
+Google sign-in is optional. Set these variables before starting the server to
+enable it:
 
 ```sh
+export OPENGRADER_AUTH_ENABLED=true
 export OPENGRADER_GOOGLE_CLIENT_ID="..."
 export OPENGRADER_GOOGLE_CLIENT_SECRET="..."
 export OPENGRADER_SESSION_SECRET="$(openssl rand -hex 32)"
+export OPENGRADER_ADMINS="prof@sjsu.edu"
 uv run opengrader serve
 ```
+
+Only admins and course staff can sign in. Admins, listed in
+`OPENGRADER_ADMINS`, create and remove courses and act as an instructor in
+every course. Everyone else is added to each course from its People page, as
+an instructor or a grader. Instructors manage that course's people and
+settings. Graders grade.
 
 The `serve` command also loads these settings from a `.env` file in the
 directory where it is launched. Values already exported by the shell take
@@ -33,8 +41,8 @@ verified `sjsu.edu` Workspace accounts by default. Set
 `OPENGRADER_GOOGLE_DOMAIN` to use another Workspace domain, and set
 `OPENGRADER_SECURE_COOKIE=1` when serving over HTTPS.
 
-Do not commit these values. If the variables are absent, Opengrader keeps its
-existing local, signed-out behavior.
+Do not commit these values. Without `OPENGRADER_AUTH_ENABLED=true`, Opengrader
+keeps its local, signed-out behavior.
 
 ## Setting up assignments
 

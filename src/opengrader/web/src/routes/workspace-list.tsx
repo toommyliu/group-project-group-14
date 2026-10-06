@@ -76,8 +76,7 @@ function byTerm(courses: CourseSummary[]) {
 export default function WorkspaceList() {
   const workspaces = useQuery(coursesQuery);
   const auth = useQuery(authQuery);
-  const canCreate =
-    auth.data && (!auth.data.enabled || auth.data.role === 'instructor');
+  const canCreate = auth.data && (!auth.data.enabled || auth.data.admin);
   const [draft, setDraft] = useState(newCourse);
   const [errors, setErrors] = useState<CourseDraftErrors>({});
   const numberInput = useRef<HTMLInputElement>(null);
@@ -209,7 +208,7 @@ export default function WorkspaceList() {
             <EmptyDescription>
               {canCreate
                 ? 'Create a course to start adding assignments.'
-                : 'Ask an instructor to add you to a course.'}
+                : 'Ask an admin to create a course.'}
             </EmptyDescription>
           </EmptyHeader>
           {canCreate && (

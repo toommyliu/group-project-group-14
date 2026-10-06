@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { authQuery } from '@/api/auth';
+import { authQuery, admitted } from '@/api/auth';
 import { HowItWorks } from '@/components/how-it-works';
 import { ModeToggle } from '@/components/mode-toggle';
 import { PageHeading } from '@/components/page-heading';
@@ -16,7 +16,7 @@ export default function HomePage() {
         description="Grade paper assignments from a stack of scans, with no friction."
         actions={<ModeToggle />}
       />
-      {auth?.enabled && !auth.role ? (
+      {auth && !admitted(auth) ? (
         <a href="/auth/login" className={buttonVariants({ size: 'lg' })}>
           Sign in with Google
         </a>

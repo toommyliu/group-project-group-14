@@ -34,16 +34,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/people": {
+    "/api/staff": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** People */
-        get: operations["people_api_people_get"];
+        /** Staff */
+        get: operations["staff_api_staff_get"];
         put?: never;
+        /** Add Staff */
+        post: operations["add_staff_api_staff_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/staff/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Change Staff Role */
+        put: operations["change_staff_role_api_staff_role_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -51,7 +69,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/people/graders": {
+    "/api/staff/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -60,25 +78,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add Grader */
-        post: operations["add_grader_api_people_graders_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/people/graders/remove": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Remove Grader */
-        post: operations["remove_grader_api_people_graders_remove_post"];
+        /** Remove Staff */
+        post: operations["remove_staff_api_staff_remove_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1125,6 +1126,11 @@ export interface components {
             /** Enabled */
             enabled: boolean;
             user?: components["schemas"]["AuthUser"] | null;
+            /**
+             * Admin
+             * @default false
+             */
+            admin: boolean;
             /** Role */
             role?: ("instructor" | "grader") | null;
         };
@@ -1261,11 +1267,6 @@ export interface components {
             answer: components["schemas"]["Answer"];
             folder?: components["schemas"]["FolderWrite"] | null;
         };
-        /** Grader */
-        Grader: {
-            /** Email */
-            email: string;
-        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1358,15 +1359,6 @@ export interface components {
              * @enum {integer}
              */
             rotation: 0 | 90 | 180 | 270;
-        };
-        /** People */
-        People: {
-            /** Domain */
-            domain: string;
-            /** Instructors */
-            instructors: string[];
-            /** Graders */
-            graders: string[];
         };
         /** PipelineOutput */
         PipelineOutput: {
@@ -1846,6 +1838,30 @@ export interface components {
             /** Count */
             count: number;
         };
+        /** Staff */
+        Staff: {
+            /** Domain */
+            domain: string;
+            /** Admins */
+            admins: string[];
+            /** Staff */
+            staff: components["schemas"]["StaffMember"][];
+        };
+        /** StaffEmail */
+        StaffEmail: {
+            /** Email */
+            email: string;
+        };
+        /** StaffMember */
+        StaffMember: {
+            /** Email */
+            email: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "instructor" | "grader";
+        };
         /** Student */
         Student: {
             /** Sid */
@@ -2098,7 +2114,7 @@ export interface operations {
             };
         };
     };
-    people_api_people_get: {
+    staff_api_staff_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2113,12 +2129,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["People"];
+                    "application/json": components["schemas"]["Staff"];
                 };
             };
         };
     };
-    add_grader_api_people_graders_post: {
+    add_staff_api_staff_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2127,7 +2143,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Grader"];
+                "application/json": components["schemas"]["StaffMember"];
             };
         };
         responses: {
@@ -2137,7 +2153,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["People"];
+                    "application/json": components["schemas"]["Staff"];
                 };
             };
             /** @description Validation Error */
@@ -2151,7 +2167,7 @@ export interface operations {
             };
         };
     };
-    remove_grader_api_people_graders_remove_post: {
+    change_staff_role_api_staff_role_put: {
         parameters: {
             query?: never;
             header?: never;
@@ -2160,7 +2176,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Grader"];
+                "application/json": components["schemas"]["StaffMember"];
             };
         };
         responses: {
@@ -2170,7 +2186,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["People"];
+                    "application/json": components["schemas"]["Staff"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_staff_api_staff_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffEmail"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Staff"];
                 };
             };
             /** @description Validation Error */

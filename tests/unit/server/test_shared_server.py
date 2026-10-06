@@ -226,22 +226,24 @@ def test_hosted_access_filters_catalog_and_every_workspace_resource(tmp_path):
         google_client_id="id",
         google_client_secret="secret",
         session_secret="session",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     app = create_app(tmp_path / "server", settings=settings, process_jobs=False)
     a = Workspace.create(tmp_path / "A")
     b = Workspace.create(tmp_path / "B")
-    a.add_grader("grader@sjsu.edu")
+    a.add_staff("grader@sjsu.edu", "grader")
     first, second = [app.state.registry.register(w.root) for w in [a, b]]
     with TestClient(app) as client:
         assert client.get(first.url_path + "/api/workspace").status_code == 401
         client.cookies.set("opengrader_session", cookie(settings, "grader@sjsu.edu"))
+        assert client.get("/auth/me").json()["admin"] is False
         assert [item["id"] for item in client.get("/api/workspaces").json()] == [
             first.id
         ]
         assert client.get(first.url_path + "/api/workspace").status_code == 200
         assert client.get(first.url_path + "/api/roster").status_code == 403
         client.cookies.set("opengrader_session", cookie(settings, "prof@sjsu.edu"))
+        assert client.get("/auth/me").json()["admin"] is True
         assert client.get(first.url_path + "/api/roster").status_code == 200
         client.cookies.set("opengrader_session", cookie(settings, "grader@sjsu.edu"))
         for path in [
@@ -269,8 +271,48 @@ def test_hosted_access_filters_catalog_and_every_workspace_resource(tmp_path):
             == 404
         )
         assert client.post("/api/shutdown").status_code == 404
-        a.remove_grader("grader@sjsu.edu")
+        a.remove_staff("grader@sjsu.edu")
         assert client.get(first.url_path + "/api/workspace").status_code == 401
+
+
+def test_course_instructors_run_their_course_and_admins_run_the_server(tmp_path):
+    settings = ServerSettings(
+        _env_file=None,
+        auth_enabled=True,
+        google_client_id="id",
+        google_client_secret="secret",
+        session_secret="session",
+        admins="prof@sjsu.edu",
+    )
+    app = create_app(tmp_path / "server", settings=settings, process_jobs=False)
+    a = Workspace.create(tmp_path / "A")
+    b = Workspace.create(tmp_path / "B")
+    b.add_staff("lead@sjsu.edu", "instructor")
+    first, second = [app.state.registry.register(w.root) for w in [a, b]]
+    course = {"number": "CS 146", "name": "Data Structures"}
+    with TestClient(app) as client:
+        client.cookies.set("opengrader_session", cookie(settings, "lead@sjsu.edu"))
+        me = client.get("/auth/me").json()
+        assert (me["admin"], me["role"]) == (False, None)
+        assert [item["id"] for item in client.get("/api/workspaces").json()] == [
+            second.id
+        ]
+        assert client.get(second.url_path + "/auth/me").json()["role"] == "instructor"
+        assert client.get(second.url_path + "/api/staff").status_code == 200
+        assert client.get(first.url_path + "/api/workspace").status_code == 403
+        assert client.put(f"/api/workspaces/{second.id}", json=course).status_code == 200
+        assert client.put(f"/api/workspaces/{first.id}", json=course).status_code == 403
+        assert client.post("/api/workspaces", json=course).status_code == 403
+        assert client.delete(f"/api/workspaces/{second.id}").status_code == 403
+
+        client.cookies.set("opengrader_session", cookie(settings, "prof@sjsu.edu"))
+        assert {item["id"] for item in client.get("/api/workspaces").json()} == {
+            first.id,
+            second.id,
+        }
+        assert client.get(first.url_path + "/auth/me").json()["role"] == "instructor"
+        assert client.put(f"/api/workspaces/{first.id}", json=course).status_code == 200
+        assert client.delete(f"/api/workspaces/{second.id}").status_code == 204
 
 
 def test_register_requires_control_token_and_browser_creation_uses_default(

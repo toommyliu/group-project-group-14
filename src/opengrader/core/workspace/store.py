@@ -36,6 +36,7 @@ from opengrader.core.workspace.models import (
     AssignmentSummary,
     FeedbackJob,
     GradeSaveResult,
+    StaffRole,
     Submission,
     WorkspaceEvent,
     WorkspaceInfo,
@@ -59,6 +60,9 @@ _RECUTS = """CREATE TABLE IF NOT EXISTS recuts (
     PRIMARY KEY (assignment_id, submission_id),
     FOREIGN KEY (assignment_id, submission_id) REFERENCES submissions(assignment_id, id)
 )"""
+_STAFF = """CREATE TABLE staff (
+    email TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('instructor', 'grader'))
+)"""
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     4: ("CREATE TABLE graders (email TEXT PRIMARY KEY)",),
     # Version 6 meant outlines on one development branch and students on
@@ -66,6 +70,11 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
     5: (_OUTLINES, _STUDENTS),
     6: (_OUTLINES, _STUDENTS),
     7: (_RECUTS,),
+    8: (
+        _STAFF,
+        "INSERT INTO staff SELECT email, 'grader' FROM graders",
+        "DROP TABLE graders",
+    ),
 }
 _VERSION = max(_MIGRATIONS) + 1
 _SCHEMA = f"""
@@ -107,7 +116,7 @@ CREATE TABLE feedback_jobs (
     PRIMARY KEY (assignment_id, submission_id),
     FOREIGN KEY (assignment_id, submission_id) REFERENCES submissions(assignment_id, id)
 );
-CREATE TABLE graders (email TEXT PRIMARY KEY);
+{_STAFF};
 {_OUTLINES};
 {_STUDENTS};
 {_RECUTS};
@@ -762,19 +771,21 @@ class Workspace:
                 )
             ]
 
-    def graders(self) -> list[str]:
+    def staff(self) -> dict[str, StaffRole]:
         with self.connect() as db:
-            return [
-                row[0] for row in db.execute("SELECT email FROM graders ORDER BY email")
-            ]
+            return dict(db.execute("SELECT email, role FROM staff ORDER BY email"))
 
-    def add_grader(self, email: str) -> None:
+    def add_staff(self, email: str, role: StaffRole) -> bool:
         with self.connect(write=True) as db:
-            db.execute("INSERT OR IGNORE INTO graders VALUES (?)", (email,))
+            return db.execute("INSERT OR IGNORE INTO staff VALUES (?, ?)", (email, role)).rowcount == 1
 
-    def remove_grader(self, email: str) -> None:
+    def change_staff_role(self, email: str, role: StaffRole) -> bool:
         with self.connect(write=True) as db:
-            db.execute("DELETE FROM graders WHERE email=?", (email,))
+            return db.execute("UPDATE staff SET role=? WHERE email=?", (role, email)).rowcount == 1
+
+    def remove_staff(self, email: str) -> bool:
+        with self.connect(write=True) as db:
+            return db.execute("DELETE FROM staff WHERE email=?", (email,)).rowcount == 1
 
     def save_grade(
         self,

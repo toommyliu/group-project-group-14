@@ -17,6 +17,7 @@ def test_auth_is_optional_for_offline_use(tmp_path):
         assert client.get("/auth/me").json() == {
             "enabled": False,
             "user": None,
+            "admin": False,
             "role": None,
         }
         response = client.get("/auth/login")
@@ -34,12 +35,13 @@ def test_saved_credentials_only_enable_sign_in_when_requested(tmp_path, monkeypa
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="session-secret",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     with TestClient(create_app(tmp_path, settings=settings, process_jobs=False)) as client:
         assert client.get("/auth/me").json() == {
             "enabled": enabled,
             "user": None,
+            "admin": False,
             "role": None,
         }
 
@@ -61,7 +63,7 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
-        instructors="grader@sjsu.edu",
+        admins="grader@sjsu.edu",
     )
     session = {
         "user": {
@@ -85,6 +87,7 @@ def test_session_reports_user_and_logout_clears_it(tmp_path):
                 "email": "grader@sjsu.edu",
                 "name": "Test Grader",
             },
+            "admin": True,
             "role": "instructor",
         }
         assert client.get("/api/assignments").status_code == 200
@@ -101,7 +104,7 @@ def test_remote_requests_require_sign_in(tmp_path):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     with TestClient(
         create_app(tmp_path, settings=settings, process_jobs=False)
@@ -117,6 +120,7 @@ def test_remote_requests_require_sign_in(tmp_path):
         assert client.get("/auth/me").json() == {
             "enabled": True,
             "user": None,
+            "admin": False,
             "role": None,
         }
 
@@ -128,7 +132,7 @@ def test_local_cli_access_does_not_allow_unsigned_proxied_requests(tmp_path):
         google_client_id="client-id",
         google_client_secret="client-secret",
         session_secret="test-session-secret",
-        instructors="prof@sjsu.edu",
+        admins="prof@sjsu.edu",
     )
     with TestClient(
         create_app(tmp_path, settings=settings, process_jobs=False),

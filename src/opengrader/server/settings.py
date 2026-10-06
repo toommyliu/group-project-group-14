@@ -24,12 +24,12 @@ class ServerSettings(BaseSettings):
     google_client_secret: SecretStr = SecretStr("")
     session_secret: SecretStr = SecretStr("")
     google_domain: Annotated[str, StringConstraints(to_lower=True)] = "sjsu.edu"
-    instructors: Annotated[frozenset[str], NoDecode] = frozenset()
+    admins: Annotated[frozenset[str], NoDecode] = frozenset()
     secure_cookie: bool = False
 
-    @field_validator("instructors", mode="before")
+    @field_validator("admins", mode="before")
     @classmethod
-    def parse_instructors(cls, value: str | Iterable[str]) -> frozenset[str]:
+    def parse_admins(cls, value: str | Iterable[str]) -> frozenset[str]:
         emails = value.split(",") if isinstance(value, str) else value
         return frozenset(email.strip().lower() for email in emails if email.strip())
 
@@ -52,11 +52,11 @@ class ServerSettings(BaseSettings):
             raise ValueError("OPENGRADER_GOOGLE_DOMAIN cannot be empty.")
         if outside := sorted(
             email
-            for email in self.instructors
+            for email in self.admins
             if not on_domain(email, self.google_domain)
         ):
             raise ValueError(
-                f"OPENGRADER_INSTRUCTORS must use @{self.google_domain} addresses: "
+                f"OPENGRADER_ADMINS must use @{self.google_domain} addresses: "
                 f"{', '.join(outside)}"
             )
         return self

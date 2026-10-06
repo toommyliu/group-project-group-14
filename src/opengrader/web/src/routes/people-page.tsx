@@ -1,11 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authQuery } from '@/api/auth';
-import { addGrader, peopleQuery, removeGrader } from '@/api/people';
+import {
+  addStaff,
+  changeStaffRole,
+  removeStaff,
+  staffQuery,
+} from '@/api/staff';
 import { AddStudents } from '@/components/add-students';
 import { PageHeading } from '@/components/page-heading';
 import { Roster } from '@/components/roster';
-import { AddGrader, StaffAccess } from '@/components/staff-access';
+import { AddStaff, StaffAccess } from '@/components/staff-access';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { peopleRoute } from '@/router';
 
@@ -15,7 +20,7 @@ export default function PeoplePage() {
   const queryClient = useQueryClient();
   const loaded = peopleRoute.useLoaderData();
   const { data: staff } = useQuery({
-    ...peopleQuery,
+    ...staffQuery,
     initialData: loaded.staff ?? undefined,
     enabled: loaded.staff !== null,
   });
@@ -40,12 +45,12 @@ export default function PeoplePage() {
               {notice}
             </p>
             {staff && view === 'staff' ? (
-              <AddGrader
+              <AddStaff
                 domain={staff.domain}
-                onAdd={async (email) => {
+                onAdd={async (email, role) => {
                   queryClient.setQueryData(
-                    peopleQuery.queryKey,
-                    await addGrader(email)
+                    staffQuery.queryKey,
+                    await addStaff(email, role)
                   );
                 }}
                 onNotice={setNotice}
@@ -86,10 +91,16 @@ export default function PeoplePage() {
             <StaffAccess
               staff={staff}
               me={me}
+              onChangeRole={async (email, role) => {
+                queryClient.setQueryData(
+                  staffQuery.queryKey,
+                  await changeStaffRole(email, role)
+                );
+              }}
               onRemove={async (email) => {
                 queryClient.setQueryData(
-                  peopleQuery.queryKey,
-                  await removeGrader(email)
+                  staffQuery.queryKey,
+                  await removeStaff(email)
                 );
               }}
               onNotice={setNotice}

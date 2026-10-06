@@ -14,8 +14,7 @@ import {
   useTable,
 } from '@tanstack/react-table';
 import { Trash2 } from 'lucide-react';
-import { cn } from 'cn';
-import type { People } from '@/api/people';
+import type { Staff, StaffRole } from '@/api/staff';
 import { ErrorAlert } from '@/components/error-alert';
 import {
   CopyButton,
@@ -56,17 +55,23 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { errorMessage } from '@/lib/error-message';
-import type { Role } from '@/api/auth';
 
-type Person = { email: string; role: Role };
+type Person = { email: string; role: StaffRole | 'admin' };
 
-const roles: Record<Role, string> = {
+const roles: Record<Person['role'], string> = {
+  admin: 'Admin',
   instructor: 'Instructor',
   grader: 'Grader',
 };
 
+const staffRoles = [
+  { value: 'grader', label: 'Grader' },
+  { value: 'instructor', label: 'Instructor' },
+] as const;
+
 const roleFilters = [
   { value: 'all', label: 'All roles' },
+  { value: 'admin', label: 'Admins' },
   { value: 'instructor', label: 'Instructors' },
   { value: 'grader', label: 'Graders' },
 ] as const;
@@ -100,18 +105,19 @@ function count(value: number, singular: string) {
   return `${number.format(value)} ${value === 1 ? singular : `${singular}s`}`;
 }
 
-export function AddGrader({
+export function AddStaff({
   domain,
   onAdd,
   onNotice,
 }: {
   domain: string;
-  onAdd: (email: string) => Promise<void>;
+  onAdd: (email: string, role: StaffRole) => Promise<void>;
   onNotice: (message: string) => void;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState('');
+  const [role, setRole] = useState<StaffRole>('grader');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -128,11 +134,13 @@ export function AddGrader({
     setSaving(true);
     setError('');
     try {
-      await onAdd(address);
+      await onAdd(address, role);
       setOpen(false);
-      onNotice(`Added ${address}.`);
+      onNotice(
+        `Added ${address} as ${role === 'grader' ? 'a grader' : 'an instructor'}.`
+      );
     } catch (cause) {
-      setError(errorMessage(cause, 'Could not add this grader. Try again.'));
+      setError(errorMessage(cause, 'Could not add this person. Try again.'));
       input.current?.focus();
     } finally {
       setSaving(false);
@@ -146,13 +154,14 @@ export function AddGrader({
         if (saving) return details.cancel();
         if (next) {
           setEmail('');
+          setRole('grader');
           setError('');
           onNotice('');
         }
         setOpen(next);
       }}
     >
-      <AlertDialogTrigger render={<Button />}>Add grader</AlertDialogTrigger>
+      <AlertDialogTrigger render={<Button />}>Add staff</AlertDialogTrigger>
       <AlertDialogContent initialFocus={input}>
         <form
           noValidate
@@ -160,7 +169,7 @@ export function AddGrader({
           className="grid gap-4"
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>Add a grader</AlertDialogTitle>
+            <AlertDialogTitle>Add staff</AlertDialogTitle>
           </AlertDialogHeader>
           <Field data-invalid={Boolean(error)}>
             <FieldLabel htmlFor={`${id}-email`}>Email</FieldLabel>
@@ -183,15 +192,42 @@ export function AddGrader({
               aria-describedby={`${id}-hint${error ? ` ${id}-error` : ''}`}
             />
             <FieldDescription id={`${id}-hint`}>
-              They sign in with their @{domain} Google account. Graders can't
-              manage people or course settings.
+              They sign in with their @{domain} Google account.
             </FieldDescription>
             <FieldError id={`${id}-error`}>{error}</FieldError>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${id}-role`}>Role</FieldLabel>
+            <Select
+              items={staffRoles}
+              value={role}
+              onValueChange={(value) => value && setRole(value)}
+              disabled={saving}
+            >
+              <SelectTrigger
+                id={`${id}-role`}
+                className="w-full"
+                aria-describedby={`${id}-role-hint`}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {staffRoles.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <FieldDescription id={`${id}-role-hint`}>
+              Graders grade. Instructors can also manage people and course
+              settings.
+            </FieldDescription>
           </Field>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
             <Button type="submit" disabled={saving}>
-              <SteadyLabel busy={saving} idle="Add grader" working="Adding…" />
+              <SteadyLabel busy={saving} idle="Add" working="Adding…" />
             </Button>
           </AlertDialogFooter>
         </form>
@@ -203,11 +239,13 @@ export function AddGrader({
 export function StaffAccess({
   staff,
   me,
+  onChangeRole,
   onRemove,
   onNotice,
 }: {
-  staff: People;
+  staff: Staff;
   me?: string;
+  onChangeRole: (email: string, role: StaffRole) => Promise<void>;
   onRemove: (email: string) => Promise<void>;
   onNotice: (message: string) => void;
 }) {
@@ -217,20 +255,15 @@ export function StaffAccess({
   const [confirming, setConfirming] = useState({ open: false, email: '' });
   const [removeError, setRemoveError] = useState('');
   const [removing, setRemoving] = useState(false);
+  const [changing, setChanging] = useState('');
   const heading = useRef<HTMLHeadingElement>(null);
   const removed = useRef(false);
   const opener = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement>(null);
 
   const data: Person[] = [
-    ...staff.instructors.map((address) => ({
-      email: address,
-      role: 'instructor' as const,
-    })),
-    ...staff.graders.map((address) => ({
-      email: address,
-      role: 'grader' as const,
-    })),
+    ...staff.admins.map((email) => ({ email, role: 'admin' as const })),
+    ...staff.staff,
   ];
   const table = useTable({
     features,
@@ -245,7 +278,14 @@ export function StaffAccess({
   const roleFilter = String(roleColumn?.getFilterValue() ?? 'all');
   const filtered = Boolean(emailFilter.trim()) || roleFilter !== 'all';
   const rows = table.getRowModel().rows;
-  const summary = `${count(staff.instructors.length, 'instructor')} · ${count(staff.graders.length, 'grader')}`;
+  const summary = (['admin', 'instructor', 'grader'] as const)
+    .map(
+      (role) =>
+        [role, data.filter((person) => person.role === role).length] as const
+    )
+    .filter(([role, total]) => role !== 'admin' || total > 0)
+    .map(([role, total]) => count(total, roles[role].toLowerCase()))
+    .join(' · ');
 
   // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
@@ -261,18 +301,34 @@ export function StaffAccess({
     ? virtualizer.getTotalSize() - visible.at(-1)!.end
     : 0;
 
-  async function remove(grader: string) {
+  async function changeRole(email: string, role: StaffRole) {
+    if (changing) return;
+    setChanging(email);
+    onNotice('');
+    try {
+      await onChangeRole(email, role);
+      onNotice(
+        `${email} is now ${role === 'grader' ? 'a grader' : 'an instructor'}.`
+      );
+    } catch (cause) {
+      onNotice(errorMessage(cause, 'Could not change this role. Try again.'));
+    } finally {
+      setChanging('');
+    }
+  }
+
+  async function remove(email: string) {
     if (removing) return;
     setRemoving(true);
     setRemoveError('');
     try {
-      await onRemove(grader);
+      await onRemove(email);
       removed.current = true;
       setConfirming((current) => ({ ...current, open: false }));
-      onNotice(`Removed ${grader}.`);
+      onNotice(`Removed ${email}.`);
     } catch (cause) {
       setRemoveError(
-        errorMessage(cause, 'Could not remove this grader. Try again.')
+        errorMessage(cause, 'Could not remove this person. Try again.')
       );
     } finally {
       setRemoving(false);
@@ -331,7 +387,7 @@ export function StaffAccess({
           <PeopleTable
             aria-labelledby={`${id}-staff`}
             aria-rowcount={rows.length ? rows.length + 1 : undefined}
-            columns="grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto]"
+            columns="grid-cols-[minmax(0,1fr)_auto_auto]"
             bodyRef={body}
             header={
               <>
@@ -343,9 +399,6 @@ export function StaffAccess({
                     onSort={(event) =>
                       header.column.getToggleSortingHandler()?.(event)
                     }
-                    className={cn(
-                      header.column.id === 'role' && 'hidden sm:flex'
-                    )}
                   />
                 ))}
                 <PeopleHead>
@@ -365,6 +418,8 @@ export function StaffAccess({
             {visible.map((item) => {
               const row = rows[item.index];
               const person = row.original;
+              const role = person.role;
+              const editable = role !== 'admin' && person.email !== me;
               return (
                 <PeopleRow
                   key={row.id}
@@ -382,15 +437,40 @@ export function StaffAccess({
                       )}
                       <CopyButton value={person.email} what="email" />
                     </div>
-                    <div className="text-muted-foreground sm:hidden">
-                      {roles[person.role]}
-                    </div>
                   </PeopleCell>
-                  <PeopleCell className="hidden text-muted-foreground sm:block">
-                    {roles[person.role]}
+                  <PeopleCell className="flex items-center py-1 text-muted-foreground">
+                    {editable ? (
+                      <Select
+                        items={staffRoles}
+                        value={role}
+                        onValueChange={(value) =>
+                          value &&
+                          value !== role &&
+                          void changeRole(person.email, value)
+                        }
+                        disabled={Boolean(changing)}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          aria-label={`Role for ${person.email}`}
+                          className="w-28"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {staffRoles.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      roles[role]
+                    )}
                   </PeopleCell>
                   <PeopleCell className="flex justify-end">
-                    {person.role === 'grader' && (
+                    {editable && (
                       <RowAction
                         action="Remove"
                         target={person.email}
@@ -432,10 +512,10 @@ export function StaffAccess({
                 </PeopleCell>
               </PeopleRow>
             )}
-            {!filtered && !staff.graders.length && (
+            {!filtered && !staff.staff.length && (
               <PeopleRow>
                 <PeopleCell className="col-span-full py-4 text-muted-foreground">
-                  No graders yet.
+                  No instructors or graders yet.
                 </PeopleCell>
               </PeopleRow>
             )}
@@ -460,8 +540,7 @@ export function StaffAccess({
               Remove {confirming.email}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              They'll be signed out right away and won't be able to sign back
-              in.
+              They'll lose access to this course right away.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {removeError && <ErrorAlert error={removeError} />}
@@ -473,11 +552,7 @@ export function StaffAccess({
               disabled={removing}
               onClick={() => void remove(confirming.email)}
             >
-              <SteadyLabel
-                busy={removing}
-                idle="Remove grader"
-                working="Removing…"
-              />
+              <SteadyLabel busy={removing} idle="Remove" working="Removing…" />
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
