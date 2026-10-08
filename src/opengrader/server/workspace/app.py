@@ -48,7 +48,6 @@ from opengrader.core.workspace.models import (
     Answer,
     Assignment,
     AssignmentSummary,
-    CourseDetails,
     FeedbackJob,
     FolderSyncResult,
     GradeSaveResult,
@@ -173,7 +172,6 @@ def create_app(
     workers: ScanWorkers | None = None,
     feedback_scheduler: FeedbackScheduler | None = None,
     create: bool = True,
-    course: CourseDetails | None = None,
 ) -> FastAPI:
     root = root.resolve()
     from opengrader.core.workspace.store import DATABASE
@@ -274,7 +272,6 @@ def create_app(
     add_auth_routes(app, settings or ServerSettings(_env_file=None), workspace, shared_session=shared_session)
 
     app.state.workspace = workspace
-    app.state.course = course or CourseDetails(number=root.name[:120])
     app.state.scan_jobs = scan_jobs
     app.state.shutdown_token = secrets.token_urlsafe(32)
 
@@ -309,7 +306,7 @@ def create_app(
     @api.get("/workspace")
     def get_workspace() -> WorkspaceInfo:
         return workspace.info().model_copy(
-            update={"folder_session": folder_session_info(workspace), "course": app.state.course}
+            update={"folder_session": folder_session_info(workspace)}
         )
 
     def require_folder_session() -> str:

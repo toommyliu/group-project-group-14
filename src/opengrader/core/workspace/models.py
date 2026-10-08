@@ -249,7 +249,7 @@ StaffRole = Literal["instructor", "grader"]
 
 class WorkspaceInfo(BaseModel):
     id: str
-    course: CourseDetails | None = None
+    course: CourseDetails
     actor: str
     event_cursor: int
     folder_session: FolderSessionInfo | None = None

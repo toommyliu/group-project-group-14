@@ -23,10 +23,8 @@ export function CourseSwitcher({ className }: { className?: string }) {
   }).data;
   const courses = useQuery(coursesQuery).data;
   if (workspaceBase && !current) return null;
-  const name = current
-    ? current.course?.number || 'Untitled course'
-    : 'All courses';
-  const title = current?.course ? courseTitle(current.course) : name;
+  const name = current ? current.course.number : 'All courses';
+  const title = current ? courseTitle(current.course) : name;
   const others =
     courses?.filter(
       (course) => course.available && course.id !== current?.id

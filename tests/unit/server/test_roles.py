@@ -167,6 +167,8 @@ def test_upgrading_keeps_existing_graders(tmp_path):
         db.executescript(
             "DROP TABLE staff; CREATE TABLE graders (email TEXT PRIMARY KEY);"
             "INSERT INTO graders VALUES ('ta@sjsu.edu'); PRAGMA user_version = 8;"
+            "ALTER TABLE workspace DROP COLUMN number; ALTER TABLE workspace DROP COLUMN name;"
+            "ALTER TABLE workspace DROP COLUMN term; ALTER TABLE workspace DROP COLUMN year;"
         )
     assert Workspace(tmp_path).staff() == {"ta@sjsu.edu": "grader"}
 

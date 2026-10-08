@@ -34,6 +34,7 @@ from opengrader.core.workspace.models import (
     Assignment,
     AssignmentInputs,
     AssignmentSummary,
+    CourseDetails,
     FeedbackJob,
     GradeSaveResult,
     StaffRole,
@@ -75,10 +76,19 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
         "INSERT INTO staff SELECT email, 'grader' FROM graders",
         "DROP TABLE graders",
     ),
+    9: (
+        "ALTER TABLE workspace ADD COLUMN number TEXT",
+        "ALTER TABLE workspace ADD COLUMN name TEXT",
+        "ALTER TABLE workspace ADD COLUMN term TEXT",
+        "ALTER TABLE workspace ADD COLUMN year INTEGER",
+    ),
 }
 _VERSION = max(_MIGRATIONS) + 1
 _SCHEMA = f"""
-CREATE TABLE workspace (id TEXT PRIMARY KEY, actor TEXT NOT NULL);
+CREATE TABLE workspace (
+    id TEXT PRIMARY KEY, actor TEXT NOT NULL,
+    number TEXT, name TEXT, term TEXT, year INTEGER
+);
 CREATE TABLE assignments (id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL);
 CREATE TABLE assignment_inputs (
     id TEXT PRIMARY KEY, folder TEXT NOT NULL UNIQUE, scan TEXT NOT NULL,
@@ -224,7 +234,7 @@ class Workspace:
                 db.execute("PRAGMA journal_mode=WAL")
                 db.executescript(_SCHEMA)
                 db.execute(
-                    "INSERT INTO workspace VALUES (?, ?)",
+                    "INSERT INTO workspace (id, actor) VALUES (?, ?)",
                     (str(uuid4()), actor or current_actor()),
                 )
         except BaseException:
@@ -256,7 +266,20 @@ class Workspace:
             cursor = db.execute(
                 "SELECT coalesce(max(cursor), 0) FROM events"
             ).fetchone()[0]
-            return WorkspaceInfo(id=row["id"], actor=row["actor"], event_cursor=cursor)
+        course = (
+            CourseDetails(number=row["number"], name=row["name"], term=row["term"], year=row["year"])
+            if row["number"]
+            else CourseDetails(number=self.root.name[:120])
+        )
+        return WorkspaceInfo(id=row["id"], actor=row["actor"], event_cursor=cursor, course=course)
+
+    def set_course(self, course: CourseDetails, *, replace: bool = True) -> None:
+        with self.connect(write=True) as db:
+            db.execute(
+                "UPDATE workspace SET number=?, name=?, term=?, year=?"
+                + ("" if replace else " WHERE number IS NULL"),
+                (course.number, course.name, course.term, course.year),
+            )
 
     def assignments(self) -> list[Assignment]:
         """List assignments in creation order, oldest first."""

@@ -23,10 +23,10 @@ import { courseSettingsRoute } from '@/router';
 
 function draftFrom(workspace: WorkspaceInfo): CourseDraft {
   return {
-    number: workspace.course?.number ?? '',
-    name: workspace.course?.name ?? '',
-    term: workspace.course?.term ?? null,
-    year: workspace.course?.year ?? null,
+    number: workspace.course.number,
+    name: workspace.course.name ?? '',
+    term: workspace.course.term ?? null,
+    year: workspace.course.year ?? null,
   };
 }
 
@@ -111,7 +111,7 @@ export default function CourseSettingsPage() {
           </p>
         </div>
       </form>
-      {admin && workspace.course && (
+      {admin && (
         <section className="mt-12 max-w-xl border-t pt-6">
           <h2 className="text-base font-semibold">Remove course</h2>
           <p className="mt-1 text-sm text-muted-foreground">

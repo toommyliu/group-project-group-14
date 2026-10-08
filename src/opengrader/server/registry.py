@@ -27,6 +27,15 @@ _MIGRATIONS: tuple[tuple[str, ...], ...] = (
         "ALTER TABLE workspaces ADD COLUMN term TEXT",
         "ALTER TABLE workspaces ADD COLUMN year INTEGER",
     ),
+    (
+        "CREATE TABLE pending_details AS SELECT id, number, name, term, year FROM workspaces",
+        """CREATE TABLE paths (
+            id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, last_opened TEXT
+        )""",
+        "INSERT INTO paths SELECT id, path, last_opened FROM workspaces",
+        "DROP TABLE workspaces",
+        "ALTER TABLE paths RENAME TO workspaces",
+    ),
 )
 
 
@@ -42,6 +51,15 @@ class RegisteredWorkspace(CourseDetails):
     @property
     def course(self) -> CourseDetails:
         return CourseDetails(**self.model_dump(include=set(CourseDetails.model_fields)))
+
+
+def _registered(row: sqlite3.Row) -> RegisteredWorkspace:
+    path = Path(row["path"])
+    try:
+        course = Workspace(path).info().course
+    except (OSError, ValueError, sqlite3.Error):
+        course = CourseDetails(number=path.name[:120])
+    return RegisteredWorkspace(**course.model_dump(), **dict(row))
 
 
 def current_term(today: date) -> tuple[Term, int]:
@@ -83,6 +101,27 @@ class WorkspaceRegistry:
             if db.execute("SELECT id FROM instance").fetchone() is None:
                 db.execute("INSERT INTO instance VALUES (?)", (str(uuid4()),))
         self.database.chmod(0o600)
+        self.adopt_details()
+
+    def adopt_details(self) -> None:
+        with self.connect() as db:
+            pending = db.execute(
+                "SELECT pending_details.*, path FROM pending_details JOIN workspaces USING (id)"
+            ).fetchall()
+        for row in pending:
+            try:
+                workspace = Workspace(Path(row["path"]))
+                if workspace.info().id == row["id"]:
+                    workspace.set_course(
+                        CourseDetails(
+                            number=row["number"], name=row["name"], term=row["term"], year=row["year"]
+                        ),
+                        replace=False,
+                    )
+            except (OSError, ValueError, sqlite3.Error):
+                continue
+            with self.connect() as db:
+                db.execute("DELETE FROM pending_details WHERE id=?", (row["id"],))
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -101,12 +140,12 @@ class WorkspaceRegistry:
 
     def list(self) -> list[RegisteredWorkspace]:
         with self.connect() as db:
-            return [
-                RegisteredWorkspace(**dict(row))
-                for row in db.execute(
-                    "SELECT * FROM workspaces ORDER BY last_opened DESC, number COLLATE NOCASE, id"
-                )
-            ]
+            rows = db.execute("SELECT * FROM workspaces").fetchall()
+        items = sorted(
+            (_registered(row) for row in rows),
+            key=lambda item: (item.number.casefold(), item.id),
+        )
+        return sorted(items, key=lambda item: item.last_opened or "", reverse=True)
 
     def get(self, workspace_id: str) -> RegisteredWorkspace:
         with self.connect() as db:
@@ -115,10 +154,10 @@ class WorkspaceRegistry:
             ).fetchone()
         if row is None:
             raise LookupError("This course isn't registered with this server.")
-        return RegisteredWorkspace(**dict(row))
+        return _registered(row)
 
     def register(
-        self, root: Path, course: CourseDetails | None = None, *, dry_run: bool = False
+        self, root: Path, course: CourseDetails | None = None
     ) -> RegisteredWorkspace:
         root = root.expanduser().resolve()
         workspace = Workspace(root)  # Never create on registration or discovery.
@@ -136,47 +175,28 @@ class WorkspaceRegistry:
                 raise ValueError(
                     "Another copy of this course is already registered. Open the registered copy."
                 )
-            course = (
-                course
-                or (previous and RegisteredWorkspace(**dict(previous)).course)
-                or CourseDetails(number=root.name[:120])
-            )
-            if dry_run:
-                taken = db.execute(
-                    "SELECT 1 FROM workspaces WHERE path=? AND id!=?",
-                    (str(root), workspace_id),
-                ).fetchone()
-                if taken:
-                    raise ValueError(
-                        "This folder is already registered as another course."
-                    )
-                return RegisteredWorkspace(
-                    **course.model_dump(),
-                    id=workspace_id,
-                    path=str(root),
-                    last_opened=previous["last_opened"] if previous else None,
-                )
             try:
                 db.execute(
-                    "INSERT INTO workspaces(id, path, number, name, term, year) VALUES (?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET path=excluded.path, number=excluded.number, "
-                    "name=excluded.name, term=excluded.term, year=excluded.year",
-                    (workspace_id, str(root), course.number, course.name, course.term, course.year),
+                    "INSERT INTO workspaces(id, path) VALUES (?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET path=excluded.path",
+                    (workspace_id, str(root)),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(
                     "This folder is already registered as another course."
                 ) from exc
+        if course is not None:
+            workspace.set_course(course)
+        self.adopt_details()
         return self.get(workspace_id)
 
     def update(self, workspace_id: str, course: CourseDetails) -> RegisteredWorkspace:
-        with self.connect() as db:
-            changed = db.execute(
-                "UPDATE workspaces SET number=?, name=?, term=?, year=? WHERE id=?",
-                (course.number, course.name, course.term, course.year, workspace_id),
-            ).rowcount
-        if not changed:
-            raise LookupError("This course isn't registered with this server.")
+        workspace = Workspace(Path(self.get(workspace_id).path))
+        if workspace.info().id != workspace_id:
+            raise ValueError(
+                "The course in this folder has changed. Register its new location."
+            )
+        workspace.set_course(course)
         return self.get(workspace_id)
 
     def remove(self, workspace_id: str) -> None:
@@ -184,6 +204,7 @@ class WorkspaceRegistry:
             removed = db.execute(
                 "DELETE FROM workspaces WHERE id=?", (workspace_id,)
             ).rowcount
+            db.execute("DELETE FROM pending_details WHERE id=?", (workspace_id,))
         if not removed:
             raise LookupError("This course isn't registered with this server.")
 
@@ -198,8 +219,8 @@ class WorkspaceRegistry:
 
     def create(self, course: CourseDetails) -> RegisteredWorkspace:
         destination = self.destination(course)
-        Workspace.create(destination)
-        return self.register(destination, course)
+        Workspace.create(destination).set_course(course)
+        return self.register(destination)
 
     def opened(self, workspace_id: str) -> None:
         with self.connect() as db:

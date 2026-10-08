@@ -54,11 +54,13 @@ def test_courses_are_grouped_by_term_and_the_last_opened_available_one_is_chosen
     rows, chosen = asyncio.run(run())
     assert rows == [
         "Fall 2026",
-        f"CMPE 30\n          Folder unavailable · {gone}",
-        f"CS 146    Data Structures\n          {live}",
+        f"CS 146   Data Structures\n         {live}",
         "",
         "Spring 2026",
-        f"CS 49J\n          {tmp_path.resolve() / 'cs49j'}",
+        f"CS 49J\n         {tmp_path.resolve() / 'cs49j'}",
+        "",
+        "No term",
+        f"cmpe30\n         Folder unavailable · {gone}",
     ]
     assert chosen == tmp_path.resolve() / "cs49j"
 
@@ -70,7 +72,8 @@ def test_an_unavailable_course_cannot_be_opened(tmp_path: Path) -> None:
         app = CourseChooser(WorkspaceRegistry().list())
         async with app.run_test(size=(110, 30)) as pilot:
             await pilot.pause()
-            app.query_one(OptionList).highlighted = 1
+            listing = app.query_one(OptionList)
+            listing.highlighted = listing.option_count - 1
             await pilot.press("enter")
             await pilot.pause()
             return app.is_running

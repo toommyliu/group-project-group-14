@@ -116,7 +116,6 @@ class Workspaces:
                         workers=self.workers,
                         feedback_scheduler=self.feedback,
                         create=False,
-                        course=item.course,
                     )
                     if app.state.workspace.info().id != item.id:
                         raise ValueError(
@@ -130,7 +129,6 @@ class Workspaces:
                 raise ValueError(
                     "This course moved while it was open. Restart the server to use its new location."
                 )
-            app.state.course = item.course
             return app
 
     async def resume_feedback(self) -> None:
@@ -315,6 +313,8 @@ def create_app(
             return summary(registry.update(workspace_id, body))
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.delete("/api/workspaces/{workspace_id}", status_code=204)
     def remove_workspace(workspace_id: str, request: Request) -> Response:

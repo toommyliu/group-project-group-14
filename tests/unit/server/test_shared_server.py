@@ -53,10 +53,11 @@ def test_creation_registration_and_recent_order_survive_restart(tmp_path, monkey
     assert reopened.register(existing.root).number == "CS201"
 
 
-def test_registry_upgrade_keeps_existing_names_as_course_numbers(tmp_path):
+def test_registry_upgrade_moves_course_details_into_course_folders(tmp_path):
     import sqlite3
 
     workspace = Workspace.create(tmp_path / "data")
+    offline = Workspace.create(tmp_path / "offline")
     home = tmp_path / "server"
     home.mkdir()
     with sqlite3.connect(home / "registry.sqlite3") as db:
@@ -72,10 +73,26 @@ def test_registry_upgrade_keeps_existing_names_as_course_numbers(tmp_path):
             "INSERT INTO workspaces VALUES (?, 'CMPE 195', ?, NULL)",
             (workspace.info().id, str(workspace.root)),
         )
+        db.execute(
+            "INSERT INTO workspaces VALUES (?, 'CS 146', ?, '2026-10-01')",
+            (offline.info().id, str(offline.root)),
+        )
     db.close()
+    offline_id = offline.info().id
+    shutil.move(offline.root, tmp_path / "unplugged")
     registry = WorkspaceRegistry(home)
     assert registry.id == "server"
     assert registry.get(workspace.info().id).course == CourseDetails(number="CMPE 195")
+    assert Workspace(workspace.root).info().course == CourseDetails(number="CMPE 195")
+    assert registry.get(offline_id).number == "offline"
+
+    shutil.move(tmp_path / "unplugged", offline.root)
+    assert WorkspaceRegistry(home).get(offline_id).number == "CS 146"
+    assert [item.number for item in WorkspaceRegistry(home).list()] == ["CS 146", "CMPE 195"]
+
+    moved = tmp_path / "moved"
+    shutil.move(workspace.root, moved)
+    assert WorkspaceRegistry(tmp_path / "other").register(moved).number == "CMPE 195"
 
 
 def test_registry_concurrent_registration_and_duplicate_copies(tmp_path):

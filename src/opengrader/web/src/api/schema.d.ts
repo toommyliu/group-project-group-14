@@ -2018,7 +2018,7 @@ export interface components {
         WorkspaceInfo: {
             /** Id */
             id: string;
-            course?: components["schemas"]["CourseDetails"] | null;
+            course: components["schemas"]["CourseDetails"];
             /** Actor */
             actor: string;
             /** Event Cursor */
