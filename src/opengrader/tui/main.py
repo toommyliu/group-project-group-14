@@ -72,7 +72,7 @@ SWITCH = "switch_assignment"
 
 _NO_COURSES = """\
 error: no course in {here} or any folder above it, and no courses yet.
-  opengrader course create  create a course
+  opengrader web            create a course in the browser
   opengrader tui FOLDER     open FOLDER as a course (created if needed)
   opengrader classic        Tools & Settings, and grading folders without a course
 """

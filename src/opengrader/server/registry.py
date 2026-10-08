@@ -187,28 +187,17 @@ class WorkspaceRegistry:
         if not removed:
             raise LookupError("This course isn't registered with this server.")
 
-    def destination(self, course: CourseDetails, root: Path | None = None) -> Path:
+    def destination(self, course: CourseDetails) -> Path:
         registered = {item.path for item in self.list()}
-        if root is None:
-            parent = default_workspaces_dir().expanduser().resolve()
-            name = folder_name(course)
-            destination, suffix = parent / name, 2
-            while destination.exists() or str(destination) in registered:
-                destination, suffix = parent / f"{name}-{suffix}", suffix + 1
-            return destination
-        destination = root.expanduser().resolve()
-        if str(destination) in registered:
-            raise ValueError("This folder is already registered as another course.")
-        if (destination / DATABASE).exists():
-            raise ValueError(
-                f"{destination} already has a course. Add it with `opengrader course add` instead."
-            )
+        parent = default_workspaces_dir().expanduser().resolve()
+        name = folder_name(course)
+        destination, suffix = parent / name, 2
+        while destination.exists() or str(destination) in registered:
+            destination, suffix = parent / f"{name}-{suffix}", suffix + 1
         return destination
 
-    def create(
-        self, course: CourseDetails, root: Path | None = None
-    ) -> RegisteredWorkspace:
-        destination = self.destination(course, root)
+    def create(self, course: CourseDetails) -> RegisteredWorkspace:
+        destination = self.destination(course)
         Workspace.create(destination)
         return self.register(destination, course)
 

@@ -221,7 +221,7 @@ def test_a_bare_tui_outside_a_workspace_explains_itself_and_creates_nothing(
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "no course" in err and "opengrader course create" in err
+    assert "no course" in err and "opengrader web" in err
     app_cls.assert_not_called()
     assert not (no_service / ".opengrader").exists()  # no workspace created
 
