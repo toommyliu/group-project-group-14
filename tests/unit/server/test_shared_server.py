@@ -319,6 +319,7 @@ def test_course_instructors_run_their_course_and_admins_run_the_server(tmp_path)
         assert client.put(f"/api/workspaces/{first.id}", json=course).status_code == 403
         assert client.post("/api/workspaces", json=course).status_code == 403
         assert client.delete(f"/api/workspaces/{second.id}").status_code == 403
+        assert client.post(f"/api/workspaces/{second.id}/delete", json={"number": "B"}).status_code == 403
 
         client.cookies.set("opengrader_session", cookie(settings, "prof@sjsu.edu"))
         assert {item["id"] for item in client.get("/api/workspaces").json()} == {

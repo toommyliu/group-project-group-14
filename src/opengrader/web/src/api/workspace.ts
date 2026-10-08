@@ -65,6 +65,13 @@ export async function removeCourse(id: string) {
   });
 }
 
+export async function deleteCourse(id: string, number: string) {
+  await serverClient.POST('/api/workspaces/{workspace_id}/delete', {
+    params: { path: { workspace_id: id } },
+    body: { number },
+  });
+}
+
 export async function syncFolderSession() {
   return readData(await client.POST('/api/folder-session/sync'));
 }

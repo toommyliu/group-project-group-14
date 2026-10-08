@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import secrets
+import shutil
 import sqlite3
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -14,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from starlette._utils import get_route_path
 
 from opengrader.core.workspace.models import CourseDetails, CourseText, StaffRole
-from opengrader.core.workspace.store import Workspace
+from opengrader.core.workspace.store import DATABASE, Workspace
 from opengrader.server.auth import (
     RemoteAuthGuard,
     add_auth_routes,
@@ -36,6 +38,10 @@ logger = logging.getLogger(__name__)
 class CourseForm(CourseDetails):
     model_config = ConfigDict(extra="forbid")
     name: CourseText
+
+
+class DeleteCourse(BaseModel):
+    number: str
 
 
 class RegisterWorkspace(BaseModel):
@@ -76,6 +82,27 @@ class ServerAccess:
             return None
 
 
+def _set_aside(root: Path, workspace_id: str) -> Path:
+    if not (root / DATABASE).is_file():
+        raise ValueError("This course's folder is unavailable. Remove the course instead.")
+    with exclusive_lock(root / SERVICE_LOCK):
+        if Workspace(root).info().id != workspace_id:
+            raise ValueError("The course in this folder has changed. Register its new location.")
+        trash = root / f".opengrader-deleted-{uuid4().hex}"
+        (root / ".opengrader").rename(trash)
+    return trash
+
+
+def _discard(trash: Path) -> None:
+    try:
+        shutil.rmtree(trash)
+    except OSError:
+        logger.exception("Could not finish deleting %s", trash)
+        return
+    with suppress(OSError):
+        trash.parent.rmdir()
+
+
 def _page_request(scope) -> bool:
     return scope["method"] == "GET" and get_route_path(scope).split("/", 2)[
         1
@@ -91,8 +118,9 @@ class Workspaces:
         self.web_dist = web_dist
         self.process_jobs = process_jobs
         self.apps: dict[str, FastAPI] = {}
+        self.closers: dict[str, AsyncExitStack] = {}
+        self.deleting: set[str] = set()
         self.lock = asyncio.Lock()
-        self.stack = AsyncExitStack()
         self.workers = ScanWorkers()
         self.feedback = FeedbackScheduler()
 
@@ -122,7 +150,7 @@ class Workspaces:
                             "The course in this folder has changed. Register its new location."
                         )
                     await pending.enter_async_context(app.router.lifespan_context(app))
-                    self.stack.push_async_callback(pending.pop_all().aclose)
+                    self.closers[item.id] = pending.pop_all()
                     self.apps[item.id] = app
             app = self.apps[item.id]
             if app.state.workspace.root != Path(item.path):
@@ -152,7 +180,21 @@ class Workspaces:
         await run_in_threadpool(self.workers.close)
         if self.process_jobs:
             await run_in_threadpool(self.feedback.close)
-        await self.stack.aclose()
+        for closer in reversed(list(self.closers.values())):
+            await closer.aclose()
+
+    async def delete(self, item: RegisteredWorkspace) -> None:
+        self.deleting.add(item.id)
+        try:
+            async with self.lock:
+                if app := self.apps.pop(item.id, None):
+                    await run_in_threadpool(app.state.stop_scans)
+                    await self.closers.pop(item.id).aclose()
+                trash = await run_in_threadpool(_set_aside, Path(item.path), item.id)
+                await run_in_threadpool(self.registry.remove, item.id)
+            await run_in_threadpool(_discard, trash)
+        finally:
+            self.deleting.discard(item.id)
 
     def refuse(self, scope, status: int, detail: str) -> Response:
         index = self.web_dist / "index.html"
@@ -167,6 +209,9 @@ class Workspaces:
             item = await run_in_threadpool(
                 self.registry.get, scope["path_params"]["workspace_id"]
             )
+            if item.id in self.deleting:
+                await self.refuse(scope, 409, "This course is being deleted.")(scope, receive, send)
+                return
             user = signed_in(Request(scope))
             if (
                 self.settings.auth_enabled
@@ -323,6 +368,30 @@ def create_app(
             registry.remove(workspace_id)
         except LookupError as exc:
             raise HTTPException(404, str(exc)) from exc
+        return Response(status_code=204)
+
+    @app.post("/api/workspaces/{workspace_id}/delete", status_code=204)
+    async def delete_workspace(workspace_id: str, body: DeleteCourse, request: Request) -> Response:
+        admin(request)
+        try:
+            item = await run_in_threadpool(registry.get, workspace_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if body.number.strip() != item.number:
+            raise HTTPException(422, f"Type {item.number} to delete this course.")
+        try:
+            await workspaces.delete(item)
+        except BlockingIOError as exc:
+            raise HTTPException(
+                409, "Another Opengrader server is using this course. Close it there, then try again."
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (OSError, sqlite3.Error) as exc:
+            logger.exception("Could not delete course %s", workspace_id)
+            raise HTTPException(
+                503, "The course could not be deleted. Check that its folder is available and writable."
+            ) from exc
         return Response(status_code=204)
 
     @app.post("/api/server/workspaces/register", include_in_schema=False)

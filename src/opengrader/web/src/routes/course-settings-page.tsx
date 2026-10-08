@@ -18,6 +18,7 @@ import { ErrorAlert } from '@/components/error-alert';
 import { PageHeading } from '@/components/page-heading';
 import { SteadyLabel } from '@/components/steady-label';
 import { RemoveCourseButton } from '@/components/remove-course-button';
+import { DeleteCourseButton } from '@/components/delete-course-button';
 import { Button } from '@/components/ui/button';
 import { courseSettingsRoute } from '@/router';
 
@@ -121,6 +122,16 @@ export default function CourseSettingsPage() {
             className="mt-4"
             course={{ id: workspace.id, number: workspace.course.number }}
             onRemoved={() => window.location.assign('/courses')}
+          />
+          <h2 className="mt-8 text-base font-semibold">Delete course</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Permanently deletes its assignments, scans, submissions, grades, and
+            roster.
+          </p>
+          <DeleteCourseButton
+            className="mt-4"
+            course={{ id: workspace.id, number: workspace.course.number }}
+            onDeleted={() => window.location.assign('/courses')}
           />
         </section>
       )}

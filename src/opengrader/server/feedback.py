@@ -12,6 +12,7 @@ class FeedbackScheduler:
     def __init__(self):
         self.jobs: list[FeedbackJobs] = []
         self.lock = Lock()
+        self.processing = Lock()
         self.stopped = Event()
         self.thread = Thread(target=self._run, name="server-feedback", daemon=True)
 
@@ -26,6 +27,13 @@ class FeedbackScheduler:
         with self.lock:
             self.jobs.append(jobs)
 
+    def remove(self, jobs: FeedbackJobs) -> None:
+        with self.lock:
+            if jobs in self.jobs:
+                self.jobs.remove(jobs)
+        with self.processing:
+            pass
+
     def close(self) -> None:
         self.stopped.set()
         self.thread.join()
@@ -37,21 +45,25 @@ class FeedbackScheduler:
             for jobs in workspaces:
                 if self.stopped.is_set():
                     return
-                try:
-                    # One job per workspace per pass keeps a large class from
-                    # starving another workspace's feedback.
-                    pending = next(
-                        (
-                            job
-                            for job in jobs.workspace.jobs()
-                            if job.status == "pending"
-                        ),
-                        None,
-                    )
-                    if pending:
-                        jobs.process(pending)
-                except Exception:
-                    logger.exception(
-                        "Could not process feedback in %s", jobs.workspace.root
-                    )
+                with self.processing:
+                    with self.lock:
+                        if jobs not in self.jobs:
+                            continue
+                    try:
+                        # One job per workspace per pass keeps a large class from
+                        # starving another workspace's feedback.
+                        pending = next(
+                            (
+                                job
+                                for job in jobs.workspace.jobs()
+                                if job.status == "pending"
+                            ),
+                            None,
+                        )
+                        if pending:
+                            jobs.process(pending)
+                    except Exception:
+                        logger.exception(
+                            "Could not process feedback in %s", jobs.workspace.root
+                        )
             self.stopped.wait(0.5)

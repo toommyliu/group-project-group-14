@@ -275,6 +275,8 @@ def create_app(
             yield
         finally:
             await run_in_threadpool(scan_jobs.close)
+            if process_jobs and feedback_scheduler is not None:
+                await run_in_threadpool(feedback_scheduler.remove, jobs)
             if process_jobs and feedback_scheduler is None:
                 await run_in_threadpool(jobs.close)
             workspace.on_commit = None
@@ -284,8 +286,14 @@ def create_app(
     api = APIRouter(prefix="/api")
     add_auth_routes(app, settings or ServerSettings(_env_file=None), workspace, shared_session=shared_session)
 
+    def stop_scans() -> None:
+        with registry_lock:
+            futures = [future for assignment_id in list(scan_jobs.futures) for future in scan_jobs.stop_assignment(assignment_id)]
+        scan_jobs.wait_for_stopped(tuple(futures))
+
     app.state.workspace = workspace
     app.state.scan_jobs = scan_jobs
+    app.state.stop_scans = stop_scans
     app.state.shutdown_token = secrets.token_urlsafe(32)
 
     @app.exception_handler(WorkspaceConflict)
