@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LoaderCircle } from 'lucide-react';
+import { authQuery } from '@/api/auth';
 import {
   coursesQuery,
   updateCourse,
@@ -31,6 +32,8 @@ function draftFrom(workspace: WorkspaceInfo): CourseDraft {
 
 export default function CourseSettingsPage() {
   const queryClient = useQueryClient();
+  const auth = useQuery(authQuery).data;
+  const admin = auth && (!auth.enabled || auth.admin);
   const { data: workspace } = useQuery({
     ...workspaceQuery,
     initialData: courseSettingsRoute.useLoaderData(),
@@ -108,7 +111,7 @@ export default function CourseSettingsPage() {
           </p>
         </div>
       </form>
-      {workspace.course && (
+      {admin && workspace.course && (
         <section className="mt-12 max-w-xl border-t pt-6">
           <h2 className="text-base font-semibold">Remove course</h2>
           <p className="mt-1 text-sm text-muted-foreground">
