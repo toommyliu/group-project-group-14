@@ -7,13 +7,17 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+from tempfile import NamedTemporaryFile
+from zipfile import ZIP_STORED, ZipFile
 from threading import RLock
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette._utils import get_route_path
+from starlette.background import BackgroundTask
 
+from opengrader.core.export.bundle import student_pdf_stem, unique_stem
 from opengrader.core.grading.edits import GradeEdit
 from opengrader.core.outline import outline_versions
 from opengrader.core.qa_file import parse_qa_markdown
@@ -28,6 +32,7 @@ from opengrader.core.workspace.store import (
     Workspace,
     WorkspaceConflict,
     WorkspaceNotFound,
+    queue_feedback,
     record_event,
 )
 from opengrader.core.workspace.folder_session import (
@@ -530,31 +535,73 @@ def create_app(
     def job_status() -> list[FeedbackJob]:
         return workspace.jobs()
 
-    @api.get("/assignments/{assignment_id}/submissions/{submission_id}/feedback")
-    def feedback(assignment_id: str, submission_id: int) -> FileResponse:
+    def feedback_pdf(
+        assignment_id: str, submission_id: int, current: list[FeedbackJob]
+    ) -> Path:
         job = next(
             (
                 job
-                for job in workspace.jobs()
+                for job in current
                 if job.assignment_id == assignment_id
                 and job.submission_id == submission_id
             ),
             None,
         )
         if job is None or job.status != "ready" or not job.artifact:
-            raise WorkspaceConflict("The current feedback PDF is not ready yet.")
-        path = workspace.root / ".opengrader" / job.artifact
+            raise WorkspaceConflict(
+                f"The feedback PDF for submission {submission_id} is not ready yet."
+            )
+        return workspace.root / ".opengrader" / job.artifact
+
+    def feedback_filename(assignment_id: str, submission_id: int) -> str:
+        return student_pdf_stem(
+            workspace.document(assignment_id, submission_id), anonymous=False
+        )
+
+    @api.get("/assignments/{assignment_id}/submissions/{submission_id}/feedback")
+    def feedback(assignment_id: str, submission_id: int) -> FileResponse:
+        path = feedback_pdf(assignment_id, submission_id, workspace.jobs())
         return FileResponse(
-            path, media_type="application/pdf", filename=f"feedback-{submission_id}.pdf"
+            path,
+            media_type="application/pdf",
+            filename=f"{feedback_filename(assignment_id, submission_id)}.pdf",
+        )
+
+    @api.get("/assignments/{assignment_id}/feedback")
+    def feedback_archive(
+        assignment_id: str, submission: list[int] = Query(min_length=1)
+    ) -> FileResponse:
+        require_assignment(assignment_id)
+        current = workspace.jobs()
+        title = next(
+            item.title for item in workspace.assignments() if item.id == assignment_id
+        )
+        with NamedTemporaryFile(suffix=".zip", delete=False) as handle:
+            archive_path = Path(handle.name)
+        try:
+            used: set[str] = set()
+            with ZipFile(archive_path, "w", ZIP_STORED) as archive:
+                for submission_id in dict.fromkeys(submission):
+                    path = feedback_pdf(assignment_id, submission_id, current)
+                    stem = unique_stem(
+                        feedback_filename(assignment_id, submission_id), used
+                    )
+                    archive.write(path, f"{stem}.pdf")
+        except BaseException:
+            archive_path.unlink()
+            raise
+        return FileResponse(
+            archive_path,
+            media_type="application/zip",
+            filename=f"{title or 'Assignment'} feedback.zip",
+            background=BackgroundTask(archive_path.unlink),
         )
 
     @api.post("/jobs/{assignment_id}/{submission_id}/retry", status_code=204)
     def retry(assignment_id: str, submission_id: int) -> Response:
+        workspace.document(assignment_id, submission_id)
         with workspace.connect(write=True) as db:
-            db.execute(
-                "UPDATE feedback_jobs SET status='pending', error='' WHERE assignment_id=? AND submission_id=? AND status='failed'",
-                (assignment_id, submission_id),
-            )
+            queue_feedback(db, assignment_id, submission_id)
         return Response(status_code=204)
 
     @api.get("/events")

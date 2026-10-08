@@ -149,6 +149,21 @@ def record_event(
     )
 
 
+def queue_feedback(db: sqlite3.Connection, assignment_id: str, submission_id: int) -> None:
+    db.execute(
+        """INSERT INTO feedback_jobs (assignment_id, submission_id, generation, status) VALUES (?, ?, 1, 'pending')
+        ON CONFLICT(assignment_id, submission_id) DO UPDATE SET generation=generation+1, status='pending', error=''""",
+        (assignment_id, submission_id),
+    )
+
+
+def refresh_feedback(db: sqlite3.Connection, assignment_id: str, submission_id: int) -> None:
+    db.execute(
+        "UPDATE feedback_jobs SET generation=generation+1, status='pending', error='' WHERE assignment_id=? AND submission_id=?",
+        (assignment_id, submission_id),
+    )
+
+
 @dataclass(frozen=True)
 class StoredOutline:
     template: str
@@ -586,6 +601,7 @@ class Workspace:
             ).rowcount
             if not updated:
                 raise WorkspaceNotFound("Submission not found.")
+            refresh_feedback(db, assignment_id, submission_id)
             record_event(db, assignment_id, kind="submission", submission_id=submission_id)
             return next(
                 submission
@@ -618,6 +634,7 @@ class Workspace:
                 ),
             ).rowcount
             if updated:
+                refresh_feedback(db, assignment_id, submission_id)
                 record_event(db, assignment_id, kind="submission", submission_id=submission_id)
             return bool(updated)
 
@@ -874,11 +891,7 @@ class Workspace:
                 "INSERT INTO events (assignment_id, submission_id, question_id, revision) VALUES (?, ?, ?, ?)",
                 (assignment_id, submission_id, question_id, after.revision),
             )
-            db.execute(
-                """INSERT INTO feedback_jobs (assignment_id, submission_id, generation, status) VALUES (?, ?, 1, 'pending')
-                ON CONFLICT(assignment_id, submission_id) DO UPDATE SET generation=generation+1, status='pending', error=''""",
-                (assignment_id, submission_id),
-            )
+            queue_feedback(db, assignment_id, submission_id)
             result = GradeSaveResult(answer=after)
             db.execute(
                 "INSERT INTO receipts VALUES (?, ?, ?, ?)",

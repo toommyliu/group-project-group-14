@@ -6,6 +6,7 @@ export type Assignment = components['schemas']['Assignment'];
 export type Answer = components['schemas']['Answer'];
 export type Question = components['schemas']['Question'];
 export type Submission = components['schemas']['Submission'];
+export type FeedbackJob = components['schemas']['FeedbackJob'];
 export type ScoreStatistics = components['schemas']['QuestionStatistics'];
 export type AssignmentVersionStatistics =
   components['schemas']['AssignmentVersionStatistics'];
@@ -37,6 +38,21 @@ export async function retryFeedback(
       path: { assignment_id: assignmentId, submission_id: submissionId },
     },
   });
+}
+
+export async function downloadFeedback(
+  assignmentId: string,
+  submissionIds: number[]
+) {
+  return readData(
+    await client.GET('/api/assignments/{assignment_id}/feedback', {
+      params: {
+        path: { assignment_id: assignmentId },
+        query: { submission: submissionIds },
+      },
+      parseAs: 'blob',
+    })
+  );
 }
 
 export type AssignmentSummary = components['schemas']['AssignmentSummary'];
@@ -73,6 +89,30 @@ export function questionsQuery(assignmentId: string, submissionId: number) {
       readData(
         await client.GET(
           '/api/assignments/{assignment_id}/submissions/{submission_id}/questions',
+          {
+            params: {
+              path: {
+                assignment_id: assignmentId,
+                submission_id: submissionId,
+              },
+            },
+            signal,
+          }
+        )
+      ),
+  });
+}
+
+export function submissionAnswersQuery(
+  assignmentId: string,
+  submissionId: number
+) {
+  return queryOptions({
+    queryKey: ['assignments', assignmentId, 'answers', submissionId],
+    queryFn: async ({ signal }) =>
+      readData(
+        await client.GET(
+          '/api/assignments/{assignment_id}/submissions/{submission_id}/answers',
           {
             params: {
               path: {

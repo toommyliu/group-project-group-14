@@ -22,6 +22,7 @@ from opengrader.core.workspace.store import (
     DOCUMENT,
     Workspace,
     WorkspaceConflict,
+    queue_feedback,
     record_event,
 )
 from opengrader.core.workspace.models import (
@@ -260,5 +261,7 @@ def publish_submission(
                 for answer in answers
             ],
         )
+        if any(answer.points_awarded is not None for answer in answers):
+            queue_feedback(db, assignment_id, submission_id)
         record_event(db, assignment_id, kind="submission", submission_id=submission_id)
     return submission_id

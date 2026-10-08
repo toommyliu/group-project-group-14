@@ -104,7 +104,7 @@ def _safe_filename(text: str) -> str:
     return cleaned.strip("._") or "student"
 
 
-def _student_pdf_stem(
+def student_pdf_stem(
     document: StudentSubmissionDocument,
     *,
     anonymous: bool,
@@ -193,7 +193,7 @@ def build_return_bundle(
         used_stems: set[str] = set()
         for item in submissions:
             document = item.document
-            stem = _unique_stem(_student_pdf_stem(document, anonymous=anonymous), used_stems)
+            stem = unique_stem(student_pdf_stem(document, anonymous=anonymous), used_stems)
             source_pdf = item.source_pdf
             if source_pdf is None or not source_pdf.exists():
                 warnings.append(
@@ -236,7 +236,7 @@ def build_return_bundle(
     )
 
 
-def _unique_stem(stem: str, used: set[str]) -> str:
+def unique_stem(stem: str, used: set[str]) -> str:
     candidate = stem
     counter = 2
     while candidate in used:

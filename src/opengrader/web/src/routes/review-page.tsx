@@ -5,15 +5,24 @@ import { CircleCheck, ClipboardCheck, Download, SearchX } from 'lucide-react';
 import { cn } from 'cn';
 import {
   assignmentQAQuery,
+  feedbackJobsQuery,
   submissionsQuery,
-  type QAPreview,
+  type FeedbackJob,
   type Submission,
 } from '@/api/queries';
 import { rosterQuery, studentName, type Student } from '@/api/roster';
 import { reviewRoute } from '@/router';
 import { searchable } from '@/lib/search';
+import {
+  percentText,
+  scoreText,
+  versionColumns,
+  type Column,
+} from '@/lib/grade-columns';
 import { PageHeading } from '@/components/page-heading';
 import { ErrorAlert } from '@/components/error-alert';
+import { FeedbackDownload } from '@/components/feedback-download';
+import { FeedbackPdfButton } from '@/components/feedback-pdf-button';
 import { FilterTabs } from '@/components/filter-tabs';
 import { TableEmpty } from '@/components/table-empty';
 import {
@@ -41,7 +50,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-type Column = { id: string; label: string; points: number };
 type SortKey = 'id' | 'student' | 'total';
 type Filter = 'all' | 'graded' | 'progress' | 'missing';
 type Row = {
@@ -57,45 +65,6 @@ type Row = {
 const ALL = '';
 
 const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
-
-/** Graded question columns per version, numbered the way the outline shows them. */
-function versionColumns(qa: QAPreview['document']) {
-  const versions = Object.keys(qa.version_questions ?? {});
-  const entries: [string, QAPreview['document']['questions']][] =
-    versions.length
-      ? versions.map((version) => [version, qa.version_questions![version]])
-      : [['', qa.questions]];
-  return new Map(
-    entries.map(([version, questions]) => [
-      version,
-      questions.flatMap((question, index): Column[] =>
-        question.subquestions?.length
-          ? question.subquestions.map((part, partIndex) => ({
-              id: part.id,
-              label: `${index + 1}.${partIndex + 1}`,
-              points: part.points,
-            }))
-          : [
-              {
-                id: question.id,
-                label: `${index + 1}`,
-                points: question.points,
-              },
-            ]
-      ),
-    ])
-  );
-}
-
-function scoreText(score: number | null | undefined) {
-  return score === null || score === undefined
-    ? ''
-    : String(Math.round(score * 100) / 100);
-}
-
-function percentText(total: number, possible: number) {
-  return possible ? `${Math.round((total / possible) * 1000) / 10}%` : '';
-}
 
 // Spreadsheet apps run cells that start with these characters as formulas.
 function csvCell(value: string) {
@@ -124,6 +93,12 @@ export default function ReviewPage() {
     initialData: loaded.students ?? undefined,
     enabled: loaded.students !== null,
   });
+  const jobs = useQuery(feedbackJobsQuery);
+  const feedback = new Map(
+    jobs.data
+      ?.filter((job) => job.assignment_id === assignment.id)
+      .map((job) => [job.submission_id, job])
+  );
   const [text, setText] = useState('');
   const search = useDeferredValue(searchable(text));
   const [filter, setFilter] = useState<Filter>('all');
@@ -274,6 +249,7 @@ export default function ReviewPage() {
     ...(combined ? ['auto'] : []),
     ...columns.map(() => 'minmax(3.5rem,auto)'),
     'auto',
+    'auto',
   ].join(' ');
 
   return (
@@ -287,12 +263,31 @@ export default function ReviewPage() {
         }
         actions={
           rows.length > 0 && (
-            <Button variant="outline" onClick={download}>
-              <Download aria-hidden="true" />
-              {versions.length > 1 && !combined
-                ? `Download version ${view} CSV`
-                : 'Download CSV'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={download}>
+                <Download aria-hidden="true" />
+                {versions.length > 1 && !combined
+                  ? `Download version ${view} CSV`
+                  : 'Download CSV'}
+              </Button>
+              <FeedbackDownload
+                assignmentId={assignment.id}
+                filename={`${assignment.title || 'Assignment'}${versions.length > 1 && !combined ? ` (Version ${view})` : ''} feedback.zip`}
+                label={
+                  versions.length > 1 && !combined
+                    ? `Download version ${view} feedback PDFs`
+                    : 'Download feedback PDFs'
+                }
+                rows={versionRows.map((row) => ({
+                  submissionId: row.submission.id,
+                  name:
+                    row.submission.student_name ||
+                    `Submission ${row.submission.id}`,
+                  complete: row.complete,
+                  job: feedback.get(row.submission.id),
+                }))}
+              />
+            </div>
           )
         }
       />
@@ -433,6 +428,9 @@ export default function ReviewPage() {
                     sorted={sorted('total')}
                     onSort={() => sortBy('total')}
                   />
+                  <PeopleHead>
+                    <span className="sr-only">Feedback PDF</span>
+                  </PeopleHead>
                 </>
               }
             >
@@ -441,6 +439,7 @@ export default function ReviewPage() {
                   key={row.submission.id}
                   assignmentId={assignment.id}
                   row={row}
+                  feedback={feedback.get(row.submission.id)}
                   own={combined ? [] : row.own}
                   showVersion={combined}
                 />
@@ -497,11 +496,13 @@ export default function ReviewPage() {
 function ReviewRow({
   assignmentId,
   row: { submission, scores, complete, total, possible },
+  feedback,
   own,
   showVersion,
 }: {
   assignmentId: string;
   row: Row;
+  feedback: FeedbackJob | undefined;
   own: Column[];
   showVersion: boolean;
 }) {
@@ -518,14 +519,16 @@ function ReviewRow({
         </Link>
       </PeopleCell>
       <PeopleCell className="grid py-1.5">
-        <span
+        <Link
+          to="/assignments/$assignmentId/review/$submissionId"
+          params={{ assignmentId, submissionId: String(submission.id) }}
           className={cn(
-            'truncate',
+            'truncate underline-offset-4 hover:underline',
             !submission.student_name && 'text-muted-foreground'
           )}
         >
           {submission.student_name || 'No student'}
-        </span>
+        </Link>
         {submission.student_id && (
           <span className="text-xs text-muted-foreground tabular-nums">
             {submission.student_id}
@@ -557,6 +560,14 @@ function ReviewRow({
           {complete ? percentText(total, possible) : 'In progress'}
         </span>
       </PeopleCell>
+      <PeopleCell className="py-0">
+        <FeedbackPdfButton
+          assignmentId={assignmentId}
+          submissionId={submission.id}
+          job={feedback}
+          graded={scores.some((score) => score !== null && score !== undefined)}
+        />
+      </PeopleCell>
     </PeopleRow>
   );
 }
@@ -586,6 +597,7 @@ function MissingRow({
       <PeopleCell className="text-end text-muted-foreground">
         No submission
       </PeopleCell>
+      <PeopleCell />
     </PeopleRow>
   );
 }

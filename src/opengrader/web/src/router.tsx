@@ -14,6 +14,7 @@ import {
   assignmentSourceQuery,
   assignmentQAQuery,
   assignmentStatisticsQuery,
+  submissionAnswersQuery,
   submissionsQuery,
 } from './api/queries';
 import { authQuery, admitted } from './api/auth';
@@ -347,6 +348,43 @@ export const reviewRoute = createRoute({
   notFoundComponent: RouteNotFound,
 });
 
+export const reviewSubmissionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assignments/$assignmentId/review/$submissionId',
+  remountDeps: ({ params }) => params.assignmentId,
+  loader: async ({ context, params: { assignmentId, submissionId } }) => {
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const id = Number(submissionId);
+    if (!Number.isInteger(id)) throw notFound();
+    const [submissions, qa, answers] = await Promise.all([
+      context.queryClient.fetchQuery({
+        ...submissionsQuery(assignmentId),
+        staleTime: 0,
+      }),
+      context.queryClient.fetchQuery({
+        ...assignmentQAQuery(assignmentId),
+        staleTime: 0,
+      }),
+      context.queryClient.fetchQuery({
+        ...submissionAnswersQuery(assignmentId, id),
+        staleTime: 0,
+      }),
+    ]);
+    if (!submissions.some((submission) => submission.id === id))
+      throw notFound();
+    return { assignment, submissions, qa, answers, submissionId: id };
+  },
+  component: lazyRouteComponent(
+    () => import('./routes/review-submission-page')
+  ),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
+});
+
 export const statisticsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/assignments/$assignmentId/statistics',
@@ -420,6 +458,7 @@ export function createAppRouter(queryClient: QueryClient) {
       outlineRoute,
       submissionsRoute,
       reviewRoute,
+      reviewSubmissionRoute,
       statisticsRoute,
       peopleRoute,
       courseSettingsRoute,

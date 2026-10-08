@@ -184,7 +184,7 @@ def test_receipt_recovers_lost_acknowledgment_even_after_another_save(managed):
     assert restarted.answer(assignment, 1, "q1").points_awarded == 0
     assert len(restarted.history(assignment)) == 2
     assert len([event for event in restarted.events() if event.kind == "grade"]) == 2
-    assert restarted.jobs()[0].generation == 2
+    assert restarted.jobs()[0].generation == 3
     with pytest.raises(WorkspaceConflict):
         restarted.save_grade(
             assignment,
@@ -197,6 +197,7 @@ def test_receipt_recovers_lost_acknowledgment_even_after_another_save(managed):
 def test_save_rolls_back_grade_history_events_and_job_when_receipt_fails(managed):
     workspace, assignment, _ = managed
     answer = workspace.answer(assignment, 1, "q1")
+    jobs = workspace.jobs()
     with workspace.connect(write=True) as db:
         db.execute(
             "CREATE TRIGGER reject_receipt BEFORE INSERT ON receipts BEGIN SELECT RAISE(ABORT, 'disk failure'); END"
@@ -206,7 +207,7 @@ def test_save_rolls_back_grade_history_events_and_job_when_receipt_fails(managed
     assert workspace.answer(assignment, 1, "q1") == answer
     assert workspace.history(assignment) == []
     assert [event for event in workspace.events() if event.kind == "grade"] == []
-    assert workspace.jobs() == []
+    assert workspace.jobs() == jobs
 
 
 @pytest.mark.parametrize(
@@ -273,7 +274,7 @@ def test_feedback_failure_does_not_change_grade_and_old_job_cannot_publish(
     monkeypatch.setattr(jobs, "_render", render)
     jobs.process(second)
     current = workspace.jobs()[0]
-    assert current.generation == 3
+    assert current.generation == 4
     assert current.status == "pending"
     assert current.artifact is None
 

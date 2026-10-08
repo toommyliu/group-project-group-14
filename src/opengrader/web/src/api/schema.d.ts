@@ -463,6 +463,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Feedback Archive */
+        get: operations["feedback_archive_api_assignments__assignment_id__feedback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{assignment_id}/{submission_id}/retry": {
         parameters: {
             query?: never;
@@ -2975,6 +2992,39 @@ export interface operations {
             path: {
                 assignment_id: string;
                 submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    feedback_archive_api_assignments__assignment_id__feedback_get: {
+        parameters: {
+            query: {
+                submission: number[];
+            };
+            header?: never;
+            path: {
+                assignment_id: string;
             };
             cookie?: never;
         };

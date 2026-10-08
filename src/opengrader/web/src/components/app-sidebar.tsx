@@ -210,7 +210,13 @@ export function AppSidebar() {
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {destinations.map(({ to, title, icon: Icon }) => {
-                      const active = Boolean(matchRoute({ to, pending: true }));
+                      const active = Boolean(
+                        matchRoute({
+                          to,
+                          pending: true,
+                          fuzzy: to === '/assignments/$assignmentId/review',
+                        })
+                      );
                       return (
                         <SidebarMenuItem key={to}>
                           <SidebarMenuButton
