@@ -1782,6 +1782,12 @@ export interface components {
             started: boolean;
             /** Assignment Version */
             assignment_version: string | null;
+            /** Version Scores */
+            version_scores: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
         };
         /** ScanFinding */
         ScanFinding: {

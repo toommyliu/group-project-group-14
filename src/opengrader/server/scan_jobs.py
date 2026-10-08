@@ -4,6 +4,7 @@ import logging
 import shutil
 import signal
 from functools import partial
+from itertools import batched
 from pathlib import Path
 from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -16,6 +17,7 @@ from opengrader.core.submissions.boundary import submission_warnings
 from opengrader.core.submissions.region_crop import CropInputs, crop_submission
 from opengrader.core.submissions.scan_plan import ScanPage, write_scan_submissions
 from opengrader.core.submissions.splitter import plan_submission_ranges
+from opengrader.core.submissions.version_match import template_features, version_scores
 from opengrader.server.scan_models import PageSelection, ScanBatch, ScanGroup
 from opengrader.server.scan_store import ScanStore
 
@@ -64,6 +66,7 @@ class ScanJobs:
         refresh: Callable[[str, Path], int],
         inputs: Callable[[str, str | None, str | None], CropInputs],
         published: Callable[[str, str], int | None],
+        templates: Callable[[str], dict[str, Path]],
         *,
         workers: ScanWorkers | None = None,
     ):
@@ -72,6 +75,7 @@ class ScanJobs:
         self.refresh = refresh
         self.inputs = inputs
         self.published = published
+        self.templates = templates
         self.stopping: set[str] = set()
         self.futures: dict[str, set[Future[None]]] = {}
         self.workers = workers or ScanWorkers()
@@ -129,13 +133,34 @@ class ScanJobs:
             except CancelledError:
                 pass
 
-    def crop(self, pdf: Path, inputs: CropInputs, output: Path) -> Path:
+    def in_process[T](self, work: Callable[..., T], *args) -> T:
         try:
-            return self.processing.submit(crop_submission, pdf, inputs, output).result()
+            return self.processing.submit(work, *args).result()
         except BrokenProcessPool:
             self.processing.shutdown(wait=False)
             self.processing = _process_pool()
             raise
+
+    def crop(self, pdf: Path, inputs: CropInputs, output: Path) -> Path:
+        return self.in_process(crop_submission, pdf, inputs, output)
+
+    def _match_versions(self, assignment_id: str, batch: ScanBatch) -> None:
+        batch.version_scores = {}
+        scan = self.store.directory(assignment_id, batch.id) / "original.pdf"
+        try:
+            templates = self.templates(assignment_id)
+            if len(templates) < 2:
+                return
+            references = self.in_process(template_features, templates)
+            for pages in batched(range(1, batch.page_count + 1), 20):
+                batch.message = f"Matching pages to versions: {pages[0] - 1} of {batch.page_count}."
+                self.save(assignment_id, batch)
+                batch.version_scores.update(self.in_process(version_scores, scan, pages, references))
+        except ScanCancelled:
+            raise
+        except (Exception, SystemExit):
+            logger.exception("Version matching failed: %s", batch.id)
+            batch.version_scores = {}
 
     def save(self, assignment_id: str, batch: ScanBatch) -> None:
         with self.lock:
@@ -169,6 +194,7 @@ class ScanJobs:
                     self.save(assignment_id, batch)
 
     def _analyze(self, assignment_id: str, batch: ScanBatch) -> None:
+        self._match_versions(assignment_id, batch)
         ranges = plan_submission_ranges(
             total_pages=batch.page_count,
             pages_per_submission=batch.pages_per_submission if batch.mode == "fixed" else batch.page_count,

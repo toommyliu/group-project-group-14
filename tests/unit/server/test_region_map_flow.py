@@ -101,6 +101,15 @@ def test_outline_crops_a_class_scan_into_named_gradable_answers(tmp_path, monkey
         app.state.scan_jobs.executor.submit(lambda: None).result(timeout=30)
         batch = next(item for item in client.get(f"{api}/scans").json()["batches"] if item["id"] == batch["id"])
         assert [len(group["pages"]) for group in batch["groups"]] == [2] * 8 + [1]
+        scores = {int(page): versions for page, versions in batch["version_scores"].items()}
+        assert sorted(scores) == list(range(1, 18))
+        matched = []
+        for student in truth:
+            totals = {version: sum(scores[page][version] for page in student["scan_pages"]) for version in ("A", "B")}
+            matched.append({"student": student["student"]["name"], "version": student["assignment_version"], "scores": totals})
+            other = "B" if student["assignment_version"] == "A" else "A"
+            assert totals[student["assignment_version"]] >= 1.4 * totals[other], matched[-1]
+        (artifacts / "version-matches.json").write_text(json.dumps(matched, indent=2))
 
         groups = [[{"number": page} for page in student["scan_pages"]] for student in truth]
         # What a grader fixes in the split review: one student's pages were

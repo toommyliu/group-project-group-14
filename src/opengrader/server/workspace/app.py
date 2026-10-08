@@ -219,8 +219,21 @@ def create_app(
             student=student,
         )
 
+    def version_templates(assignment_id: str) -> dict[str, Path]:
+        versions = outline_versions(parse_qa_markdown(workspace.assignment_source(assignment_id)))
+        outlines = workspace.outlines(assignment_id)
+        if not all(version in outlines and outlines[version].template for version in versions):
+            return {}
+        return {version: workspace.asset(outlines[version].template) for version in versions}
+
     scan_jobs = ScanJobs(
-        scan_store, registry_lock, publish, crop_inputs, workspace.submission_for_source, workers=workers
+        scan_store,
+        registry_lock,
+        publish,
+        crop_inputs,
+        workspace.submission_for_source,
+        version_templates,
+        workers=workers,
     )
 
     def require_assignment(assignment_id: str) -> None:

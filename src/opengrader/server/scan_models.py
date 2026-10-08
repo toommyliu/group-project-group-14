@@ -54,6 +54,7 @@ class ScanBatch(ScanModel):
     message: str = "Choose how to separate this scan."
     started: bool = False
     assignment_version: str | None = None
+    version_scores: dict[int, dict[str, int]] = Field(default_factory=dict)
 
 
 class ScanList(ScanModel):

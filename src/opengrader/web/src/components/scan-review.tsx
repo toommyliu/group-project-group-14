@@ -43,6 +43,7 @@ import {
   DEFAULT_VERSION_LABEL,
   DETECT_VERSION_LABEL,
   inheritedVersionLabel,
+  matchedVersion,
 } from '@/lib/scan-versions';
 import { ScanPageDialog, type PreviewPage } from './scan-page-dialog';
 import { ScanSplitSettings } from './scan-split-settings';
@@ -197,7 +198,8 @@ export function ScanReview({
         Object.fromEntries(
           current.groups.map((group) => [
             group.key,
-            chosen.get(pageSignature(group.pages)) ?? null,
+            chosen.get(pageSignature(group.pages)) ??
+              matchedVersion(group.pages, current.version_scores),
           ])
         )
       );
@@ -329,6 +331,7 @@ export function ScanReview({
               groupCount={groups.length}
               versions={versions}
               defaultVersion={defaultVersion}
+              matched={matchedVersion(group.pages, batch.version_scores)}
               warnings={warnings.get(pageSignature(group.pages)) ?? []}
               flagged={flagged}
               busy={busy}
@@ -506,6 +509,7 @@ function GroupRow({
   groupCount,
   versions,
   defaultVersion,
+  matched,
   warnings,
   flagged,
   busy,
@@ -524,6 +528,7 @@ function GroupRow({
   groupCount: number;
   versions: string[];
   defaultVersion: string;
+  matched: string | null;
   warnings: string[];
   flagged: Map<number, string[]>;
   busy: boolean;
@@ -568,7 +573,11 @@ function GroupRow({
             label="Version"
             versions={versions}
             value={group.version ?? ''}
-            emptyLabel={inheritedVersionLabel(defaultVersion)}
+            emptyLabel={
+              matched
+                ? `Matched (Version ${matched})`
+                : inheritedVersionLabel(defaultVersion)
+            }
             disabled={busy}
             stacked
             onChange={onVersion}
