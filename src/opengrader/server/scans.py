@@ -14,7 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 
 from opengrader.core.submissions.scan_plan import ScanPage, validate_scan_plan
-from opengrader.server.scan_jobs import ScanJobs
+from opengrader.server.scan_jobs import ScanJobs, check_template
 from opengrader.server.scan_models import (
     MAX_SCAN_BYTES, AnalyzeScan, PageSelection, ProcessScan, ReviewScan,
     ScanBatch, ScanGroup, ScanList, ScanRevision,
@@ -154,6 +154,9 @@ def add_scan_routes(
                     scan_warnings=list(submission_warnings(len(group), batch.pages_per_submission)),
                 ) for group in request.groups
             ]
+            for group in batch.groups:
+                if tuple(page.number for page in group.pages) not in previous:
+                    check_template(group, batch, reorder=False)
             batch.excluded_pages = request.excluded_pages
             batch.status = "review"
             batch.message = "Split saved. Create submissions when the page groups are correct."
@@ -175,7 +178,11 @@ def add_scan_routes(
                     group.assignment_version = request.group_versions[group.key]
                 if group.submission_id is None:
                     try:
-                        jobs.inputs(assignment_id, group.assignment_version or request.assignment_version, None)
+                        jobs.inputs(
+                            assignment_id,
+                            group.assignment_version or group.matched_version or request.assignment_version,
+                            None,
+                        )
                     except ValueError as exc:
                         raise HTTPException(422, str(exc)) from exc
             batch.started = True

@@ -17,7 +17,7 @@ from opengrader.core.submissions.boundary import submission_warnings
 from opengrader.core.submissions.region_crop import CropInputs, crop_submission
 from opengrader.core.submissions.scan_plan import ScanPage, write_scan_submissions
 from opengrader.core.submissions.splitter import plan_submission_ranges
-from opengrader.core.submissions.version_match import template_features, version_scores
+from opengrader.core.submissions.version_match import check_group, score_pages, template_features
 from opengrader.server.scan_models import PageSelection, ScanBatch, ScanGroup
 from opengrader.server.scan_store import ScanStore
 
@@ -38,6 +38,14 @@ def _process_pool() -> ProcessPoolExecutor:
         mp_context=get_context("spawn"),
         initializer=_defer_terminal_shutdown,
     )
+
+
+def check_template(group: ScanGroup, batch: ScanBatch, *, reorder: bool) -> None:
+    check = check_group([page.number for page in group.pages], batch.template_scores, reorder=reorder)
+    by_number = {page.number: page for page in group.pages}
+    group.pages = [by_number[number] for number in check.pages]
+    group.matched_version = check.version
+    group.scan_warnings.extend(check.warnings)
 
 
 class ScanCancelled(Exception):
@@ -145,7 +153,7 @@ class ScanJobs:
         return self.in_process(crop_submission, pdf, inputs, output)
 
     def _match_versions(self, assignment_id: str, batch: ScanBatch) -> None:
-        batch.version_scores = {}
+        batch.template_scores = {}
         scan = self.store.directory(assignment_id, batch.id) / "original.pdf"
         try:
             templates = self.templates(assignment_id)
@@ -155,12 +163,12 @@ class ScanJobs:
             for pages in batched(range(1, batch.page_count + 1), 20):
                 batch.message = f"Matching pages to versions: {pages[0] - 1} of {batch.page_count}."
                 self.save(assignment_id, batch)
-                batch.version_scores.update(self.in_process(version_scores, scan, pages, references))
+                batch.template_scores.update(self.in_process(score_pages, scan, pages, references))
         except ScanCancelled:
             raise
         except (Exception, SystemExit):
             logger.exception("Version matching failed: %s", batch.id)
-            batch.version_scores = {}
+            batch.template_scores = {}
 
     def save(self, assignment_id: str, batch: ScanBatch) -> None:
         with self.lock:
@@ -207,6 +215,8 @@ class ScanJobs:
             )
             for group in ranges
         ]
+        for group in batch.groups:
+            check_template(group, batch, reorder=True)
         batch.excluded_pages = []
         batch.findings = []
         batch.status = "review"
@@ -240,7 +250,7 @@ class ScanJobs:
                 if group.submission_id is None:
                     inputs = self.inputs(
                         assignment_id,
-                        group.assignment_version or batch.assignment_version,
+                        group.assignment_version or group.matched_version or batch.assignment_version,
                         group.student.student_id if group.student else None,
                     )
                     staging = self.crop(directory / "split" / f"{name}.pdf", inputs, directory / "extracted")

@@ -101,19 +101,22 @@ def test_outline_crops_a_class_scan_into_named_gradable_answers(tmp_path, monkey
         app.state.scan_jobs.executor.submit(lambda: None).result(timeout=30)
         batch = next(item for item in client.get(f"{api}/scans").json()["batches"] if item["id"] == batch["id"])
         assert [len(group["pages"]) for group in batch["groups"]] == [2] * 8 + [1]
-        scores = {int(page): versions for page, versions in batch["version_scores"].items()}
-        assert sorted(scores) == list(range(1, 18))
-        matched = []
-        for student in truth:
-            totals = {version: sum(scores[page][version] for page in student["scan_pages"]) for version in ("A", "B")}
-            matched.append({"student": student["student"]["name"], "version": student["assignment_version"], "scores": totals})
-            other = "B" if student["assignment_version"] == "A" else "A"
-            assert totals[student["assignment_version"]] >= 1.4 * totals[other], matched[-1]
-        (artifacts / "version-matches.json").write_text(json.dumps(matched, indent=2))
+        assert sorted(map(int, batch["template_scores"])) == list(range(1, 18))
+        checked = [
+            {"pages": [page["number"] for page in group["pages"]], "version": group["matched_version"], "warnings": group["scan_warnings"]}
+            for group in batch["groups"]
+        ]
+        (artifacts / "page-checks.json").write_text(json.dumps(checked, indent=2))
+        # The fixed two-page split is right until Omar's scratch sheet shifts it.
+        assert [group["version"] for group in checked[:7]] == [student["assignment_version"] for student in truth[:7]]
+        assert checked[5] == {"pages": [12, 11], "version": "B", "warnings": ["Pages were reordered to match Version B."]}
+        assert all(not group["warnings"] for group in checked[:5] + checked[6:7])
+        assert "No scan page looks like page 2 of Version B." in checked[7]["warnings"]
+        assert "No scan page looks like page 1 of Version B." in checked[8]["warnings"]
 
         groups = [[{"number": page} for page in student["scan_pages"]] for student in truth]
-        # What a grader fixes in the split review: one student's pages were
-        # scanned in reverse and another's first page went in upside down.
+        # What a grader fixes in the split review after the reorder above:
+        # Omar's scratch sheet and Grace's upside-down first page.
         groups[5].reverse()
         groups[7][0]["rotation"] = 180
         reviewed = client.put(
@@ -122,16 +125,10 @@ def test_outline_crops_a_class_scan_into_named_gradable_answers(tmp_path, monkey
         )
         assert reviewed.status_code == 200, reviewed.text
         batch = reviewed.json()
-        unversioned = client.post(f"{api}/scans/{batch['id']}/process", json={"expected_revision": batch["revision"], "acknowledge_findings": True})
-        assert unversioned.status_code == 422
-        assert unversioned.json()["detail"] == "Choose the assignment version for this submission."
+        assert [group["matched_version"] for group in batch["groups"]] == [student["assignment_version"] for student in truth]
         processed = client.post(
             f"{api}/scans/{batch['id']}/process",
-            json={
-                "expected_revision": batch["revision"],
-                "acknowledge_findings": True,
-                "group_versions": {group["key"]: student["assignment_version"] for group, student in zip(batch["groups"], truth)},
-            },
+            json={"expected_revision": batch["revision"], "acknowledge_findings": True},
         )
         assert processed.status_code == 202, processed.text
         app.state.scan_jobs.executor.submit(lambda: None).result(timeout=120)

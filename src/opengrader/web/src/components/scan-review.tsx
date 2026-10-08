@@ -43,7 +43,6 @@ import {
   DEFAULT_VERSION_LABEL,
   DETECT_VERSION_LABEL,
   inheritedVersionLabel,
-  matchedVersion,
 } from '@/lib/scan-versions';
 import { ScanPageDialog, type PreviewPage } from './scan-page-dialog';
 import { ScanSplitSettings } from './scan-split-settings';
@@ -135,6 +134,12 @@ export function ScanReview({
       group.scan_warnings,
     ])
   );
+  const matched = new Map(
+    batch.groups.map((group) => [
+      pageSignature(group.pages),
+      group.matched_version,
+    ])
+  );
   const flagged = new Map<number, string[]>();
   for (const finding of batch.findings)
     if (finding.page)
@@ -198,8 +203,7 @@ export function ScanReview({
         Object.fromEntries(
           current.groups.map((group) => [
             group.key,
-            chosen.get(pageSignature(group.pages)) ??
-              matchedVersion(group.pages, current.version_scores),
+            chosen.get(pageSignature(group.pages)) ?? null,
           ])
         )
       );
@@ -331,7 +335,7 @@ export function ScanReview({
               groupCount={groups.length}
               versions={versions}
               defaultVersion={defaultVersion}
-              matched={matchedVersion(group.pages, batch.version_scores)}
+              matched={matched.get(pageSignature(group.pages)) ?? null}
               warnings={warnings.get(pageSignature(group.pages)) ?? []}
               flagged={flagged}
               busy={busy}

@@ -1799,10 +1799,10 @@ export interface components {
             started: boolean;
             /** Assignment Version */
             assignment_version: string | null;
-            /** Version Scores */
-            version_scores: {
+            /** Template Scores */
+            template_scores: {
                 [key: string]: {
-                    [key: string]: number;
+                    [key: string]: number[];
                 };
             };
         };
@@ -1832,6 +1832,8 @@ export interface components {
             error: string;
             /** Assignment Version */
             assignment_version: string | null;
+            /** Matched Version */
+            matched_version: string | null;
             student: components["schemas"]["RosterStudent"] | null;
         };
         /** ScanList */

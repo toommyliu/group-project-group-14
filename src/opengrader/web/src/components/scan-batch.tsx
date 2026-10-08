@@ -363,6 +363,10 @@ function ScanSubmissions({
       <ol className="divide-y border bg-background">
         {batch.groups.map((group, index) => {
           const first = group.pages[0];
+          const version =
+            group.assignment_version ??
+            group.matched_version ??
+            batch.assignment_version;
           return (
             <li key={group.key} className="flex items-center gap-3 px-3 py-2">
               {first && (
@@ -392,8 +396,7 @@ function ScanSubmissions({
                 <p className="truncate text-xs text-muted-foreground">
                   Scan pages{' '}
                   {pageRanges(group.pages.map((page) => page.number))}
-                  {(group.assignment_version ?? batch.assignment_version) &&
-                    ` · Version ${group.assignment_version ?? batch.assignment_version}`}
+                  {version && ` · Version ${version}`}
                 </p>
                 {group.scan_warnings.map((warning) => (
                   <p key={warning} className="text-xs text-chart-4">

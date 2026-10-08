@@ -29,6 +29,7 @@ class ScanGroup(ScanModel):
     scan_warnings: list[str] = Field(default_factory=list)
     error: str = ""
     assignment_version: str | None = None
+    matched_version: str | None = None
     student: RosterStudent | None = None
 
 
@@ -54,7 +55,7 @@ class ScanBatch(ScanModel):
     message: str = "Choose how to separate this scan."
     started: bool = False
     assignment_version: str | None = None
-    version_scores: dict[int, dict[str, int]] = Field(default_factory=dict)
+    template_scores: dict[int, dict[str, list[int]]] = Field(default_factory=dict)
 
 
 class ScanList(ScanModel):
