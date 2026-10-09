@@ -258,6 +258,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/questions/{question_id}/rubric": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Rubric
+         * @description Edit one question's rubric while grading; a folder session only.
+         *
+         *     There the answer key is a file, and the edit is written into it at
+         *     once (`folder_session.edit_rubric`). A workspace's key has no file
+         *     to keep in step, and its grades reach files only by write-back, which
+         *     does not carry the answer key — so it keeps the rule that the key is
+         *     edited before submissions arrive.
+         */
+        put: operations["save_rubric_api_assignments__assignment_id__questions__question_id__rubric_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assignments/{assignment_id}/source": {
         parameters: {
             query?: never;
@@ -1217,6 +1243,33 @@ export interface components {
             /** Artifact */
             artifact: string | null;
         };
+        /**
+         * FolderRoster
+         * @description The class folder's roster file, as a folder session last read it.
+         *
+         *     `editable` is false when the roster is several files (one per section):
+         *     a student added in the browser would have no one file to go into.
+         */
+        FolderRoster: {
+            /** Files */
+            files: string[];
+            /**
+             * Format
+             * @enum {string}
+             */
+            format: "tsv" | "csv";
+            /** Editable */
+            editable: boolean;
+            /** Has Email */
+            has_email: boolean;
+            /** Students */
+            students: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+        };
         /** FolderSessionInfo */
         FolderSessionInfo: {
             /** Assignment Id */
@@ -1225,6 +1278,7 @@ export interface components {
             assignment_title: string;
             /** Folder */
             folder: string;
+            roster?: components["schemas"]["FolderRoster"] | null;
         };
         /** FolderSyncResult */
         FolderSyncResult: {
@@ -1253,6 +1307,11 @@ export interface components {
              * @default []
              */
             problems: string[];
+            /**
+             * Roster Changed
+             * @default false
+             */
+            roster_changed: boolean;
         };
         /**
          * FolderWrite
@@ -1748,6 +1807,45 @@ export interface components {
             before: components["schemas"]["StudentDetails"];
             after: components["schemas"]["StudentDetails"];
         };
+        /**
+         * RubricEdit
+         * @description One question's rubric as the editor leaves it, and as it found it.
+         *
+         *     `expected_rubric` is what the editor opened; the edit is refused if the
+         *     question's rubric is no longer that, so two people (or the browser and
+         *     the terminal app) cannot silently overwrite each other.
+         */
+        RubricEdit: {
+            /** Version */
+            version?: string | null;
+            /** Rubric */
+            rubric: components["schemas"]["QARubricItem-Input"][];
+            /** Expected Rubric */
+            expected_rubric: components["schemas"]["QARubricItem-Input"][];
+        };
+        /**
+         * RubricEditResult
+         * @description What saving a question's rubric from the browser did.
+         *
+         *     `regraded` counts the saved grades that followed a renamed or re-pointed
+         *     item. `problems` names any of those grades whose `.submission.md` could
+         *     not be written yet; the answer key file itself is always written before
+         *     anything else changes, so a result means it holds the new rubric.
+         */
+        RubricEditResult: {
+            /** Changed */
+            changed: boolean;
+            /**
+             * Regraded
+             * @default 0
+             */
+            regraded: number;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+        };
         /** RubricOption */
         RubricOption: {
             /** Label */
@@ -1924,6 +2022,45 @@ export interface components {
             id: string;
             /** Revision */
             revision: number;
+        };
+        /**
+         * StudentChange
+         * @description A roster student after an edit, and what the edit did beyond the roster.
+         *
+         *     Submissions already matched to the student (they carry the student's ID)
+         *     follow a changed name or ID, so the roster and the graded work never
+         *     name the same person two ways. `renamed` counts them. `problems` is for
+         *     a folder session, where each one is also a file that has to be written.
+         */
+        StudentChange: {
+            /** Sid */
+            sid: string;
+            /**
+             * First Name
+             * @default
+             */
+            first_name: string;
+            /**
+             * Last Name
+             * @default
+             */
+            last_name: string;
+            /** Email */
+            email?: string | null;
+            /** Id */
+            id: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Renamed
+             * @default 0
+             */
+            renamed: number;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
         };
         /** StudentDetails */
         StudentDetails: {
@@ -2599,6 +2736,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_rubric_api_assignments__assignment_id__questions__question_id__rubric_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RubricEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubricEditResult"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -3876,7 +4049,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Student"];
+                    "application/json": components["schemas"]["StudentChange"];
                 };
             };
             /** @description Validation Error */

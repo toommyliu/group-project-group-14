@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import time
 from dataclasses import replace
 from typing import Callable
 
@@ -11,7 +13,14 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
 from opengrader.core import app_config
-from opengrader.core.app_config import AISettings, ResolvedAI, consent, keystore
+from opengrader.core.app_config import (
+    AISettings,
+    ResolvedAI,
+    consent,
+    keystore,
+    local_ai,
+)
+from opengrader.core.homebrew import HOMEBREW_URL, find_homebrew
 from opengrader.core.ocr.math_ocr import (
     DEFAULT_MATH_BACKEND,
     MATH_BACKEND_NAMES,
@@ -29,6 +38,16 @@ _MATH_BACKEND_LABELS = {
 _MATH_BACKEND_CHOICES = [
     (_MATH_BACKEND_LABELS[name], name) for name in MATH_BACKEND_NAMES
 ]
+
+# What the "Set up local AI" button says. It checks first and names what is
+# missing; the two expensive steps then need a second, labelled press.
+_PREPARE_LABEL = "Set up local AI"
+_PREPARE_DOWNLOAD_LABEL = "Download models"
+_PREPARE_INSTALL_LABEL = "Install and download"
+_PREPARE_STOP_LABEL = "Stop"
+
+# A download reports many times a second; the screen needs a few.
+_PROGRESS_INTERVAL_SECONDS = 0.25
 
 
 class AISettingsScreen(ModalScreen[AISettings | None]):
@@ -98,6 +117,12 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         padding: 0 1;
     }
 
+    #ai-prepare-status {
+        width: 100%;
+        height: auto;
+        color: $accent;
+    }
+
     #ai-buttons {
         height: auto;
         align-horizontal: right;
@@ -122,6 +147,11 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         # following whichever default is current, instead of pinning
         # whatever happened to be on screen when Save was pressed.
         self._escalate_touched = False
+        # Set while "Set up local AI" is working; setting it stops the work.
+        self._prepare_cancel: local_ai.Cancel | None = None
+        # The (server, models) an install or download was offered for. The
+        # next press goes ahead only if the form still says the same.
+        self._prepare_offer: tuple[str, tuple[str, ...]] | None = None
 
 
     @staticmethod
@@ -158,6 +188,22 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             )
 
             with VerticalScroll(id="ai-form"):
+                # First, because it is the switch that makes the rest work
+                # without anyone starting a server or fetching a model by hand.
+                yield Checkbox(
+                    "Start the AI automatically when needed",
+                    value=self._settings.auto_start,
+                    id="ai-auto-start",
+                )
+                yield Static(
+                    "Starts the local AI server and downloads a missing model "
+                    "instead of stopping a run to ask. Turn it off if you would "
+                    "rather start it yourself. To do both now and watch the "
+                    "download, press Set up local AI below — it fetches only "
+                    "the models the switches here need.",
+                    classes="ai-note",
+                )
+
                 yield self._label("What the AI does here")
                 yield Static(
                     "These switches are what every tool reads — including "
@@ -397,24 +443,20 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
                     classes="ai-note",
                 )
 
-                yield Checkbox(
-                    "Start the AI automatically when needed",
-                    value=self._settings.auto_start,
-                    id="ai-auto-start",
-                )
-                yield Static(
-                    "Starts the local AI server and downloads a missing model "
-                    "instead of stopping a run to ask. Turn it off if you would "
-                    "rather start it yourself.",
-                    classes="ai-note",
-                )
-
             log = RichLog(id="ai-log", wrap=True, auto_scroll=False, markup=False)
             log.border_title = "Connection test"
             yield log
+            progress = Static("", id="ai-prepare-status", markup=False)
+            progress.display = False
+            yield progress
 
             with Horizontal(id="ai-buttons"):
                 yield Button("Test connection", id="ai-test", compact=True)
+                prepare = Button(_PREPARE_LABEL, id="ai-prepare", compact=True)
+                # Starting a server and downloading models is something only
+                # an AI on this computer needs.
+                prepare.display = current.kind == "local"
+                yield prepare
                 yield Button(
                     "Use suggested limit",
                     id="ai-apply-timeout",
@@ -562,6 +604,8 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
             not provider.requires_api_key, "hidden"
         )
         self.query_one("#ai-key-status", Static).update(self._key_status(preview))
+        if self._prepare_cancel is None:
+            self.query_one("#ai-prepare", Button).display = preview.kind == "local"
         if self._settings.escalate_only is None:
             # Still following the default — let it track the newly chosen
             # provider's kind. This is a display refresh only: prevent()
@@ -681,8 +725,11 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         for button in self.query(Button):
             button.disabled = True
         log = self.query_one("#ai-log", RichLog)
+        log.border_title = "Connection test"
+        log.auto_scroll = False
         log.clear()
         log.write("Testing…")
+        self.query_one("#ai-prepare-status", Static).display = False
         self.run_worker(lambda: self._test(resolved), thread=True, exclusive=True)
 
     def _test(self, current: ResolvedAI) -> None:
@@ -768,6 +815,279 @@ class AISettingsScreen(ModalScreen[AISettings | None]):
         value = f"{self._timeout_recommendation:g}"
         self.query_one("#ai-timeout", Input).value = value
         self.app.notify(f"Filled in {value} s — press Save to keep it.")
+
+    # -- Set up local AI ----------------------------------------------------
+
+    @on(Button.Pressed, "#ai-prepare")
+    def _on_prepare(self, event: Button.Pressed) -> None:
+        event.stop()
+        if self._prepare_cancel is not None:
+            # The same button is Stop while the work runs.
+            event.button.disabled = True
+            self._prepare_cancel.set()
+            return
+        pending = self.collect()
+        if pending is None:
+            return
+        resolved = app_config.resolve(pending)
+        if resolved.kind != "local":
+            self.app.notify(
+                f"{resolved.provider.label} at {resolved.host} is not on this "
+                "computer, so there is nothing here to start or download.",
+                severity="warning",
+            )
+            return
+        models, skipped = self._models_in_use(resolved)
+        log = self.query_one("#ai-log", RichLog)
+        log.border_title = "Local AI setup"
+        log.auto_scroll = True
+        log.clear()
+        self.query_one("#ai-prepare-status", Static).display = False
+        if not models:
+            # Nothing ticked needs a model, so there is nothing to start or
+            # fetch — and saying so beats downloading on a guess.
+            self._prepare_offer = None
+            event.button.label = _PREPARE_LABEL
+            log.write(
+                "No switch that uses a local model is ticked, so there is "
+                "nothing to download."
+            )
+            for line in skipped:
+                log.write(line)
+            return
+        offer = (resolved.host, models)
+        go_ahead = self._prepare_offer == offer
+        self._prepare_offer = None
+
+        cancel = local_ai.Cancel()
+        self._prepare_cancel = cancel
+        for button in self.query(Button):
+            button.disabled = button.id != "ai-prepare"
+        event.button.label = _PREPARE_STOP_LABEL
+        for line in skipped:
+            log.write(line)
+        log.write("Checking the AI on this computer…")
+        self.run_worker(
+            lambda: self._prepare(resolved, models, go_ahead, cancel),
+            thread=True,
+            exclusive=True,
+            group="ai-prepare",
+        )
+
+    def _prepare(
+        self,
+        resolved: ResolvedAI,
+        models: tuple[str, ...],
+        go_ahead: bool,
+        cancel: local_ai.Cancel,
+    ) -> None:
+        last_shown = 0.0
+
+        def on_progress(progress: local_ai.PullProgress) -> None:
+            nonlocal last_shown
+            now = time.monotonic()
+            if now - last_shown < _PROGRESS_INTERVAL_SECONDS:
+                return
+            last_shown = now
+            self._from_worker(self._show_prepare_progress, progress)
+
+        def emit(line: str) -> None:
+            self._from_worker(self._prepare_line, line)
+
+        try:
+            status = local_ai.prepare(
+                resolved.host,
+                models,
+                emit=emit,
+                on_progress=on_progress,
+                cancel=cancel,
+                install=go_ahead,
+                download=go_ahead,
+            )
+        except local_ai.OllamaNotInstalled:
+            self._from_worker(self._prepare_not_installed, resolved, models)
+        except local_ai.LocalAICancelled:
+            self._from_worker(self._prepare_stopped)
+        except Exception as exc:  # noqa: BLE001 - whatever went wrong belongs on screen
+            self._from_worker(self._prepare_failed, str(exc))
+        else:
+            self._from_worker(self._prepare_done, resolved, status)
+
+    @staticmethod
+    def _models_in_use(resolved: ResolvedAI) -> tuple[tuple[str, ...], list[str]]:
+        """The models the ticked switches need, and a line for each one left out.
+
+        A model is several gigabytes, so one is only fetched for a job that
+        is switched on: the handwriting model for reading scans or names, the
+        grading model for suggesting grades. Works from the form as it
+        stands, ticked-but-unsaved included.
+        """
+        wanted: list[str] = []
+        left_out: list[tuple[str, str]] = []
+        if resolved.read_handwriting or resolved.read_identity_locally:
+            wanted.append(resolved.vision_model)
+        else:
+            left_out.append(
+                (
+                    resolved.vision_model,
+                    f"Leaving out the handwriting model ({resolved.vision_model}): "
+                    "'Read handwriting on scans' and 'Let the local AI read "
+                    "student names and IDs' are both off.",
+                )
+            )
+        if resolved.grade_written:
+            wanted.append(resolved.text_model)
+        else:
+            left_out.append(
+                (
+                    resolved.text_model,
+                    f"Leaving out the grading model ({resolved.text_model}): "
+                    "'Suggest grades for written answers' is off. Tick it and "
+                    "press again if you want it — drafting a rubric with AI "
+                    "and Calibrate AI grading use it too.",
+                )
+            )
+        models = local_ai.distinct_models(wanted)
+        # One model named for both jobs is fetched if either job is on, so
+        # it is not also reported as left out.
+        skipped = [
+            line
+            for model, line in left_out
+            if not any(local_ai.same_model(model, kept) for kept in models)
+        ]
+        return models, skipped
+
+    def _from_worker(self, callback: Callable[..., None], *args: object) -> None:
+        # Closed mid-download: the screen is gone and nobody is left to tell.
+        if self.is_attached:
+            self.app.call_from_thread(callback, *args)
+
+    def _prepare_line(self, line: str) -> None:
+        if self.is_attached:
+            self.query_one("#ai-prepare-status", Static).display = False
+            self.query_one("#ai-log", RichLog).write(line)
+
+    def _show_prepare_progress(self, progress: local_ai.PullProgress) -> None:
+        if not self.is_attached or self._prepare_cancel is None:
+            return
+        status = self.query_one("#ai-prepare-status", Static)
+        status.update(f"{progress.model} — {progress.describe()}")
+        status.display = True
+
+    @staticmethod
+    def _with_roles(resolved: ResolvedAI, models: tuple[str, ...]) -> str:
+        """Model names with what each is for: "a (handwriting), b (grading)"."""
+        described = []
+        for model in models:
+            roles = [
+                role
+                for role, name in (
+                    ("handwriting", resolved.vision_model),
+                    ("grading", resolved.text_model),
+                )
+                if local_ai.same_model(name, model)
+            ]
+            described.append(f"{model} ({' and '.join(roles)})" if roles else model)
+        return ", ".join(described)
+
+    def _end_prepare(self, label: str = _PREPARE_LABEL) -> RichLog | None:
+        """Put the buttons back; returns the log, or None when the screen has gone."""
+        self._prepare_cancel = None
+        if not self.is_attached:
+            return None
+        for button in self.query(Button):
+            button.disabled = False
+        self.query_one("#ai-apply-timeout", Button).disabled = (
+            self._timeout_recommendation is None
+        )
+        self.query_one("#ai-prepare", Button).label = label
+        self.query_one("#ai-prepare-status", Static).display = False
+        return self.query_one("#ai-log", RichLog)
+
+    def _prepare_done(self, resolved: ResolvedAI, status: local_ai.LocalAIStatus) -> None:
+        if not status.missing:
+            log = self._end_prepare()
+            if log is None:
+                return
+            log.write("")
+            log.write(
+                "The local AI is ready: the server is answering and "
+                f"{self._with_roles(resolved, status.wanted)} "
+                f"{'is' if len(status.wanted) == 1 else 'are'} installed."
+            )
+            log.write("Test connection shows how quickly it answers on this computer.")
+            self.app.notify("The local AI is ready.")
+            return
+        log = self._end_prepare(_PREPARE_DOWNLOAD_LABEL)
+        if log is None:
+            return
+        self._prepare_offer = (status.host, status.wanted)
+        log.write("")
+        log.write(f"Not downloaded yet: {self._with_roles(resolved, status.missing)}.")
+        log.write(
+            f"Press {_PREPARE_DOWNLOAD_LABEL} to fetch "
+            f"{'it' if len(status.missing) == 1 else 'them'}. A model is "
+            "several GB and comes over the internet; the exact size is shown "
+            "as soon as the download starts. It can be stopped and carried on "
+            "later."
+        )
+
+    def _prepare_not_installed(
+        self, resolved: ResolvedAI, models: tuple[str, ...]
+    ) -> None:
+        brew = find_homebrew()
+        log = self._end_prepare(_PREPARE_INSTALL_LABEL if brew else _PREPARE_LABEL)
+        if log is None:
+            return
+        log.write("")
+        log.write(
+            "Ollama, the program that runs the AI on this computer, is not "
+            "installed."
+        )
+        if brew:
+            self._prepare_offer = (resolved.host, models)
+            log.write(
+                "Homebrew is installed, so Opengrader can do this for you: "
+                f"press {_PREPARE_INSTALL_LABEL}. It installs Ollama, starts "
+                f"it and downloads {self._with_roles(resolved, models)} — "
+                f"several GB{' each' if len(models) > 1 else ''}, over the "
+                "internet."
+            )
+            return
+        log.write(
+            f"Install it from {local_ai.OLLAMA_DOWNLOAD_URL}, then press "
+            f"{_PREPARE_LABEL} again."
+        )
+        if sys.platform == "darwin":
+            log.write(
+                f"With Homebrew ({HOMEBREW_URL}) on this Mac, Opengrader can "
+                "install Ollama for you instead."
+            )
+
+    def _prepare_stopped(self) -> None:
+        log = self._end_prepare()
+        if log is None:
+            return
+        log.write("")
+        log.write(
+            f"Stopped. What was downloaded so far is kept: press "
+            f"{_PREPARE_LABEL} to carry on from there."
+        )
+
+    def _prepare_failed(self, message: str) -> None:
+        log = self._end_prepare()
+        if log is None:
+            return
+        log.write("")
+        log.write(message)
+        self.app.notify("The local AI is not ready — see the log.", severity="error")
+
+    def on_unmount(self) -> None:
+        # A worker thread cannot be cancelled; ending what it waits on (the
+        # download's connection, a Homebrew install) is what lets it, and the
+        # app, finish.
+        if self._prepare_cancel is not None:
+            self._prepare_cancel.set()
 
     @on(Button.Pressed, "#ai-save")
     def _on_save(self, event: Button.Pressed) -> None:

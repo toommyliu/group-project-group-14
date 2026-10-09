@@ -415,6 +415,14 @@ export const peopleRoute = createRoute({
     const auth = await context.queryClient.ensureQueryData(authQuery);
     if (!workspaceBase || (auth.enabled && auth.role !== 'instructor'))
       throw notFound();
+    // A class folder without a roster file has no People page; send an old
+    // bookmark back to the assignment.
+    const workspace = await context.queryClient.ensureQueryData(workspaceQuery);
+    if (workspace.folder_session && !workspace.folder_session.roster)
+      throw redirect({
+        to: '/assignments/$assignmentId',
+        params: { assignmentId: workspace.folder_session.assignment_id },
+      });
     return { staffAccess: auth.enabled };
   },
   loader: async ({ context }) => {

@@ -311,7 +311,7 @@ def test_import_records_the_source_submissions_folder(
     from opengrader.tui.main import _import_as_workspace
 
     root = tmp_path / "quiz"
-    shutil.copytree(Path("samples/cs146-quiz1"), root)
+    shutil.copytree(Path("samples/cs146-quiz1"), root, ignore=shutil.ignore_patterns(".opengrader"))
     workspace = Workspace.create(root)
     connection = ServiceConnection(
         root=str(root), url="http://localhost", pid=0,

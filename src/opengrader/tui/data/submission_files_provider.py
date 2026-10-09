@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypeVar
 
+from opengrader.core.grading.rubric_edit import diff_rubric_options
 from opengrader.core.grading.files import FileGradingSession
 from opengrader.core.grading.questions import (
     QuestionContext as _QuestionContext,
@@ -1216,59 +1216,23 @@ class SubmissionFilesProvider:
         original_options: list[RubricOptionSeed],
         options: list[RubricOptionSeed],
     ) -> tuple[list[RubricOptionUpdate], list[_RubricOptionDelete]]:
-        original_keys = [
-            (option.label, option.points_delta) for option in original_options
+        # The matching itself is shared with the browser's rubric edit
+        # (`core/grading/rubric_edit.py`), so both agree on which option
+        # became which.
+        diff = diff_rubric_options(original_options, options)
+        changes = [
+            RubricOptionUpdate(
+                old_label=original.label,
+                old_points_delta=original.points_delta,
+                new_label=new.label,
+                new_points_delta=new.points_delta,
+            )
+            for original, new in diff.changed
         ]
-        new_keys = [(option.label, option.points_delta) for option in options]
-        matcher = SequenceMatcher(
-            a=original_keys,
-            b=new_keys,
-            autojunk=False,
-        )
-        changes: list[RubricOptionUpdate] = []
-        deleted_options: list[_RubricOptionDelete] = []
-
-        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            if tag == "equal":
-                continue
-            if tag == "delete":
-                deleted_options.extend(
-                    _RubricOptionDelete(
-                        label=option.label,
-                        points_delta=option.points_delta,
-                    )
-                    for option in original_options[i1:i2]
-                )
-                continue
-            if tag == "insert":
-                continue
-
-            original_segment = original_options[i1:i2]
-            new_segment = options[j1:j2]
-            if len(original_segment) != len(new_segment):
-                deleted_options.extend(
-                    _RubricOptionDelete(
-                        label=option.label,
-                        points_delta=option.points_delta,
-                    )
-                    for option in original_segment
-                )
-                continue
-
-            for original, new in zip(original_segment, new_segment, strict=True):
-                if (
-                    original.label == new.label
-                    and abs(original.points_delta - new.points_delta) <= 1e-6
-                ):
-                    continue
-                changes.append(
-                    RubricOptionUpdate(
-                        old_label=original.label,
-                        old_points_delta=original.points_delta,
-                        new_label=new.label,
-                        new_points_delta=new.points_delta,
-                    )
-                )
+        deleted_options = [
+            _RubricOptionDelete(label=option.label, points_delta=option.points_delta)
+            for option in diff.deleted
+        ]
         return changes, deleted_options
 
     def _matching_saved_grade_count(

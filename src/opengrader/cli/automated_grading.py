@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import socket
-import subprocess
 import sys
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 import click
 
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
+from opengrader.core.app_config import local_ai
 from opengrader.core.grading.answer_cache import AnswerGradeCache
 from opengrader.core.grading.rubric_draft import has_partial_credit_items
 from opengrader.core.grading.llm_grader import (
@@ -104,33 +101,6 @@ def _submission_paths(input_path: Path) -> list[Path]:
     direct = sorted(input_path.glob("*.submission.md"))
     nested = sorted(input_path.glob("*/*.submission.md"))
     return direct + nested
-
-
-def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> None:
-    parsed = urlparse(host)
-    hostname = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 11434
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        if probe.connect_ex((hostname, port)) == 0:
-            return
-    emit(f"Starting Ollama server at {host}…")
-    try:
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "'ollama' binary not found. Please install Ollama first."
-        ) from exc
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        time.sleep(1)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            if probe.connect_ex((hostname, port)) == 0:
-                return
-    emit("Warning: timed out waiting for Ollama to start.")
 
 
 @dataclass(frozen=True)
@@ -301,20 +271,12 @@ def command(
         )
         if auto_ollama and resolved.kind == "local":
             try:
-                _start_ollama_server_if_needed(resolved.host, emit)
-            except RuntimeError as exc:
+                local_ai.prepare_for_run(
+                    resolved.host, (resolved.text_model,), emit=emit
+                )
+            except local_ai.OllamaNotInstalled as exc:
                 print(f"Error: {exc}", file=sys.stderr)
                 sys.exit(1)
-            emit(
-                f"Pulling model '{resolved.text_model}' if needed — "
-                "first run may download several GB…"
-            )
-            subprocess.run(
-                ["ollama", "pull", resolved.text_model],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
         if resolved.kind == "cloud":
             from opengrader.core.cloud_preflight import CloudPreflight, cli_confirm_cloud_send
 

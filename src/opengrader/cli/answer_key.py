@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import socket
-import subprocess
 import sys
-import tempfile
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 import click
 
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
+from opengrader.core.app_config import local_ai
 from opengrader.core.qa_file import parse_qa_markdown
 from opengrader.core.qa_file.text2qti import parse_text2qti, render_qa
 
@@ -60,31 +56,6 @@ def _qa_from_text(
     )
 
 
-def _start_ollama_server_if_needed(ollama_host: str, emit: Callable[[str], None]):
-    parsed_url = urlparse(ollama_host)
-    host = parsed_url.hostname or "127.0.0.1"
-    port = parsed_url.port or 11434
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex((host, port)) == 0:
-            return None, None
-    emit(f"Ollama server not found at {ollama_host}. Starting 'ollama serve'...")
-    log_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
-    try:
-        proc = subprocess.Popen(["ollama", "serve"], stdout=log_file, stderr=log_file)
-    except FileNotFoundError:
-        log_file.close()
-        raise RuntimeError("'ollama' binary not found. Please install Ollama first.")
-    start_time = time.time()
-    while time.time() - start_time < 30:
-        time.sleep(1)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-            if s2.connect_ex((host, port)) == 0:
-                break
-    else:
-        emit("Warning: Timed out waiting for Ollama to start; using Tesseract only.")
-    return proc, log_file
-
-
 def _answer_key_pages_phrase(path: Path) -> str:
     try:
         from pypdf import PdfReader
@@ -113,8 +84,7 @@ def _qa_from_pdf(
 ) -> str:
     from opengrader.core.qa_file.pdf_answer_key import extract_qa_markdown_from_pdf
 
-    server_proc = None
-    log_file = None
+    started_server = None
     try:
         vision_reader = None
         if not llm_read_scans:
@@ -132,11 +102,8 @@ def _qa_from_pdf(
                 timeout_seconds=ollama_timeout,
             )
             if auto_ollama and resolved.provider.kind == "local":
-                server_proc, log_file = _start_ollama_server_if_needed(ollama_host, emit)
-                emit(f"Ensuring model '{ollama_model}' is available...")
-                subprocess.run(
-                    ["ollama", "pull", ollama_model],
-                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                started_server = local_ai.prepare_for_run(
+                    ollama_host, (ollama_model,), emit=emit
                 )
             if (
                 auto_ollama
@@ -193,10 +160,8 @@ def _qa_from_pdf(
             progress=progress,
         )
     finally:
-        if server_proc:
-            server_proc.terminate()
-        if log_file:
-            log_file.close()
+        if started_server:
+            started_server.stop()
 
 
 @dataclass(frozen=True)

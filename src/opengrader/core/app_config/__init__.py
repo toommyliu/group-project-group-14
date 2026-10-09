@@ -100,6 +100,10 @@ __all__ = [
 
 DEFAULT_PROVIDER = "ollama"
 DEFAULT_HOST = "http://127.0.0.1:11434"
+# The models a fresh install uses, and the ones "Set up local AI" downloads
+# when AI setup names no others. To recommend a different model, change the
+# name here: the setup hint, the help screen, the Ollama clients' own
+# defaults and the download all read these two lines.
 DEFAULT_VISION_MODEL = "qwen3.5:9b"
 DEFAULT_TEXT_MODEL = "qwen2.5vl:7b"
 DEFAULT_TIMEOUT_SECONDS = 120.0
@@ -316,8 +320,11 @@ OLLAMA = ProviderSpec(
     default_vision_model=DEFAULT_VISION_MODEL,
     default_text_model=DEFAULT_TEXT_MODEL,
     setup_hint=(
-        "Install Ollama, then pull qwen3.5:9b for handwriting and qwen2.5vl:7b for grading. Run ollama serve. "
-        "'Check this computer' in Helper Tools reports exactly what is missing."
+        "Press Set up local AI in AI setup: it starts Ollama and downloads "
+        f"{DEFAULT_VISION_MODEL} for handwriting and {DEFAULT_TEXT_MODEL} for "
+        "grading. By hand: install Ollama, run ollama serve, then ollama pull "
+        "each model. 'Check this computer' in Helper Tools reports exactly "
+        "what is missing."
     ),
     text_config_factory=_ollama_text_config,
     vision_config_factory=_ollama_vision_config,

@@ -76,3 +76,29 @@ def test_no_type_checking_only_name_is_called_at_runtime(path: Path) -> None:
         "Add a local import at the call site (keeping the deferral), or move "
         "the import to module scope if it is not actually heavy."
     )
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        "opengrader.core.grading.solutions",
+        "opengrader.core.grading.evaluation",
+        "opengrader.core.submissions",
+        "opengrader.cli.llm_eval",
+    ],
+)
+def test_grading_and_submissions_import_in_either_order(module: str) -> None:
+    # `core.submissions` reads a constant from `grading.solutions`, which in
+    # turn uses a `core.submissions` helper. In one process only the first
+    # import matters, so each is tried first in a process of its own.
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr[-600:]

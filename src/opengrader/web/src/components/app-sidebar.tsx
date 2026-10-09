@@ -40,8 +40,19 @@ const menuButtonClass =
   'min-h-11 px-4 text-sm transition-none group-data-[collapsible=icon]:h-11! group-data-[collapsible=icon]:w-12! group-data-[collapsible=icon]:px-4! focus-visible:ring-2 focus-visible:ring-inset';
 
 export function AppSidebar() {
-  const { assignment } = useAssignmentNavigation();
+  const { assignment: routeAssignment } = useAssignmentNavigation();
   const folderSession = useFolderSession();
+  // A folder session has exactly one assignment, so its pages stay in the
+  // sidebar on a page that belongs to no assignment (People) too — otherwise
+  // there would be no way back from it.
+  const assignment =
+    routeAssignment ??
+    (folderSession
+      ? {
+          id: folderSession.assignment_id,
+          title: folderSession.assignment_title,
+        }
+      : undefined);
   const matchRoute = useMatchRoute();
   const pages = useContext(WorkspacePages);
   const gradingPage = pages.find(
@@ -70,6 +81,13 @@ export function AppSidebar() {
   const onSettings = Boolean(matchRoute({ to: '/settings', pending: true }));
   const expanded = isMobile ? openMobile : open;
   const courseLinks = Boolean(workspaceBase) && (!folderSession || instructor);
+  // A class folder opened from classic shows People only when the folder has
+  // a roster file: the page is that file, and without one there is nothing
+  // for it to show or save into.
+  const folderRoster = Boolean(folderSession?.roster) && managesPeople;
+  const showPeople = folderSession
+    ? folderRoster
+    : courseLinks && managesPeople;
   const close = () => setOpenMobile(false);
   const destinations = (
     [
@@ -142,11 +160,11 @@ export function AppSidebar() {
           )}
         </SidebarHeader>
         <SidebarContent className="overflow-x-hidden pt-2">
-          {courseLinks && (
+          {(courseLinks || showPeople) && (
             <nav aria-label="Course" className="w-full">
               <SidebarGroup className="px-2 py-0">
                 <SidebarMenu>
-                  {!folderSession && (
+                  {courseLinks && !folderSession && (
                     <SidebarMenuItem>
                       <SidebarMenuButton
                         className={menuButtonClass}
@@ -163,7 +181,7 @@ export function AppSidebar() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
-                  {managesPeople && (
+                  {showPeople && (
                     <SidebarMenuItem>
                       <SidebarMenuButton
                         className={menuButtonClass}
@@ -180,7 +198,7 @@ export function AppSidebar() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
-                  {instructor && (
+                  {courseLinks && instructor && (
                     <SidebarMenuItem>
                       <SidebarMenuButton
                         className={menuButtonClass}
@@ -204,7 +222,7 @@ export function AppSidebar() {
           {assignment && (
             <nav aria-label={assignment.title} className="w-full">
               <SidebarGroup className="px-2 py-0">
-                {courseLinks && (
+                {(courseLinks || showPeople) && (
                   <SidebarSeparator className="mx-4 my-2 group-data-[collapsible=icon]:mx-2" />
                 )}
                 <SidebarGroupContent>

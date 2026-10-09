@@ -21,6 +21,9 @@ export async function observeWorkspace(queries: QueryClient) {
       value.kind === 'roster'
     ) {
       void queries.invalidateQueries({ queryKey: rosterQuery.queryKey });
+      // In a folder session the roster is a file whose details (how many
+      // students, whether it can hold an email) ride on /api/workspace.
+      void queries.invalidateQueries({ queryKey: workspaceQuery.queryKey });
       return;
     }
     if (

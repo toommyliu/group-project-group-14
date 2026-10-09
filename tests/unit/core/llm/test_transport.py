@@ -619,3 +619,76 @@ def test_a_password_in_the_host_url_never_reaches_the_raised_message(monkeypatch
         transport.send_json(url="https://alice:hunter2pass@gw.example/v1/x", payload={})
     assert "hunter2pass" not in str(excinfo.value)
     assert "gw.example" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# A reply that arrives a line at a time
+# ---------------------------------------------------------------------------
+
+
+class _LineResponse:
+    """A streamed reply: iterating it gives one line of bytes at a time."""
+
+    def __init__(self, lines: list[bytes]) -> None:
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
+def test_stream_json_lines_yields_each_object_and_skips_what_is_not_one(monkeypatch) -> None:
+    sent: list = []
+
+    def fake_urlopen(req, timeout=None):
+        sent.append((req.full_url, req.get_method(), json.loads(req.data), timeout))
+        return _LineResponse(
+            [b'{"status": "one"}\n', b"\n", b"not json\n", b"[1, 2]\n", b'{"status": "two"}\n']
+        )
+
+    monkeypatch.setattr(transport.request, "urlopen", fake_urlopen)
+    cutters: list = []
+
+    events = list(
+        transport.stream_json_lines(
+            url="http://127.0.0.1:1/api/pull",
+            payload={"model": "m"},
+            timeout_seconds=7,
+            on_open=cutters.append,
+        )
+    )
+
+    assert events == [{"status": "one"}, {"status": "two"}]
+    assert sent == [("http://127.0.0.1:1/api/pull", "POST", {"model": "m"}, 7)]
+    # The caller is handed a way to cut the connection; on a stand-in with
+    # no socket underneath, using it does nothing rather than failing.
+    assert len(cutters) == 1
+    cutters[0]()
+
+
+def test_stream_json_lines_reports_a_refusal_through_the_error_factory(monkeypatch) -> None:
+    class _Refused(Exception):
+        pass
+
+    def fake_urlopen(req, timeout=None):
+        raise _make_http_error(req.full_url, 400, '{"error": "invalid model name"}')
+
+    monkeypatch.setattr(transport.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(_Refused) as caught:
+        list(
+            transport.stream_json_lines(
+                url="http://127.0.0.1:1/api/pull",
+                payload={"model": "m"},
+                service="Ollama",
+                error_factory=_Refused,
+            )
+        )
+
+    assert "Ollama at http://127.0.0.1:1/api/pull returned HTTP 400" in str(caught.value)
+    assert "invalid model name" in str(caught.value)

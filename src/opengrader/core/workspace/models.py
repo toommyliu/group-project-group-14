@@ -122,10 +122,41 @@ class GradeSaveResult(BaseModel):
     folder: FolderWrite | None = None
 
 
+class RubricEditResult(BaseModel):
+    """What saving a question's rubric from the browser did.
+
+    `regraded` counts the saved grades that followed a renamed or re-pointed
+    item. `problems` names any of those grades whose `.submission.md` could
+    not be written yet; the answer key file itself is always written before
+    anything else changes, so a result means it holds the new rubric.
+    """
+
+    changed: bool
+    regraded: int = 0
+    problems: list[str] = []
+
+
+class FolderRoster(BaseModel):
+    """The class folder's roster file, as a folder session last read it.
+
+    `editable` is false when the roster is several files (one per section):
+    a student added in the browser would have no one file to go into.
+    """
+
+    files: list[str]
+    format: Literal["tsv", "csv"]
+    editable: bool
+    has_email: bool
+    students: int
+    skipped: int = 0
+
+
 class FolderSessionInfo(BaseModel):
     assignment_id: str
     assignment_title: str
     folder: str
+    # None when the class folder has no roster; the People page is then hidden.
+    roster: FolderRoster | None = None
 
 
 class FolderSyncResult(BaseModel):
@@ -134,6 +165,8 @@ class FolderSyncResult(BaseModel):
     written: int = 0
     failed: int = 0
     problems: list[str] = []
+    # The roster file changed, appeared or went away since the last sync.
+    roster_changed: bool = False
 
 
 CourseText = Annotated[
@@ -220,6 +253,19 @@ class StudentDetails(BaseModel):
 class Student(StudentDetails):
     id: str
     revision: int
+
+
+class StudentChange(Student):
+    """A roster student after an edit, and what the edit did beyond the roster.
+
+    Submissions already matched to the student (they carry the student's ID)
+    follow a changed name or ID, so the roster and the graded work never
+    name the same person two ways. `renamed` counts them. `problems` is for
+    a folder session, where each one is also a file that has to be written.
+    """
+
+    renamed: int = 0
+    problems: list[str] = []
 
 
 class StudentEdit(StudentDetails):

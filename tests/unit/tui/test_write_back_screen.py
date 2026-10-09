@@ -28,7 +28,7 @@ REPO = Path(__file__).resolve().parents[3]
 @pytest.fixture
 def cls(tmp_path: Path):
     root = tmp_path / "quiz"
-    shutil.copytree(REPO / "samples" / "cs146-quiz1", root)
+    shutil.copytree(REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader"))
     store = Workspace.create(root)
     published = publish_pipeline(
         store,

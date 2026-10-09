@@ -299,7 +299,7 @@ export default function SubmissionsPage() {
               <p role="status" className="text-sm text-muted-foreground">
                 {notice}
               </p>
-              {unnamed > 0 && !folderSession && (
+              {unnamed > 0 && (!folderSession || students.length > 0) && (
                 <Button
                   variant="outline"
                   disabled={matching}
@@ -448,7 +448,6 @@ export default function SubmissionsPage() {
                 roster={students}
                 holders={holders}
                 hasVersions={hasVersions}
-                editable={!folderSession}
                 onEdit={() => keep(row.submission.id)}
               />
             ))}
@@ -462,7 +461,6 @@ export default function SubmissionsPage() {
                       roster={students}
                       holders={holders}
                       hasVersions={hasVersions}
-                      editable={!folderSession}
                       onEdit={() => keep(row.submission.id)}
                     />
                   )}
@@ -540,7 +538,6 @@ function SubmissionRow({
   roster,
   holders,
   hasVersions,
-  editable,
   onEdit,
 }: {
   assignmentId: string;
@@ -548,7 +545,6 @@ function SubmissionRow({
   roster: Student[];
   holders: Map<string, number[]>;
   hasVersions: boolean;
-  editable: boolean;
   onEdit: () => void;
 }) {
   const scores = Object.values(submission.question_scores);
@@ -562,25 +558,16 @@ function SubmissionRow({
         <Handwriting submission={submission} />
       </PeopleCell>
       <PeopleCell>
-        {!editable ? (
-          <div className="grid">
-            <span className="truncate font-medium">
-              {submission.student_name || 'No student'}
-            </span>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {submission.student_id}
-            </span>
-          </div>
-        ) : (
-          <StudentCell
-            assignmentId={assignmentId}
-            submission={submission}
-            problem={problem}
-            roster={roster}
-            holders={holders}
-            onEdit={onEdit}
-          />
-        )}
+        {/* Also in a folder session, where the name is written into the
+            student's submission file as it is saved. */}
+        <StudentCell
+          assignmentId={assignmentId}
+          submission={submission}
+          problem={problem}
+          roster={roster}
+          holders={holders}
+          onEdit={onEdit}
+        />
       </PeopleCell>
       {hasVersions && (
         <PeopleCell className="hidden @3xl:block">

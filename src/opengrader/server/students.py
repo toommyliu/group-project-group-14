@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from opengrader.core.submissions.region_crop import RosterStudent, identify
-from opengrader.core.workspace import roster
+from opengrader.core.workspace import folder_session, roster
 from opengrader.core.workspace.models import Submission
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.scan_jobs import ScanJobs
@@ -30,12 +30,21 @@ def add_student_routes(
     @api.put("/assignments/{assignment_id}/submissions/{submission_id}/student")
     def set_student(assignment_id: str, submission_id: int, request: StudentUpdate) -> Submission:
         require_assignment(assignment_id)
-        return workspace.set_student(
-            assignment_id,
-            submission_id,
-            " ".join(request.student_name.split()),
-            request.student_id.strip(),
-        )
+        name = " ".join(request.student_name.split())
+        student_id = request.student_id.strip()
+        if folder_session.load_folder_session(workspace.root) is None:
+            return workspace.set_student(assignment_id, submission_id, name, student_id)
+        # A class folder open from classic: the name belongs to the
+        # submission's file, so it is written there first.
+        with folder_session.folder_lock(workspace.root):
+            session = folder_session.load_folder_session(workspace.root)
+            if session is None or session.assignment_id != assignment_id:
+                return workspace.set_student(
+                    assignment_id, submission_id, name, student_id
+                )
+            return folder_session.set_student(
+                workspace, assignment_id, submission_id, name, student_id
+            )
 
     @api.get(
         "/assignments/{assignment_id}/submissions/{submission_id}/pdf",
@@ -62,6 +71,53 @@ def add_student_routes(
         if not students:
             raise HTTPException(409, "Add students to the roster on the People page first.")
         counts = {"matched": 0, "ambiguous": 0, "unmatched": 0}
+
+        def suggest(submission_id: int, found) -> bool:  # noqa: ANN001 - identify()'s result
+            def apply() -> bool:
+                return workspace.suggest_student(
+                    assignment_id,
+                    submission_id,
+                    found.student_name,
+                    found.student_id,
+                    found.match_percent,
+                    list(found.candidates),
+                )
+
+            if folder_session.load_folder_session(workspace.root) is None:
+                return apply()
+            # A class folder open from classic: a matched name goes into the
+            # submission's file first. The lock is taken per submission, not
+            # around the whole run, so reading each name does not hold up a
+            # grade being saved meanwhile.
+            with folder_session.folder_lock(workspace.root):
+                session = folder_session.load_folder_session(workspace.root)
+                if session is None or session.assignment_id != assignment_id:
+                    return apply()
+                current = next(
+                    (
+                        item
+                        for item in workspace.submissions(assignment_id)
+                        if item.id == submission_id
+                    ),
+                    None,
+                )
+                if current is None or current.student_name:
+                    return False  # named while this one was being read
+                if not found.student_name:
+                    return apply()  # only close matches to offer; nothing to write
+                try:
+                    settle = folder_session.write_student_file(
+                        workspace,
+                        assignment_id,
+                        submission_id,
+                        found.student_name,
+                        found.student_id,
+                    )
+                except (OSError, ValueError):
+                    return False  # left unnamed, in the file and here alike
+                applied = apply()
+                settle()
+                return applied
         for submission in workspace.submissions(assignment_id):
             if submission.student_name:
                 continue
@@ -75,14 +131,7 @@ def add_student_routes(
                 continue
             found = jobs.processing.submit(identify, *crops, students).result()
             kind = "matched" if found.student_name else "ambiguous" if found.candidates else "unmatched"
-            if kind != "unmatched" and not workspace.suggest_student(
-                assignment_id,
-                submission.id,
-                found.student_name,
-                found.student_id,
-                found.match_percent,
-                list(found.candidates),
-            ):
+            if kind != "unmatched" and not suggest(submission.id, found):
                 continue
             counts[kind] += 1
         return RosterMatches(**counts)

@@ -13,6 +13,7 @@ from opengrader.core.workspace.models import (
     RosterProblem,
     RosterUpdate,
     Student,
+    StudentChange,
     StudentDetails,
 )
 from opengrader.core.workspace.store import (
@@ -20,6 +21,7 @@ from opengrader.core.workspace.store import (
     WorkspaceConflict,
     WorkspaceNotFound,
     record_event,
+    refresh_feedback,
 )
 
 MAX_ROSTER_BYTES = 2_000_000
@@ -220,6 +222,72 @@ def _plan(
     return _Plan(additions, updates, unchanged, problems)
 
 
+def matched_submissions(db: sqlite3.Connection, sid: str) -> list[tuple[str, int]]:
+    """(assignment, submission) for every submission matched to this student ID."""
+    if not sid:
+        return []
+    return [
+        (row[0], row[1])
+        for row in db.execute(
+            "SELECT assignment_id, id FROM submissions "
+            "WHERE json_extract(original, '$.student_id')=? ORDER BY assignment_id, id",
+            (sid,),
+        )
+    ]
+
+
+def rename_matched_submissions(
+    db: sqlite3.Connection, old_sid: str, after: StudentDetails
+) -> int:
+    """Carry a roster student's new name or ID into the submissions matched to them.
+
+    A submission keeps its own copy of the name and ID it was given (that is
+    what is printed on its feedback). Matching is by ID, so those copies are
+    exactly the ones holding the student's old ID. Whether the match was
+    confirmed by a grader is left as it was: this corrects who the student
+    *is*, not which paper is theirs.
+    """
+    matched = matched_submissions(db, old_sid)
+    if not matched:
+        return 0
+    changed = 0
+    for assignment_id, submission_id in matched:
+        changed += db.execute(
+            """UPDATE submissions SET original=json_set(original,
+               '$.student_name', ?, '$.student_id', ?)
+               WHERE assignment_id=? AND id=?
+               AND (coalesce(json_extract(original, '$.student_name'), '') != ?
+                    OR json_extract(original, '$.student_id') != ?)""",
+            (after.name, after.sid, assignment_id, submission_id, after.name, after.sid),
+        ).rowcount
+        refresh_feedback(db, assignment_id, submission_id)
+        record_event(db, assignment_id, kind="submission", submission_id=submission_id)
+    return changed
+
+
+def submissions_matched_to(workspace: Workspace, sid: str) -> list[tuple[str, int]]:
+    with workspace.connect() as db:
+        return matched_submissions(db, sid)
+
+
+def rename_submission(
+    workspace: Workspace, assignment_id: str, submission_id: int, after: StudentDetails
+) -> None:
+    """One submission's share of `rename_matched_submissions`, on its own.
+
+    For a folder session, which renames a submission in the workspace only
+    once its file has been written.
+    """
+    with workspace.connect(write=True) as db:
+        db.execute(
+            """UPDATE submissions SET original=json_set(original,
+               '$.student_name', ?, '$.student_id', ?) WHERE assignment_id=? AND id=?""",
+            (after.name, after.sid, assignment_id, submission_id),
+        )
+        refresh_feedback(db, assignment_id, submission_id)
+        record_event(db, assignment_id, kind="submission", submission_id=submission_id)
+
+
 def _apply(db: sqlite3.Connection, plan: _Plan) -> None:
     # Clear changing emails first so two students can trade addresses in one import.
     db.executemany(
@@ -240,6 +308,9 @@ def _apply(db: sqlite3.Connection, plan: _Plan) -> None:
             for details in plan.additions
         ],
     )
+    for student, after in plan.updates:
+        if after.name != student.name:
+            rename_matched_submissions(db, student.sid, after)
     record_event(db, "", kind="roster")
 
 
@@ -316,32 +387,143 @@ def add_student(workspace: Workspace, details: StudentDetails) -> Student:
     return student
 
 
-def update_student(
-    workspace: Workspace, student_id: str, details: StudentDetails, expected_revision: int
-) -> Student:
-    with workspace.connect(write=True) as db:
-        row = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
-        if row is None:
-            raise WorkspaceNotFound("This student is no longer on the roster.")
-        current = Student(**dict(row))
-        if current.revision != expected_revision:
-            raise WorkspaceConflict(
-                "Someone else changed this student while you were editing."
-            )
-        details = StudentDetails.model_validate(
-            details.model_dump(include=set(StudentDetails.model_fields))
+def _checked_update(
+    db: sqlite3.Connection, student_id: str, details: StudentDetails, expected_revision: int
+) -> tuple[Student, StudentDetails]:
+    row = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if row is None:
+        raise WorkspaceNotFound("This student is no longer on the roster.")
+    current = Student(**dict(row))
+    if current.revision != expected_revision:
+        raise WorkspaceConflict(
+            "Someone else changed this student while you were editing."
         )
-        if _details(current) == details:
-            return current
+    details = StudentDetails.model_validate(
+        details.model_dump(include=set(StudentDetails.model_fields))
+    )
+    if _details(current) != details:
         _require_unique(db, details, student_id)
+    return current, details
+
+
+def check_add(workspace: Workspace, details: StudentDetails) -> None:
+    """Raise what `add_student` would, changing nothing."""
+    with workspace.connect() as db:
+        _require_unique(db, details)
+
+
+def check_update(
+    workspace: Workspace, student_id: str, details: StudentDetails, expected_revision: int
+) -> tuple[Student, StudentDetails]:
+    """Raise what `update_student` would, changing nothing.
+
+    Returns the student as it is now and the edit as it would be stored, for
+    a caller that has to write a file before the roster may change.
+    """
+    with workspace.connect() as db:
+        return _checked_update(db, student_id, details, expected_revision)
+
+
+def get_student(workspace: Workspace, student_id: str) -> Student:
+    with workspace.connect() as db:
+        row = db.execute("SELECT * FROM students WHERE id=?", (student_id,)).fetchone()
+    if row is None:
+        raise WorkspaceNotFound("This student is no longer on the roster.")
+    return Student(**dict(row))
+
+
+def update_student(
+    workspace: Workspace,
+    student_id: str,
+    details: StudentDetails,
+    expected_revision: int,
+    *,
+    rename_submissions: bool = True,
+) -> StudentChange:
+    """Change a roster student; matched submissions follow a new name or ID.
+
+    `rename_submissions=False` is for a folder session, which has already
+    carried the change into each submission's file and the workspace with it.
+    """
+    with workspace.connect(write=True) as db:
+        current, details = _checked_update(db, student_id, details, expected_revision)
+        if _details(current) == details:
+            return StudentChange(**current.model_dump())
         student = Student(**details.model_dump(), id=student_id, revision=current.revision + 1)
         db.execute(
             "UPDATE students SET sid=:sid, first_name=:first_name, last_name=:last_name, "
             "email=:email, revision=:revision WHERE id=:id",
             student.model_dump(),
         )
+        renamed = 0
+        if rename_submissions and (
+            details.sid != current.sid or details.name != current.name
+        ):
+            renamed = rename_matched_submissions(db, current.sid, details)
         record_event(db, "", kind="roster")
-    return student
+    return StudentChange(**student.model_dump(), renamed=renamed)
+
+
+@dataclass(frozen=True)
+class RosterMirror:
+    """What making the roster equal to a file changed.
+
+    `renamed` pairs a student as they were with what the file now says, for
+    those whose name changed under the same ID.
+    """
+
+    changed: bool = False
+    renamed: tuple[tuple[Student, StudentDetails], ...] = ()
+
+
+def mirror_students(workspace: Workspace, desired: list[StudentDetails]) -> RosterMirror:
+    """Make the roster exactly `desired`, the students in a class folder's file.
+
+    Students are matched by ID: one the file still has keeps its identity
+    (and is updated if its name or email changed), one it gained is added,
+    one it lost is removed. Submissions are not touched here — a folder
+    session renames those through their files (`folder_roster`).
+    """
+    wanted: dict[str, StudentDetails] = {}
+    emails: set[str] = set()
+    for details in desired:
+        if details.sid in wanted:
+            continue
+        if details.email is not None:
+            # Two rows with one address: the roster allows an address once.
+            if details.email in emails:
+                details = details.model_copy(update={"email": None})
+            else:
+                emails.add(details.email)
+        wanted[details.sid] = details
+    with workspace.connect(write=True) as db:
+        current = {student.sid: student for student in _students(db)}
+        removed = [student for sid, student in current.items() if sid not in wanted]
+        added = [details for sid, details in wanted.items() if sid not in current]
+        updated = [
+            (current[sid], details)
+            for sid, details in wanted.items()
+            if sid in current and _details(current[sid]) != details
+        ]
+        if not (removed or added or updated):
+            return RosterMirror()
+        db.executemany("DELETE FROM students WHERE id=?", [(s.id,) for s in removed])
+        db.executemany(
+            "UPDATE students SET email=NULL WHERE id=?", [(s.id,) for s, _ in updated]
+        )
+        db.executemany(
+            "UPDATE students SET first_name=?, last_name=?, email=?, revision=revision+1 WHERE id=?",
+            [(d.first_name, d.last_name, d.email, s.id) for s, d in updated],
+        )
+        db.executemany(
+            "INSERT INTO students (id, sid, first_name, last_name, email, revision) VALUES (?, ?, ?, ?, ?, 1)",
+            [(str(uuid4()), d.sid, d.first_name, d.last_name, d.email) for d in added],
+        )
+        record_event(db, "", kind="roster")
+    return RosterMirror(
+        changed=True,
+        renamed=tuple((s, d) for s, d in updated if s.name != d.name),
+    )
 
 
 def remove_student(workspace: Workspace, student_id: str) -> None:

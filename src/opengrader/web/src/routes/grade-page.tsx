@@ -325,7 +325,9 @@ export default function GradePage({
                 ungraded ? () => selectSubmission(ungraded.id) : undefined
               }
               submissionId={submission.id}
-              question={question}
+              // The answer carries the question it is graded against, and is
+              // refreshed when a rubric is edited; the route's copy is not.
+              question={(data.answer && answer?.question) || question}
               answer={data.answer ? (answer ?? data.answer) : null}
               header={questionHeader}
             />

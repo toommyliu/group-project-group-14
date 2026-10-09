@@ -583,7 +583,7 @@ def test_classic_opening_a_shared_workspace_folder_warns_once(tmp_path, monkeypa
     from opengrader.core.workspace.store import Workspace
 
     root = tmp_path / "quiz"
-    shutil.copytree(Path(__file__).resolve().parents[3] / "samples" / "cs146-quiz1", root)
+    shutil.copytree(Path(__file__).resolve().parents[3] / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader"))
     store = Workspace.create(root)
     published = publish_pipeline(
         store,

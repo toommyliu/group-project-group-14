@@ -44,9 +44,22 @@ def load_roster_students(
 ) -> list[RosterStudent]:
     """Accepts tab-separated ID/name rows and a UTF-8 BOM. allow_missing_id retains
     name-only rows; other incomplete rows are skipped.
+
+    A `.csv` is read as the browser's roster format instead — a heading row
+    with First Name, Last Name and SID — so one roster file serves the
+    pipeline and the browser alike. A `.csv` without those headings raises
+    `ValueError` saying which are missing.
     """
     students: list[RosterStudent] = []
     text = Path(path).read_text(encoding="utf-8-sig")
+    if Path(path).suffix.lower() == ".csv":
+        # Imported here: the workspace package imports this module's callers.
+        from opengrader.core.workspace.roster_file import parse_roster
+
+        return [
+            RosterStudent(student_id=student.sid, name=student.name)
+            for student in parse_roster(text, "csv").students
+        ]
     for line in text.splitlines():
         if not line.strip():
             continue

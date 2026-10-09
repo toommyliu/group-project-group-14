@@ -98,10 +98,15 @@ def scan_class_folder(folder: str | Path) -> ClassFolderScan:
         ambiguities=ambiguities,
     )
     for path in files:
-        if path.suffix.lower() == ".csv" and _words(path) & _ROSTER_WORDS:
+        if (
+            path.suffix.lower() == ".csv"
+            and _words(path) & _ROSTER_WORDS
+            and not _is_roster_file(path)
+        ):
             notes.append(
-                f"{path.name} looks like a roster, but the pipeline reads a "
-                "tab-separated file (ID<TAB>NAME) — save it as .tsv"
+                f"{path.name} looks like a roster, but a .csv roster needs a "
+                "first row naming First Name, Last Name and SID — add it, or "
+                "save the file tab-separated (ID<TAB>NAME) as .tsv"
             )
 
     templates: list[Path] = []
@@ -229,8 +234,37 @@ def _is_qa_file(path: Path) -> bool:
     return bool(document.questions) or bool(document.version_questions)
 
 
+def find_roster(folder: str | Path) -> Path | None:
+    """The folder's roster file, when exactly one file can be it.
+
+    The roster part of `scan_class_folder` on its own, for a caller that
+    asks often and wants nothing else read (a browser session re-reads the
+    roster on every sync). Two candidates are no answer, as in the scan.
+    """
+    root = Path(folder).expanduser()
+    return _pick(
+        ROLE_ROSTER,
+        [
+            path
+            for path in _visible_children(root)
+            if path.is_file() and _is_roster_file(path)
+        ],
+        preferred=lambda path: bool(_words(path) & _ROSTER_WORDS),
+        ambiguities=[],
+    )
+
+
 def _is_roster_file(path: Path) -> bool:
     suffix = path.suffix.lower()
+    if suffix == ".csv":
+        # The browser's roster format: a heading row, then the students.
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            return False
+        from opengrader.core.workspace.roster_file import csv_has_roster_headings
+
+        return csv_has_roster_headings(text)
     if suffix not in (".tsv", ".txt"):
         return False
     try:

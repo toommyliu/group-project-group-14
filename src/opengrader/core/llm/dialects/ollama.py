@@ -19,6 +19,14 @@ class OllamaDialect:
     def models_endpoint(self, host: str) -> str | None:
         return join_url(host, "/api/tags")
 
+    def pull_endpoint(self, host: str) -> str:
+        return join_url(host, "/api/pull")
+
+    def pull_body(self, model: str) -> dict:
+        # "name" is what servers older than the "model" spelling read; a
+        # server ignores whichever one it does not know.
+        return {"model": model, "name": model, "stream": True}
+
     def auth_headers(self, api_key: str | None) -> dict[str, str]:
         # A server on this machine. There is nothing to authenticate to, and
         # sending a header anyway would be the first step towards treating the

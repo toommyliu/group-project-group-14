@@ -8,6 +8,7 @@ from urllib.parse import quote
 from PIL import Image
 
 from opengrader.core.grading.questions import (
+    QuestionContext,
     flatten_question_contexts,
     questions_for_submission,
     rubric_options,
@@ -32,6 +33,38 @@ from opengrader.core.workspace.models import (
     Question,
     RubricOption,
 )
+
+
+def workspace_question(context: QuestionContext) -> Question:
+    """One graded question as the workspace stores it beside every answer."""
+    return Question(
+        id=context.question_id,
+        prompt=context.prompt,
+        possible_points=context.points,
+        question_type=context.question_type,
+        expected_answers=context.expected_answers,
+        rubric=[
+            RubricOption(
+                label=option.label,
+                points_delta=option.points_delta,
+                kind=option.kind,
+                selection_mode=option.selection_mode,
+                default_comment=option.default_comment,
+            )
+            for option in rubric_options(context)
+        ],
+    )
+
+
+def context_revision(question: Question, response_text: str) -> str:
+    """Changes whenever what a grader is looking at does: the question or the answer.
+
+    A save names the revision it was made against, so a grade entered against
+    an older rubric is refused instead of being scored with the new one.
+    """
+    return hashlib.sha256(
+        (question.model_dump_json() + response_text).encode()
+    ).hexdigest()
 
 
 def publish_pipeline(
@@ -172,37 +205,18 @@ def publish_submission(
                 question_type=context.question_type,
             )
             responses[context.question_id] = response
-        question = Question(
-            id=context.question_id,
-            prompt=context.prompt,
-            possible_points=context.points,
-            question_type=context.question_type,
-            expected_answers=context.expected_answers,
-            rubric=[
-                RubricOption(
-                    label=option.label,
-                    points_delta=option.points_delta,
-                    kind=option.kind,
-                    selection_mode=option.selection_mode,
-                    default_comment=option.default_comment,
-                )
-                for option in rubric_options(context)
-            ],
-        )
+        question = workspace_question(context)
         width = height = None
         image_url = None
         if response.response_image_path:
             with Image.open(workspace.asset(response.response_image_path)) as image:
                 width, height = image.size
             image_url = f"/api/assets/{quote(Path(response.response_image_path).name)}"
-        context_revision = hashlib.sha256(
-            (question.model_dump_json() + response.response_text).encode()
-        ).hexdigest()
         answers.append(
             Answer(
                 workspace_id=workspace_id,
                 revision="0",
-                context_revision=context_revision,
+                context_revision=context_revision(question, response.response_text),
                 submission_id=0,
                 version=version,
                 question=question,

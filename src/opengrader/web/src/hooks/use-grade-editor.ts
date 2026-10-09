@@ -31,12 +31,15 @@ export function useGradeEditor({
   answer,
   navigating,
   onNext,
+  paused = false,
 }: {
   assignmentId: string;
   question: Question;
   answer: Answer;
   navigating: boolean;
   onNext: (() => void) | undefined;
+  /** True while something else owns the keyboard, such as the rubric editor. */
+  paused?: boolean;
 }) {
   const client = useQueryClient();
   const [saved, setSaved] = useState(answer);
@@ -422,6 +425,7 @@ export function useGradeEditor({
     {
       enabled:
         !busy &&
+        !paused &&
         !reloadOpen &&
         conflict === null &&
         blocker.status !== 'blocked',

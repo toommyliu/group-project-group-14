@@ -15,7 +15,6 @@ from opengrader.core.qa_file import (
 )
 from opengrader.core.qa_file.markdown import QAChoice
 from opengrader.core.question_types import MULTIPLE_CHOICE, normalize_boolean
-from opengrader.core.submissions.printed_text import printed_question_text
 
 MIN_TRUSTED_TRANSCRIPTION_CONFIDENCE = 60.0
 
@@ -130,6 +129,11 @@ def choice_label_set(response: str) -> frozenset[str]:
 def flatten_solution_entries(
     questions: list[QAQuestion],
 ) -> dict[str, SolutionEntry]:
+    # Imported here, not at the top: `core.submissions` imports this module
+    # (review.py reads the confidence floor above), so a top-level import
+    # made whichever of the two was imported first fail half-built.
+    from opengrader.core.submissions.printed_text import printed_question_text
+
     entries: dict[str, SolutionEntry] = {}
     for question in questions:
         if question.subquestions:

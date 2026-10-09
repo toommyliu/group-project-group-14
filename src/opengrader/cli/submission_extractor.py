@@ -7,10 +7,6 @@ import contextlib
 import shutil
 import sys
 import tempfile
-import subprocess
-import time
-import socket
-from urllib.parse import urlparse
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +16,7 @@ import click
 
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, resolved_ai, run_command
 from opengrader.core import app_config
+from opengrader.core.app_config import local_ai
 from opengrader.core.ocr import OcrConfig
 from opengrader.core.ocr.math_ocr import (
     MATH_BACKEND_NAMES,
@@ -1150,60 +1147,19 @@ def command(
         timeout_seconds=ollama_timeout,
     )
 
-    ollama_server_proc = None
-    ollama_log_file = None
+    started_server = None
     if (
         auto_ollama
         and bubble_sheet_layout is None
         and effective_ai.provider.kind == "local"
     ):
-        parsed_url = urlparse(ollama_host)
-        host = parsed_url.hostname or "127.0.0.1"
-        port = parsed_url.port or 11434
-
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex((host, port)) != 0:
-                print(f"Ollama server not found at {ollama_host}. Starting 'ollama serve'...")
-                try:
-                    ollama_log_file = tempfile.TemporaryFile(mode='w+', encoding='utf-8')
-                    ollama_server_proc = subprocess.Popen(
-                        ["ollama", "serve"],
-                        stdout=ollama_log_file,
-                        stderr=ollama_log_file
-                    )
-                    start_time = time.time()
-                    while time.time() - start_time < 30:
-                        time.sleep(1)
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                            if s2.connect_ex((host, port)) == 0:
-                                break
-                    else:
-                        print("Warning: Timed out waiting for Ollama to start. Extraction may fail.", file=sys.stderr)
-                        if ollama_log_file:
-                            ollama_log_file.seek(0)
-                            logs = ollama_log_file.read()
-                            if logs:
-                                print("\n--- Ollama Server Logs (failed to start) ---", file=sys.stderr)
-                                print(logs, file=sys.stderr)
-                                print("--------------------------------------------\n", file=sys.stderr)
-                            else:
-                                print("No logs captured from Ollama server.", file=sys.stderr)
-                except FileNotFoundError:
-                    print("Error: 'ollama' binary not found. Please install Ollama first.", file=sys.stderr)
-                    sys.exit(1)
-                except Exception as e:
-                    print(f"Error starting Ollama server: {e}", file=sys.stderr)
-                    if ollama_log_file:
-                        ollama_log_file.seek(0)
-                        logs = ollama_log_file.read()
-                        if logs:
-                            print("\n--- Ollama Server Logs (error during start) ---", file=sys.stderr)
-                            print(logs, file=sys.stderr)
-                            print("----------------------------------------------\n", file=sys.stderr)
-                    sys.exit(1)
-
-        print(f"Ensuring model '{ollama_model}' is available...")
-        subprocess.run(["ollama", "pull", ollama_model], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            started_server = local_ai.prepare_for_run(
+                ollama_host, (ollama_model,), emit=print
+            )
+        except local_ai.OllamaNotInstalled as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     ocr_config = None
     vision_reader = None
@@ -1568,15 +1524,9 @@ def command(
     finally:
         if refine_staging is not None:
             shutil.rmtree(refine_staging, ignore_errors=True)
-        if ollama_server_proc:
+        if started_server:
             print("Stopping auto-started Ollama server...")
-            ollama_server_proc.terminate()
-            try:
-                ollama_server_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                ollama_server_proc.kill()
-        if ollama_log_file:
-            ollama_log_file.close()
+            started_server.stop()
 
 
 def run_cli(

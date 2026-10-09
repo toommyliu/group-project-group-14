@@ -5,6 +5,8 @@ import {
   questionOutlineKey,
   questionOutlineTargetId,
 } from '@/lib/assignment-outline';
+import { PenLine } from 'lucide-react';
+import { Button } from './ui/button';
 import { Label } from './ui/label';
 import { GradingText } from './grading-text';
 
@@ -47,13 +49,18 @@ function QuestionContent({
   version,
   depth,
   onQuestionSelect,
+  onEditRubric,
 }: {
   question: Question | Subquestion;
   version: string;
   depth: number;
   onQuestionSelect: (key: string) => void;
+  onEditRubric?: (questionId: string) => void;
 }) {
   const outlineKey = questionOutlineKey(version, question);
+  // A question with parts is graded by its parts, which have the rubrics.
+  const graded = !('subquestions' in question && question.subquestions?.length);
+  const editRubric = graded && onEditRubric;
   const questionLabel = `Question ${question.id}`;
   const pointsLabel = `${question.points} points`;
   const correct = question.correct_choice_labels?.length
@@ -126,10 +133,30 @@ function QuestionContent({
           </pre>
         </div>
       )}
-      {!!question.rubric?.length && (
+      {(!!question.rubric?.length || editRubric) && (
         <div className="space-y-3">
-          <p className="font-medium">Rubric</p>
-          <RubricTree items={question.rubric} />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="font-medium">Rubric</p>
+            {editRubric && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label={`Edit the rubric of question ${question.id}`}
+                onClick={() => editRubric(question.id)}
+              >
+                <PenLine aria-hidden="true" />
+                Edit rubric
+              </Button>
+            )}
+          </div>
+          {question.rubric?.length ? (
+            <RubricTree items={question.rubric} />
+          ) : (
+            <p className="text-muted-foreground">
+              None yet. Graders choose Correct or Incorrect, or enter a score.
+            </p>
+          )}
         </div>
       )}
       {!!question.outcomes?.length && (
@@ -144,6 +171,7 @@ function QuestionContent({
               version={version}
               depth={depth + 1}
               onQuestionSelect={onQuestionSelect}
+              onEditRubric={onEditRubric}
             />
           ))}
         </div>
@@ -156,10 +184,13 @@ export function QAPreviewView({
   preview,
   versionOverride,
   onQuestionSelect,
+  onEditRubric,
 }: {
   preview: QAPreview;
   versionOverride?: string;
   onQuestionSelect: (key: string) => void;
+  /** Given the id of a question in the shown version; omit to show no button. */
+  onEditRubric?: (questionId: string) => void;
 }) {
   const { document, warnings } = preview;
   const [selectedVersion, setSelectedVersion] = useState('');
@@ -214,6 +245,7 @@ export function QAPreviewView({
               version={version ?? ''}
               depth={0}
               onQuestionSelect={onQuestionSelect}
+              onEditRubric={onEditRubric}
             />
           </li>
         ))}

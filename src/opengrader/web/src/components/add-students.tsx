@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { FileSpreadsheet, UserRound } from 'lucide-react';
 import { RosterImportDialog } from '@/components/roster-import';
 import { StudentDialog } from '@/components/student-dialog';
+import { useFolderSession } from '@/hooks/use-folder-session';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -26,6 +27,10 @@ export function AddStudents({
 }) {
   const [step, setStep] = useState<Step>('closed');
   const [opening, setOpening] = useState(0);
+  // A class folder's roster is its own file: students go into it one at a
+  // time, and a CSV is not imported over it. Several rosters (one per
+  // section) are not edited from here at all.
+  const folderRoster = useFolderSession()?.roster;
   const trigger = useRef<HTMLButtonElement>(null);
   const close = () => setStep('closed');
   const returnFocus = () => trigger.current;
@@ -34,16 +39,21 @@ export function AddStudents({
     onNotice(message);
   };
 
+  if (folderRoster && !folderRoster.editable) return null;
+
   return (
     <>
       <Button
         ref={trigger}
         onClick={() => {
           onNotice('');
-          setStep('choose');
+          if (folderRoster) {
+            setOpening((count) => count + 1);
+            setStep('one');
+          } else setStep('choose');
         }}
       >
-        Add students
+        {folderRoster ? 'Add student' : 'Add students'}
       </Button>
 
       <AlertDialog

@@ -40,6 +40,8 @@ export type AssignmentDraftOptions =
         assignment: Assignment;
         qa: QAPreview;
         editUnavailableReason?: string;
+        /** Rubrics can be edited question by question while the rest is read-only. */
+        rubricEditable?: boolean;
         hideDelete?: boolean;
         structureLocked?: boolean;
       };
@@ -62,6 +64,18 @@ export function useAssignmentDraft({
   >(() =>
     overview ? { source: initialSource, preview: overview.qa } : undefined
   );
+  // A read-only page has no draft, so when the saved answer key changes
+  // underneath it (a rubric edited in place, or in the class folder) it shows
+  // the new one. Adopted during render so the view keeps its scroll position.
+  const [receivedSource, setReceivedSource] = useState(initialSource);
+  if (overview?.editUnavailableReason && initialSource !== receivedSource) {
+    setReceivedSource(initialSource);
+    setOriginalSource(initialSource);
+    setSource(initialSource);
+    setResult({ source: initialSource, data: overview.qa });
+    setOutline(overview.qa);
+    setVisualBaseline({ source: initialSource, preview: overview.qa });
+  }
   const [retry, setRetry] = useState(0);
   const [mode, setMode] = useState<EditorMode>(
     () => usePreferences.getState().editorMode

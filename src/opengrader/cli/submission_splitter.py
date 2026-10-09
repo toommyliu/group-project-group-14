@@ -6,11 +6,6 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 import sys
-import tempfile
-import subprocess
-import time
-import socket
-from urllib.parse import urlparse
 
 import click
 
@@ -28,6 +23,7 @@ from opengrader.core.submissions import (
     write_extra_pages_map,
 )
 from opengrader.core import app_config
+from opengrader.core.app_config import local_ai
 
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.ocr.vision_reader import VisionReader
@@ -49,44 +45,6 @@ Examples:
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation --fix-order
 """
-
-
-def _start_ollama_server(ollama_host: str, ollama_model: str, emit: Callable[[str], None]):
-    parsed_url = urlparse(ollama_host)
-    host = parsed_url.hostname or "127.0.0.1"
-    port = parsed_url.port or 11434
-    proc = None
-    log_file = None
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        already_running = s.connect_ex((host, port)) == 0
-
-    if not already_running:
-        emit(f"Ollama server not found at {ollama_host}. Starting 'ollama serve'...")
-        try:
-            log_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
-            proc = subprocess.Popen(["ollama", "serve"], stdout=log_file, stderr=log_file)
-            start_time = time.time()
-            while time.time() - start_time < 30:
-                time.sleep(1)
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
-                    if s2.connect_ex((host, port)) == 0:
-                        break
-            else:
-                print("Warning: Timed out waiting for Ollama to start; the vision fallback may be unavailable.", file=sys.stderr)
-        except FileNotFoundError:
-            print("Error: 'ollama' binary not found. Please install Ollama first.", file=sys.stderr)
-            sys.exit(1)
-        except Exception as exc:
-            print(f"Error starting Ollama server: {exc}", file=sys.stderr)
-            sys.exit(1)
-
-    emit(f"Ensuring model '{ollama_model}' is available...")
-    subprocess.run(
-        ["ollama", "pull", ollama_model],
-        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    return proc, log_file
 
 
 def _verified_vision_reader(
@@ -676,8 +634,7 @@ def command(
     uses_ordering_pass = reorder or blank_template or auto_reorder
     may_use_vlm = llm_page_numbers and (use_boundary or uses_ordering_pass)
 
-    ollama_server_proc = None
-    ollama_log_file = None
+    started_server = None
     try:
         if may_use_vlm:
             resolved_for_reorder = app_config.with_overrides(
@@ -686,9 +643,13 @@ def command(
                 timeout_seconds=ollama_timeout,
             )
             if auto_ollama and resolved_for_reorder.provider.kind == "local":
-                ollama_server_proc, ollama_log_file = _start_ollama_server(
-                    ollama_host, ollama_model, emit
-                )
+                try:
+                    started_server = local_ai.prepare_for_run(
+                        ollama_host, (ollama_model,), emit=emit
+                    )
+                except local_ai.OllamaNotInstalled as exc:
+                    print(f"Error: {exc}", file=sys.stderr)
+                    sys.exit(1)
             # No cloud pre-flight here: every vision call the splitter makes
             # (page-number footers and Name/ID headers, used only to detect
             # boundaries and reorder pages) is a whole-page read, and
@@ -791,15 +752,9 @@ def command(
                 "(or --reorder). Pages were left as scanned."
             )
     finally:
-        if ollama_server_proc:
+        if started_server:
             emit("Stopping auto-started Ollama server...")
-            ollama_server_proc.terminate()
-            try:
-                ollama_server_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                ollama_server_proc.kill()
-        if ollama_log_file:
-            ollama_log_file.close()
+            started_server.stop()
 
 
 def run_cli(

@@ -32,6 +32,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { searchable } from '@/lib/search';
+import { useFolderSession } from '@/hooks/use-folder-session';
 import { setPreference, usePreferences } from '@/stores/preferences';
 
 type SortKey = 'name' | 'sid' | 'email';
@@ -106,6 +107,8 @@ export function Roster({
 }) {
   const id = useId();
   const queryClient = useQueryClient();
+  const folderRoster = useFolderSession()?.roster;
+  const editable = !folderRoster || folderRoster.editable;
   const roster = useQuery({ ...rosterQuery, initialData: initialStudents });
   const students = roster.data;
   const nameOrder = usePreferences(
@@ -189,7 +192,9 @@ export function Roster({
             </EmptyMedia>
             <EmptyTitle>No students yet</EmptyTitle>
             <EmptyDescription>
-              Use Add students to add them one at a time or import a CSV file.
+              {folderRoster
+                ? 'The roster file in the class folder has no students yet.'
+                : 'Use Add students to add them one at a time or import a CSV file.'}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -295,20 +300,28 @@ export function Roster({
                     )}
                   </PeopleCell>
                   <PeopleCell className="flex justify-end">
-                    <RowAction
-                      action="Edit"
-                      target={studentLabel(student)}
-                      onClick={(event) => edit(student, event.currentTarget)}
-                    >
-                      <Pencil aria-hidden="true" />
-                    </RowAction>
-                    <RowAction
-                      action="Remove"
-                      target={studentLabel(student)}
-                      onClick={(event) => remove(student, event.currentTarget)}
-                    >
-                      <Trash2 aria-hidden="true" />
-                    </RowAction>
+                    {editable && (
+                      <>
+                        <RowAction
+                          action="Edit"
+                          target={studentLabel(student)}
+                          onClick={(event) =>
+                            edit(student, event.currentTarget)
+                          }
+                        >
+                          <Pencil aria-hidden="true" />
+                        </RowAction>
+                        <RowAction
+                          action="Remove"
+                          target={studentLabel(student)}
+                          onClick={(event) =>
+                            remove(student, event.currentTarget)
+                          }
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </RowAction>
+                      </>
+                    )}
                   </PeopleCell>
                 </PeopleRow>
               );

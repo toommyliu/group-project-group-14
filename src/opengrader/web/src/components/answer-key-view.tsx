@@ -21,6 +21,7 @@ import {
 } from '@/lib/assignment-outline';
 import type { VisualEditorNavigation } from './visual-assignment-editor';
 import { QAPreviewView } from './qa-preview';
+import { RubricEditSheet, type RubricTarget } from './rubric-edit-sheet';
 import { Label } from './ui/label';
 import {
   Select,
@@ -39,6 +40,7 @@ export const AnswerKeyView = memo(function AnswerKeyView({
   scrollElementRef,
   onOutlineChange,
   onActiveChange,
+  rubricEditAssignmentId,
 }: {
   ref?: Ref<VisualEditorNavigation>;
   preview: QAPreview;
@@ -46,9 +48,12 @@ export const AnswerKeyView = memo(function AnswerKeyView({
   scrollElementRef: RefObject<HTMLElement | null>;
   onOutlineChange: (entries: OutlineEntry[], version: string) => void;
   onActiveChange: (key: string) => void;
+  /** Set where a rubric can be edited in place (a folder session); else read-only. */
+  rubricEditAssignmentId?: string;
 }) {
   const versions = preview.document.versions ?? [];
   const [version, setVersion] = useState(versions[0] ?? '');
+  const [rubricTarget, setRubricTarget] = useState<RubricTarget | null>(null);
   const pendingTarget = useRef<string | null>(null);
   const entries = useMemo(
     () => questionOutlineEntries(previewOutlineGroups(preview.document)),
@@ -142,7 +147,20 @@ export const AnswerKeyView = memo(function AnswerKeyView({
         preview={preview}
         versionOverride={version}
         onQuestionSelect={scrollToQuestion}
+        onEditRubric={
+          rubricEditAssignmentId
+            ? (questionId) =>
+                setRubricTarget({ questionId, version: version || null })
+            : undefined
+        }
       />
+      {rubricEditAssignmentId && (
+        <RubricEditSheet
+          assignmentId={rubricEditAssignmentId}
+          target={rubricTarget}
+          onClose={() => setRubricTarget(null)}
+        />
+      )}
     </div>
   );
 });

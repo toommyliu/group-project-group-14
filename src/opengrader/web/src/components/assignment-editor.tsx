@@ -565,6 +565,11 @@ export function AssignmentEditor(props: AssignmentDraftOptions) {
                             scrollElementRef={editorScrollRef}
                             onOutlineChange={acceptOutline}
                             onActiveChange={updateActiveKey}
+                            rubricEditAssignmentId={
+                              overview?.rubricEditable
+                                ? overview.assignment.id
+                                : undefined
+                            }
                           />
                         ) : (
                           <Suspense

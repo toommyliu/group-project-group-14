@@ -2,10 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 
-from opengrader.core.workspace import roster
+from opengrader.core.workspace import folder_roster, roster
+from opengrader.core.workspace.folder_session import folder_lock, load_folder_session
 from opengrader.core.workspace.models import (
     RosterImport,
     Student,
+    StudentChange,
     StudentDetails,
     StudentEdit,
 )
@@ -41,17 +43,41 @@ def add_roster_routes(api: APIRouter, workspace: Workspace) -> None:
     def list_students() -> list[Student]:
         return roster.students(workspace)
 
+    # In a folder session (a class folder open from classic mode) the roster
+    # is a file in that folder. Each change below is written into it first
+    # (`core/workspace/folder_roster`); the lock keeps a sync from reading
+    # the file between that write and the roster catching up.
+
     @router.post("/students", status_code=201)
     def add_student(details: StudentDetails) -> Student:
-        return roster.add_student(workspace, details)
+        with folder_lock(workspace.root):
+            session = load_folder_session(workspace.root)
+            if session is None:
+                return roster.add_student(workspace, details)
+            return folder_roster.add_student(workspace, session.assignment_id, details)
 
     @router.put("/students/{student_id}")
-    def edit_student(student_id: str, edit: StudentEdit) -> Student:
-        return roster.update_student(workspace, student_id, edit, edit.expected_revision)
+    def edit_student(student_id: str, edit: StudentEdit) -> StudentChange:
+        with folder_lock(workspace.root):
+            session = load_folder_session(workspace.root)
+            if session is None:
+                return roster.update_student(
+                    workspace, student_id, edit, edit.expected_revision
+                )
+            return folder_roster.update_student(
+                workspace, session.assignment_id, student_id, edit
+            )
 
     @router.delete("/students/{student_id}", status_code=204)
     def remove_student(student_id: str) -> Response:
-        roster.remove_student(workspace, student_id)
+        with folder_lock(workspace.root):
+            session = load_folder_session(workspace.root)
+            if session is None:
+                roster.remove_student(workspace, student_id)
+            else:
+                folder_roster.remove_student(
+                    workspace, session.assignment_id, student_id
+                )
         return Response(status_code=204)
 
     @router.post("/import/preview", openapi_extra=_CSV_BODY)

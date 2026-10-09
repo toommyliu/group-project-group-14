@@ -150,6 +150,28 @@ def test_a_csv_roster_is_explained_not_used(tmp_path) -> None:
     assert any("tab-separated" in note for note in found.notes)
 
 
+def test_a_csv_roster_with_its_heading_row_is_used(tmp_path) -> None:
+    _touch(tmp_path / "scan.pdf")
+    _touch(tmp_path / "roster.csv", "First Name,Last Name,SID\nAda,Lovelace,1\n")
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.roster == tmp_path / "roster.csv"
+    assert found.notes == ()
+
+
+def test_find_roster_is_the_scans_answer_without_the_rest_of_the_scan(tmp_path) -> None:
+    from opengrader.core.class_folder import find_roster
+
+    assert find_roster(tmp_path) is None
+    _touch(tmp_path / "enrolled.tsv", "1\tAda Lovelace\n")
+    assert find_roster(tmp_path) == tmp_path / "enrolled.tsv"
+    # Two files that could each be it are no answer, exactly as in the scan.
+    _touch(tmp_path / "other.tsv", "2\tGrace Hopper\n")
+    assert find_roster(tmp_path) is None
+    assert scan_class_folder(tmp_path).roster is None
+
+
 def test_two_templates_are_reported(tmp_path) -> None:
     _touch(tmp_path / "scan.pdf")
     _touch(tmp_path / "template-vA.pdf")

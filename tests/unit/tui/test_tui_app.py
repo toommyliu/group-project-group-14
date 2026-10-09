@@ -2252,7 +2252,7 @@ def _copy_sample(tmp_path: Path) -> tuple[Path, Path]:
     import shutil
 
     target = tmp_path / "cs146-quiz1"
-    shutil.copytree("samples/cs146-quiz1", target)
+    shutil.copytree("samples/cs146-quiz1", target, ignore=shutil.ignore_patterns(".opengrader"))
     return target / "qa.md", target / "student-submissions"
 
 
@@ -2357,7 +2357,7 @@ def _record_folders(tmp_path: Path, count: int) -> list[Path]:
     folders = []
     for index in range(count):
         folder = tmp_path / f"class-{index}"
-        shutil.copytree("samples/cs146-quiz1", folder)
+        shutil.copytree("samples/cs146-quiz1", folder, ignore=shutil.ignore_patterns(".opengrader"))
         record_recent(
             "folder",
             folder,

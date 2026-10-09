@@ -486,13 +486,19 @@ def test_run_cli_reports_progress(tmp_path: Path) -> None:
 
 def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> None:
     import opengrader.cli.automated_grading as ag
+    from opengrader.core.app_config import local_ai
 
+    pulled: list[str] = []
+
+    def fake_start(host, *, emit, **_kwargs):  # noqa: ANN001
+        emit("Starting the AI server…")
+        return None
+
+    monkeypatch.setattr(local_ai, "start_server", fake_start)
+    monkeypatch.setattr(local_ai, "installed_models", lambda host, **_k: [])
     monkeypatch.setattr(
-        ag,
-        "_start_ollama_server_if_needed",
-        lambda config, emit: emit("Starting Ollama server…"),
+        local_ai, "pull_model", lambda host, model, **_k: pulled.append(model)
     )
-    monkeypatch.setattr(ag.subprocess, "run", lambda *a, **k: None)
     monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
     monkeypatch.setattr("opengrader.core.llm.generate", lambda **k: "{}")
 
@@ -511,8 +517,9 @@ def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> N
         status_callback=messages.append,
     )
 
-    assert any("Starting Ollama" in m for m in messages)
-    assert any("Pulling model" in m for m in messages)
+    assert any("Starting the AI server" in m for m in messages)
+    assert any("Downloading model" in m for m in messages)
+    assert pulled == [app_config.resolve().text_model]
 
 
 def test_unknown_version_falls_back_to_first_version(tmp_path: Path) -> None:

@@ -33,6 +33,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Field, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
+import { useFolderSession } from '@/hooks/use-folder-session';
 
 type FieldName = 'first_name' | 'last_name' | 'sid' | 'email';
 type Draft = Record<FieldName, string>;
@@ -191,6 +192,10 @@ export function StudentDialog({
 }) {
   const id = useId();
   const queryClient = useQueryClient();
+  // A tab-separated roster file (and a CSV with no Email column) has nowhere
+  // to keep an email, so the field is not offered for one.
+  const folderRoster = useFolderSession()?.roster;
+  const emailField = !folderRoster || folderRoster.has_email;
   const [base, setBase] = useState(student);
   const [draft, setDraft] = useState<Draft>({
     first_name: student?.first_name ?? '',
@@ -259,15 +264,24 @@ export function StudentDialog({
       sid: draft.sid.trim(),
       first_name: draft.first_name.trim(),
       last_name: draft.last_name.trim(),
-      email: draft.email.trim() || null,
+      email: emailField ? draft.email.trim() || null : null,
     };
     setSaving(true);
     try {
-      const saved = base
-        ? await editStudent(base, details)
-        : await addStudent(details);
+      const change = base ? await editStudent(base, details) : null;
+      const saved = change ?? (await addStudent(details));
       await refresh();
-      onDone(`${base ? 'Saved' : 'Added'} ${studentLabel(saved)}.`);
+      // Submissions already matched to this student follow a changed name
+      // or ID; say so, and say if any of their files could not be written.
+      const renamed = change?.renamed ?? 0;
+      const problems = change?.problems ?? [];
+      onDone(
+        `${base ? 'Saved' : 'Added'} ${studentLabel(saved)}.` +
+          (renamed
+            ? ` Updated ${renamed} matched submission${renamed === 1 ? '' : 's'}.`
+            : '') +
+          (problems.length ? ` Could not update: ${problems.join(' ')}` : '')
+      );
     } catch (error) {
       await recover(error);
     } finally {
@@ -338,16 +352,18 @@ export function StudentDialog({
             placeholder="012345678"
             maxLength={64}
           />
-          <StudentField
-            {...fieldProps}
-            name="email"
-            label="Email"
-            requirement="optional"
-            type="email"
-            inputMode="email"
-            placeholder="name@school.edu"
-            maxLength={254}
-          />
+          {emailField && (
+            <StudentField
+              {...fieldProps}
+              name="email"
+              label="Email"
+              requirement="optional"
+              type="email"
+              inputMode="email"
+              placeholder="name@school.edu"
+              maxLength={254}
+            />
+          )}
           <p role="status" className={notice ? 'text-sm' : 'sr-only'}>
             {notice}
           </p>

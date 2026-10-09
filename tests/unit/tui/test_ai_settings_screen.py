@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 
 import pytest
 from textual.app import App
 from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
 from opengrader.core import app_config
-from opengrader.core.app_config import AISettings, ProviderSpec
+from opengrader.core.app_config import AISettings, ProviderSpec, local_ai
+from opengrader.tui.ui.screens import ai_settings_screen
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
 
 _SIZE = (120, 44)
@@ -673,3 +676,415 @@ def test_apply_button_stays_hidden_and_disabled_with_no_recommendation(
     hidden, disabled = asyncio.run(run())
     assert hidden is True
     assert disabled is True
+
+
+# ---------------------------------------------------------------------------
+# Set up local AI
+# ---------------------------------------------------------------------------
+
+
+def _status(missing: tuple[str, ...], wanted: tuple[str, ...]) -> "local_ai.LocalAIStatus":
+    return local_ai.LocalAIStatus(
+        host=app_config.DEFAULT_HOST,
+        wanted=wanted,
+        installed=tuple(model for model in wanted if model not in missing),
+        missing=missing,
+    )
+
+
+# Both jobs ticked, so both models are in play. A fresh install has only
+# "read names and IDs locally" on, which needs the handwriting model alone.
+_BOTH_JOBS_ON = AISettings(read_handwriting=True, grade_written=True)
+
+
+def _prepare_label(screen: AISettingsScreen) -> str:
+    return str(screen.query_one("#ai-prepare", Button).label)
+
+
+def _plain_log(screen: AISettingsScreen) -> str:
+    # The log wraps, so a sentence is rarely on one line: join the lines'
+    # text and collapse the whitespace before looking for one.
+    lines = screen.query_one("#ai-log", RichLog).lines
+    return " ".join(" ".join(line.text for line in lines).split())
+
+
+async def _press_prepare(pilot, screen: AISettingsScreen) -> None:  # noqa: ANN001
+    # A button ignores a click for a moment after the last one (the pressed
+    # look is still showing). A stand-in that answers instantly gets a test
+    # to the second press sooner than any person could.
+    button = screen.query_one("#ai-prepare", Button)
+    await _settle(pilot, lambda: not button.has_class("-active"))
+    await pilot.click("#ai-prepare")
+
+
+def test_set_up_local_ai_asks_before_it_downloads_then_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+    release = threading.Event()
+
+    def fake_prepare(host, models, *, emit, on_progress, cancel, install, download):  # noqa: ANN001
+        calls.append(
+            {"host": host, "models": models, "install": install, "download": download}
+        )
+        if not download:
+            return _status(missing=models, wanted=models)
+        emit(f"Downloading {models[0]}…")
+        on_progress(
+            local_ai.PullProgress(
+                models[0], "pulling", completed=3_000_000_000, total=6_000_000_000
+            )
+        )
+        release.wait(timeout=10)
+        return _status(missing=(), wanted=models)
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> dict:
+        seen: dict = {}
+        app = _Host(AISettingsScreen(_BOTH_JOBS_ON))
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#ai-text-model", Input).value = "typed-grader:1"
+            await pilot.pause()
+
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: _prepare_label(screen) == "Download models")
+            seen["offer_label"] = _prepare_label(screen)
+            seen["offer_text"] = _plain_log(screen)
+            seen["save_enabled_at_offer"] = not screen.query_one("#ai-save", Button).disabled
+
+            await _press_prepare(pilot, screen)
+            progress = screen.query_one("#ai-prepare-status", Static)
+            await _settle(pilot, lambda: bool(progress.display))
+            seen["progress"] = str(progress.render())
+            seen["running_label"] = _prepare_label(screen)
+            seen["save_disabled_while_running"] = screen.query_one("#ai-save", Button).disabled
+            release.set()
+            await _settle(pilot, lambda: _prepare_label(screen) == "Set up local AI")
+            seen["done_text"] = _plain_log(screen)
+            seen["progress_hidden"] = not progress.display
+        return seen
+
+    seen = asyncio.run(run())
+    vision = app_config.DEFAULT_VISION_MODEL
+
+    # The first press only looks; the second, labelled press is the consent.
+    assert [(call["install"], call["download"]) for call in calls] == [
+        (False, False),
+        (True, True),
+    ]
+    # What is fetched is what the form says: a typed name, and the
+    # recommended model where the field is blank.
+    assert calls[0]["models"] == (vision, "typed-grader:1")
+    assert calls[0]["host"] == app_config.DEFAULT_HOST
+    assert seen["offer_label"] == "Download models"
+    assert f"{vision} (handwriting)" in seen["offer_text"]
+    assert "typed-grader:1 (grading)" in seen["offer_text"]
+    assert seen["save_enabled_at_offer"] is True
+    assert seen["progress"] == f"{vision} — 50% · 3.0 GB of 6.0 GB"
+    assert seen["running_label"] == "Stop"
+    assert seen["save_disabled_while_running"] is True
+    assert "The local AI is ready" in seen["done_text"]
+    assert seen["progress_hidden"] is True
+    # Like Test connection, it works from the form and saves nothing.
+    assert not app_config.settings_path().exists()
+
+
+def test_set_up_local_ai_says_ready_at_once_when_nothing_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def fake_prepare(host, models, *, emit, on_progress, cancel, install, download):  # noqa: ANN001
+        calls.append(download)
+        emit(f"The AI server is answering at {host}.")
+        return _status(missing=(), wanted=models)
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> tuple[str, str]:
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: "ready" in _plain_log(screen))
+            return _plain_log(screen), _prepare_label(screen)
+
+    text, label = asyncio.run(run())
+    assert calls == [False]
+    assert "The AI server is answering" in text
+    assert "The local AI is ready" in text
+    assert label == "Set up local AI"
+
+
+def test_set_up_local_ai_can_be_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_prepare(host, models, *, emit, on_progress, cancel, install, download):  # noqa: ANN001
+        if not download:
+            return _status(missing=models, wanted=models)
+        deadline = time.monotonic() + 10
+        while not cancel.is_set() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        cancel.check()
+        raise AssertionError("was never asked to stop")
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> tuple[str, str, bool]:
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: _prepare_label(screen) == "Download models")
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: _prepare_label(screen) == "Stop")
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: _prepare_label(screen) == "Set up local AI")
+            return (
+                _plain_log(screen),
+                _prepare_label(screen),
+                screen.query_one("#ai-save", Button).disabled,
+            )
+
+    text, label, save_disabled = asyncio.run(run())
+    assert "Stopped." in text
+    assert "is kept" in text
+    assert label == "Set up local AI"
+    assert save_disabled is False
+
+
+@pytest.mark.parametrize(
+    ("brew", "label", "expected"),
+    [
+        ("/stand-in/brew", "Install and download", "press Install and download"),
+        (None, "Set up local AI", local_ai.OLLAMA_DOWNLOAD_URL),
+    ],
+)
+def test_set_up_local_ai_offers_to_install_ollama_only_where_homebrew_can(
+    monkeypatch: pytest.MonkeyPatch, brew: str | None, label: str, expected: str
+) -> None:
+    calls: list[bool] = []
+
+    def fake_prepare(host, models, *, emit, on_progress, cancel, install, download):  # noqa: ANN001
+        calls.append(install)
+        if install:
+            return _status(missing=(), wanted=models)
+        raise local_ai.OllamaNotInstalled()
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+    monkeypatch.setattr(ai_settings_screen, "find_homebrew", lambda: brew)
+
+    async def run() -> tuple[str, str, str]:
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: "not installed" in _plain_log(screen))
+            first_text, first_label = _plain_log(screen), _prepare_label(screen)
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: len(calls) == 2)
+            await _settle(
+                pilot, lambda: not screen.query_one("#ai-save", Button).disabled
+            )
+            return first_text, first_label, _plain_log(screen)
+
+    first_text, first_label, second_text = asyncio.run(run())
+    assert "Ollama, the program that runs the AI" in first_text
+    assert expected in first_text
+    assert first_label == label
+    # With Homebrew the second press installs; without it there is nothing to
+    # confirm, so a second press is simply another look.
+    assert calls == [False, bool(brew)]
+    assert ("The local AI is ready" in second_text) is bool(brew)
+
+
+def test_set_up_local_ai_reports_a_failure_in_the_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_prepare(host, models, **_kwargs):  # noqa: ANN001
+        raise local_ai.LocalAIError("Ollama did not answer within 30 s.")
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> tuple[str, bool]:
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: "did not answer" in _plain_log(screen))
+            return _plain_log(screen), screen.query_one("#ai-test", Button).disabled
+
+    text, test_disabled = asyncio.run(run())
+    assert "Ollama did not answer within 30 s." in text
+    assert test_disabled is False
+
+
+def test_set_up_local_ai_is_not_offered_for_a_cloud_provider(
+    fake_cloud_provider: ProviderSpec,
+) -> None:
+    async def run() -> tuple[bool, bool]:
+        local = _Host(AISettingsScreen())
+        async with local.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            shown_for_local = bool(local.screen.query_one("#ai-prepare", Button).display)
+        cloud = _Host(AISettingsScreen(AISettings(provider=fake_cloud_provider.name)))
+        async with cloud.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            shown_for_cloud = bool(cloud.screen.query_one("#ai-prepare", Button).display)
+        return shown_for_local, shown_for_cloud
+
+    shown_for_local, shown_for_cloud = asyncio.run(run())
+    assert shown_for_local is True
+    assert shown_for_cloud is False
+
+
+def test_closing_ai_setup_stops_a_download_in_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stopped = threading.Event()
+
+    def fake_prepare(host, models, *, emit, on_progress, cancel, install, download):  # noqa: ANN001
+        if not download:
+            return _status(missing=models, wanted=models)
+        deadline = time.monotonic() + 10
+        while not cancel.is_set() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if cancel.is_set():
+            stopped.set()
+        cancel.check()
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> None:
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: _prepare_label(screen) == "Download models")
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: _prepare_label(screen) == "Stop")
+            await pilot.press("escape")
+            await _settle(pilot, stopped.is_set)
+
+    asyncio.run(run())
+    assert stopped.is_set()
+
+
+def test_set_up_local_ai_fetches_only_the_models_the_ticked_switches_need(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[tuple[str, ...]] = []
+
+    def fake_prepare(host, models, **_kwargs):  # noqa: ANN001
+        asked.append(models)
+        return _status(missing=models, wanted=models)
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> list[str]:
+        logs: list[str] = []
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+
+            # As installed: only names and IDs are read locally.
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: len(asked) == 1 and "Not downloaded" in _plain_log(screen))
+            logs.append(_plain_log(screen))
+
+            # Ticked but not saved still counts: the form is what is read.
+            screen.query_one("#ai-grade-written", Checkbox).value = True
+            await pilot.pause()
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: len(asked) == 2 and "Not downloaded" in _plain_log(screen))
+            logs.append(_plain_log(screen))
+
+            # Grading only.
+            screen.query_one("#ai-read-identity-locally", Checkbox).value = False
+            await pilot.pause()
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: len(asked) == 3 and "Not downloaded" in _plain_log(screen))
+            logs.append(_plain_log(screen))
+        return logs
+
+    logs = asyncio.run(run())
+    vision, text = app_config.DEFAULT_VISION_MODEL, app_config.DEFAULT_TEXT_MODEL
+    assert asked == [(vision,), (vision, text), (text,)]
+    assert f"Leaving out the grading model ({text})" in logs[0]
+    assert "Leaving out" not in logs[1]
+    assert f"Leaving out the handwriting model ({vision})" in logs[2]
+    # A changed selection is a new question: no press here was taken as the
+    # go-ahead for a download offered for a different set of models.
+    assert all("Not downloaded yet" in log for log in logs)
+
+
+def test_set_up_local_ai_downloads_nothing_when_no_switch_needs_a_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        local_ai, "prepare", lambda *a, **k: pytest.fail("started the local AI")
+    )
+
+    async def run() -> tuple[str, bool, str]:
+        settings = AISettings(read_identity_locally=False)
+        app = _Host(AISettingsScreen(settings))
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: "nothing to download" in _plain_log(screen))
+            return (
+                _plain_log(screen),
+                screen.query_one("#ai-save", Button).disabled,
+                _prepare_label(screen),
+            )
+
+    text, save_disabled, label = asyncio.run(run())
+    assert "nothing to download" in text
+    assert "Leaving out the handwriting model" in text
+    assert "Leaving out the grading model" in text
+    assert save_disabled is False
+    assert label == "Set up local AI"
+
+
+def test_one_model_named_for_both_jobs_is_fetched_when_either_is_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[tuple[str, ...]] = []
+
+    def fake_prepare(host, models, **_kwargs):  # noqa: ANN001
+        asked.append(models)
+        return _status(missing=(), wanted=models)
+
+    monkeypatch.setattr(local_ai, "prepare", fake_prepare)
+
+    async def run() -> str:
+        settings = AISettings(vision_model="shared:1", text_model="shared:1")
+        app = _Host(AISettingsScreen(settings))
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            await _press_prepare(pilot, screen)
+            await _settle(pilot, lambda: "ready" in _plain_log(screen))
+            return _plain_log(screen)
+
+    text = asyncio.run(run())
+    assert asked == [("shared:1",)]
+    assert "Leaving out" not in text
+
+
+def test_start_the_ai_automatically_is_the_first_switch() -> None:
+    async def run() -> str | None:
+        app = _Host(AISettingsScreen())
+        async with app.run_test(size=_SIZE) as pilot:
+            await pilot.pause()
+            return app.screen.query(Checkbox).first().id
+
+    assert asyncio.run(run()) == "ai-auto-start"

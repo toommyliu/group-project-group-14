@@ -325,7 +325,7 @@ class SetupScreen(Vertical):
         "pipe-scan": ("any", "Choose the scanned bundle PDF, or a folder of split PDFs"),
         "pipe-qa": ("file", "Choose the answer-key markdown file"),
         "pipe-out": ("directory", "Choose the class folder"),
-        "pipe-roster": ("file", "Choose the roster/ID file (.tsv)"),
+        "pipe-roster": ("file", "Choose the roster/ID file (.tsv or .csv)"),
         "pipe-template": ("file", "Choose the blank template PDF"),
         "pipe-region-map": ("file", "Choose the region map (.regions.json)"),
     }
@@ -535,7 +535,7 @@ class SetupScreen(Vertical):
                             "Match student names against a roster", id="pipe-use-roster"
                         )
                         yield self._path_row(
-                            "Path to roster file (.tsv)…", "pipe-roster", hidden=True
+                            "Path to roster file (.tsv or .csv)…", "pipe-roster", hidden=True
                         )
 
                         yield Checkbox(
@@ -1415,7 +1415,7 @@ class SetupScreen(Vertical):
             text_area.text = f"{existing}{path}\n"
 
         self.app.push_screen(
-            PathPickerScreen(title="Choose a roster file (.tsv)", mode="file"),
+            PathPickerScreen(title="Choose a roster file (.tsv or .csv)", mode="file"),
             _apply,
         )
 

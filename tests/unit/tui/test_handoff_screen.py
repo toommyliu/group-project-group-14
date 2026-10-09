@@ -535,7 +535,7 @@ def sample_session(tmp_path: Path) -> tuple[Path, Path]:
     import shutil
 
     repo = Path(__file__).resolve().parents[3]
-    shutil.copytree(repo / "samples" / "cs146-quiz1", tmp_path / "cs146-quiz1")
+    shutil.copytree(repo / "samples" / "cs146-quiz1", tmp_path / "cs146-quiz1", ignore=shutil.ignore_patterns(".opengrader"))
     shutil.copy(
         repo / "samples" / "cs146-quiz1" / "qa.md",
         tmp_path / "qa-multi.md",

@@ -73,7 +73,9 @@ while Opengrader gets itself ready:
 6. **Checks for Ollama**, the program that runs the AI model that reads
    handwriting. Ollama is **not** installed for you (its models are several GB),
    so if it's missing you'll see a note with the download link:
-   <https://ollama.com>.
+   <https://ollama.com>. Inside the app, **Tools → AI setup → Set up local AI**
+   starts Ollama and downloads the models with the progress on screen — and on
+   a Mac with Homebrew it can install Ollama too, after asking.
 
 The first launch takes a minute or two. After that, every step is already
 done, so Opengrader opens almost instantly.

@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import json
-import socket
-import subprocess
 import sys
-import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from urllib.parse import urlparse
 
 import click
 
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
+from opengrader.core.app_config import local_ai
 from opengrader.core.grading.evaluation import (
     DEFAULT_BUCKET_SIZE,
     DEFAULT_MIN_SAMPLE,
@@ -431,59 +428,20 @@ def report_to_dict(report: LlmEvalReport) -> dict[str, object]:
     }
 
 
-def _start_ollama_server_if_needed(host: str, emit: Callable[[str], None]) -> None:
-    parsed = urlparse(host)
-    hostname = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 11434
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        if probe.connect_ex((hostname, port)) == 0:
-            return
-    emit(f"Starting Ollama server at {host}…")
-    try:
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "'ollama' binary not found. Please install Ollama first."
-        ) from exc
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        time.sleep(1)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            if probe.connect_ex((hostname, port)) == 0:
-                return
-    emit("Warning: timed out waiting for Ollama to start.")
-
-
 def _default_generate_factory(
     host: str, timeout_seconds: float, *, auto_ollama: bool
 ) -> Callable[[str], GenerateFn]:
-    started = False
-
     def factory(model: str) -> GenerateFn:
-        nonlocal started
         resolved = app_config.with_overrides(
             host=host, text_model=model, timeout_seconds=timeout_seconds
         )
         if auto_ollama and resolved.kind == "local":
-            if not started:
-                _start_ollama_server_if_needed(
-                    resolved.host, lambda msg: print(msg, file=sys.stderr)
-                )
-                started = True
-            print(
-                f"Pulling model '{model}' if needed — first run may download "
-                "several GB…",
-                file=sys.stderr,
-            )
-            subprocess.run(
-                ["ollama", "pull", model],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            # Once per model compared: the server is started by the first
+            # call and found running by the rest.
+            local_ai.prepare_for_run(
+                resolved.host,
+                (model,),
+                emit=lambda msg: print(msg, file=sys.stderr),
             )
         try:
             app_config.ensure_ready(resolved, purpose="text")

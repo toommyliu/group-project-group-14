@@ -9,6 +9,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
+from opengrader.core.app_config import DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL
+
 _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("q", "Quit Opengrader."),
     ("F2", "Save pending feedback and choose something else to grade: the workspace's assignment list (opengrader tui), or the Start grading card (opengrader classic)."),
@@ -584,6 +586,17 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "listed as not installed and the vision model keeps working.",
     ),
     (
+        "The quick way",
+        "Press 'Set up local AI' in AI setup. It starts the AI server, tells "
+        "you which models are missing, and on a second press downloads them "
+        "with the progress on screen — the models named in AI setup, or the "
+        "recommended ones where a field is blank, and only for the jobs that "
+        "are ticked: the handwriting model for reading scans or names, the "
+        "grading model for suggesting grades. On a Mac with Homebrew it "
+        "can install Ollama as well. Steps 1-3 below are the same thing by "
+        "hand.",
+    ),
+    (
         "1 · Install Ollama",
         "macOS / Windows: download from https://ollama.com/download (or "
         "'brew install ollama'). Linux: "
@@ -600,11 +613,13 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
     (
         "3 · Get the model",
-        "With that same box ticked, a step also 'ollama pull's the model it "
-        "needs on first use. For handwriting, run 'ollama pull qwen3.5:9b' "
-        "(~7 GB); for grading, 'ollama pull qwen2.5vl:7b' (~6 GB). 'ollama list' shows what you "
-        "have, and 'Check this computer' in Tools (F3, classic) reports whether the "
-        "models AI setup names are actually installed.",
+        "With that same box ticked, a step also downloads the model it needs "
+        "on first use, reporting how far it has got. By hand: for "
+        f"handwriting, run 'ollama pull {DEFAULT_VISION_MODEL}'; for grading, "
+        f"'ollama pull {DEFAULT_TEXT_MODEL}' — several GB each. 'ollama "
+        "list' shows what you have, and 'Check this computer' in Tools (F3, "
+        "classic) reports whether the models AI setup names are actually "
+        "installed.",
     ),
     (
         "Choosing a model",
@@ -615,8 +630,9 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "model; leave either blank for the default.",
     ),
     (
-        "· vision — default",
-        "qwen3.5:9b   ~7 GB download. The handwriting default; qwen2.5vl:7b remains the grading default.",
+        "· the defaults",
+        f"{DEFAULT_VISION_MODEL} reads handwriting and {DEFAULT_TEXT_MODEL} "
+        "suggests grades — what a blank field in AI setup means.",
     ),
     (
         "· vision — light",

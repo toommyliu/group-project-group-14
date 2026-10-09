@@ -58,7 +58,7 @@ def _import(root: Path) -> tuple[Workspace, str]:
 @pytest.fixture
 def quiz(tmp_path: Path):
     root = tmp_path / "quiz"
-    shutil.copytree(REPO / "samples" / "cs146-quiz1", root)
+    shutil.copytree(REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader"))
     store, aid = _import(root)
     files = sorted((root / "student-submissions").rglob("*.submission.md"))
     first, second = (s.id for s in store.submissions(aid))
@@ -319,7 +319,7 @@ def test_sync_pulls_a_classic_edit_through_the_save_path(session) -> None:
 
     result = session["client"].post("/api/folder-session/sync").json()
 
-    assert result == {"imported": 0, "updated": 1, "written": 0, "failed": 0, "problems": []}
+    assert result == {"imported": 0, "updated": 1, "written": 0, "failed": 0, "problems": [], "roster_changed": False}
     answer = session["client"].get(_url(session, "q2", 1)).json()
     assert answer["points_awarded"] == 7 and answer["revision"] == "1"
     events = store.events(cursor)
@@ -342,7 +342,7 @@ def test_sync_without_changes_does_nothing_and_skips_unchanged_files(session, mo
 
     result = client.post("/api/folder-session/sync").json()
 
-    assert result == {"imported": 0, "updated": 0, "written": 0, "failed": 0, "problems": []}
+    assert result == {"imported": 0, "updated": 0, "written": 0, "failed": 0, "problems": [], "roster_changed": False}
     assert planned == []
 
 
@@ -368,6 +368,8 @@ def test_workspace_info_names_the_folder_session(session) -> None:
         "assignment_id": session["aid"],
         "assignment_title": "CS146: Quiz 1",
         "folder": str((session["root"] / "student-submissions").resolve()),
+        # The sample folder has no roster file, so there is no People page.
+        "roster": None,
     }
 
 

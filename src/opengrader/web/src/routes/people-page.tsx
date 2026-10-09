@@ -12,6 +12,7 @@ import { PageHeading } from '@/components/page-heading';
 import { Roster } from '@/components/roster';
 import { AddStaff, StaffAccess } from '@/components/staff-access';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useFolderSession } from '@/hooks/use-folder-session';
 import { peopleRoute } from '@/router';
 
 type View = 'students' | 'staff';
@@ -27,6 +28,7 @@ export default function PeoplePage() {
   const me = useQuery(authQuery).data?.user?.email;
   const [view, setView] = useState<View>('students');
   const [notice, setNotice] = useState('');
+  const folderRoster = useFolderSession()?.roster;
 
   const roster = (
     <Roster initialStudents={loaded.students} onNotice={setNotice} />
@@ -61,6 +63,26 @@ export default function PeoplePage() {
           </div>
         }
       />
+      {folderRoster && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          {folderRoster.editable ? (
+            <>
+              This is the roster file in the class folder (
+              <code>{folderRoster.files[0]}</code>). Students you add, edit or
+              remove here are saved straight into that file, and a submission
+              already matched to a student follows a changed name or ID.
+            </>
+          ) : (
+            <>
+              This class folder has one roster per section (
+              {folderRoster.files.join(', ')}), so its students are shown here
+              and edited in those files.
+            </>
+          )}
+          {folderRoster.skipped > 0 &&
+            ` ${folderRoster.skipped} row${folderRoster.skipped === 1 ? ' is' : 's are'} not shown: a student needs both a name and an ID.`}
+        </p>
+      )}
       {staff ? (
         <Tabs
           value={view}

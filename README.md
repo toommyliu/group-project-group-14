@@ -415,6 +415,11 @@ uv run submission-extractor --input /path/to/split --output /path/to/student-sub
 
 Run a vision language model to extract printed and handwritten text from the processed submissions:
 
+In the desktop app none of this is typed: open **Tools → AI setup** and press
+**Set up local AI**. It starts the Ollama server, lists which models are missing,
+and on a second press downloads them with the progress on screen. The commands
+below are the same thing by hand.
+
 Terminal 1: install the Ollama vision model and keep it running:
 ```bash
 # Download the handwriting model.

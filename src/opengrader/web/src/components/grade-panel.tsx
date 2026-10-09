@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { ErrorAlert } from '@/components/error-alert';
-import { Check, Eraser, TriangleAlert } from 'lucide-react';
+import { Check, Eraser, PenLine, TriangleAlert } from 'lucide-react';
 import type { Answer, Question } from '@/api/queries';
 import { useGradeEditor } from '@/hooks/use-grade-editor';
+import { useFolderSession } from '@/hooks/use-folder-session';
+import { RubricEditSheet } from './rubric-edit-sheet';
 import { GradingText } from './grading-text';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
@@ -34,6 +37,10 @@ export function GradePanel({
   navigating: boolean;
   onNext: (() => void) | undefined;
 }) {
+  // A rubric can be edited mid-grading only where the answer key is a file
+  // the edit is written into at once: a class folder opened from classic.
+  const folderSession = useFolderSession();
+  const [editingRubric, setEditingRubric] = useState(false);
   const {
     saved,
     draft,
@@ -63,7 +70,17 @@ export function GradePanel({
     blocker,
     discardAndLeave,
     retryAndLeave,
-  } = useGradeEditor({ assignmentId, question, answer, navigating, onNext });
+  } = useGradeEditor({
+    assignmentId,
+    question,
+    answer,
+    navigating,
+    onNext,
+    paused: editingRubric,
+  });
+  // An unsaved grade was chosen from the rubric about to change; let it land
+  // first so the edit sees it (and can carry it along).
+  const rubricLocked = busy || saving || dirty || Boolean(error);
   const { shortcut, shortcutAria } = useGradingShortcutHints();
   return (
     <section
@@ -76,6 +93,23 @@ export function GradePanel({
           <h2 id="rubric-heading" className="font-semibold">
             Rubric
           </h2>
+          {folderSession && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ms-1.5 self-center text-muted-foreground"
+              disabled={rubricLocked}
+              title={
+                rubricLocked
+                  ? 'Available once this grade has finished saving'
+                  : 'Edit this question’s rubric in the answer key'
+              }
+              onClick={() => setEditingRubric(true)}
+            >
+              <PenLine aria-hidden="true" />
+              Edit<span className="sr-only"> rubric</span>
+            </Button>
+          )}
           <p
             role="status"
             className="min-w-0 text-sm wrap-anywhere text-muted-foreground"
@@ -333,6 +367,17 @@ export function GradePanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {folderSession && (
+        <RubricEditSheet
+          assignmentId={assignmentId}
+          target={
+            editingRubric
+              ? { questionId: question.id, version: answer.version }
+              : null
+          }
+          onClose={() => setEditingRubric(false)}
+        />
+      )}
       <GradeRecoveryDialog
         mode={
           reloadOpen ? 'reload' : blocker.status === 'blocked' ? 'leave' : null

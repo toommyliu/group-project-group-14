@@ -270,6 +270,28 @@ export async function updateAssignment(
   );
 }
 
+export type RubricItem = components['schemas']['QARubricItem-Input'];
+export type RubricEditResult = components['schemas']['RubricEditResult'];
+
+/** Save one question's rubric into the class folder's answer key (a folder session). */
+export async function saveRubric(
+  assignmentId: string,
+  questionId: string,
+  body: components['schemas']['RubricEdit']
+) {
+  return readData(
+    await client.PUT(
+      '/api/assignments/{assignment_id}/questions/{question_id}/rubric',
+      {
+        params: {
+          path: { assignment_id: assignmentId, question_id: questionId },
+        },
+        body,
+      }
+    )
+  );
+}
+
 export async function deleteAssignment(assignmentId: string) {
   await client.DELETE('/api/assignments/{assignment_id}', {
     params: { path: { assignment_id: assignmentId } },

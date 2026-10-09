@@ -14,13 +14,14 @@ from threading import RLock
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 from starlette._utils import get_route_path
 from starlette.background import BackgroundTask
 
 from opengrader.core.export.bundle import student_pdf_stem, unique_stem
 from opengrader.core.grading.edits import GradeEdit
 from opengrader.core.outline import outline_versions
-from opengrader.core.qa_file import parse_qa_markdown
+from opengrader.core.qa_file import QARubricItem, parse_qa_markdown
 from opengrader.core.qa_file.errors import QAParseError
 from opengrader.core.submissions.region_crop import CropInputs, RosterStudent
 from opengrader.core.workspace import roster
@@ -37,10 +38,12 @@ from opengrader.core.workspace.store import (
 )
 from opengrader.core.workspace.folder_session import (
     active_folder_session,
+    edit_rubric,
     end_folder_session,
     folder_lock,
     folder_session_info,
     load_folder_session,
+    sync_answer_key,
     sync_folder,
     write_through,
 )
@@ -56,6 +59,7 @@ from opengrader.core.workspace.models import (
     FeedbackJob,
     FolderSyncResult,
     GradeSaveResult,
+    RubricEditResult,
     PipelineOutput,
     PipelinePublication,
     Question,
@@ -115,7 +119,8 @@ _FOLDER_SESSION_REFUSALS = (
         "PUT",
         re.compile(r"/api/assignments/[^/]+/?"),
         "In a folder session the answer key is the file in the class folder, "
-        "so it cannot be edited here. " + _NOT_IN_FOLDER_SESSION,
+        "so only a question's rubric can be edited here. "
+        + _NOT_IN_FOLDER_SESSION,
     ),
     (
         None,
@@ -128,13 +133,28 @@ _FOLDER_SESSION_REFUSALS = (
         "In a folder session the assignment comes from the class folder, so "
         "its outline cannot be edited here. " + _NOT_IN_FOLDER_SESSION,
     ),
+    # The roster is the class folder's own file: students are added, edited
+    # and removed in it one at a time, never replaced from an upload.
     (
-        None,
-        re.compile(r"/api/assignments/[^/]+/submissions/(match|[^/]+/student)"),
-        "In a folder session student names come from the class folder files. "
-        + _NOT_IN_FOLDER_SESSION,
+        "POST",
+        re.compile(r"/api/roster/import(/preview)?"),
+        "In a folder session the roster is the file in the class folder, so "
+        "a roster is not imported here. " + _NOT_IN_FOLDER_SESSION,
     ),
 )
+
+
+class RubricEdit(BaseModel):
+    """One question's rubric as the editor leaves it, and as it found it.
+
+    `expected_rubric` is what the editor opened; the edit is refused if the
+    question's rubric is no longer that, so two people (or the browser and
+    the terminal app) cannot silently overwrite each other.
+    """
+
+    version: str | None = None
+    rubric: list[QARubricItem]
+    expected_rubric: list[QARubricItem]
 
 
 def folder_session_refusal(method: str, path: str) -> str | None:
@@ -387,6 +407,13 @@ def create_app(
     def import_submissions(
         assignment_id: str, output: PipelineOutput
     ) -> PipelinePublication:
+        session = load_folder_session(root)
+        if session is not None and session.assignment_id == assignment_id:
+            # Opening a class folder again after its answer key was edited
+            # (a rubric changed in the terminal app, say): take the file's
+            # key first, or the import below refuses it as a different one.
+            with folder_lock(root):
+                sync_answer_key(workspace, assignment_id)
         result = publish_pipeline(workspace, assignment_id, output)
         with registry_lock:
             extraction_source(result.assignment.id)
@@ -426,6 +453,43 @@ def create_app(
             )
             extraction_source(assignment_id)
             return assignment
+
+    @api.put("/assignments/{assignment_id}/questions/{question_id}/rubric")
+    def save_rubric(
+        assignment_id: str, question_id: str, edit: RubricEdit, request: Request
+    ) -> RubricEditResult:
+        """Edit one question's rubric while grading; a folder session only.
+
+        There the answer key is a file, and the edit is written into it at
+        once (`folder_session.edit_rubric`). A workspace's key has no file
+        to keep in step, and its grades reach files only by write-back, which
+        does not carry the answer key — so it keeps the rule that the key is
+        edited before submissions arrive.
+        """
+        require_assignment(assignment_id)
+        user = signed_in(request)
+        with folder_lock(root):
+            session = load_folder_session(root)
+            if session is None or session.assignment_id != assignment_id:
+                raise HTTPException(
+                    409,
+                    "A rubric can be edited while grading only when a class "
+                    "folder is open from classic mode. In a workspace, edit "
+                    "it on the Answer key page before submissions are added.",
+                )
+            result = edit_rubric(
+                workspace,
+                assignment_id,
+                question_id,
+                version=edit.version or None,
+                rubric=edit.rubric,
+                expected=edit.expected_rubric,
+                actor=user.email if user else None,
+            )
+        if result.changed:
+            with registry_lock:
+                extraction_source(assignment_id)
+        return result
 
     @api.delete("/assignments/{assignment_id}", status_code=204)
     async def delete_assignment(assignment_id: str) -> Response:

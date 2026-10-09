@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from opengrader.core.app_config import DEFAULT_TEXT_MODEL
+
 from . import ollama_transport
 from .errors import LLMError
 from .ollama_transport import parse_json_object
@@ -18,7 +20,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class OllamaConfig:
-    model: str = "qwen2.5vl:7b"
+    model: str = DEFAULT_TEXT_MODEL
     host: str = ollama_transport.DEFAULT_HOST
     timeout_seconds: float = ollama_transport.DEFAULT_TIMEOUT_SECONDS
     keep_alive: str = ollama_transport.DEFAULT_KEEP_ALIVE

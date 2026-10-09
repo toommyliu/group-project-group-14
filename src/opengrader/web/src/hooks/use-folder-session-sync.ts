@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { syncFolderSession } from '@/api/workspace';
+import { useQueryClient } from '@tanstack/react-query';
+import { rosterQuery } from '@/api/roster';
+import { syncFolderSession, workspaceQuery } from '@/api/workspace';
 import { ApiError } from '@/api/client';
 import { errorMessage } from '@/lib/error-message';
 
@@ -13,12 +15,19 @@ export function useFolderSessionSync() {
   const [problems, setProblems] = useState<string[]>([]);
   const [notice, setNotice] = useState('');
   const inFlight = useRef(false);
+  const queries = useQueryClient();
 
   const runSync = useCallback(() => {
     if (inFlight.current) return;
     inFlight.current = true;
     void syncFolderSession()
       .then((result) => {
+        // The class folder's roster appeared, changed or went away: the
+        // People link and everything that lists students follow.
+        if (result.roster_changed) {
+          void queries.invalidateQueries({ queryKey: workspaceQuery.queryKey });
+          void queries.invalidateQueries({ queryKey: rosterQuery.queryKey });
+        }
         setProblems(result.failed > 0 ? result.problems : []);
         const changed = result.updated + result.imported;
         if (changed > 0)
@@ -35,7 +44,7 @@ export function useFolderSessionSync() {
       .finally(() => {
         inFlight.current = false;
       });
-  }, []);
+  }, [queries]);
 
   useEffect(() => {
     runSync();

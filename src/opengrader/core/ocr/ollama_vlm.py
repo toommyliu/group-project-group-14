@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from opengrader.core.app_config import DEFAULT_VISION_MODEL
 from opengrader.core.llm import ollama_transport
 from opengrader.core.llm.errors import LLMError
 from opengrader.core.llm.ollama_transport import parse_json_object as _parse_json_from_response
@@ -28,7 +29,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class OllamaVisionConfig:
-    model: str = "qwen3.5:9b"
+    model: str = DEFAULT_VISION_MODEL
     host: str = ollama_transport.DEFAULT_HOST
     timeout_seconds: float = ollama_transport.DEFAULT_TIMEOUT_SECONDS
     keep_alive: str = ollama_transport.DEFAULT_KEEP_ALIVE
