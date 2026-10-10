@@ -11,7 +11,9 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
-import type { QAPreview } from '@/api/queries';
+import { useQuery } from '@tanstack/react-query';
+import { PenLine } from 'lucide-react';
+import { answerFieldsQuery, type QAPreview } from '@/api/queries';
 import { useOutlineTracking } from '@/hooks/use-outline-tracking';
 import {
   previewOutlineGroups,
@@ -20,8 +22,11 @@ import {
   type OutlineEntry,
 } from '@/lib/assignment-outline';
 import type { VisualEditorNavigation } from './visual-assignment-editor';
+import { unanswered } from '@/lib/answers';
+import { AnswersSheet } from './answers-sheet';
 import { QAPreviewView } from './qa-preview';
 import { RubricEditSheet, type RubricTarget } from './rubric-edit-sheet';
+import { Button } from './ui/button';
 import { Label } from './ui/label';
 import {
   Select,
@@ -54,6 +59,14 @@ export const AnswerKeyView = memo(function AnswerKeyView({
   const versions = preview.document.versions ?? [];
   const [version, setVersion] = useState(versions[0] ?? '');
   const [rubricTarget, setRubricTarget] = useState<RubricTarget | null>(null);
+  const [addingAnswers, setAddingAnswers] = useState(false);
+  // Only where answers can be saved (a folder session), and only to know
+  // whether any are missing: the button is not shown otherwise.
+  const answerFields = useQuery({
+    ...answerFieldsQuery(rubricEditAssignmentId ?? ''),
+    enabled: Boolean(rubricEditAssignmentId),
+  });
+  const answersLeft = unanswered(answerFields.data, version || null).length;
   const pendingTarget = useRef<string | null>(null);
   const entries = useMemo(
     () => questionOutlineEntries(previewOutlineGroups(preview.document)),
@@ -143,6 +156,20 @@ export const AnswerKeyView = memo(function AnswerKeyView({
           </Select>
         </div>
       )}
+      {rubricEditAssignmentId && answersLeft > 0 && (
+        <div className="flex flex-wrap items-center gap-3 border border-dashed p-3">
+          <p className="min-w-0 flex-1 text-sm">
+            {answersLeft === 1
+              ? '1 question has no answer yet.'
+              : `${answersLeft} questions have no answer yet.`}{' '}
+            Without one, a question is graded by hand.
+          </p>
+          <Button onClick={() => setAddingAnswers(true)}>
+            <PenLine aria-hidden="true" />
+            Add answers
+          </Button>
+        </div>
+      )}
       <QAPreviewView
         preview={preview}
         versionOverride={version}
@@ -159,6 +186,14 @@ export const AnswerKeyView = memo(function AnswerKeyView({
           assignmentId={rubricEditAssignmentId}
           target={rubricTarget}
           onClose={() => setRubricTarget(null)}
+        />
+      )}
+      {rubricEditAssignmentId && (
+        <AnswersSheet
+          assignmentId={rubricEditAssignmentId}
+          version={version || null}
+          open={addingAnswers}
+          onClose={() => setAddingAnswers(false)}
         />
       )}
     </div>

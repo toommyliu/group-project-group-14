@@ -12,6 +12,7 @@ from opengrader.core.class_folder import (
     ROLE_SCAN,
     ROLE_TEMPLATE,
     describe_class_folder,
+    find_answer_key_source,
     scan_class_folder,
 )
 
@@ -266,3 +267,29 @@ def test_a_folder_with_no_submissions_yet_says_so(tmp_path) -> None:
         "· answer key      none found",
         "· submissions     none found",
     ]
+
+
+def test_the_instructors_solutions_are_offered_as_the_answer_key_source(tmp_path) -> None:
+    _touch(tmp_path / "scans.pdf")
+    _touch(tmp_path / "blank-template.pdf")
+    source = _touch(tmp_path / "Quiz 1 Solutions.docx", "not really a docx")
+
+    assert find_answer_key_source(tmp_path) == source
+
+
+def test_an_answer_key_source_is_never_guessed(tmp_path) -> None:
+    # Nothing named like one.
+    _touch(tmp_path / "scans.pdf")
+    assert find_answer_key_source(tmp_path) is None
+
+    # Two that could be it.
+    _touch(tmp_path / "answer-key.pdf")
+    _touch(tmp_path / "solutions.txt", "1. What is 2 + 2?\n")
+    assert find_answer_key_source(tmp_path) is None
+
+
+def test_a_finished_answer_key_or_a_template_is_not_its_own_source(tmp_path) -> None:
+    _touch(tmp_path / "solutions.md", QA_TEXT)
+    _touch(tmp_path / "answer-sheet-template.pdf")
+
+    assert find_answer_key_source(tmp_path) is None

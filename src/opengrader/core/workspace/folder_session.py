@@ -65,6 +65,7 @@ from opengrader.core.workspace.models import (
     FolderSessionInfo,
     FolderSyncResult,
     FolderWrite,
+    RegradeResult,
     RubricEditResult,
     Submission,
 )
@@ -556,6 +557,24 @@ def _flat_options(rubric: list[QARubricItem], points: float) -> list[QARubricFla
     ]
 
 
+@dataclass(frozen=True)
+class KeyEdit:
+    """One question's rubric and/or answers as an editor leaves them, each
+    with what the editor opened (`expected_…`): an edit is refused when the
+    question is no longer that, so the browser and the terminal app (or two
+    people) cannot silently overwrite each other. None leaves a side alone.
+
+    For a multiple-choice question the answers are its correct letters.
+    """
+
+    question_id: str
+    version: str | None = None
+    rubric: list[QARubricItem] | None = None
+    expected_rubric: list[QARubricItem] | None = None
+    answers: list[str] | None = None
+    expected_answers: list[str] | None = None
+
+
 def edit_rubric(
     workspace: Workspace,
     assignment_id: str,
@@ -566,27 +585,50 @@ def edit_rubric(
     expected: list[QARubricItem],
     actor: str | None = None,
 ) -> RubricEditResult:
-    """Save one question's rubric into the answer-key file, then everywhere else.
+    """Save one question's rubric; see `edit_answer_key`."""
+    return edit_answer_key(
+        workspace,
+        assignment_id,
+        [KeyEdit(question_id, version, rubric=rubric, expected_rubric=expected)],
+        actor=actor,
+    )
+
+
+def edit_answer_key(
+    workspace: Workspace,
+    assignment_id: str,
+    edits: list[KeyEdit],
+    *,
+    actor: str | None = None,
+) -> RubricEditResult:
+    """Save questions' rubrics and answers into the answer-key file, then
+    everywhere else.
 
     In order, so that a failure leaves the class folder consistent:
 
     1. the file is read, and anything it gained since the import is taken;
-    2. the edit is refused if the rubric is no longer the one the editor
-       opened (`expected`), or if it drops an item saved grades still use —
-       both checked before anything is written;
-    3. only that question's rubric section of the file is rewritten;
+    2. every edit is checked before anything is written: refused if the
+       rubric or the answers are no longer what the editor opened, if a
+       rubric drops an item saved grades still use, or if the result would
+       not be a valid answer key;
+    3. the file is written once, with only those questions' sections changed
+       — a rubric and its answers together, never one without the other;
     4. the workspace takes the new key, renaming and re-scoring the grades
-       that selected a changed item;
+       that selected a changed rubric item;
     5. each of those grades is written into its `.submission.md`.
 
-    A grade whose file cannot be written in step 5 is reported and written
-    by the next sync, as a failed grade save is. Call under `folder_lock`.
+    Answers change no grade by themselves: what was graded stays graded until
+    auto-grading is run again. A grade whose file cannot be written in step 5
+    is reported and written by the next sync, as a failed grade save is.
+    Call under `folder_lock`.
     """
+    from opengrader.core.qa_file.answers import answer_edit, answer_fields, clean_answers
+
     path = answer_key_path(workspace, assignment_id)
     if path is None:
         raise WriteBackError(
             "The answer key file could not be found in the class folder; it "
-            "may have moved. The rubric was not changed."
+            "may have moved. Nothing was changed."
         )
     try:
         text, fingerprint = _read_answer_key(path)
@@ -600,41 +642,65 @@ def edit_rubric(
         replace_answer_key(workspace, assignment_id, _unix_newlines(text), strict=False)
 
     document = parse_qa_markdown(text)
-    question = find_qa_question(document, question_id, version=version)
-    if getattr(question, "subquestions", None):
-        raise ValueError(
-            f"Question {question_id} is graded by its parts; edit the rubric "
-            "of a part instead."
-        )
-    if question.rubric != expected:
-        raise WorkspaceConflict(
-            "This rubric was changed somewhere else since you opened it. "
-            "Close this and open it again to see the current rubric."
-        )
-    if rubric == question.rubric:
-        return RubricEditResult(changed=False)
-
-    edited_text = edit_qa_markdown(
-        text,
-        [
-            QuestionEdit(
+    fields = {(field.version or None, field.key): field for field in answer_fields(text)}
+    changes: list[QuestionEdit] = []
+    rubric_edits: list[tuple[KeyEdit, object]] = []
+    for edit in edits:
+        version = edit.version or None
+        question = find_qa_question(document, edit.question_id, version=version)
+        if getattr(question, "subquestions", None):
+            raise ValueError(
+                f"Question {edit.question_id} is graded by its parts; edit the rubric "
+                "of a part instead."
+            )
+        rubric = question.rubric
+        if edit.rubric is not None:
+            if question.rubric != edit.expected_rubric:
+                raise WorkspaceConflict(
+                    "This rubric was changed somewhere else since you opened it. "
+                    "Close this and open it again to see the current rubric."
+                )
+            rubric = edit.rubric
+        change: QuestionEdit | None = None
+        if edit.answers is not None:
+            field = fields[(version, edit.question_id)]
+            if field.answers != clean_answers(field, edit.expected_answers or []):
+                raise WorkspaceConflict(
+                    "These answers were changed somewhere else since you opened "
+                    "them. Close this and open it again to see the current answers."
+                )
+            change = answer_edit(field, question, edit.answers)
+        if change is None:
+            if rubric == question.rubric:
+                continue
+            change = QuestionEdit(
                 source_line=question.source_line,
                 prompt=question.prompt,
                 points=question.points,
                 answers=question.answers,
                 rubric=rubric,
-                version=version,
             )
-        ],
-    )
-    # Parsing is the validation: a rubric the answer-key format does not
-    # allow is refused here, before the file is touched.
-    edited = find_qa_question(
-        parse_qa_markdown(edited_text), question_id, version=version
-    )
-    before = _flat_options(question.rubric, question.points)
-    after = _flat_options(edited.rubric, edited.points)
-    relabel = {(version, question_id): diff_rubric_options(before, after).renames}
+        change.rubric = rubric
+        change.version = version
+        changes.append(change)
+        if rubric != question.rubric:
+            rubric_edits.append((edit, question))
+    if not changes:
+        return RubricEditResult(changed=False)
+
+    edited_text = edit_qa_markdown(text, changes)
+    # Parsing is the validation: a rubric or an answer the answer-key format
+    # does not allow is refused here, before the file is touched.
+    edited_document = parse_qa_markdown(edited_text)
+    relabel: dict[tuple[str | None, str], dict[str, str]] = {}
+    logged: list[tuple[str, list, list]] = []
+    for edit, question in rubric_edits:
+        version = edit.version or None
+        edited = find_qa_question(edited_document, edit.question_id, version=version)
+        before = _flat_options(question.rubric, question.points)
+        after = _flat_options(edited.rubric, edited.points)
+        relabel[(version, edit.question_id)] = diff_rubric_options(before, after).renames
+        logged.append((edit.question_id, before, after))
     source = _unix_newlines(edited_text)
     check_answer_key(workspace, assignment_id, source, relabel=relabel)
 
@@ -642,12 +708,12 @@ def edit_rubric(
         _replace_atomically(path, edited_text, fingerprint)
     except FileChanged as exc:
         raise WorkspaceConflict(
-            f"{path.name} changed while the rubric was being saved, so "
-            "nothing was written. Open the rubric again and retry."
+            f"{path.name} changed while it was being saved, so "
+            "nothing was written. Open it again and retry."
         ) from exc
     except OSError as exc:
         raise WriteBackError(
-            f"{path.name} could not be written, so the rubric was not "
+            f"{path.name} could not be written, so the answer key was not "
             f"changed: {exc}"
         ) from exc
 
@@ -661,22 +727,77 @@ def edit_rubric(
             problems.append(written.message)
     folder = locate_submissions_dir(workspace, assignment_id)
     if folder is not None:
-        count = len(update.regraded)
-        try:
-            _journal(folder).append(
-                kind="rubric",
-                student_id="",
-                student_name="",
-                question_id=question_id,
-                summary=f"{RUBRIC_SUMMARY} · {count} grade{'' if count == 1 else 's'} updated",
-                old={"options": [option.label for option in before]},
-                new={"options": [option.label for option in after]},
-            )
-        except OSError:
-            pass  # history is a record of the edit, not a condition of it
+        for question_id, before, after in logged:
+            count = sum(1 for _sid, changed in update.regraded if changed == question_id)
+            try:
+                _journal(folder).append(
+                    kind="rubric",
+                    student_id="",
+                    student_name="",
+                    question_id=question_id,
+                    summary=f"{RUBRIC_SUMMARY} · {count} grade{'' if count == 1 else 's'} updated",
+                    old={"options": [option.label for option in before]},
+                    new={"options": [option.label for option in after]},
+                )
+            except OSError:
+                pass  # history is a record of the edit, not a condition of it
     return RubricEditResult(
         changed=True, regraded=len(update.regraded), problems=problems
     )
+
+
+def regrade_folder(
+    workspace: Workspace, assignment_id: str, *, actor: str | None = None
+) -> RegradeResult:
+    """Grade the class folder's submissions again with its answer key.
+
+    What the pipeline's auto-grade step does, without the AI: every answer the
+    key settles outright (multiple choice, numeric, an exact accepted answer)
+    is scored from it — replacing a grade entered by hand there — and nothing
+    else is touched. The files are the truth in a folder session, so:
+
+    1. the folder is synced, so a browser grade still waiting to be written
+       is in its file before anything is graded over;
+    2. each submission file is graded in place and the run journalled, as
+       `automated-grading` does (it can be undone the same way);
+    3. the folder is synced again, which brings every changed grade into the
+       browser through `save_grade`, so open pages see it.
+
+    Call under `folder_lock`.
+    """
+    import contextlib
+    import io
+
+    from opengrader.core.grading.automated import RunJournal, grade_student_file
+
+    folder = locate_submissions_dir(workspace, assignment_id)
+    path = answer_key_path(workspace, assignment_id)
+    if folder is None or path is None:
+        raise WriteBackError(
+            "The class folder or its answer key could not be found; it may "
+            "have moved. Nothing was graded."
+        )
+    before = sync_folder(workspace, assignment_id)
+    problems = list(before.problems)
+    try:
+        document = parse_qa_markdown(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise WriteBackError(f"{path.name} could not be read: {exc}") from exc
+
+    journal = RunJournal(folder, operator=actor)
+    files = 0
+    for student_file in sorted(folder.rglob("*.submission.md")):
+        files += 1
+        try:
+            # The shared grader reports to a terminal; a server has none.
+            with contextlib.redirect_stdout(io.StringIO()):
+                grade_student_file(student_file, document, journal=journal)
+        except (OSError, ValueError) as exc:
+            problems.append(f"{student_file.name}: {exc}")
+
+    after = sync_folder(workspace, assignment_id)
+    problems.extend(problem for problem in after.problems if problem not in problems)
+    return RegradeResult(files=files, updated=after.updated, problems=problems)
 
 
 # ---------------------------------------------------------------------------

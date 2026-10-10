@@ -28,14 +28,40 @@ from opengrader.core.pdf_utils import (
     norm_bbox,
 )
 
+from opengrader.core.qa_file.standard_rubric import (
+    DEFAULT_QUESTION_POINTS,
+    format_points,
+    standard_rubric_lines,
+)
+from opengrader.core.qa_file.text2qti import (
+    ParsedAssignment,
+    parse_text2qti,
+    render_question,
+    summarize_points,
+)
+
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.ocr.vision_reader import VisionReader
 
 
-def detect_question_positions(doc):
-    all_detections = {}
-    max_q = 0
+# A question number as OCR hands it over, alone in the left margin: "3.",
+# "3)", "Q3." — or a bare "3" whose mark landed in the next token. "3a)" and
+# "3(a)" start question 3 too, when it is written only as its parts.
+_MARGIN_NUMBER_RE = re.compile(
+    r"^(?:Q\s*)?(\d{1,2})(\(?a\)?[.)]?|[.)])?$", re.IGNORECASE
+)
+_MARGIN_POINTS_RE = re.compile(r"\(?\d+\s*(?:points?|pts)\)?", re.IGNORECASE)
+# How far (as a share of the page width) a number may sit from the margin the
+# question numbers share and still be one of them.
+_MARGIN_TOLERANCE = 0.03
+# A question's own line on a blank template that prints no points beside it.
+_LOOSE_QUESTION_LINE_RE = re.compile(r"^\s*(?:Q\s*)?(\d{1,2})\s*[.)]\s+(.*)$", re.IGNORECASE)
 
+
+def _margin_numbers(doc) -> list[tuple[int, int, float, float, bool]]:
+    """Every number in a left margin that could start a question:
+    (number, page, y, x, has points beside it), y and x as page fractions."""
+    found: list[tuple[int, int, float, float, bool]] = []
     for pg_idx in range(len(doc)):
         img, _, _ = render_page_to_image(doc, pg_idx, dpi=300)
         img_w, img_h = img.size
@@ -43,41 +69,98 @@ def detect_question_positions(doc):
         left_img = img.crop((0, 0, int(img_w * 0.3), img_h))
 
         # PSM 6 treats the vertical question-number list as one text block.
-        config = "--psm 6"
-        data = safe_image_to_data(left_img, config=config)
+        data = safe_image_to_data(left_img, config="--psm 6")
+        tokens = [str(text).strip() for text in data["text"]]
 
-        for i, text in enumerate(data["text"]):
-            text = text.strip()
-            matched_qnum = None
-
-            if re.match(r"^\d{1,2}\.$", text) or re.match(r"^\d{1,2}$", text):
-                potential_num = int(text.rstrip("."))
-
-                has_dot = "." in text or (
-                    i + 1 < len(data["text"]) and data["text"][i + 1].strip() == "."
+        for i, text in enumerate(tokens):
+            match = _MARGIN_NUMBER_RE.match(text)
+            if match is None:
+                continue
+            marked = bool(match.group(2)) or (
+                i + 1 < len(tokens) and tokens[i + 1] in {".", ")"}
+            )
+            if not marked:
+                continue
+            context = " ".join(tokens[max(0, i - 1) : i + 6])
+            found.append(
+                (
+                    int(match.group(1)),
+                    pg_idx + 1,
+                    data["top"][i] / img_h,
+                    data["left"][i] / img_w,
+                    bool(_MARGIN_POINTS_RE.search(context)),
                 )
+            )
+    return found
 
-                full_context = " ".join(data["text"][max(0, i - 1) : i + 6])
-                if has_dot and re.search(r"\(?\d+\s*points?\)?", full_context):
-                    matched_qnum = potential_num
 
-            if matched_qnum:
-                y_frac = data["top"][i] / img_h
-                x_left = data["left"][i]
-                if matched_qnum not in all_detections:
-                    all_detections[matched_qnum] = []
-                all_detections[matched_qnum].append((pg_idx + 1, y_frac, x_left))
-                max_q = max(max_q, matched_qnum)
+def _question_margin(candidates: list[tuple[int, int, float, float, bool]]) -> float:
+    """Where the question numbers line up: among numbers with points beside
+    them when there are any, else wherever the most numbers share a margin."""
+    labelled = sorted(x for _q, _pg, _y, x, strong in candidates if strong)
+    if labelled:
+        return labelled[len(labelled) // 2]
+    xs = sorted(x for _q, _pg, _y, x, _strong in candidates)
+    best = max(xs, key=lambda x: (sum(1 for other in xs if abs(other - x) <= _MARGIN_TOLERANCE), -x))
+    return best
 
-    single_xs = [dets[0][2] for dets in all_detections.values() if len(dets) == 1]
-    median_x = sorted(single_xs)[len(single_xs) // 2] if single_xs else 0
 
-    q_starts = {}
-    for qnum, dets in all_detections.items():
-        best = min(dets, key=lambda d: abs(d[2] - median_x))
-        q_starts[qnum] = (best[0], best[1])  # (page, y_frac).
+def _numbers_in_order(
+    candidates: list[tuple[int, int, float, float, bool]],
+) -> list[tuple[int, int, float, float, bool]]:
+    """The run of numbers that reads 1, 2, 3 … down the pages.
 
-    return q_starts, max_q
+    A number with no points beside it is only trusted as part of that run: a
+    numbered list inside an answer, or a stray "7." in a margin, does not
+    count upwards from the last question in step with the page. A number
+    that does have points beside it weighs more, and a skipped number (one
+    OCR missed) costs a little, so the run is not broken by it.
+    """
+    ordered = sorted(candidates, key=lambda c: (c[1], c[2]))
+    best_score: list[float] = []
+    previous: list[int | None] = []
+    for index, (qnum, _pg, _y, _x, strong) in enumerate(ordered):
+        own = 1.5 if strong else 1.0
+        score, link = own - 0.6 * (qnum - 1), None
+        for earlier in range(index):
+            gap = qnum - ordered[earlier][0]
+            if gap < 1:
+                continue
+            candidate = best_score[earlier] + own - 0.6 * (gap - 1)
+            if candidate > score:
+                score, link = candidate, earlier
+        best_score.append(score)
+        previous.append(link)
+
+    if not ordered:
+        return []
+    at: int | None = max(range(len(ordered)), key=lambda i: best_score[i])
+    run: list[tuple[int, int, float, float, bool]] = []
+    while at is not None:
+        run.append(ordered[at])
+        at = previous[at]
+    return run[::-1]
+
+
+def detect_question_positions(doc):
+    """Where each question starts on a scanned answer key: {number: (page, y)}.
+
+    A question is a number in the left margin — "3.", "3)" — with its points
+    beside it or not; see `_numbers_in_order` for how one without is told
+    from any other number on the page.
+    """
+    candidates = _margin_numbers(doc)
+    if not candidates:
+        return {}, 0
+    margin = _question_margin(candidates)
+    aligned = [
+        candidate
+        for candidate in candidates
+        if candidate[4] or abs(candidate[3] - margin) <= _MARGIN_TOLERANCE
+    ]
+    run = _numbers_in_order(aligned)
+    q_starts = {qnum: (page, y) for qnum, page, y, _x, _strong in run}
+    return q_starts, max(q_starts, default=0)
 
 
 def compute_bounding_boxes(q_starts, max_q):
@@ -123,6 +206,89 @@ def find_answer_box(img_pil: Image.Image):
     return None
 
 
+def _template_question_line(
+    line_text: str, last_qnum: int | None
+) -> tuple[int, float | None, str] | None:
+    """(number, points, rest of the line) when a template line starts a question.
+
+    "3. (10 points) …" always does. A line with no points beside the number
+    — "3) …", or with the points at its end — does only as the next number
+    in order, so a numbered list in a question's text is not taken for one.
+    """
+    match = QUESTION_PREFIX_RE.match(line_text)
+    if match:
+        return int(match.group(1)), float(match.group(2)), match.group(3).strip()
+    loose = _LOOSE_QUESTION_LINE_RE.match(line_text)
+    if loose is None or int(loose.group(1)) != (last_qnum or 0) + 1:
+        return None
+    rest = loose.group(2)
+    points = re.search(POINTS_SPEC, rest, re.IGNORECASE)
+    if points is None:
+        return int(loose.group(1)), None, rest.strip()
+    rest = f"{rest[: points.start()]} {rest[points.end():]}"
+    return int(loose.group(1)), float(points.group(1)), " ".join(rest.split())
+
+
+def pdf_text_lines(pdf_path: str | Path) -> str:
+    """The text a PDF carries itself, one printed line per line; empty for a
+    scan. An answer written after its question on the same line
+    ("… ? Solution: 4") is moved to a line of its own, which is where the
+    text reader looks for it."""
+    lines: list[str] = []
+    with fitz.open(str(pdf_path)) as doc:
+        for page in doc:
+            try:
+                text = page.get_text("text", sort=True) or ""
+            except Exception:  # noqa: BLE001 - an unreadable page is a scan to us
+                continue
+            lines.append(_as_reader_lines(text))
+    return "\n".join(line for line in lines if line)
+
+
+def _as_reader_lines(text: str) -> str:
+    """Text off a page, shaped for the text reader.
+
+    An answer after its question on the same line gets a line of its own.
+    Blank lines are dropped: on a page they are spacing, not the end of an
+    answer, so an answer runs on to the next question, part or answer.
+    """
+    lines: list[str] = []
+    for line in text.splitlines():
+        lines.extend(
+            piece
+            for piece in _INLINE_ANSWER_RE.sub("\n", line.rstrip()).split("\n")
+            if piece.strip()
+        )
+    return "\n".join(lines)
+
+
+def _block_from_reader(
+    qnum: int,
+    region_text: str,
+    *,
+    default_points: float,
+    template_points: float | None,
+) -> tuple[str, bool] | None:
+    """One question's block when its text reads by the text reader's rules
+    — "Answer:" lines, parts "3a)", points anywhere on its line — and
+    whether it was given the default points. None when it does not: no
+    answer the reader recognises, or the number it reads is not `qnum`."""
+    parsed = parse_text2qti(_as_reader_lines(region_text))
+    if len(parsed.questions) != 1:
+        return None
+    question = parsed.questions[0]
+    if question.number != qnum or not (question.parts or question.has_answer_block()):
+        return None
+    if not question.points_inline and template_points:
+        # The blank template printed them; as good as on the question's line.
+        question.points, question.points_inline = template_points, True
+    defaulted = summarize_points(ParsedAssignment("", "", [question])).defaulted > 0
+    return "\n".join(render_question(question, default_points=default_points)), defaulted
+
+
+_INLINE_ANSWER_RE = re.compile(r"(?<=\S)\s+(?=(?:Solution|Answers?)\s*:)", re.IGNORECASE)
+
+
 def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssignmentTemplate:
     questions: dict[int, QuestionLayoutInfo] = {}
     current_qnum: int | None = None
@@ -142,7 +308,7 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
                     line_text = "".join(span["text"] for span in line_dict["spans"]).strip()
                     x0, y0, x1, y1 = line_dict["bbox"]
 
-                    match = QUESTION_PREFIX_RE.match(line_text)
+                    match = _template_question_line(line_text, current_qnum)
                     if match:
                         if current_qnum is not None and current_start is not None:
                             prev_pg, prev_y0, prev_x0, prev_pw, prev_ph = current_start
@@ -158,9 +324,8 @@ def _load_blank_template_layout(blank_template_doc: fitz.Document) -> BlankAssig
                                 prompt=" ".join(current_prompt_lines).strip(),
                             )
 
-                        current_qnum = int(match.group(1))
-                        current_points = float(match.group(2))
-                        current_prompt_lines = [match.group(3).strip()]
+                        current_qnum, current_points, first_line = match
+                        current_prompt_lines = [first_line]
                         current_start = (pg_idx + 1, y0, x0, page_w, page_h)
                     elif current_qnum is not None:
                         current_prompt_lines.append(line_text)
@@ -284,21 +449,41 @@ def extract_content(
     max_q: int,
     vision_reader: VisionReader | None = None,
     progress: Callable[[int, int], None] | None = None,
+    *,
+    default_points: float = DEFAULT_QUESTION_POINTS,
+    template_points: dict[int, float] | None = None,
+    defaulted: list[int] | None = None,
 ):
+    """One answer-key block per question.
+
+    A question's points are the ones read beside it on the answer key, else
+    the ones printed on the blank template (`template_points`), else
+    `default_points` — and its number is then appended to `defaulted`.
+    """
     markdown_questions = []
+    template_points = template_points or {}
+
+    def fallback_points(qnum: int) -> float:
+        known = template_points.get(qnum)
+        if known:
+            return known
+        if defaulted is not None:
+            defaulted.append(qnum)
+        return default_points
 
     for qnum in range(1, max_q + 1):
         if progress is not None:
             progress(qnum, max_q)
         if qnum not in question_bboxes:
-            block = (
-                f"- (10 points) [Question {qnum} - Text not detected]\n"
-                "  - **Correct**\n"
-                "    - No answer detected.\n"
-                "  - **Rubric**\n"
-                "    - Correct (+0)\n"
-                "    - Partially Correct (-5)\n"
-                "    - Incorrect (-10)"
+            pts_val = fallback_points(qnum)
+            block = "\n".join(
+                [
+                    f"- ({format_points(pts_val)} points) [Question {qnum} - Text not detected]",
+                    "  - **Correct**",
+                    "    - No answer detected.",
+                    "  - **Rubric**",
+                    *standard_rubric_lines(pts_val),
+                ]
             )
             markdown_questions.append(block)
             continue
@@ -338,8 +523,25 @@ def extract_content(
                     except Exception as e:
                         print(f"  Warning: Ollama check failed for Q{qnum}: {e}", file=sys.stderr)
 
+        if not vlm_answer:
+            # Text that reads by the text reader's rules is taken by them, so
+            # a scan and a typed file are understood the same way.
+            read = _block_from_reader(
+                qnum,
+                full_text,
+                default_points=default_points,
+                template_points=template_points.get(qnum),
+            )
+            if read is not None:
+                block, was_defaulted = read
+                if was_defaulted and defaulted is not None:
+                    defaulted.append(qnum)
+                markdown_questions.append(block)
+                continue
+
         pts_match = re.search(POINTS_SPEC, full_text, re.IGNORECASE)
-        points = pts_match.group(1) if pts_match else "10"
+        pts_val = float(pts_match.group(1)) if pts_match else fallback_points(qnum)
+        points = format_points(pts_val)
 
         sol_match = re.search(r"(?i)solution\s*:?\s*", full_text)
 
@@ -360,26 +562,18 @@ def extract_content(
             question_stem = " ".join(lines) if lines else f"Question {qnum}"
             answer_body = "No answer detected."
 
-        question_stem = re.sub(rf"^\s*{qnum}\.?\s*", "", question_stem)
+        question_stem = re.sub(rf"^\s*(?:Q\s*)?{qnum}\s*[.)]?\s*", "", question_stem)
         question_stem = re.sub(
             r"\(?\d+\s*points?\)?", "", question_stem, flags=re.IGNORECASE
         ).strip()
         question_stem = re.sub(r"\s+", " ", question_stem).strip()
 
         answer_body = re.sub(r"(?i)^solution\s*:?\s*", "", answer_body).strip()
-        answer_body = re.sub(rf"^\s*{qnum}\.?\s*", "", answer_body)
+        answer_body = re.sub(rf"^\s*{qnum}\s*[.)]?\s*", "", answer_body)
         answer_body = re.sub(
             r"^\s*\(?\d+\s*points?\)?\s*", "", answer_body, flags=re.IGNORECASE
         ).strip()
         answer_body = re.sub(r"\s+", " ", answer_body).strip()
-
-        try:
-            pts_val = int(points)
-        except ValueError:
-            pts_val = 10
-        half_pts = pts_val / 2
-        if half_pts.is_integer():
-            half_pts = int(half_pts)
 
         answer_parts = [a.strip() for a in re.split(r'[\\/]', answer_body)]
         answer_parts = [a for a in answer_parts if a]
@@ -390,10 +584,7 @@ def extract_content(
             f"  - **Correct**\n"
             f"{correct_section}\n"
             f"  - **Rubric**\n"
-            f"    - Correct (+0)\n"
-            f"    - Partially Correct (-{half_pts})\n"
-            f"    - Incorrect (-{points})"
-        )
+        ) + "\n".join(standard_rubric_lines(pts_val))
         markdown_questions.append(block)
 
     return markdown_questions
@@ -408,8 +599,14 @@ def extract_qa_markdown_from_pdf(
     vision_reader: VisionReader | None = None,
     emit: Callable[[str], None] | None = None,
     progress: Callable[[int, int], None] | None = None,
+    default_points: float = DEFAULT_QUESTION_POINTS,
+    on_default_points: Callable[[int, int], None] | None = None,
 ) -> str:
+    """`on_default_points(given, total)` is called once, with how many of
+    the questions had no points to read and were given `default_points`."""
     say = emit or (lambda _message: None)
+    template_points: dict[int, float] = {}
+    defaulted: list[int] = []
 
     answer_key_doc = fitz.open(str(pdf_path))
     try:
@@ -426,6 +623,9 @@ def extract_qa_markdown_from_pdf(
             say(f"Loading blank template layout from {blank_template_path}...")
             blank_layout = _load_blank_template_layout(blank_template_doc)
             blank_template_doc.close()
+            template_points = {
+                qnum: info.points for qnum, info in blank_layout.questions.items()
+            }
 
             if not blank_layout.questions:
                 say("Warning: No questions detected in blank template. Falling back to text layer extraction.")
@@ -476,8 +676,8 @@ def extract_qa_markdown_from_pdf(
 
         if not final_question_bboxes:
             raise ValueError(
-                "No questions were detected. Check that the PDF layout matches the "
-                "expected 'N. (Points)' format."
+                "No questions were detected. Number each question in the left "
+                "margin — '1.' or '1)' — in order from 1."
             )
 
         say(f"Found {len(final_question_bboxes)} questions (Max ID: {max_q})")
@@ -486,7 +686,12 @@ def extract_qa_markdown_from_pdf(
             answer_key_doc, rendered_answer_key_pages, final_question_bboxes, max_q,
             vision_reader=vision_reader,
             progress=progress,
+            default_points=default_points,
+            template_points=template_points,
+            defaulted=defaulted,
         )
+        if on_default_points is not None:
+            on_default_points(len(defaulted), len(qa_blocks))
 
         header = f"---\ntitle: {title}\ninstructions: {instructions}\n---\n\n"
         return header + "\n\n".join(qa_blocks) + "\n"

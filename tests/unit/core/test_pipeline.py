@@ -18,6 +18,7 @@ from opengrader.core.pipeline import (
     PipelineProgress,
     PipelineRequest,
     StageStatus,
+    auto_grade_pending,
     plan_pipeline,
     run_pipeline,
 )
@@ -355,6 +356,22 @@ def test_auto_grade_is_skipped_when_turned_off(tmp_path) -> None:
     qa.write_text("# key\n", encoding="utf-8")
     plan = _stage_plan(_request(tmp_path, qa_file=qa, auto_grade=False), STAGE_AUTO_GRADE)
     assert plan.status is StageStatus.SKIPPED
+
+
+def test_auto_grading_is_pending_only_after_a_run_that_read_scans_without_it(
+    tmp_path, stages, clean_scan
+) -> None:
+    cohort = tmp_path / "cohort"
+    # Never run here: nothing to catch up on.
+    assert auto_grade_pending(cohort) is False
+
+    run_pipeline(_request(tmp_path))
+    assert auto_grade_pending(cohort) is True
+
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    run_pipeline(_request(tmp_path, qa_file=qa))
+    assert auto_grade_pending(cohort) is False
 
 
 def test_stages_run_in_order_and_report_what_they_did(tmp_path, stages, clean_scan) -> None:
@@ -927,3 +944,105 @@ def test_a_template_checks_a_bundle_by_submission_length_not_its_whole_page_coun
     run_pipeline(_request(tmp_path, blank_template=_pdf(tmp_path / "blank.pdf", pages=2)))
 
     assert seen["pages_per_submission"] == 2 and seen["expected_page_count"] is None
+
+
+# --- scans that need an answer key to find their questions -------------------
+
+
+def _split_catalog(tmp_path, lines) -> None:
+    """The page catalog a split by page matching leaves beside the split PDFs."""
+    import numpy as np
+
+    from opengrader.core.pages.catalog import (
+        CATALOG_DIRNAME,
+        PageCatalog,
+        PageGroup,
+        PageMatch,
+        ScanPage,
+        save_catalog,
+    )
+    from opengrader.core.pages.layout import page_layout
+    from opengrader.core.pages.printed import TextLine
+
+    page = ScanPage(tmp_path / "scans" / "bundle.pdf", 0)
+    printed = [TextLine(text, (0.1, y, 0.6, y + 0.012)) for text, y in lines]
+    group = PageGroup(id="g01", reference=page, reference_turns=0,
+                      layout=page_layout(printed, printed_only=True), page_number=1, copies_read=2)
+    save_catalog(
+        PageCatalog(groups={"g01": group}, matches=[PageMatch(page, "g01", np.eye(3), 100)]),
+        tmp_path / "cohort" / "split" / CATALOG_DIRNAME,
+    )
+
+
+_OWN_PAGES = [("1) What is the symbol for gold?", 0.2), ("2) Why does ice float?", 0.5)]
+_PRINTED_PAGES = [("1. (5 points) What is the symbol for gold?", 0.2), ("2. (5 points) Why does ice float?", 0.5)]
+
+
+def test_scans_of_your_own_assignment_wait_for_an_answer_key_after_the_split(
+    tmp_path, stages, clean_scan
+) -> None:
+    _split_catalog(tmp_path, _OWN_PAGES)
+
+    report = run_pipeline(_request(tmp_path))
+
+    # Checked and split, so the wait costs only the reading.
+    assert stages.stages() == [STAGE_SPLIT]
+    assert report.answer_key_needed and report.ok and not report.ready_to_grade
+    paused = report.stage(STAGE_EXTRACT)
+    assert paused.status is StageStatus.PAUSED and "answer key" in paused.message
+    assert not report.page_order_review_needed
+    # Nothing recorded: the next run reads them.
+    assert STAGE_EXTRACT not in read_manifest(tmp_path / "cohort", filename=RUN_LEDGER_FILENAME)
+
+
+def test_with_the_answer_key_they_are_read_and_the_key_is_handed_to_the_reader(
+    tmp_path, stages, clean_scan
+) -> None:
+    _split_catalog(tmp_path, _OWN_PAGES)
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+
+    report = run_pipeline(_request(tmp_path, qa_file=qa))
+
+    assert not report.answer_key_needed
+    argv = stages.argv_for(STAGE_EXTRACT)
+    assert argv[argv.index("--qa-file") + 1] == str(qa)
+
+
+def test_a_blank_template_a_region_map_or_a_say_so_reads_them_without_a_key(
+    tmp_path, stages, clean_scan
+) -> None:
+    _split_catalog(tmp_path, _OWN_PAGES)
+    template = _pdf(tmp_path / "blank.pdf")
+    region_map = tmp_path / "quiz.regions.json"
+    region_map.write_text("{}", encoding="utf-8")
+
+    for overrides in (
+        {"blank_template": template},
+        {"region_map": region_map},
+        {"read_without_key": True},
+    ):
+        report = run_pipeline(_request(tmp_path, fresh=True, **overrides))
+        assert not report.answer_key_needed, overrides
+        assert report.stage(STAGE_EXTRACT).status is StageStatus.RAN, overrides
+
+
+def test_scans_opengrader_printed_never_wait_for_a_key(tmp_path, stages, clean_scan) -> None:
+    _split_catalog(tmp_path, _PRINTED_PAGES)
+
+    report = run_pipeline(_request(tmp_path))
+
+    assert not report.answer_key_needed
+    assert report.stage(STAGE_EXTRACT).status is StageStatus.RAN
+
+
+def test_the_answer_key_is_not_handed_over_where_something_else_finds_the_questions(tmp_path) -> None:
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    template = _pdf(tmp_path / "blank.pdf")
+
+    plain = _stage_plan(_request(tmp_path, qa_file=qa), STAGE_EXTRACT)
+    with_template = _stage_plan(_request(tmp_path, qa_file=qa, blank_template=template), STAGE_EXTRACT)
+
+    assert "--qa-file" in plain.argv
+    assert "--qa-file" not in with_template.argv

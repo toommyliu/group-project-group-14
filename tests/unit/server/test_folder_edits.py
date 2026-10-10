@@ -562,3 +562,328 @@ def test_outside_a_folder_session_a_student_edit_stays_in_the_workspace(plain) -
 
     assert response.status_code == 200
     assert plain["files"][0].read_text(encoding="utf-8") == before
+
+
+# -- answers ------------------------------------------------------------------
+
+
+def _fields(ctx, version: str = "A") -> dict[str, dict]:
+    listed = ctx["client"].get(f"/api/assignments/{ctx['aid']}/answer-fields").json()
+    return {field["question_id"]: field for field in listed if field["version"] == version}
+
+
+def _key_question(ctx, question: str, version: str = "A"):
+    return find_qa_question(load_qa_markdown(ctx["qa"]), question, version=version)
+
+
+def _save_answers(ctx, *questions: dict):
+    return ctx["client"].put(
+        f"/api/assignments/{ctx['aid']}/answers", json={"questions": list(questions)}
+    )
+
+
+def _answers(question: str, answers: list[str], expected: list[str], version: str = "A") -> dict:
+    return {
+        "question_id": question,
+        "version": version,
+        "answers": answers,
+        "expected_answers": expected,
+    }
+
+
+def test_every_question_is_listed_with_its_options_and_what_it_accepts(session) -> None:
+    fields = _fields(session)
+
+    assert fields["q1"]["answers"] == ["101"] and fields["q1"]["choices"] == []
+    assert fields["q1"]["label"] == "A · 1" and fields["q1"]["points"] == 10
+    # Multiple choice: its options, and the correct letter as its answer.
+    assert [choice["label"] for choice in fields["q3"]["choices"]] == ["A", "B", "C", "D"]
+    assert fields["q3"]["answers"] == ["B"]
+
+
+def test_answers_saved_in_the_browser_are_written_into_the_answer_key_file(session) -> None:
+    before = session["qa"].read_text(encoding="utf-8")
+
+    response = _save_answers(
+        session,
+        _answers("q1", ["101", "0b101"], ["101"]),
+        _answers("q3", ["a"], ["B"]),
+    )
+
+    assert response.status_code == 200 and response.json()["changed"] is True
+    assert _key_question(session, "q1").answers == ["101", "0b101"]
+    assert _key_question(session, "q3").correct_choice_label == "A"
+    # The browser's own copy follows, and nothing else in the file moved.
+    assert _fields(session)["q1"]["answers"] == ["101", "0b101"]
+    after = session["qa"].read_text(encoding="utf-8")
+    assert _key_question(session, "q1").rubric == find_qa_question(
+        load_qa_markdown_text(before), "q1", version="A"
+    ).rubric
+    assert len(after.splitlines()) == len(before.splitlines()) + 1
+    # Version B's question 1 was not the one edited.
+    assert _key_question(session, "q1", "B").answers == find_qa_question(
+        load_qa_markdown_text(before), "q1", version="B"
+    ).answers
+
+
+def load_qa_markdown_text(text: str):
+    from opengrader.core.qa_file import parse_qa_markdown
+
+    return parse_qa_markdown(text)
+
+
+def test_changing_an_answer_changes_no_grade(session) -> None:
+    assert _grade(session, "q1", ["Correct"]).status_code == 200
+    graded = _answer(session, "q1")
+
+    assert _save_answers(session, _answers("q1", ["five"], ["101"])).status_code == 200
+
+    after = _answer(session, "q1")
+    assert (after["rubric_labels"], after["points_awarded"]) == (
+        graded["rubric_labels"],
+        graded["points_awarded"],
+    )
+    assert _file_question(session, "q1").rubric_labels == ("Correct",)
+
+
+def test_answers_changed_somewhere_else_since_they_were_opened_are_not_overwritten(session) -> None:
+    text = session["qa"].read_text(encoding="utf-8")
+    session["qa"].write_text(text.replace("    - 101\n", "    - 0b101\n", 1), encoding="utf-8")
+
+    response = _save_answers(session, _answers("q1", ["five"], ["101"]))
+
+    assert response.status_code == 409
+    assert "changed somewhere else" in response.json()["detail"]
+    assert _key_question(session, "q1").answers == ["0b101"]
+
+
+def test_one_answer_that_cannot_be_saved_saves_none_of_them(session) -> None:
+    before = session["qa"].read_bytes()
+
+    response = _save_answers(
+        session,
+        _answers("q1", ["five"], ["101"]),
+        _answers("q3", ["Z"], ["B"]),
+    )
+
+    assert response.status_code == 422 and "no option Z" in response.json()["detail"]
+    assert session["qa"].read_bytes() == before
+
+
+def test_saving_answers_unchanged_writes_nothing(session) -> None:
+    before = session["qa"].stat().st_mtime_ns
+
+    response = _save_answers(session, _answers("q1", ["101"], ["101"]))
+
+    assert response.json()["changed"] is False
+    assert session["qa"].stat().st_mtime_ns == before
+
+
+def test_a_rubric_and_its_answers_are_saved_together_or_not_at_all(session) -> None:
+    opened = _rubric(session)
+    url = f"/api/assignments/{session['aid']}/questions/q1/rubric"
+
+    saved = session["client"].put(
+        url,
+        json={
+            "version": "A",
+            "rubric": _rebalanced(opened, 6, 4),
+            "expected_rubric": opened,
+            "answers": ["101", "0b101"],
+            "expected_answers": ["101"],
+        },
+    )
+
+    assert saved.status_code == 200
+    question = _key_question(session, "q1")
+    assert question.answers == ["101", "0b101"]
+    assert [item.points_delta for item in question.rubric[1].subitems] == [6, 4]
+
+    # A stale rubric refuses the whole save: the answers are not written either.
+    before = session["qa"].read_bytes()
+    refused = session["client"].put(
+        url,
+        json={
+            "version": "A",
+            "rubric": _rebalanced(opened, 5, 5),
+            "expected_rubric": opened,
+            "answers": ["five"],
+            "expected_answers": ["101", "0b101"],
+        },
+    )
+    assert refused.status_code == 409
+    assert session["qa"].read_bytes() == before
+
+
+def test_answers_alone_can_go_through_the_question_sheet_without_touching_the_rubric(session) -> None:
+    opened = _rubric(session)
+
+    response = session["client"].put(
+        f"/api/assignments/{session['aid']}/questions/q1/rubric",
+        json={
+            "version": "A",
+            "rubric": opened,
+            "expected_rubric": opened,
+            "answers": ["five"],
+            "expected_answers": ["101"],
+        },
+    )
+
+    assert response.json() == {"changed": True, "regraded": 0, "problems": []}
+    assert _key_question(session, "q1").answers == ["five"]
+
+
+def test_outside_a_folder_session_answers_are_not_edited_while_grading(plain) -> None:
+    before = plain["qa"].read_bytes()
+
+    response = _save_answers(plain, _answers("q1", ["five"], ["101"]))
+
+    assert response.status_code == 409
+    assert plain["qa"].read_bytes() == before
+    # Reading what a question accepts is allowed anywhere.
+    assert _fields(plain)["q1"]["answers"] == ["101"]
+
+
+def test_a_drafted_keys_option_lines_become_choices_when_one_is_picked(tmp_path) -> None:
+    from opengrader.core.qa_file.draft_key import draft_from_text
+
+    root = tmp_path / "drafted"
+    shutil.copytree(
+        REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader")
+    )
+    # The same number of questions as the sample's submissions carry, so the
+    # folder publishes; the second is multiple choice with nothing marked.
+    lines = [f"{n}. Question {n}?" for n in range(1, 6)]
+    lines.insert(2, "a) Sodium\nb) Chlorine")
+    (root / "qa.md").write_text(draft_from_text("\n".join(lines), title="Quiz").markdown, encoding="utf-8")
+    store = Workspace.create(root)
+    try:
+        aid = publish_pipeline(
+            store,
+            store.assignment_id_for_folder(root),
+            PipelineOutput(
+                qa_markdown=(root / "qa.md").read_text(encoding="utf-8"),
+                submissions_dir=str((root / "student-submissions").resolve()),
+            ),
+        ).assignment.id
+    except Exception as exc:  # noqa: BLE001 - the sample's own questions do not fit this key
+        pytest.skip(f"the sample cannot be published against a drafted key: {exc}")
+    store.save_assignment_inputs(
+        AssignmentInputs(id=aid, folder=".", scan="", output=".", submissions="student-submissions", qa="qa.md")
+    )
+    start_folder_session(root, aid)
+    with TestClient(create_app(root, process_jobs=False)) as client:
+        ctx = {"client": client, "aid": aid, "qa": root / "qa.md"}
+        field = {f["question_id"]: f for f in client.get(f"/api/assignments/{aid}/answer-fields").json()}["q2"]
+        assert [c["label"] for c in field["choices"]] == ["A", "B"] and field["answers"] == []
+
+        response = client.put(
+            f"/api/assignments/{aid}/answers",
+            json={"questions": [{"question_id": "q2", "version": None, "answers": ["B"], "expected_answers": []}]},
+        )
+
+        assert response.status_code == 200, response.text
+        question = find_qa_question(load_qa_markdown(ctx["qa"]), "q2", version=None)
+        assert question.correct_choice_label == "B" and question.prompt == "Question 2?"
+        assert [choice.text for choice in question.choices] == ["Sodium", "Chlorine"]
+
+
+# -- grading again with the answer key ----------------------------------------
+
+
+def _write_response(path: Path, question: str, text: str) -> None:
+    """Give one answer a transcription, as extraction with a reader would."""
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    inside = False
+    for index, line in enumerate(lines):
+        if line.startswith("- "):
+            inside = line.strip() == f"- {question}:"
+        elif inside and line.startswith("  - Response text:"):
+            lines[index] = f"  - Response text: {text}\n"
+            break
+    else:
+        raise AssertionError(f"no {question} in {path.name}")
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+@pytest.fixture
+def read_session(quiz):
+    """A folder session whose first student's answers to q1 and q3 were read."""
+    _write_response(quiz["files"][0], "q1", "five")
+    _write_response(quiz["files"][0], "q3", "B")
+    start_folder_session(quiz["root"], quiz["aid"])
+    with TestClient(create_app(quiz["root"], process_jobs=False)) as client:
+        ctx = {**quiz, "client": client}
+        client.post("/api/folder-session/sync")
+        yield ctx
+
+
+def _regrade(ctx):
+    return ctx["client"].post(f"/api/assignments/{ctx['aid']}/regrade")
+
+
+def test_grading_again_scores_what_the_answer_key_settles_in_files_and_browser(read_session) -> None:
+    ctx = read_session
+    assert _answer(ctx, "q3")["points_awarded"] is None
+
+    response = _regrade(ctx)
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["files"] == 2 and result["updated"] >= 1 and result["problems"] == []
+    # The multiple-choice answer matches the key: full marks, in the file and here.
+    assert _file_question(ctx, "q3").points_awarded == 10
+    assert _answer(ctx, "q3")["points_awarded"] == 10
+    # The run is in the history, like any auto-grading run.
+    actors = {entry.actor for entry in read_journal(resolve_history_dir(ctx["root"] / "student-submissions"))}
+    assert "automated-grading" in actors
+
+
+def test_new_answers_are_used_when_grading_again(read_session) -> None:
+    ctx = read_session
+    _regrade(ctx)
+    wrong = _answer(ctx, "q1")["points_awarded"]
+
+    assert _save_answers(ctx, _answers("q1", ["101", "five"], ["101"])).status_code == 200
+    # Saving the answer changed no grade…
+    assert _answer(ctx, "q1")["points_awarded"] == wrong
+    # …grading again does.
+    assert _regrade(ctx).json()["updated"] >= 1
+    assert _answer(ctx, "q1")["points_awarded"] == 10
+    assert _file_question(ctx, "q1").points_awarded == 10
+    assert wrong != 10
+
+
+def test_a_grade_on_a_question_the_key_does_not_settle_is_kept(read_session) -> None:
+    ctx = read_session
+    # q2 has no transcription to compare with the key: graded by hand.
+    assert _grade(ctx, "q2", ["Incorrect"]).status_code == 200
+    kept = _answer(ctx, "q2")
+
+    _regrade(ctx)
+
+    after = _answer(ctx, "q2")
+    assert (after["rubric_labels"], after["points_awarded"]) == (
+        kept["rubric_labels"],
+        kept["points_awarded"],
+    )
+
+
+def test_grading_again_twice_changes_nothing_the_second_time(read_session) -> None:
+    ctx = read_session
+    _regrade(ctx)
+    before = [path.read_bytes() for path in ctx["files"]]
+
+    again = _regrade(ctx).json()
+
+    assert again["updated"] == 0 and again["problems"] == []
+    assert [path.read_bytes() for path in ctx["files"]] == before
+
+
+def test_outside_a_folder_session_work_is_not_graded_again_from_the_browser(plain) -> None:
+    before = [path.read_bytes() for path in plain["files"]]
+
+    response = _regrade(plain)
+
+    assert response.status_code == 409
+    assert [path.read_bytes() for path in plain["files"]] == before

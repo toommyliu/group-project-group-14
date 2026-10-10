@@ -7,8 +7,8 @@ Two files, split by what a setting describes:
   the run ledger. Quiz 1's six pages must not follow you to quiz 2, and the
   file travels with the folder (paths inside it are stored relative to it).
 * **this computer** — parallel jobs, whether grading opens as submissions
-  arrive, the class folder used last — in `pipeline.json` beside the AI
-  settings.
+  arrive, the class folder used last, the points Create answer key gives a
+  question that states none — in `pipeline.json` beside the AI settings.
 
 One-shot overrides ("grade it anyway", "start over") are deliberately not
 fields here: a remembered "ignore scan warnings" would silently grade the next
@@ -58,6 +58,8 @@ class MachinePipelineSettings:
     # None = let Opengrader pick the number of parallel extractions.
     jobs: int | None = None
     last_class_folder: str = ""
+    # None = the standard (`standard_rubric.DEFAULT_QUESTION_POINTS`).
+    answer_key_points: float | None = None
 
 
 # Fields holding one path, stored relative to the class folder when inside it.
@@ -130,11 +132,13 @@ def load_machine_settings() -> MachinePipelineSettings:
         return MachinePipelineSettings()
     jobs = data.get("jobs")
     last = data.get("last_class_folder")
+    points = data.get("answer_key_points")
     return MachinePipelineSettings(
         # Absent or anything but an explicit false keeps the default (on).
         grade_as_ready=data.get("grade_as_ready") is not False,
         jobs=jobs if _positive_int(jobs) else None,
         last_class_folder=last if isinstance(last, str) else "",
+        answer_key_points=float(points) if _positive_number(points) else None,
     )
 
 
@@ -147,12 +151,18 @@ def save_machine_settings(settings: MachinePipelineSettings) -> Path:
         body["jobs"] = settings.jobs
     if settings.last_class_folder:
         body["last_class_folder"] = settings.last_class_folder
+    if settings.answer_key_points:
+        body["answer_key_points"] = settings.answer_key_points
     return _write(machine_settings_path(), body)
 
 
 def _positive_int(value: object) -> bool:
     # bool is an int in Python; `true` is not a page count.
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _positive_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
 
 
 def _read(path: Path) -> dict | None:

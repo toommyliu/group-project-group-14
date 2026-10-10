@@ -1,15 +1,38 @@
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
+from typing import Sequence
 
 from opengrader.core.pdf_utils import POINTS_SPEC
 
+from .outline import Outline
 from .printed import FIELD_LINE_RE, TextLine
 
 QUESTION_LABEL_RE = re.compile(r"^\s*[-*•]?\s*(\d{1,2})\s*[.,)]\s*" + POINTS_SPEC, re.IGNORECASE)
 PART_LABEL_RE = re.compile(r"^\s*[-*•]?\s*\(?([a-h])\)\s*" + POINTS_SPEC, re.IGNORECASE)
 _PLAIN_QUESTION_RE = re.compile(r"^\s*(\d{1,2})\s*[.)]\s+\S")
+# How a question or a part may be printed when the answer key says what to
+# look for (`outline_labels`): "3." "3)" "Q3." "Question 3:", parts "3a)"
+# "3(a)" "3.a)", and — under their question — a bare "a)" "(a)" "a.".
+_KEYED_PART_RE = re.compile(
+    r"^\s*[-*•]?\s*(?:(?:Q|Question|Problem)\s*)?(\d{1,2})\s*"
+    r"(?:\.?([a-h])[.)]|\(([a-h])\)[.:]?)\s*(.*)$",
+    re.IGNORECASE,
+)
+_KEYED_QUESTION_RE = re.compile(
+    r"^\s*[-*•]?\s*(?:(?:Q|Question|Problem)\s*(\d{1,2})\s*[.):]|(\d{1,2})\s*[.,)])\s*(.*)$",
+    re.IGNORECASE,
+)
+_KEYED_BARE_PART_RE = re.compile(r"^\s*[-*•]?\s*(?:\(([a-h])\)|([a-h])[.)])\s+(.*)$", re.IGNORECASE)
+_POINTS_ANYWHERE_RE = re.compile(POINTS_SPEC, re.IGNORECASE)
+# How alike a printed line and a question's text must be for the line to be
+# that question with no number in front of it at all.
+_TEXT_ONLY_MATCH = 0.85
+_TEXT_ONLY_MIN_CHARS = 12
+# What one question of the key left unfound between two found ones costs.
+_SKIP_COST = 0.3
 _PAGE_NUMBER_RE = re.compile(r"^\s*(?:page\s*)?(\d{1,2})(?:\s*(?:of|/)\s*(\d{1,2}))?\s*$", re.IGNORECASE)
 _PAGE_OF_RE = re.compile(r"\bpage\s*(\d{1,2})\s*(?:of|/)\s*(\d{1,2})\b", re.IGNORECASE)
 
@@ -26,6 +49,9 @@ class QuestionLabel:
     part: str | None
     points: float | None
     box: tuple[float, float, float, float]
+    # The question's text as the answer key gives it, when the key is what
+    # found this label; None reads it off the page (`_prompt`).
+    prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +65,8 @@ class PageLayout:
     lines: tuple[TextLine, ...] = ()
     title: str = ""
     printed_only: bool = False
+    # True when the answer key found the labels, not the page's own print.
+    guided: bool = False
 
     @property
     def has_identity(self) -> bool:
@@ -60,10 +88,24 @@ class Region:
     prompt: str = ""
 
 
-def page_layout(lines: list[TextLine] | tuple[TextLine, ...], *, printed_only: bool) -> PageLayout:
+def page_layout(
+    lines: list[TextLine] | tuple[TextLine, ...],
+    *,
+    printed_only: bool,
+    outlines: Sequence[Outline] = (),
+) -> PageLayout:
+    """`outlines` is the answer key's questions (one outline per version).
+    They are used only where they find more than the page's own labels do, so
+    a page Opengrader printed reads exactly as it does without them."""
     lines = sorted(lines, key=lambda line: (line.box[1], line.box[0]))
     fields, title = _fields(lines, printed_only=printed_only)
     labels = _labels(lines)
+    guided = False
+    if outlines:
+        own = len(labels) if any(label.points is not None for label in labels) else 0
+        keyed = max((outline_labels(lines, outline) for outline in outlines), key=_labels_score)
+        if keyed and len(keyed) > own:
+            labels, guided = keyed, True
     page_number, page_count = _page_number(lines)
     first_label_y = labels[0].box[1] if labels else 1.0
     last_label_y = labels[-1].box[1] if labels else 0.0
@@ -79,7 +121,7 @@ def page_layout(lines: list[TextLine] | tuple[TextLine, ...], *, printed_only: b
     return PageLayout(
         labels=tuple(labels), fields=fields, page_number=page_number, page_count=page_count,
         header_bottom=header_bottom, content_bottom=content_bottom, lines=tuple(lines), title=title,
-        printed_only=printed_only,
+        printed_only=printed_only, guided=guided,
     )
 
 
@@ -100,7 +142,8 @@ def question_regions(layout: PageLayout, next_page: PageLayout | None = None) ->
         bottom = starts[following.key] - _PAD if following else layout.content_bottom
         box = (LEFT, max(0.0, top), RIGHT, max(top + 0.01, bottom))
         continuation = next_page.top_band if following is None and next_page is not None else None
-        out.append((Region(label.key, box, label.points, _prompt(layout, box)), continuation))
+        prompt = label.prompt if label.prompt is not None else _prompt(layout, box)
+        out.append((Region(label.key, box, label.points, prompt), continuation))
     return out
 
 
@@ -137,6 +180,109 @@ def _plain_labels(lines: list[TextLine]) -> list[QuestionLabel]:
             labels.append(QuestionLabel(f"q{number}", number, None, None, line.box))
             expected = number + 1
     return labels if len(labels) >= 2 else []
+
+
+def _labels_score(labels: list[QuestionLabel]) -> tuple[int, int]:
+    # More questions found wins; between versions that find as many, the one
+    # whose parts were found too.
+    return len(labels), sum(1 for label in labels if label.part)
+
+
+def _alike(printed: str, expected: str) -> float:
+    """How much a printed line reads like the start of a question's text."""
+    a = re.sub(r"\W+", "", _POINTS_ANYWHERE_RE.sub("", printed).lower())
+    b = re.sub(r"\W+", "", expected.lower())
+    if not a or not b:
+        return 0.0
+    # A long question wraps: the line is only its beginning.
+    return difflib.SequenceMatcher(None, a, b[: max(len(a), 1)]).ratio()
+
+
+def _keyed_candidates(line: TextLine, outline: Outline) -> list[tuple[int, float, bool]]:
+    """(index into the outline, how well it fits, needs its question above)
+    for every question or part this line could be the printed start of."""
+    text = line.text
+    found: list[tuple[int, float, bool]] = []
+    part = _KEYED_PART_RE.match(text)
+    question = None if part else _KEYED_QUESTION_RE.match(text)
+    bare = None if part or question else _KEYED_BARE_PART_RE.match(text)
+    for index, item in enumerate(outline):
+        if part and item.part == (part.group(2) or part.group(3)).lower() and item.number == int(part.group(1)):
+            found.append((index, 1.0 + _alike(part.group(4), item.prompt), False))
+        elif question and item.part is None and item.number == int(question.group(1) or question.group(2)):
+            found.append((index, 1.0 + _alike(question.group(3), item.prompt), False))
+        elif bare and item.part == (bare.group(1) or bare.group(2)).lower():
+            # "a)" says which part, not of which question: it is one only
+            # right under that question, or its earlier parts.
+            found.append((index, 1.0 + _alike(bare.group(3), item.prompt), True))
+        elif (
+            not (part or question or bare)
+            and len(re.sub(r"\W+", "", item.prompt)) >= _TEXT_ONLY_MIN_CHARS
+            and _alike(text, item.prompt) >= _TEXT_ONLY_MATCH
+        ):
+            # No number printed at all, but the line is the question's text.
+            found.append((index, 1.0 + _alike(text, item.prompt), False))
+    return found
+
+
+def outline_labels(lines: Sequence[TextLine], outline: Outline) -> list[QuestionLabel]:
+    """The answer key's questions, found on a page.
+
+    Lines are taken top to bottom and questions in the key's order: the
+    result is the run of (line, question) pairs that fits the key best. So a
+    numbered step a student wrote in an answer is not a question — it does
+    not come in order, and it does not read like the question's text — and a
+    question the page prints with no points, or lettered "3a)", still is.
+    A page holds a stretch of the key, so starting anywhere costs nothing,
+    but skipping a question inside the stretch does.
+    """
+    ordered = sorted(lines, key=lambda line: (line.box[1], line.box[0]))
+    pairs = [
+        (position, index, fit, needs_question)
+        for position, line in enumerate(ordered)
+        for index, fit, needs_question in _keyed_candidates(line, outline)
+    ]
+    best: list[float] = []
+    link: list[int | None] = []
+    for current, (position, index, fit, needs_question) in enumerate(pairs):
+        score, previous = (float("-inf") if needs_question else fit), None
+        for earlier in range(current):
+            before_position, before_index, _fit, _needs = pairs[earlier]
+            if before_position >= position or before_index >= index or best[earlier] == float("-inf"):
+                continue
+            if needs_question and outline[before_index].number != outline[index].number:
+                continue
+            skipped = sum(1 for item in outline[before_index + 1 : index] if not item.stem)
+            candidate = best[earlier] + fit - _SKIP_COST * skipped
+            if candidate > score:
+                score, previous = candidate, earlier
+        best.append(score)
+        link.append(previous)
+
+    if not pairs or max(best) == float("-inf"):
+        return []
+    at: int | None = max(range(len(pairs)), key=lambda i: best[i])
+    run: list[tuple[int, int, float, bool]] = []
+    while at is not None:
+        run.append(pairs[at])
+        at = link[at]
+    run.reverse()
+    # One number alone proves nothing unless the line also reads like the question.
+    if len(run) == 1 and run[0][2] < 1.5:
+        return []
+
+    with_parts = {outline[index].number for _p, index, _f, _n in run if outline[index].part}
+    labels = []
+    for position, index, _fit, _needs in run:
+        item, line = outline[index], ordered[position]
+        if item.stem and item.number not in with_parts:
+            # The stem with none of its parts on this page is not an answer.
+            continue
+        points = item.points
+        if points is None and (printed := _POINTS_ANYWHERE_RE.search(line.text)):
+            points = float(printed.group(1))
+        labels.append(QuestionLabel(item.key, item.number, item.part, points, line.box, item.prompt))
+    return labels
 
 
 def _dedupe(labels: list[QuestionLabel]) -> list[QuestionLabel]:

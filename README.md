@@ -162,12 +162,30 @@ There are two ways into the terminal grading app:
   most recent class folders — press ↩ on one to reopen it, `d` to forget one
   that has moved. F2 comes back to *Start grading*, F3 moves between Tools and
   grading.
+  **A folder that is not ready yet:** choose it and press *Launch Grading*
+  anyway. If it holds scans but nothing to grade, Opengrader asks once, then
+  checks, splits and reads them with the settings saved for that folder (the
+  progress shows on the card) and opens grading. With no answer key it says
+  what to do: with a blank template it offers to draft the key from it (every
+  question, its points, the usual rubric; answers left blank), otherwise
+  *Create answer key* opens and the run carries on by itself when the key is
+  made. *Add answers* (shown while the key has a question with no answer)
+  is a form for the answers — one accepted answer per line, tick-boxes for
+  multiple choice, *Suggest answers with AI* when an AI is available, and
+  *Open as text file* for editing the key in a plain-text editor.
   **Optional browser app:** tick *Show Open in browser* under Tools → *Browser
   app* to enable the *Open in browser* button on the *Start grading* card. The
   button opens your class folder as a folder session and shows it in your
   browser. Every grade you save in the browser writes immediately into the
   student's `.submission.md` file; edits made in Opengrader (classic) appear in
-  the browser when you switch back. Click **Create a workspace** to switch to
+  the browser when you switch back. *Open in browser* prepares a folder that
+  is not ready the same way *Launch Grading* does, and opens the browser when
+  the run finishes. In the browser, the Answer key page has *Add answers*
+  (every question still without one, on one page) and *Edit answers and
+  rubric* on each question; both save straight into the answer key file.
+  Saving answers changes no grade: *Grade again with these answers* then
+  scores what the key settles outright (replacing a hand grade on those
+  questions only) and is recorded in the history like any auto-grading run. Click **Create a workspace** to switch to
   shared grading across several graders — after that, browser grades save into
   the workspace instead, and you write them back to the files with `W` in the
   TUI (`opengrader tui`, open the assignment). The Tools → *Browser app* section
@@ -256,7 +274,7 @@ spelling. The one exception is `classic`, which only exists as
 - `photo-import`: Turn a folder of phone photos (JPEG/HEIC/PNG) into per-student PDFs. Each photo is deskewed and perspective-corrected — by the sheet's corner registration marks when it has them, by the page's own edges otherwise — then the photos belonging to one student are bound into a single PDF for `submission-extractor`. Your photos are only ever read. For a class that submits photos instead of a scanned bundle; it lands where `submission-splitter` lands, so the rest of the pipeline is unchanged.
 - `submission-splitter`: Split one scanned PDF containing many students into per-student PDFs.
 - `submission-extractor`: Convert per-student submission PDFs into `.submission.md` files and response image crops using digital text, templates, or OCR. Runs submissions in parallel across CPU cores (`--jobs`) and can pick up where an interrupted run stopped (`--resume`).
-- `create-answer-key` (`answer-key`): Build a QA markdown draft from an existing answer key — a [text2qti](https://github.com/gpoore/text2qti) file, a Word document, or a solved answer-key PDF (OCR + vision model for a scanned one). The input format is detected from the file extension; replaces the old `pdf-to-qa-solutions` and `text2qti-to-qa` scripts, both retired.
+- `create-answer-key` (`answer-key`): Build a QA markdown draft from an existing answer key — a [text2qti](https://github.com/gpoore/text2qti) file, a Word document, or a solved answer-key PDF (OCR + vision model for a scanned one). A text or Word file, or a PDF that carries its own text, needs only numbered questions (`1.`, `1)`, `Q1.`; parts as `1a)`, `1b)`) and `Answer:` lines (one per accepted answer); points are optional, anywhere on the question's line (`… (10 points)`), and a question with none gets `--default-points` (10, half for partial credit). A scanned PDF is read by the same rules after OCR. The input format is detected from the file extension; replaces the old `pdf-to-qa-solutions` and `text2qti-to-qa` scripts, both retired.
 - `draft-rubric`: Analyze student answers to free-response questions and ask the AI to draft partial-credit rubric items. By default, it prints the drafts; use `--write` to save them into your QA file. The next step is `automated-grading --llm` to apply the rubric and get a first-pass grade for each answer.
 - `automated-grading`: Update student `.submission.md` files from a solutions markdown file. With `--llm`, it also tells you which written questions have no partial-credit rubric items yet and how to draft them.
 - `claim`: Divide grading between several TAs. `claim divide --graders alice,bob,carol` splits the cohort into contiguous slices; `claim status` shows coverage, gaps and any double-booked work. Claiming work someone else holds is refused.

@@ -102,12 +102,12 @@ export function GradePanel({
               title={
                 rubricLocked
                   ? 'Available once this grade has finished saving'
-                  : 'Edit this question’s rubric in the answer key'
+                  : 'Edit this question’s answers and rubric in the answer key'
               }
               onClick={() => setEditingRubric(true)}
             >
               <PenLine aria-hidden="true" />
-              Edit<span className="sr-only"> rubric</span>
+              Edit<span className="sr-only"> answers and rubric</span>
             </Button>
           )}
           <p

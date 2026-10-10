@@ -15,6 +15,7 @@ from PIL import Image
 
 from .features import Alignment, PageFeatures, align, gray_for_matching, page_features, rectify
 from .layout import PART_LABEL_RE, QUESTION_LABEL_RE, PageLayout, QuestionLabel, is_page_number, page_layout, question_regions
+from .outline import Outline, OutlineItem, regions_fingerprint
 from .printed import FIELD_LINE_RE, TextLine, read_lines, read_title
 
 CATALOG_DIRNAME = ".opengrader-pages"
@@ -67,6 +68,8 @@ class PageCatalog:
     groups: dict[str, PageGroup]
     matches: list[PageMatch]
     directory: Path | None = None
+    # Questions the answer key has that `guide_catalog` found on no page.
+    missing: tuple[OutlineItem, ...] = ()
 
     @property
     def expected_pages(self) -> list[int]:
@@ -448,6 +451,82 @@ def load_catalog(directory: Path) -> PageCatalog:
         for p in data["pages"]
     ]
     return PageCatalog(groups=groups, matches=matches, directory=directory)
+
+
+@dataclass(frozen=True)
+class GuideReport:
+    """What the answer key changed about where the questions are."""
+
+    # Printed pages whose questions the key found (the rest kept their own labels).
+    guided_pages: int
+    found: tuple[str, ...]
+    missing: tuple[str, ...]
+    # A digest of the guided pages' regions when they differ from what the
+    # pages' own labels gave; "" when the key changed nothing.
+    fingerprint: str
+
+
+def _region_boxes(layout: PageLayout) -> list[tuple[str, tuple[float, ...]]]:
+    return [(region.key, region.box) for region, _ in question_regions(layout)]
+
+
+def guide_catalog(catalog: PageCatalog, outlines: tuple[Outline, ...]) -> GuideReport:
+    """Find the answer key's questions on the catalog's printed pages.
+
+    Only the layouts change, in memory: the catalog on disk keeps the lines
+    it read, so a different answer key is applied to the same reading. A page
+    that prints Opengrader's own labels keeps them.
+    """
+    before: dict[str, list] = {}
+    after: dict[str, list] = {}
+    guided = 0
+    for group in catalog.groups.values():
+        layout = page_layout(group.layout.lines, printed_only=group.layout.printed_only, outlines=outlines)
+        if not layout.guided:
+            continue
+        guided += 1
+        before[group.id], after[group.id] = _region_boxes(group.layout), _region_boxes(layout)
+        group.layout = layout
+
+    found = {label.key for group in catalog.groups.values() for label in group.layout.labels}
+    # With several versions there is no telling which one a missing question
+    # belongs to; with one, what the key has and no page shows is a gap.
+    expected = outlines[0] if len(outlines) == 1 else ()
+    missing = tuple(item for item in expected if not item.stem and item.key not in found)
+    kinds = {item.key: item.kind for outline in outlines for item in outline if item.kind}
+    for group in catalog.groups.values():
+        if group.layout.guided:
+            for label in group.layout.labels:
+                if label.key in kinds:
+                    # The key lists choices: no need to guess the type from the page.
+                    group.question_types[label.key] = kinds[label.key]
+    catalog.missing = missing if guided else ()
+    stems = {item.key for outline in outlines for item in outline if item.stem}
+    return GuideReport(
+        guided_pages=guided,
+        # What gets graded: a stem above its parts is not a question to count.
+        found=tuple(sorted(found - stems)),
+        missing=tuple(item.key for item in catalog.missing),
+        fingerprint=regions_fingerprint(after) if after != before else "",
+    )
+
+
+def scans_need_answer_key(source_dir: Path) -> bool:
+    """True when these split scans print nothing that says where the
+    questions are — no "3. (10 points)" of Opengrader's own — so the answer
+    key is what has to. False when there is no page catalog to tell from."""
+    directory = Path(source_dir) / CATALOG_DIRNAME
+    if not (directory / "catalog.json").exists():
+        return False
+    try:
+        catalog = load_catalog(directory)
+    except (OSError, ValueError, KeyError):
+        return False
+    if not catalog.groups:
+        return False
+    return not any(
+        label.points is not None for group in catalog.groups.values() for label in group.layout.labels
+    )
 
 
 def ensure_features(group: PageGroup) -> PageGroup:

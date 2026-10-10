@@ -123,7 +123,7 @@ class GradeSaveResult(BaseModel):
 
 
 class RubricEditResult(BaseModel):
-    """What saving a question's rubric from the browser did.
+    """What saving a question's rubric — or answers — from the browser did.
 
     `regraded` counts the saved grades that followed a renamed or re-pointed
     item. `problems` names any of those grades whose `.submission.md` could
@@ -167,6 +167,18 @@ class FolderSyncResult(BaseModel):
     problems: list[str] = []
     # The roster file changed, appeared or went away since the last sync.
     roster_changed: bool = False
+
+
+class RegradeResult(BaseModel):
+    """What grading a class folder again with its answer key did.
+
+    `updated` counts the grades that changed; `problems` names anything that
+    could not be read, graded or brought back into the browser.
+    """
+
+    files: int = 0
+    updated: int = 0
+    problems: list[str] = []
 
 
 CourseText = Annotated[

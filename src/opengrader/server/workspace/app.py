@@ -38,11 +38,13 @@ from opengrader.core.workspace.store import (
 )
 from opengrader.core.workspace.folder_session import (
     active_folder_session,
-    edit_rubric,
+    KeyEdit,
+    edit_answer_key,
     end_folder_session,
     folder_lock,
     folder_session_info,
     load_folder_session,
+    regrade_folder,
     sync_answer_key,
     sync_folder,
     write_through,
@@ -59,6 +61,7 @@ from opengrader.core.workspace.models import (
     FeedbackJob,
     FolderSyncResult,
     GradeSaveResult,
+    RegradeResult,
     RubricEditResult,
     PipelineOutput,
     PipelinePublication,
@@ -155,6 +158,44 @@ class RubricEdit(BaseModel):
     version: str | None = None
     rubric: list[QARubricItem]
     expected_rubric: list[QARubricItem]
+    # The question's answers, saved with the rubric in the same write; left
+    # out, they are not touched. For a multiple-choice question they are its
+    # correct letters.
+    answers: list[str] | None = None
+    expected_answers: list[str] | None = None
+
+
+class AnswerChoice(BaseModel):
+    label: str
+    text: str
+
+
+class AnswerFieldInfo(BaseModel):
+    """One question (or part) of the answer key as a place to put an answer."""
+
+    question_id: str
+    version: str | None = None
+    # "1", "3a" — what the question is called on the page.
+    label: str
+    prompt: str
+    points: int
+    # Empty unless the question is multiple choice.
+    choices: list[AnswerChoice]
+    # The accepted answers; for multiple choice, the correct letters.
+    answers: list[str]
+
+
+class QuestionAnswers(BaseModel):
+    question_id: str
+    version: str | None = None
+    answers: list[str]
+    expected_answers: list[str]
+
+
+class AnswersEdit(BaseModel):
+    """Answers for several questions at once, each with what the editor opened."""
+
+    questions: list[QuestionAnswers]
 
 
 def folder_session_refusal(method: str, path: str) -> str | None:
@@ -477,19 +518,114 @@ def create_app(
                     "folder is open from classic mode. In a workspace, edit "
                     "it on the Answer key page before submissions are added.",
                 )
-            result = edit_rubric(
+            result = edit_answer_key(
                 workspace,
                 assignment_id,
-                question_id,
-                version=edit.version or None,
-                rubric=edit.rubric,
-                expected=edit.expected_rubric,
+                [
+                    KeyEdit(
+                        question_id,
+                        edit.version or None,
+                        rubric=edit.rubric,
+                        expected_rubric=edit.expected_rubric,
+                        answers=edit.answers,
+                        expected_answers=edit.expected_answers,
+                    )
+                ],
                 actor=user.email if user else None,
             )
         if result.changed:
             with registry_lock:
                 extraction_source(assignment_id)
         return result
+
+    @api.get("/assignments/{assignment_id}/answer-fields")
+    def answer_fields_of(assignment_id: str) -> list[AnswerFieldInfo]:
+        """Every question (or part) of the answer key that takes an answer.
+
+        A draft keeps a multiple-choice question's options as lines of its
+        text; they are listed here as choices, which is what saving a correct
+        one makes them.
+        """
+        from opengrader.core.qa_file.answers import answer_fields
+
+        require_assignment(assignment_id)
+        return [
+            AnswerFieldInfo(
+                question_id=field.key,
+                version=field.version or None,
+                label=field.label,
+                prompt=field.prompt,
+                points=field.points,
+                choices=[AnswerChoice(label=label, text=text) for label, text in field.choices],
+                answers=list(field.answers),
+            )
+            for field in answer_fields(workspace.assignment_source(assignment_id))
+        ]
+
+    @api.put("/assignments/{assignment_id}/answers")
+    def save_answers(
+        assignment_id: str, edit: AnswersEdit, request: Request
+    ) -> RubricEditResult:
+        """Add or change the answers of several questions; a folder session only.
+
+        One write into the answer key file (`folder_session.edit_answer_key`),
+        so either every answer here is saved or none is. No grade changes:
+        what was graded stays graded until auto-grading is run again.
+        """
+        require_assignment(assignment_id)
+        user = signed_in(request)
+        with folder_lock(root):
+            session = load_folder_session(root)
+            if session is None or session.assignment_id != assignment_id:
+                raise HTTPException(
+                    409,
+                    "Answers can be added here only when a class folder is "
+                    "open from classic mode. In a workspace, edit them on the "
+                    "Answer key page before submissions are added.",
+                )
+            result = edit_answer_key(
+                workspace,
+                assignment_id,
+                [
+                    KeyEdit(
+                        question.question_id,
+                        question.version or None,
+                        answers=question.answers,
+                        expected_answers=question.expected_answers,
+                    )
+                    for question in edit.questions
+                ],
+                actor=user.email if user else None,
+            )
+        if result.changed:
+            with registry_lock:
+                extraction_source(assignment_id)
+        return result
+
+    @api.post("/assignments/{assignment_id}/regrade")
+    def regrade(assignment_id: str, request: Request) -> RegradeResult:
+        """Grade the folder's work again with its answer key; a folder session only.
+
+        The rule-based part of auto-grading, run on the files and then
+        brought back here (`folder_session.regrade_folder`). No AI is used
+        from the browser. A workspace has no files to grade in place.
+        """
+        require_assignment(assignment_id)
+        user = signed_in(request)
+        with folder_lock(root):
+            session = load_folder_session(root)
+            if session is None or session.assignment_id != assignment_id:
+                raise HTTPException(
+                    409,
+                    "Work can be graded again from here only when a class "
+                    "folder is open from classic mode.",
+                )
+            try:
+                return regrade_folder(
+                    workspace, assignment_id, actor=user.email if user else None
+                )
+            except WriteBackError as exc:
+                raise HTTPException(409, str(exc)) from exc
 
     @api.delete("/assignments/{assignment_id}", status_code=204)
     async def delete_assignment(assignment_id: str) -> Response:

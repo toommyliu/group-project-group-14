@@ -90,3 +90,36 @@ def open_in_external_viewer(path: str | Path) -> str:
         ) from exc
 
     return target.name
+
+
+def text_editor_command(path: str | Path) -> list[str]:
+    """The computer's plain-text editor on a file, whatever its extension.
+
+    An answer key is a `.md` file, and a computer with no Markdown program
+    has nothing to open one with on a double-click. These need none: TextEdit
+    (`open -t`), Notepad, and on Linux whatever handles plain text.
+    """
+    if sys.platform == "darwin":
+        return ["open", "-t", str(path)]
+    if sys.platform == "win32":
+        return ["notepad", str(path)]
+    return ["xdg-open", str(path)]
+
+
+def open_in_text_editor(path: str | Path) -> str:
+    target = Path(path)
+    if not target.exists():
+        raise ExternalViewerError(f"file not found: {target}")
+    command = text_editor_command(target.resolve())
+    popen_kwargs: dict[str, object] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform != "win32":
+        popen_kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen(command, **popen_kwargs)  # type: ignore[arg-type]  # noqa: S603
+    except (OSError, ValueError) as exc:
+        raise ExternalViewerError(f"could not launch {command[0]!r}: {exc}") from exc
+    return target.name

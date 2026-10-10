@@ -52,6 +52,8 @@ _STAGE_COMMANDS = {
 
 # Prefix of the PAUSED extract outcome's detail when page order needs confirming.
 PAGE_ORDER_DETAIL = "page-order:"
+# …and when the scans cannot be read until there is an answer key.
+ANSWER_KEY_DETAIL = "answer-key:"
 
 
 class StageStatus(str, Enum):
@@ -105,6 +107,10 @@ class PipelineRequest:
     # them as scanned and carry on. Without it (or reorder_pages) the run pauses
     # before extraction for a person to confirm, sort, or rearrange them.
     keep_page_order: bool = False
+    # The answer to "these scans need an answer key to find their questions"
+    # given up front: read them anyway, by whatever numbers the pages print.
+    # One-shot, like `force`: never remembered.
+    read_without_key: bool = False
     llm: LlmOptions = LlmOptions()
     jobs: int | None = None
     auto_grade: bool = True
@@ -221,6 +227,15 @@ class PipelineReport:
         submissions look out of order and nobody has confirmed them yet."""
         return any(
             outcome.status is StageStatus.PAUSED and outcome.detail.startswith(PAGE_ORDER_DETAIL)
+            for outcome in self.stages
+        )
+
+    @property
+    def answer_key_needed(self) -> bool:
+        """True when the run stopped before extraction because nothing says
+        where the questions are on these scans, and there is no answer key."""
+        return any(
+            outcome.status is StageStatus.PAUSED and outcome.detail.startswith(ANSWER_KEY_DETAIL)
             for outcome in self.stages
         )
 
@@ -414,6 +429,14 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
         argv += ["--blank-template", str(request.blank_template)]
     if request.region_map is not None:
         argv += ["--region-map", str(request.region_map)]
+    if (
+        request.qa_file is not None
+        and request.blank_template is None
+        and request.region_map is None
+    ):
+        # Something has to say where the questions are; with neither of the
+        # above it is the answer key (scans with their own labels ignore it).
+        argv += ["--qa-file", str(request.qa_file)]
     if request.jobs:
         argv += ["--jobs", str(request.jobs)]
     if request.llm.read_handwriting:
@@ -489,6 +512,17 @@ def _read_ledger(request: PipelineRequest) -> dict[str, ExtractionRecord]:
     if request.fresh:
         return {}
     return read_manifest(request.output_dir, filename=RUN_LEDGER_FILENAME)
+
+
+def auto_grade_pending(output_dir: str | Path) -> bool:
+    """True when a run here read the scans but none has ever auto-graded them.
+
+    That is a folder prepared before it had an answer key (or with
+    auto-grading off, or stopped for a rubric review). Only the run ledger is
+    read, so this is cheap enough to ask every time a folder is opened.
+    """
+    ledger = read_manifest(output_dir, filename=RUN_LEDGER_FILENAME)
+    return STAGE_EXTRACT in ledger and STAGE_AUTO_GRADE not in ledger
 
 
 def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
@@ -880,7 +914,9 @@ def _run_extract(
     from opengrader.cli import submission_extractor
     from opengrader.core.submissions.processor import ExtractionProgress
 
-    paused = _page_order_gate(request, plan, progress, started)
+    paused = _answer_key_gate(request, plan, started) or _page_order_gate(
+        request, plan, progress, started
+    )
     if paused is not None:
         return paused
 
@@ -910,6 +946,46 @@ def _run_extract(
         message=f"{len(outputs)} submission(s) ready to grade",
         duration_seconds=duration,
         outputs=tuple(str(path) for path in outputs),
+    )
+
+
+def _answer_key_gate(
+    request: PipelineRequest, plan: StagePlan, started: float
+) -> StageOutcome | None:
+    """Extraction waits for an answer key when the key is the only thing that
+    can say where the questions are: no blank template, no region map, and
+    scans that do not print Opengrader's own labels. The scan is checked and
+    split by then, so the wait costs only the reading — and reading without
+    the key would have to be done again once there is one."""
+    if (
+        request.qa_file is not None
+        or request.blank_template is not None
+        or request.region_map is not None
+        or request.read_without_key
+        or not request.extract_source.is_dir()
+    ):
+        return None
+    from opengrader.core.pages.catalog import scans_need_answer_key
+
+    if not scans_need_answer_key(request.extract_source):
+        return None
+    return StageOutcome(
+        stage=plan.stage,
+        status=StageStatus.PAUSED,
+        message="the scans are split and waiting for an answer key to find their questions",
+        detail="\n".join(
+            [
+                ANSWER_KEY_DETAIL,
+                "These pages do not print their points beside each question "
+                "number, so the answer key is what says which questions and "
+                "parts to look for.",
+                "Create the answer key (opengrader create-answer-key) in "
+                f"{request.output_dir} and run again; the split is reused.",
+                "To read them by whatever numbers the pages print instead, "
+                "run again with --read-without-key.",
+            ]
+        ),
+        duration_seconds=time.monotonic() - started,
     )
 
 

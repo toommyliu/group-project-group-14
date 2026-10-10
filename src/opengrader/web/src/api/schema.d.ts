@@ -284,6 +284,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/answer-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Answer Fields Of
+         * @description Every question (or part) of the answer key that takes an answer.
+         *
+         *     A draft keeps a multiple-choice question's options as lines of its
+         *     text; they are listed here as choices, which is what saving a correct
+         *     one makes them.
+         */
+        get: operations["answer_fields_of_api_assignments__assignment_id__answer_fields_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Answers
+         * @description Add or change the answers of several questions; a folder session only.
+         *
+         *     One write into the answer key file (`folder_session.edit_answer_key`),
+         *     so either every answer here is saved or none is. No grade changes:
+         *     what was graded stays graded until auto-grading is run again.
+         */
+        put: operations["save_answers_api_assignments__assignment_id__answers_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/regrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regrade
+         * @description Grade the folder's work again with its answer key; a folder session only.
+         *
+         *     The rule-based part of auto-grading, run on the files and then
+         *     brought back here (`folder_session.regrade_folder`). No AI is used
+         *     from the browser. A workspace has no files to grade in place.
+         */
+        post: operations["regrade_api_assignments__assignment_id__regrade_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assignments/{assignment_id}/source": {
         parameters: {
             query?: never;
@@ -1089,6 +1161,41 @@ export interface components {
             /** Analysis */
             analysis: string;
         };
+        /** AnswerChoice */
+        AnswerChoice: {
+            /** Label */
+            label: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * AnswerFieldInfo
+         * @description One question (or part) of the answer key as a place to put an answer.
+         */
+        AnswerFieldInfo: {
+            /** Question Id */
+            question_id: string;
+            /** Version */
+            version?: string | null;
+            /** Label */
+            label: string;
+            /** Prompt */
+            prompt: string;
+            /** Points */
+            points: number;
+            /** Choices */
+            choices: components["schemas"]["AnswerChoice"][];
+            /** Answers */
+            answers: string[];
+        };
+        /**
+         * AnswersEdit
+         * @description Answers for several questions at once, each with what the editor opened.
+         */
+        AnswersEdit: {
+            /** Questions */
+            questions: components["schemas"]["QuestionAnswers"][];
+        };
         /** Assignment */
         Assignment: {
             /** Id */
@@ -1659,6 +1766,17 @@ export interface components {
             /** Rubric */
             rubric: components["schemas"]["RubricOption"][];
         };
+        /** QuestionAnswers */
+        QuestionAnswers: {
+            /** Question Id */
+            question_id: string;
+            /** Version */
+            version?: string | null;
+            /** Answers */
+            answers: string[];
+            /** Expected Answers */
+            expected_answers: string[];
+        };
         /** QuestionEdit */
         QuestionEdit: {
             /** Source Line */
@@ -1757,6 +1875,30 @@ export interface components {
                 number
             ];
         };
+        /**
+         * RegradeResult
+         * @description What grading a class folder again with its answer key did.
+         *
+         *     `updated` counts the grades that changed; `problems` names anything that
+         *     could not be read, graded or brought back into the browser.
+         */
+        RegradeResult: {
+            /**
+             * Files
+             * @default 0
+             */
+            files: number;
+            /**
+             * Updated
+             * @default 0
+             */
+            updated: number;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+        };
         /** ReviewScan */
         ReviewScan: {
             /** Expected Revision */
@@ -1822,10 +1964,14 @@ export interface components {
             rubric: components["schemas"]["QARubricItem-Input"][];
             /** Expected Rubric */
             expected_rubric: components["schemas"]["QARubricItem-Input"][];
+            /** Answers */
+            answers?: string[] | null;
+            /** Expected Answers */
+            expected_answers?: string[] | null;
         };
         /**
          * RubricEditResult
-         * @description What saving a question's rubric from the browser did.
+         * @description What saving a question's rubric — or answers — from the browser did.
          *
          *     `regraded` counts the saved grades that followed a renamed or re-pointed
          *     item. `problems` names any of those grades whose `.submission.md` could
@@ -2771,6 +2917,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RubricEditResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_fields_of_api_assignments__assignment_id__answer_fields_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerFieldInfo"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_answers_api_assignments__assignment_id__answers_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswersEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubricEditResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regrade_api_assignments__assignment_id__regrade_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegradeResult"];
                 };
             };
             /** @description Validation Error */

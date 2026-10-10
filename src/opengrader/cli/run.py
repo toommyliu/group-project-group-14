@@ -225,6 +225,13 @@ def _print_summary(report: PipelineReport) -> None:
         )
         return
 
+    if report.answer_key_needed:
+        paused = next(o for o in report.stages if o.status is StageStatus.PAUSED)
+        print("\nPaused before extraction: these scans need an answer key.")
+        for line in paused.detail.splitlines()[1:]:
+            print(f"  {line}")
+        return
+
     if report.paused_for_review:
         print(
             "\nPaused for review: the AI drafted rubric items into "
@@ -774,6 +781,17 @@ def _save_inputs(
     ),
 )
 @click.option(
+    "--read-without-key",
+    is_flag=True,
+    help=(
+        "Read scans that print no points beside their question numbers "
+        "without an answer key, by whatever numbers the pages print. "
+        "Without this (and without --qa, --blank-template) the run pauses "
+        "after splitting them, because the answer key is what finds their "
+        "questions and reading them twice is the slow part."
+    ),
+)
+@click.option(
     "--force",
     is_flag=True,
     help=(
@@ -829,6 +847,7 @@ def command(
     draft_rubrics: bool,
     reorder_pages: bool,
     keep_page_order: bool,
+    read_without_key: bool,
     force: bool,
     fresh: bool,
     dry_run: bool,
@@ -876,6 +895,7 @@ def command(
         pages_per_submission=inputs.pages_per_submission,
         reorder_pages=reorder_pages,
         keep_page_order=keep_page_order,
+        read_without_key=read_without_key,
         llm=LlmOptions(
             read_handwriting=llm if llm is not None else ai.read_handwriting,
             grade_written=llm if llm is not None else ai.grade_written,

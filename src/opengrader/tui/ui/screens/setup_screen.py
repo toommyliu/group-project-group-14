@@ -22,7 +22,12 @@ from textual.widgets import (
 
 from opengrader.core import app_config, browser_app
 from opengrader.core.pipeline import (
+    PIPELINE_STAGES,
+    STAGE_AUTO_GRADE,
+    STAGE_DRAFT_RUBRICS,
     STAGE_EXTRACT,
+    STAGE_SCAN_CHECK,
+    STAGE_SPLIT,
     LlmOptions,
     PipelineProgress,
     PipelineReport,
@@ -30,19 +35,20 @@ from opengrader.core.pipeline import (
     StageOutcome,
     StagePlan,
     StageStatus,
+    auto_grade_pending,
     plan_pipeline,
     refine_argv,
     run_pipeline,
 )
 from opengrader.core.pipeline_settings import (
     FolderPipelineSettings,
-    MachinePipelineSettings,
     load_folder_settings,
     load_machine_settings,
     save_folder_settings,
     save_machine_settings,
 )
 from opengrader.core.policy import GradingPolicy, read_policy, write_policy
+from opengrader.core.qa_file.standard_rubric import DEFAULT_QUESTION_POINTS, format_points
 from opengrader.core.submissions import ExtractionProgress
 from opengrader.core.submissions.watch import ExtractionWatcher
 from opengrader.core.submissions.photo_intake import (
@@ -51,6 +57,7 @@ from opengrader.core.submissions.photo_intake import (
     import_photos,
 )
 from opengrader.cli.submission_extractor import run_cli as run_extractor_cli
+from opengrader.cli.answer_key import default_points_note
 from opengrader.cli.answer_key import run_cli as run_answer_key_cli
 from opengrader.cli import run_command
 from opengrader.cli.qa_file import command as qa_file_command
@@ -60,14 +67,17 @@ from opengrader.core.class_folder import (
     ROLE_QA,
     ROLE_ROSTER,
     ROLE_SCAN,
+    ROLE_SUBMISSIONS,
     ROLE_TEMPLATE,
     ClassFolderScan,
     describe_class_folder,
+    find_answer_key_source,
     scan_class_folder,
 )
 from opengrader.core.course import COURSE_FILENAME
 from opengrader.core.recents import load_recents
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
+from opengrader.tui.ui.screens.answer_fill_screen import AnswerFillScreen
 from opengrader.tui.ui.screens.backup_screen import BackupScreen
 from opengrader.tui.ui.screens.cloud_consent_screen import CloudPreflightConfirmScreen
 from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
@@ -77,6 +87,15 @@ from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.provider_screen import ProviderScreen
 from opengrader.tui.ui.screens.page_order_screen import PageOrderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
+from opengrader.tui.ui.screens.prepare_folder_screen import (
+    ACTION_AUTO_GRADE,
+    ACTION_CREATE_KEY,
+    ACTION_OPEN,
+    ACTION_PREPARE,
+    ACTION_SETTINGS,
+    ACTION_SKIP,
+    PrepareFolderScreen,
+)
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
 from opengrader.tui.ui.widgets.browser_health import BrowserHealth
 from opengrader.tui.ui.widgets.browser_launcher import BrowserLauncher
@@ -95,6 +114,19 @@ _PIPE_STATUS_GLYPH = {
     StageStatus.FAILED: "✗",
     StageStatus.PAUSED: "‖",
 }
+
+
+# What a stage is doing, in the words the progress line uses.
+_PIPE_STAGE_LABELS = {
+    STAGE_SCAN_CHECK: "Checking the scan",
+    STAGE_SPLIT: "Splitting it into one PDF per student",
+    STAGE_EXTRACT: "Reading the answers",
+    STAGE_DRAFT_RUBRICS: "Drafting rubric items",
+    STAGE_AUTO_GRADE: "Auto-grading",
+}
+
+# Names tried, in order, for an answer key Create answer key is about to write.
+_NEW_ANSWER_KEY_NAMES = ("qa.md", "answer-key.md", "solutions.md")
 
 
 _COURSE_SEARCH_DEPTH = 4
@@ -197,7 +229,8 @@ class SetupScreen(Vertical):
         color: $text;
     }
 
-    SetupScreen #browser-open-button {
+    SetupScreen #browser-open-button,
+    SetupScreen #answers-button {
         margin-right: 1;
     }
 
@@ -212,11 +245,13 @@ class SetupScreen(Vertical):
         margin-top: 1;
     }
 
-    SetupScreen #pipe-progress {
+    SetupScreen #pipe-progress,
+    SetupScreen #launch-progress {
         height: auto;
     }
 
-    SetupScreen #pipe-pages {
+    SetupScreen #pipe-pages,
+    SetupScreen #ak-default-points {
         width: 24;
     }
 
@@ -311,7 +346,7 @@ class SetupScreen(Vertical):
         "photo-output": ("directory", "Choose the directory for the per-student PDFs"),
         "region-pdf": ("file", "Choose the blank assignment PDF"),
         "region-map-path": ("any", "Choose an existing region map (.regions.json)"),
-        "ak-input": ("file", "Choose the answer-key source (.md/.txt/.pdf)"),
+        "ak-input": ("file", "Choose the answer-key source (.md/.txt/.docx/.pdf)"),
         "ak-output": ("any", "Choose the output QA markdown file"),
         "ak-template-path": ("file", "Choose the blank template PDF"),
         "tmpl-qa-input": ("file", "Choose the QA markdown file"),
@@ -411,8 +446,9 @@ class SetupScreen(Vertical):
                     launch_card.border_title = "▸ Start grading"
                     yield Static(
                         "Choose a class folder (or a grader packet) — its answer "
-                        "key and submissions are found for you. New scans? "
-                        "Prepare the assignment below first.",
+                        "key and submissions are found for you. A folder of new "
+                        "scans is prepared first: you are asked, then it runs "
+                        "with the settings saved for that folder.",
                         classes="card-hint",
                     )
                     # What is open right now; hidden while nothing is.
@@ -451,8 +487,29 @@ class SetupScreen(Vertical):
                         yield self._path_row(
                             "Path to submissions directory…", "tui-sub-path"
                         )
+                    # A run started from this card (`_run_pipeline(from_launch=True)`)
+                    # shows here what the pipeline card shows further down.
+                    with Vertical(id="launch-progress", classes="hidden"):
+                        yield ProgressBar(
+                            id="launch-progress-bar", total=None, show_eta=True
+                        )
+                        yield Static(
+                            "",
+                            id="launch-progress-status",
+                            classes="card-hint",
+                            markup=False,
+                        )
                     # Opt-in (Tools → Browser app): hidden until the user ticks it.
                     yield self._card_actions(
+                        # The answer key's answers as a form: no file to open.
+                        # Shown only while the card's key has a question with
+                        # no answer (`_refresh_answers_button`).
+                        Button(
+                            "Add answers…",
+                            id="answers-button",
+                            compact=True,
+                            classes="hidden",
+                        ),
                         Button(
                             "Open in browser",
                             id="browser-open-button",
@@ -691,6 +748,19 @@ class SetupScreen(Vertical):
                             "of order, unreadable. Tick this only after reading "
                             "what it found (it still gets reported) and deciding "
                             "to grade the scan as it is.",
+                            classes="card-hint",
+                        )
+
+                        yield Checkbox(
+                            "Read the scans without an answer key", id="pipe-no-key"
+                        )
+                        yield Static(
+                            "Scans of your own assignment — no blank template, "
+                            "no points printed beside the question numbers — "
+                            "are split and then wait for the answer key: it is "
+                            "what says which questions and parts to look for. "
+                            "Tick this to read them now anyway, by whatever "
+                            "numbers the pages print.",
                             classes="card-hint",
                         )
 
@@ -992,13 +1062,28 @@ class SetupScreen(Vertical):
                 ):
                     yield self._field_label(
                         "Answer-key source",
-                        "a plain-text assignment (.md/.txt) or a scanned answer-key PDF",
+                        "a text file (.md/.txt), a Word document (.docx) or an answer-key PDF",
                     )
                     yield self._path_row("Path to answer-key source…", "ak-input")
                     yield self._field_label("Output QA markdown")
                     yield self._path_row("Where to write the answer key…", "ak-output")
                     yield self._field_label("Title", "optional")
                     yield Input(placeholder="e.g. CS 146 Quiz 1", id="ak-title")
+                    yield self._field_label(
+                        "Points when none are given",
+                        f"blank = {format_points(DEFAULT_QUESTION_POINTS)} · "
+                        "partial credit is half",
+                    )
+                    yield Input(
+                        placeholder=format_points(DEFAULT_QUESTION_POINTS),
+                        id="ak-default-points",
+                    )
+                    yield Static(
+                        "Only for a question whose source states no points; "
+                        "points it does state are kept. Remembered on this "
+                        "computer.",
+                        classes="card-hint",
+                    )
                     yield Checkbox(
                         "Scanned PDF: align with a blank template", id="ak-use-template"
                     )
@@ -1011,6 +1096,13 @@ class SetupScreen(Vertical):
                         classes="card-hint",
                     )
                     yield Static(
+                        "A text or Word file needs only numbered questions and "
+                        "their answers: [b]1. What is the capital of France?[/b] "
+                        "then [b]Answer: Paris[/b], with one Answer: line for "
+                        "each answer you accept. Number questions 1. or 1) and "
+                        "parts 1a) 1b); points are optional, anywhere on the "
+                        "question's line: [b](10 points)[/b]. A PDF saved from "
+                        "Word or Google Docs is read the same way. "
                         "Plain-text files are read exactly. A born-digital PDF is "
                         "read directly from its text layer (fast, exact); a scanned "
                         "or image PDF is read with OCR, and with the handwriting "
@@ -1358,13 +1450,19 @@ class SetupScreen(Vertical):
         elif event.checkbox.id == "pipe-use-roster":
             self.query_one("#pipe-roster-row").set_class(not event.value, "hidden")
         elif event.checkbox.id == "pipe-use-template":
-            self.query_one("#pipe-template-row").set_class(not event.value, "hidden")
+            # The box as it is now, not as it was when this was posted: a
+            # folder scan ticks it and the saved settings may untick it again
+            # before either message arrives, and the first must not then
+            # untick a saved region map.
+            ticked = event.checkbox.value
+            self.query_one("#pipe-template-row").set_class(not ticked, "hidden")
             # A template and a region map answer the same question.
-            if event.value:
+            if ticked:
                 self.query_one("#pipe-use-region-map", Checkbox).value = False
         elif event.checkbox.id == "pipe-use-region-map":
-            self.query_one("#pipe-region-map-area").set_class(not event.value, "hidden")
-            if event.value:
+            ticked = event.checkbox.value
+            self.query_one("#pipe-region-map-area").set_class(not ticked, "hidden")
+            if ticked:
                 self.query_one("#pipe-use-template", Checkbox).value = False
         elif event.checkbox.id == "pipe-many-rosters":
             self.query_one("#pipe-rosters-area").set_class(not event.value, "hidden")
@@ -1435,6 +1533,8 @@ class SetupScreen(Vertical):
             self._launch_grading()
         elif event.button.id == "browser-open-button":
             self._open_in_browser()
+        elif event.button.id == "answers-button":
+            self._add_answers()
         elif event.button.id == "run-answer-key":
             self._run_answer_key()
         elif event.button.id == "run-refine":
@@ -2013,6 +2113,10 @@ class SetupScreen(Vertical):
         if saved.jobs:
             self.query_one("#pipe-jobs", Input).value = str(saved.jobs)
             self.query_one("#pipe-parallel", Checkbox).value = True
+        if saved.answer_key_points:
+            self.query_one("#ak-default-points", Input).value = format_points(
+                saved.answer_key_points
+            )
         last = saved.last_class_folder
         if last and Path(last).is_dir():
             self.query_one("#pipe-out", Input).value = last
@@ -2025,7 +2129,8 @@ class SetupScreen(Vertical):
         try:
             save_folder_settings(request.output_dir, self._folder_settings())
             save_machine_settings(
-                MachinePipelineSettings(
+                replace(
+                    load_machine_settings(),
                     grade_as_ready=self.query_one("#pipe-grade-asap", Checkbox).value,
                     jobs=request.jobs,
                     last_class_folder=str(request.output_dir),
@@ -2055,9 +2160,16 @@ class SetupScreen(Vertical):
             return
         banner.update(f"Grading {submissions}. F3 goes back to it.")
         banner.remove_class("hidden")
+        # Recorded as filled in, not typed: choosing another class folder
+        # afterwards replaces them instead of opening this one again.
+        autofilled: dict[str, str] = getattr(self, "_autofilled", {})
+        self._autofilled = autofilled
         if qa_file is not None:
             self.query_one("#tui-qa-path", Input).value = str(qa_file)
+            autofilled["tui-qa-path"] = str(qa_file)
         self.query_one("#tui-sub-path", Input).value = str(submissions)
+        autofilled["tui-sub-path"] = str(submissions)
+        self._refresh_answers_button()
 
     async def refresh_recents(self) -> None:
         """Re-read the last `RECENT_FOLDERS_SHOWN` class folders from recents."""
@@ -2128,6 +2240,8 @@ class SetupScreen(Vertical):
 
         self._autofill("tui-qa-path", found.qa_file)
         self._autofill("tui-sub-path", found.submissions)
+        self._launch_folder_scanned = folder
+        self._refresh_answers_button()
 
         summary = self.query_one("#tui-folder-summary", Static)
         summary.update(
@@ -2140,34 +2254,618 @@ class SetupScreen(Vertical):
             self.query_one("#launch-files", Collapsible).collapsed = False
         return found
 
-    def _launch_paths(self) -> tuple[str, str] | None:
-        """The card's answer key + submissions, found from the class folder if blank."""
-        qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
-        sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
-        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
-        if (not qa_path or not sub_path) and folder and Path(folder).is_dir():
-            self._scan_launch_folder()
-            qa_path = self._clean_path(self.query_one("#tui-qa-path", Input).value)
-            sub_path = self._clean_path(self.query_one("#tui-sub-path", Input).value)
+    def _launch_grading(self, *, browser: bool = False) -> None:
+        """Open the card's folder for grading, or offer to get it ready first.
 
-        if not qa_path or not sub_path:
+        `browser` is Open in browser: the same check and the same offers, and
+        the browser app is what opens at the end instead of the grade screen.
+        """
+        self._launch_to_browser = browser
+        folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        qa_path, sub_path = self._session_paths()
+        is_folder = bool(folder) and Path(folder).is_dir()
+        found: ClassFolderScan | None = None
+        # A folder typed over the last one, with no Enter or Browse to scan
+        # it, must not open the last one's files.
+        if is_folder and (
+            not qa_path
+            or not sub_path
+            or folder != getattr(self, "_launch_folder_scanned", None)
+        ):
+            found = self._scan_launch_folder()
+            qa_path, sub_path = self._session_paths()
+
+        if qa_path and sub_path:
+            if not self._offer_auto_grade(qa_path, sub_path):
+                self._open_for_grading(qa_path, sub_path)
+        elif found is not None:
+            self._offer_to_prepare(found)
+        elif not is_folder:
             self.query_one("#launch-files", Collapsible).collapsed = False
             self.app.notify(
-                "Both QA path and Submissions path are required to launch.",
+                "Choose a class folder to open, or an answer key and a "
+                "submissions folder.",
                 severity="error",
             )
-            return None
-        return qa_path, sub_path
 
-    def _launch_grading(self) -> None:
-        paths = self._launch_paths()
-        if paths is not None:
-            self.post_message(self.LaunchRequested(*paths))
+    def _open_for_grading(self, qa_path: str, sub_path: str) -> None:
+        """Open a ready folder where the press that started this asked for it:
+        the grade screen (Launch Grading) or the browser app (Open in browser)."""
+        if getattr(self, "_launch_to_browser", False):
+            self.query_one(BrowserLauncher).open_folder(qa_path, sub_path)
+        else:
+            self.post_message(self.LaunchRequested(qa_path, sub_path))
+
+    def _offer_to_prepare(self, found: ClassFolderScan) -> None:
+        """The folder has nothing to grade yet: say what it would take.
+
+        Nothing is prepared without a yes. A folder that cannot answer for
+        itself (no scan, or two candidates) is handed to the pipeline card,
+        where the choice is made.
+        """
+        folder = found.folder
+        if getattr(self, "extraction_in_progress", False):
+            self.app.notify(
+                "A folder is already being prepared. Grading opens when its "
+                "submissions are ready.",
+                severity="warning",
+            )
+            return
+
+        two_keys = found.ambiguity(ROLE_QA) is not None
+        if found.ambiguity(ROLE_SUBMISSIONS) is not None or (
+            found.submissions is not None and two_keys
+        ):
+            which = "answer key" if two_keys else "set of submissions"
+            self.app.notify(
+                f"This folder has more than one {which}. Choose the one to "
+                'grade under "Answer key and submissions".',
+                severity="error",
+            )
+            return
+
+        if found.submissions is not None:
+            # Read already; only the answer key is missing.
+            count = sum(1 for _ in found.submissions.rglob("*.submission.md"))
+            self._ask_about_folder(
+                found,
+                "This folder needs an answer key",
+                f"Folder: {folder}\n"
+                f"✓ {count} submission(s) are read and ready\n"
+                "· answer key      none found",
+                "Grading needs an answer key: it holds the questions, the "
+                "points and the rubric. Create answer key writes one from "
+                "your assignment or your solutions (a text file, a Word "
+                "document or a PDF). Opengrader picks up from here when it "
+                "is made.",
+                [(ACTION_CREATE_KEY, "Create answer key…")],
+            )
+            return
+
+        self._show_folder_in_pipeline_card(folder)
+        scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
+        has_key = bool(self.query_one("#pipe-qa", Input).value.strip())
+        if not scan or (two_keys and not has_key):
+            self._show_pipeline_card()
+            if two_keys and scan:
+                reason = (
+                    "This folder has more than one answer key. Choose one "
+                    "under Advanced settings, then press Run Pipeline."
+                )
+            elif found.ambiguity(ROLE_SCAN) is not None:
+                reason = (
+                    "More than one PDF in this folder could be the scan. "
+                    "Choose the scanned bundle under Advanced settings, then "
+                    "press Run Pipeline."
+                )
+            else:
+                reason = (
+                    "There is nothing to grade in this folder yet: no "
+                    "submissions and no scanned PDF. Put the scan in the "
+                    "folder, or choose it under Advanced settings."
+                )
+            self.app.notify(reason, severity="error", timeout=10)
+            return
+
+        if getattr(self, "_launch_to_browser", False):
+            wait = "The browser opens when it finishes."
+        elif self.query_one("#pipe-grade-asap", Checkbox).value:
+            wait = "Grading opens as soon as the first submission is ready."
+        else:
+            wait = "Grading opens when it finishes."
+
+        work = (
+            "the scan is checked, split into one PDF per student, and every "
+            "answer is read. That builds split/ and submissions/ inside the "
+            "folder and can take a few minutes."
+        )
+        if has_key:
+            self._ask_about_folder(
+                found,
+                "Prepare this folder for grading?",
+                self._prepare_summary(folder),
+                f"This folder has scans but nothing to grade yet. To get it "
+                f"ready, {work} {wait}",
+                [
+                    (ACTION_SETTINGS, "Change settings…"),
+                    (ACTION_PREPARE, "Prepare and grade"),
+                ],
+            )
+            return
+
+        needs_key = (
+            "Grading needs an answer key: it holds the questions, the points "
+            "and the rubric."
+        )
+        draft = self._draft_key(folder)
+        if draft is not None:
+            # A blank template prints the questions and their points: the key
+            # can be drafted from it, with only the answers left to add.
+            key, output = draft
+            points = (
+                f" ({key.defaulted} with no points printed get the standard ones)"
+                if key.defaulted
+                else ""
+            )
+            self._ask_about_folder(
+                found,
+                "No answer key yet — one can be drafted",
+                self._prepare_summary(folder),
+                f"{needs_key} The blank template prints {key.questions} "
+                f"question(s) and their points{points}, so Opengrader can "
+                f"draft the key from it as {output.name}: every question, "
+                "its points and the usual rubric, with the answers left "
+                "blank for you.\n\n"
+                f"Then {work} {wait} You can grade by hand straight away; "
+                f"add the answers to {output.name} when you want "
+                "auto-grading.",
+                [
+                    (ACTION_SETTINGS, "Change settings…"),
+                    (ACTION_CREATE_KEY, "Create it myself…"),
+                    (ACTION_PREPARE, "Draft the key and read the scans"),
+                ],
+                draft=draft,
+            )
+        elif self._card_says_where_answers_are():
+            self._ask_about_folder(
+                found,
+                "This folder needs an answer key",
+                self._prepare_summary(folder),
+                f"{needs_key} Create answer key writes one from your "
+                "assignment or your solutions.\n\n"
+                "Reading the scans is the slow part and does not need it. "
+                f"Start that now and {work} Create answer key opens too, so "
+                "you can make the key while it runs.",
+                [
+                    (ACTION_SETTINGS, "Change settings…"),
+                    (ACTION_CREATE_KEY, "Create answer key…"),
+                    (ACTION_PREPARE, "Read the scans now"),
+                ],
+            )
+        else:
+            self._ask_about_folder(
+                found,
+                "This folder needs an answer key",
+                self._prepare_summary(folder),
+                f"{needs_key} Create answer key writes one from your "
+                "assignment or your solutions.\n\n"
+                "With no blank template, the key is also what finds the "
+                "questions on the pages (unless they are Opengrader's own "
+                "printed exam). So start now: the scan is checked and split "
+                "into one PDF per student while Create answer key opens for "
+                "you. Reading the answers starts by itself as soon as the "
+                "key is made.",
+                [
+                    (ACTION_SETTINGS, "Change settings…"),
+                    (ACTION_CREATE_KEY, "Create answer key…"),
+                    (ACTION_PREPARE, "Check and split the scans now"),
+                ],
+            )
+
+    def _card_says_where_answers_are(self) -> bool:
+        """A blank template or a region map is set on the pipeline card."""
+        return any(
+            self.query_one(f"#pipe-use-{name}", Checkbox).value
+            and self.query_one(f"#pipe-{name}", Input).value.strip()
+            for name in ("template", "region-map")
+        )
+
+    def _draft_key(self, folder: Path):  # noqa: ANN202 - (DraftKey, Path) | None
+        """The answer key the card's blank template can be read into, and the
+        file it would be written to; None with no template, or one that
+        prints no questions a reader can find (a scanned template)."""
+        from opengrader.core.qa_file.draft_key import draft_from_blank_template
+
+        if not self.query_one("#pipe-use-template", Checkbox).value:
+            return None
+        template = self._clean_path(self.query_one("#pipe-template", Input).value)
+        output = next(
+            (
+                folder / name
+                for name in _NEW_ANSWER_KEY_NAMES
+                if not (folder / name).exists()
+            ),
+            None,
+        )
+        if not template or output is None or not Path(template).is_file():
+            return None
+        points = load_machine_settings().answer_key_points or DEFAULT_QUESTION_POINTS
+        key = draft_from_blank_template(template, default_points=points)
+        return None if key is None else (key, output)
+
+    def _write_draft_key(self, draft) -> bool:  # noqa: ANN001
+        """Write the drafted answer key and point the pipeline card at it."""
+        key, output = draft
+        try:
+            # Never over a file that appeared since the dialog opened.
+            with output.open("x", encoding="utf-8") as handle:
+                handle.write(key.markdown)
+        except OSError as exc:
+            self.app.notify(
+                f"Could not write the draft answer key ({exc}).", severity="error"
+            )
+            return False
+        self.query_one("#pipe-qa", Input).value = str(output)
+        self.query_one("#pipe-qa-hint").add_class("hidden")
+        launch_folder = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        if launch_folder == str(output.parent):
+            # Start grading is on this folder: it has an answer key now.
+            self._autofill("tui-qa-path", output)
+            self._refresh_answers_button()
+        self.app.notify(
+            f"Drafted {output.name} from the blank template: {key.questions} "
+            "question(s) with their points and rubric. The answers are blank "
+            "until you add them.",
+            timeout=10,
+        )
+        return True
+
+    def _draft_and_run(self, draft, *, from_launch: bool) -> bool:  # noqa: ANN001
+        """Write the drafted key, start the run with it, and put the answers
+        form in front of the user while the scans are read. False when the
+        draft could not be written (nothing was started)."""
+        if not self._write_draft_key(draft):
+            return False
+        self._run_pipeline(from_launch=from_launch, offer_draft=False)
+        self._open_answer_form(
+            draft[1],
+            note=(
+                "The scans are being read meanwhile. Answers saved before "
+                "auto-grading starts are used by it; you can also do this "
+                "later with Add answers… on Start grading."
+            ),
+        )
+        return True
+
+    def _add_answers(self) -> None:
+        """Start grading's Add answers…: the card's answer key as a form."""
+        qa_path = self._session_paths()[0]
+        if not qa_path or not Path(qa_path).is_file():
+            # The button is only shown for a key that is there; it went since.
+            self._refresh_answers_button()
+            return
+        self._open_answer_form(Path(qa_path))
+
+    def _refresh_answers_button(self) -> None:
+        """Show Add answers… only while there is something to add: the
+        card's answer key exists and has a question with no answer."""
+        from opengrader.core.qa_file.answers import unanswered_count
+
+        button = self.query_one("#answers-button", Button)
+        missing = 0
+        qa_path = self._session_paths()[0]
+        if qa_path and Path(qa_path).is_file():
+            try:
+                missing = unanswered_count(Path(qa_path).read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                missing = 0
+        button.label = f"Add answers · {missing} left"
+        button.set_class(missing == 0, "hidden")
+
+    def _open_answer_form(self, qa_file: Path, *, note: str = "") -> None:
+        def closed(saved: bool | None) -> None:
+            self._refresh_answers_button()
+            if not saved:
+                return
+            if getattr(self, "extraction_in_progress", False):
+                message = (
+                    "Answers saved. Nothing else to do: this run auto-grades "
+                    "with them when it gets there."
+                )
+            else:
+                message = (
+                    "Answers saved. Work that is already read has not been "
+                    "graded with them yet. Press Run Pipeline (under Prepare "
+                    "an assignment) and Opengrader grades it again with the "
+                    "new answers. The scans are not read again; a question "
+                    "the answers settle outright is scored afresh, and the "
+                    "rest of your grades are kept."
+                )
+            self.app.notify(message, timeout=15)
+
+        self.app.push_screen(AnswerFillScreen(qa_file, note=note), closed)
+
+    def _offer_draft_then_run(self, request: PipelineRequest, draft) -> None:  # noqa: ANN001
+        """Run Pipeline with a blank template and no answer key: the same
+        offer Launch Grading makes, so the two do not behave differently."""
+        key, output = draft
+
+        def answered(action: str | None) -> None:
+            if action == ACTION_PREPARE:
+                self._draft_and_run(draft, from_launch=False)
+            elif action == ACTION_SKIP:
+                self._run_pipeline(offer_draft=False)
+
+        self.app.push_screen(
+            PrepareFolderScreen(
+                "No answer key yet — one can be drafted",
+                self._prepare_summary(request.output_dir),
+                "Without an answer key the scans are read but grading cannot "
+                f"open. The blank template prints {key.questions} question(s) "
+                "and their points, so Opengrader can draft the key from it as "
+                f"{output.name}: every question, its points and the usual "
+                "rubric, with the answers left blank. A form to add the "
+                "answers opens while the scans are read.",
+                [
+                    (ACTION_SKIP, "Run without a key"),
+                    (ACTION_PREPARE, "Draft the key and run"),
+                ],
+            ),
+            answered,
+        )
+
+    def _offer_auto_grade(self, qa_path: str, sub_path: str) -> bool:
+        """Offer the auto-grading a folder prepared without its answer key
+        never had. True when the question was asked (its answer opens the
+        folder); False to open the folder as it is."""
+        submissions = Path(sub_path)
+        folder = submissions.parent
+        declined: set[str] = getattr(self, "_auto_grade_declined", set())
+        self._auto_grade_declined = declined
+        if (
+            submissions.name != "submissions"
+            or getattr(self, "extraction_in_progress", False)
+            or str(folder) in declined
+            or not self._ai().auto_grade
+            or not auto_grade_pending(folder)
+        ):
+            return False
+        self._show_folder_in_pipeline_card(folder)
+        scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
+        card_key = self._clean_path(self.query_one("#pipe-qa", Input).value)
+        if not scan or card_key != qa_path:
+            # Nothing to run again from, or not the answer key being opened.
+            return False
+
+        count = sum(1 for _ in submissions.rglob("*.submission.md"))
+
+        def answered(action: str | None) -> None:
+            if action == ACTION_AUTO_GRADE:
+                # Opens when the grades are in, not while they are written.
+                self._run_pipeline(from_launch=True, grade_as_ready=False)
+            elif action == ACTION_OPEN:
+                declined.add(str(folder))
+                self._open_for_grading(qa_path, sub_path)
+
+        self.app.push_screen(
+            PrepareFolderScreen(
+                "Auto-grade before opening?",
+                f"Folder: {folder}\n"
+                f"✓ {count} submission(s) are read\n"
+                f"✓ answer key      {Path(qa_path).name}\n"
+                "· auto-grading    not done yet",
+                "These submissions were read before they could be "
+                "auto-graded. Auto-grading scores what the answer key "
+                "settles outright, so you only grade the rest. Nothing is "
+                "read again; grading opens when it is done.",
+                [
+                    (ACTION_OPEN, "Open without it"),
+                    (ACTION_AUTO_GRADE, "Auto-grade and open"),
+                ],
+                ai_status=self._ai_status_text("pipe"),
+            ),
+            answered,
+        )
+        return True
+
+    def _ask_about_folder(
+        self,
+        found: ClassFolderScan,
+        title: str,
+        summary: str,
+        note: str,
+        actions: list[tuple[str, str]],
+        *,
+        draft=None,  # noqa: ANN001 - (DraftKey, Path) from `_draft_key`
+    ) -> None:
+        def answered(action: str | None) -> None:
+            if action == ACTION_PREPARE:
+                has_key = bool(self.query_one("#pipe-qa", Input).value.strip())
+                if not has_key and draft is not None and self._draft_and_run(
+                    draft, from_launch=True
+                ):
+                    return
+                if not has_key:
+                    # The key can be made while the scans are read.
+                    self._open_answer_key_tool(found, scroll=False)
+                self._run_pipeline(from_launch=True, offer_draft=False)
+            elif action == ACTION_SETTINGS:
+                self._show_pipeline_card(settings=True)
+            elif action == ACTION_CREATE_KEY:
+                self._open_answer_key_tool(found)
+
+        runs = any(action == ACTION_PREPARE for action, _label in actions)
+        self.app.push_screen(
+            PrepareFolderScreen(
+                title,
+                summary,
+                note,
+                actions,
+                ai_status=self._ai_status_text("pipe") if runs else "",
+            ),
+            answered,
+        )
+
+    def _prepare_summary(self, folder: Path) -> str:
+        """What a run from the pipeline card would use, as the card stands."""
+
+        def shown(input_id: str) -> str:
+            value = self._clean_path(self.query_one(f"#{input_id}", Input).value)
+            if not value:
+                return ""
+            path = Path(value)
+            try:
+                name = path.relative_to(folder).as_posix()
+            except ValueError:
+                return value
+            return f"{name}/" if path.is_dir() else name
+
+        def ticked(checkbox_id: str) -> bool:
+            return self.query_one(f"#{checkbox_id}", Checkbox).value
+
+        rows = [
+            ("scanned bundle", shown("pipe-scan")),
+            ("answer key", shown("pipe-qa")),
+        ]
+        if ticked("pipe-many-rosters"):
+            count = len(self._section_rosters())
+            rows.append(("roster", f"{count} section roster(s)"))
+        else:
+            rows.append(
+                ("roster", shown("pipe-roster") if ticked("pipe-use-roster") else "")
+            )
+        if ticked("pipe-use-region-map"):
+            rows.append(("region map", shown("pipe-region-map")))
+        else:
+            rows.append(
+                (
+                    "blank template",
+                    shown("pipe-template") if ticked("pipe-use-template") else "",
+                )
+            )
+        lines = [f"Folder: {folder}"]
+        for label, value in rows:
+            if value:
+                lines.append(f"✓ {label:<15} {value}")
+            elif label == "answer key":
+                lines.append(f"· {label:<15} none found")
+            else:
+                lines.append(f"· {label:<15} not used")
+        pages = self.query_one("#pipe-pages", Input).value.strip()
+        lines.append(f"  {'pages each':<15} {pages or 'worked out from the scan'}")
+        lines.append(
+            "Settings: the ones saved with this folder."
+            if load_folder_settings(folder) is not None
+            else "Settings: the usual ones; nothing is saved for this folder yet."
+        )
+        return "\n".join(lines)
+
+    def _show_folder_in_pipeline_card(self, folder: Path) -> None:
+        """Point the pipeline card at a folder chosen on the Start grading card.
+
+        A different folder starts from a clean card: one assignment's page
+        count or template must not run against another's scans. What the
+        folder saved for itself is then brought back by `_load_class_folder`.
+        """
+        if str(folder) != getattr(self, "_pipe_folder_loaded", None):
+            autofilled: dict[str, str] = getattr(self, "_autofilled", {})
+            for input_id in (
+                "pipe-scan",
+                "pipe-qa",
+                "pipe-roster",
+                "pipe-template",
+                "pipe-region-map",
+            ):
+                self.query_one(f"#{input_id}", Input).value = ""
+                autofilled.pop(input_id, None)
+            self._apply_folder_settings(FolderPipelineSettings())
+            # One-shot overrides belong to the run they were ticked for.
+            self.query_one("#pipe-force", Checkbox).value = False
+            self.query_one("#pipe-fresh", Checkbox).value = False
+            self.query_one("#pipe-no-key", Checkbox).value = False
+        self.query_one("#pipe-out", Input).value = str(folder)
+        self._load_class_folder()
+
+    def _show_pipeline_card(self, *, settings: bool = False) -> None:
+        """Open Prepare an assignment and bring it into view."""
+        section = self.query_one("#section-pipeline", Collapsible)
+        section.collapsed = False
+        if settings:
+            self.query_one("#pipe-settings", Collapsible).collapsed = False
+        self.query_one("#pipe-out", Input).focus(scroll_visible=False)
+        self.call_after_refresh(section.scroll_visible, top=True)
+
+    def _open_answer_key_tool(
+        self, found: ClassFolderScan, *, scroll: bool = True
+    ) -> None:
+        """Open Create answer key filled in for this folder, and remember to
+        carry on with the folder once the key is written."""
+        folder = found.folder
+        source = find_answer_key_source(folder)
+        output = next(
+            (
+                folder / name
+                for name in _NEW_ANSWER_KEY_NAMES
+                if not (folder / name).exists()
+            ),
+            None,
+        )
+        self._autofill("ak-input", source)
+        self._autofill("ak-output", output)
+        # The template only helps a scanned key line up with its questions.
+        from_pdf = source is not None and source.suffix.lower() == ".pdf"
+        self._autofill(
+            "ak-template-path",
+            found.blank_template if from_pdf else None,
+            checkbox_id="ak-use-template",
+        )
+        self._ak_resume_folder = folder
+
+        section = self.query_one("#section-answer-key", Collapsible)
+        section.collapsed = False
+        if scroll:
+            self.query_one("#ak-input", Input).focus(scroll_visible=False)
+            self.call_after_refresh(section.scroll_visible, top=True)
+        if source is not None:
+            message = (
+                f"Create answer key is filled in from {source.name}. Check "
+                "it and press Create answer key."
+            )
+        else:
+            message = (
+                "In Create answer key, choose your assignment or solutions "
+                "file, then press Create answer key. Press t for templates "
+                "to copy."
+            )
+        self.app.notify(message, timeout=10)
+
+    def _resume_launch_after_key(self, output: str) -> None:
+        """An answer key asked for by Launch Grading was written: carry on
+        with that folder, which asks again now that it has one."""
+        folder: Path | None = getattr(self, "_ak_resume_folder", None)
+        if folder is None or Path(output).parent != folder:
+            return
+        self._ak_resume_folder = None
+        if getattr(self, "_pipe_waiting_for_key", None) == folder:
+            # A run stopped for exactly this key: carry on with it. The yes
+            # was given when the run was started.
+            self._pipe_waiting_for_key = None
+            if not getattr(self, "extraction_in_progress", False):
+                self._show_folder_in_pipeline_card(folder)
+                self._run_pipeline(from_launch=getattr(self, "_pipe_from_launch", False))
+                return
+        self.query_one("#tui-class-folder", Input).value = str(folder)
+        # Scan it again: the folder has changed since it was last read.
+        self._launch_folder_scanned = None
+        self.call_after_refresh(
+            self.query_one("#launch-section").scroll_visible, top=True
+        )
+        # Still headed where the press that began this was: grading, or the browser.
+        self._launch_grading(browser=getattr(self, "_launch_to_browser", False))
 
     def _open_in_browser(self) -> None:
-        paths = self._launch_paths()
-        if paths is not None:
-            self.query_one(BrowserLauncher).open_folder(*paths)
+        # Everything Launch Grading does for a folder that is not ready.
+        self._launch_grading(browser=True)
 
     def _set_browser_enabled(self, enabled: bool) -> None:
         self.query_one("#browser-open-button").set_class(not enabled, "hidden")
@@ -2315,6 +3013,7 @@ class SetupScreen(Vertical):
             auto_grade=current.auto_grade,
             force=self.query_one("#pipe-force", Checkbox).value,
             fresh=self.query_one("#pipe-fresh", Checkbox).value,
+            read_without_key=self.query_one("#pipe-no-key", Checkbox).value,
             draft_rubrics=self.query_one("#pipe-draft-rubrics", Checkbox).value,
         )
 
@@ -2362,16 +3061,45 @@ class SetupScreen(Vertical):
         output.update("\n".join(lines))
         output.remove_class("hidden")
 
-    def _run_pipeline(self) -> None:
+    def _run_pipeline(
+        self,
+        *,
+        from_launch: bool = False,
+        grade_as_ready: bool | None = None,
+        offer_draft: bool = True,
+    ) -> None:
+        """Run the card as it stands.
+
+        `from_launch` is a run the Start grading card asked for: its progress
+        is shown on that card too. `grade_as_ready` overrides the card's
+        "Start grading as submissions arrive" for this one run. `offer_draft`
+        off is a run whose answer-key question was already asked.
+        """
         request = self._build_pipeline_request()
         if request is None:
+            if from_launch:
+                # The reason was just notified; the fields it names are here.
+                self._show_pipeline_card()
             return
+
+        if offer_draft and request.qa_file is None and request.blank_template is not None:
+            draft = self._draft_key(request.output_dir)
+            if draft is not None:
+                self._offer_draft_then_run(request, draft)
+                return
 
         self._save_pipeline_settings(request)
 
         asap = self.query_one("#pipe-grade-asap", Checkbox).value
+        if grade_as_ready is not None:
+            asap = grade_as_ready
+        # Where this run opens the folder when it is ready. The browser app
+        # is given finished work: it opens once, at the end.
+        self._pipe_to_browser = from_launch and getattr(self, "_launch_to_browser", False)
+        if self._pipe_to_browser:
+            asap = False
         qa_path = str(request.qa_file) if request.qa_file is not None else ""
-        if asap and not qa_path:
+        if asap and not qa_path and not from_launch:
             self.app.notify(
                 "No answer key set — grading will open once the whole run "
                 "finishes instead of as submissions arrive. Put an answer "
@@ -2380,17 +3108,58 @@ class SetupScreen(Vertical):
 
         self._pipe_log_lines: list[str] = []
         self._pipe_total = 0
+        self._pipe_steps = self._pipeline_steps(request)
+        self._pipe_step = ""
+        self._pipe_from_launch = from_launch
         self.query_one("#pipe-preview-output").add_class("hidden")
-        bar = self.query_one("#pipe-progress-bar", ProgressBar)
-        bar.update(total=None, progress=0)
-        self.query_one("#pipe-progress-status", Static).update("Starting…")
+        for bar in self._pipe_bars():
+            bar.update(total=None, progress=0)
         self.query_one("#pipe-stage-log", Static).update("")
+        self.query_one("#launch-progress").set_class(not from_launch, "hidden")
+        self._pipe_start(request, asap, qa_path)
+
+    def _pipe_start(self, request: PipelineRequest, asap: bool, qa_path: str) -> None:
+        """Start the worker — also after a question the run stopped to ask
+        (the cloud send, the page order), where the same request runs again."""
         self.query_one("#pipe-progress").remove_class("hidden")
+        self.query_one("#launch-progress-bar").remove_class("hidden")
+        self._pipe_status("Starting…")
         self.query_one("#pipe-run", Button).disabled = True
         self.query_one("#pipe-preview", Button).disabled = True
         self.extraction_in_progress = True
-
         self._pipeline_worker(request, asap, qa_path)
+
+    @staticmethod
+    def _pipeline_steps(request: PipelineRequest) -> tuple[str, ...]:
+        """The stages this run can reach, for "Step 2 of 4". The rest are
+        skipped by `plan_pipeline` whatever the ledger says."""
+        has_key = request.qa_file is not None
+        skipped = set()
+        if request.input_is_split:
+            skipped.add(STAGE_SPLIT)
+        if not (request.draft_rubrics and has_key):
+            skipped.add(STAGE_DRAFT_RUBRICS)
+        if not (request.auto_grade and has_key):
+            skipped.add(STAGE_AUTO_GRADE)
+        return tuple(stage for stage in PIPELINE_STAGES if stage not in skipped)
+
+    def _pipe_bars(self) -> tuple[ProgressBar, ProgressBar]:
+        return (
+            self.query_one("#pipe-progress-bar", ProgressBar),
+            self.query_one("#launch-progress-bar", ProgressBar),
+        )
+
+    def _pipe_status(self, message: str) -> None:
+        """The run's one-line status, on the pipeline card and on Start grading."""
+        self.query_one("#pipe-progress-status", Static).update(message)
+        self.query_one("#launch-progress-status", Static).update(message)
+
+    def _pipe_detail(self, detail: str) -> None:
+        """What the current step is working on, kept behind the step's name."""
+        step = getattr(self, "_pipe_step", "")
+        if step:
+            detail = f"{step} — {detail}" if detail else f"{step}…"
+        self._pipe_status(detail)
 
     @work(thread=True, exclusive=True, group="pipeline")
     def _pipeline_worker(
@@ -2448,7 +3217,15 @@ class SetupScreen(Vertical):
         )
 
     def _pipe_stage_start(self, stage: str) -> None:
-        self.query_one("#pipe-progress-status", Static).update(f"▸ {stage}…")
+        steps = getattr(self, "_pipe_steps", PIPELINE_STAGES)
+        if stage not in steps:
+            # Skipped for this run; it is over before it could be read.
+            return
+        self._pipe_step = (
+            f"Step {steps.index(stage) + 1} of {len(steps)} · "
+            f"{_PIPE_STAGE_LABELS.get(stage, stage)}"
+        )
+        self._pipe_status(f"{self._pipe_step}…")
 
     def _pipe_stage_finish(self, outcome: StageOutcome) -> None:
         glyph = _PIPE_STATUS_GLYPH.get(outcome.status, "·")
@@ -2462,16 +3239,18 @@ class SetupScreen(Vertical):
         self.query_one("#pipe-stage-log", Static).update("\n".join(self._pipe_log_lines))
 
     def _pipe_set_status(self, message: str) -> None:
-        self.query_one("#pipe-progress-status", Static).update(message.strip())
+        self._pipe_detail(message.strip())
 
     def _pipe_file_start(self, name: str, count: int) -> None:
         self._pipe_total = getattr(self, "_pipe_total", 0) + count
-        self.query_one("#pipe-progress-bar", ProgressBar).update(total=self._pipe_total)
-        self.query_one("#pipe-progress-status", Static).update(f"{name} ({count})")
+        for bar in self._pipe_bars():
+            bar.update(total=self._pipe_total)
+        self._pipe_detail(f"{name} ({count})")
 
     def _pipe_response(self, name: str, item: str) -> None:
-        self.query_one("#pipe-progress-bar", ProgressBar).advance(1)
-        self.query_one("#pipe-progress-status", Static).update(f"{name} · {item}")
+        for bar in self._pipe_bars():
+            bar.advance(1)
+        self._pipe_detail(f"{name} · {item}")
 
     def _pipe_launch_early(self, qa_path: str, submissions_path: str) -> None:
         self.app.notify(
@@ -2480,10 +3259,25 @@ class SetupScreen(Vertical):
         )
         self.post_message(self.GradeWhileExtractingRequested(qa_path, submissions_path))
 
+    def _pipe_open(self, qa_path: str, sub_path: str) -> None:
+        """Open what a finished run prepared, where that run was asked to."""
+        if getattr(self, "_pipe_to_browser", False):
+            self.query_one(BrowserLauncher).open_folder(qa_path, sub_path)
+        else:
+            self.post_message(self.LaunchRequested(qa_path, sub_path))
+
     def _pipe_reset_buttons(self) -> None:
         self.query_one("#pipe-run", Button).disabled = False
         self.query_one("#pipe-preview", Button).disabled = False
+        # Start grading keeps the last status line, without a bar still moving.
+        self.query_one("#launch-progress-bar").add_class("hidden")
         self.extraction_in_progress = False
+
+    def _pipe_stopped_short(self) -> None:
+        """A run asked for on Start grading stopped: open the card that holds
+        the stage log and the settings that fix it."""
+        if getattr(self, "_pipe_from_launch", False):
+            self.query_one("#section-pipeline", Collapsible).collapsed = False
 
     def _pipe_finish_error(self, message: str) -> None:
         self._pipe_reset_buttons()
@@ -2507,9 +3301,10 @@ class SetupScreen(Vertical):
             (o for o in report.stages if o.status is StageStatus.BLOCKED), None
         )
         if blocked is not None:
-            self.query_one("#pipe-progress-status", Static).update(
+            self._pipe_status(
                 f"Stopped: {blocked.message}"
             )
+            self._pipe_stopped_short()
             self.app.notify(
                 f"{blocked.message} Fix the scan and re-run, or tick "
                 '"Grade it anyway (ignore scan warnings)" to grade it as it is.',
@@ -2522,7 +3317,8 @@ class SetupScreen(Vertical):
                 (o for o in report.stages if o.status is StageStatus.FAILED), None
             )
             message = failed.message if failed is not None else "The pipeline failed."
-            self.query_one("#pipe-progress-status", Static).update(f"Failed: {message}")
+            self._pipe_status(f"Failed: {message}")
+            self._pipe_stopped_short()
             self.app.notify(f"Pipeline failed: {message}", severity="error")
             return
 
@@ -2530,11 +3326,15 @@ class SetupScreen(Vertical):
             self._confirm_page_order_and_rerun(request, asap, qa_path)
             return
 
+        if report.answer_key_needed:
+            self._wait_for_answer_key(request)
+            return
+
         if report.paused_for_review:
             paused = next(
                 o for o in report.stages if o.status is StageStatus.PAUSED
             )
-            self.query_one("#pipe-progress-status", Static).update(
+            self._pipe_status(
                 f"Paused: {paused.message}"
             )
             self.app.notify(
@@ -2544,12 +3344,11 @@ class SetupScreen(Vertical):
                 timeout=12,
             )
             if not launched_early and report.ready_to_grade and qa_path:
-                self.post_message(
-                    self.LaunchRequested(qa_path, str(report.submissions_dir))
-                )
+                self._pipe_open(qa_path, str(report.submissions_dir))
             return
 
         if launched_early:
+            self.query_one("#launch-progress").add_class("hidden")
             self.app.notify(
                 f"Pipeline finished — {report.submission_count} submission(s) "
                 f"in {report.submissions_dir}."
@@ -2557,14 +3356,19 @@ class SetupScreen(Vertical):
             return
 
         if report.ready_to_grade and qa_path:
+            self.query_one("#launch-progress").add_class("hidden")
             self.app.notify(
-                f"{report.submission_count} submission(s) ready — opening the "
-                "grading workspace."
+                f"{report.submission_count} submission(s) ready — opening "
+                + ("the browser." if getattr(self, "_pipe_to_browser", False) else "the grading workspace.")
             )
-            self.post_message(self.LaunchRequested(qa_path, str(report.submissions_dir)))
+            self._pipe_open(qa_path, str(report.submissions_dir))
             return
 
         if report.ready_to_grade:
+            self._pipe_status(
+                f"{report.submission_count} submission(s) are read and waiting "
+                "for an answer key. Press Launch Grading once it is in the folder."
+            )
             self.app.notify(
                 f"{report.submission_count} submission(s) ready in "
                 f"{report.submissions_dir}. Put an answer key in the class folder, or "
@@ -2602,6 +3406,24 @@ class SetupScreen(Vertical):
         )
         return statement, ""
 
+    def _wait_for_answer_key(self, request: PipelineRequest) -> None:
+        """The run split the scans and stopped: nothing but an answer key can
+        say where their questions are. Open Create answer key for the folder
+        and carry on by itself once the key is written."""
+        folder = request.output_dir
+        self._pipe_status(
+            "The scans are checked and split. Reading them waits for an "
+            "answer key: on these pages it is what finds the questions. "
+            "Create answer key is open below; the run carries on when the "
+            "key is made."
+        )
+        self._pipe_waiting_for_key = folder
+        try:
+            found = scan_class_folder(folder)
+        except OSError:
+            return
+        self._open_answer_key_tool(found, scroll=False)
+
     def _confirm_cloud_and_rerun(
         self,
         report: PipelineReport,
@@ -2610,7 +3432,7 @@ class SetupScreen(Vertical):
         qa_path: str,
     ) -> None:
         statement, host = self._cloud_preflight_statement(report)
-        self.query_one("#pipe-progress-status", Static).update(
+        self._pipe_status(
             "Waiting for you to confirm the cloud send…"
         )
         self.run_worker(
@@ -2633,23 +3455,17 @@ class SetupScreen(Vertical):
         if not confirmed:
             self._pipe_reset_buttons()
             self.query_one("#pipe-progress").add_class("hidden")
-            self.query_one("#pipe-progress-status", Static).update(
+            self._pipe_status(
                 "Not sent — the cloud send was declined. Nothing left this "
                 "computer; re-run when you're ready."
             )
             return
-        confirmed_request = replace(request, send_to_cloud_confirmed=True)
-        self.query_one("#pipe-progress").remove_class("hidden")
-        self.query_one("#pipe-progress-status", Static).update("Starting…")
-        self.query_one("#pipe-run", Button).disabled = True
-        self.query_one("#pipe-preview", Button).disabled = True
-        self.extraction_in_progress = True
-        self._pipeline_worker(confirmed_request, asap, qa_path)
+        self._pipe_start(replace(request, send_to_cloud_confirmed=True), asap, qa_path)
 
     def _confirm_page_order_and_rerun(
         self, request: PipelineRequest, asap: bool, qa_path: str
     ) -> None:
-        self.query_one("#pipe-progress-status", Static).update(
+        self._pipe_status(
             "Waiting for you to confirm the page order…"
         )
         self.run_worker(
@@ -2678,7 +3494,7 @@ class SetupScreen(Vertical):
             chosen = await self.app.push_screen_wait(PageOrderScreen(pending, split_dir))
         if chosen is None:
             self._pipe_reset_buttons()
-            self.query_one("#pipe-progress-status", Static).update(
+            self._pipe_status(
                 f"Paused before extraction — nothing was moved. Check the PDFs in "
                 f"{split_dir}, rearrange any that need it, then run again."
             )
@@ -2688,12 +3504,7 @@ class SetupScreen(Vertical):
         await asyncio.to_thread(
             keep_pages, split_dir, [name for name in names if name not in done]
         )
-        self.query_one("#pipe-progress").remove_class("hidden")
-        self.query_one("#pipe-progress-status", Static).update("Starting…")
-        self.query_one("#pipe-run", Button).disabled = True
-        self.query_one("#pipe-preview", Button).disabled = True
-        self.extraction_in_progress = True
-        self._pipeline_worker(request, asap, qa_path)
+        self._pipe_start(request, asap, qa_path)
 
     def _confirm_tool_cloud_send(
         self,
@@ -2739,7 +3550,35 @@ class SetupScreen(Vertical):
             self.app.notify("Input file and output path are required.", severity="error")
             return
 
-        argv = ["--input", input_file, "--output", output_md]
+        raw_points = self.query_one("#ak-default-points", Input).value.strip()
+        try:
+            points = float(raw_points) if raw_points else DEFAULT_QUESTION_POINTS
+        except ValueError:
+            points = 0.0
+        # Whole points: an answer key's question points are whole numbers.
+        if points < 1 or not points.is_integer():
+            self.app.notify(
+                "Points when none are given must be a whole number, 1 or "
+                f"more (or blank for {format_points(DEFAULT_QUESTION_POINTS)}).",
+                severity="error",
+            )
+            return
+        try:
+            save_machine_settings(
+                replace(
+                    load_machine_settings(),
+                    answer_key_points=points if raw_points else None,
+                )
+            )
+        except OSError:
+            # Remembering is a convenience; the answer key is still made.
+            pass
+
+        argv = [
+            "--input", input_file, "--output", output_md,
+            "--default-points", format_points(points),
+        ]
+        self._ak_points = points
         title = self.query_one("#ak-title", Input).value.strip()
         if title:
             argv.extend(["--title", title])
@@ -2750,6 +3589,7 @@ class SetupScreen(Vertical):
         argv.extend(self._auto_ollama_argv())
 
         self._ak_total = 0
+        self._ak_output = output_md
         bar = self.query_one("#ak-progress-bar", ProgressBar)
         bar.update(total=None, progress=0)
         self.query_one("#ak-progress-status", Static).update("Working…")
@@ -2767,12 +3607,17 @@ class SetupScreen(Vertical):
         def on_progress(current: int, total: int) -> None:
             app.call_from_thread(self._ak_progress, current, total)
 
+        defaulted: list[tuple[int, int]] = []
+
         try:
             run_answer_key_cli(
                 argv,
                 status_callback=on_status,
                 progress_callback=on_progress,
                 prompt_cloud_send=False,
+                default_points_callback=lambda given, total: defaulted.append(
+                    (given, total)
+                ),
             )
         except CloudConfirmationNeeded as needed:
             app.call_from_thread(
@@ -2789,7 +3634,14 @@ class SetupScreen(Vertical):
         except Exception as exc:
             app.call_from_thread(self._ak_finish, f"Answer key error: {exc}", True)
             return
-        app.call_from_thread(self._ak_finish, "Answer key created.", False)
+        message = "Answer key created."
+        if defaulted:
+            note = default_points_note(
+                *defaulted[-1], getattr(self, "_ak_points", DEFAULT_QUESTION_POINTS)
+            )
+            if note:
+                message = f"{message} {note}"
+        app.call_from_thread(self._ak_finish, message, False, created=True)
 
     def _ak_progress(self, current: int, total: int) -> None:
         bar = self.query_one("#ak-progress-bar", ProgressBar)
@@ -2804,10 +3656,17 @@ class SetupScreen(Vertical):
     def _ak_set_status(self, message: str) -> None:
         self.query_one("#ak-progress-status", Static).update(message.strip())
 
-    def _ak_finish(self, message: str, is_error: bool) -> None:
+    def _ak_finish(self, message: str, is_error: bool, *, created: bool = False) -> None:
         self.query_one("#run-answer-key", Button).disabled = False
         self.query_one("#ak-progress").add_class("hidden")
-        self.app.notify(message, severity="error" if is_error else "information")
+        self.app.notify(
+            message,
+            severity="error" if is_error else "information",
+            # A created key may carry a note about points worth reading.
+            timeout=12 if created else 5,
+        )
+        if created:
+            self._resume_launch_after_key(getattr(self, "_ak_output", ""))
 
     def _sync_template_options(self) -> None:
         bubble = self.query_one("#tmpl-bubble-sheet", Checkbox).value
@@ -2914,6 +3773,8 @@ class SetupScreen(Vertical):
             self._load_class_folder()
         elif event.input.id == "tui-class-folder":
             self._scan_launch_folder()
+        elif event.input.id == "tui-qa-path":
+            self._refresh_answers_button()
 
     def _sync_policy_checkbox(self) -> None:
         submissions = self._clean_path(

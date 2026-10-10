@@ -2017,3 +2017,81 @@ def test_a_run_paused_for_rubric_review_opens_grading_to_check_the_drafts(tmp_pa
     assert status.startswith("Paused: drafted rubric items for q2")
     launches = [m for m in posted if isinstance(m, SetupScreen.LaunchRequested)]
     assert len(launches) == 1
+
+
+def _create_answer_key(monkeypatch, tmp_path, fill=lambda _app: None, *, report=(0, 0)):  # noqa: ANN001, ANN202
+    """Press Create answer key with a stand-in for the tool; what it was
+    handed and what the user was told."""
+    seen: dict[str, object] = {"notices": []}
+
+    def fake(argv, *, default_points_callback=None, **_hooks):  # noqa: ANN001, ANN202
+        seen["argv"] = list(argv)
+        if default_points_callback is not None:
+            default_points_callback(*report)
+
+    monkeypatch.setattr(setup_screen, "run_answer_key_cli", fake)
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.notify = lambda message, **_kwargs: seen["notices"].append(str(message))  # type: ignore[method-assign]
+            app.query_one("#ak-input", Input).value = str(tmp_path / "questions.txt")
+            app.query_one("#ak-output", Input).value = str(tmp_path / "qa.md")
+            fill(app)
+            app.query_one(SetupScreen)._run_answer_key()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            seen["field"] = app.query_one("#ak-default-points", Input).value
+
+    asyncio.run(run())
+    return seen
+
+
+def test_create_answer_key_uses_ten_points_unless_told_otherwise(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _create_answer_key(monkeypatch, tmp_path)
+
+    argv = seen["argv"]
+    assert argv[argv.index("--default-points") + 1] == "10"
+
+
+def test_create_answer_key_passes_and_remembers_the_points_typed(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    from opengrader.core.pipeline_settings import load_machine_settings
+
+    def fill(app) -> None:  # noqa: ANN001
+        app.query_one("#ak-default-points", Input).value = "5"
+
+    seen = _create_answer_key(monkeypatch, tmp_path, fill)
+
+    argv = seen["argv"]
+    assert argv[argv.index("--default-points") + 1] == "5"
+    assert load_machine_settings().answer_key_points == 5.0
+
+    # The next session starts with it filled in.
+    again = _create_answer_key(monkeypatch, tmp_path)
+    assert again["field"] == "5"
+    assert again["argv"][again["argv"].index("--default-points") + 1] == "5"
+
+
+def test_create_answer_key_refuses_points_that_are_not_a_number(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    def fill(app) -> None:  # noqa: ANN001
+        app.query_one("#ak-default-points", Input).value = "ten"
+
+    seen = _create_answer_key(monkeypatch, tmp_path, fill)
+
+    assert "argv" not in seen
+    assert any("whole number, 1 or more" in notice for notice in seen["notices"])
+
+
+def test_create_answer_key_says_when_the_standard_points_were_used(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _create_answer_key(monkeypatch, tmp_path, report=(6, 8))
+
+    (notice,) = [n for n in seen["notices"] if n.startswith("Answer key created.")]
+    assert "No points were found for 6 of 8 questions" in notice
+    assert "standard 10 (5 for partial credit, 0 for none)" in notice
+
+
+def test_create_answer_key_says_nothing_extra_when_points_were_all_stated(monkeypatch, tmp_path) -> None:  # noqa: ANN001
+    seen = _create_answer_key(monkeypatch, tmp_path, report=(0, 8))
+
+    assert "Answer key created." in seen["notices"]

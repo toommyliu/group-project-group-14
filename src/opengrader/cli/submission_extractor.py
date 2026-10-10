@@ -299,6 +299,37 @@ def _resolve_page_catalog(input_path: str, pdfs: list[Path], output_dir: Path, e
     )
 
 
+def _guide_by_answer_key(catalog: PageCatalog, qa_file: Path, emit: Callable[[str], None]) -> str:
+    """Find the answer key's questions on the scans' printed pages; returns
+    the digest of what that changed ("" when nothing). A key that cannot be
+    read is reported and the scans are read by their own labels."""
+    from opengrader.core.pages.catalog import guide_catalog
+    from opengrader.core.pages.outline import load_outlines
+
+    try:
+        outlines = load_outlines(qa_file)
+    except (OSError, ValueError) as exc:
+        emit(f"note: the answer key {qa_file.name} could not be read ({exc}); finding questions without it.")
+        return ""
+    if not outlines:
+        return ""
+    report = guide_catalog(catalog, outlines)
+    if not report.guided_pages:
+        emit("The scans print their own question labels; the answer key was not needed to find them.")
+        return ""
+    emit(
+        f"Found {len(report.found)} question(s) on {report.guided_pages} printed "
+        f"page(s) by the answer key {qa_file.name}."
+    )
+    if report.missing:
+        emit(
+            "Warning: the answer key has question(s) that were not found on the "
+            f"printed pages: {', '.join(report.missing)}. They are listed without "
+            "a crop; check the answer key's numbering against the assignment."
+        )
+    return report.fingerprint
+
+
 def _catalog_fingerprint(catalog: PageCatalog | None) -> str:
     if catalog is None or catalog.directory is None:
         return ""
@@ -502,6 +533,20 @@ class _Hooks:
         "(same printed content and layout; real text layer required). It "
         "supplies question/name/ID regions. The scans themselves need no "
         "text layer. This mode does not use OCR layout detection."
+    ),
+)
+@click.option(
+    "--qa-file",
+    "qa_file",
+    metavar="QA_FILE",
+    help=(
+        "The answer key. On scans that print no points beside their "
+        "question numbers (your own assignment, numbered '1)', '1a)', …) it "
+        "is what finds the questions: they are looked for in the key's "
+        "order and by its question text, so a number a student wrote is "
+        "not mistaken for one. Scans Opengrader printed are read by their "
+        "own labels and are not affected. Not used with --blank-template, "
+        "--region-map or --bubble-sheet."
     ),
 )
 @click.option(
@@ -862,6 +907,7 @@ def command(
     input_path: str,
     output: str,
     blank_template: str | None,
+    qa_file: str | None,
     region_map_path: str | None,
     region_map_input: str | None,
     bubble_sheet: str | None,
@@ -1075,6 +1121,10 @@ def command(
     page_catalog = None
     if blank_assignment_template is None and bubble_sheet_layout is None and not legacy_layout:
         page_catalog = _resolve_page_catalog(input_path, pdfs, output_dir, print)
+
+    answer_key_regions = ""
+    if page_catalog is not None and qa_file:
+        answer_key_regions = _guide_by_answer_key(page_catalog, Path(qa_file), print)
 
     roster: list | None = None
     default_section: str | None = section
@@ -1324,6 +1374,9 @@ def command(
             "update": update,
             "refresh_layout": refresh_layout,
             "page_catalog": _catalog_fingerprint(page_catalog),
+            # Only when the answer key moved a region, so a rubric edit — or a
+            # key given for scans that carry their own labels — re-reads nothing.
+            **({"answer_key_regions": answer_key_regions} if answer_key_regions else {}),
         }
     )
     ledger = read_manifest(output_dir) if resume else {}

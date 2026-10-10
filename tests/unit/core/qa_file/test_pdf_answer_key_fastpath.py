@@ -118,3 +118,60 @@ def test_weak_ocr_escalates_to_the_vlm(monkeypatch) -> None:
 
     assert calls == ["vlm"]
     assert "four" in "\n".join(blocks)
+
+
+def _pointless_doc() -> fitz.Document:
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "1. What is 2+2? Solution: 4")
+    return doc
+
+
+def _extract_one(doc, **options):  # noqa: ANN001, ANN003, ANN202
+    rendered = {1: Image.new("RGB", (612, 792), "white")}
+    bboxes = {1: (1, (0.0, 0.05, 1.0, 0.25))}
+    return "\n".join(extract_content(doc, rendered, bboxes, max_q=1, **options))
+
+
+def test_a_question_with_no_points_gets_the_standard_and_is_counted() -> None:
+    defaulted: list[int] = []
+
+    text = _extract_one(_pointless_doc(), defaulted=defaulted)
+
+    assert "- (10 points) What is 2+2?" in text
+    assert "    - Partially Correct (-5)\n    - Incorrect (-10)" in text
+    assert defaulted == [1]
+
+
+def test_the_blank_templates_points_are_used_before_the_default() -> None:
+    defaulted: list[int] = []
+
+    text = _extract_one(
+        _pointless_doc(), template_points={1: 4.0}, default_points=6, defaulted=defaulted
+    )
+
+    assert "- (4 points) What is 2+2?" in text
+    assert "    - Partially Correct (-2)\n    - Incorrect (-4)" in text
+    assert defaulted == []
+
+
+def test_points_read_on_the_answer_key_win_over_both() -> None:
+    defaulted: list[int] = []
+
+    text = _extract_one(
+        _born_digital_doc(), template_points={1: 4.0}, default_points=6, defaulted=defaulted
+    )
+
+    assert "- (5 points) What is 2+2?" in text
+    assert defaulted == []
+
+
+def test_a_question_that_was_not_found_still_gets_the_chosen_default() -> None:
+    defaulted: list[int] = []
+    blocks = extract_content(
+        _blank_scan_doc(), {}, {}, max_q=1, default_points=6, defaulted=defaulted
+    )
+
+    assert blocks[0].startswith("- (6 points) [Question 1 - Text not detected]")
+    assert blocks[0].endswith("    - Partially Correct (-3)\n    - Incorrect (-6)")
+    assert defaulted == [1]

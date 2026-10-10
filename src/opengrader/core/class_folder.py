@@ -36,6 +36,8 @@ _PIPELINE_SUBMISSIONS_DIR = "submissions"
 
 _TEMPLATE_WORDS = frozenset({"template", "blank"})
 _ANSWER_PDF_WORDS = frozenset({"answer", "answers", "solution", "solutions", "key"})
+# What create-answer-key reads.
+_ANSWER_SOURCE_SUFFIXES = frozenset({".pdf", ".docx", ".txt", ".md"})
 _SCAN_WORDS = frozenset({"scan", "scans", "scanned", "submission", "submissions", "bundle"})
 _ROSTER_WORDS = frozenset({"roster", "students", "ids", "class"})
 _SPLIT_DIR_NAMES = ("split", "split-submissions", "split-pdfs")
@@ -252,6 +254,27 @@ def find_roster(folder: str | Path) -> Path | None:
         preferred=lambda path: bool(_words(path) & _ROSTER_WORDS),
         ambiguities=[],
     )
+
+
+def find_answer_key_source(folder: str | Path) -> Path | None:
+    """A file to make the answer key from, when exactly one looks like it.
+
+    For a folder that has no answer key yet: the instructor's own solutions
+    (`answer-key.pdf`, `solutions.docx`, …) are what Create answer key reads.
+    Chosen by name only, and two candidates are no answer, as in the scan.
+    """
+    root = Path(folder).expanduser()
+    candidates = [
+        path
+        for path in _visible_children(root)
+        if path.is_file()
+        and path.suffix.lower() in _ANSWER_SOURCE_SUFFIXES
+        and not path.name.lower().endswith(".submission.md")
+        and _words(path) & _ANSWER_PDF_WORDS
+        and not _words(path) & _TEMPLATE_WORDS
+        and not _is_qa_file(path)
+    ]
+    return _pick(ROLE_QA, candidates, preferred=lambda path: False, ambiguities=[])
 
 
 def _is_roster_file(path: Path) -> bool:

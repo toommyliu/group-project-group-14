@@ -135,3 +135,87 @@ def test_an_answer_that_two_of_five_students_wrote_in_the_same_place_is_not_prin
     copies = [[label, _line("50", 0.36, x=0.35)], [label, _line("50", 0.361, x=0.35)], [label], [label], [label]]
 
     assert [line.text for line in consensus_lines(copies)] == ["4. (10 pts) Which of these numbers are even?"]
+
+
+# --- the answer key applied to a catalog -------------------------------------
+
+from opengrader.core.pages.catalog import guide_catalog, scans_need_answer_key  # noqa: E402
+from opengrader.core.pages.outline import OutlineItem  # noqa: E402
+
+_KEY = (
+    OutlineItem("q1", 1, None, 5.0, "What is the chemical symbol for gold?"),
+    OutlineItem("q2", 2, None, 10.0, "The periodic table.", stem=True),
+    OutlineItem("q2a", 2, "a", 4.0, "Name a noble gas."),
+    OutlineItem("q2b", 2, "b", 6.0, "Which of these is a halogen?", kind="multiple_choice"),
+    OutlineItem("q3", 3, None, 10.0, "Explain why ice floats on water."),
+)
+
+
+def _catalog(lines, directory=None) -> PageCatalog:
+    page = ScanPage(Path("scan.pdf"), 0)
+    group = PageGroup(id="g01", reference=page, reference_turns=0,
+                      layout=page_layout(lines, printed_only=True), page_number=1, copies_read=2)
+    return PageCatalog(groups={"g01": group}, matches=[PageMatch(page, "g01", np.eye(3), 100)], directory=directory)
+
+
+_OWN_ASSIGNMENT = [
+    _line("1) What is the chemical symbol for gold?", 0.10),
+    _line("2) The periodic table.", 0.30),
+    _line("2a) Name a noble gas.", 0.35),
+    _line("2b) Which of these is a halogen?", 0.50),
+]
+
+
+def test_the_answer_key_gives_a_catalog_its_parts_types_and_what_is_missing():
+    catalog = _catalog(_OWN_ASSIGNMENT)
+
+    report = guide_catalog(catalog, (_KEY,))
+
+    layout = catalog.groups["g01"].layout
+    assert [label.key for label in layout.labels] == ["q1", "q2", "q2a", "q2b"]
+    assert report.guided_pages == 1 and report.found == ("q1", "q2a", "q2b")
+    # In the key, on no page: reported, and listed for every submission.
+    assert report.missing == ("q3",) and [item.key for item in catalog.missing] == ["q3"]
+    assert catalog.groups["g01"].question_types == {"q2b": "multiple_choice"}
+    # The parts are new regions, so answers have to be read again.
+    assert report.fingerprint
+
+
+def test_a_key_that_moves_no_region_asks_for_nothing_to_be_read_again():
+    key = (
+        OutlineItem("q1", 1, None, 5.0, "What is the chemical symbol for gold?"),
+        OutlineItem("q2", 2, None, 10.0, "Explain why ice floats on water."),
+    )
+    lines = [_line("1) What is the chemical symbol for gold?", 0.10), _line("2) Explain why ice floats on water.", 0.40)]
+
+    report = guide_catalog(_catalog(lines), (key,))
+
+    assert report.guided_pages == 1 and report.missing == ()
+    assert report.fingerprint == ""
+    # Asking twice gives the same answer: the catalog's lines are untouched.
+    assert guide_catalog(_catalog(lines), (key,)).fingerprint == ""
+
+
+def test_scans_with_opengraders_own_labels_do_not_use_the_key():
+    catalog = _catalog([_line("1. (5 pts) What is the chemical symbol for gold?", 0.1)])
+    before = catalog.groups["g01"].layout
+
+    report = guide_catalog(catalog, (_KEY,))
+
+    assert report.guided_pages == 0 and report.fingerprint == "" and catalog.missing == ()
+    assert catalog.groups["g01"].layout is before
+
+
+def test_only_scans_that_print_no_points_need_an_answer_key(tmp_path):
+    from opengrader.core.pages.catalog import CATALOG_DIRNAME
+
+    own, printed, never_split = tmp_path / "own", tmp_path / "printed", tmp_path / "never"
+    for folder in (own, printed, never_split):
+        folder.mkdir()
+    save_catalog(_catalog(_OWN_ASSIGNMENT), own / CATALOG_DIRNAME)
+    save_catalog(_catalog([_line("1. (5 pts) Gold?", 0.1)]), printed / CATALOG_DIRNAME)
+
+    assert scans_need_answer_key(own) is True
+    assert scans_need_answer_key(printed) is False
+    # No catalog to tell from: never a reason to hold a run up.
+    assert scans_need_answer_key(never_split) is False

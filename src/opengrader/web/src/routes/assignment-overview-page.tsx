@@ -24,7 +24,7 @@ export default function AssignmentOverviewPage({
   const folderSession = useFolderSession();
   // TODO: allow with confirmation
   const editUnavailableReason = folderSession
-    ? 'In a folder session the answer key is the file in the class folder. Each rubric can be edited here and is saved straight into that file; edit anything else in the file itself.'
+    ? 'In a folder session the answer key is the file in the class folder, so it cannot be edited here.'
     : scans.batches.length > 0
       ? 'Assignments with uploaded scans cannot be edited.'
       : submissions.length > 0

@@ -153,3 +153,160 @@ def test_handwriting_in_the_answer_space_is_not_part_of_the_prompt_but_printed_c
     prompts = [region.prompt for region, _ in question_regions(layout)]
 
     assert prompts == ["Convert decimal 5 to binary.", "What is the most significant bit of the binary number 1010? A) 0 B) 1"]
+
+
+# --- questions found by the answer key ---------------------------------------
+
+from opengrader.core.pages.layout import outline_labels  # noqa: E402
+from opengrader.core.pages.outline import OutlineItem, load_outlines  # noqa: E402
+
+KEY = (
+    OutlineItem("q1", 1, None, 5.0, "What is the chemical symbol for gold?"),
+    OutlineItem("q2", 2, None, 10.0, "Explain why ice floats on water."),
+    OutlineItem("q3", 3, None, 10.0, "The periodic table.", stem=True),
+    OutlineItem("q3a", 3, "a", 4.0, "Name a noble gas."),
+    OutlineItem("q3b", 3, "b", 6.0, "Which of these is a halogen?", kind="multiple_choice"),
+)
+
+
+def _keyed(lines):
+    layout = page_layout(lines, printed_only=True, outlines=(KEY,))
+    return layout, [region for region, _ in question_regions(layout)]
+
+
+def test_the_answer_key_finds_questions_printed_without_points():
+    layout, regions = _keyed([
+        _line("1) What is the chemical symbol for gold?", 0.20),
+        _line("Q2. Explain why ice floats on water.", 0.40),
+    ])
+
+    assert layout.guided
+    assert [(r.key, r.points, r.prompt) for r in regions] == [
+        ("q1", 5.0, "What is the chemical symbol for gold?"),
+        ("q2", 10.0, "Explain why ice floats on water."),
+    ]
+
+
+def test_parts_are_found_numbered_or_as_bare_letters_under_their_question():
+    for first, second in (("3a) Name a noble gas.", "3b) Which of these is a halogen?"),
+                          ("(a) Name a noble gas.", "b) Which of these is a halogen?")):
+        _, regions = _keyed([
+            _line("2. Explain why ice floats on water.", 0.10),
+            _line("3. The periodic table.", 0.40),
+            _line(first, 0.45, x=0.12),
+            _line(second, 0.60, x=0.12),
+        ])
+
+        assert [(r.key, r.points) for r in regions] == [("q2", 10.0), ("q3a", 4.0), ("q3b", 6.0)]
+        # The stem above the parts belongs to the first part's crop.
+        assert regions[1].box[1] < 0.40
+
+
+def test_a_bare_letter_is_not_a_part_of_the_wrong_question():
+    _, regions = _keyed([
+        _line("1) What is the chemical symbol for gold?", 0.20),
+        # A list a student wrote under question 1.
+        _line("a) gold is Au", 0.25, x=0.12),
+        _line("b) from the Latin aurum", 0.28, x=0.12),
+        _line("2) Explain why ice floats on water.", 0.50),
+    ])
+
+    assert [r.key for r in regions] == ["q1", "q2"]
+
+
+def test_numbered_steps_a_student_wrote_are_not_questions():
+    _, regions = _keyed([
+        _line("1) What is the chemical symbol for gold?", 0.10),
+        _line("2) Explain why ice floats on water.", 0.30),
+        _line("1) water expands when it freezes", 0.35, x=0.15),
+        _line("2) so the ice is less dense", 0.38, x=0.15),
+        _line("3) and floats", 0.41, x=0.15),
+        _line("3. The periodic table.", 0.60),
+        _line("3a) Name a noble gas.", 0.65),
+    ])
+
+    assert [r.key for r in regions] == ["q1", "q2", "q3a"]
+    # Question 2's crop runs to the printed question 3, past the student's "3)".
+    assert abs(regions[1].box[3] - regions[2].box[1]) < 1e-9 and regions[2].box[1] > 0.55
+
+
+def test_a_question_printed_with_no_number_is_found_by_its_text():
+    _, regions = _keyed([
+        _line("What is the chemical symbol for gold?", 0.20),
+        _line("Explain why ice floats on water.", 0.50),
+    ])
+
+    assert [r.key for r in regions] == ["q1", "q2"]
+
+
+def test_one_number_alone_is_not_trusted_unless_it_reads_like_the_question():
+    assert outline_labels([_line("2) see the back of the page", 0.4)], KEY) == []
+    (label,) = outline_labels([_line("2) Explain why ice floats on water.", 0.4)], KEY)
+    assert label.key == "q2"
+
+
+def test_a_page_opengrader_printed_reads_the_same_with_an_answer_key():
+    lines = [
+        _line("1. (10 pts) Convert decimal 5 to binary.", 0.30),
+        _line("2. (10 pts) Which literals are valid?", 0.50),
+    ]
+
+    plain = page_layout(lines, printed_only=True)
+    keyed = page_layout(lines, printed_only=True, outlines=(KEY,))
+
+    assert not keyed.guided
+    assert keyed.labels == plain.labels
+    assert [r for r, _ in question_regions(keyed)] == [r for r, _ in question_regions(plain)]
+
+
+def test_a_page_holds_a_stretch_of_the_key_and_a_stem_without_its_parts_is_no_answer():
+    _, regions = _keyed([
+        _line("2. Explain why ice floats on water.", 0.30),
+        _line("3. The periodic table.", 0.80),
+    ])
+
+    assert [r.key for r in regions] == ["q2"]
+
+
+def test_the_outline_is_read_from_an_answer_key_file(tmp_path):
+    qa = tmp_path / "qa.md"
+    qa.write_text("""---
+title: T
+---
+
+- (5 points) Gold?
+  - **Correct**
+    - Au
+  - **Rubric**
+    - Correct (+0)
+    - Partially Correct (-2.5)
+    - Incorrect (-5)
+
+- (10 points) Table.
+  - (4 points) Noble gas?
+    - **Correct**
+      - neon
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-2)
+      - Incorrect (-4)
+  - (6 points) Halogen?
+    - **Choices**
+      - A) Sodium
+      - B) Chlorine
+    - **Correct**
+      - B
+    - **Rubric**
+      - Correct (+0)
+      - Partially Correct (-3)
+      - Incorrect (-6)
+""", encoding="utf-8")
+
+    (outline,) = load_outlines(qa)
+
+    assert [(i.key, i.number, i.part, i.points, i.stem, i.kind) for i in outline] == [
+        ("q1", 1, None, 5.0, False, None),
+        ("q2", 2, None, 10.0, True, None),
+        ("q2a", 2, "a", 4.0, False, None),
+        ("q2b", 2, "b", 6.0, False, "multiple_choice"),
+    ]

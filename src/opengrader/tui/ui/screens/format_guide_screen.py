@@ -14,13 +14,36 @@ from opengrader.tui.clipboard import copy_text
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
 
 _SYNTAX_ROWS: list[tuple[str, str]] = [
-    ("1.  2.  3.", "Start each question with its number. Number them in order."),
+    (
+        "1.  2.  3.",
+        "Start each question with its number, in order. 1) Q1. and "
+        "Question 1: work too.",
+    ),
+    (
+        "1a)  1b)",
+        "Parts of question 1, each graded on its own. Keep the number: a "
+        "bare a) is a multiple-choice option.",
+    ),
+    (
+        "(10 points)",
+        "Optional, anywhere on a question's or a part's line. A question's "
+        "points are shared among parts that state none.",
+    ),
     ("a)  *b)", "Multiple choice — list options a) b) c); mark the correct one with a *."),
     ("[ ]  [*]", "Select all that apply — check every correct option with a *."),
     ("=", "Numeric answer, e.g. = 42, or = 3.14 +- 0.01 to allow a tolerance."),
     ("*", "Short answer. Use several * lines to accept alternative answers."),
+    (
+        "Answer:",
+        "The answer in plain words. Add one Answer: line for each answer you "
+        "accept. Under a) b) c) options, name the letter: Answer: b.",
+    ),
     ("____", "Essay / long answer — a line of underscores where the answer goes."),
-    ("Points possible:", "Optional — points for the questions that follow it."),
+    (
+        "Points possible:",
+        "Optional — points for the questions that follow it. Without it a "
+        "question is worth 10 (5 for partial credit).",
+    ),
     (
         "Outcome:",
         "Optional — a learning outcome this question measures, e.g. Outcome: "

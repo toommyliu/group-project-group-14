@@ -273,7 +273,7 @@ export async function updateAssignment(
 export type RubricItem = components['schemas']['QARubricItem-Input'];
 export type RubricEditResult = components['schemas']['RubricEditResult'];
 
-/** Save one question's rubric into the class folder's answer key (a folder session). */
+/** Save one question's rubric — and its answers, when given — into the class folder's answer key (a folder session). */
 export async function saveRubric(
   assignmentId: string,
   questionId: string,
@@ -289,6 +289,44 @@ export async function saveRubric(
         body,
       }
     )
+  );
+}
+
+export type AnswerField = components['schemas']['AnswerFieldInfo'];
+
+/** Every question (or part) of the answer key that takes an answer. */
+export function answerFieldsQuery(assignmentId: string) {
+  return queryOptions({
+    queryKey: ['assignments', assignmentId, 'answer-fields'],
+    queryFn: async ({ signal }) =>
+      readData(
+        await client.GET('/api/assignments/{assignment_id}/answer-fields', {
+          params: { path: { assignment_id: assignmentId } },
+          signal,
+        })
+      ),
+  });
+}
+
+/** Save several questions' answers into the class folder's answer key (a folder session). */
+export async function saveAnswers(
+  assignmentId: string,
+  body: components['schemas']['AnswersEdit']
+) {
+  return readData(
+    await client.PUT('/api/assignments/{assignment_id}/answers', {
+      params: { path: { assignment_id: assignmentId } },
+      body,
+    })
+  );
+}
+
+/** Grade the class folder's work again with its answer key (a folder session). */
+export async function regradeWithAnswerKey(assignmentId: string) {
+  return readData(
+    await client.POST('/api/assignments/{assignment_id}/regrade', {
+      params: { path: { assignment_id: assignmentId } },
+    })
   );
 }
 

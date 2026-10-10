@@ -146,7 +146,7 @@ function QuestionContent({
                 onClick={() => editRubric(question.id)}
               >
                 <PenLine aria-hidden="true" />
-                Edit rubric
+                Edit answers and rubric
               </Button>
             )}
           </div>

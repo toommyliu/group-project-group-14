@@ -109,6 +109,18 @@ def crop_submission(
                 question_id=region.key, prompt=region.prompt, possible_points=region.points,
                 response_image_path=None, response_text="",
             ))
+    if catalog.missing:
+        # In the answer key, on no printed page: listed without a crop, so it
+        # is seen to be missing instead of silently not graded.
+        for item in catalog.missing:
+            questions.setdefault(item.key, StudentSubmissionQuestion(
+                question_id=item.key, prompt=item.prompt, possible_points=item.points,
+                response_image_path=None, response_text="",
+            ))
+        result.warnings.append(
+            "The answer key has question(s) that were not found on the printed pages: "
+            + ", ".join(item.key for item in catalog.missing) + ". They have no crop."
+        )
     result.questions = list(questions.values())
     if debug:
         from .debug import write_layout_debug

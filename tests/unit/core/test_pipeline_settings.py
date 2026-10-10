@@ -107,3 +107,15 @@ def test_machine_settings_round_trip_beside_the_ai_settings() -> None:
     assert path == machine_settings_path()
     assert path.parent == app_config.settings_path().parent
     assert load_machine_settings() == settings
+
+
+def test_the_answer_key_points_are_remembered_and_a_bad_value_is_ignored() -> None:
+    import json
+
+    save_machine_settings(MachinePipelineSettings(answer_key_points=5))
+    assert load_machine_settings().answer_key_points == 5.0
+
+    machine_settings_path().write_text(
+        json.dumps({"version": 1, "answer_key_points": -3}), encoding="utf-8"
+    )
+    assert load_machine_settings().answer_key_points is None
