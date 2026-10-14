@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   GradeDrafts,
   acknowledgeDraft,
+  draftFor,
   readRecovery,
+  sameDraft,
   type Recovery,
 } from './grade-drafts';
 import type { Answer } from '@/api/queries';
@@ -67,6 +69,29 @@ const answer: Answer = {
 };
 
 describe('grade recovery', () => {
+  it.each(['1.50', '01.5', '1.5e0'])(
+    'acknowledges formatted score %s without another save',
+    (score) => {
+      const saved = { ...answer, points_awarded: 1.5 };
+      const submitted = { ...value.pending!, points_awarded: 1.5 };
+      const current = { ...draftFor(saved), score };
+      expect(
+        sameDraft(acknowledgeDraft(current, submitted, saved), draftFor(saved))
+      ).toBe(true);
+    }
+  );
+
+  it('retains a newer score or feedback while acknowledging a formatted score', () => {
+    const saved = { ...answer, points_awarded: 1.5 };
+    const submitted = { ...value.pending!, points_awarded: 1.5 };
+    for (const current of [
+      { ...draftFor(saved), score: '2.50' },
+      { ...draftFor(saved), score: '1.50', analysis: 'New feedback' },
+      { ...draftFor(saved), score: '' },
+    ])
+      expect(acknowledgeDraft(current, submitted, saved)).toBe(current);
+  });
+
   it('retains the exact unacknowledged request and newer typing across a page restart', () => {
     const disk = storage();
     const first = new GradeDrafts('workspace', 'assignment', 1, 'q1', disk);

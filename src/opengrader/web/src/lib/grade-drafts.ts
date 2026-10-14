@@ -40,7 +40,15 @@ export function acknowledgeDraft(
     manual: submitted.score_mode === 'manual',
     score: submitted.points_awarded?.toString() ?? '',
   };
-  return sameDraft(current, sent)
+  // Number inputs retain formatting (for example "1.50"), while the request
+  // and response contain numbers. Compare the value that was actually sent.
+  const comparable =
+    current.manual &&
+    current.score !== '' &&
+    Number.isFinite(Number(current.score))
+      ? { ...current, score: Number(current.score).toString() }
+      : current;
+  return sameDraft(comparable, sent)
     ? { ...draftFor(saved), manual: sent.manual }
     : current;
 }

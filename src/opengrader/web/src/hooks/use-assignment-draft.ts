@@ -64,18 +64,6 @@ export function useAssignmentDraft({
   >(() =>
     overview ? { source: initialSource, preview: overview.qa } : undefined
   );
-  // A read-only page has no draft, so when the saved answer key changes
-  // underneath it (a rubric edited in place, or in the class folder) it shows
-  // the new one. Adopted during render so the view keeps its scroll position.
-  const [receivedSource, setReceivedSource] = useState(initialSource);
-  if (overview?.editUnavailableReason && initialSource !== receivedSource) {
-    setReceivedSource(initialSource);
-    setOriginalSource(initialSource);
-    setSource(initialSource);
-    setResult({ source: initialSource, data: overview.qa });
-    setOutline(overview.qa);
-    setVisualBaseline({ source: initialSource, preview: overview.qa });
-  }
   const [retry, setRetry] = useState(0);
   const [mode, setMode] = useState<EditorMode>(
     () => usePreferences.getState().editorMode
@@ -112,6 +100,26 @@ export function useAssignmentDraft({
   const dirty =
     !saved && (source !== originalSource || reading || visualPending);
   const busy = reading || saving || !!saved;
+
+  // Follow external saves only when there is no local work to overwrite.
+  // Keep the old base for a dirty draft so optimistic concurrency still
+  // prevents replacing another editor's work without review.
+  const [receivedSource, setReceivedSource] = useState(initialSource);
+  if (
+    overview &&
+    initialSource !== receivedSource &&
+    !reading &&
+    !saving &&
+    !visualPending &&
+    (readOnly || source === originalSource)
+  ) {
+    setReceivedSource(initialSource);
+    setOriginalSource(initialSource);
+    setSource(initialSource);
+    setResult({ source: initialSource, data: overview.qa });
+    setOutline(overview.qa);
+    setVisualBaseline({ source: initialSource, preview: overview.qa });
+  }
 
   const openMode = useCallback((nextMode: EditorMode) => {
     setOpenedModes((opened) =>

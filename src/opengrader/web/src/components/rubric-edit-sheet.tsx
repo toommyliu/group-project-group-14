@@ -102,12 +102,13 @@ export function RubricEditSheet({
     qa.dataUpdatedAt,
     fields.dataUpdatedAt,
   ]);
-  const reload = () => {
-    void qa.refetch();
-    void fields.refetch();
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const reload = async () => {
+    const results = await Promise.all([qa.refetch(), fields.refetch()]);
+    if (results.every((result) => result.isSuccess))
+      setReloadVersion((version) => version + 1);
   };
-  // Kept here, not in the form: a save re-reads the file, and the form is
-  // rebuilt on every fresh read.
+  // Kept here so a completed save can replace the form with its outcome.
   const [saved, setSaved] = useState<Saved | null>(null);
   const close = () => {
     setSaved(null);
@@ -138,7 +139,7 @@ export function RubricEditSheet({
             saved={saved}
             onClose={close}
           />
-        ) : failed ? (
+        ) : failed && !fresh ? (
           <div className="px-4">
             <ErrorAlert error={failed} title="Could not load the question">
               <Button variant="outline" onClick={reload}>
@@ -159,8 +160,9 @@ export function RubricEditSheet({
           </p>
         ) : (
           <RubricForm
-            // A fresh read of the file is a fresh form, never a merge.
-            key={`${target.questionId}/${target.version ?? ''}/${qa.dataUpdatedAt}/${fields.dataUpdatedAt}`}
+            // Only an explicit reload replaces a draft; background events
+            // also refresh these queries while another grader is working.
+            key={`${target.questionId}/${target.version ?? ''}/${reloadVersion}`}
             assignmentId={assignmentId}
             target={target}
             opened={found.rubric}
@@ -225,9 +227,9 @@ function SavedNote({
 function RubricForm({
   assignmentId,
   target,
-  opened,
-  field,
-  points,
+  opened: initialOpened,
+  field: initialField,
+  points: initialPoints,
   reloading,
   onReload,
   onSaved,
@@ -246,6 +248,11 @@ function RubricForm({
   onClose: () => void;
 }) {
   const client = useQueryClient();
+  const [{ opened, field, points }] = useState(() => ({
+    opened: initialOpened,
+    field: initialField,
+    points: initialPoints,
+  }));
   const [rubric, setRubric] = useState(opened);
   const openedAnswers = field?.answers ?? [];
   const [answers, setAnswers] = useState<AnswerDraft>(openedAnswers);
