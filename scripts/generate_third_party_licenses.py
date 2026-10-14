@@ -281,35 +281,30 @@ def _npm_license_records() -> list[dict[str, Any]]:
     if not WEB_NODE_MODULES.exists():
         raise RuntimeError(
             "web dependencies are not installed; run "
-            "`pnpm --dir src/opengrader/web install --frozen-lockfile`"
+            "`npm --prefix src/opengrader/web ci`"
         )
-    if shutil.which("pnpm") is None:
-        raise RuntimeError("pnpm is required to collect web dependency licenses")
+    if shutil.which("npm") is None:
+        raise RuntimeError("npm is required to collect web dependency licenses")
 
-    output = _run(
-        ["pnpm", "licenses", "list", "--prod", "--no-optional", "--json"],
-        cwd=WEB_DIR,
-    )
+    output = _run(["npm", "query", ".prod:not(.optional)"], cwd=WEB_DIR)
     records: dict[tuple[str, str], dict[str, Any]] = {}
-    for license_group in json.loads(output).values():
-        for package in license_group:
-            for raw_path in package["paths"]:
-                package_dir = Path(raw_path)
-                metadata = json.loads(
-                    (package_dir / "package.json").read_text(encoding="utf-8")
-                )
-                name = metadata["name"]
-                version = metadata["version"]
-                key = (name, version)
-                if key in records:
-                    continue
-                records[key] = {
-                    "Name": name,
-                    "Version": version,
-                    "License": metadata.get("license", package["license"]),
-                    "URL": _package_url(metadata),
-                    "LicenseText": _npm_license_text(package_dir, name, version),
-                }
+    for package in json.loads(output):
+        if not package["location"]:
+            continue
+        package_dir = Path(package["path"])
+        metadata = json.loads((package_dir / "package.json").read_text(encoding="utf-8"))
+        name = metadata["name"]
+        version = metadata["version"]
+        key = (name, version)
+        if key in records:
+            continue
+        records[key] = {
+            "Name": name,
+            "Version": version,
+            "License": metadata.get("license", "UNKNOWN"),
+            "URL": _package_url(metadata),
+            "LicenseText": _npm_license_text(package_dir, name, version),
+        }
 
     return sorted(
         records.values(),

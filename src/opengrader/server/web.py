@@ -24,9 +24,9 @@ def add_web_routes(app: FastAPI, dist: Path) -> None:
             return HTMLResponse(
                 "<html lang='en'><title>Opengrader</title>"
                 "<h1>The web app has not been built</h1>"
-                "<p>From the repository, run <code>pnpm --dir "
-                "src/opengrader/web install --frozen-lockfile</code>, then "
-                "<code>pnpm --dir src/opengrader/web build</code> "
+                "<p>From the repository, run <code>npm --prefix "
+                "src/opengrader/web ci</code>, then "
+                "<code>npm --prefix src/opengrader/web run build</code> "
                 "and restart the server.</p>"
                 "<p>The <a href='/docs'>API documentation</a> is available.</p></html>",
                 status_code=503,

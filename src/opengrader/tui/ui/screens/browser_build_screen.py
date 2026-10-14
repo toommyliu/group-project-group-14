@@ -20,18 +20,18 @@ from textual.widgets import Button, Static
 
 # What the user chose: "cancel" (dismissed/closed, do nothing), "open" (use
 # the build that's there, stale or not), "build" (build/rebuild, then open) or
-# "install" (install Node.js and pnpm with Homebrew, then build and open).
+# "install" (install Node.js with Homebrew, then build and open).
 BrowserBuildChoice = Literal["cancel", "open", "build", "install"]
 
 
 class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
     """Dismisses with the user's choice; see `BrowserBuildChoice`.
 
-    With no pnpm (or corepack) on this machine there is nothing to build
-    with. On a Mac that has Homebrew (`can_install`) the dialog offers to
-    install Node.js and pnpm first; otherwise it says what to install and
+    With no npm on this machine there is nothing to build with. On a Mac
+    that has Homebrew (`can_install`) the dialog offers to install Node.js
+    first; otherwise it says what to install and
     offers only Close. Neither happens for the stale variant — the caller only shows it once it has
-    already confirmed pnpm is there (see `browser_launcher.open_folder`).
+    already confirmed npm is there (see `browser_launcher.open_folder`).
     """
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
@@ -118,9 +118,9 @@ class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
                     "in seconds."
                 )
                 yield Static(
-                    "Building needs Node.js and pnpm, which are not installed. "
-                    "Homebrew is on this Mac, so Opengrader can install them "
-                    "for you (brew install node pnpm) and then build the app. "
+                    "Building needs Node.js, which is not installed. "
+                    "Homebrew is on this Mac, so Opengrader can install it "
+                    "for you (brew install node) and then build the app. "
                     "Both need the internet and together take several "
                     "minutes. Grading in this window keeps working meanwhile.",
                     classes="bb-muted",
@@ -132,9 +132,9 @@ class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
                     "in seconds."
                 )
                 yield Static(
-                    "Building needs Node.js and pnpm, which are not installed. "
+                    "Building needs Node.js, which is not installed. "
                     "Install Node.js from https://nodejs.org — or on a Mac "
-                    "with Homebrew: brew install node pnpm — then press Open "
+                    "with Homebrew: brew install node — then press Open "
                     "in browser again.",
                     classes="bb-muted",
                 )

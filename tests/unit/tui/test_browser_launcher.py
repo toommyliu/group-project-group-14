@@ -223,7 +223,7 @@ def test_an_unbuilt_app_is_built_only_after_the_user_agrees(
         lambda source=None: "ready" if built["ready"] else "missing",
     )
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
-    monkeypatch.setattr(browser_app, "pnpm_command", lambda: ["pnpm"])
+    monkeypatch.setattr(browser_app, "npm_command", lambda: ["npm"])
 
     def _build(source=None, *, on_line=None, log=None):  # noqa: ANN001, ANN202
         built["builds"] += 1
@@ -256,7 +256,7 @@ def test_an_unbuilt_app_is_built_only_after_the_user_agrees(
 def test_declining_the_build_installs_nothing(service, monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "missing")
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
-    monkeypatch.setattr(browser_app, "pnpm_command", lambda: None)
+    monkeypatch.setattr(browser_app, "npm_command", lambda: None)
     monkeypatch.setattr(
         browser_app, "build_web", lambda *a, **k: pytest.fail("built without asking")
     )
@@ -268,7 +268,7 @@ def test_declining_the_build_installs_nothing(service, monkeypatch) -> None:  # 
             _fill_card(app)
             app.query_one("#browser-open-button").press()
             await pilot.pause()
-            # No pnpm and no Homebrew: the dialog only explains, with Close.
+            # No npm and no Homebrew: the dialog only explains, with Close.
             assert not app.screen.query("#bb-build")
             assert not app.screen.query("#bb-install")
             app.screen.query_one("#bb-cancel").press()
@@ -280,7 +280,7 @@ def test_declining_the_build_installs_nothing(service, monkeypatch) -> None:  # 
 
 
 def _missing_tools_with_homebrew(monkeypatch) -> dict:  # noqa: ANN001
-    """An unbuilt app, no pnpm, and a Homebrew that can install it."""
+    """An unbuilt app, no npm, and a Homebrew that can install it."""
     done = {"installs": [], "builds": 0, "order": []}
     monkeypatch.setattr(
         browser_app,
@@ -288,7 +288,7 @@ def _missing_tools_with_homebrew(monkeypatch) -> dict:  # noqa: ANN001
         lambda source=None: "ready" if done["builds"] else "missing",
     )
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
-    monkeypatch.setattr(browser_app, "pnpm_command", lambda: None)
+    monkeypatch.setattr(browser_app, "npm_command", lambda: None)
     monkeypatch.setattr(homebrew, "find_homebrew", lambda: "/opt/homebrew/bin/brew")
 
     def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
@@ -362,7 +362,7 @@ def test_a_failed_install_says_why_and_builds_nothing(
     done = _missing_tools_with_homebrew(monkeypatch)
 
     def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
-        raise WebBuildError("Node.js and pnpm were not installed.", "Error: no bottle")
+        raise WebBuildError("Node.js was not installed.", "Error: no bottle")
 
     monkeypatch.setattr(browser_app, "install_tools", _install)
     notices: list[tuple[str, str]] = []
@@ -392,10 +392,10 @@ def test_a_failed_install_says_why_and_builds_nothing(
     assert not still_busy
     assert done["builds"] == 0 and service["imports"] == []
     assert notices and notices[-1][1] == "error"
-    assert "were not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
+    assert "was not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
     # The notification goes away; the status line keeps what it said.
     assert not hidden
-    assert "were not installed" in status and "no bottle" in status
+    assert "was not installed" in status and "no bottle" in status
 
 
 def test_a_stale_build_opens_anyway_without_rebuilding(
@@ -403,7 +403,7 @@ def test_a_stale_build_opens_anyway_without_rebuilding(
 ) -> None:
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "stale")
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
-    monkeypatch.setattr(browser_app, "pnpm_command", lambda: ["pnpm"])
+    monkeypatch.setattr(browser_app, "npm_command", lambda: ["npm"])
     monkeypatch.setattr(
         browser_app, "build_web", lambda *a, **k: pytest.fail("rebuilt when told to open anyway")
     )
@@ -432,7 +432,7 @@ def test_a_stale_build_opens_anyway_without_rebuilding(
 def test_a_stale_build_can_be_rebuilt_before_opening(service, monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "stale")
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
-    monkeypatch.setattr(browser_app, "pnpm_command", lambda: ["pnpm"])
+    monkeypatch.setattr(browser_app, "npm_command", lambda: ["npm"])
     builds = {"count": 0}
 
     def _build(source=None, *, on_line=None, log=None):  # noqa: ANN001, ANN202

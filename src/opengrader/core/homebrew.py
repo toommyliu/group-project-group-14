@@ -2,7 +2,7 @@
 
 `core.environment` only looks; this is the one place that installs a
 program, and only when asked to: the Doctor screen's Install Tesseract
-button, the browser app's Install Node.js and pnpm (`core/browser_app`) and
+button, the browser app's Install Node.js (`core/browser_app`) and
 AI setup's Set up local AI (`core/app_config/local_ai`, for Ollama). Homebrew
 itself is never installed from here: its installer asks for an administrator
 password in a terminal.

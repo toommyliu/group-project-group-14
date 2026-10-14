@@ -6,7 +6,7 @@ a workspace — the same import `opengrader tui FOLDER` does, grades already in
 the files kept — starts that workspace's local service (detached, so it
 outlives this window) and opens the assignment in the default browser. The
 first time, when the web app is not built yet, it offers to build it — and,
-on a Mac that has Homebrew, to install Node.js and pnpm first if the build
+on a Mac that has Homebrew, to install Node.js first if the build
 has nothing to run with.
 
 A folder opened this way is a *folder session* (`core/workspace/folder_session`):
@@ -113,7 +113,7 @@ class BrowserLauncher(Vertical):
         """What *Open in browser* does with the card's answer key + submissions.
 
         `web_dist_state()` decides what happens: missing asks to build first
-        (offering to install Node.js and pnpm when Homebrew can, or else just
+        (offering to install Node.js when Homebrew can, or else just
         saying why it can't); stale — sources have changed since the
         last build — offers a rebuild but doesn't force one, since a stale
         bundle still mostly works; ready opens straight away.
@@ -128,19 +128,19 @@ class BrowserLauncher(Vertical):
         if state == "missing" and not browser_app.web_buildable():
             self.app.notify(
                 "This copy of Opengrader was installed without the browser app. "
-                "Reinstall from a copy where `pnpm --dir src/opengrader/web "
-                "build` has been run.",
+                "Reinstall from a copy where `npm --prefix src/opengrader/web "
+                "run build` has been run.",
                 severity="error",
                 timeout=12,
             )
             return
-        can_build = browser_app.web_buildable() and browser_app.pnpm_command() is not None
+        can_build = browser_app.web_buildable() and browser_app.npm_command() is not None
         if state == "stale" and not can_build:
             # Nothing to rebuild from (or nothing to rebuild with) — the old
             # bundle is still better than nothing.
             self.app.notify(
                 "The browser app may be out of date on this computer "
-                "(Node.js and pnpm are needed to rebuild it).",
+                "(Node.js and npm are needed to rebuild it).",
                 severity="warning",
                 timeout=12,
             )
@@ -175,7 +175,7 @@ class BrowserLauncher(Vertical):
         build: bool,
         install_with: str | None = None,
     ) -> None:
-        """`install_with` is Homebrew's path when Node.js and pnpm go in first."""
+        """`install_with` is Homebrew's path when Node.js goes in first."""
         app = self.app
         app.call_from_thread(self._set_busy, "Starting the browser app…")
         if install_with:
@@ -184,12 +184,12 @@ class BrowserLauncher(Vertical):
                 if self.is_attached:
                     app.call_from_thread(
                         self._set_busy,
-                        f"Installing Node.js and pnpm (one time) — {line}",
+                        f"Installing Node.js (one time) — {line}",
                     )
 
             app.call_from_thread(
                 self._set_busy,
-                "Installing Node.js and pnpm with Homebrew (one time, a few minutes)…",
+                "Installing Node.js with Homebrew (one time, a few minutes)…",
             )
             try:
                 browser_app.install_tools(
@@ -307,7 +307,7 @@ class BrowserLauncher(Vertical):
     def _fail(self, message: str, *, keep: bool = False) -> None:
         """`keep` leaves the message in the status line until the next try.
 
-        For a failed install or build: Homebrew's and pnpm's errors are too
+        For a failed install or build: Homebrew's and npm's errors are too
         long to read off a notification before it goes. A running service
         keeps its own status line (and its Stop button) instead.
         """

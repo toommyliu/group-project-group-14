@@ -10,9 +10,9 @@ not UI:
   per-user file beside the AI settings (`browser.json`), best effort like
   `core/recents.py`;
 - whether the web app is built (`web/dist/index.html`), and building it on
-  first use with the user's own Node.js + pnpm, so neither is ever needed by
+  first use with the user's own Node.js and npm, so neither is ever needed by
   someone who never opens the browser app;
-- installing those two when they are missing and the user asks, on a Mac
+- installing Node.js when it is missing and the user asks, on a Mac
   that has Homebrew (`core/homebrew`), with Homebrew's output kept in
   `tools-install.log` beside the build log.
 """
@@ -43,7 +43,7 @@ __all__ = [
     "web_dist_ready",
     "web_dist_state",
     "web_buildable",
-    "pnpm_command",
+    "npm_command",
     "tool_status",
     "missing_tool_formulae",
     "install_tools",
@@ -58,15 +58,14 @@ BUILD_LOG_FILENAME = "web-build.log"
 INSTALL_LOG_FILENAME = "tools-install.log"
 # Written into dist/ right after a successful build, so a later run can tell
 # "built" from "built from sources that have since changed" without needing
-# to ask pnpm anything.
+# to ask npm anything.
 BUILD_STAMP_FILENAME = ".opengrader-build.json"
 
 # The files that end up in the bundle. Anything else under the source tree
-# (README, scripts/, the pnpm store) can change without making dist/ stale.
+# (README, scripts/) can change without making dist/ stale.
 _FINGERPRINT_ROOT_FILES = (
     "package.json",
-    "pnpm-lock.yaml",
-    "pnpm-workspace.yaml",
+    "package-lock.json",
     "index.html",
     "vite.config.ts",
 )
@@ -88,8 +87,6 @@ _TOOL_CHECK_SECONDS = 5.0
 # that (macOS checks a new binary before letting it start), and calling a
 # working install "failed" sends the user off to fix nothing.
 _FIRST_RUN_CHECK_SECONDS = 30.0
-
-_FORMULA_NAMES = {"node": "Node.js", "pnpm": "pnpm"}
 
 
 @dataclass(frozen=True)
@@ -148,7 +145,7 @@ def web_dist_ready(source: Path | None = None) -> bool:
 def web_buildable(source: Path | None = None) -> bool:
     """A checkout (or a desktop install copied from one) carries the sources."""
     root = source or web_source_dir()
-    return (root / "package.json").is_file() and (root / "pnpm-lock.yaml").is_file()
+    return (root / "package.json").is_file() and (root / "package-lock.json").is_file()
 
 
 def _fingerprint_files(root: Path) -> list[Path]:
@@ -195,7 +192,7 @@ def _stamp_path(root: Path) -> Path:
 
 def _write_build_stamp(root: Path, fingerprint: str) -> None:
     """Best effort: a stamp that fails to write just means the next check
-    falls back to comparing mtimes, same as a `dist/` built by `pnpm build`."""
+    falls back to comparing mtimes, same as a `dist/` built by `npm run build`."""
     stamp = _stamp_path(root)
     body = {
         "version": 1,
@@ -215,7 +212,7 @@ def web_dist_state(source: Path | None = None) -> Literal["missing", "stale", "r
     """Whether `dist/` can be served as-is, or wants a rebuild first.
 
     A stamp from `build_web` settles it exactly (fingerprint match). With no
-    stamp — a `dist/` a developer built with `pnpm build`, or one the
+    stamp — a `dist/` a developer built with `npm run build`, or one the
     installer copied in — mtimes are the best available signal: stale if any
     hashed source is newer than `dist/index.html`. Anything unreadable is
     called stale rather than ready, since serving a bundle that is actually
@@ -260,7 +257,7 @@ class ToolInfo:
 @dataclass(frozen=True)
 class ToolStatus:
     node: ToolInfo | None
-    pnpm: ToolInfo | None
+    npm: ToolInfo | None
 
 
 def _tool_version(
@@ -284,19 +281,14 @@ def _tool_version(
 
 
 def tool_status(*, timeout: float = _TOOL_CHECK_SECONDS) -> ToolStatus:
-    """Node and pnpm as this machine actually has them — for the health panel.
+    """Node and npm as this machine actually has them — for the health panel.
 
     A tool counts only if its `--version` call also succeeds within `timeout`
     seconds: a `node` on PATH that can't run is no better than no `node` at
     all.
     """
     search = _tool_path()
-    env = {
-        **os.environ,
-        "PATH": search,
-        "CI": "true",
-        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
-    }
+    env = {**os.environ, "PATH": search, "CI": "true"}
 
     node: ToolInfo | None = None
     node_path = shutil.which("node", path=search)
@@ -305,34 +297,24 @@ def tool_status(*, timeout: float = _TOOL_CHECK_SECONDS) -> ToolStatus:
         if version:
             node = ToolInfo(path=node_path, version=version)
 
-    pnpm: ToolInfo | None = None
-    pnpm_path = shutil.which("pnpm", path=search)
-    if pnpm_path:
-        version = _tool_version([pnpm_path, "--version"], env, timeout)
+    npm: ToolInfo | None = None
+    npm_path = shutil.which("npm", path=search)
+    if npm_path:
+        version = _tool_version([npm_path, "--version"], env, timeout)
         if version:
-            pnpm = ToolInfo(path=pnpm_path, version=version)
-    else:
-        corepack_path = shutil.which("corepack", path=search)
-        if corepack_path:
-            version = _tool_version([corepack_path, "pnpm", "--version"], env, timeout)
-            if version:
-                pnpm = ToolInfo(path="via corepack", version=version)
+            npm = ToolInfo(path=npm_path, version=version)
 
-    return ToolStatus(node=node, pnpm=pnpm)
+    return ToolStatus(node=node, npm=npm)
 
 
 def missing_tool_formulae(status: ToolStatus) -> tuple[str, ...]:
     """The Homebrew formulae that would supply what `status` lacks.
 
-    Both are named when both are missing: Homebrew's pnpm does not bring
-    Node.js with it.
+    Homebrew's `node` brings npm with it.
     """
-    formulae: list[str] = []
-    if status.node is None:
-        formulae.append("node")
-    if status.pnpm is None:
-        formulae.append("pnpm")
-    return tuple(formulae)
+    if status.node is None or status.npm is None:
+        return ("node",)
+    return ()
 
 
 def install_log_path() -> Path:
@@ -356,8 +338,8 @@ def _open_install_log(target: Path) -> IO[str] | None:
 def _tool_status_after_install() -> ToolStatus:
     """The tools as a fresh install leaves them: patient, and asked twice.
 
-    Homebrew's pnpm is itself run by Node.js, so one slow or failed first
-    start of `node` can make either tool look missing when both are fine.
+    npm is itself run by Node.js, so one slow or failed first start of
+    `node` can make either tool look missing when both are fine.
     """
     status = tool_status(timeout=_FIRST_RUN_CHECK_SECONDS)
     if missing_tool_formulae(status):
@@ -378,12 +360,12 @@ def install_tools(
     on_start: Callable[[subprocess.Popen[str]], None] | None = None,
     log: Path | None = None,
 ) -> None:
-    """Install whichever of Node.js and pnpm is missing, with Homebrew.
+    """Install Node.js (which brings npm) with Homebrew, if either is missing.
 
     What counts is the check afterwards, not Homebrew's exit code: "installed"
     means the build can find and run both, and a Homebrew that complained but
-    left both working has not failed. Raises `WebBuildError` naming only what
-    is still missing; Homebrew's whole output is appended to `log`.
+    left both working has not failed. Raises `WebBuildError` if they still
+    cannot be run; Homebrew's whole output is appended to `log`.
     """
     from opengrader.core.homebrew import HomebrewError, brew_install
 
@@ -419,28 +401,24 @@ def install_tools(
         status = _tool_status_after_install()
         record(
             "Afterwards — "
-            f"{_tool_report('Node.js', status.node)}; {_tool_report('pnpm', status.pnpm)}\n"
+            f"{_tool_report('Node.js', status.node)}; {_tool_report('npm', status.npm)}\n"
         )
     finally:
         if stream is not None:
             stream.close()
 
-    still_missing = missing_tool_formulae(status)
-    if not still_missing:
+    if not missing_tool_formulae(status):
         return
-    names = " and ".join(_FORMULA_NAMES[formula] for formula in still_missing)
     where = f"The full output is in {target}." if stream is not None else ""
     if failure is not None:
-        verb = "were" if len(still_missing) > 1 else "was"
         raise WebBuildError(
-            f"{names} {verb} not installed. {failure} Trying again often "
+            f"Node.js was not installed. {failure} Trying again often "
             f"fixes a download that failed. {where}".rstrip(),
             failure.tail,
         ) from failure
     raise WebBuildError(
-        f"Homebrew finished, but {names} still cannot be run here. Try "
-        f"`brew install {' '.join(still_missing)}` in a terminal to see why. "
-        f"{where}".rstrip()
+        "Homebrew finished, but Node.js and npm still cannot be run here. Try "
+        f"`brew install node` in a terminal to see why. {where}".rstrip()
     )
 
 
@@ -449,16 +427,9 @@ def _tool_path() -> str:
     return os.pathsep.join([*entries, *(d for d in _EXTRA_TOOL_DIRS if d not in entries)])
 
 
-def pnpm_command() -> list[str] | None:
-    """How to run pnpm here: pnpm itself, else Node's bundled corepack."""
-    search = _tool_path()
-    pnpm = shutil.which("pnpm", path=search)
-    if pnpm:
-        return [pnpm]
-    corepack = shutil.which("corepack", path=search)
-    if corepack:
-        return [corepack, "pnpm"]
-    return None
+def npm_command() -> list[str] | None:
+    npm = shutil.which("npm", path=_tool_path())
+    return [npm] if npm else None
 
 
 def build_log_path() -> Path:
@@ -477,7 +448,7 @@ class WebBuildError(RuntimeError):
 
 # One build at a time: the button that starts it is disabled while busy, but
 # a stray second call (a retried notification, a second window) must not
-# also start `pnpm install` into the same `node_modules/`.
+# also start `npm ci` into the same `node_modules/`.
 _build_lock = threading.Lock()
 
 
@@ -489,8 +460,8 @@ def build_web(
 ) -> None:
     """Install the web app's packages and build `dist/` (needs the internet once).
 
-    Runs `pnpm install --frozen-lockfile` then `vite build`. The type check in
-    `pnpm build` is for developers; an end user only needs the bundle, and a
+    Runs `npm ci` then `vite build`. The type check in `npm run build` is
+    for developers; an end user only needs the bundle, and a
     type error must not stop them from grading.
     """
     if not _build_lock.acquire(blocking=False):
@@ -512,23 +483,21 @@ def _build_web_locked(
         raise WebBuildError(
             "This copy of Opengrader has no browser app sources to build from."
         )
-    pnpm = pnpm_command()
-    if pnpm is None:
+    npm = npm_command()
+    if npm is None:
         raise WebBuildError(
-            "The browser app needs Node.js and pnpm to build once. Install "
-            "Node.js from https://nodejs.org (or `brew install node pnpm`), "
-            "then try again."
+            "The browser app needs Node.js and npm to build once. Install "
+            "Node.js from https://nodejs.org (it includes npm), then try again."
         )
     env = {
         **os.environ,
         "PATH": _tool_path(),
         # No TTY here: never stop for a question nobody can answer.
         "CI": "true",
-        "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
     }
     steps = (
-        ("Installing packages", [*pnpm, "install", "--frozen-lockfile"]),
-        ("Building the browser app", [*pnpm, "exec", "vite", "build"]),
+        ("Installing packages", [*npm, "ci", "--no-audit", "--no-fund"]),
+        ("Building the browser app", [*npm, "exec", "--", "vite", "build"]),
     )
     target = log or build_log_path()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -572,5 +541,5 @@ def _build_web_locked(
             f"The build finished but produced no dist/index.html. See {target}."
         )
     # Best effort: a missing stamp only means the next check falls back to
-    # comparing mtimes, same as a dist/ built by hand with `pnpm build`.
+    # comparing mtimes, same as a dist/ built by hand with `npm run build`.
     _write_build_stamp(root, source_fingerprint(root))

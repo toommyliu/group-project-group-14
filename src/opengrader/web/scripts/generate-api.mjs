@@ -12,7 +12,7 @@ const schema = execFileSync(
   }
 );
 const output =
-  '// Generated from FastAPI. Run pnpm generate:api to update.\n' +
+  '// Generated from FastAPI. Run npm run generate:api to update.\n' +
   astToString(
     await openapiTS(schema, {
       transform: (schemaObject) =>
@@ -25,7 +25,7 @@ const target = new URL('../src/api/schema.d.ts', import.meta.url);
 
 if (process.argv.includes('--check')) {
   if (readFileSync(target, 'utf8') !== output) {
-    console.error('API types are stale. Run pnpm generate:api.');
+    console.error('API types are stale. Run npm run generate:api.');
     process.exitCode = 1;
   }
 } else {

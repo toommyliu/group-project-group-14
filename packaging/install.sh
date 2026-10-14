@@ -7,7 +7,7 @@ OS="$(uname -s)"
 
 # --build-web: build the browser app now, from this checkout, so the first
 # "Open in browser" a user presses doesn't have to. Optional and best effort
-# — no flag, no pnpm, or a failed build all fall back to what already happens
+# — no flag, no npm, or a failed build all fall back to what already happens
 # without this: classic offers to build it itself, once, on first use.
 BUILD_WEB=""
 for arg in "$@"; do
@@ -18,16 +18,16 @@ done
 
 [[ -f "$SRC/pyproject.toml" ]] || { echo "error: run from a repo checkout"; exit 1; }
 
-_find_pnpm() {
-  if command -v pnpm >/dev/null 2>&1; then
-    command -v pnpm
+_find_npm() {
+  if command -v npm >/dev/null 2>&1; then
+    command -v npm
     return 0
   fi
   # Where a desktop-launched shell (or this script's own PATH) might not
   # look: Homebrew, MacPorts, per-user installs.
   for dir in /opt/homebrew/bin /usr/local/bin /opt/local/bin; do
-    if [[ -x "$dir/pnpm" ]]; then
-      echo "$dir/pnpm"
+    if [[ -x "$dir/npm" ]]; then
+      echo "$dir/npm"
       return 0
     fi
   done
@@ -36,18 +36,18 @@ _find_pnpm() {
 
 if [[ -n "$BUILD_WEB" ]]; then
   WEB_SRC="$SRC/src/opengrader/web"
-  if PNPM_BIN="$(_find_pnpm)"; then
+  if NPM_BIN="$(_find_npm)"; then
     echo "Building the browser app (needs the internet once)…"
-    # pnpm is a Node script: its own folder (MacPorts, Homebrew) holds node too.
-    export PATH="$(dirname "$PNPM_BIN"):$PATH"
-    if "$PNPM_BIN" --dir "$WEB_SRC" install --frozen-lockfile \
-        && "$PNPM_BIN" --dir "$WEB_SRC" build; then
+    # npm is a Node script: its own folder (MacPorts, Homebrew) holds node too.
+    export PATH="$(dirname "$NPM_BIN"):$PATH"
+    if "$NPM_BIN" --prefix "$WEB_SRC" ci \
+        && "$NPM_BIN" --prefix "$WEB_SRC" run build; then
       echo "  ✔ Browser app built"
     else
       echo "  ⚠ Browser app build failed — continuing without it (classic will offer to build it later)"
     fi
   else
-    echo "  ⚠ --build-web given but pnpm was not found — continuing without it"
+    echo "  ⚠ --build-web given but npm was not found — continuing without it"
   fi
 fi
 

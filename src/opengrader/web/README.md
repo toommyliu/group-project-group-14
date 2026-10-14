@@ -4,8 +4,8 @@
 
 ```sh
 uv sync
-pnpm --dir src/opengrader/web install --frozen-lockfile
-pnpm --dir src/opengrader/web build
+npm --prefix src/opengrader/web ci
+npm --prefix src/opengrader/web run build
 uv run opengrader serve # Serves
 ```
 
@@ -85,7 +85,7 @@ FastAPI's models and routes define the network contract. Make sure to re-generat
 prevent drift:
 
 ```sh
-pnpm --dir src/opengrader/web generate:api
-pnpm --dir src/opengrader/web check:api
-pnpm --dir src/opengrader/web build
+npm --prefix src/opengrader/web run generate:api
+npm --prefix src/opengrader/web run check:api
+npm --prefix src/opengrader/web run build
 ```

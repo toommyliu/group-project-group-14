@@ -114,7 +114,7 @@ def run_dev(port: int, root: Path | None = None) -> int:
         raise ValueError(
             "Development mode requires Node.js and the web dependencies. "
             "Install Node.js, then run "
-            "'pnpm --dir src/opengrader/web install --frozen-lockfile'."
+            "'npm --prefix src/opengrader/web ci'."
         )
 
     with own_server(resolve_data_home()):

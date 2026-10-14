@@ -1,6 +1,6 @@
-"""`BrowserHealth` — the Node/pnpm + build-freshness panel in Tools.
+"""`BrowserHealth` — the Node/npm + build-freshness panel in Tools.
 
-Every check here is monkeypatched: real `node`/`pnpm` live at `/opt/local/bin`
+Every check here is monkeypatched: real `node`/`npm` live at `/opt/local/bin`
 on this machine but must never actually run from a test.
 """
 
@@ -18,7 +18,7 @@ from opengrader.core.browser_app import ToolInfo, ToolStatus, WebBuildError
 from opengrader.tui.ui.widgets.browser_health import BrowserHealth
 
 NODE = ToolInfo(path="/opt/local/bin/node", version="v22.22.2")
-PNPM = ToolInfo(path="/opt/local/bin/pnpm", version="12.6.0")
+NPM = ToolInfo(path="/opt/local/bin/npm", version="10.9.0")
 BREW = "/opt/homebrew/bin/brew"
 
 
@@ -49,11 +49,11 @@ def _stub(
     monkeypatch: pytest.MonkeyPatch,
     *,
     node: ToolInfo | None = None,
-    pnpm: ToolInfo | None = None,
+    npm: ToolInfo | None = None,
     state: str = "missing",
     buildable: bool = True,
 ) -> None:
-    monkeypatch.setattr(browser_app, "tool_status", lambda: ToolStatus(node=node, pnpm=pnpm))
+    monkeypatch.setattr(browser_app, "tool_status", lambda: ToolStatus(node=node, npm=npm))
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: state)
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: buildable)
 
@@ -91,29 +91,29 @@ def test_a_hidden_panel_never_runs_a_check(monkeypatch: pytest.MonkeyPatch) -> N
     asyncio.run(run())  # no AssertionError means neither check ran
 
 
-def test_a_shown_panel_checks_and_lists_node_and_pnpm(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM, state="ready", buildable=True)
+def test_a_shown_panel_checks_and_lists_node_and_npm(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub(monkeypatch, node=NODE, npm=NPM, state="ready", buildable=True)
 
     text = asyncio.run(_checked(_Host(), _rows_text))
     assert "✓ Node.js v22.22.2" in text and "/opt/local/bin/node" in text
-    assert "✓ pnpm 12.6.0" in text and "/opt/local/bin/pnpm" in text
+    assert "✓ npm 10.9.0" in text and "/opt/local/bin/npm" in text
     assert "up to date" in text
 
 
 def test_missing_tools_are_reported_with_an_install_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub(monkeypatch, node=None, pnpm=None, state="missing", buildable=True)
+    _stub(monkeypatch, node=None, npm=None, state="missing", buildable=True)
 
     text = asyncio.run(_checked(_Host(), _rows_text))
     assert "✗ Node.js not found" in text
-    assert "✗ pnpm not found" in text
+    assert "✗ npm not found" in text
     assert "nodejs.org" in text
     assert "✗ Browser app not built yet" in text
 
 
 def test_a_stale_build_is_reported_as_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM, state="stale", buildable=True)
+    _stub(monkeypatch, node=NODE, npm=NPM, state="stale", buildable=True)
 
     text = asyncio.run(_checked(_Host(), _rows_text))
     assert "⚠ Browser app is out of date" in text
@@ -123,20 +123,20 @@ def _build_button(app: App) -> Button:
     return app.query_one("#browser-build", Button)
 
 
-def test_build_button_is_disabled_without_pnpm(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=None, state="missing", buildable=True)
+def test_build_button_is_disabled_without_npm(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub(monkeypatch, node=NODE, npm=None, state="missing", buildable=True)
 
     assert asyncio.run(_checked(_Host(), lambda app: _build_button(app).disabled))
 
 
 def test_build_button_is_disabled_without_sources(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM, state="missing", buildable=False)
+    _stub(monkeypatch, node=NODE, npm=NPM, state="missing", buildable=False)
 
     assert asyncio.run(_checked(_Host(), lambda app: _build_button(app).disabled))
 
 
 def test_build_button_offers_rebuild_once_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM, state="ready", buildable=True)
+    _stub(monkeypatch, node=NODE, npm=NPM, state="ready", buildable=True)
 
     disabled, label = asyncio.run(
         _checked(_Host(), lambda app: (_build_button(app).disabled, str(_build_button(app).label)))
@@ -150,7 +150,7 @@ def test_check_again_reruns_the_checks(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def _status() -> ToolStatus:
         calls["n"] += 1
-        return ToolStatus(node=NODE, pnpm=PNPM)
+        return ToolStatus(node=NODE, npm=NPM)
 
     monkeypatch.setattr(browser_app, "tool_status", _status)
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "ready")
@@ -174,7 +174,7 @@ def test_check_again_reruns_the_checks(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_set_enabled_shows_the_panel_and_checks_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM, state="ready", buildable=True)
+    _stub(monkeypatch, node=NODE, npm=NPM, state="ready", buildable=True)
 
     async def run() -> tuple[bool, bool]:
         app = _Host(classes="hidden")
@@ -197,7 +197,7 @@ def test_pressing_build_runs_build_web_and_refreshes_the_panel(
 ) -> None:
     state = {"value": "missing"}
     monkeypatch.setattr(
-        browser_app, "tool_status", lambda: ToolStatus(node=NODE, pnpm=PNPM)
+        browser_app, "tool_status", lambda: ToolStatus(node=NODE, npm=NPM)
     )
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: state["value"])
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
@@ -226,7 +226,7 @@ def test_pressing_build_runs_build_web_and_refreshes_the_panel(
     assert "up to date" in text
 
 
-# -- installing Node.js and pnpm ----------------------------------------------
+# -- installing Node.js ----------------------------------------------
 
 
 def _install_button(app: App) -> Button:
@@ -238,7 +238,7 @@ def _error_box(app: App) -> Static:
 
 
 def test_no_install_button_without_homebrew(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=None, pnpm=None)
+    _stub(monkeypatch, node=None, npm=None)
 
     shown, text = asyncio.run(
         _checked(_Host(), lambda app: (_install_button(app).display, _rows_text(app)))
@@ -250,7 +250,7 @@ def test_no_install_button_without_homebrew(monkeypatch: pytest.MonkeyPatch) -> 
 def test_no_install_button_when_nothing_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM, state="ready")
+    _stub(monkeypatch, node=NODE, npm=NPM, state="ready")
     monkeypatch.setattr(homebrew, "find_homebrew", lambda: BREW)
 
     assert asyncio.run(_checked(_Host(), lambda app: _install_button(app).display)) is False
@@ -259,7 +259,7 @@ def test_no_install_button_when_nothing_is_missing(
 def test_missing_tools_with_homebrew_offer_to_install_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=None)
+    _stub(monkeypatch, node=NODE, npm=None)
     monkeypatch.setattr(homebrew, "find_homebrew", lambda: BREW)
     monkeypatch.setattr(
         browser_app, "install_tools", lambda *a, **k: pytest.fail("installed unasked")
@@ -276,13 +276,13 @@ def test_missing_tools_with_homebrew_offer_to_install_them(
         )
     )
     assert shown is True and not disabled
-    assert "press Install Node.js and pnpm" in text
+    assert "press Install Node.js" in text
 
 
 def test_pressing_install_installs_and_enables_the_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tools = {"status": ToolStatus(node=None, pnpm=None)}
+    tools = {"status": ToolStatus(node=None, npm=None)}
     monkeypatch.setattr(browser_app, "tool_status", lambda: tools["status"])
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "missing")
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
@@ -292,7 +292,7 @@ def test_pressing_install_installs_and_enables_the_build(
     def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
         installs.append(brew)
         on_line("==> Pouring node")
-        tools["status"] = ToolStatus(node=NODE, pnpm=PNPM)
+        tools["status"] = ToolStatus(node=NODE, npm=NPM)
 
     monkeypatch.setattr(browser_app, "install_tools", _install)
 
@@ -317,17 +317,17 @@ def test_pressing_install_installs_and_enables_the_build(
     assert installs == [BREW]
     assert install_shown is False
     assert not build_disabled
-    assert "✓ Node.js" in text and "✓ pnpm" in text
+    assert "✓ Node.js" in text and "✓ npm" in text
 
 
 def test_a_failed_install_says_why_and_can_be_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub(monkeypatch, node=None, pnpm=None)
+    _stub(monkeypatch, node=None, npm=None)
     monkeypatch.setattr(homebrew, "find_homebrew", lambda: BREW)
 
     def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
-        raise WebBuildError("Node.js and pnpm were not installed.", "Error: no bottle")
+        raise WebBuildError("Node.js was not installed.", "Error: no bottle")
 
     monkeypatch.setattr(browser_app, "install_tools", _install)
     notices: list[tuple[str, str]] = []
@@ -357,16 +357,16 @@ def test_a_failed_install_says_why_and_can_be_retried(
     shown, disabled, error_shown, error_text = asyncio.run(run())
     assert shown is True and not disabled
     assert notices and notices[-1][1] == "error"
-    assert "were not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
+    assert "was not installed" in notices[-1][0] and "no bottle" in notices[-1][0]
     # The notification goes away; the panel keeps what it said.
     assert error_shown is True
-    assert "were not installed" in error_text and "no bottle" in error_text
+    assert "was not installed" in error_text and "no bottle" in error_text
 
 
 def test_the_kept_error_goes_once_a_retry_works(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tools = {"status": ToolStatus(node=None, pnpm=None)}
+    tools = {"status": ToolStatus(node=None, npm=None)}
     monkeypatch.setattr(browser_app, "tool_status", lambda: tools["status"])
     monkeypatch.setattr(browser_app, "web_dist_state", lambda source=None: "missing")
     monkeypatch.setattr(browser_app, "web_buildable", lambda source=None: True)
@@ -376,9 +376,9 @@ def test_the_kept_error_goes_once_a_retry_works(
     def _install(brew, *, on_line=None, on_start=None):  # noqa: ANN001, ANN202
         presses["n"] += 1
         if presses["n"] == 1:
-            tools["status"] = ToolStatus(node=None, pnpm=PNPM)
+            tools["status"] = ToolStatus(node=None, npm=NPM)
             raise WebBuildError("Node.js was not installed.", "Error: no bottle")
-        tools["status"] = ToolStatus(node=NODE, pnpm=PNPM)
+        tools["status"] = ToolStatus(node=NODE, npm=NPM)
 
     monkeypatch.setattr(browser_app, "install_tools", _install)
 
@@ -407,10 +407,10 @@ def test_the_kept_error_goes_once_a_retry_works(
 def test_a_failed_build_stays_written_in_the_panel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _stub(monkeypatch, node=NODE, pnpm=PNPM)
+    _stub(monkeypatch, node=NODE, npm=NPM)
 
     def _build(source=None, *, on_line=None, log=None):  # noqa: ANN001, ANN202
-        raise WebBuildError("Installing packages failed (exit 1).", "ERR_PNPM_FETCH")
+        raise WebBuildError("Installing packages failed (exit 1).", "npm error network")
 
     monkeypatch.setattr(browser_app, "build_web", _build)
 
@@ -429,11 +429,11 @@ def test_a_failed_build_stays_written_in_the_panel(
 
     shown, text = asyncio.run(run())
     assert shown is True
-    assert "Installing packages failed" in text and "ERR_PNPM_FETCH" in text
+    assert "Installing packages failed" in text and "npm error network" in text
 
 
 def test_quitting_stops_a_running_install(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub(monkeypatch, node=None, pnpm=None)
+    _stub(monkeypatch, node=None, npm=None)
     monkeypatch.setattr(homebrew, "find_homebrew", lambda: BREW)
     release = threading.Event()
 

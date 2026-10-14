@@ -191,7 +191,7 @@ There are two ways into the terminal grading app:
   TUI (`opengrader tui`, open the assignment). The Tools → *Browser app* section
   shows a health check with **Check again** and **Build/Rebuild** buttons; a
   build is needed only once (or run `install.sh --build-web` before handing the
-  app to others). Node.js and pnpm are only needed to build the web app, once.
+  app to others). Node.js (with npm) is only needed to build the web app, once.
   ```bash
   uv run opengrader classic
   ```

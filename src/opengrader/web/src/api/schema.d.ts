@@ -1,4 +1,4 @@
-// Generated from FastAPI. Run pnpm generate:api to update.
+// Generated from FastAPI. Run npm run generate:api to update.
 export interface paths {
     "/auth/me": {
         parameters: {

@@ -104,14 +104,14 @@ Opengrader can also show a class folder in your web browser. This is
 completely optional and off by default. To turn it on, go to
 **Tools → Browser app** and tick **Show Open in browser**.
 
-The browser version has to be *built* once, which needs two free tools,
-**Node.js** and **pnpm**. The *Browser app* section tells you whether they're
+The browser version has to be *built* once, which needs **Node.js**, a free
+tool that comes with npm. The *Browser app* section tells you whether it's
 installed, whether the browser version is built and up to date, and has
 **Check again** and **Build / Rebuild** buttons. If you press **Open in
 browser** before it's built, Opengrader offers to build it for you.
 
-**Missing Node.js or pnpm on a Mac?** If Homebrew is installed, the same
-section shows an **Install Node.js and pnpm** button, and **Open in browser**
+**Missing Node.js on a Mac?** If Homebrew is installed, the same
+section shows an **Install Node.js** button, and **Open in browser**
 offers **Install and build**. Nothing is installed until you press one of
 them; it needs the internet and takes a few minutes. Without Homebrew the
 section says what to install instead: Homebrew from <https://brew.sh> (it
@@ -125,7 +125,7 @@ see that step:
 | macOS or Linux | `bash packaging/install.sh --build-web` |
 | Windows | `powershell -ExecutionPolicy Bypass -File packaging\install.ps1 -BuildWeb` |
 
-If pnpm isn't found or the build fails, the install still finishes — just
+If npm isn't found or the build fails, the install still finishes — just
 without the browser version.
 
 ---
@@ -301,10 +301,10 @@ packaging/
    `uv run --no-sync opengrader classic`. Every step is a no-op when already
    satisfied, so a normal launch adds well under a second.
 3. **The browser app.** `--build-web` / `-BuildWeb` runs
-   `pnpm install --frozen-lockfile && pnpm build` in `src/opengrader/web`
-   before copying (best effort: a missing pnpm or a failed build only warns).
+   `npm ci && npm run build` in `src/opengrader/web`
+   before copying (best effort: a missing npm or a failed build only warns).
    Building it yourself first works too:
-   `pnpm --dir src/opengrader/web install --frozen-lockfile && pnpm --dir src/opengrader/web build`.
+   `npm --prefix src/opengrader/web ci && npm --prefix src/opengrader/web run build`.
    `web/dist/` is copied with everything else. When the checkout has no
    `dist/` of its own, a `dist/` built inside the installed copy is kept by
    both the installer and the launch-time refresh (the installer's `tar`
@@ -312,7 +312,7 @@ packaging/
    sources' fingerprint with the stamp `build_web` writes into `dist/` (file
    modification times for a hand-built `dist/` without a stamp). Builds started
    from inside the app are logged to `web-build.log` beside the AI settings,
-   and Homebrew installs of Node.js and pnpm to `tools-install.log` there
+   and Homebrew installs of Node.js to `tools-install.log` there
    (appended, so a failed try is still readable after a retry).
 
 ### The `opengrader` command

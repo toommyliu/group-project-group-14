@@ -1,7 +1,7 @@
 param(
     # Build the browser app now, from this checkout, so the first "Open in
     # browser" a user presses doesn't have to. Optional and best effort: no
-    # switch, no pnpm, or a failed build all fall back to what happens
+    # switch, no npm, or a failed build all fall back to what happens
     # without this — classic offers to build it itself, once, on first use.
     [switch]$BuildWeb
 )
@@ -17,13 +17,13 @@ if (-not (Test-Path (Join-Path $Src 'pyproject.toml'))) {
 }
 
 if ($BuildWeb) {
-    $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
-    if ($pnpm) {
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npm) {
         $webSrc = Join-Path $Src 'src\opengrader\web'
         Write-Host 'Building the browser app (needs the internet once)...'
-        & $pnpm.Source --dir $webSrc install --frozen-lockfile
+        & $npm.Source --prefix $webSrc ci
         if ($LASTEXITCODE -eq 0) {
-            & $pnpm.Source --dir $webSrc build
+            & $npm.Source --prefix $webSrc run build
         }
         if ($LASTEXITCODE -eq 0) {
             Write-Host '  OK Browser app built'
@@ -32,7 +32,7 @@ if ($BuildWeb) {
         }
         $global:LASTEXITCODE = 0
     } else {
-        Write-Host '  WARN -BuildWeb given but pnpm was not found - continuing without it' -ForegroundColor Yellow
+        Write-Host '  WARN -BuildWeb given but npm was not found - continuing without it' -ForegroundColor Yellow
     }
 }
 

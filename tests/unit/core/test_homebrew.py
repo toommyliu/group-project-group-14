@@ -80,10 +80,10 @@ def test_install_runs_brew_install_with_the_formulae_and_reports_its_output(
     started: list[object] = []
 
     brew_install(
-        brew, ["node", "pnpm"], on_line=lines.append, on_start=started.append
+        brew, ["node"], on_line=lines.append, on_start=started.append
     )
 
-    assert record.read_text().strip() == "install node pnpm"
+    assert record.read_text().strip() == "install node"
     assert lines == ["==> Pouring node", "done"]
     assert len(started) == 1
 

@@ -14,7 +14,7 @@ from opengrader.core.browser_app import BrowserPreferences, ToolStatus, WebBuild
 def _web_sources(root: Path) -> Path:
     root.mkdir(parents=True)
     (root / "package.json").write_text("{}")
-    (root / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n")
+    (root / "package-lock.json").write_text('{"lockfileVersion": 3}')
     return root
 
 
@@ -79,12 +79,10 @@ def test_dist_ready_and_buildable_are_read_from_the_folder(tmp_path) -> None:  #
     assert browser_app.web_dist_ready(source)
 
 
-def test_pnpm_is_preferred_and_corepack_is_the_fallback(only_these_tools) -> None:  # noqa: ANN001
-    assert browser_app.pnpm_command() is None
-    corepack = _tool(only_these_tools, "corepack", "exit 0\n")
-    assert browser_app.pnpm_command() == [str(corepack), "pnpm"]
-    pnpm = _tool(only_these_tools, "pnpm", "exit 0\n")
-    assert browser_app.pnpm_command() == [str(pnpm)]
+def test_npm_command_is_found_on_path(only_these_tools) -> None:  # noqa: ANN001
+    assert browser_app.npm_command() is None
+    npm = _tool(only_these_tools, "npm", "exit 0\n")
+    assert browser_app.npm_command() == [str(npm)]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
@@ -94,8 +92,8 @@ def test_build_installs_then_bundles_and_logs_both_steps(
     source = _web_sources(tmp_path / "web")
     _tool(
         only_these_tools,
-        "pnpm",
-        'echo "pnpm $*"\n'
+        "npm",
+        'echo "npm $*"\n'
         'if [ "$1" = exec ]; then /bin/mkdir -p dist && echo ok > dist/index.html; fi\n',
     )
     lines: list[str] = []
@@ -104,9 +102,9 @@ def test_build_installs_then_bundles_and_logs_both_steps(
     browser_app.build_web(source, on_line=lines.append, log=log)
 
     assert browser_app.web_dist_ready(source)
-    assert "pnpm install --frozen-lockfile" in lines
-    assert "pnpm exec vite build" in lines
-    assert "install --frozen-lockfile" in log.read_text()
+    assert "npm ci --no-audit --no-fund" in lines
+    assert "npm exec -- vite build" in lines
+    assert "npm ci --no-audit --no-fund" in log.read_text()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
@@ -114,17 +112,17 @@ def test_a_failed_step_is_reported_with_the_end_of_its_output(
     tmp_path, only_these_tools  # noqa: ANN001
 ) -> None:
     source = _web_sources(tmp_path / "web")
-    _tool(only_these_tools, "pnpm", 'echo "ERR_PNPM_FETCH no network"\nexit 1\n')
+    _tool(only_these_tools, "npm", 'echo "npm error network no network"\nexit 1\n')
 
     with pytest.raises(WebBuildError) as caught:
         browser_app.build_web(source, log=tmp_path / "build.log")
 
     assert "Installing packages failed" in str(caught.value)
-    assert "ERR_PNPM_FETCH no network" in caught.value.tail
+    assert "npm error network no network" in caught.value.tail
     assert not browser_app.web_dist_ready(source)
 
 
-def test_no_pnpm_says_what_to_install(tmp_path, only_these_tools) -> None:  # noqa: ANN001
+def test_no_npm_says_what_to_install(tmp_path, only_these_tools) -> None:  # noqa: ANN001
     source = _web_sources(tmp_path / "web")
     with pytest.raises(WebBuildError, match="Node.js"):
         browser_app.build_web(source, log=tmp_path / "build.log")
@@ -165,7 +163,7 @@ def test_build_writes_a_stamp_with_the_fingerprint(
     source = _web_sources(tmp_path / "web")
     _tool(
         only_these_tools,
-        "pnpm",
+        "npm",
         'if [ "$1" = exec ]; then /bin/mkdir -p dist && echo ok > dist/index.html; fi\n',
     )
 
@@ -220,7 +218,7 @@ def test_only_one_build_runs_at_a_time(tmp_path, only_these_tools) -> None:  # n
     source = _web_sources(tmp_path / "web")
     _tool(
         only_these_tools,
-        "pnpm",
+        "npm",
         'sleep 0.3\n'
         'if [ "$1" = exec ]; then /bin/mkdir -p dist && echo ok > dist/index.html; fi\n',
     )
@@ -246,27 +244,17 @@ def test_only_one_build_runs_at_a_time(tmp_path, only_these_tools) -> None:  # n
 
 
 def test_tool_status_is_none_when_nothing_is_installed(only_these_tools) -> None:  # noqa: ANN001
-    assert browser_app.tool_status() == ToolStatus(node=None, pnpm=None)
+    assert browser_app.tool_status() == ToolStatus(node=None, npm=None)
 
 
-def test_tool_status_reports_node_and_pnpm_paths_and_versions(only_these_tools) -> None:  # noqa: ANN001
+def test_tool_status_reports_node_and_npm_paths_and_versions(only_these_tools) -> None:  # noqa: ANN001
     node = _tool(only_these_tools, "node", 'echo "v22.22.2"\n')
-    pnpm = _tool(only_these_tools, "pnpm", 'echo "12.6.0"\n')
+    npm = _tool(only_these_tools, "npm", 'echo "10.9.0"\n')
 
     status = browser_app.tool_status()
 
     assert status.node == browser_app.ToolInfo(path=str(node), version="v22.22.2")
-    assert status.pnpm == browser_app.ToolInfo(path=str(pnpm), version="12.6.0")
-
-
-def test_tool_status_reports_pnpm_via_corepack_when_pnpm_itself_is_absent(
-    only_these_tools,  # noqa: ANN001
-) -> None:
-    _tool(only_these_tools, "corepack", 'echo "12.6.0"\n')
-
-    status = browser_app.tool_status()
-
-    assert status.pnpm == browser_app.ToolInfo(path="via corepack", version="12.6.0")
+    assert status.npm == browser_app.ToolInfo(path=str(npm), version="10.9.0")
 
 
 def test_tool_status_is_none_when_the_version_call_fails(only_these_tools) -> None:  # noqa: ANN001
@@ -275,21 +263,23 @@ def test_tool_status_is_none_when_the_version_call_fails(only_these_tools) -> No
     assert browser_app.tool_status().node is None
 
 
-# -- installing Node.js and pnpm ----------------------------------------------
+# -- installing Node.js ----------------------------------------------
 
 
 def _fake_brew(
     bin_dir: Path, *, installs: bool = True, exit_code: int = 0, skip: str = ""
 ) -> Path:
     """A stand-in `brew` that records its arguments and, when `installs`,
-    leaves a runnable tool behind for each formula it was asked for — except
-    `skip`, the one whose download "failed"."""
+    leaves a runnable tool behind for each formula it was asked for (`node`
+    brings `npm`) — except `skip`, the one whose download "failed"."""
     create = (
         'for f in "$@"; do\n'
         '  [ "$f" = install ] && continue\n'
         f'  [ "$f" = "{skip}" ] && continue\n'
-        f'  printf \'#!/bin/sh\\necho 1.0\\n\' > "{bin_dir}/$f"\n'
-        f'  /bin/chmod +x "{bin_dir}/$f"\n'
+        '  for t in "$f" $( [ "$f" = node ] && echo npm ); do\n'
+        f'    printf \'#!/bin/sh\\necho 1.0\\n\' > "{bin_dir}/$t"\n'
+        f'    /bin/chmod +x "{bin_dir}/$t"\n'
+        "  done\n"
         "done\n"
         if installs
         else ""
@@ -311,16 +301,16 @@ def _brew_calls(bin_dir: Path) -> list[str]:
 
 def test_missing_tools_name_the_formulae_that_supply_them() -> None:
     node = browser_app.ToolInfo(path="/bin/node", version="v22")
-    pnpm = browser_app.ToolInfo(path="/bin/pnpm", version="10")
+    npm = browser_app.ToolInfo(path="/bin/npm", version="10")
 
-    assert browser_app.missing_tool_formulae(ToolStatus(None, None)) == ("node", "pnpm")
-    assert browser_app.missing_tool_formulae(ToolStatus(node, None)) == ("pnpm",)
-    assert browser_app.missing_tool_formulae(ToolStatus(None, pnpm)) == ("node",)
-    assert browser_app.missing_tool_formulae(ToolStatus(node, pnpm)) == ()
+    assert browser_app.missing_tool_formulae(ToolStatus(None, None)) == ("node",)
+    assert browser_app.missing_tool_formulae(ToolStatus(node, None)) == ("node",)
+    assert browser_app.missing_tool_formulae(ToolStatus(None, npm)) == ("node",)
+    assert browser_app.missing_tool_formulae(ToolStatus(node, npm)) == ()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
-def test_install_tools_asks_homebrew_for_both_and_reports_its_output(
+def test_install_tools_asks_homebrew_for_node_and_reports_its_output(
     only_these_tools,  # noqa: ANN001
 ) -> None:
     brew = _fake_brew(only_these_tools)
@@ -329,22 +319,12 @@ def test_install_tools_asks_homebrew_for_both_and_reports_its_output(
 
     browser_app.install_tools(str(brew), on_line=lines.append, on_start=started.append)
 
-    assert _brew_calls(only_these_tools) == ["install node pnpm"]
-    assert lines == ["==> Pouring install node pnpm"]
+    assert _brew_calls(only_these_tools) == ["install node"]
+    assert lines == ["==> Pouring install node"]
     assert len(started) == 1
     status = browser_app.tool_status()
-    assert status.node is not None and status.pnpm is not None
-    assert browser_app.pnpm_command() == [str(only_these_tools / "pnpm")]
-
-
-@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
-def test_install_tools_only_installs_what_is_missing(only_these_tools) -> None:  # noqa: ANN001
-    _tool(only_these_tools, "node", 'echo "v22.22.2"\n')
-    brew = _fake_brew(only_these_tools)
-
-    browser_app.install_tools(str(brew))
-
-    assert _brew_calls(only_these_tools) == ["install pnpm"]
+    assert status.node is not None and status.npm is not None
+    assert browser_app.npm_command() == [str(only_these_tools / "npm")]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
@@ -352,7 +332,7 @@ def test_install_tools_leaves_homebrew_alone_when_nothing_is_missing(
     only_these_tools,  # noqa: ANN001
 ) -> None:
     _tool(only_these_tools, "node", 'echo "v22.22.2"\n')
-    _tool(only_these_tools, "pnpm", 'echo "12.6.0"\n')
+    _tool(only_these_tools, "npm", 'echo "10.9.0"\n')
     brew = _fake_brew(only_these_tools)
 
     browser_app.install_tools(str(brew))
@@ -369,9 +349,9 @@ def test_a_failed_tool_install_is_reported_with_the_end_of_homebrews_output(
     with pytest.raises(WebBuildError) as caught:
         browser_app.install_tools(str(brew))
 
-    assert "were not installed" in str(caught.value)
+    assert str(caught.value).startswith("Node.js was not installed.")
     assert "exit 1" in str(caught.value)
-    assert caught.value.tail == "==> Pouring install node pnpm"
+    assert caught.value.tail == "==> Pouring install node"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
@@ -385,22 +365,6 @@ def test_a_clean_homebrew_exit_that_left_no_tools_is_still_a_failure(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
-def test_a_half_finished_install_names_only_what_is_still_missing(
-    tmp_path, only_these_tools  # noqa: ANN001
-) -> None:
-    brew = _fake_brew(only_these_tools, exit_code=1, skip="node")
-    log = tmp_path / "install.log"
-
-    with pytest.raises(WebBuildError) as caught:
-        browser_app.install_tools(str(brew), log=log)
-
-    message = str(caught.value)
-    assert message.startswith("Node.js was not installed.")
-    assert "pnpm" not in message.split("`")[0]
-    assert str(log) in message
-
-
-@pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
 def test_a_homebrew_that_complains_but_leaves_both_tools_working_has_not_failed(
     tmp_path, only_these_tools  # noqa: ANN001
 ) -> None:
@@ -409,7 +373,7 @@ def test_a_homebrew_that_complains_but_leaves_both_tools_working_has_not_failed(
     browser_app.install_tools(str(brew), log=tmp_path / "install.log")
 
     status = browser_app.tool_status()
-    assert status.node is not None and status.pnpm is not None
+    assert status.node is not None and status.npm is not None
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fake tools are shell scripts")
@@ -425,8 +389,8 @@ def test_a_new_tool_that_fails_its_first_start_is_asked_again(
         only_these_tools,
         "brew",
         f'printf \'#!/bin/sh\\n{flaky_node}\' > "{only_these_tools}/node"\n'
-        f'printf \'#!/bin/sh\\necho 12.6.0\\n\' > "{only_these_tools}/pnpm"\n'
-        f'/bin/chmod +x "{only_these_tools}/node" "{only_these_tools}/pnpm"\n',
+        f'printf \'#!/bin/sh\\necho 10.9.0\\n\' > "{only_these_tools}/npm"\n'
+        f'/bin/chmod +x "{only_these_tools}/node" "{only_these_tools}/npm"\n',
     )
 
     browser_app.install_tools(str(brew), log=tmp_path / "install.log")
@@ -471,11 +435,10 @@ def test_the_install_log_keeps_a_failed_try_after_the_retry_that_worked(
     browser_app.install_tools(str(_fake_brew(only_these_tools)), log=log)
 
     text = log.read_text()
-    assert "install node pnpm" in text and "failed (exit 1)" in text
+    assert "install node" in text and "failed (exit 1)" in text
     assert "Node.js: cannot be run" in text
-    # The second press only asks for what the first one did not leave behind.
-    assert _brew_calls(only_these_tools) == ["install node pnpm", "install node"]
-    assert text.rstrip().endswith("pnpm: 1.0 (" + str(only_these_tools / "pnpm") + ")")
+    assert _brew_calls(only_these_tools) == ["install node", "install node"]
+    assert text.rstrip().endswith("npm: 1.0 (" + str(only_these_tools / "npm") + ")")
 
 
 def test_the_install_log_lives_beside_the_build_log() -> None:

@@ -2,7 +2,7 @@
 
 *Show Open in browser* only tells the user whether the button is on; it says
 nothing about whether the thing it opens actually works on this computer.
-This widget answers that: is Node.js here, is pnpm here, and is the built
+This widget answers that: is Node.js here, is npm here, and is the built
 bundle (`web/dist/`) the one the current sources would produce, or one built
 before they last changed (`core/browser_app.web_dist_state`). When a tool is
 missing on a Mac that has Homebrew, it also offers to install it
@@ -12,7 +12,7 @@ a notification is gone before a Homebrew error can be read.
 
 Composed into `#section-browser` but otherwise self-contained: `SetupScreen`
 only shows or hides it (`set_enabled`) from `_set_browser_enabled` and the
-saved preference at compose time. Every check — `node --version`, `pnpm
+saved preference at compose time. Every check — `node --version`, `npm
 --version`, hashing the web sources — runs off the UI thread, and none of it
 runs at all while the section is hidden, so a user who never opens Tools (or
 never turns the browser app on) never pays for it.
@@ -32,13 +32,13 @@ from textual.widgets import Button, Static
 from opengrader.core import browser_app, homebrew
 
 INSTALL_HINT = (
-    "Install Node.js from https://nodejs.org (bundles pnpm via corepack) — "
-    "or `brew install node pnpm` — or on MacPorts: "
-    "`sudo port install nodejs22 pnpm`."
+    "Install Node.js from https://nodejs.org (it includes npm) — "
+    "or `brew install node` — or on MacPorts: "
+    "`sudo port install nodejs22 npm10`."
 )
 INSTALL_OFFER = (
     "Homebrew is installed, so Opengrader can do this for you: press "
-    "Install Node.js and pnpm below."
+    "Install Node.js below."
 )
 HOMEBREW_HINT = (
     f"With Homebrew ({homebrew.HOMEBREW_URL}) on this Mac, an Install button "
@@ -136,7 +136,7 @@ class BrowserHealth(Vertical):
                 "Build browser app", id="browser-build", compact=True, disabled=True
             )
             install = Button(
-                "Install Node.js and pnpm",
+                "Install Node.js",
                 id="browser-install-tools",
                 variant="success",
                 compact=True,
@@ -183,7 +183,7 @@ class BrowserHealth(Vertical):
     def _apply_snapshot(self, snapshot: _Snapshot) -> None:
         lines = [
             _tool_line("Node.js", snapshot.tools.node),
-            _tool_line("pnpm", snapshot.tools.pnpm),
+            _tool_line("npm", snapshot.tools.npm),
         ]
         missing = bool(browser_app.missing_tool_formulae(snapshot.tools))
         self._brew = snapshot.brew if missing else None
@@ -202,12 +202,12 @@ class BrowserHealth(Vertical):
             if snapshot.dist_state == "missing"
             else "Rebuild browser app"
         )
-        build_button.disabled = snapshot.tools.pnpm is None or not snapshot.buildable
+        build_button.disabled = snapshot.tools.npm is None or not snapshot.buildable
         install_button = self.query_one("#browser-install-tools", Button)
         install_button.display = bool(self._brew)
         install_button.disabled = False
 
-    # -- install Node.js and pnpm --------------------------------------------
+    # -- install Node.js --------------------------------------------
 
     @on(Button.Pressed, "#browser-install-tools")
     def _on_install_pressed(self, event: Button.Pressed) -> None:
@@ -219,7 +219,7 @@ class BrowserHealth(Vertical):
         self._set_busy(True)
         progress = self.query_one("#browser-health-progress", Static)
         progress.update(
-            "Installing Node.js and pnpm with Homebrew. This needs the "
+            "Installing Node.js with Homebrew. This needs the "
             "internet and can take a few minutes…"
         )
         progress.remove_class("hidden")
@@ -261,7 +261,7 @@ class BrowserHealth(Vertical):
         self._show_error(error)
         if error is None:
             self.app.notify(
-                "Node.js and pnpm installed. The browser app can be built now."
+                "Node.js installed. The browser app can be built now."
             )
         else:
             detail = f"\n{error.tail}" if error.tail else ""
