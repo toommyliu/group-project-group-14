@@ -9,6 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DirectoryTree, Static, Tree
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 PathPickMode = Literal["file", "directory", "any"]
 
@@ -18,7 +19,7 @@ class _FilteredDirectoryTree(DirectoryTree):
         return [path for path in paths if not path.name.startswith(".")]
 
 
-class PathPickerScreen(ModalScreen[Path | None]):
+class PathPickerScreen(OutlineButtons, ModalScreen[Path | None]):
     DEFAULT_CSS = """
     PathPickerScreen {
         align: center middle;

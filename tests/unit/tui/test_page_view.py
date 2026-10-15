@@ -255,3 +255,29 @@ def test_changing_question_returns_to_the_crop(workspace, tmp_path: Path) -> Non
 
 def test_toggle_hidden_when_there_is_no_source_pdf(tmp_path: Path) -> None:
     asyncio.run(_test_toggle_hidden_when_there_is_no_source_pdf(tmp_path))
+
+
+async def _test_question_card_buttons_are_outline_buttons(workspace) -> None:
+    from opengrader.tui.ui import button_roles
+
+    app = _app(workspace)
+    async with app.run_test(size=(140, 45)) as pilot:
+        await _open_grade_screen(app, pilot)
+        screen = app.get_grade_screen()
+        card = screen.query_one("#sidebar-quadrant-question")
+        buttons = list(card.query(Button))
+        assert buttons
+        assert all(b.has_class(button_roles.OUTLINE) and not b.compact for b in buttons)
+        assert card.query_one("#question-page-toggle", Button).has_class(
+            button_roles.OPEN
+        )
+        assert card.query_one("#transcription-save", Button).has_class(
+            button_roles.LAUNCH
+        )
+        # The rubric's buttons stay one line, beside each rubric option.
+        rubric = screen.query_one("#sidebar-quadrant-rubric")
+        assert all(b.compact for b in rubric.query(Button))
+
+
+def test_question_card_buttons_are_outline_buttons(workspace) -> None:
+    asyncio.run(_test_question_card_buttons_are_outline_buttons(workspace))

@@ -36,6 +36,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
 from opengrader.core import browser_app, homebrew
+from opengrader.tui.ui import button_roles
 from opengrader.core.recents import short_path
 
 POLL_SECONDS = 15.0
@@ -93,7 +94,12 @@ class BrowserLauncher(Vertical):
         with Horizontal(id="browser-status-row"):
             yield Static("", id="browser-status-text", markup=False)
             with Horizontal(id="browser-status-actions"):
-                yield Button("Open", id="browser-reopen", compact=True)
+                yield Button(
+                    "Open",
+                    id="browser-reopen",
+                    classes=button_roles.BROWSER,
+                    compact=True,
+                )
                 yield Button("Stop server", id="browser-stop", variant="error", compact=True)
 
     def on_mount(self) -> None:

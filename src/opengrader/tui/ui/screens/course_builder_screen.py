@@ -20,11 +20,13 @@ from opengrader.core.course import (
     write_course_toml,
 )
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 DEFAULT_WEIGHT = "1"
 
 
-class _AssignmentRow(Vertical):
+class _AssignmentRow(OutlineButtons, Vertical):
     def __init__(self, assignment: DiscoveredAssignment | None = None) -> None:
         super().__init__(classes="assignment-row")
         self.name_input = Input(
@@ -38,14 +40,16 @@ class _AssignmentRow(Vertical):
             classes="assignment-weight",
         )
         self.share_label = Label("", classes="assignment-share")
-        self.remove_button = Button("✕", classes="assignment-remove", compact=True)
+        self.remove_button = Button(
+            "✕", classes="assignment-remove", variant="error", compact=True
+        )
         self.submissions_input = Input(
             value=str(assignment.path) if assignment else "",
             placeholder="Submissions folder (.submission.md files)…",
             classes="assignment-path",
         )
         self.submissions_browse = Button(
-            "Browse", classes="assignment-browse-subs", compact=True
+            "Browse", classes=f"assignment-browse-subs {button_roles.OPEN}", compact=True
         )
         self.solutions_input = Input(
             value=str(assignment.solutions)
@@ -55,7 +59,7 @@ class _AssignmentRow(Vertical):
             classes="assignment-path",
         )
         self.solutions_browse = Button(
-            "Browse", classes="assignment-browse-key", compact=True
+            "Browse", classes=f"assignment-browse-key {button_roles.OPEN}", compact=True
         )
 
     def compose(self) -> ComposeResult:
@@ -96,7 +100,7 @@ class _AssignmentRow(Vertical):
         )
 
 
-class CourseBuilderScreen(ModalScreen[Path | None]):
+class CourseBuilderScreen(OutlineButtons, ModalScreen[Path | None]):
     DEFAULT_CSS = """
     CourseBuilderScreen {
         align: center middle;
@@ -138,7 +142,6 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
         min-width: 10;
         width: auto;
         margin-left: 1;
-        margin-top: 1;
     }
 
     #course-builder-rows {
@@ -252,7 +255,7 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
                     placeholder=f"Where to write {COURSE_FILENAME}…",
                     id="course-builder-output",
                 )
-                yield Button("Browse", id="course-builder-output-browse", compact=True)
+                yield Button("Browse", id="course-builder-output-browse", classes=button_roles.OPEN,  compact=True)
             yield self._field_label(
                 "Assignments", "name · weight · share of the final grade"
             )
@@ -264,7 +267,7 @@ class CourseBuilderScreen(ModalScreen[Path | None]):
                 )
             yield Static("", id="course-builder-status")
             with Horizontal(id="course-builder-buttons"):
-                yield Button("Scan a folder…", id="course-builder-scan", compact=True)
+                yield Button("Scan a folder…", id="course-builder-scan", classes=button_roles.OPEN,  compact=True)
                 yield Button("Add assignment", id="course-builder-add", compact=True)
                 yield Button(
                     "Save course file",

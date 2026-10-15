@@ -14,9 +14,11 @@ from opengrader.core.app_config import manifests as ai_manifests
 from opengrader.core.app_config import setup as ai_setup
 from opengrader.tui.ui.screens.cloud_consent_screen import CredentialConsentScreen
 from opengrader.tui.ui.screens.provider_setup_screen import ProviderSetupScreen
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 
-class ProviderScreen(ModalScreen[bool]):
+class ProviderScreen(OutlineButtons, ModalScreen[bool]):
     """Dismisses with True when the set of registered providers changed."""
 
     DEFAULT_CSS = """
@@ -168,7 +170,7 @@ class ProviderScreen(ModalScreen[bool]):
                     yield Button(
                         "Set up a provider…",
                         id="prov-setup",
-                        variant="primary",
+                        classes=button_roles.OPEN,
                         compact=True,
                     )
                 # Every provider at a glance — where it runs and whether it
@@ -177,7 +179,7 @@ class ProviderScreen(ModalScreen[bool]):
                 yield OptionList(id="prov-list")
                 with Horizontal(id="prov-actions"):
                     yield Button("Test", id="prov-test", compact=True)
-                    yield Button("Forget key", id="prov-forget-key", compact=True)
+                    yield Button("Forget key", id="prov-forget-key", variant="error", compact=True)
                     yield Button("Remove", id="prov-remove", variant="error", compact=True)
                 # What the last button press did, right under the buttons
                 # that cause it. Hidden until there is something to say.

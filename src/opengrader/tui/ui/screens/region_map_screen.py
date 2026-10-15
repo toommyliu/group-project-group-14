@@ -37,6 +37,7 @@ from opengrader.core.region_map import (
 )
 from opengrader.core.pdf_utils import clamp_bbox_norm, render_pdf_page
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 NUDGE_STEP = 0.005
 
@@ -146,7 +147,7 @@ class RegionCanvas(Widget):
         event.stop()
 
 
-class RegionMapScreen(ModalScreen["Path | None"]):
+class RegionMapScreen(OutlineButtons, ModalScreen["Path | None"]):
     DEFAULT_CSS = """
     RegionMapScreen {
         align: center middle;

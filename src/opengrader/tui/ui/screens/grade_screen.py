@@ -34,6 +34,7 @@ from opengrader.tui.formatting import (
 from opengrader.tui.latex_render import render_response_latex_png, response_has_latex
 from opengrader.tui.page_render import PageRenderOutcome, render_page_context_png
 from opengrader.tui.state import QuestionGrade, StudentGradingRun
+from opengrader.tui.ui import button_roles
 from opengrader.tui.ui.widgets.breadcrumb import Breadcrumb
 from opengrader.tui.ui.widgets.sharp_image import SharpImage
 from opengrader.tui.ui.widgets.response_viewer import ResponseViewer
@@ -317,13 +318,13 @@ class GradeScreen(Vertical):
         margin-top: 1;
     }
 
+    /* Outline buttons (button_roles), three lines tall: their own edges
+       space them, so they need no margin. */
     #question-math-toggle {
-        margin-top: 1;
         display: none;
     }
 
     #question-page-toggle {
-        margin-top: 1;
         display: none;
     }
 
@@ -332,13 +333,6 @@ class GradeScreen(Vertical):
         display: none;
     }
 
-    #question-open-external {
-        margin-top: 1;
-    }
-
-    #transcription-toggle {
-        margin-top: 1;
-    }
 
     #transcription-editor {
         height: auto;
@@ -486,30 +480,37 @@ class GradeScreen(Vertical):
                     yield Button(
                         "View rendered math ▸",
                         id="question-math-toggle",
+                        classes=button_roles.OPEN,
                         compact=True,
                     )
                     yield Button(
                         "⛶ View whole page ▸",
                         id="question-page-toggle",
+                        classes=button_roles.OPEN,
                         compact=True,
                     )
                     yield Label("", id="question-page-indicator")
                     yield Button(
                         "⧉ Open image in viewer",
                         id="question-open-external",
+                        classes=button_roles.OPEN,
                         compact=True,
                     )
                     yield ShortcutInput(placeholder="Comment…", id="question-comment")
                     yield Button(
                         "✎ Fix transcription",
                         id="transcription-toggle",
+                        classes=button_roles.OPEN,
                         compact=True,
                     )
                     with Vertical(id="transcription-editor"):
                         yield TextArea(id="transcription-text")
                         with Horizontal(id="transcription-actions"):
                             yield Button(
-                                "Save", id="transcription-save", compact=True
+                                "Save",
+                                id="transcription-save",
+                                classes=button_roles.LAUNCH,
+                                compact=True,
                             )
                             yield Button(
                                 "Cancel", id="transcription-cancel", compact=True
@@ -554,6 +555,11 @@ class GradeScreen(Vertical):
                     yield Static("", id="db-status")
 
     def on_mount(self) -> None:
+        # The question card's buttons are outline buttons like the Tools
+        # page's; the rubric's stay one line, beside each rubric option.
+        button_roles.apply_outline_style(
+            self.query_one("#sidebar-quadrant-question")
+        )
         self._update_rubric_list_visibility()
         self._update_hotkey_ref()
         self._zoom_fraction = 0.7

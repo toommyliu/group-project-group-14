@@ -38,6 +38,8 @@ from opengrader.core.handoff.packet import (
 )
 from opengrader.core.history import GradeJournal, resolve_history_dir
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 def _field_label(text: str, detail: str = "") -> Static:
     markup = f"[b]{text}[/b]"
@@ -67,7 +69,7 @@ def _browse_into(screen: ModalScreen, target: Input, *, title: str, mode: str) -
     )
 
 
-class GraderPacketScreen(ModalScreen[None]):
+class GraderPacketScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = """
     GraderPacketScreen {
         align: center middle;
@@ -109,7 +111,6 @@ class GraderPacketScreen(ModalScreen[None]):
         min-width: 10;
         width: auto;
         margin-left: 1;
-        margin-top: 1;
     }
 
     GraderPacketScreen Checkbox {
@@ -258,7 +259,7 @@ class GraderPacketScreen(ModalScreen[None]):
                             placeholder=str(self._default_output()),
                             id="packet-output",
                         )
-                        yield Button("Browse", id="packet-browse", compact=True)
+                        yield Button("Browse", id="packet-browse", classes=button_roles.OPEN,  compact=True)
                 yield Static(self._destination_hint(), id="packet-destination-hint")
             log = RichLog(id="packet-log", wrap=True, auto_scroll=True)
             log.border_title = "Result"
@@ -456,7 +457,7 @@ class _ConflictRow(Static):
 ConflictRow = _ConflictRow
 
 
-class MergeScreen(ModalScreen[bool]):
+class MergeScreen(OutlineButtons, ModalScreen[bool]):
     DEFAULT_CSS = """
     MergeScreen {
         align: center middle;
@@ -511,7 +512,6 @@ class MergeScreen(ModalScreen[bool]):
         min-width: 10;
         width: auto;
         margin-left: 1;
-        margin-top: 1;
     }
 
     MergeScreen Checkbox {
@@ -619,7 +619,7 @@ class MergeScreen(ModalScreen[bool]):
                     placeholder="Path to the returned folder or sealed file…",
                     id="merge-incoming",
                 )
-                yield Button("Browse", id="merge-browse", compact=True)
+                yield Button("Browse", id="merge-browse", classes=button_roles.OPEN,  compact=True)
             with Vertical(id="merge-passphrase-area", classes="hidden"):
                 yield _field_label(
                     "Passphrase", "this copy was sealed when it was handed out"

@@ -32,6 +32,8 @@ from opengrader.core import app_config
 from opengrader.core.qa_file.answer_suggest import ANSWER_SUGGEST_SCHEMA, suggest_answers
 from opengrader.core.qa_file.answers import AnswerField, answer_fields, apply_answers
 from opengrader.tui.external_viewer import ExternalViewerError, open_in_text_editor
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 
 # Checkbox labels cannot wrap.
@@ -104,7 +106,7 @@ def ai_generate(
     return app_config.text_generate(resolved, response_format=ANSWER_SUGGEST_SCHEMA)
 
 
-class AnswerFillScreen(ModalScreen[bool]):
+class AnswerFillScreen(OutlineButtons, ModalScreen[bool]):
     """Dismisses True when answers were saved, False otherwise."""
 
     BINDINGS = [Binding("escape", "cancel", "Not now")]
@@ -255,7 +257,7 @@ class AnswerFillScreen(ModalScreen[bool]):
                 suggest = Button("Suggest answers with AI", id="answers-suggest")
                 suggest.display = False
                 yield suggest
-                yield Button("Open as text file", id="answers-open-text")
+                yield Button("Open as text file", id="answers-open-text", classes=button_roles.OPEN)
                 yield Button("Not now", id="answers-cancel")
                 yield Button(
                     "Save answers", id="answers-save", variant="primary",

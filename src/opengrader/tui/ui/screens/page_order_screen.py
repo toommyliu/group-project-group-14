@@ -21,6 +21,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Static
 
 from opengrader.tui.external_viewer import ExternalViewerError, open_in_external_viewer
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 if TYPE_CHECKING:  # pragma: no cover - importing it at startup would load OpenCV
     from opengrader.core.pages.order_review import OrderFinding
@@ -29,7 +31,7 @@ if TYPE_CHECKING:  # pragma: no cover - importing it at startup would load OpenC
 _LABEL_WIDTH = 44
 
 
-class PageOrderScreen(ModalScreen[tuple[str, ...] | None]):
+class PageOrderScreen(OutlineButtons, ModalScreen[tuple[str, ...] | None]):
     """Dismisses with the names to sort (the rest are kept), or None to stop."""
 
     BINDINGS = [Binding("escape", "stop", "Stop")]
@@ -101,7 +103,7 @@ class PageOrderScreen(ModalScreen[tuple[str, ...] | None]):
                 yield Static(_explain(finding), classes="page-order-read", markup=False)
             with Horizontal(id="page-order-buttons"):
                 yield Button("Stop and check them myself", id="page-order-stop")
-                yield Button("Open folder", id="page-order-open")
+                yield Button("Open folder", id="page-order-open", classes=button_roles.OPEN)
                 yield Button("Continue", id="page-order-continue", variant="primary")
 
     def on_mount(self) -> None:

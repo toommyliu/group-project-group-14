@@ -18,13 +18,16 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
+
 # What the user chose: "cancel" (dismissed/closed, do nothing), "open" (use
 # the build that's there, stale or not), "build" (build/rebuild, then open) or
 # "install" (install Node.js with Homebrew, then build and open).
 BrowserBuildChoice = Literal["cancel", "open", "build", "install"]
 
 
-class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
+class BrowserBuildScreen(OutlineButtons, ModalScreen[BrowserBuildChoice]):
     """Dismisses with the user's choice; see `BrowserBuildChoice`.
 
     With no npm on this machine there is nothing to build with. On a Mac
@@ -140,28 +143,36 @@ class BrowserBuildScreen(ModalScreen[BrowserBuildChoice]):
                 )
             with Horizontal(id="bb-buttons"):
                 if self._stale:
-                    yield Button("Open anyway", id="bb-open", compact=True)
+                    yield Button(
+                        "Open anyway",
+                        id="bb-open",
+                        classes=button_roles.BROWSER,
+                        compact=True,
+                    )
                     yield Button(
                         "Rebuild and open",
                         id="bb-build",
-                        variant="primary",
+                        classes=button_roles.BROWSER,
                         compact=True,
                     )
                 elif self._can_build:
                     yield Button("Not now", id="bb-cancel", compact=True)
                     yield Button(
-                        "Build and open", id="bb-build", variant="primary", compact=True
+                        "Build and open",
+                        id="bb-build",
+                        classes=button_roles.BROWSER,
+                        compact=True,
                     )
                 elif self._can_install:
                     yield Button("Not now", id="bb-cancel", compact=True)
                     yield Button(
                         "Install and build",
                         id="bb-install",
-                        variant="primary",
+                        classes=button_roles.BROWSER,
                         compact=True,
                     )
                 else:
-                    yield Button("Close", id="bb-cancel", variant="primary", compact=True)
+                    yield Button("Close", id="bb-cancel", compact=True)
 
     def on_mount(self) -> None:
         # Rebuilding is the safer default for a stale copy; for a missing one

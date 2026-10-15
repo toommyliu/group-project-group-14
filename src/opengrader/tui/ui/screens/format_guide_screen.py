@@ -12,6 +12,7 @@ from textual.widgets import Button, Select, Static
 
 from opengrader.tui.clipboard import copy_text
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 _SYNTAX_ROWS: list[tuple[str, str]] = [
     (
@@ -177,7 +178,7 @@ d) Radix sort
 """
 
 
-class FormatGuideScreen(ModalScreen[None]):
+class FormatGuideScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = """
     FormatGuideScreen {
         align: center middle;

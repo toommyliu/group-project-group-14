@@ -30,6 +30,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static
 
 from opengrader.core import browser_app, homebrew
+from opengrader.tui.ui import button_roles
 
 INSTALL_HINT = (
     "Install Node.js from https://nodejs.org (it includes npm) — "
@@ -131,14 +132,23 @@ class BrowserHealth(Vertical):
         error.display = False
         yield error
         with Horizontal(id="browser-health-actions"):
-            yield Button("Check again", id="browser-check", compact=True)
             yield Button(
-                "Build browser app", id="browser-build", compact=True, disabled=True
+                "Check again",
+                id="browser-check",
+                classes=button_roles.BROWSER,
+                compact=True,
+            )
+            yield Button(
+                "Build browser app",
+                id="browser-build",
+                classes=button_roles.BROWSER,
+                compact=True,
+                disabled=True,
             )
             install = Button(
                 "Install Node.js",
                 id="browser-install-tools",
-                variant="success",
+                classes=button_roles.BROWSER,
                 compact=True,
             )
             install.display = False

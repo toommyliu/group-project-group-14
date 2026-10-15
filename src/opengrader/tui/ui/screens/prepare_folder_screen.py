@@ -21,6 +21,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 # What a dialog can be dismissed with.
 ACTION_PREPARE = "prepare"
@@ -33,7 +34,7 @@ ACTION_SKIP = "skip"
 _BUTTON_PREFIX = "prepare-folder-"
 
 
-class PrepareFolderScreen(ModalScreen[str | None]):
+class PrepareFolderScreen(OutlineButtons, ModalScreen[str | None]):
     """Dismisses with the chosen action, or None for Cancel / Escape."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]

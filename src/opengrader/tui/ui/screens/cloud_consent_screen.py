@@ -31,13 +31,14 @@ from textual.widgets import Button, Static
 
 from opengrader.core.app_config import ProviderSpec, ResolvedAI, consent
 from opengrader.core.app_config.consent import ConsentText
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 
 def _format_argv(argv: tuple[str, ...]) -> str:
     return consent.format_argv(argv)
 
 
-class _ConsentDialog(ModalScreen[bool]):
+class _ConsentDialog(OutlineButtons, ModalScreen[bool]):
     """Renders a `ConsentText` and dismisses with True (accept) or False (cancel)."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
@@ -155,7 +156,7 @@ class CredentialConsentScreen(_ConsentDialog):
         )
 
 
-class CloudPreflightConfirmScreen(ModalScreen[bool]):
+class CloudPreflightConfirmScreen(OutlineButtons, ModalScreen[bool]):
     """Confirms the actual scale of one run before it sends anything.
 
     This is separate from `CloudConsentScreen`: that one is given once, when a

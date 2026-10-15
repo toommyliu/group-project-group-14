@@ -6,6 +6,7 @@ from textual.widgets import Button, Checkbox, Collapsible, Input, Static
 import opengrader.tui.ui.screens.setup_screen as setup_screen
 from opengrader.core import app_config
 from opengrader.tui.tui import TuiApp
+from opengrader.tui.ui import button_roles
 from opengrader.tui.ui.screens.setup_screen import SetupScreen
 
 from .fakes import DEFAULT_IMAGE_PATH
@@ -28,6 +29,163 @@ def test_setup_scroll_reaches_the_very_last_section() -> None:
 
     asyncio.run(run())
 
+
+
+def test_every_tools_page_button_is_coloured_by_what_it_does() -> None:
+    """Green starts work, blue opens a screen, purple is the browser app.
+
+    Every button on the Tools page has a role, except the two that should not
+    stand out: Stop server stays red, and Preview stays grey beside Run
+    Pipeline. A new button added without a role fails here, so its colour is a
+    decision, not an accident.
+    """
+    roles = (button_roles.LAUNCH, button_roles.OPEN, button_roles.BROWSER)
+    unroled = {"browser-stop", "pipe-preview"}
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            buttons = {b.id: b for b in screen.query(Button) if b.id}
+
+            missing = sorted(
+                bid
+                for bid, button in buttons.items()
+                if bid not in unroled
+                and not any(button.has_class(role) for role in roles)
+            )
+            assert missing == []
+            assert buttons["browser-stop"].variant == "error"
+
+            assert buttons["launch-button"].has_class(button_roles.LAUNCH)
+            assert buttons["pipe-run"].has_class(button_roles.LAUNCH)
+            assert buttons["run-ai-settings"].has_class(button_roles.OPEN)
+            assert buttons["browse-tui-sub-path"].has_class(button_roles.OPEN)
+            assert buttons["browser-open-button"].has_class(button_roles.BROWSER)
+
+            # The three roles look different (an outline button has no fill
+            # until hovered, so it is the text and outline colour).
+            colours = {
+                role: buttons[bid].styles.color
+                for role, bid in (
+                    (button_roles.LAUNCH, "launch-button"),
+                    (button_roles.OPEN, "run-ai-settings"),
+                    (button_roles.BROWSER, "browser-open-button"),
+                )
+            }
+            assert len(set(colours.values())) == 3
+
+    asyncio.run(run())
+
+
+
+def test_every_tools_page_button_is_an_outline_button() -> None:
+    """One look everywhere: full height, outlined, filled only while hovered."""
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            buttons = list(screen.query(Button))
+            assert buttons
+            assert all(b.has_class(button_roles.OUTLINE) for b in buttons)
+            assert not any(b.compact for b in buttons)
+
+            launch = screen.query_one("#launch-button", Button)
+            assert launch.styles.background.a == 0
+            assert launch.styles.border_top[0] == "round"
+            await pilot.hover("#launch-button")
+            await pilot.pause()
+            # Filled, with the half-block border that keeps the fill the
+            # outline's size.
+            assert launch.styles.background.a == 1
+            assert launch.styles.border_top[0] == "inner"
+            launch.add_class("-active")
+            await pilot.pause()
+            assert "reverse" in str(launch.styles.text_style)
+
+    asyncio.run(run())
+
+
+def test_the_screens_the_tools_page_opens_have_outline_buttons() -> None:
+    """Browse, Open AI setup, Manage providers … open screens that match it.
+
+    The grading screen and the reports opened while grading are left out on
+    purpose (button_roles docstring); a new Tools-page dialog belongs here.
+    """
+    import importlib
+
+    from opengrader.tui.ui.button_roles import OutlineButtons
+
+    screens = {
+        "ai_settings": ["AISettingsScreen"],
+        "answer_fill": ["AnswerFillScreen"],
+        "backup": ["BackupScreen"],
+        "browser_build": ["BrowserBuildScreen"],
+        "cloud_consent": [
+            "CloudConsentScreen",
+            "CredentialConsentScreen",
+            "CloudPreflightConfirmScreen",
+        ],
+        "course_builder": ["CourseBuilderScreen", "_AssignmentRow"],
+        "course_grades": ["CourseGradesScreen"],
+        "doctor": ["DoctorScreen"],
+        "format_guide": ["FormatGuideScreen"],
+        "handoff": ["GraderPacketScreen", "MergeScreen"],
+        "llm_eval": ["LlmEvalScreen"],
+        "page_order": ["PageOrderScreen"],
+        "path_picker": ["PathPickerScreen"],
+        "prepare_folder": ["PrepareFolderScreen"],
+        "provider": ["ProviderScreen"],
+        "provider_setup": ["ProviderSetupScreen"],
+        "region_map": ["RegionMapScreen"],
+    }
+    missing = [
+        f"{module}.{name}"
+        for module, names in screens.items()
+        for name in names
+        if not issubclass(
+            getattr(
+                importlib.import_module(f"opengrader.tui.ui.screens.{module}_screen"),
+                name,
+            ),
+            OutlineButtons,
+        )
+    ]
+    assert missing == []
+    assert issubclass(SetupScreen, OutlineButtons)
+
+
+def test_a_dialogs_main_action_is_green_and_what_opens_a_screen_is_blue() -> None:
+    from opengrader.tui.ui.screens.provider_screen import ProviderScreen
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app.push_screen(ProviderScreen())
+            await pilot.pause()
+            screen = app.screen
+            assert all(
+                b.has_class(button_roles.OUTLINE) and not b.compact
+                for b in screen.query(Button)
+            )
+            assert screen.query_one("#prov-setup", Button).has_class(
+                button_roles.OPEN
+            )
+            assert not screen.query_one("#prov-setup", Button).has_class(
+                button_roles.LAUNCH
+            )
+            assert screen.query_one("#prov-remove", Button).variant == "error"
+            close = screen.query_one("#prov-close", Button)
+            assert not any(
+                close.has_class(role)
+                for role in (button_roles.LAUNCH, button_roles.OPEN)
+            )
+
+    asyncio.run(run())
 
 def test_template_qr_checkbox_reveals_roster_and_builds_argv(monkeypatch) -> None:
     captured: dict[str, object] = {}

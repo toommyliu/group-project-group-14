@@ -21,6 +21,8 @@ from textual.widgets import (
 )
 
 from opengrader.core import app_config, browser_app
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 from opengrader.core.pipeline import (
     PIPELINE_STAGES,
     STAGE_AUTO_GRADE,
@@ -150,7 +152,7 @@ def _find_course_file(start: Path) -> Path | None:
     return None
 
 
-class SetupScreen(Vertical):
+class SetupScreen(OutlineButtons, Vertical):
     DEFAULT_CSS = """
     SetupScreen #setup-container {
         align-horizontal: center;
@@ -238,10 +240,6 @@ class SetupScreen(Vertical):
         width: 100%;
         height: auto;
         align-horizontal: right;
-        margin-top: 1;
-    }
-
-    SetupScreen .path-row .browse-button {
         margin-top: 1;
     }
 
@@ -387,7 +385,12 @@ class SetupScreen(Vertical):
         classes = "path-row hidden" if hidden else "path-row"
         return Horizontal(
             Input(placeholder=placeholder, id=input_id, classes="path-input"),
-            Button("Browse", id=f"browse-{input_id}", classes="browse-button", compact=True),
+            Button(
+                "Browse",
+                id=f"browse-{input_id}",
+                classes=f"browse-button {button_roles.OPEN}",
+                compact=True,
+            ),
             classes=classes,
             id=f"{input_id}-row",
         )
@@ -508,17 +511,22 @@ class SetupScreen(Vertical):
                             "Add answers…",
                             id="answers-button",
                             compact=True,
-                            classes="hidden",
+                            classes=f"{button_roles.OPEN} hidden",
                         ),
                         Button(
                             "Open in browser",
                             id="browser-open-button",
                             compact=True,
-                            classes=""
+                            classes=button_roles.BROWSER
                             if browser_app.load_browser_preferences().enabled
-                            else "hidden",
+                            else f"{button_roles.BROWSER} hidden",
                         ),
-                        Button("Launch Grading", variant="success", id="launch-button", compact=True),
+                        Button(
+                            "Launch Grading",
+                            id="launch-button",
+                            classes=button_roles.LAUNCH,
+                            compact=True,
+                        ),
                     )
                     # Where the browser app is running, with Open and Stop.
                     yield BrowserLauncher(id="browser-launcher")
@@ -705,7 +713,7 @@ class SetupScreen(Vertical):
                                 Button(
                                     "Browse & add roster",
                                     id="browse-pipe-roster-list",
-                                    classes="browse-button",
+                                    classes=f"browse-button {button_roles.OPEN}",
                                     compact=True,
                                 )
                             )
@@ -787,7 +795,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Run Pipeline",
                             id="pipe-run",
-                            variant="primary",
+                            classes=button_roles.LAUNCH,
                             compact=True,
                         ),
                     )
@@ -835,7 +843,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Check this computer",
                             id="run-doctor",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )
@@ -872,7 +880,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Open AI setup",
                             id="run-ai-settings",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )
@@ -904,7 +912,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Manage providers",
                             id="run-providers",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )
@@ -1004,7 +1012,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Import Photos",
                             id="run-photo-import",
-                            variant="primary",
+                            classes=button_roles.LAUNCH,
                             compact=True,
                         )
                     )
@@ -1050,7 +1058,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Draw answer regions",
                             id="run-region-map",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )
@@ -1112,7 +1120,12 @@ class SetupScreen(Vertical):
                         classes="card-hint",
                     )
                     yield self._card_actions(
-                        Button("Create answer key", id="run-answer-key", variant="primary", compact=True)
+                        Button(
+                            "Create answer key",
+                            id="run-answer-key",
+                            classes=button_roles.LAUNCH,
+                            compact=True,
+                        )
                     )
                     with Vertical(id="ak-progress", classes="hidden"):
                         yield ProgressBar(
@@ -1201,7 +1214,12 @@ class SetupScreen(Vertical):
                                 classes="card-hint",
                             )
                     yield self._card_actions(
-                        Button("Generate Template", id="run-template", variant="primary", compact=True)
+                        Button(
+                            "Generate Template",
+                            id="run-template",
+                            classes=button_roles.LAUNCH,
+                            compact=True,
+                        )
                     )
 
                 with Collapsible(
@@ -1243,7 +1261,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Re-read unclear answers",
                             id="run-refine",
-                            variant="primary",
+                            classes=button_roles.LAUNCH,
                             compact=True,
                         )
                     )
@@ -1274,7 +1292,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Open calibration",
                             id="run-llm-eval",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )
@@ -1299,7 +1317,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Open course gradebook",
                             id="run-course-grades",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )
@@ -1340,7 +1358,12 @@ class SetupScreen(Vertical):
                         classes="card-hint",
                     )
                     yield self._card_actions(
-                        Button("Apply Policy", id="run-policy", variant="primary", compact=True)
+                        Button(
+                            "Apply Policy",
+                            id="run-policy",
+                            classes=button_roles.LAUNCH,
+                            compact=True,
+                        )
                     )
 
                 with Collapsible(
@@ -1386,11 +1409,14 @@ class SetupScreen(Vertical):
                         yield Button(
                             "Create grader copy…",
                             id="run-handoff-pack",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                         yield Button(
-                            "Merge a copy back…", id="run-handoff-merge", compact=True
+                            "Merge a copy back…",
+                            id="run-handoff-merge",
+                            classes=button_roles.OPEN,
+                            compact=True,
                         )
 
                 with Collapsible(
@@ -1429,7 +1455,7 @@ class SetupScreen(Vertical):
                         Button(
                             "Open backup tools",
                             id="run-backup",
-                            variant="primary",
+                            classes=button_roles.OPEN,
                             compact=True,
                         )
                     )

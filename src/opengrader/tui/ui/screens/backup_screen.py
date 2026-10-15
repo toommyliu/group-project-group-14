@@ -24,9 +24,11 @@ from opengrader.core.integrity import (
     write_snapshot,
 )
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 
-class BackupScreen(ModalScreen[None]):
+class BackupScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = """
     BackupScreen {
         align: center middle;
@@ -68,7 +70,6 @@ class BackupScreen(ModalScreen[None]):
         min-width: 10;
         width: auto;
         margin-left: 1;
-        margin-top: 1;
     }
     #backup-form {
         width: 100%;
@@ -210,7 +211,7 @@ class BackupScreen(ModalScreen[None]):
                             placeholder=str(self._default_archive()),
                             id="backup-archive",
                         )
-                        yield Button("Browse", id="backup-browse", compact=True)
+                        yield Button("Browse", id="backup-browse", classes=button_roles.OPEN,  compact=True)
                 yield Checkbox(
                     "Protect the archive with a passphrase",
                     value=False,

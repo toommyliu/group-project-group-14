@@ -26,9 +26,10 @@ from opengrader.tui.formatting import (
     format_environment_check,
     format_environment_verdict,
 )
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 
-class DoctorScreen(ModalScreen[None]):
+class DoctorScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = """
     DoctorScreen {
         align: center middle;

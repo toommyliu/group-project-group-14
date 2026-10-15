@@ -18,6 +18,8 @@ from opengrader.core.grading.evaluation import (
     LlmEvalReport,
 )
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 SOURCE_THIS = "this"
 SOURCE_OTHER = "other"
@@ -28,7 +30,7 @@ _SOURCE_OPTIONS: list[tuple[str, str]] = [
 ]
 
 
-class LlmEvalScreen(ModalScreen[float | None]):
+class LlmEvalScreen(OutlineButtons, ModalScreen[float | None]):
     DEFAULT_CSS = """
     LlmEvalScreen {
         align: center middle;
@@ -75,7 +77,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
         min-width: 10;
         width: auto;
         margin-left: 1;
-        margin-top: 1;
     }
     #llm-eval-other-source {
         height: auto;
@@ -92,10 +93,6 @@ class LlmEvalScreen(ModalScreen[float | None]):
 
     #llm-eval-classes {
         height: 5;
-        margin-top: 1;
-    }
-
-    #llm-eval-classes-browse {
         margin-top: 1;
     }
 
@@ -149,7 +146,7 @@ class LlmEvalScreen(ModalScreen[float | None]):
     def _path_row(self, placeholder: str, widget_id: str, value: str = "") -> Horizontal:
         row = Horizontal(
             Input(value=value, placeholder=placeholder, id=widget_id),
-            Button("Browse", id=f"{widget_id}-browse", compact=True),
+            Button("Browse", id=f"{widget_id}-browse", classes=button_roles.OPEN,  compact=True),
             classes="path-row",
             id=f"{widget_id}-row",
         )
@@ -215,6 +212,7 @@ class LlmEvalScreen(ModalScreen[float | None]):
                 yield Button(
                     "Browse & add class",
                     id="llm-eval-classes-browse",
+                    classes=button_roles.OPEN,
                     compact=True,
                 )
 

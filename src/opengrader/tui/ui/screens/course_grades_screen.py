@@ -15,6 +15,8 @@ from opengrader.cli import course_grades, run_command
 from opengrader.core.course import COURSE_FILENAME
 from opengrader.tui.ui.screens.course_builder_screen import CourseBuilderScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 VIEW_EVERYTHING = "everything"
 VIEW_SUMMARY = "summary"
@@ -29,7 +31,7 @@ _VIEW_OPTIONS: list[tuple[str, str]] = [
 ]
 
 
-class CourseGradesScreen(ModalScreen[None]):
+class CourseGradesScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = """
     CourseGradesScreen {
         align: center middle;
@@ -71,7 +73,6 @@ class CourseGradesScreen(ModalScreen[None]):
         min-width: 10;
         width: auto;
         margin-left: 1;
-        margin-top: 1;
     }
 
     #course-grades-log {
@@ -132,8 +133,8 @@ class CourseGradesScreen(ModalScreen[None]):
                     placeholder=f"Path to {COURSE_FILENAME}…",
                     id="course-grades-path",
                 )
-                yield Button("Browse", id="course-grades-browse", compact=True)
-                yield Button("New…", id="course-grades-new", compact=True)
+                yield Button("Browse", id="course-grades-browse", classes=button_roles.OPEN,  compact=True)
+                yield Button("New…", id="course-grades-new", classes=button_roles.OPEN,  compact=True)
             yield self._field_label(
                 "Save a CSV", "optional — one row per student, one column per assignment"
             )
@@ -142,7 +143,7 @@ class CourseGradesScreen(ModalScreen[None]):
                     placeholder="Leave blank to only show the report…",
                     id="course-grades-csv",
                 )
-                yield Button("Browse", id="course-grades-csv-browse", compact=True)
+                yield Button("Browse", id="course-grades-csv-browse", classes=button_roles.OPEN,  compact=True)
             log = RichLog(id="course-grades-log", wrap=True, auto_scroll=False)
             log.border_title = "Report"
             yield log

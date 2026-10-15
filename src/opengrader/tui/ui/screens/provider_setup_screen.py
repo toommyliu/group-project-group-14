@@ -45,6 +45,8 @@ from opengrader.core.app_config import keystore
 from opengrader.core.app_config import manifests as ai_manifests
 from opengrader.core.app_config import setup as ai_setup
 from opengrader.tui.clipboard import copy_text
+from opengrader.tui.ui import button_roles
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 STEP_CHOOSE = "setup-step-choose"
 STEP_KEY = "setup-step-key"
@@ -55,7 +57,7 @@ STEP_DONE = "setup-step-done"
 PROMPT_FILENAME = "provider-prompt.txt"
 
 
-class ProviderSetupScreen(ModalScreen[str | None]):
+class ProviderSetupScreen(OutlineButtons, ModalScreen[str | None]):
     """Dismisses with the name of the provider that was added or changed, else None."""
 
     DEFAULT_CSS = """
@@ -217,7 +219,7 @@ class ProviderSetupScreen(ModalScreen[str | None]):
                     yield TextArea(id="setup-reply", show_line_numbers=False)
                 with VerticalScroll(id=STEP_KEY):
                     yield Static("", id="setup-key-intro")
-                    yield Button("Open the key page", id="setup-open-page", compact=True)
+                    yield Button("Open the key page", id="setup-open-page", classes=button_roles.OPEN,  compact=True)
                     yield Input(
                         placeholder="Paste the key here",
                         password=True,

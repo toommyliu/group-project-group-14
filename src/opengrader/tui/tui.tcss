@@ -462,3 +462,51 @@ Checkbox:focus {
     height: auto;
     min-height: 1;
 }
+
+/* Outline buttons (tui/ui/button_roles.py): every button on the Tools page.
+   A rounded outline in its role colour, no fill: green starts or saves work,
+   blue opens another screen, purple is the browser app, red stops something,
+   grey is a secondary action. Hovered it fills with that colour; pressed
+   (-active) the fill darkens and the label is highlighted. Hover and press
+   swap to the half-block `inner` border so the fill is exactly the size of
+   the outline (a rounded line sits mid-cell; a fill colours whole cells).
+   Selectors are ordered by state, each state more specific than the one
+   before it, so a hovered button that is also focused shows the hover, and
+   a pressed one the press. These are app CSS, which always beats Textual's
+   own Button rules (and their `variant` colours). */
+Button.outline {
+    background: transparent;
+    text-style: bold;
+}
+/* Textual's focus reverses the label, which would fill the button: a white
+   outline says "Enter presses this" instead. */
+Button.outline.-style-default:focus {
+    text-style: bold;
+    border: round #ECEFF4;
+}
+
+Button.outline.-style-default { color: #D8DEE9; border: round #4C566A; }
+Button.outline.-error { color: #BF616A; border: round #BF616A; }
+Button.outline.role-launch { color: #A3BE8C; border: round #A3BE8C; }
+Button.outline.role-open { color: #81A1C1; border: round #5E81AC; }
+Button.outline.role-browser { color: #B48EAD; border: round #B48EAD; }
+
+Button.outline.-style-default:hover { background: #4C566A; color: #ECEFF4; border: inner #4C566A; }
+Button.outline.-error:hover { background: #BF616A; color: #2E3440; border: inner #BF616A; }
+Button.outline.role-launch:hover { background: #A3BE8C; color: #2E3440; border: inner #A3BE8C; }
+Button.outline.role-open:hover { background: #5E81AC; color: #ECEFF4; border: inner #5E81AC; }
+Button.outline.role-browser:hover { background: #B48EAD; color: #2E3440; border: inner #B48EAD; }
+
+/* Pressed: on every button (all are -style-default), then each colour. The
+   reversed label is the highlight; `tint` cancels Textual's own press dimming. */
+Button.outline.-style-default.-active {
+    background: #3B4252;
+    color: #FFFFFF;
+    border: inner #3B4252;
+    tint: transparent;
+    text-style: bold reverse;
+}
+Button.outline.-error.-active { background: #A5545C; color: #FFFFFF; border: inner #A5545C; }
+Button.outline.role-launch.-active { background: #7E9A68; color: #FFFFFF; border: inner #7E9A68; }
+Button.outline.role-open.-active { background: #405F86; color: #FFFFFF; border: inner #405F86; }
+Button.outline.role-browser.-active { background: #8F6B88; color: #FFFFFF; border: inner #8F6B88; }

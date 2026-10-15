@@ -30,6 +30,7 @@ from opengrader.tui.ui.screens.cloud_consent_screen import (
     CloudConsentScreen,
     CredentialConsentScreen,
 )
+from opengrader.tui.ui.button_roles import OutlineButtons
 
 _MATH_BACKEND_LABELS = {
     "vlm": "Vision model — answers that mix writing and maths",
@@ -50,7 +51,7 @@ _PREPARE_STOP_LABEL = "Stop"
 _PROGRESS_INTERVAL_SECONDS = 0.25
 
 
-class AISettingsScreen(ModalScreen[AISettings | None]):
+class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
     DEFAULT_CSS = """
     AISettingsScreen {
         align: center middle;
