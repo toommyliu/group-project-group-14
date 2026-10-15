@@ -89,3 +89,31 @@ npm --prefix src/opengrader/web run generate:api
 npm --prefix src/opengrader/web run check:api
 npm --prefix src/opengrader/web run build
 ```
+
+### Browser flow tests
+
+From the repository root:
+
+```sh
+uv sync --group browser
+uv run --group browser playwright install chromium --only-shell
+npm --prefix src/opengrader/web ci
+npm --prefix src/opengrader/web run build
+uv run --group browser pytest browser_tests --browser chromium --tracing=retain-on-failure --screenshot=only-on-failure
+```
+
+On Linux CI, install browser system libraries with
+`uv run --group browser playwright install --with-deps chromium --only-shell`.
+
+These tests run the built website against the real API, using a fresh temporary
+course with two small submissions and an automatically assigned localhost port
+for every test. They cover PDF scan upload, answer-key import and assignment
+creation, decimal scores and feedback across navigation and reloads, live
+updates between tabs, failed saves and conflict recovery, and downloaded grade
+CSV contents. They do
+not run OCR, AI providers, or background PDF workers, and do not use your courses
+or server home. Pages and servers shut down after each test.
+
+The default `uv run pytest` continues to run `tests/`; browser tests are an
+explicit separate run so unit tests do not require a browser installation.
+Failure artifacts go in the ignored `test-results/` directory.

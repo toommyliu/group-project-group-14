@@ -114,3 +114,6 @@ docker-data/
 .envs
 .tui_cache/
 .opengrader
+
+# Playwright screenshots, traces, and videos from failed browser tests.
+test-results/

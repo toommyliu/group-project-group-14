@@ -10,6 +10,9 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - 'packaging/opengrader*'
+      - 'src/opengrader/web/**'
+      - 'browser_tests/**'
+      - '.github/workflows/tests.yml'
   push:
     branches:
       - main
@@ -19,6 +22,9 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - 'packaging/opengrader*'
+      - 'src/opengrader/web/**'
+      - 'browser_tests/**'
+      - '.github/workflows/tests.yml'
   workflow_dispatch:
 
 concurrency:
@@ -60,3 +66,41 @@ jobs:
 
       - name: Run test suite
         run: uv run pytest
+
+  browser:
+    name: Chromium browser flows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: src/opengrader/web/package-lock.json
+      - name: Install project and browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libgl1 libglib2.0-0
+          uv sync --frozen --group browser
+          uv run --group browser playwright install --with-deps chromium --only-shell
+      - name: Build website
+        run: |
+          npm --prefix src/opengrader/web ci
+          npm --prefix src/opengrader/web run build
+      - name: Run browser flows
+        run: uv run --group browser pytest browser_tests --browser chromium --tracing=retain-on-failure --screenshot=only-on-failure
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failure-artifacts
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
