@@ -128,13 +128,18 @@ def detect_target(path: str | Path, *, qa_file: str | Path | None = None) -> Ope
             submissions=submissions,
             lines=(verdict, *details),
         )
-    if scan.scan is not None:
+    if scan.scan is not None or scan.section_scans:
+        what = (
+            scan.scan.name
+            if scan.scan is not None
+            else f"one per section, {len(scan.section_scans)} sections"
+        )
         return OpenTarget(
             "scans",
             folder=target,
             qa_file=qa,
             lines=(
-                f"Scans not processed yet ({scan.scan.name}). Open them in Tools "
+                f"Scans not processed yet ({what}). Open them in Tools "
                 "to run the pipeline, then grade.",
             ),
         )

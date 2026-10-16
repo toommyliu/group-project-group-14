@@ -89,3 +89,14 @@ def test_a_missing_or_empty_folder_says_why(tmp_path: Path) -> None:
 
     assert missing.kind == "unknown" and "No such folder" in missing.lines[0]
     assert empty.kind == "unknown" and "Nothing to grade" in empty.lines[0]
+
+
+def test_one_scan_per_section_opens_in_tools(tmp_path: Path) -> None:
+    shutil.copy(SAMPLE / "qa.md", tmp_path / "qa.md")
+    for name in ("section-01.pdf", "section-02.pdf"):
+        shutil.copy(SAMPLE / "submissions.pdf", tmp_path / name)
+
+    target = detect_target(tmp_path)
+
+    assert target.kind == "scans"
+    assert "2 sections" in target.lines[0]

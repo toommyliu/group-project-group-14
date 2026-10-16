@@ -24,6 +24,13 @@ Examples:
   uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --dry-run
   uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1"
   uv run canvas-export --submissions samples/cs146-quiz1/student-submissions/ --course "CS146" --assignment "Quiz 1" --attach-pdf
+  uv run canvas-export --submissions quiz1/submissions/ --course "CS146-01" --assignment "Quiz 1" --section "Section 01"
+
+\b
+Sections:
+  Students are matched by SIS ID, so one Canvas course that holds every
+  section (cross-listed) needs no --section. When each section is its own
+  Canvas course, post each section to its course with --section.
 
 \b
 Setup (one-time):
@@ -33,11 +40,17 @@ Setup (one-time):
 
 
 def _submission_paths(path: Path) -> list[Path]:
-    if path.is_file():
-        return [path]
-    if path.is_dir():
-        return sorted(path.glob("*.submission.md"))
-    raise FileNotFoundError(f"submissions path not found: {path}")
+    # A pipeline's submissions/ holds one folder per student
+    # (<stem>/<stem>.submission.md), so one level down is read as well.
+    from opengrader.core.export.gradebook import discover_submission_paths
+
+    return discover_submission_paths(path)
+
+
+def _in_section(doc: StudentSubmissionDocument, section: str) -> bool:
+    from opengrader.core.class_folder import section_key
+
+    return section_key(doc.section or "") == section_key(section)
 
 
 def _total_score(doc: StudentSubmissionDocument) -> float:
@@ -142,6 +155,14 @@ def _check_canvas_sak_installed() -> bool:
     is_flag=True,
     help="Attach the annotated PDF to the Canvas comment if one exists.",
 )
+@click.option(
+    "--section",
+    metavar="NAME",
+    help=(
+        "Post only the students of this class section (as their submissions "
+        "record it), e.g. to a Canvas course of that section alone."
+    ),
+)
 def command(
     *,
     submissions: str | None,
@@ -152,6 +173,7 @@ def command(
     dry_run: bool,
     partial: bool,
     attach_pdf: bool,
+    section: str | None,
 ) -> None:
     """Export graded submission files to Canvas LMS via canvas_sak."""
     if not _check_canvas_sak_installed():
@@ -200,10 +222,20 @@ def command(
     if not records:
         print(f"error: no submissions found in {submissions_path}", file=sys.stderr)
         sys.exit(1)
+    if section:
+        records = [(path, doc) for path, doc in records if _in_section(doc, section)]
+        if not records:
+            print(
+                f"error: no submission in {submissions_path} is in section {section!r}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     curve = read_curve(submissions_path)
     mode = "[DRY RUN] " if dry_run else ""
     print(f"{mode}Exporting grades to Canvas: course={course!r} assignment={assignment!r}")
+    if section:
+        print(f"Section {section!r} only: {len(records)} submission(s).")
     if curve.is_active:
         print("A score curve is active — posting curved totals (raw shown alongside).")
     print()

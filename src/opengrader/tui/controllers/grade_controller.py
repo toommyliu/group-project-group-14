@@ -6,6 +6,8 @@ from typing import Protocol
 
 from opengrader.core.analytics.score_statistics import QuestionStatistics
 from opengrader.core.claims import claim_for
+from opengrader.core.concurrency import ConcurrentModificationError
+from opengrader.core.grading.versions import VersionUnknownError
 from opengrader.core.grading import (
     confirm_ai_analysis,
     override_ai_analysis,
@@ -47,6 +49,22 @@ from opengrader.tui.ui.widgets.nav_item import NavItem
 _CURRENT_STUDENT_ITEM = object()
 
 
+def describe_save_error(exc: Exception) -> str:
+    """Why a write failed, in words a grader can act on.
+
+    A permission error is the common case when two people share one folder:
+    the files belong to whoever made them, and the other account may read
+    them but not write them. Say so plainly instead of "[Errno 13]".
+    """
+    if isinstance(exc, PermissionError):
+        where = f" {exc.filename}" if exc.filename else " this folder's files"
+        return (
+            f"this account is not allowed to write{where}. Ask whoever owns "
+            "the folder to give your account write access, then grade again."
+        )
+    return str(exc) or type(exc).__name__
+
+
 @dataclass
 class _PendingCommentEdit:
     """baseline precedes the entire coalesced edit, not the latest keystroke."""
@@ -66,6 +84,8 @@ class GradeApp(Protocol):
 
     def show_grade_conflict(self) -> None: ...
 
+    def alert_not_saved(self, message: str) -> None: ...
+
 
 class GradeController(AIDraftMixin):
     def __init__(
@@ -75,6 +95,7 @@ class GradeController(AIDraftMixin):
         data_provider: Provider,
     ) -> None:
         self._app = app
+        self._last_save_error: Exception | None = None
         self._state = state
         self._data_provider = data_provider
         self._refresh_students: Callable[[], None] | None = None
@@ -304,8 +325,29 @@ class GradeController(AIDraftMixin):
 
     def on_rubric_selected(self, option_index: int, finalize: bool = False) -> None:
         revert = self._grade_revert_before_change()
+        self._last_save_error = None
+        question = self._state.grading_run.current_question
+        # What the screen showed before this key, put back if the save fails so
+        # the screen never shows a grade that is not on disk.
+        before = (
+            (set(question.selected_option_indices), question.points_awarded)
+            if question is not None
+            else None
+        )
         self._state.grading_run.apply_option(option_index)
-        status = self._persist_current_grade(revert=revert)
+        saved, status = self._persist_current_grade(revert=revert)
+        if not saved:
+            if question is not None and before is not None:
+                question.selected_option_indices, question.points_awarded = before
+            # Never finalize or move on: a grader working with Shift+digit would
+            # otherwise see "QA finalized" and the next student, and the error
+            # would be gone before anyone read it.
+            self._app.alert_not_saved(status)
+            if isinstance(self._last_save_error, ConcurrentModificationError):
+                # Another grader saved this answer: show theirs, read afresh.
+                self.open_student_by_index(self._state.active_student_index)
+            self.refresh_grade_screen(status=status)
+            return
         self._auto_insert_rubric_comment(option_index)
         if finalize:
             self.finalize_student()
@@ -392,9 +434,10 @@ class GradeController(AIDraftMixin):
                     previous_analysis=pending.baseline,
                 )
             except Exception as exc:
-                error = f"Could not save feedback: {exc}"
+                error = f"Feedback NOT saved: {describe_save_error(exc)}"
                 self._pending_comment = pending
                 self._app.show_grade_conflict()
+                self._app.alert_not_saved(error)
                 self._set_active_status(error)
                 return error
         self._record_comment_log_entry(
@@ -428,6 +471,11 @@ class GradeController(AIDraftMixin):
         self._state.grading_run.update_response_text(response_text)
         error = self._persist_current_transcription(response_text)
         if error:
+            # Show what is on disk, not the text that failed to save.
+            current_question.response_text = previous_text
+            current_question.response_confidence = revert.response_confidence
+            current_question.response_source = revert.response_source
+            current_question.response_provider = revert.response_provider
             self.refresh_grade_screen(status=error)
             return
         self._record_transcription_log_entry(response_text, revert=revert)
@@ -451,7 +499,9 @@ class GradeController(AIDraftMixin):
                 response_text=response_text,
             )
         except Exception as exc:
-            return f"Could not save transcription: {exc}"
+            error = f"Transcription NOT saved: {describe_save_error(exc)}"
+            self._app.alert_not_saved(error)
+            return error
         return ""
 
     def _record_transcription_log_entry(
@@ -1098,6 +1148,7 @@ class GradeController(AIDraftMixin):
 
         applied = 0
         failed = 0
+        first_error: Exception | None = None
         skipped = 0
         for member_id in other_members:
             member_seed = self._question_seed_for_student(
@@ -1115,8 +1166,9 @@ class GradeController(AIDraftMixin):
                     points_awarded=member_points,
                     rubric_labels=rubric_labels,
                 )
-            except Exception:
+            except Exception as exc:
                 failed += 1
+                first_error = first_error or exc
                 continue
             self._set_qa_student_status(
                 current_question.question_id,
@@ -1162,6 +1214,16 @@ class GradeController(AIDraftMixin):
         if extras:
             status += " · " + ", ".join(extras) + "."
 
+        if failed:
+            # Stay on this group so the grader sees which answers kept no grade.
+            self._app.alert_not_saved(
+                f"Group grade NOT saved for {failed} student(s): "
+                f"{describe_save_error(first_error)}"
+                if first_error is not None
+                else f"Group grade NOT saved for {failed} student(s)."
+            )
+            self.refresh_grade_screen(status=status)
+            return
         if self._state.group_mode:
             self._advance_after_group_grade(status)
             return
@@ -1369,15 +1431,19 @@ class GradeController(AIDraftMixin):
             question.selected_options(),
         )
 
-    def _persist_current_grade(self, *, revert: GradeRevert | None = None) -> str:
+    def _persist_current_grade(
+        self, *, revert: GradeRevert | None = None
+    ) -> tuple[bool, str]:
+        """(saved, status). Nothing to save counts as saved; a refused or failed
+        write is (False, why)."""
         save_grade = getattr(self._data_provider, "save_question_grade", None)
         if not callable(save_grade):
-            return ""
+            return True, ""
 
         current_student = self._current_student_item()
         current_question = self._state.grading_run.current_question
         if current_student is None or current_question is None:
-            return ""
+            return True, ""
         selected_options = current_question.selected_options()
         rubric_labels = current_question.selected_rubric_labels()
         points_awarded = self._points_for_selection(current_question)
@@ -1391,9 +1457,13 @@ class GradeController(AIDraftMixin):
                 points_awarded=points_awarded,
                 rubric_labels=rubric_labels,
             )
+        except VersionUnknownError as exc:
+            # Not a conflict with another grader: nothing to reload.
+            return False, f"Not saved: {exc}"
         except Exception as exc:
+            self._last_save_error = exc
             self._app.show_grade_conflict()
-            return f"Could not save grade: {exc}"
+            return False, f"Grade NOT saved: {describe_save_error(exc)}"
         self._record_grade_log_entry(
             current_question,
             current_student,
@@ -1413,7 +1483,7 @@ class GradeController(AIDraftMixin):
                     or tuple(revert.rubric_labels or ()) != tuple(rubric_labels)
                 )
             )
-        return "Grade saved."
+        return True, "Grade saved."
 
     def _retag_member_ai_note(
         self,
@@ -2014,6 +2084,28 @@ class GradeController(AIDraftMixin):
             return ""
         return f"U: {pending} similar-answer merge(s) available"
 
+
+    def show_status(self, status: str) -> None:
+        self._set_active_status(status)
+
+    def after_submissions_joined(self, student_item_id: str) -> None:
+        """Two submissions became one underneath the session. In a class
+        folder a student's id is its position, so every later student's id
+        moved: forget everything kept by id — the undo history included, or
+        an undo could land on a different student — and open the joined one."""
+        self._pending_comment = None
+        self._state.grading_log.clear()
+        course_id = str(self._state.selection.course_id or "")
+        assignment_id = str(self._state.selection.assignment_id or "")
+        self._state.student_status = {
+            key: status
+            for key, status in self._state.student_status.items()
+            if key[:2] != (course_id, assignment_id)
+        }
+        question_id = self._current_question_id()
+        self.open_question_picker_for_assignment()
+        self.open_review_target(student_item_id, question_id or "")
+        self._refresh_grading_log()
 
     def reset_after_recovery(self) -> None:
         self._pending_comment = None

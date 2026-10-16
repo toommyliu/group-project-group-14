@@ -94,6 +94,10 @@ class GradeJournal:
         self._path = self._dir / f"grade-journal-{self._session_id}.jsonl"
 
     @property
+    def directory(self) -> Path:
+        return self._dir
+
+    @property
     def actor(self) -> str:
         return self._actor
 

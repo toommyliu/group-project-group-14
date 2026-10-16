@@ -284,3 +284,84 @@ def test_the_analysis_pdf_omits_outcomes_when_nothing_is_tagged(tmp_path) -> Non
     with fitz.open(output) as document:
         text = "".join(page.get_text() for page in document)
     assert "Learning outcomes" not in text
+
+
+def _write_sectioned_cohort(directory: Path, sections: list[str | None]) -> None:
+    from dataclasses import replace
+
+    for index, section in enumerate(sections, start=1):
+        source_pdf = directory / f"submission-{index}.pdf"
+        _make_source_pdf(source_pdf)
+        document = StudentSubmissionDocument(
+            student_name=f"Student {index}",
+            student_id=str(100 + index),
+            course_code="CS146",
+            assignment_title="Quiz 1",
+            assignment_version=None,
+            source_pdf=source_pdf.name,
+            questions=[_question("q1", 10, 5 + index, response_text="x")],
+        )
+        document = replace(document, section=section)
+        (directory / f"student-{index}.submission.md").write_text(
+            render_student_submission_markdown(document), encoding="utf-8"
+        )
+
+
+def test_a_bundle_by_section_has_a_folder_per_section(tmp_path) -> None:
+    submissions = tmp_path / "submissions"
+    submissions.mkdir()
+    _write_sectioned_cohort(submissions, ["Section 10", "Section 2", "Section 2", None])
+
+    result = build_return_bundle(
+        submissions,
+        tmp_path / "out",
+        content=BUNDLE_PRESETS["gradebook-student"],
+        name="quiz",
+        by_section=True,
+    )
+
+    bundle = tmp_path / "out" / "quiz"
+    assert [folder.name for folder in result.section_dirs] == [
+        "Section 2", "Section 10", "No section",
+    ]
+    # Each student's PDF is in exactly one place: their section's folder.
+    assert not (bundle / "student-pdfs").exists()
+    assert len(list((bundle / "Section 2" / "student-pdfs").glob("*.pdf"))) == 2
+    assert result.student_count == 4
+    with (bundle / "Section 2" / "gradebook" / "gradebook.csv").open() as handle:
+        rows = list(csv.reader(handle))
+    assert [row[0] for row in rows[1:]] == ["102", "103"]
+    # The class-wide gradebook says who is in which section.
+    with (bundle / "gradebook" / "gradebook.csv").open() as handle:
+        rows = list(csv.reader(handle))
+    assert rows[0][:3] == ["student_id", "student_name", "section"]
+    assert [row[2] for row in rows[1:]] == ["Section 10", "Section 2", "Section 2", ""]
+    readme = (bundle / "README.txt").read_text(encoding="utf-8")
+    assert "Section 10/" in readme and "No section/" in readme
+
+
+def test_a_bundle_by_section_without_sections_is_not_split(tmp_path) -> None:
+    submissions = tmp_path / "submissions"
+    submissions.mkdir()
+    _write_sectioned_cohort(submissions, [None, None])
+
+    result = build_return_bundle(
+        submissions,
+        tmp_path / "out",
+        content=BUNDLE_PRESETS["gradebook"],
+        name="quiz",
+        by_section=True,
+    )
+
+    assert result.section_dirs == ()
+    assert any("not split by section" in warning for warning in result.warnings)
+    with (tmp_path / "out" / "quiz" / "gradebook" / "gradebook.csv").open() as handle:
+        assert "section" not in next(csv.reader(handle))
+
+
+def test_a_section_name_is_kept_readable_as_a_folder_name() -> None:
+    from opengrader.core.export.bundle import section_folder_name
+
+    assert section_folder_name("Section 01") == "Section 01"
+    assert section_folder_name("MW/TTh: 9am") == "MW TTh 9am"
+    assert section_folder_name("  ") == "No section"

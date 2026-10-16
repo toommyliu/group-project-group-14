@@ -343,7 +343,7 @@ export default function ScansPage({
             <EmptyMedia variant="icon">
               <FileUp />
             </EmptyMedia>
-            <EmptyTitle>Upload scanned exams</EmptyTitle>
+            <EmptyTitle>Upload scanned assignments</EmptyTitle>
             <EmptyDescription>
               Drop PDFs anywhere on this page. One PDF can hold a whole class.
               {templatePages

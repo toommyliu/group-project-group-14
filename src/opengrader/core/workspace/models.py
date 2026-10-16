@@ -122,6 +122,20 @@ class GradeSaveResult(BaseModel):
     folder: FolderWrite | None = None
 
 
+class ReplaceSubmissions(BaseModel):
+    """Submissions whose files were read again (two pieces of one paper the
+    splitter cut apart, now joined): drop them and publish what the folder
+    holds now. Keys are `pipeline:<path in the submissions folder>`."""
+
+    source_keys: list[str]
+
+
+class ReplacedSubmissions(BaseModel):
+    # The submission each key now names; None when its file is gone.
+    submission_ids: dict[str, int | None]
+    problems: list[str] = []
+
+
 class RubricEditResult(BaseModel):
     """What saving a question's rubric — or answers — from the browser did.
 
@@ -329,3 +343,60 @@ class FeedbackJob(BaseModel):
     status: Literal["pending", "running", "ready", "failed"]
     error: str
     artifact: str | None
+
+
+class AccountRole(BaseModel):
+    """An account on this computer that can open the workspace, and its role.
+
+    The account that runs the service owns the workspace and is always an
+    instructor. Others join through it as graders unless made instructors.
+    """
+
+    login: str
+    role: StaffRole
+    # A grader allowed to change grades other people gave, without asking.
+    may_change_others: bool = False
+
+
+class SharingInfo(BaseModel):
+    owner: str
+    # The group whose members may join; None when the workspace is not shared.
+    group: str | None
+    accounts: list[AccountRole]
+
+
+class SharingUpdate(BaseModel):
+    group: str | None = None
+    # Turn sharing off (`group` is then ignored).
+    off: bool = False
+    accounts: list[AccountRole] = []
+
+
+class Viewer(BaseModel):
+    """Who this request comes from, as the service sees it."""
+
+    login: str
+    role: StaffRole
+    owner: str
+    may_change_others: bool
+
+
+class ChangeRequest(BaseModel):
+    """A grader's change to a grade someone else gave, waiting for an instructor."""
+
+    id: int
+    assignment_id: str
+    submission_id: int
+    question_id: str
+    requested_by: str
+    graded_by: str
+    created: str
+    status: Literal["pending", "approved", "dismissed"]
+    rubric_labels: list[str]
+    points_awarded: float | None
+    score_mode: Literal["rubric", "manual"]
+    analysis: str
+    # The grade as it stands now, to compare with.
+    current_rubric_labels: list[str] = []
+    current_points: float | None = None
+    decided_by: str | None = None

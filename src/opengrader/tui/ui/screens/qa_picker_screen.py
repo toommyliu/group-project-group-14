@@ -738,8 +738,21 @@ class QAPickerScreen(Vertical):
                 default_name=default_name,
                 workspace_root=workspace.client.connection.root if workspace else "",
                 workspace_assignment=workspace.assignment.id if workspace else "",
+                sections=self._provider_sections(provider),
             )
         )
+
+    @staticmethod
+    def _provider_sections(provider: object) -> tuple[str, ...]:
+        """The class sections the open assignment's submissions record, for
+        the exports that can be split or filtered by section."""
+        sections_fn = getattr(provider, "available_sections", None)
+        if not callable(sections_fn):
+            return ()
+        try:
+            return tuple(sections_fn())
+        except Exception:
+            return ()
 
     def _open_canvas_export(self) -> None:
         from opengrader.tui.data.workspace_provider import WorkspaceProvider
@@ -757,6 +770,7 @@ class QAPickerScreen(Vertical):
                 assignment=labels.get("assignment", ""),
                 workspace_root=workspace.client.connection.root if workspace else "",
                 workspace_assignment=workspace.assignment.id if workspace else "",
+                sections=self._provider_sections(provider),
             )
         )
 

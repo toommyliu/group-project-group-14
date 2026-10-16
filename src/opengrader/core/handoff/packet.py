@@ -590,7 +590,7 @@ def _packet_readme(
         lines += [
             "This copy is anonymous by design. Each student appears under an",
             "opaque code (og-xxxxxxxx) instead of a name or a student id, and the",
-            "scanned exam PDFs were left out because the student's name is",
+            "scanned assignment PDFs were left out because the student's name is",
             "written across the top of every sheet. You will see each answer's",
             "image crop and its transcription, which is what grading needs.",
             "",

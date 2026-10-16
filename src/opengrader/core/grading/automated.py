@@ -121,6 +121,18 @@ def grade_student_file(
     journal: "RunJournal | None" = None,
 ) -> None:
     document = load_student_submission_markdown(student_path)
+    if qa_doc.version_questions:
+        from opengrader.core.grading.versions import match_version
+
+        match = match_version(qa_doc, document)
+        if not match.known:
+            # Grading it against a guessed version would look right and be
+            # wrong; the review queue asks a person instead.
+            print(
+                f"Skipped {student_path.name}: {match.describe()} "
+                "(review queue: press R in the grading app)"
+            )
+            return
     solutions = solution_entries_for_submission(qa_doc, document)
     version = solution_version_for_submission(qa_doc, document)
     cache = answer_cache if answer_cache is not None else AnswerGradeCache()

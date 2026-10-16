@@ -146,8 +146,17 @@ def _estimate_students(request: "PipelineRequest") -> int:
     """A cheap count from the filesystem — never opens or reads a crop.
 
     0 means "could not tell", never "none": the caller must not read it as
-    nothing being sent.
+    nothing being sent. With one scan per section it is their sum, and 0 when
+    any one of them cannot be counted.
     """
+    if request.section_scans:
+        from opengrader.core.pipeline import section_requests
+
+        try:
+            counts = [_estimate_students(item) for item in section_requests(request)]
+        except ValueError:
+            return 0
+        return 0 if not counts or 0 in counts else sum(counts)
     source = request.extract_source
     if not source.exists() and request.scan.is_file():
         # A combined scan is split into per-student PDFs by the split stage,
@@ -276,9 +285,11 @@ def plan_cloud_egress(
         STAGE_AUTO_GRADE,
         STAGE_DRAFT_RUBRICS,
         STAGE_EXTRACT,
+        _ledger_key,
         _read_ledger,
         _stage_ledger_key,
         plan_pipeline,
+        section_requests,
     )
     from opengrader.core.submissions.manifest import record_is_reusable
 
@@ -297,13 +308,16 @@ def plan_cloud_egress(
     # already extracted last time, a re-run sends nothing new even though
     # the stage still "runs" (and quickly finds there is nothing left to
     # do) — so check the same run ledger directly here.
-    extract_source, extract_settings_id = _stage_ledger_key(request, STAGE_EXTRACT)
-    extract_already_done = record_is_reusable(
-        _read_ledger(request).get(STAGE_EXTRACT),
-        output_dir=request.output_dir,
-        source_sha256=extract_source,
-        settings_id=extract_settings_id,
-    )
+    # With one scan per section, done only when every section's reading is.
+    extract_already_done = True
+    for item in section_requests(request) or (request,):
+        extract_source, extract_settings_id = _stage_ledger_key(item, STAGE_EXTRACT)
+        extract_already_done = extract_already_done and record_is_reusable(
+            _read_ledger(item).get(_ledger_key(item, STAGE_EXTRACT)),
+            output_dir=item.output_dir,
+            source_sha256=extract_source,
+            settings_id=extract_settings_id,
+        )
     uncounted: dict[str, str] = {}
     students = _estimate_students(request)
     per_student_known = _question_count(request)

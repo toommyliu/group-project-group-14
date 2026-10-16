@@ -23,7 +23,11 @@ from .regrade_queue_screen import RegradeChoice, RegradeQueueScreen
 from .region_map_screen import RegionMapScreen
 from .release_screen import ReleaseScreen
 from .return_bundle_screen import ReturnBundleScreen
-from .review_queue_screen import AssignIdentityScreen, ReviewQueueScreen
+from .review_queue_screen import (
+    AssignIdentityScreen,
+    AssignVersionScreen,
+    ReviewQueueScreen,
+)
 from .setup_screen import SetupScreen
 from .similarity_screen import SimilarityScreen
 from .unify_answers_screen import UnifyAnswersScreen
@@ -58,6 +62,7 @@ __all__ = [
     "RegionMapScreen",
     "ReleaseScreen",
     "AssignIdentityScreen",
+    "AssignVersionScreen",
     "ReturnBundleScreen",
     "ReviewQueueScreen",
     "SetupScreen",

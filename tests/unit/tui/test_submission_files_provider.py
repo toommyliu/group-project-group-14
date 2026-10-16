@@ -682,18 +682,43 @@ def test_submission_files_provider_detects_external_submission_change(
     submission_file = (
         submissions_path / "submission-0001" / "submission-0001.submission.md"
     )
-    current = file_mtime_ns(submission_file)
-    assert current is not None
-    os.utime(submission_file, ns=(current + 1_000_000, current + 1_000_000))
 
+    def changed_elsewhere(question_id: str, points: float) -> None:
+        # Another grader's save to this student's file, as another app makes it.
+        current = file_mtime_ns(submission_file)
+        assert current is not None
+        update_student_submission_file(
+            submission_file,
+            StudentSubmissionGradeUpdate(question_id=question_id, points_awarded=points),
+        )
+        os.utime(submission_file, ns=(current + 1_000_000_000, current + 1_000_000_000))
+
+    # Another question changed: this save lands and keeps the other one.
+    changed_elsewhere("q2", 3)
+    provider.save_question_grade(
+        student_item_id="s1",
+        question_id="q1",
+        possible_points=10,
+        points_awarded=7,
+        rubric_labels=("Partially Correct",),
+    )
+    saved = {
+        q.question_id: q.points_awarded
+        for q in load_student_submission_markdown(submission_file).questions
+    }
+    assert (saved["q1"], saved["q2"]) == (7, 3)
+
+    # The same question changed: refused, and the other grader's grade is kept.
+    changed_elsewhere("q1", 1)
     with pytest.raises(ConcurrentModificationError):
         provider.save_question_grade(
             student_item_id="s1",
             question_id="q1",
             possible_points=10,
-            points_awarded=7,
-            rubric_labels=("Partially Correct",),
+            points_awarded=10,
+            rubric_labels=("Correct",),
         )
+    assert load_student_submission_markdown(submission_file).questions[0].points_awarded == 1
 
 
 def test_submission_files_provider_save_succeeds_after_reload(

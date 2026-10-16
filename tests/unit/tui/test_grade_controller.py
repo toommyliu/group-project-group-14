@@ -485,7 +485,11 @@ class FakeApp:
     def show_grade_conflict(self) -> None:
         pass
 
+    def alert_not_saved(self, message: str) -> None:
+        self.not_saved_alerts.append(message)
+
     def __init__(self) -> None:
+        self.not_saved_alerts: list[str] = []
         self.grade_screen = FakeGradeScreen()
         self.qa_screen = FakeQAPickerScreen()
         self.page = PAGE_QA_PICKER
@@ -905,8 +909,9 @@ def test_failed_comment_commit_keeps_pending_work_for_retry() -> None:
 
     assert provider.saved_annotations == []
     assert app.grade_screen.status == (
-        "Could not save feedback: Question source metadata missing"
+        "Feedback NOT saved: Question source metadata missing"
     )
+    assert app.not_saved_alerts == [app.grade_screen.status]
 
     assert len(state.grading_log) == 0
     provider.annotation_error = None
@@ -2143,3 +2148,128 @@ def test_all_questions_graded_message_is_qualified_while_extraction_is_active() 
     controller.note_extraction_progress(added=0, appears_active=False)
     controller.qa_jump_ungraded_question()
     assert app.qa_screen.status == "All questions are fully graded for all students!"
+
+
+class FailingSaveFakeDataProvider(PersistentFakeDataProvider):
+    """Every write is refused, as for a grader whose account cannot write the folder."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.save_error: Exception | None = PermissionError(
+            13, "Permission denied", "/class/submissions/s1.submission.md"
+        )
+
+    def save_question_grade(self, **kwargs: object) -> None:
+        if self.save_error is not None:
+            raise self.save_error
+        super().save_question_grade(**kwargs)
+
+    def save_question_transcription(self, **kwargs: object) -> None:
+        if self.save_error is not None:
+            raise self.save_error
+
+
+def _build_failing_controller() -> tuple[
+    FakeApp, TuiWorkflowState, FailingSaveFakeDataProvider, GradeController
+]:
+    app = FakeApp()
+    state = TuiWorkflowState()
+    state.selection.course_id = 1
+    state.selection.assignment_id = 1
+    state.selection_labels["course"] = "CMPE 195"
+    state.selection_labels["assignment"] = "HW 1"
+    provider = FailingSaveFakeDataProvider()
+    controller = GradeController(app, state, provider)
+    controller.attach_student_refresh(lambda: None)
+    controller.open_question_picker_for_assignment()
+    controller.open_question_by_index(0)
+    state.current_page = PAGE_GRADE
+    return app, state, provider, controller
+
+
+def test_failed_grade_save_with_finalize_stays_on_the_student_and_says_so() -> None:
+    # Shift+digit selects and finalizes in one key. A refused write used to be
+    # replaced by "QA finalized" and the next student, so it looked saved.
+    app, state, provider, controller = _build_failing_controller()
+    question = state.grading_run.current_question
+    assert question is not None and not question.selected_option_indices
+
+    controller.on_rubric_selected(1, finalize=True)
+
+    assert provider.saved_grades == []
+    assert state.active_student_index == 0
+    assert ("1", "1", "s1") not in state.student_status
+    assert ("1", "1", "Q1", "s1") not in state.qa_student_status
+    # The screen shows what is on disk: nothing selected.
+    assert question.selected_option_indices == set()
+    assert question.points_awarded is None
+    assert len(state.grading_log) == 0
+    assert app.grade_screen.status.startswith("Grade NOT saved:")
+    assert "not allowed to write /class/submissions/s1.submission.md" in (
+        app.grade_screen.status
+    )
+    assert app.not_saved_alerts == [app.grade_screen.status]
+
+
+def test_grade_saves_again_once_the_write_is_allowed() -> None:
+    app, state, provider, controller = _build_failing_controller()
+    controller.on_rubric_selected(1)
+    assert provider.saved_grades == []
+
+    provider.save_error = None
+    controller.on_rubric_selected(1)
+
+    assert len(provider.saved_grades) == 1
+    assert app.grade_screen.status == "Grade saved."
+    assert len(app.not_saved_alerts) == 1
+
+
+def test_failed_service_save_reports_the_service_message() -> None:
+    from opengrader.server.transport import ServiceError
+
+    app, _state, provider, controller = _build_failing_controller()
+    provider.save_error = ServiceError(
+        503, "The workspace database could not be written."
+    )
+
+    controller.on_rubric_selected(1)
+
+    assert app.not_saved_alerts == [
+        "Grade NOT saved: The workspace database could not be written."
+    ]
+
+
+def test_failed_transcription_save_puts_the_saved_text_back() -> None:
+    app, state, _provider, controller = _build_failing_controller()
+    question = state.grading_run.current_question
+    assert question is not None
+    before = question.response_text
+
+    controller.on_transcription_updated(before + " corrected")
+
+    assert question.response_text == before
+    assert app.grade_screen.status.startswith("Transcription NOT saved:")
+    assert len(app.not_saved_alerts) == 1
+
+
+def test_group_grade_that_fails_for_a_member_stays_on_the_group() -> None:
+    app, state, provider, controller = _build_grouping_controller()
+    saved = provider.save_question_grade
+
+    def refuse_s2(**kwargs: object) -> None:
+        if kwargs["student_item_id"] == "s2":
+            raise PermissionError(13, "Permission denied", "s2.submission.md")
+        saved(**kwargs)
+
+    provider.save_question_grade = refuse_s2  # type: ignore[method-assign]
+    state.group_mode = True
+    controller.on_rubric_selected(0)
+    controller.apply_grade_to_answer_group()
+
+    assert ("1", "1", "Q1", "s2") not in state.qa_student_status
+    assert state.active_student_index == 0
+    assert "1 could not be saved" in app.grade_screen.status
+    assert len(app.not_saved_alerts) == 1
+    assert app.not_saved_alerts[0].startswith(
+        "Group grade NOT saved for 1 student(s): this account is not allowed to write"
+    )

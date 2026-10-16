@@ -31,6 +31,7 @@ from opengrader.tui.state import (
 from opengrader.tui.terminal_graphics import active_graphics
 from opengrader.tui.ui.screens import (
     AssignIdentityScreen,
+    AssignVersionScreen,
     BackupScreen,
     ClaimAction,
     ClaimScreen,
@@ -151,6 +152,8 @@ class TuiApp(App[Literal["switch_assignment"]]):
             self.workflow_state.session_open = True
         self._workspace_events: dict[tuple[str, int, str], WorkspaceEvent] = {}
         self._workspace_retry_at = 0.0
+        # A join of two split submissions is reading a paper again (`X`).
+        self._joining_split = False
         self.grade_controller = GradeController(
             self,
             self.workflow_state,
@@ -188,6 +191,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
             submissions_path = getattr(self.data_provider, "submissions_path", None)
             if submissions_path is not None:
                 self._start_extraction_watch(submissions_path, known_active=None)
+                self._warn_if_not_writable()
         if not self.has_tools_page:  # a workspace session: follow its events
             provider = self.data_provider
 
@@ -202,6 +206,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
                 provider.cursor, changed
             )
             self.set_interval(0.1, self._refresh_workspace)
+            self.run_worker(self._announce_workspace_role, thread=True, group="workspace-role")
         self._show_session_on_tools_page()
         if self.workflow_state.current_page == PAGE_SETUP:
             # Classic with nothing open: land on the recent folders (or the
@@ -412,7 +417,29 @@ class TuiApp(App[Literal["switch_assignment"]]):
         self._start_extraction_watch(submissions_path, known_active=known_active)
         self._remember_folder()
         self._warn_if_shared_workspace(submissions_path)
+        self._warn_if_not_writable()
         return True
+
+    def _warn_if_not_writable(self) -> None:
+        """Say at once when this account cannot save grades in the folder,
+        instead of at the first save: on a machine shared over SSH each
+        grader's own account writes the files."""
+        from opengrader.core.folder_access import check_folder_access
+
+        provider = self.data_provider
+        try:
+            access = check_folder_access(
+                provider.submissions_path, getattr(provider, "qa_file_path", None)
+            )
+        except OSError:
+            return
+        if message := access.message():
+            self.notify(
+                message,
+                title="Cannot save here" if not access.can_grade else "Answer key is read-only",
+                severity="error" if not access.can_grade else "warning",
+                timeout=60,
+            )
 
     def _warn_if_shared_workspace(self, submissions_path: str | Path) -> None:
         """Say so when browser grades for this folder may not be in its files.
@@ -686,6 +713,14 @@ class TuiApp(App[Literal["switch_assignment"]]):
             self._show_claims,
         )
         self.input_controller.register(
+            InputCommand.JOIN_SPLIT_SUBMISSIONS,
+            self._show_join_split,
+        )
+        self.input_controller.register(
+            InputCommand.OPEN_CHANGE_REQUESTS,
+            self._show_change_requests,
+        )
+        self.input_controller.register(
             InputCommand.APP_TOGGLE_TEACHER_MODE,
             self._toggle_teacher_mode,
         )
@@ -768,6 +803,171 @@ class TuiApp(App[Literal["switch_assignment"]]):
     def _show_format_guide(self) -> None:
         self.push_screen(FormatGuideScreen())
 
+    def _show_join_split(self) -> None:
+        from opengrader.core.submissions.merge_split import MergeUnavailable
+        from opengrader.tui.ui.screens.join_submissions_screen import JoinSubmissionsScreen
+
+        neighbours_of = getattr(self.data_provider, "split_neighbours", None)
+        student = self.workflow_state.selection.student_item_id
+        if not callable(neighbours_of) or not student:
+            self.notify("Open a submission to join it with the one scanned next to it.")
+            return
+        if self._joining_split:
+            self.notify("Still joining the last two submissions.")
+            return
+        try:
+            neighbours = neighbours_of(student)
+        except (MergeUnavailable, OSError, ValueError) as exc:
+            self.notify(str(exc), severity="warning", timeout=15)
+            return
+        if neighbours.before is None and neighbours.after is None:
+            self.notify("No other submission came from the same scan, so there is nothing to join.")
+            return
+
+        def chosen(side: str | None) -> None:
+            if side == "before" and neighbours.before is not None:
+                self._join_split(neighbours.before, neighbours.here)
+            elif side == "after" and neighbours.after is not None:
+                self._join_split(neighbours.here, neighbours.after)
+
+        self.push_screen(JoinSubmissionsScreen(neighbours), chosen)
+
+    def _join_split(
+        self, first: object, second: object, *, send_to_cloud_confirmed: bool = False
+    ) -> None:
+        self._joining_split = True
+        self.grade_controller.commit_pending_comment()
+        self.grade_controller.show_status(
+            f"Joining {second.stem} onto {first.stem} and reading it again…"
+        )
+        self.run_worker(
+            lambda: self._join_split_worker(first, second, send_to_cloud_confirmed),
+            thread=True,
+            exclusive=True,
+            group="join-split",
+        )
+
+    def _join_split_worker(self, first, second, send_to_cloud_confirmed: bool) -> None:  # noqa: ANN001 - SplitPiece
+        from opengrader.core.cloud_preflight import CloudConfirmationNeeded
+
+        def status(message: str) -> None:
+            self.call_from_thread(self.grade_controller.show_status, message)
+
+        try:
+            joined, result = self.data_provider.join_split_submissions(
+                first.student_item_id,
+                second.student_item_id,
+                status=status,
+                send_to_cloud_confirmed=send_to_cloud_confirmed,
+            )
+        except CloudConfirmationNeeded as needed:
+            # Nothing was sent. The PDFs may already be joined: a second
+            # call finishes the same join, so asking and calling again is safe.
+            self.call_from_thread(self._confirm_join_cloud_send, needed, first, second)
+            return
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 - shown to the grader, never swallowed
+            # The extractor exits (SystemExit) when it refuses to run.
+            reason = str(exc) if not isinstance(exc, SystemExit) else (
+                "reading the paper again stopped; run the pipeline on this folder to see why"
+            )
+            self.call_from_thread(
+                self._join_split_failed,
+                f"Could not join {second.stem} onto {first.stem}: {reason}",
+            )
+            return
+        self.call_from_thread(self._join_split_done, joined, result, first, second)
+
+    def _confirm_join_cloud_send(self, needed, first, second) -> None:  # noqa: ANN001
+        from opengrader.tui.ui.screens.cloud_consent_screen import CloudPreflightConfirmScreen
+
+        def answered(confirmed: bool | None) -> None:
+            if confirmed:
+                self._join_split(first, second, send_to_cloud_confirmed=True)
+            else:
+                self._join_split_failed(
+                    f"Not joined: the cloud send was declined, so nothing left this "
+                    f"computer. Press Shift+X on {first.stem} again to finish the join."
+                )
+
+        self.push_screen(
+            CloudPreflightConfirmScreen(needed.statement(), needed.preflight.host), answered
+        )
+
+    def _join_split_failed(self, message: str) -> None:
+        self._joining_split = False
+        self.grade_controller.show_status(message)
+        self.notify(message, title="Not joined", severity="error", timeout=30)
+
+    def _join_split_done(self, joined: str, result, first, second) -> None:  # noqa: ANN001 - JoinResult
+        self._joining_split = False
+        self.grade_controller.after_submissions_joined(joined)
+        readings = (
+            f" and {result.readings} corrected reading(s)" if result.readings else ""
+        )
+        message = (
+            f"Joined {second.stem} onto {first.stem} and read it again; "
+            f"{result.grades} grade(s){readings} carried over."
+        )
+        self.grade_controller.show_status(message)
+        self.notify(message, timeout=15)
+
+    def _announce_workspace_role(self) -> None:
+        """Say who this session is in a workspace shared between accounts: a
+        grader learns the rule before their first change, an instructor
+        learns that graders are waiting on them."""
+        provider = self.data_provider
+        viewer = getattr(provider, "viewer", lambda: None)()
+        if viewer is None:
+            return
+        message = ""
+        if viewer.login != viewer.owner:
+            if viewer.role == "instructor":
+                message = f"Joined {viewer.owner}'s workspace as an instructor."
+            elif viewer.may_change_others:
+                message = f"Joined {viewer.owner}'s workspace as a grader who may change any grade."
+            else:
+                message = (
+                    f"Joined {viewer.owner}'s workspace as a grader. You can grade "
+                    "answers nobody has graded and change your own grades; a change "
+                    f"to someone else's grade is sent to {viewer.owner} to approve."
+                )
+        if viewer.role == "instructor":
+            try:
+                waiting = len(provider.change_requests())
+            except Exception:  # noqa: BLE001 - an older service has none to list
+                waiting = 0
+            if waiting:
+                message = (message + " " if message else "") + (
+                    f"{waiting} change request(s) from graders are waiting: press Shift+Q."
+                )
+        if message:
+            self.call_from_thread(self.notify, message, timeout=20)
+
+    def _show_change_requests(self) -> None:
+        from opengrader.tui.ui.screens.change_requests_screen import ChangeRequestsScreen
+
+        provider = self.data_provider
+        list_requests = getattr(provider, "change_requests", None)
+        if not callable(list_requests):
+            self.notify(
+                "Change requests belong to a workspace shared with other accounts "
+                "(opengrader share); this folder has none."
+            )
+            return
+        try:
+            requests = list_requests()
+        except Exception as exc:  # noqa: BLE001 - a grader is refused here
+            self.notify(str(exc), severity="warning", timeout=15)
+            return
+
+        def decide(request_id: int, approve: bool) -> None:
+            provider.decide_change_request(request_id, approve=approve)
+
+        def closed(_result: object) -> None:
+            self.grade_controller.refresh_after_external_change()
+
+        self.push_screen(ChangeRequestsScreen(requests, decide), closed)
+
     def _show_review_queue(self) -> None:
         build_items = getattr(self.data_provider, "build_review_items", None)
         items = build_items() if callable(build_items) else []
@@ -781,6 +981,11 @@ class TuiApp(App[Literal["switch_assignment"]]):
             return
         if getattr(item, "is_identity_flag", False) and self._can_assign_identity():
             self._resolve_identity(item)
+            return
+        if getattr(item, "is_version_flag", False) and callable(
+            getattr(self.data_provider, "assign_submission_version", None)
+        ):
+            self._resolve_version(item)
             return
         student_item_id = getattr(item, "student_item_id", "")
         question_id = getattr(item, "question_id", "")
@@ -806,6 +1011,30 @@ class TuiApp(App[Literal["switch_assignment"]]):
             self._show_review_queue()
 
         self.push_screen(AssignIdentityScreen(item), _after)
+
+    def _resolve_version(self, item: object) -> None:
+        from opengrader.tui.ui.screens.review_queue_screen import LOOK_AT_PAPER
+
+        student_item_id = getattr(item, "student_item_id", "")
+
+        def _after(result: object) -> None:
+            if result == LOOK_AT_PAPER:
+                self.grade_controller.open_review_target(student_item_id, "")
+                return
+            if isinstance(result, str):
+                try:
+                    self.data_provider.assign_submission_version(
+                        student_item_id=student_item_id, version=result
+                    )
+                    # The paper's questions and rubric are now that version's.
+                    self.grade_controller.refresh_after_external_change()
+                    self.notify(f"Set to version {result}; it can be graded now.")
+                except Exception as exc:
+                    self.notify(f"Could not set the version: {exc}", severity="error")
+            self._show_review_queue()
+
+        versions = self.data_provider.answer_key_versions()
+        self.push_screen(AssignVersionScreen(item, versions), _after)
 
     def _toggle_teacher_mode(self) -> None:
         self.grade_controller.toggle_teacher_mode()
@@ -1329,6 +1558,12 @@ class TuiApp(App[Literal["switch_assignment"]]):
             return
         self._workspace_events.clear()
         self._workspace_retry_at = 0.0
+
+    def alert_not_saved(self, message: str) -> None:
+        """A grade, comment or reading that did not reach disk must be
+        impossible to miss: the status line alone is replaced by the next
+        action, so the grader would believe it was saved."""
+        self.notify(message, title="Not saved", severity="error", timeout=30)
 
     def show_grade_conflict(self) -> None:
         from opengrader.tui.data.workspace_provider import WorkspaceProvider

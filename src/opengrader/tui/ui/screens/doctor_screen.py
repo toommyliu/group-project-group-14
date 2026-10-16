@@ -110,7 +110,7 @@ class DoctorScreen(OutlineButtons, ModalScreen[None]):
                 id="doctor-hint",
             )
             yield Checkbox(
-                "Also build a test exam PDF",
+                "Also build a test assignment PDF",
                 value=False,
                 id="doctor-smoke",
             )

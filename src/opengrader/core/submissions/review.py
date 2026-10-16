@@ -20,6 +20,8 @@ from opengrader.core.submissions.student_file import (
 
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.analytics.rubric_drift import StaleGrade
+    from opengrader.core.grading.versions import VersionMatch
+    from opengrader.core.qa_file import QADocument
 
 ReviewSeverity = Literal["high", "medium", "low"]
 
@@ -40,6 +42,9 @@ _ZERO_SWEEP_MIN_GRADED = 2
 
 class ReviewReason(str, Enum):
     SCAN_INCOMPLETE = "scan_incomplete"
+    # The answer key has versions and this paper's could not be told: it is
+    # left ungraded until a person picks one (`core/grading/versions.py`).
+    VERSION_UNKNOWN = "version_unknown"
     MISSING_STUDENT_ID = "missing_student_id"
     MALFORMED_STUDENT_ID = "malformed_student_id"
     MISSING_STUDENT_NAME = "missing_student_name"
@@ -91,7 +96,10 @@ def flag_submission(
     ocr_confidence_floor: float = DEFAULT_OCR_CONFIDENCE_FLOOR,
     identity_confidence_floor: float = DEFAULT_IDENTITY_CONFIDENCE_FLOOR,
     include_ungraded: bool = False,
+    version: "VersionMatch | None" = None,
 ) -> list[ReviewFlag]:
+    """`version` is `versions.match_version` for this paper, when the caller
+    has the answer key; an unknown one is flagged first."""
     student_id = document.student_id.strip()
     student_name = document.student_name.strip()
     source_pdf = document.source_pdf
@@ -113,7 +121,10 @@ def flag_submission(
             question_id=question_id,
         )
 
-    flags: list[ReviewFlag] = [_flag(ReviewReason.SCAN_INCOMPLETE, "high", warning) for warning in document.scan_warnings]
+    flags: list[ReviewFlag] = []
+    if version is not None and not version.known:
+        flags.append(_flag(ReviewReason.VERSION_UNKNOWN, "high", version.describe()))
+    flags += [_flag(ReviewReason.SCAN_INCOMPLETE, "high", warning) for warning in document.scan_warnings]
 
     if not student_id:
         flags.append(
@@ -384,7 +395,12 @@ def build_review_flags(
     roster: list[RosterStudent] | None = None,
     regrade_requests: list[RegradeRequest] | None = None,
     stale_grades: "Sequence[StaleGrade] | None" = None,
+    qa_document: "QADocument | None" = None,
 ) -> list[ReviewFlag]:
+    """`qa_document` is the answer key, when known: with it, a paper whose
+    version cannot be told is flagged (`ReviewReason.VERSION_UNKNOWN`)."""
+    from opengrader.core.grading.versions import match_version
+
     flags: list[ReviewFlag] = []
     for document in documents:
         flags.extend(
@@ -395,6 +411,11 @@ def build_review_flags(
                 ocr_confidence_floor=ocr_confidence_floor,
                 identity_confidence_floor=identity_confidence_floor,
                 include_ungraded=include_ungraded,
+                version=(
+                    match_version(qa_document, document)
+                    if qa_document is not None
+                    else None
+                ),
             )
         )
     if roster is not None:

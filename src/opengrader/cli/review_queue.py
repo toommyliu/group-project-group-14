@@ -123,7 +123,7 @@ def _flag_to_dict(flag: ReviewFlag) -> dict[str, str]:
         "Flag submissions whose student name/id was read (or roster-matched) "
         "below this confidence percent. Stricter than --ocr-confidence on "
         "purpose: a shaky answer costs one question, a shaky identity posts "
-        "the whole exam to the wrong person."
+        "the whole assignment to the wrong person."
     ),
 )
 @click.option(
@@ -140,6 +140,14 @@ def _flag_to_dict(flag: ReviewFlag) -> dict[str, str]:
         "passed to submission-extractor --id-file). Roster students with no "
         "matching submission are flagged, catching assignments that were never "
         "scanned or extracted before grades reach Canvas."
+    ),
+)
+@click.option(
+    "--solutions",
+    help=(
+        "The answer key (QA markdown). With it, a paper whose version cannot "
+        "be told from a key with several versions is flagged: it is left "
+        "ungraded until its version is picked."
     ),
 )
 @click.option(
@@ -172,6 +180,7 @@ def command(
     identity_confidence: float,
     id_pattern: str | None,
     roster: str | None,
+    solutions: str | None,
     no_rubric_drift: bool,
     as_json: bool,
     fail_on_high: bool,
@@ -209,6 +218,15 @@ def command(
             print(f"Error: roster file not found: {roster_path}", file=sys.stderr)
             sys.exit(1)
         kwargs["roster"] = load_roster_students(roster_path)
+
+    if solutions is not None:
+        from opengrader.core.qa_file import load_qa_markdown
+
+        try:
+            kwargs["qa_document"] = load_qa_markdown(Path(solutions))
+        except (OSError, ValueError) as exc:
+            print(f"Error: could not read the answer key {solutions}: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     regrade_requests = open_regrade_requests(input_path)
     if regrade_requests:

@@ -8,6 +8,11 @@ from typing import Callable, TypeVar
 
 from opengrader.core.grading.rubric_edit import diff_rubric_options
 from opengrader.core.grading.files import FileGradingSession
+from opengrader.core.grading.versions import (
+    VersionMatch,
+    VersionUnknownError,
+    match_version,
+)
 from opengrader.core.grading.questions import (
     QuestionContext as _QuestionContext,
     flatten_question_contexts,
@@ -55,6 +60,7 @@ from opengrader.core.submissions import (
     SOURCE_HUMAN,
     StudentSubmissionGradeUpdate,
     StudentSubmissionQuestion,
+    set_assignment_version_file,
     set_student_identity_file,
     update_student_submission_file,
 )
@@ -136,6 +142,13 @@ class _LoadedSubmission:
     grading: FileGradingSession
     qa_version: str | None
     question_contexts: list[_QuestionContext]
+    # False when the answer key has versions and this paper's is unknown
+    # (`core/grading/versions.py`): shown, but not graded until one is picked.
+    version: "VersionMatch | None" = None
+
+    @property
+    def version_known(self) -> bool:
+        return self.version is None or self.version.known
 
 
 @dataclass(frozen=True)
@@ -339,6 +352,14 @@ class SubmissionFilesProvider:
         rubric_labels: tuple[str, ...],
         analysis: str | None = None,
     ) -> None:
+        submission = self._submission_for_student_item(student_item_id)
+        if not submission.version_known and submission.version is not None:
+            # Its rubric could be the wrong version's: a grade waits for a
+            # person to say which version the paper is.
+            raise VersionUnknownError(
+                "this paper's version is unknown. Press R and choose "
+                "\"Version unknown\" to pick it, then grade."
+            )
         with self._edit_submission(student_item_id) as grading:
             grading.save_grade(
                 question_id=question_id,
@@ -553,7 +574,7 @@ class SubmissionFilesProvider:
                 item_id_by_norm_id.setdefault(norm_id, item_id)
             display_id = document.student_id.strip() or item_id
             source_pdf_name = Path(document.source_pdf).name if document.source_pdf else ""
-            for flag in flag_submission(document):
+            for flag in flag_submission(document, version=submission.version):
                 candidates = (
                     document.id_candidates
                     if flag.reason in (ReviewReason.MISSING_STUDENT_ID, ReviewReason.MALFORMED_STUDENT_ID)
@@ -636,6 +657,33 @@ class SubmissionFilesProvider:
             ),
             old={"student_id": old_id, "student_name": old_name},
             new={"student_id": student_id, "student_name": resolved_name},
+        )
+
+    def answer_key_versions(self) -> tuple[str, ...]:
+        """The answer key's versions, in its order; () without versions."""
+        return tuple(self._qa_doc.version_questions)
+
+    def assign_submission_version(self, *, student_item_id: str, version: str) -> None:
+        """Say which version a paper is: written into its file (the header's
+        `assignment_version`, nothing else touched) and journalled, so its
+        questions, rubric and auto-grading follow that version from now on."""
+        if version not in self._qa_doc.version_questions:
+            raise ValueError(f"the answer key has no version {version!r}")
+        submission = self._submission_for_student_item(student_item_id)
+        old = submission.grading.document.assignment_version or ""
+        set_assignment_version_file(
+            submission.grading.path,
+            version=version,
+            expected_mtime_ns=submission.grading.mtime_ns,
+        )
+        self._reload_submission(student_item_id)
+        self._journal_event(
+            kind="version",
+            submission=submission,
+            question_id="",
+            summary=f"set version {version}" + (f" (was {old})" if old else ""),
+            old={"assignment_version": old},
+            new={"assignment_version": version},
         )
 
     def build_regrade_items(self) -> list[RegradeReportItem]:
@@ -753,6 +801,86 @@ class SubmissionFilesProvider:
     def grader_actor(self) -> str:
         return current_actor()
 
+    def split_neighbours(self, student_item_id: str) -> "SplitNeighbours":
+        """This submission and the ones scanned either side of it, which are
+        the only ones it can be joined with (`X`)."""
+        from opengrader.core.submissions.merge_split import (
+            MergeUnavailable,
+            neighbours,
+            piece_for,
+        )
+        from opengrader.tui.data.models import SplitNeighbours
+
+        submission = self._submission_for_student_item(student_item_id)
+        here = piece_for(self._submissions_path, submission.grading.path)
+        if here is None:
+            raise MergeUnavailable(
+                "This submission was not read from a split scan, so there is "
+                "nothing to join it with."
+            )
+        before, after = neighbours(self._submissions_path, here.stem)
+        piece = self._split_piece(here)
+        assert piece is not None
+        return SplitNeighbours(piece, self._split_piece(before), self._split_piece(after))
+
+    def _split_piece(self, piece) -> "SplitPiece | None":  # noqa: ANN001 - merge_split.Piece
+        from opengrader.core.submissions.merge_split import page_count
+        from opengrader.tui.data.models import SplitPiece
+
+        if piece is None:
+            return None
+        target = piece.submission.resolve()
+        index = next(
+            (i for i, loaded in enumerate(self._submissions) if loaded.grading.path.resolve() == target),
+            None,
+        )
+        if index is None:
+            return None
+        questions = self._submissions[index].grading.document.questions
+        graded = sum(1 for q in questions if q.points_awarded is not None or q.rubric_labels)
+        return SplitPiece(f"s{index + 1}", piece.stem, page_count(piece), graded)
+
+    def join_split_submissions(
+        self,
+        first_item_id: str,
+        second_item_id: str,
+        *,
+        status: Callable[[str], None] | None = None,
+        send_to_cloud_confirmed: bool = False,
+    ) -> tuple[str, "JoinResult"]:
+        """Join the second onto the first (scanned just before it), read it
+        again and carry the valid grades and corrected readings over.
+        Returns the joined submission's item id — ids are positions here, so
+        every later student's id moves down by one — and what was carried."""
+        from opengrader.core.submissions.merge_split import (
+            MergeUnavailable,
+            merge_in_folder,
+            piece_for,
+        )
+
+        first = piece_for(self._submissions_path, self._submission_for_student_item(first_item_id).grading.path)
+        second = piece_for(self._submissions_path, self._submission_for_student_item(second_item_id).grading.path)
+        if first is None or second is None:
+            raise MergeUnavailable("Both submissions must come from the same split scan.")
+        result = merge_in_folder(
+            self._submissions_path,
+            first,
+            second,
+            history_dir=self._history_dir,
+            actor=self.grader_actor(),
+            status=status,
+            # The app asks with its own dialog, then calls again confirmed.
+            prompt_cloud_send=False,
+            send_to_cloud_confirmed=send_to_cloud_confirmed,
+        )
+        self.reload_all()
+        target = result.path.resolve()
+        index = next(
+            (i for i, loaded in enumerate(self._submissions) if loaded.grading.path.resolve() == target),
+            0,
+        )
+        return f"s{index + 1}", result
+
     def read_work_claims(self) -> list[WorkClaim]:
         return active_claims(self._submissions_path)
 
@@ -812,6 +940,7 @@ class SubmissionFilesProvider:
                 documents,
                 regrade_requests=open_regrade_requests(self._submissions_path),
                 stale_grades=detect_rubric_drift(read_journal(self._history_dir)),
+                qa_document=self._qa_doc,
             ),
             consistency_flags=build_consistency_flags(documents),
             claims=self.read_work_claims(),
@@ -1140,6 +1269,7 @@ class SubmissionFilesProvider:
             grading=grading,
             qa_version=qa_version,
             question_contexts=flatten_question_contexts(qa_questions),
+            version=match_version(self._qa_doc, grading.document),
         )
 
     def reload_all(self) -> None:

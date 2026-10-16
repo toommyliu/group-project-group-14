@@ -1,7 +1,10 @@
 """One application server with explicitly registered grading workspaces."""
 
 import asyncio
+import json
 import logging
+import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -31,6 +34,42 @@ from opengrader.server.settings import ServerSettings
 from opengrader.server.web import add_web_routes
 from opengrader.server.workspace.app import create_app as create_workspace_app
 from opengrader.server.workspace.client import SERVICE_LOCK, exclusive_lock
+from opengrader.server.peer import login_of, own_uid, peer_uid
+from opengrader.server.transport import ACCOUNT_HEADER
+
+# Where a workspace shared with other accounts tells them how to join.
+CONNECTION_NOTE = Path(".opengrader/connection.json")
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# The one change a grader who joined someone else's workspace may make.
+_GRADE_SAVE = re.compile(r"/api/assignments/[^/]+/submissions/\d+/answers/[^/]+/?")
+
+
+def server_owner() -> str:
+    from opengrader.core.folder_access import current_account
+
+    return current_account()
+
+
+class OtherAccountGuard:
+    """Another account on this computer may reach this server only to join a
+    workspace that was shared with it (checked per request in `Workspaces`).
+    Until now any account could call it — list and create courses — because
+    being on this computer was taken to mean being its owner."""
+
+    def __init__(self, app) -> None:  # noqa: ANN001 - ASGI app
+        self.app = app
+
+    async def __call__(self, scope, receive, send):  # noqa: ANN001
+        if scope["type"] == "http" and not get_route_path(scope).startswith("/courses/"):
+            uid = peer_uid(scope.get("client"), scope.get("server"))
+            mine = own_uid()
+            if uid is not None and mine is not None and uid != mine:
+                await JSONResponse(
+                    {"detail": f"This Opengrader belongs to {server_owner()}."},
+                    status_code=403,
+                )(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +157,12 @@ class Workspaces:
         self.web_dist = web_dist
         self.process_jobs = process_jobs
         self.apps: dict[str, FastAPI] = {}
+        self.items: dict[str, RegisteredWorkspace] = {}
+        # Per shared workspace: what a joining account must present.
+        self.grader_tokens: dict[str, str] = {}
+        # This server's own address, once it listens (set by `serve`).
+        self.base_url: str | None = None
+        self.owner = server_owner()
         self.closers: dict[str, AsyncExitStack] = {}
         self.deleting: set[str] = set()
         self.lock = asyncio.Lock()
@@ -150,14 +195,129 @@ class Workspaces:
                             "The course in this folder has changed. Register its new location."
                         )
                     await pending.enter_async_context(app.router.lifespan_context(app))
+                    app.state.owner = self.owner
+                    app.state.sharing_changed = lambda item_id=item.id: self.publish_note(item_id)
+                    pending.callback(self.withdraw_note, item.id)
                     self.closers[item.id] = pending.pop_all()
                     self.apps[item.id] = app
+                    self.items[item.id] = item
+                    await run_in_threadpool(self.publish_note, item.id)
             app = self.apps[item.id]
             if app.state.workspace.root != Path(item.path):
                 raise ValueError(
                     "This course moved while it was open. Restart the server to use its new location."
                 )
             return app
+
+    def publish_note(self, item_id: str) -> None:
+        """Leave (or take away) the note that lets the sharing group join.
+
+        It holds this server's address and a token only that group can read,
+        so another account's `opengrader tui` can reach this workspace's
+        service instead of starting its own. It is only good while this
+        server runs; a stale one is detected by the joining side.
+        """
+        from opengrader.core.workspace.sharing import sharing_group
+
+        item, app = self.items.get(item_id), self.apps.get(item_id)
+        if item is None or app is None:
+            return
+        note = Path(item.path) / CONNECTION_NOTE
+        try:
+            group = sharing_group(app.state.workspace)
+        except (OSError, sqlite3.Error):
+            group = None
+        if not group or not self.base_url:
+            self.withdraw_note(item_id)
+            return
+        try:
+            import grp
+
+            gid = grp.getgrnam(group).gr_gid
+        except (ImportError, KeyError):
+            logger.warning("Cannot share %s: no group named %s", item.path, group)
+            self.withdraw_note(item_id)
+            return
+        token = self.grader_tokens.setdefault(item_id, secrets.token_urlsafe(32))
+        body = json.dumps(
+            {
+                "workspace_id": item_id,
+                "url": self.base_url + item.url_path,
+                "token": token,
+                "owner": self.owner,
+                "pid": os.getpid(),
+            }
+        )
+        temporary = note.with_suffix(".tmp")
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w") as stream:
+            stream.write(body)
+        try:
+            os.chown(temporary, -1, gid)
+            os.chmod(temporary, 0o640)
+        except OSError:
+            logger.warning("Cannot give group %s the note in %s", group, item.path)
+            temporary.unlink(missing_ok=True)
+            return
+        temporary.replace(note)
+
+    def withdraw_note(self, item_id: str) -> None:
+        self.grader_tokens.pop(item_id, None)
+        item = self.items.get(item_id)
+        if item is not None:
+            with suppress(OSError):
+                (Path(item.path) / CONNECTION_NOTE).unlink(missing_ok=True)
+
+    async def open_shared(self) -> None:
+        """Open every shared workspace when the server starts, so its note is
+        there for the graders without the owner opening it first."""
+        from opengrader.core.workspace.sharing import sharing_group
+
+        for item in await run_in_threadpool(self.registry.list):
+            try:
+                shared = await run_in_threadpool(
+                    lambda path=item.path: sharing_group(Workspace(Path(path)))
+                )
+                if shared:
+                    await self.open(item)
+            except (OSError, ValueError, RuntimeError, sqlite3.Error):
+                logger.exception("Could not open shared workspace %s", item.path)
+
+    def identify(self, scope, item: RegisteredWorkspace) -> tuple[str | None, Response | None]:  # noqa: ANN001
+        """(account, refusal). The account is set only for someone who joined
+        this workspace from another account; None means its owner."""
+        request = Request(scope)
+        token = self.grader_tokens.get(item.id)
+        presented = request.headers.get("authorization", "")
+        uid = peer_uid(scope.get("client"), scope.get("server"))
+        mine = own_uid()
+        if token and secrets.compare_digest(presented.encode(), f"Bearer {token}".encode()):
+            declared = request.headers.get(ACCOUNT_HEADER, "").strip()
+            verified = login_of(uid) if uid is not None else None
+            if uid is not None and uid == mine:
+                return None, None
+            login = verified or declared
+            if verified and declared and verified != declared:
+                return None, JSONResponse(
+                    {"detail": f"This connection belongs to {verified}, not {declared}."}, status_code=403
+                )
+            if not login or (verified is None and login == self.owner):
+                return None, JSONResponse(
+                    {"detail": "Say which account is joining (opengrader tui does)."}, status_code=401
+                )
+            return login, None
+        if uid is not None and mine is not None and uid != mine:
+            return None, JSONResponse(
+                {
+                    "detail": (
+                        f"This workspace belongs to {self.owner}. To grade in it from "
+                        f"your own account, {self.owner} shares it (opengrader share "
+                        f"--group <group>) and you run opengrader tui {item.path}."
+                    )
+                },
+                status_code=403,
+            )
+        return None, None
 
     async def resume_feedback(self) -> None:
         for item in await run_in_threadpool(self.registry.list):
@@ -230,6 +390,25 @@ class Workspaces:
                 )(scope, receive, send)
                 return
             app = await self.open(item)
+            account, refusal = await run_in_threadpool(self.identify, scope, item)
+            if refusal is not None:
+                await refusal(scope, receive, send)
+                return
+            if account is not None:
+                from opengrader.core.workspace.sharing import viewer
+
+                who = await run_in_threadpool(viewer, app.state.workspace, account, self.owner)
+                if (
+                    scope["method"] not in _SAFE_METHODS
+                    and who.role != "instructor"
+                    and not (scope["method"] == "PUT" and _GRADE_SAVE.fullmatch(get_route_path(scope)))
+                ):
+                    await JSONResponse(
+                        {"detail": f"Only an instructor can do that in {self.owner}'s workspace; graders grade."},
+                        status_code=403,
+                    )(scope, receive, send)
+                    return
+                scope.setdefault("state", {})["account"] = account
             if _page_request(scope):
                 await run_in_threadpool(self.registry.opened, item.id)
         except LookupError as exc:
@@ -267,6 +446,7 @@ def create_app(
         if process_jobs:
             workspaces.feedback.start()
             recovery = asyncio.create_task(workspaces.resume_feedback())
+        await workspaces.open_shared()
         try:
             yield
         finally:
@@ -281,6 +461,7 @@ def create_app(
     add_auth_routes(app, settings, access=access if settings.auth_enabled else None)
     if not settings.auth_enabled:
         app.add_middleware(RemoteAuthGuard)
+    app.add_middleware(OtherAccountGuard)
 
     # Explicitly guard sensitive endpoints with the server's private token.
     def control(request: Request):

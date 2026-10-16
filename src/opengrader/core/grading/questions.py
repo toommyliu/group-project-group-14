@@ -17,9 +17,6 @@ from opengrader.core.question_types import FREE_RESPONSE, QuestionType
 from opengrader.core.submissions import StudentSubmissionDocument
 from opengrader.core.submissions.printed_text import printed_question_text
 
-_VERSION_MARKER_RE = re.compile(r"\[([A-Za-z0-9]+)\]|\(([A-Za-z0-9]+)\)")
-
-
 @dataclass(frozen=True)
 class QuestionContext:
     question_id: str
@@ -36,26 +33,21 @@ def questions_for_submission(
     qa: QADocument,
     document: StudentSubmissionDocument,
 ) -> tuple[str | None, list[QAQuestion]]:
-    """Match local grading's explicit, inferred, then first-version fallback."""
+    """The version this paper is graded against, and its questions.
+
+    `versions.match_version` decides. A paper whose version is unknown gets
+    (None, the first version's questions): the questions to show, since
+    every version has the same question IDs, but no version to grade by —
+    the grading app refuses to save on it until a version is picked.
+    """
+    from opengrader.core.grading.versions import match_version
+
     if not qa.version_questions:
         return None, qa.questions
-
-    available = {version.strip().lower(): version for version in qa.version_questions}
-    candidates: set[str] = set()
-    for text in [document.assignment_title, *(q.prompt for q in document.questions)]:
-        for match in _VERSION_MARKER_RE.finditer(text or ""):
-            raw = match.group(1) or match.group(2)
-            version = available.get(raw.strip().lower())
-            if version is not None:
-                candidates.add(version)
-    inferred = next(iter(candidates)) if len(candidates) == 1 else ""
-    explicit = (document.assignment_version or "").strip()
-    selected = available.get((explicit or inferred).lower())
-    if selected is None and explicit and inferred:
-        selected = available.get(inferred.lower())
-    if selected is None:
-        selected = next(iter(qa.version_questions))
-    return selected, qa.version_questions[selected]
+    match = match_version(qa, document)
+    if match.version is None:
+        return None, next(iter(qa.version_questions.values()))
+    return match.version, qa.version_questions[match.version]
 
 
 def flatten_question_contexts(questions: list[QAQuestion]) -> list[QuestionContext]:

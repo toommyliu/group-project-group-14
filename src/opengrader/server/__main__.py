@@ -62,6 +62,8 @@ def serve(
             with os.fdopen(descriptor, "w") as stream:
                 stream.write(connection.model_dump_json())
             temporary.replace(record)
+            # Shared workspaces tell other accounts this address.
+            app.state.workspaces.base_url = connection.url
             if on_ready is None:
                 print(f"Open {connection.url}/courses", flush=True)
             try:

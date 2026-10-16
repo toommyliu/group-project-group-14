@@ -33,6 +33,8 @@ class GraphicsCapability:
     source: str
     terminal: str = ""
     detail: str = ""
+    # How long asking the terminal took, when it was asked.
+    seconds: float | None = None
 
     @property
     def pixel_accurate(self) -> bool:
@@ -137,6 +139,64 @@ def _detect_from_environment(
     return None
 
 
+def _load_textual_image_quietly() -> None:
+    """Import `textual_image` without its own terminal questions.
+
+    On import it asks the terminal, one question at a time with 0.1 s each,
+    whether it draws Sixel or Kitty images and how big a cell is: too short
+    over SSH, and the late answers then arrive as stray characters in the
+    app. Our widgets pick their renderer from our own detection
+    (`terminal_query`, one round trip), so the library is imported while
+    stdout says it is not a terminal, and only the window size the system
+    knows is kept for its cell size (`_prime_cell_size` fills in the rest).
+    Windows keeps the library's own questions: there is no POSIX terminal to
+    ask the way `terminal_query` does.
+    """
+    if os.name == "nt" or "textual_image.renderable" in sys.modules or not sys.__stdout__:
+        return
+    real = sys.__stdout__
+
+    class _NotATerminal:
+        def __getattr__(self, name: str):  # noqa: ANN204
+            return getattr(real, name)
+
+        def isatty(self) -> bool:
+            return False
+
+    sys.__stdout__ = _NotATerminal()  # type: ignore[assignment]
+    try:
+        import textual_image.renderable  # noqa: F401
+        import textual_image.widget  # noqa: F401  (it measures the cell on import)
+    except Exception:  # pragma: no cover - images then fall back as before
+        return
+    finally:
+        sys.__stdout__ = real
+    _prime_cell_size(None)
+
+
+def _prime_cell_size(answered: tuple[int, int] | None) -> None:
+    """Tell `textual_image` how big a cell is: the system's window size when
+    it knows, else the terminal's answer, else its usual default."""
+    try:
+        from textual_image._terminal import CellSize, get_cell_size
+    except Exception:  # pragma: no cover
+        return
+    from opengrader.tui.terminal_query import system_cell_size
+
+    width, height = system_cell_size() or answered or (10, 20)
+    setattr(get_cell_size, "_result", CellSize(width, height))
+
+
+_load_textual_image_quietly()
+
+
+def _ask_terminal():  # noqa: ANN202 - TerminalAnswers | GraphicsProtocol | None
+    from opengrader.tui.terminal_query import ask_terminal
+
+    answers = ask_terminal()
+    return answers if answers is not None else _query_terminal()
+
+
 def _query_terminal() -> GraphicsProtocol | None:
     try:
         from textual_image.renderable import Image as auto_renderable
@@ -160,7 +220,7 @@ def detect_graphics_capability(
     query: Callable[[], GraphicsProtocol | None] | None = None,
 ) -> GraphicsCapability:
     environ = os.environ if environ is None else environ
-    query = _query_terminal if query is None else query
+    query = _ask_terminal if query is None else query
 
     explicit = (override or "").strip().lower()
     if explicit == "auto":
@@ -191,23 +251,68 @@ def detect_graphics_capability(
 
     from_environment = _detect_from_environment(environ)
     if from_environment is not None:
+        if from_environment.pixel_accurate and query is _ask_terminal:
+            # Known by name, but the image still needs the cell's size, which
+            # the system often does not report over SSH: ask for that alone.
+            from opengrader.tui.terminal_query import system_cell_size
+
+            if system_cell_size() is None:
+                answers = query()
+                _prime_cell_size(getattr(answers, "cell_size", None))
         return from_environment
 
     queried = query()
-    if queried is not None:
+    if queried is None or isinstance(queried, str):
+        if queried is not None:
+            return GraphicsCapability(
+                queried,
+                source="query",
+                detail="reported by the terminal's capability query",
+            )
         return GraphicsCapability(
-            queried,
-            source="query",
-            detail="reported by the terminal's capability query",
+            "halfcell",
+            source="fallback",
+            detail=(
+                "this terminal reported no image support; crops render as coarse "
+                "colour blocks"
+            ),
         )
 
+    from opengrader.tui.terminal_query import ENV_TIMEOUT
+
+    answers = queried
+    _prime_cell_size(answers.cell_size)
+    where = " over SSH" if answers.over_ssh else ""
+    if not answers.answered:
+        return GraphicsCapability(
+            "halfcell",
+            source="fallback",
+            seconds=answers.seconds,
+            detail=(
+                f"the terminal did not answer within {answers.timeout:g} s{where}; "
+                f"crops render as coarse colour blocks. Name the protocol with "
+                f"{ENV_OVERRIDE}=kitty|sixel|iterm2, or wait longer with "
+                f"{ENV_TIMEOUT}=<seconds>"
+            ),
+        )
+    # Sixel before Kitty, as textual_image chooses: Konsole and WezTerm report
+    # Kitty graphics but draw our images only with Sixel.
+    protocol: GraphicsProtocol | None = "sixel" if answers.sixel else "kitty" if answers.kitty else None
+    if protocol is None:
+        return GraphicsCapability(
+            "halfcell",
+            source="query",
+            seconds=answers.seconds,
+            detail=(
+                "this terminal answered that it draws no images; crops render "
+                "as coarse colour blocks"
+            ),
+        )
     return GraphicsCapability(
-        "halfcell",
-        source="fallback",
-        detail=(
-            "this terminal reported no image support; crops render as coarse "
-            "colour blocks"
-        ),
+        protocol,
+        source="query",
+        seconds=answers.seconds,
+        detail=f"reported by the terminal{where} in {answers.seconds:.2f} s",
     )
 
 
@@ -245,13 +350,22 @@ def graphics_report(capability: GraphicsCapability | None = None) -> str:
             else "NOT rendered in the terminal (low-fidelity preview only)"
         ),
     ]
+    if capability.seconds is not None:
+        lines.append(f"Detection took    : {capability.seconds:.2f} s")
     if capability.detail:
         lines.append(f"Note              : {capability.detail}")
     lines.append(f"External viewer   : {describe_external_viewer()}")
     lines.append("")
     lines.append(
         "Force a protocol with --graphics "
-        f"{{{','.join(PROTOCOL_CHOICES)}}} or {ENV_OVERRIDE}=<protocol>."
+        f"{{{','.join(PROTOCOL_CHOICES)}}} or {ENV_OVERRIDE}=<protocol> "
+        "(skips asking the terminal: the fastest start, over SSH too)."
+    )
+    from opengrader.tui.terminal_query import ENV_TIMEOUT, LOCAL_TIMEOUT, SSH_TIMEOUT
+
+    lines.append(
+        f"A terminal that never answers is waited for {LOCAL_TIMEOUT:g} s "
+        f"({SSH_TIMEOUT:g} s over SSH); change it with {ENV_TIMEOUT}=<seconds>."
     )
     if not capability.pixel_accurate:
         lines.append(

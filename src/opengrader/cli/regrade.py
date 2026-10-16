@@ -22,7 +22,7 @@ Examples:
   uv run regrade add --submissions out/subs/ --student 012345 --question q3 \\
       --reason "Valid alternative method deserves partial credit."
   uv run regrade add --submissions out/subs/ --student 012345 \\
-      --reason "Whole-exam total looks off."          # whole-assignment dispute
+      --reason "Whole-assignment total looks off."          # whole-assignment dispute
   uv run regrade list --submissions out/subs/                     # open only
   uv run regrade list --submissions out/subs/ --all              # every request
   uv run regrade resolve rg-1a2b3c4d --submissions out/subs/ --note "Regraded: +5"

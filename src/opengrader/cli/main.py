@@ -17,7 +17,7 @@ PROGRAM_NAME = "opengrader"
 EXIT_INTERRUPTED = 130
 
 UNADVERTISED_ALIASES = frozenset(
-    {"opengrader-run", "opengrader-providers", "opengrader-data-flow"}
+    {"opengrader-run", "opengrader-providers", "opengrader-data-flow", "opengrader-share"}
 )
 
 
@@ -126,7 +126,7 @@ COMMANDS: tuple[Subcommand, ...] = (
     Subcommand(
         name="qa-file",
         target="opengrader.cli.qa_file:command",
-        summary="validate a QA file; print exam templates from it",
+        summary="validate a QA file; print assignment templates from it",
         section=SECTION_PREPARE,
         folder_tool=True,
     ),
@@ -165,6 +165,20 @@ COMMANDS: tuple[Subcommand, ...] = (
         summary="read each student PDF into a .submission.md plus answer crops",
         section=SECTION_INTAKE,
         aliases=("extract",),
+        folder_tool=True,
+    ),
+    Subcommand(
+        name="share",
+        target="opengrader.cli.share:command",
+        summary="let other accounts on this computer grade in your workspace",
+        section=SECTION_GRADERS,
+        aliases=("opengrader-share",),
+    ),
+    Subcommand(
+        name="merge-submissions",
+        target="opengrader.cli.merge_submissions:command",
+        summary="join a paper the splitter cut in two, keeping its grades",
+        section=SECTION_INTAKE,
         folder_tool=True,
     ),
     Subcommand(
@@ -474,7 +488,7 @@ as before; this is one door onto the same tools, not a replacement for them.
 @click.version_option(version=_version(), prog_name=PROGRAM_NAME)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """Opengrader — grade paper exams on your own machine.
+    """Opengrader — grade paper assignments on your own machine.
 
     Start with `opengrader doctor` to check the machine, then
     `opengrader run` to take a stack of scans all the way to gradeable work,

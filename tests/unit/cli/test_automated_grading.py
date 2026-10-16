@@ -522,7 +522,7 @@ def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> N
     assert pulled == [app_config.resolve().text_model]
 
 
-def test_unknown_version_falls_back_to_first_version(tmp_path: Path) -> None:
+def test_an_unknown_version_gets_no_answer_key_rather_than_the_first(tmp_path: Path) -> None:
     from opengrader.cli.automated_grading import _solution_entries_for_submission
     from opengrader.core.submissions import StudentSubmissionDocument
 
@@ -560,9 +560,9 @@ def test_unknown_version_falls_back_to_first_version(tmp_path: Path) -> None:
         questions=[],
     )
 
-    entries = _solution_entries_for_submission(qa_doc, document)
-    assert any(entry.prompt == "PromptA" for entry in entries.values())
-    assert not any(entry.prompt == "PromptB" for entry in entries.values())
+    # Grading a Version Z paper against Version A would look right and be
+    # wrong: nothing is graded until someone picks its version.
+    assert _solution_entries_for_submission(qa_doc, document) == {}
 
 
 def _journal_entries(submissions_dir: Path):  # noqa: ANN202

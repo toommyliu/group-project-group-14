@@ -100,6 +100,7 @@ _REVIEW_SEVERITY_MARKERS = {
 }
 
 _REVIEW_REASON_LABELS = {
+    "version_unknown": "Version unknown",
     "missing_student_id": "Missing student ID",
     "malformed_student_id": "Suspect student ID",
     "missing_student_name": "Missing student name",

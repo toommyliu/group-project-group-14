@@ -35,11 +35,11 @@ from opengrader.core.pipeline import (
     PipelineReport,
     PipelineRequest,
     StageOutcome,
-    StagePlan,
     StageStatus,
     auto_grade_pending,
     plan_pipeline,
     refine_argv,
+    section_requests,
     run_pipeline,
 )
 from opengrader.core.pipeline_settings import (
@@ -71,12 +71,16 @@ from opengrader.core.class_folder import (
     ROLE_SCAN,
     ROLE_SUBMISSIONS,
     ROLE_TEMPLATE,
+    AssignmentFolders,
     ClassFolderScan,
     describe_class_folder,
     find_answer_key_source,
+    find_assignment_folders,
+    is_workspace,
     scan_class_folder,
 )
 from opengrader.core.course import COURSE_FILENAME
+from opengrader.core.roster import parse_roster_arg
 from opengrader.core.recents import load_recents
 from opengrader.tui.ui.screens.ai_settings_screen import AISettingsScreen
 from opengrader.tui.ui.screens.answer_fill_screen import AnswerFillScreen
@@ -88,6 +92,7 @@ from opengrader.tui.ui.screens.handoff_screen import GraderPacketScreen, MergeSc
 from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.provider_screen import ProviderScreen
 from opengrader.tui.ui.screens.page_order_screen import PageOrderScreen
+from opengrader.tui.ui.screens.split_review_screen import SplitReviewScreen
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen, PathPickMode
 from opengrader.tui.ui.screens.prepare_folder_screen import (
     ACTION_AUTO_GRADE,
@@ -96,6 +101,7 @@ from opengrader.tui.ui.screens.prepare_folder_screen import (
     ACTION_PREPARE,
     ACTION_SETTINGS,
     ACTION_SKIP,
+    ACTION_WORKSPACE,
     PrepareFolderScreen,
 )
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
@@ -315,6 +321,8 @@ class SetupScreen(OutlineButtons, Vertical):
     SetupScreen #pipe-parallel-options,
     SetupScreen #pipe-region-map-area,
     SetupScreen #pipe-rosters-area,
+    SetupScreen #pipe-scans-area,
+    SetupScreen #pipe-preview-output,
     SetupScreen #tmpl-bubble-note,
     SetupScreen #tmpl-batch-area,
     SetupScreen #tmpl-copies-area,
@@ -322,7 +330,8 @@ class SetupScreen(OutlineButtons, Vertical):
         height: auto;
     }
 
-    SetupScreen #pipe-roster-list {
+    SetupScreen #pipe-roster-list,
+    SetupScreen #pipe-scan-list {
         height: 6;
         margin-top: 1;
     }
@@ -513,6 +522,14 @@ class SetupScreen(OutlineButtons, Vertical):
                             compact=True,
                             classes=f"{button_roles.OPEN} hidden",
                         ),
+                        # A folder of several assignments: offered when one is
+                        # chosen (`_scan_launch_folder`), hidden otherwise.
+                        Button(
+                            "Make this a workspace…",
+                            id="workspace-button",
+                            compact=True,
+                            classes=f"{button_roles.OPEN} hidden",
+                        ),
                         Button(
                             "Open in browser",
                             id="browser-open-button",
@@ -694,6 +711,35 @@ class SetupScreen(OutlineButtons, Vertical):
                             )
 
                         yield Checkbox(
+                            "One scan per class section",
+                            id="pipe-many-scans",
+                        )
+                        with Vertical(id="pipe-scans-area", classes="hidden"):
+                            yield Static(
+                                "One scanned PDF per line, in the form "
+                                "[b]path/to/section-01.pdf=Section 01[/b]. The "
+                                "'=Section' part is optional: a file named after "
+                                "its section (section-01.pdf, Sec B.pdf) is filled "
+                                "in for you when the folder holds them. Each scan "
+                                "is checked, split and read on its own; every "
+                                "submission is tagged with its section and all of "
+                                "them are graded together, against one answer key. "
+                                "A section's roster is the line naming the same "
+                                "section under the box below, else the roster in "
+                                "Settings. These replace the scanned bundle above.",
+                                classes="card-hint",
+                            )
+                            yield TextArea(id="pipe-scan-list")
+                            yield self._card_actions(
+                                Button(
+                                    "Browse & add scan",
+                                    id="browse-pipe-scan-list",
+                                    classes=f"browse-button {button_roles.OPEN}",
+                                    compact=True,
+                                )
+                            )
+
+                        yield Checkbox(
                             "This stack mixes several class sections",
                             id="pipe-many-rosters",
                         )
@@ -799,7 +845,21 @@ class SetupScreen(OutlineButtons, Vertical):
                             compact=True,
                         ),
                     )
-                    yield Static("", id="pipe-preview-output", classes="card-hint hidden")
+                    # Preview: what a run would do in plain words first, then
+                    # the tools' own plan for anyone who wants it.
+                    with Vertical(id="pipe-preview-output", classes="hidden"):
+                        yield Static("", id="pipe-preview-summary", markup=False)
+                        with Collapsible(
+                            title="Technical details — each step and its command",
+                            id="pipe-preview-technical",
+                            collapsed=True,
+                        ):
+                            yield Static(
+                                "",
+                                id="pipe-preview-details",
+                                classes="card-hint",
+                                markup=False,
+                            )
                     with Vertical(id="pipe-progress", classes="hidden"):
                         yield ProgressBar(
                             id="pipe-progress-bar", total=None, show_eta=True
@@ -1382,7 +1442,7 @@ class SetupScreen(OutlineButtons, Vertical):
                         "shared folder. This is for the other arrangement: a TA "
                         "takes a copy away and grades it on their own machine. "
                         "The copy they get replaces every name and student id "
-                        "with a code and leaves the scanned exams behind, so "
+                        "with a code and leaves the scanned assignments behind, so "
                         "handing it over gives nothing away — only you hold the "
                         "file that turns the codes back into students, and "
                         "merging their work back needs it.",
@@ -1492,6 +1552,8 @@ class SetupScreen(OutlineButtons, Vertical):
                 self.query_one("#pipe-use-template", Checkbox).value = False
         elif event.checkbox.id == "pipe-many-rosters":
             self.query_one("#pipe-rosters-area").set_class(not event.value, "hidden")
+        elif event.checkbox.id == "pipe-many-scans":
+            self.query_one("#pipe-scans-area").set_class(not event.value, "hidden")
         elif event.checkbox.id == "pipe-parallel":
             self.query_one("#pipe-parallel-options").set_class(not event.value, "hidden")
         elif event.checkbox.id == "browser-enabled":
@@ -1527,8 +1589,12 @@ class SetupScreen(OutlineButtons, Vertical):
             _apply,
         )
 
-    def _append_roster_path(self) -> None:
-        text_area = self.query_one("#pipe-roster-list", TextArea)
+    def _append_roster_path(
+        self,
+        list_id: str = "pipe-roster-list",
+        title: str = "Choose a roster file (.tsv or .csv)",
+    ) -> None:
+        text_area = self.query_one(f"#{list_id}", TextArea)
 
         def _apply(path: Path | None) -> None:
             if path is None:
@@ -1538,16 +1604,19 @@ class SetupScreen(OutlineButtons, Vertical):
                 existing += "\n"
             text_area.text = f"{existing}{path}\n"
 
-        self.app.push_screen(
-            PathPickerScreen(title="Choose a roster file (.tsv or .csv)", mode="file"),
-            _apply,
-        )
+        self.app.push_screen(PathPickerScreen(title=title, mode="file"), _apply)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id or ""
         if button_id == "browse-pipe-roster-list":
             event.stop()
             self._append_roster_path()
+            return
+        if button_id == "browse-pipe-scan-list":
+            event.stop()
+            self._append_roster_path(
+                "pipe-scan-list", "Choose one section's scanned PDF"
+            )
             return
         if button_id.startswith("browse-"):
             input_id = button_id.removeprefix("browse-")
@@ -1561,6 +1630,8 @@ class SetupScreen(OutlineButtons, Vertical):
             self._open_in_browser()
         elif event.button.id == "answers-button":
             self._add_answers()
+        elif event.button.id == "workspace-button":
+            self._on_workspace_button()
         elif event.button.id == "run-answer-key":
             self._run_answer_key()
         elif event.button.id == "run-refine":
@@ -1922,6 +1993,29 @@ class SetupScreen(OutlineButtons, Vertical):
         raw = self.query_one("#pipe-roster-list", TextArea).text
         return tuple(line.strip() for line in raw.splitlines() if line.strip())
 
+    def _section_scans(self) -> tuple[str, ...]:
+        """The `PDF[=SECTION]` lines, one scan per section, or () when not in use."""
+        if not self.query_one("#pipe-many-scans", Checkbox).value:
+            return ()
+        raw = self.query_one("#pipe-scan-list", TextArea).text
+        return tuple(line.strip() for line in raw.splitlines() if line.strip())
+
+    def _autofill_lines(
+        self, list_id: str, checkbox_id: str, lines: tuple[str, ...]
+    ) -> None:
+        """`_autofill` for a one-per-line box: what the user typed survives a
+        re-scan; what a scan filled is replaced, and its box ticked to match."""
+        autofilled: dict[str, str] = getattr(self, "_autofilled", {})
+        self._autofilled = autofilled
+        area = self.query_one(f"#{list_id}", TextArea)
+        current = area.text.strip()
+        if current and current != autofilled.get(list_id, "").strip():
+            return
+        text = "".join(f"{line}\n" for line in lines)
+        area.text = text
+        autofilled[list_id] = text
+        self.query_one(f"#{checkbox_id}", Checkbox).value = bool(lines)
+
     def _run_refine(self) -> None:
         request = self._build_pipeline_request()
         if request is None:
@@ -2032,6 +2126,17 @@ class SetupScreen(OutlineButtons, Vertical):
         self._autofill(
             "pipe-template", found.blank_template, checkbox_id="pipe-use-template"
         )
+        self._autofill_lines(
+            "pipe-scan-list",
+            "pipe-many-scans",
+            tuple(f"{item.path}={item.section}" for item in found.section_scans),
+        )
+        if found.section_scans:
+            self._autofill_lines(
+                "pipe-roster-list",
+                "pipe-many-rosters",
+                tuple(f"{item.path}={item.section}" for item in found.section_rosters),
+            )
 
         summary = self.query_one("#pipe-folder-summary", Static)
         summary.update("\n".join(describe_class_folder(found)))
@@ -2041,7 +2146,9 @@ class SetupScreen(OutlineButtons, Vertical):
 
         # The scan and answer-key fields are tucked away; show them only when
         # the folder could not answer for itself.
-        has_scan = bool(self.query_one("#pipe-scan", Input).value.strip())
+        has_scan = bool(self.query_one("#pipe-scan", Input).value.strip()) or bool(
+            self._section_scans()
+        )
         if not has_scan or found.ambiguity(ROLE_SCAN) or found.ambiguity(ROLE_QA):
             self.query_one("#pipe-advanced", Collapsible).collapsed = False
         if found.ambiguity(ROLE_ROSTER) or found.ambiguity(ROLE_TEMPLATE):
@@ -2094,6 +2201,13 @@ class SetupScreen(OutlineButtons, Vertical):
             f"{entry}\n" for entry in saved.section_rosters
         )
         tick("pipe-many-rosters", saved.use_section_rosters)
+        # Saved lines are ones typed by hand; none saved keeps what the folder
+        # scan found (a section added since is picked up next time).
+        if saved.section_scans or not saved.use_section_scans:
+            self.query_one("#pipe-scan-list", TextArea).text = "".join(
+                f"{entry}\n" for entry in saved.section_scans
+            )
+        tick("pipe-many-scans", saved.use_section_scans)
         tick("pipe-reorder", saved.reorder_pages)
         tick("pipe-draft-rubrics", saved.draft_rubrics)
 
@@ -2115,6 +2229,12 @@ class SetupScreen(OutlineButtons, Vertical):
 
         pages = self.query_one("#pipe-pages", Input).value.strip()
         raw_rosters = self.query_one("#pipe-roster-list", TextArea).text
+        raw_scans = self.query_one("#pipe-scan-list", TextArea).text
+        if raw_scans.strip() == getattr(self, "_autofilled", {}).get(
+            "pipe-scan-list", ""
+        ).strip():
+            # Found by the folder scan: found again next time.
+            raw_scans = ""
         return FolderPipelineSettings(
             scan=override("pipe-scan"),
             qa_file=override("pipe-qa"),
@@ -2128,6 +2248,10 @@ class SetupScreen(OutlineButtons, Vertical):
             use_section_rosters=ticked("pipe-many-rosters"),
             section_rosters=tuple(
                 line.strip() for line in raw_rosters.splitlines() if line.strip()
+            ),
+            use_section_scans=ticked("pipe-many-scans"),
+            section_scans=tuple(
+                line.strip() for line in raw_scans.splitlines() if line.strip()
             ),
             reorder_pages=ticked("pipe-reorder"),
             draft_rubrics=ticked("pipe-draft-rubrics"),
@@ -2223,7 +2347,13 @@ class SetupScreen(OutlineButtons, Vertical):
             )
 
     def on_recent_list_chosen(self, event: RecentList.Chosen) -> None:
-        # Exactly what Launch Grading does, with the pair recorded last time.
+        """Open a recent folder, or only choose it when there are two ways to.
+
+        With *Open in browser* on the card, a recent entry fills the card
+        (folder, answer key, submissions) and waits for Launch Grading or
+        Open in browser. Without it, Launch Grading is the only way, so the
+        entry opens straight away with the pair recorded last time.
+        """
         event.stop()
         item = event.item
         if not item.qa_file or not item.submissions:
@@ -2232,7 +2362,38 @@ class SetupScreen(OutlineButtons, Vertical):
                 severity="error",
             )
             return
-        self.post_message(self.LaunchRequested(item.qa_file, item.submissions))
+        if self.query_one("#browser-open-button").has_class("hidden"):
+            self.post_message(self.LaunchRequested(item.qa_file, item.submissions))
+            return
+        self._choose_recent(item)
+
+    def _choose_recent(self, item) -> None:  # noqa: ANN001 - core.recents.RecentItem
+        """Fill the card with a recent entry, exactly as recorded, and wait."""
+        autofilled: dict[str, str] = getattr(self, "_autofilled", {})
+        self._autofilled = autofilled
+        self.query_one("#tui-class-folder", Input).value = item.path
+        for input_id, value in (
+            ("tui-qa-path", item.qa_file),
+            ("tui-sub-path", item.submissions),
+        ):
+            self.query_one(f"#{input_id}", Input).value = value
+            # Filled in, not typed: choosing another folder replaces them.
+            autofilled[input_id] = value
+        # The pair is the one recorded, so Launch Grading must not re-scan the
+        # folder and perhaps pick a different answer key.
+        self._launch_folder_scanned = item.path
+        self._launch_assignments = None
+        self.query_one("#workspace-button").add_class("hidden")
+        self._refresh_answers_button()
+        title = item.title or Path(item.path).name
+        summary = self.query_one("#tui-folder-summary", Static)
+        summary.update(
+            f"{title} — answer key {Path(item.qa_file).name}, submissions "
+            f"{Path(item.submissions).name}/.\nPress Launch Grading to grade "
+            "here, or Open in browser."
+        )
+        summary.remove_class("hidden")
+        self.query_one("#launch-button", Button).focus()
 
     def on_recent_list_forgotten(self, event: RecentList.Forgotten) -> None:
         event.stop()
@@ -2269,16 +2430,231 @@ class SetupScreen(OutlineButtons, Vertical):
         self._launch_folder_scanned = folder
         self._refresh_answers_button()
 
+        lines = describe_class_folder(found, GRADING_ROLES, include_notes=False)
+        assignments: AssignmentFolders | None = None
+        own_workspace = is_workspace(found.folder)
+        if own_workspace:
+            lines = self._workspace_lines(found)
+        elif (
+            found.qa_file is None
+            and found.ambiguity(ROLE_QA) is None
+            and found.submissions is None
+        ):
+            # No answer key or submissions of its own: perhaps a folder of
+            # assignments. (Its own scan finds their submissions and scans as
+            # candidates, so what it says here is not the whole story.)
+            assignments = find_assignment_folders(found.folder)
+            if not assignments.assignments and not assignments.workspaces:
+                assignments = None
+            else:
+                lines = self._assignment_folders_lines(assignments)
+        self._launch_assignments = assignments
+        self._set_workspace_action(found.folder, own_workspace, assignments)
+
         summary = self.query_one("#tui-folder-summary", Static)
-        summary.update(
-            "\n".join(
-                describe_class_folder(found, GRADING_ROLES, include_notes=False)
-            )
-        )
+        summary.update("\n".join(lines))
         summary.remove_class("hidden")
-        if found.qa_file is None or found.submissions is None:
+        if (
+            (found.qa_file is None or found.submissions is None)
+            and assignments is None
+            and not own_workspace
+        ):
             self.query_one("#launch-files", Collapsible).collapsed = False
         return found
+
+    def _set_workspace_action(
+        self,
+        folder: Path,
+        own_workspace: bool,
+        assignments: AssignmentFolders | None,
+    ) -> None:
+        """One button, worded for the folder: *Open workspace* when it is one,
+        *Open "Midterm" workspace* when one subfolder is, *Make this a
+        workspace…* for a folder of assignments, and hidden otherwise.
+        Nothing opens without a press: classic never redirects by itself."""
+        action: tuple[str, Path] | None = None
+        label = ""
+        if own_workspace:
+            action, label = ("open", folder), "Open workspace"
+        elif assignments is not None and len(assignments.workspaces) == 1:
+            inner = assignments.workspaces[0]
+            name = inner.name if len(inner.name) <= 24 else inner.name[:23] + "…"
+            action, label = ("open", inner), f"Open “{name}” workspace"
+        elif assignments is not None and assignments.is_workspace_candidate:
+            action, label = ("make", folder), "Make this a workspace…"
+        self._workspace_action = action
+        button = self.query_one("#workspace-button", Button)
+        if label:
+            button.label = label
+        button.set_class(action is None, "hidden")
+
+    @staticmethod
+    def _workspace_lines(found: ClassFolderScan) -> list[str]:
+        """What the card says about a folder that is a workspace."""
+        lines = ["This folder is a workspace."]
+        try:
+            from opengrader.core.workspace.store import Workspace
+
+            titles = [item.title for item in Workspace(found.folder).assignments()]
+        except Exception:  # noqa: BLE001 - an unreadable database still opens
+            titles = []
+        if titles:
+            shown = ", ".join(titles[:5]) + (
+                f" and {len(titles) - 5} more" if len(titles) > 5 else ""
+            )
+            lines[0] = f"This folder is a workspace with {len(titles)} assignment(s): {shown}."
+        lines.append(
+            "Open workspace opens its assignment list, shared with the browser app."
+        )
+        if found.qa_file is not None and found.submissions is not None:
+            lines.append(
+                "Launch Grading grades the files here in place instead; those "
+                "grades reach the workspace only when it imports the folder again."
+            )
+        return lines
+
+    def _on_workspace_button(self) -> None:
+        action = getattr(self, "_workspace_action", None)
+        if action is None:
+            return
+        kind, path = action
+        if kind == "open":
+            self._open_workspace(path)
+        else:
+            self._offer_workspace()
+
+    def _open_workspace(self, root: Path) -> None:
+        """Close classic and open an existing workspace (`main._after_classic`)."""
+        from opengrader.tui.make_workspace import OpenWorkspaceRequest
+
+        if getattr(self, "extraction_in_progress", False):
+            self.app.notify(
+                "A folder is being prepared. Open the workspace when it is done.",
+                severity="warning",
+            )
+            return
+        self.app.exit(OpenWorkspaceRequest(root=root))
+
+    @staticmethod
+    def _assignment_folders_lines(
+        found: AssignmentFolders, *, advice: bool = True
+    ) -> list[str]:
+        """What a folder of assignments holds, for the Start grading card."""
+
+        def name(path: Path) -> str:
+            return f"{path.relative_to(found.folder).as_posix()}/"
+
+        lines = (
+            [
+                f"This folder holds {len(found.assignments)} assignment(s), each "
+                "with its own answer key:"
+            ]
+            if found.assignments
+            else []
+        )
+        for item in found.assignments:
+            if item.submissions is not None:
+                count = sum(1 for _ in item.submissions.rglob("*.submission.md"))
+                state = f"ready: {count} submission(s)"
+            else:
+                state = "scans not prepared yet"
+            lines.append(f"  {'✓' if item.submissions else '·'} {name(item.folder):<22} {state}")
+        for group in found.same_key:
+            lines.append(
+                "! "
+                + " and ".join(name(path) for path in group)
+                + " have the same answer key: sections of one assignment. Put "
+                "their scans in one folder, one scan per section, and prepare "
+                "it once (Prepare an assignment → Advanced settings)."
+            )
+        for path in found.workspaces:
+            opens = (
+                f"Open “{path.name}” workspace opens it"
+                if len(found.workspaces) == 1
+                else "choose it above to open it"
+            )
+            lines.append(
+                f"! {name(path)} is a workspace of its own: {opens}. A "
+                "workspace cannot hold another, so this folder cannot become one."
+            )
+        if advice and found.is_workspace_candidate:
+            lines.append(
+                "A workspace keeps them together: one list of assignments to "
+                "grade from, shared with the browser app. Make this a "
+                "workspace… sets it up."
+            )
+        return lines
+
+    def _offer_workspace(self) -> None:
+        """Make this folder of assignments a workspace, after asking.
+
+        Classic never opens a workspace itself: on a yes the app closes with
+        a `MakeWorkspaceRequest`, and `classic_command` imports the ready
+        assignments and opens the workspace's assignment list.
+        """
+        from opengrader.tui.make_workspace import MakeWorkspaceRequest
+
+        found: AssignmentFolders | None = getattr(self, "_launch_assignments", None)
+        if found is None or not found.is_workspace_candidate:
+            self.app.notify(
+                "Choose a folder whose subfolders each hold an assignment.",
+                severity="error",
+            )
+            return
+        if getattr(self, "extraction_in_progress", False):
+            self.app.notify(
+                "A folder is being prepared. Make the workspace when it is done.",
+                severity="warning",
+            )
+            return
+        ready = found.ready
+        if not ready:
+            self.app.notify(
+                "None of these assignments is prepared yet. Choose each "
+                "subfolder here and prepare it first; then make the workspace.",
+                severity="error",
+                timeout=10,
+            )
+            return
+        waiting = [item for item in found.assignments if item not in ready]
+        note = (
+            "Each ready assignment is imported with the grades already in its "
+            "files, and the workspace's assignment list opens. From then on "
+            "grade them there (here, in the browser app, or with opengrader "
+            "tui), not in place: the files stay as they are, and W in the "
+            "assignment list writes the workspace's grades back to them."
+        )
+        if waiting:
+            names = ", ".join(f"{item.folder.name}/" for item in waiting)
+            note += (
+                f" Not prepared yet, so left out: {names}. Add each later with "
+                "`opengrader run <its folder>`, which publishes into this workspace."
+            )
+
+        def answered(action: str | None) -> None:
+            if action == ACTION_WORKSPACE:
+                self.app.exit(
+                    MakeWorkspaceRequest(
+                        root=found.folder,
+                        assignments=tuple(
+                            (item.qa_file, item.submissions)  # type: ignore[misc]
+                            for item in ready
+                        ),
+                    )
+                )
+
+        self.app.push_screen(
+            PrepareFolderScreen(
+                "Make this folder a workspace?",
+                "\n".join(
+                    [f"Folder: {found.folder}"]
+                    + self._assignment_folders_lines(found, advice=False)
+                ),
+                note,
+                [(ACTION_WORKSPACE, "Make workspace")],
+            ),
+            answered,
+        )
 
     def _launch_grading(self, *, browser: bool = False) -> None:
         """Open the card's folder for grading, or offer to get it ready first.
@@ -2338,6 +2714,24 @@ class SetupScreen(OutlineButtons, Vertical):
             )
             return
 
+        if is_workspace(folder):
+            # Launch Grading on a workspace is a press to open it.
+            self._open_workspace(folder)
+            return
+        assignments: AssignmentFolders | None = getattr(self, "_launch_assignments", None)
+        if assignments is not None and assignments.folder == folder:
+            if assignments.is_workspace_candidate:
+                self._offer_workspace()
+                return
+            if assignments.assignments or assignments.workspaces:
+                self.app.notify(
+                    "This folder holds assignments in its subfolders. Choose one "
+                    "of them to grade it (see the list on the card).",
+                    severity="warning",
+                    timeout=10,
+                )
+                return
+
         two_keys = found.ambiguity(ROLE_QA) is not None
         if found.ambiguity(ROLE_SUBMISSIONS) is not None or (
             found.submissions is not None and two_keys
@@ -2369,7 +2763,9 @@ class SetupScreen(OutlineButtons, Vertical):
             return
 
         self._show_folder_in_pipeline_card(folder)
-        scan = self._clean_path(self.query_one("#pipe-scan", Input).value)
+        scan = self._clean_path(self.query_one("#pipe-scan", Input).value) or (
+            "sections" if self._section_scans() else ""
+        )
         has_key = bool(self.query_one("#pipe-qa", Input).value.strip())
         if not scan or (two_keys and not has_key):
             self._show_pipeline_card()
@@ -2477,7 +2873,7 @@ class SetupScreen(OutlineButtons, Vertical):
                 "assignment or your solutions.\n\n"
                 "With no blank template, the key is also what finds the "
                 "questions on the pages (unless they are Opengrader's own "
-                "printed exam). So start now: the scan is checked and split "
+                "printed assignment). So start now: the scan is checked and split "
                 "into one PDF per student while Create answer key opens for "
                 "you. Reading the answers starts by itself as soon as the "
                 "key is made.",
@@ -2749,8 +3145,14 @@ class SetupScreen(OutlineButtons, Vertical):
         def ticked(checkbox_id: str) -> bool:
             return self.query_one(f"#{checkbox_id}", Checkbox).value
 
+        scans = self._section_scans()
         rows = [
-            ("scanned bundle", shown("pipe-scan")),
+            (
+                "scanned bundle",
+                f"one per section, {len(scans)} sections"
+                if scans
+                else shown("pipe-scan"),
+            ),
             ("answer key", shown("pipe-qa")),
         ]
         if ticked("pipe-many-rosters"):
@@ -2804,6 +3206,8 @@ class SetupScreen(OutlineButtons, Vertical):
             ):
                 self.query_one(f"#{input_id}", Input).value = ""
                 autofilled.pop(input_id, None)
+            autofilled.pop("pipe-scan-list", None)
+            autofilled.pop("pipe-roster-list", None)
             self._apply_folder_settings(FolderPipelineSettings())
             # One-shot overrides belong to the run they were ticked for.
             self.query_one("#pipe-force", Checkbox).value = False
@@ -2933,6 +3337,22 @@ class SetupScreen(OutlineButtons, Vertical):
         if not out:
             self.app.notify("Choose the class folder first.", severity="error")
             return None
+        section_scans = self._section_scans()
+        if self.query_one("#pipe-many-scans", Checkbox).value and not section_scans:
+            self.query_one("#pipe-advanced", Collapsible).collapsed = False
+            self.app.notify(
+                'Add one scan per section, or untick "One scan per class section".',
+                severity="error",
+            )
+            return None
+        if section_scans:
+            # The scans' own folder stands for them where one path is asked.
+            scan = os.path.commonpath(
+                [
+                    str(parse_roster_arg(entry)[0].expanduser().resolve().parent)
+                    for entry in section_scans
+                ]
+            )
         if not scan:
             self.query_one("#pipe-advanced", Collapsible).collapsed = False
             self.app.notify(
@@ -3024,12 +3444,13 @@ class SetupScreen(OutlineButtons, Vertical):
             auto_ollama=current.auto_start,
         )
 
-        return PipelineRequest(
+        request = PipelineRequest(
             scan=Path(scan),
             output_dir=Path(out),
             qa_file=Path(qa) if qa else None,
             roster=roster,
             section_rosters=section_rosters,
+            section_scans=section_scans,
             blank_template=template,
             region_map=region_map,
             pages_per_submission=pages,
@@ -3042,6 +3463,13 @@ class SetupScreen(OutlineButtons, Vertical):
             read_without_key=self.query_one("#pipe-no-key", Checkbox).value,
             draft_rubrics=self.query_one("#pipe-draft-rubrics", Checkbox).value,
         )
+        try:
+            section_requests(request)
+        except ValueError as exc:
+            self.query_one("#pipe-advanced", Collapsible).collapsed = False
+            self.app.notify(str(exc), severity="error", timeout=10)
+            return None
+        return request
 
     def _run_pipeline_preview(self) -> None:
         request = self._build_pipeline_request()
@@ -3054,38 +3482,32 @@ class SetupScreen(OutlineButtons, Vertical):
 
     @work(thread=True, exclusive=True, group="pipeline-preview")
     def _pipeline_preview_worker(self, request: PipelineRequest) -> None:
+        from opengrader.core.pipeline_preview import describe_plan, technical_lines
+
         app = self.app
         try:
             plans = plan_pipeline(request)
+            summary = describe_plan(request, plans).lines()
+            details = technical_lines(plans, request)
         except Exception as exc:
-            app.call_from_thread(
-                self._pipe_preview_finish, None, request.output_dir, str(exc)
-            )
+            app.call_from_thread(self._pipe_preview_finish, None, None, str(exc))
             return
-        app.call_from_thread(self._pipe_preview_finish, plans, request.output_dir, None)
+        app.call_from_thread(self._pipe_preview_finish, summary, details, None)
 
     def _pipe_preview_finish(
         self,
-        plans: tuple[StagePlan, ...] | None,
-        output_dir: Path,
+        summary: list[str] | None,
+        details: list[str] | None,
         error: str | None,
     ) -> None:
         self.query_one("#pipe-run", Button).disabled = False
         self.query_one("#pipe-preview", Button).disabled = False
-        if error is not None:
+        if error is not None or summary is None or details is None:
             self.app.notify(f"Could not build a plan: {error}", severity="error")
             return
-        lines = ["Plan (nothing has been run or written):", ""]
-        for plan in plans:
-            verb = "run" if plan.will_run else plan.status.value
-            lines.append(f"{plan.stage:<12} {verb:<8} {plan.reason}")
-            if plan.command:
-                lines.append(f"             $ {plan.command}")
-        lines.append("")
-        lines.append(f"class folder: {output_dir}")
-        output = self.query_one("#pipe-preview-output", Static)
-        output.update("\n".join(lines))
-        output.remove_class("hidden")
+        self.query_one("#pipe-preview-summary", Static).update("\n".join(summary))
+        self.query_one("#pipe-preview-details", Static).update("\n".join(details))
+        self.query_one("#pipe-preview-output").remove_class("hidden")
 
     def _run_pipeline(
         self,
@@ -3348,6 +3770,10 @@ class SetupScreen(OutlineButtons, Vertical):
             self.app.notify(f"Pipeline failed: {message}", severity="error")
             return
 
+        if report.split_review_needed:
+            self._confirm_split_and_rerun(request, asap, qa_path)
+            return
+
         if report.page_order_review_needed:
             self._confirm_page_order_and_rerun(request, asap, qa_path)
             return
@@ -3488,6 +3914,55 @@ class SetupScreen(OutlineButtons, Vertical):
             return
         self._pipe_start(replace(request, send_to_cloud_confirmed=True), asap, qa_path)
 
+    def _confirm_split_and_rerun(
+        self, request: PipelineRequest, asap: bool, qa_path: str
+    ) -> None:
+        self._pipe_status("Waiting for you to check the split…")
+        self.run_worker(
+            self._ask_split_review(request, asap, qa_path),
+            exclusive=True,
+            group="pipeline-split-review",
+        )
+
+    async def _ask_split_review(
+        self, request: PipelineRequest, asap: bool, qa_path: str
+    ) -> None:
+        """The pipeline paused before extraction because the split looks
+        wrong somewhere: show where, apply the fixes the user ticks, and run
+        again (the split is reused)."""
+        import asyncio
+
+        from opengrader.core.pages.split_review import pending_split_findings
+        from opengrader.core.pipeline import answer_split_review
+
+        def first_pending() -> Path:
+            # With one scan per section, the section the run stopped at.
+            return next(
+                (folder for folder in request.review_dirs if pending_split_findings(folder)),
+                request.extract_source,
+            )
+
+        split_dir = await asyncio.to_thread(first_pending)
+        pending = await asyncio.to_thread(pending_split_findings, split_dir)
+        chosen: tuple[str, ...] | None = ()
+        if pending:
+            chosen = await self.app.push_screen_wait(SplitReviewScreen(pending, split_dir))
+        if chosen is None:
+            self._pipe_reset_buttons()
+            self._pipe_status(
+                f"Paused before extraction — nothing was changed. Check the PDFs in "
+                f"{split_dir}, fix any that need it, then run again."
+            )
+            return
+        await asyncio.to_thread(
+            answer_split_review,
+            request,
+            split_dir,
+            fix=list(chosen),
+            keep=[finding.key for finding in pending],
+        )
+        self._pipe_start(request, asap, qa_path)
+
     def _confirm_page_order_and_rerun(
         self, request: PipelineRequest, asap: bool, qa_path: str
     ) -> None:
@@ -3513,7 +3988,14 @@ class SetupScreen(OutlineButtons, Vertical):
             sort_pages,
         )
 
-        split_dir = request.extract_source
+        def first_pending() -> Path:
+            # With one scan per section, the section the run stopped at.
+            return next(
+                (folder for folder in request.review_dirs if pending_findings(folder)),
+                request.extract_source,
+            )
+
+        split_dir = await asyncio.to_thread(first_pending)
         pending = await asyncio.to_thread(pending_findings, split_dir)
         chosen: tuple[str, ...] | None = ()
         if pending:

@@ -201,7 +201,7 @@ class LlmEvalScreen(OutlineButtons, ModalScreen[float | None]):
                     "optional — one folder per line, all sharing the answer key above",
                 )
                 yield Static(
-                    "Taught this exam before? Add those terms' submissions to "
+                    "Taught this assignment before? Add those terms' submissions to "
                     "measure the model on every class at once. Same answer key "
                     "means same rubric and same point scale, so it is simply a "
                     "bigger sample — which is the only thing that makes a "

@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from textual.widgets import Input
+from textual.widgets import Input, Select
 
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens import CanvasExportScreen, PathPickerScreen
@@ -156,5 +156,48 @@ def test_browse_button_fills_submissions_input(tmp_path: Path) -> None:
 
             assert isinstance(app.screen, CanvasExportScreen)
             assert submissions_input.value == str(tmp_path)
+
+    asyncio.run(run())
+
+
+class _SectionedProvider(FakeDataProvider):
+    def available_sections(self) -> list[str]:
+        return ["Section 01", "Section 02"]
+
+
+def test_a_chosen_section_is_posted_alone(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        export_module, "run_command", lambda _command, argv: calls.append(argv)
+    )
+
+    async def run() -> None:
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=_SectionedProvider())
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+            screen = app.screen
+            screen.query_one("#canvas-export-submissions", Input).value = str(tmp_path)
+            screen.query_one("#canvas-export-course", Input).value = "CS146-02"
+            screen.query_one("#canvas-export-assignment", Input).value = "Quiz 1"
+            section = screen.query_one("#canvas-export-section", Select)
+            assert section.value == ""  # every section, unless one is chosen
+            section.value = "Section 02"
+            await pilot.pause()
+
+            await pilot.click("#canvas-export-run")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            assert calls == [
+                [
+                    "--submissions", str(tmp_path),
+                    "--course", "CS146-02",
+                    "--assignment", "Quiz 1",
+                    "--section", "Section 02",
+                    "--dry-run",
+                ]
+            ]
 
     asyncio.run(run())

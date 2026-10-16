@@ -12,6 +12,25 @@ from opengrader.core.submissions.student_file import IdentityCandidate
 
 
 @dataclass(frozen=True)
+class SplitPiece:
+    """One submission as the splitter cut it, for the join dialog. Named by
+    its file, never the student: grading is anonymous by default."""
+
+    student_item_id: str
+    stem: str
+    pages: int
+    graded: int
+
+
+@dataclass(frozen=True)
+class SplitNeighbours:
+    here: SplitPiece
+    # The submissions scanned just before and after; only these can be joined.
+    before: SplitPiece | None
+    after: SplitPiece | None
+
+
+@dataclass(frozen=True)
 class StudentSummary:
     id: int
     full_name: str
@@ -41,6 +60,10 @@ class ReviewItem:
     def is_identity_flag(self) -> bool:
         reason = getattr(self.reason, "value", self.reason)
         return reason in ("missing_student_id", "malformed_student_id")
+
+    @property
+    def is_version_flag(self) -> bool:
+        return getattr(self.reason, "value", self.reason) == "version_unknown"
 
 
 @dataclass(frozen=True)

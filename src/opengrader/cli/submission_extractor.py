@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import contextlib
+import dataclasses
 import shutil
 import sys
 import tempfile
@@ -729,7 +730,7 @@ class _Hooks:
     help=(
         "Read every answer with Tesseract first and ask the vision model "
         "only about the ones it read badly (empty, or below "
-        "--escalate-confidence). Implies --llm-responses. On an exam whose "
+        "--escalate-confidence). Implies --llm-responses. On an assignment whose "
         "answers are mostly short and legible this is a fraction of the "
         "model calls of --llm-responses alone, and it cannot lose an "
         "answer: a model that reads nothing leaves the OCR text standing."
@@ -768,7 +769,7 @@ class _Hooks:
         "answer, prose and all, and marks the maths up inline. 'pix2tex' is "
         "a dedicated image-to-LaTeX model, markedly better on dense "
         "notation but it transcribes the crop as ONE expression - right for "
-        "an exam whose answers are equations, wrong for one that asks a "
+        "an assignment whose answers are equations, wrong for one that asks a "
         "student to explain. Install it with: uv sync --extra math"
     ),
 )
@@ -813,6 +814,16 @@ class _Hooks:
         "OLLAMA_NUM_PARALLEL). Use --jobs 1 for the old one-at-a-time "
         "behavior; that is also forced automatically by --interactive-roster, "
         "which needs the terminal."
+    ),
+)
+@click.option(
+    "--adopt-only",
+    is_flag=True,
+    hidden=True,
+    help=(
+        "With --resume: read nothing; re-record every submission still "
+        "reusable under its own settings. Run before one PDF of a folder is "
+        "changed (joining two pieces of one paper), so the others stay reused."
     ),
 )
 @click.option(
@@ -945,6 +956,7 @@ def command(
     refine_model: str | None,
     refine_dry_run: bool,
     yes_send_to_cloud: bool,
+    adopt_only: bool,
 ) -> None:
     """Convert scanned per-student submission PDFs into markdown student
     submission files (frontmatter + per-question response image/text).
@@ -1260,16 +1272,19 @@ def command(
                 ),
                 students=len(pdfs),
             )
-            cli_confirm_cloud_send(
-                effective_ai,
-                preflight,
-                yes_send_to_cloud=yes_send_to_cloud,
-                emit=lambda message: print(message, file=sys.stderr),
-                interactive=hooks.prompt_cloud_send,
-            )
+            if not adopt_only:  # nothing is read, so nothing is sent
+                cli_confirm_cloud_send(
+                    effective_ai,
+                    preflight,
+                    yes_send_to_cloud=yes_send_to_cloud,
+                    emit=lambda message: print(message, file=sys.stderr),
+                    interactive=hooks.prompt_cloud_send,
+                )
         print(f"Using Ollama vision model: {ollama_model}")
         try:
             vision_reader = app_config.vision_reader(effective_ai)
+            # Even with --adopt-only: whether the reader is ready is part of
+            # the settings, so this pass must see what a reading would.
             app_config.ensure_ready(effective_ai, purpose="vision")
         except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
@@ -1347,10 +1362,9 @@ def command(
             on_response=on_response if vlm_possible else None,
         )
 
-    settings_id = settings_fingerprint(
+    settings_base: dict[str, object] = (
         {
             "pipeline_version": 2,
-            "scan_warnings": {pdf.name: file_fingerprint(pdf.with_suffix(".scan.json")) for pdf in pdfs},
             "dpi": dpi,
             "lang": lang,
             "deskew": not no_deskew,
@@ -1379,6 +1393,26 @@ def command(
             **({"answer_key_regions": answer_key_regions} if answer_key_regions else {}),
         }
     )
+    # A PDF's scan warnings shape only its own reading, so each record's
+    # settings carry only its own: joining two submissions, or a warning
+    # mended on one, must not make every other student read again over
+    # their grades. The whole-folder form records were written with before
+    # is still accepted, so an unchanged folder is never read again either.
+    legacy_settings_id = settings_fingerprint(
+        {
+            **settings_base,
+            "scan_warnings": {pdf.name: file_fingerprint(pdf.with_suffix(".scan.json")) for pdf in pdfs},
+        }
+    )
+
+    def settings_for(pdf_path: Path) -> str:
+        return settings_fingerprint(
+            {
+                **settings_base,
+                "scan_warnings": {pdf_path.name: file_fingerprint(pdf_path.with_suffix(".scan.json"))},
+            }
+        )
+
     ledger = read_manifest(output_dir) if resume else {}
 
     refine_candidates: dict[str, RefineCandidate] = {}
@@ -1408,15 +1442,28 @@ def command(
 
     jobs: list[ExtractionJob] = []
     skipped: list[Path] = []
+    unread: list[Path] = []
+    adopted = 0
     for pdf_path in pdfs:
         source_sha256 = file_fingerprint(pdf_path)
-        if resume and record_is_reusable(
-            ledger.get(pdf_path.stem),
-            output_dir=output_dir,
-            source_sha256=source_sha256,
-            settings_id=settings_id,
-        ):
+        record = ledger.get(pdf_path.stem)
+        own_settings = settings_for(pdf_path)
+        reusable = {
+            settings: record_is_reusable(
+                record, output_dir=output_dir, source_sha256=source_sha256, settings_id=settings
+            )
+            for settings in (own_settings, legacy_settings_id)
+        } if resume else {}
+        if reusable.get(own_settings) or reusable.get(legacy_settings_id):
+            if not reusable.get(own_settings) and record is not None:
+                # Re-recorded under its own settings, so it stays reused
+                # whatever happens to the other PDFs later.
+                append_record(output_dir, dataclasses.replace(record, settings_id=own_settings))
+                adopted += 1
             skipped.append(pdf_path)
+            continue
+        if adopt_only:
+            unread.append(pdf_path)
             continue
 
         expected_md = output_dir / pdf_path.stem / f"{pdf_path.stem}.submission.md"
@@ -1451,6 +1498,13 @@ def command(
                 page_catalog=page_catalog,
             )
         )
+
+    if adopt_only:
+        emit(
+            f"{len(skipped)} extracted submission(s) kept ({adopted} re-recorded under "
+            f"their own settings); {len(unread)} would be read again. Nothing was read."
+        )
+        return
 
     if skipped:
         emit(f"Resuming: {len(skipped)} already extracted, {len(jobs)} to do")
@@ -1523,7 +1577,7 @@ def command(
                 key=outcome.key,
                 source=str(outcome.pdf_path),
                 source_sha256=outcome.source_sha256,
-                settings_id=settings_id,
+                settings_id=settings_for(outcome.pdf_path),
                 outputs=outcome.outputs,
                 student_id=outcome.student_id,
                 student_name=outcome.student_name,

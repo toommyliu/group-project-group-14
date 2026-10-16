@@ -366,7 +366,7 @@ export function OutlineEditor({
         {lock && <p className="text-muted-foreground">{lock.reason}</p>}
         <FileUpload
           title="Upload the assignment PDF"
-          description="Use the blank exam or quiz students write on. Next you draw a box around each question on it."
+          description="Use the blank assignment students write on. Next you draw a box around each question on it."
           buttonLabel={busy ? 'Uploading…' : 'Select PDF'}
           inputLabel="Upload template PDF"
           accept=".pdf,application/pdf"

@@ -4,6 +4,18 @@ Only the folder's own files are read, plus its immediate subfolders as a
 possible split-PDF directory. Anything that could be two things is reported as
 ambiguous rather than guessed: grading the wrong PDF is far costlier than being
 asked which one.
+
+Two shapes are recognised beyond "one of each":
+
+* **One scan per class section** — several scanned bundles (in the folder, or
+  in one subfolder of it) whose names each say which section they are
+  (`section-01.pdf`, `Sec B scans.pdf`, `period 3.pdf`). They are one
+  assignment: one answer key, graded as one class, each submission tagged
+  with its section. Every candidate must name a different section, or the
+  folder is ambiguous as before. Rosters named the same way are paired with
+  them by section.
+* **Several assignments** (`find_assignment_folders`) — subfolders that each
+  hold their own, different answer key. That is what a workspace is for.
 """
 
 from __future__ import annotations
@@ -45,12 +57,28 @@ _SPLIT_DIR_NAMES = ("split", "split-submissions", "split-pdfs")
 _GENERATED_DIRS = frozenset({"submissions", "student-submissions", "grader-copies"})
 
 _WORD_RE = re.compile(r"[a-z]+")
+# "section-01", "Sec B", "sect_2", "period 3" in a lowercased file stem. The
+# section's own name is digits (with an optional letter) or, after a
+# separator, a single letter; it must not run on into a longer word, so
+# "second", "sections" and "sec-ond" are not sections.
+_SECTION_RE = re.compile(
+    r"(?<![a-z])(section|sect|sec|period)"
+    r"(?:[\s_.\-]+(\d+[a-z]?|[a-z])|(\d+[a-z]?))(?![a-z0-9])"
+)
 
 
 @dataclass(frozen=True)
 class Ambiguity:
     role: str
     candidates: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class SectionFile:
+    """A file that belongs to one class section, by its name."""
+
+    path: Path
+    section: str
 
 
 @dataclass(frozen=True)
@@ -63,6 +91,12 @@ class ClassFolderScan:
     submissions: Path | None = None
     ambiguities: tuple[Ambiguity, ...] = ()
     notes: tuple[str, ...] = ()
+    # One scanned bundle per class section, in place of `scan`. Set only when
+    # every candidate names a different section; `scan` is then None.
+    section_scans: tuple[SectionFile, ...] = ()
+    # Rosters named after the same sections, found only beside section scans;
+    # `roster` is then None.
+    section_rosters: tuple[SectionFile, ...] = ()
 
     def found(self, role: str) -> Path | None:
         return {
@@ -93,11 +127,13 @@ def scan_class_folder(folder: str | Path) -> ClassFolderScan:
         ambiguities=ambiguities,
     )
 
+    roster_candidates = [path for path in files if _is_roster_file(path)]
+    roster_ambiguities: list[Ambiguity] = []
     roster = _pick(
         ROLE_ROSTER,
-        [path for path in files if _is_roster_file(path)],
+        roster_candidates,
         preferred=lambda path: bool(_words(path) & _ROSTER_WORDS),
-        ambiguities=ambiguities,
+        ambiguities=roster_ambiguities,
     )
     for path in files:
         if (
@@ -134,19 +170,46 @@ def scan_class_folder(folder: str | Path) -> ClassFolderScan:
         ambiguities=ambiguities,
     )
 
-    scan = _pick(
-        ROLE_SCAN,
-        bundles,
-        preferred=lambda path: bool(_words(path) & _SCAN_WORDS),
-        ambiguities=ambiguities,
-    )
-    if scan is None and not bundles:
+    scan: Path | None = None
+    section_scans = section_files(bundles)
+    if not section_scans:
         scan = _pick(
             ROLE_SCAN,
-            _split_pdf_dirs(root),
+            bundles,
+            preferred=lambda path: bool(_words(path) & _SCAN_WORDS),
+            ambiguities=ambiguities,
+        )
+    if scan is None and not bundles:
+        split_dirs = _split_pdf_dirs(root)
+        # A subfolder of bundles that each name a section (scans/section-01.pdf,
+        # scans/section-02.pdf) is several scans, not one student per PDF.
+        by_section = [
+            (folder, found)
+            for folder in split_dirs
+            if (found := section_files(_pdfs_in(folder)))
+        ]
+        if len(by_section) == 1:
+            folder, section_scans = by_section[0]
+            split_dirs.remove(folder)
+        scan = _pick(
+            ROLE_SCAN,
+            split_dirs,
             preferred=lambda path: path.name.lower() in _SPLIT_DIR_NAMES,
             ambiguities=ambiguities,
         )
+        if scan is not None and section_scans:
+            # Both a folder of split PDFs and a folder of section scans: which
+            # one this run means is not for the scan to decide.
+            ambiguities.append(
+                Ambiguity(role=ROLE_SCAN, candidates=(scan, section_scans[0].path.parent))
+            )
+            scan, section_scans = None, ()
+
+    section_rosters: tuple[SectionFile, ...] = ()
+    if section_scans and roster is None:
+        section_rosters = section_files(roster_candidates)
+    if not section_rosters:
+        ambiguities.extend(roster_ambiguities)
 
     submissions = _find_submissions(root, ambiguities)
 
@@ -159,7 +222,155 @@ def scan_class_folder(folder: str | Path) -> ClassFolderScan:
         submissions=submissions,
         ambiguities=tuple(ambiguities),
         notes=tuple(notes),
+        section_scans=section_scans,
+        section_rosters=section_rosters,
     )
+
+
+def section_name(path: str | Path) -> str | None:
+    """The class section a file's name says it belongs to, or None.
+
+    `section-01.pdf` → "Section 01", `Sec_b.tsv` → "Section B",
+    `period 3 scans.pdf` → "Period 3". Only the first mention counts.
+    """
+    match = _SECTION_RE.search(Path(path).stem.lower())
+    if match is None:
+        return None
+    word = "Period" if match.group(1) == "period" else "Section"
+    return f"{word} {(match.group(2) or match.group(3)).upper()}"
+
+
+def section_files(paths: list[Path]) -> tuple[SectionFile, ...]:
+    """`paths` as one file per section, or () when they are not that.
+
+    At least two, each naming a section, and no section twice: anything less
+    is not evidence of one file per section, and the caller falls back to
+    treating the files as candidates for one role.
+    """
+    if len(paths) < 2:
+        return ()
+    found: list[SectionFile] = []
+    for path in paths:
+        name = section_name(path)
+        if name is None:
+            return ()
+        found.append(SectionFile(path=path, section=name))
+    if len({section_key(item.section) for item in found}) != len(found):
+        return ()
+    return tuple(sorted(found, key=lambda item: _natural_key(item.section)))
+
+
+def section_key(name: str) -> str:
+    """What two spellings of one section have in common: "Section 01",
+    "section 1" and "SECTION 1" are the same section."""
+    return re.sub(r"\d+", lambda match: str(int(match.group())), name.strip().lower())
+
+
+@dataclass(frozen=True)
+class AssignmentFolders:
+    """What `find_assignment_folders` found in a folder of assignments."""
+
+    folder: Path
+    # Subfolders with their own answer key and something to grade or prepare.
+    assignments: tuple[ClassFolderScan, ...] = ()
+    # Subfolders that share one answer key: sections of one assignment, which
+    # belong together in one folder, not as separate assignments.
+    same_key: tuple[tuple[Path, ...], ...] = ()
+    # Subfolders already a workspace of their own: never nested in another.
+    workspaces: tuple[Path, ...] = ()
+
+    @property
+    def ready(self) -> tuple[ClassFolderScan, ...]:
+        """Assignments whose submissions are read: they can be imported now."""
+        return tuple(
+            item
+            for item in self.assignments
+            if item.qa_file is not None and item.submissions is not None
+        )
+
+    @property
+    def is_workspace_candidate(self) -> bool:
+        """Two or more different assignments, none of them a section of
+        another and none a workspace already."""
+        return len(self.assignments) >= 2 and not self.same_key and not self.workspaces
+
+
+_WORKSPACE_DATABASE = Path(".opengrader/workspace.sqlite3")
+# The browser app's temporary session on one class folder (*Open in browser*)
+# keeps a workspace database too, marked with this file
+# (`core/workspace/folder_session.FOLDER_SESSION`).
+_FOLDER_SESSION_MARKER = Path(".opengrader/folder-session.json")
+
+
+def is_workspace(folder: str | Path) -> bool:
+    """True for a real workspace: its database and no browser-session marker.
+
+    A class folder once opened in the browser has the database as well, but
+    it is still a class folder, graded from its files; `browser_launcher.
+    import_folder` draws the same line.
+    """
+    root = Path(folder).expanduser()
+    return (root / _WORKSPACE_DATABASE).is_file() and not (
+        root / _FOLDER_SESSION_MARKER
+    ).is_file()
+
+
+def find_assignment_folders(folder: str | Path) -> AssignmentFolders:
+    """The assignments in `folder`'s immediate subfolders.
+
+    A subfolder is an assignment when it has exactly one answer key and
+    either submissions or a scan to prepare. Nothing deeper is read, and the
+    folder itself is not an assignment here: it is the would-be workspace.
+    """
+    root = Path(folder).expanduser()
+    assignments: list[ClassFolderScan] = []
+    workspaces: list[Path] = []
+    keys: dict[str, list[Path]] = {}
+    for child in _visible_children(root):
+        if not child.is_dir() or child.name.lower() in _GENERATED_DIRS:
+            continue
+        if is_workspace(child):
+            workspaces.append(child)
+            continue
+        try:
+            found = scan_class_folder(child)
+        except OSError:
+            continue
+        has_work = (
+            found.submissions is not None
+            or found.scan is not None
+            or bool(found.section_scans)
+        )
+        if found.qa_file is None or not has_work:
+            continue
+        assignments.append(found)
+        try:
+            text = found.qa_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        keys.setdefault(" ".join(text.split()), []).append(child)
+    return AssignmentFolders(
+        folder=root,
+        assignments=tuple(assignments),
+        same_key=tuple(tuple(paths) for paths in keys.values() if len(paths) > 1),
+        workspaces=tuple(workspaces),
+    )
+
+
+def _natural_key(text: str) -> tuple:
+    # "Section 2" before "Section 10".
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in re.findall(r"\d+|\D+", text)
+    )
+
+
+def _pdfs_in(directory: Path) -> list[Path]:
+    return [
+        path
+        for path in _visible_children(directory)
+        if path.suffix.lower() == ".pdf" and path.is_file()
+    ]
 
 
 def describe_class_folder(
@@ -173,7 +384,17 @@ def describe_class_folder(
         label = ROLE_LABELS[role]
         found = result.found(role)
         ambiguity = result.ambiguity(role)
-        if found is not None:
+        by_section = {
+            ROLE_SCAN: result.section_scans,
+            ROLE_ROSTER: result.section_rosters,
+        }.get(role, ())
+        if found is None and by_section:
+            names = ", ".join(
+                f"{_shown_name(result.folder, item.path)} ({item.section})"
+                for item in by_section
+            )
+            lines.append(f"✓ {label:<15} one per section: {names}")
+        elif found is not None:
             if found == result.folder:
                 shown = "this folder"
             else:
@@ -190,6 +411,13 @@ def describe_class_folder(
     if include_notes:
         lines.extend(f"! {note}" for note in result.notes)
     return lines
+
+
+def _shown_name(folder: Path, path: Path) -> str:
+    try:
+        return path.relative_to(folder).as_posix()
+    except ValueError:
+        return path.name
 
 
 def _pick(

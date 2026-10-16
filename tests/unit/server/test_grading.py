@@ -161,3 +161,37 @@ def test_pdf_failure_preserves_saved_grade_and_history(workspace, monkeypatch):
     assert store.jobs()[0].status == "failed"
     assert client.get(url).json()["points_awarded"] == 10
     assert len(store.history(store.assignments()[0].id)) == 1
+
+
+def test_a_database_that_cannot_be_written_is_reported_not_a_bare_500(
+    workspace, monkeypatch
+):
+    import sqlite3
+
+    client, url, _path, home = workspace
+    answer = client.get(url).json()
+
+    def refuse(*_args, **_kwargs):
+        raise sqlite3.OperationalError("attempt to write a readonly database")
+
+    monkeypatch.setattr(Workspace, "save_grade", refuse)
+    result = client.put(url, json=edit(answer))
+
+    assert result.status_code == 503
+    detail = result.json()["detail"]
+    assert "attempt to write a readonly database" in detail
+    assert "nothing was saved" in detail
+
+
+def test_a_file_the_server_may_not_write_is_named(workspace, monkeypatch):
+    client, url, _path, _home = workspace
+    answer = client.get(url).json()
+
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(13, "Permission denied", "/class/.opengrader/x")
+
+    monkeypatch.setattr(Workspace, "save_grade", refuse)
+    result = client.put(url, json=edit(answer))
+
+    assert result.status_code == 503
+    assert "not allowed to write /class/.opengrader/x" in result.json()["detail"]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from opengrader.core.concurrency import file_mtime_ns
+from opengrader.core.concurrency import ConcurrentModificationError, file_mtime_ns
 from opengrader.core.curve import read_curve
 from opengrader.core.history import (
     AspectValue,
@@ -22,6 +22,24 @@ from opengrader.core.submissions import (
     load_student_submission_markdown,
     update_student_submission_file,
 )
+
+
+class AnswerChangedByOther(ConcurrentModificationError):
+    """Someone else saved this very answer since it was loaded; theirs is kept."""
+
+    def __init__(self, path: Path, question_id: str, by: str | None) -> None:
+        super().__init__(path)
+        who = by or "Someone else"
+        self.args = (
+            f"{who} changed {question_id} for this student since you opened it, "
+            "so your change was not saved. What they saved is on screen now; "
+            "change it again if it still needs changing.",
+        )
+        self.by = by
+
+
+# How often a save is tried again when the file keeps changing underneath it.
+_MERGE_ATTEMPTS = 3
 
 
 class FileGradingSession:
@@ -180,10 +198,51 @@ class FileGradingSession:
         )
 
     def _update(self, update: StudentSubmissionGradeUpdate) -> None:
-        update_student_submission_file(
-            self.path, update, expected_mtime_ns=self.mtime_ns
-        )
+        try:
+            update_student_submission_file(
+                self.path, update, expected_mtime_ns=self.mtime_ns
+            )
+        except ConcurrentModificationError:
+            self._update_after_another_save(update)
         self.reload()
+
+    def _update_after_another_save(self, update: StudentSubmissionGradeUpdate) -> None:
+        """The file changed since it was loaded: in folder mode, most often a
+        second grader on another question of the same student (each student
+        is one file). Their save is always kept. When they did not touch this
+        question the change is made to the file as it is now; when they did,
+        it is refused and the file re-read, so the screen shows theirs."""
+        for _attempt in range(_MERGE_ATTEMPTS):
+            # The time first: a change after it fails the write and is retried.
+            current_mtime = file_mtime_ns(self.path)
+            on_disk = {
+                question.question_id: question
+                for question in load_student_submission_markdown(self.path).questions
+            }
+            if on_disk.get(update.question_id) != self.questions_by_id.get(update.question_id):
+                self.reload()
+                raise AnswerChangedByOther(self.path, update.question_id, self._last_editor(update.question_id))
+            try:
+                update_student_submission_file(self.path, update, expected_mtime_ns=current_mtime)
+                return
+            except ConcurrentModificationError:
+                continue
+        self.reload()
+        raise ConcurrentModificationError(self.path)
+
+    def _last_editor(self, question_id: str) -> str | None:
+        """Who last changed this answer, from the history, when it says."""
+        from opengrader.core.history.journal import read_journal
+
+        student = self.document.student_id
+        if not student:
+            return None
+        try:
+            entries = read_journal(self._journal.directory)
+        except OSError:
+            return None
+        matching = [e for e in entries if e.student_id == student and e.question_id == question_id]
+        return max(matching, key=lambda e: e.timestamp).actor if matching else None
 
     def sync_pdf_annotations(
         self, question_id: str, *, comment_override: str | None = None

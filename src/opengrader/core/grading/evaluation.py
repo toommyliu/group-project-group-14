@@ -451,7 +451,7 @@ def recommend_threshold(
             min_sample=min_sample,
             reason=(
                 f"not enough evidence: no confidence cutoff covers {min_sample} "
-                "or more human-graded answers. Grade more of the exam by hand, "
+                "or more human-graded answers. Grade more of the assignment by hand, "
                 "or lower --min-sample if you accept a smaller sample."
             ),
         )

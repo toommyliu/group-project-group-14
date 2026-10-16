@@ -123,7 +123,7 @@ def evaluate_tesseract(probe: ToolProbe) -> EnvironmentCheck:
             name=TESSERACT_CHECK_NAME,
             status="broken",
             detail="not installed",
-            impact="Scanned exams extract to empty answers; scan pre-flight cannot check rotation.",
+            impact="Scanned assignments extract to empty answers; scan pre-flight cannot check rotation.",
             fix=fix,
         )
     where = f" at {probe.path}" if probe.path else ""

@@ -37,6 +37,9 @@ _ANALYSIS_DIR = "analysis"
 _GRADEBOOK_FILENAME = "gradebook.csv"
 _ANALYSIS_FILENAME = "analysis-report.pdf"
 
+# The folder for submissions that record no section, in a bundle split by one.
+NO_SECTION = "No section"
+
 ProgressFn = Callable[[str], None]
 
 
@@ -67,6 +70,8 @@ class BundleResult:
     student_pdf_paths: tuple[Path, ...] = ()
     analysis_path: Path | None = None
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    # One folder per class section, when the bundle was split by section.
+    section_dirs: tuple[Path, ...] = ()
 
     @property
     def student_count(self) -> int:
@@ -136,6 +141,40 @@ def _noop(_message: str) -> None:
     return None
 
 
+def section_folder_name(section: str) -> str:
+    """A section's name as a folder name: kept readable ("Section 01"), with
+    only what a file system refuses taken out."""
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", section).strip().strip(".")
+    return re.sub(r"\s+", " ", cleaned).strip() or NO_SECTION
+
+
+def submission_sections(documents: Sequence[StudentSubmissionDocument]) -> list[str]:
+    """The sections these submissions record, in natural order ("Section 2"
+    before "Section 10"), without the blank one."""
+    names = {(document.section or "").strip() for document in documents}
+    names.discard("")
+    return sorted(names, key=_natural_key)
+
+
+def _natural_key(text: str) -> tuple:
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part.lower())
+        for part in re.findall(r"\d+|\D+", text)
+    )
+
+
+def _group_by_section(
+    submissions: Sequence[BundleSubmission],
+) -> list[tuple[str, list[BundleSubmission]]]:
+    groups: dict[str, list[BundleSubmission]] = {}
+    for item in submissions:
+        groups.setdefault((item.document.section or "").strip(), []).append(item)
+    order = submission_sections([item.document for item in submissions])
+    if "" in groups:
+        order.append("")
+    return [(name or NO_SECTION, groups[name]) for name in order]
+
+
 def build_return_bundle(
     submissions_path: str | Path,
     output_dir: str | Path,
@@ -147,8 +186,15 @@ def build_return_bundle(
     progress: ProgressFn | None = None,
     qa_document: object | None = None,
     submissions: Sequence[BundleSubmission] | None = None,
+    by_section: bool = False,
 ) -> BundleResult:
-    """curve=None uses the assignment's saved curve."""
+    """curve=None uses the assignment's saved curve.
+
+    `by_section` adds one folder per class section ("Section 01/"), each with
+    the chosen content for that section's students alone; the class-wide
+    gradebook (with a section column) and analysis stay at the top. Grading
+    state is never kept there: it is an export, made again at will.
+    """
     emit = progress or _noop
     submissions_path = Path(submissions_path).expanduser().resolve()
     output_dir = Path(output_dir).expanduser()
@@ -178,14 +224,107 @@ def build_return_bundle(
     emit(f"Bundle folder: {bundle_dir}")
 
     warnings: list[str] = []
+    groups = _group_by_section(submissions) if by_section else []
+    if by_section and all(name == NO_SECTION for name, _items in groups):
+        warnings.append(
+            "No submission records a section, so the bundle is not split by section."
+        )
+        by_section = False
+
+    section_dirs: list[Path] = []
+    if by_section:
+        # The whole class at the top, for the instructor; no student PDFs
+        # there, so each student's PDF is in exactly one place.
+        gradebook_path, _pdfs, analysis_path = _write_contents(
+            bundle_dir,
+            submissions,
+            content=BundleContent(gradebook=content.gradebook, analysis=content.analysis),
+            curve=curve,
+            anonymous=anonymous,
+            qa_document=qa_document,
+            include_section=True,
+            emit=emit,
+            warnings=warnings,
+        )
+        student_pdf_paths: list[Path] = []
+        used_folders: set[str] = set()
+        for section, items in groups:
+            folder = bundle_dir / unique_stem(section_folder_name(section), used_folders)
+            emit(f"{section}: {len(items)} student(s)…")
+            _gradebook, pdfs, _analysis = _write_contents(
+                folder,
+                items,
+                content=content,
+                curve=curve,
+                anonymous=anonymous,
+                qa_document=qa_document,
+                emit=emit,
+                warnings=warnings,
+            )
+            student_pdf_paths.extend(pdfs)
+            section_dirs.append(folder)
+    else:
+        gradebook_path, student_pdf_paths, analysis_path = _write_contents(
+            bundle_dir,
+            submissions,
+            content=content,
+            curve=curve,
+            anonymous=anonymous,
+            qa_document=qa_document,
+            emit=emit,
+            warnings=warnings,
+        )
+
+    _write_manifest(
+        bundle_dir,
+        documents=documents,
+        content=content,
+        gradebook_path=gradebook_path,
+        student_pdf_paths=student_pdf_paths,
+        analysis_path=analysis_path,
+        anonymous=anonymous,
+        curve=curve,
+        section_dirs=section_dirs,
+    )
+
+    emit("Done.")
+    return BundleResult(
+        bundle_dir=bundle_dir,
+        gradebook_path=gradebook_path,
+        student_pdf_paths=tuple(student_pdf_paths),
+        analysis_path=analysis_path,
+        warnings=tuple(warnings),
+        section_dirs=tuple(section_dirs),
+    )
+
+
+def _write_contents(
+    folder: Path,
+    submissions: Sequence[BundleSubmission],
+    *,
+    content: BundleContent,
+    curve: Curve,
+    anonymous: bool,
+    qa_document: object | None,
+    emit: ProgressFn,
+    warnings: list[str],
+    include_section: bool = False,
+) -> tuple[Path | None, list[Path], Path | None]:
+    """The gradebook, student PDFs and analysis for these students, in `folder`."""
+    documents = [item.document for item in submissions]
     gradebook_path: Path | None = None
     student_pdf_paths: list[Path] = []
     analysis_path: Path | None = None
+    bundle_dir = folder
+    bundle_dir.mkdir(parents=True, exist_ok=True)
 
     if content.gradebook:
         gradebook_path = bundle_dir / _GRADEBOOK_DIR / _GRADEBOOK_FILENAME
         emit("Writing gradebook CSV…")
-        write_gradebook_csv(build_gradebook_rows(documents, curve), gradebook_path)
+        write_gradebook_csv(
+            build_gradebook_rows(documents, curve, include_section=include_section),
+            gradebook_path,
+        )
 
     if content.student_pdfs:
         pdf_dir = bundle_dir / _STUDENT_PDF_DIR
@@ -215,25 +354,7 @@ def build_return_bundle(
         emit("Building analysis report…")
         analysis_path = _build_analysis(bundle_dir, documents, curve, qa_document)
 
-    _write_manifest(
-        bundle_dir,
-        documents=documents,
-        content=content,
-        gradebook_path=gradebook_path,
-        student_pdf_paths=student_pdf_paths,
-        analysis_path=analysis_path,
-        anonymous=anonymous,
-        curve=curve,
-    )
-
-    emit("Done.")
-    return BundleResult(
-        bundle_dir=bundle_dir,
-        gradebook_path=gradebook_path,
-        student_pdf_paths=tuple(student_pdf_paths),
-        analysis_path=analysis_path,
-        warnings=tuple(warnings),
-    )
+    return gradebook_path, student_pdf_paths, analysis_path
 
 
 def unique_stem(stem: str, used: set[str]) -> str:
@@ -301,6 +422,7 @@ def _write_manifest(
     analysis_path: Path | None,
     anonymous: bool,
     curve: Curve,
+    section_dirs: Sequence[Path] = (),
 ) -> None:
     lines = [
         "Opengrader return bundle",
@@ -330,4 +452,10 @@ def _write_manifest(
             f"{_ANALYSIS_DIR}/{_ANALYSIS_FILENAME}"
             "  — class analysis: score distribution and per-question item analysis."
         )
+    if section_dirs:
+        if content.gradebook:
+            lines.append("  (the class gradebook has a section column)")
+        lines.append("")
+        lines.append("One folder per section, with the same contents for its students:")
+        lines.extend(f"{folder.name}/" for folder in section_dirs)
     (bundle_dir / "README.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")

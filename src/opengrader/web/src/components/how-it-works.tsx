@@ -15,7 +15,7 @@ const STEP_DURATION_MS = 6000;
 const steps = [
   {
     title: 'Outline the template',
-    description: 'Upload the blank exam and draw a box around each question.',
+    description: 'Upload the blank assignment and draw a box around each question.',
     Illustration: AnswerKeyIllustration,
   },
   {

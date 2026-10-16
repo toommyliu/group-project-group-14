@@ -106,13 +106,19 @@ def build_gradebook_rows(
     *,
     outcomes_by_question: dict[str, tuple[str, ...]] | None = None,
     possible_points_by_question: dict[str, float] | None = None,
+    include_section: bool = False,
 ) -> list[list[str]]:
-    """Columns: student_id, student_name, question scores, total, optional curved total,
-    possible, then outcome percentages. Ungraded outcome cells are blank.
+    """Columns: student_id, student_name, (section,) question scores, total,
+    optional curved total, possible, then outcome percentages. Ungraded
+    outcome cells are blank. `section` is only there when asked for, so the
+    usual layout is unchanged.
     """
     question_ids = ordered_question_ids(docs)
     outcomes = outcome_columns(outcomes_by_question)
-    header = ["student_id", "student_name", *[_question_label(q) for q in question_ids]]
+    header = ["student_id", "student_name"]
+    if include_section:
+        header.append("section")
+    header += [_question_label(q) for q in question_ids]
     header += ["total", "possible"]
     if curve.is_active:
         header.insert(header.index("possible"), "curved")
@@ -122,6 +128,8 @@ def build_gradebook_rows(
         awarded_by_id = {q.question_id: q.points_awarded for q in doc.questions}
         graded = {q.question_id for q in doc.questions if q.points_awarded is not None}
         cells = [doc.student_id, doc.student_name]
+        if include_section:
+            cells.append((doc.section or "").strip())
         for question_id in question_ids:
             if question_id in graded:
                 cells.append(_number(awarded_by_id[question_id]))

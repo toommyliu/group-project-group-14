@@ -363,8 +363,9 @@ def test_a_folder_with_no_scan_is_sent_to_the_pipeline_card(tmp_path, pipeline_c
 
 def test_two_candidate_scans_are_chosen_by_hand_not_guessed(tmp_path, pipeline_calls) -> None:  # noqa: ANN001
     folder = _class_folder(tmp_path)
-    (folder / "section-b.pdf").write_bytes(b"%PDF-1.4\n")
-    (folder / "scans.pdf").rename(folder / "section-a.pdf")
+    # Names that say nothing; ones naming a section each are section scans.
+    (folder / "afternoon.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "scans.pdf").rename(folder / "morning.pdf")
 
     async def steps(session: _Session):  # noqa: ANN202
         await session.launch(folder)
@@ -977,3 +978,264 @@ def test_launch_grading_after_open_in_browser_goes_back_to_the_grade_screen(
 
     assert _drive(steps) == [(str(folder / "qa.md"), str(folder / "submissions"))]
     assert len(browser_opens) == 1
+
+
+# One scan per section, and a folder of assignments ---------------------------
+
+
+def test_a_folder_of_section_scans_is_prepared_as_one_assignment(
+    tmp_path, pipeline_calls
+) -> None:  # noqa: ANN001
+    folder = tmp_path / "quiz1"
+    folder.mkdir()
+    (folder / "qa.md").write_text(_QA_TEXT, encoding="utf-8")
+    for name in ("section-01.pdf", "section-02.pdf"):
+        (folder / name).write_bytes(b"%PDF-1.4\n")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        await session.launch(folder)
+        await session.asked()
+        summary = _text(session.app, "#prepare-folder-found")
+        await session.choose("prepare")
+        await session.finished()
+        return summary
+
+    summary = _drive(steps)
+
+    assert "one per section, 2 sections" in summary
+    # Found by the folder scan, so found again next time rather than frozen.
+    saved = load_folder_settings(folder)
+    assert saved is not None and saved.use_section_scans and saved.section_scans == ()
+    (request,) = pipeline_calls
+    assert request.scan == folder.resolve()
+    assert request.section_scans == (
+        f"{folder / 'section-01.pdf'}=Section 01",
+        f"{folder / 'section-02.pdf'}=Section 02",
+    )
+
+
+def _assignment(folder: Path, title: str) -> Path:
+    folder.mkdir(parents=True)
+    (folder / "qa.md").write_text(
+        _QA_TEXT.replace("title: Quiz", f"title: {title}"), encoding="utf-8"
+    )
+    _add_submission(folder)
+    return folder
+
+
+def test_a_folder_of_assignments_is_offered_as_a_workspace(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.tui.make_workspace import MakeWorkspaceRequest
+
+    root = tmp_path / "Fall 2026"
+    quiz = _assignment(root / "Quiz 1", "Quiz 1")
+    midterm = _assignment(root / "Midterm", "Midterm")
+    (root / "Final").mkdir()
+    (root / "Final" / "qa.md").write_text(
+        _QA_TEXT.replace("title: Quiz", "title: Final"), encoding="utf-8"
+    )
+    (root / "Final" / "scans.pdf").write_bytes(b"%PDF-1.4\n")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        session.app.query_one("#tui-class-folder", Input).value = str(root)
+        session.screen._scan_launch_folder()
+        await session.pilot.pause()
+        shown = not session.app.query_one("#workspace-button").has_class("hidden")
+        card = _text(session.app, "#tui-folder-summary")
+        session.app.query_one("#launch-button", Button).press()
+        await session.asked()
+        buttons = _buttons(session.app)
+        note = _text(session.app, "#prepare-folder-note")
+        session.app.screen.query_one("#prepare-folder-workspace", Button).press()
+        await _settle(session.pilot, lambda: session.app.return_value is not None)
+        return shown, card, buttons, note, session.app.return_value
+
+    shown, card, buttons, note, result = _drive(steps)
+
+    assert shown
+    assert "holds 3 assignment(s)" in card and "Final/" in card
+    assert "workspace" in buttons
+    assert "Final/" in note  # not prepared yet: left out, and said so
+    assert isinstance(result, MakeWorkspaceRequest)
+    assert result.root == root
+    assert sorted(result.assignments) == sorted(
+        [
+            (quiz / "qa.md", quiz / "submissions"),
+            (midterm / "qa.md", midterm / "submissions"),
+        ]
+    )
+
+
+def test_sections_kept_as_separate_folders_are_not_offered_as_a_workspace(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    root = tmp_path / "Fall 2026"
+    _assignment(root / "Quiz 1 Sec 1", "Quiz 1")
+    _assignment(root / "Quiz 1 Sec 2", "Quiz 1")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        session.app.query_one("#tui-class-folder", Input).value = str(root)
+        session.screen._scan_launch_folder()
+        await session.pilot.pause()
+        hidden = session.app.query_one("#workspace-button").has_class("hidden")
+        card = _text(session.app, "#tui-folder-summary")
+        await session.launch(root)
+        return hidden, card, _dialog(session.app), list(session.notices)
+
+    hidden, card, dialog, notices = _drive(steps)
+
+    assert hidden and dialog is None
+    assert "same answer key" in card and "one scan per section" in card
+    assert any("Choose one of them" in notice for notice in notices)
+
+
+def _workspace(root: Path, *titles: str) -> Path:
+    from opengrader.core.workspace.store import Workspace
+
+    workspace = Workspace.create(root)
+    for title in titles:
+        workspace.create_assignment(
+            _QA_TEXT.replace("title: Quiz", f"title: {title}")
+        )
+    return root
+
+
+async def _choose_folder(session: _Session, folder: Path):  # noqa: ANN202
+    session.app.query_one("#tui-class-folder", Input).value = str(folder)
+    session.screen._scan_launch_folder()
+    await session.pilot.pause()
+    button = session.app.query_one("#workspace-button", Button)
+    return (
+        None if button.has_class("hidden") else str(button.label),
+        _text(session.app, "#tui-folder-summary"),
+    )
+
+
+def test_a_workspace_folder_offers_to_open_it_and_opens_on_the_press(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.tui.make_workspace import OpenWorkspaceRequest
+
+    root = _workspace(tmp_path / "Fall 2026", "Quiz 1", "Midterm")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        label, card = await _choose_folder(session, root)
+        # Choosing it opens nothing by itself.
+        still_here = session.app.return_value is None
+        session.app.query_one("#workspace-button", Button).press()
+        await _settle(session.pilot, lambda: session.app.return_value is not None)
+        return label, card, still_here, session.app.return_value, _dialog(session.app)
+
+    label, card, still_here, result, dialog = _drive(steps)
+
+    assert label == "Open workspace"
+    assert "workspace with 2 assignment(s): Quiz 1, Midterm" in card
+    assert still_here and dialog is None  # opening asks nothing
+    assert result == OpenWorkspaceRequest(root=root)
+
+
+def test_launch_grading_on_a_workspace_opens_it(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.tui.make_workspace import OpenWorkspaceRequest
+
+    root = _workspace(tmp_path / "Fall 2026", "Quiz 1")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        await session.launch(root)
+        await _settle(session.pilot, lambda: session.app.return_value is not None)
+        return session.app.return_value
+
+    assert _drive(steps) == OpenWorkspaceRequest(root=root)
+
+
+def test_a_workspace_in_a_subfolder_is_offered_by_name(tmp_path) -> None:  # noqa: ANN001
+    from opengrader.tui.make_workspace import OpenWorkspaceRequest
+
+    root = tmp_path / "Fall 2026"
+    _assignment(root / "Quiz 1", "Quiz 1")
+    inner = _workspace(root / "Old term", "Final")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        label, card = await _choose_folder(session, root)
+        session.app.query_one("#workspace-button", Button).press()
+        await _settle(session.pilot, lambda: session.app.return_value is not None)
+        return label, card, session.app.return_value
+
+    label, card, result = _drive(steps)
+
+    assert label == "Open “Old term” workspace"
+    assert "Old term/ is a workspace of its own" in card
+    assert result == OpenWorkspaceRequest(root=inner)
+
+
+def test_a_class_folder_opened_in_the_browser_is_still_graded_in_place(tmp_path) -> None:  # noqa: ANN001
+    folder = _class_folder(tmp_path)
+    submissions = _add_submission(folder)
+    marker = folder / ".opengrader" / "folder-session.json"
+    _workspace(folder)
+    marker.write_text("{}", encoding="utf-8")
+
+    async def steps(session: _Session):  # noqa: ANN202
+        label, _card = await _choose_folder(session, folder)
+        await session.launch(folder)
+        return label, session.launched
+
+    label, launched = _drive(steps)
+
+    assert label is None
+    assert launched == [(str(folder / "qa.md"), str(submissions))]
+
+
+# Recent class folders --------------------------------------------------------
+
+
+def _choose_recent(session: _Session, folder: Path, *, browser: bool) -> None:  # noqa: ANN001
+    from types import SimpleNamespace
+
+    from opengrader.core.recents import RecentItem
+
+    session.app.query_one("#browser-open-button").set_class(not browser, "hidden")
+    item = RecentItem(
+        kind="folder",
+        path=str(folder),
+        title="Quiz",
+        qa_file=str(folder / "qa.md"),
+        submissions=str(folder / "submissions"),
+    )
+    session.screen.on_recent_list_chosen(SimpleNamespace(item=item, stop=lambda: None))
+
+
+def test_a_recent_folder_opens_at_once_when_there_is_no_browser_button(tmp_path) -> None:  # noqa: ANN001
+    folder = _class_folder(tmp_path)
+    submissions = _add_submission(folder)
+
+    async def steps(session: _Session):  # noqa: ANN202
+        _choose_recent(session, folder, browser=False)
+        await session.pilot.pause()
+        return session.launched
+
+    assert _drive(steps) == [(str(folder / "qa.md"), str(submissions))]
+
+
+def test_a_recent_folder_is_only_chosen_when_it_could_open_in_the_browser(tmp_path) -> None:  # noqa: ANN001
+    folder = _class_folder(tmp_path)
+    submissions = _add_submission(folder)
+
+    async def steps(session: _Session):  # noqa: ANN202
+        _choose_recent(session, folder, browser=True)
+        await session.pilot.pause()
+        filled = (
+            session.app.query_one("#tui-class-folder", Input).value,
+            session.app.query_one("#tui-qa-path", Input).value,
+            session.app.query_one("#tui-sub-path", Input).value,
+        )
+        waiting = list(session.launched)
+        focused = session.app.focused.id if session.app.focused else None
+        card = _text(session.app, "#tui-folder-summary")
+        # Launch Grading then opens exactly the pair recorded.
+        session.app.query_one("#launch-button", Button).press()
+        await session.pilot.pause()
+        return filled, waiting, focused, card, session.launched
+
+    filled, waiting, focused, card, launched = _drive(steps)
+
+    assert filled == (str(folder), str(folder / "qa.md"), str(submissions))
+    assert waiting == [] and focused == "launch-button"
+    assert "Open in browser" in card
+    assert launched == [(str(folder / "qa.md"), str(submissions))]

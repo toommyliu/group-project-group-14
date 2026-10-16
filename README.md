@@ -212,6 +212,30 @@ See [packaging/README.md](packaging/README.md) for details and uninstall steps.
    powershell -ExecutionPolicy Bypass -File packaging\install-command.ps1   # Windows
    ```
 
+### Grading with other accounts on one computer (SSH)
+
+<details>
+<summary><b>Show how to share grading between accounts</b></summary>
+
+When several people grade on one machine, each logged in with their own account:
+
+1. **Professor (once):** put the class folder where every grader can reach it (for example `/srv/cmpe195`), make a group for the graders, then share the workspace:
+   ```bash
+   sudo groupadd cmpe195-graders
+   sudo usermod -aG cmpe195-graders alice bob     # graders (and yourself)
+   opengrader tui /srv/cmpe195/quiz3              # opens it, and starts your Opengrader
+   opengrader share --group cmpe195-graders /srv/cmpe195/quiz3
+   ```
+2. **Each grader:** `opengrader tui /srv/cmpe195/quiz3` from their own account. They join the professor's Opengrader, so only the professor's account writes the files, and the history shows who gave each grade.
+
+Graders give grades where there are none and change their own. A change to a grade someone else gave is sent to the professor, who approves or dismisses it with **Shift+Q**. `opengrader share --instructor <login>` makes someone an instructor, `--trust <login>` lets a grader change any grade, and `--off` stops sharing. Graders can join while the professor's Opengrader runs; it keeps running in the background and stops with `opengrader stop`. On Linux, Opengrader checks with the system which account each grader really is.
+
+Over SSH, Opengrader asks your terminal (on your own computer) whether it can show images. That works on a slow connection, but you can skip it: put `export OPENGRADER_GRAPHICS=kitty` (or `sixel`, `iterm2`, `halfcell`) in your shell profile on the server. `opengrader tui --check-graphics` shows what was detected and how long it took.
+
+In a plain class folder (`opengrader classic`), each account writes the files itself: the folder must be group-writable (`chgrp -R`, `chmod -R g+rwX`, `umask 002`). Opengrader says when it opens a folder your account cannot write.
+
+</details>
+
 ### Environment variables
 
 **None are required for local use.** Everything below is optional. Never commit real values.
@@ -235,7 +259,8 @@ See [packaging/README.md](packaging/README.md) for details and uninstall steps.
 | --- | --- |
 | *Provider API key* (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) | Key for a cloud AI provider you opted into. You can instead paste it in the app, which stores it in your OS password store (macOS Keychain, etc.), never in a project file. |
 | `OPENGRADER_AI_ALLOW_CLOUD` | Set to `0` to forbid every cloud AI send on this machine (kill switch). |
-| `OPENGRADER_GRAPHICS` | Force a terminal image protocol: `kitty`, `iterm2`, `sixel`, `halfcell`, or `unicode`. |
+| `OPENGRADER_GRAPHICS` | Force a terminal image protocol: `kitty`, `iterm2`, `sixel`, `halfcell`, or `unicode`. Skips asking the terminal, so it is also the fastest start over SSH. |
+| `OPENGRADER_TERMINAL_TIMEOUT` | Seconds to wait for a terminal that never answers the image-support question (default 0.5, or 2 over SSH). A terminal that does answer is never waited for longer than it takes. |
 | `OPENGRADER_IMAGE_VIEWER` | Program used by `o` to open an image, e.g. `"feh {}"`. |
 | `OPENGRADER_HOME` | Which checkout the global `opengrader` command should run. |
 | `OPENGRADER_PYTHON` | Which Python interpreter the global `opengrader` command should use. |

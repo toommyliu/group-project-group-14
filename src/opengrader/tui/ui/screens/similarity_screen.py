@@ -247,7 +247,7 @@ class SimilarityScreen(ModalScreen["tuple[str, str] | None"]):
         if not view.analyzed:
             widgets.append(
                 Label(
-                    "Nothing to compare — this exam has no rule-graded question "
+                    "Nothing to compare — this assignment has no rule-graded question "
                     "with a spread of wrong answers.",
                     classes="similarity-empty",
                 )

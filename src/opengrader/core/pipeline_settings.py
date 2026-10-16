@@ -48,6 +48,10 @@ class FolderPipelineSettings:
     use_section_rosters: bool = False
     # `TSV[=SECTION]` lines, kept exactly as typed.
     section_rosters: tuple[str, ...] = ()
+    use_section_scans: bool = False
+    # `PDF[=SECTION]` lines, one scan per section, kept exactly as typed. Blank
+    # (with the box ticked) means the ones the folder scan finds.
+    section_scans: tuple[str, ...] = ()
     reorder_pages: bool = False
     draft_rubrics: bool = False
 
@@ -69,6 +73,7 @@ _BOOL_FIELDS = (
     "use_template",
     "use_region_map",
     "use_section_rosters",
+    "use_section_scans",
     "reorder_pages",
     "draft_rubrics",
 )
@@ -102,11 +107,12 @@ def load_folder_settings(folder: str | Path) -> FolderPipelineSettings | None:
     pages = data.get("pages_per_submission")
     if _positive_int(pages):
         values["pages_per_submission"] = pages
-    rosters = data.get("section_rosters")
-    if isinstance(rosters, list):
-        values["section_rosters"] = tuple(
-            entry for entry in rosters if isinstance(entry, str) and entry.strip()
-        )
+    for name in ("section_rosters", "section_scans"):
+        entries = data.get(name)
+        if isinstance(entries, list):
+            values[name] = tuple(
+                entry for entry in entries if isinstance(entry, str) and entry.strip()
+            )
     return FolderPipelineSettings(**values)  # type: ignore[arg-type]
 
 
@@ -123,6 +129,8 @@ def save_folder_settings(folder: str | Path, settings: FolderPipelineSettings) -
         body["pages_per_submission"] = settings.pages_per_submission
     if settings.section_rosters:
         body["section_rosters"] = list(settings.section_rosters)
+    if settings.section_scans:
+        body["section_scans"] = list(settings.section_scans)
     return _write(folder_settings_path(root), body)
 
 

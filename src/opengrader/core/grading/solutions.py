@@ -166,17 +166,11 @@ def solution_version_for_submission(
     qa_doc: QADocument,
     document: StudentSubmissionDocument,
 ) -> str:
-    if not qa_doc.version_questions:
-        return ""
+    """The key's version for this paper; "" when the key has no versions or
+    the paper's version is unknown (`versions.match_version`: never guessed)."""
+    from opengrader.core.grading.versions import match_version
 
-    version = (document.assignment_version or "").strip()
-    version_by_normalized = {
-        candidate.strip().lower(): candidate for candidate in qa_doc.version_questions
-    }
-    selected = version_by_normalized.get(version.lower()) if version else None
-    if selected is None:
-        selected = next(iter(qa_doc.version_questions))
-    return selected
+    return match_version(qa_doc, document).version or ""
 
 
 def solution_entries_for_submission(
@@ -185,6 +179,9 @@ def solution_entries_for_submission(
 ) -> dict[str, SolutionEntry]:
     version = solution_version_for_submission(qa_doc, document)
     if not version:
+        if qa_doc.version_questions:
+            # Unknown version: no key, so nothing is graded until one is picked.
+            return {}
         return flatten_solution_entries(qa_doc.questions)
     return flatten_solution_entries(qa_doc.version_questions[version])
 

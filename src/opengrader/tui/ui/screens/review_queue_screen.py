@@ -285,3 +285,117 @@ class AssignIdentityScreen(ModalScreen["tuple[str, str] | None"]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+# What `AssignVersionScreen` returns for "show me the paper first".
+LOOK_AT_PAPER = "\x00look"
+
+
+class _VersionListItem(ListItem):
+    def __init__(self, version: str) -> None:
+        self.version = version
+        super().__init__(Label(Text(f"Version {version}", style="bold")), classes="candidate-row")
+
+
+class AssignVersionScreen(ModalScreen["str | None"]):
+    """Pick which answer-key version a paper is, when it could not be read.
+
+    Returns the chosen version, `LOOK_AT_PAPER` to open the paper first, or
+    None to leave it for now. Nothing is graded on the paper until a version
+    is picked (`core/grading/versions.py`).
+    """
+
+    DEFAULT_CSS = """
+    AssignVersionScreen {
+        align: center middle;
+    }
+
+    #version-dialog {
+        width: 70%;
+        max-width: 80;
+        height: auto;
+        max-height: 80%;
+        background: $surface;
+        border: round $accent;
+        border-title-align: left;
+        border-title-color: $accent;
+        border-title-style: bold;
+        padding: 1 2;
+    }
+
+    #version-summary {
+        width: 100%;
+        height: auto;
+        color: $text-muted;
+    }
+
+    #version-list {
+        height: auto;
+        max-height: 14;
+        margin-top: 1;
+        background: transparent;
+        border: round $surface-lighten-2;
+    }
+
+    #version-buttons {
+        height: auto;
+        align-horizontal: right;
+        margin-top: 1;
+    }
+
+    #version-buttons Button {
+        margin-left: 1;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, item: ReviewItem, versions: tuple[str, ...]) -> None:
+        self._item = item
+        self._versions = versions
+        super().__init__()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="version-dialog") as dialog:
+            dialog.border_title = "▸ Which version is this paper?"
+            yield Static(self._summary_text(), id="version-summary", markup=False)
+            yield ListView(
+                *(_VersionListItem(version) for version in self._versions),
+                id="version-list",
+            )
+            with Horizontal(id="version-buttons"):
+                yield Button("Look at the paper", id="version-look", compact=True)
+                yield Button("Cancel", id="version-cancel", compact=True)
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#version-list", ListView)
+        list_view.index = 0
+        list_view.focus()
+
+    def _summary_text(self) -> str:
+        name = self._item.student_name or self._item.student_display_id or "this paper"
+        where = f" ({self._item.source_pdf_name})" if self._item.source_pdf_name else ""
+        return (
+            f"{name}{where}: {self._item.detail}\n"
+            "Pick the version printed on the paper. Its questions and rubric "
+            "then follow that version, and it can be graded."
+        )
+
+    @on(ListView.Selected, "#version-list")
+    def _on_version_selected(self, event: ListView.Selected) -> None:
+        event.stop()
+        if isinstance(event.item, _VersionListItem):
+            self.dismiss(event.item.version)
+
+    @on(Button.Pressed, "#version-look")
+    def _on_look_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(LOOK_AT_PAPER)
+
+    @on(Button.Pressed, "#version-cancel")
+    def _on_cancel_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)

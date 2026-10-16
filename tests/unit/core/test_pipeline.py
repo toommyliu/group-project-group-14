@@ -930,6 +930,108 @@ def test_reorder_pages_sorts_what_is_still_unanswered_instead_of_pausing(tmp_pat
     assert _numbers(pdf) == ["page 1", "page 3", "page 2"]
 
 
+def _split_five_plus_one(split_dir: Path) -> None:
+    """What the splitter leaves for the tester's scan: a six-page assignment
+    split 5 + 1, then a correct one, with its findings recorded."""
+    from opengrader.core.pages.split_review import read_part, record_split_review
+
+    for name, pages in (("submission-0001", 5), ("submission-0002", 1), ("submission-0003", 6)):
+        _pdf(split_dir / f"{name}.pdf", pages=pages)
+    names = ("submission-0001", "submission-0002", "submission-0003")
+    record_split_review(split_dir, [read_part(split_dir, name) for name in names], 6)
+
+
+@pytest.fixture
+def five_plus_one_split(monkeypatch, stages):
+    def split(argv, *, status_callback=None, **_kwargs) -> None:
+        stages.calls.append((STAGE_SPLIT, list(argv)))
+        _split_five_plus_one(Path(argv[argv.index("--output") + 1]))
+
+    monkeypatch.setattr(submission_splitter, "run_cli", split)
+    stages.split_count = 2
+    return stages
+
+
+def test_a_split_of_the_wrong_length_pauses_the_run_before_extraction(
+    tmp_path, five_plus_one_split, clean_scan
+) -> None:
+    request = _request(tmp_path, pages_per_submission=6)
+
+    report = run_pipeline(request)
+
+    assert report.split_review_needed and report.paused_for_review and report.ok
+    assert STAGE_EXTRACT not in five_plus_one_split.stages()
+    detail = report.stage(STAGE_EXTRACT).detail
+    assert "submission-0001: 5 page(s) where 6 are expected" in detail
+    assert "Merge submission-0001 and submission-0002" in detail
+    assert (request.split_dir / "submission-0002.pdf").exists()
+
+
+def test_a_fix_applied_between_runs_is_not_undone_by_splitting_again(
+    tmp_path, five_plus_one_split, clean_scan
+) -> None:
+    from opengrader.core.pipeline import answer_split_review
+
+    request = _request(tmp_path, pages_per_submission=6)
+    assert run_pipeline(request).split_review_needed
+
+    assert answer_split_review(
+        request, request.split_dir, fix=["submission-0001"], keep=["submission-0001"]
+    ) == ["submission-0001"]
+    report = run_pipeline(request)
+
+    assert not report.paused_for_review
+    # The split is reused: the ledger was told about the merge.
+    assert five_plus_one_split.stages().count(STAGE_SPLIT) == 1
+    assert STAGE_EXTRACT in five_plus_one_split.stages()
+    assert not (request.split_dir / "submission-0002.pdf").exists()
+    assert len(_numbers(request.split_dir / "submission-0001.pdf")) == 6
+
+
+def test_fix_split_up_front_applies_the_proposed_fix_and_carries_on(
+    tmp_path, five_plus_one_split, clean_scan
+) -> None:
+    request = _request(tmp_path, pages_per_submission=6, fix_split=True)
+
+    report = run_pipeline(request)
+
+    assert not report.paused_for_review
+    assert STAGE_EXTRACT in five_plus_one_split.stages()
+    assert not (request.split_dir / "submission-0002.pdf").exists()
+
+
+def test_keep_split_up_front_changes_nothing_and_carries_on(
+    tmp_path, five_plus_one_split, clean_scan
+) -> None:
+    request = _request(tmp_path, pages_per_submission=6, keep_split=True)
+
+    report = run_pipeline(request)
+
+    assert not report.paused_for_review
+    assert (request.split_dir / "submission-0002.pdf").exists()
+
+
+def test_fix_split_still_waits_for_a_problem_it_has_no_fix_for(
+    tmp_path, stages, clean_scan
+) -> None:
+    from opengrader.core.pages.split_review import read_part, record_split_review
+
+    request = _request(tmp_path, pages_per_submission=6, fix_split=True)
+    stages.split_count = 0
+    _pdf(request.split_dir / "submission-0001.pdf", pages=6)
+    _pdf(request.split_dir / "submission-0002.pdf", pages=4)
+    record_split_review(
+        request.split_dir,
+        [read_part(request.split_dir, f"submission-000{n}") for n in (1, 2)],
+        6,
+    )
+
+    report = run_pipeline(request)
+
+    assert report.split_review_needed
+    assert "No fix can be proposed" in report.stage(STAGE_EXTRACT).detail
+
+
 def test_a_template_checks_a_bundle_by_submission_length_not_its_whole_page_count(
     tmp_path, stages, monkeypatch
 ) -> None:

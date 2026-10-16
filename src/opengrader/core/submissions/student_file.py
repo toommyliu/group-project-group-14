@@ -929,6 +929,23 @@ def set_student_section_markdown(content: str, *, section: str) -> str:
     return _set_scalar_surgically(content, "section", section)
 
 
+def set_assignment_version_file(
+    path: str | Path,
+    *,
+    version: str,
+    expected_mtime_ns: int | None = None,
+) -> int:
+    """Set which answer-key version a paper is: only the header's
+    `assignment_version` line changes, never a question block."""
+    submission_path = Path(path)
+    check_unmodified(submission_path, expected_mtime_ns)
+    updated = _set_scalar_surgically(
+        submission_path.read_text(), "assignment_version", version
+    )
+    submission_path.write_text(updated)
+    return submission_path.stat().st_mtime_ns
+
+
 _FILE_REFERENCE_KEYS = ("source_pdf", "name_image_path", "id_image_path")
 
 

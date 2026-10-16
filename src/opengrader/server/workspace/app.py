@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import sqlite3
 from tempfile import NamedTemporaryFile
 from zipfile import ZIP_STORED, ZipFile
 from threading import RLock
@@ -66,6 +67,12 @@ from opengrader.core.workspace.models import (
     PipelineOutput,
     PipelinePublication,
     Question,
+    ReplaceSubmissions,
+    ReplacedSubmissions,
+    ChangeRequest,
+    SharingInfo,
+    SharingUpdate,
+    Viewer,
     Submission,
     WorkspaceInfo,
 )
@@ -123,6 +130,13 @@ _FOLDER_SESSION_REFUSALS = (
         re.compile(r"/api/assignments/[^/]+/?"),
         "In a folder session the answer key is the file in the class folder, "
         "so only a question's rubric can be edited here. "
+        + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        "POST",
+        re.compile(r"/api/assignments/[^/]+/submissions/replace/?"),
+        "In a folder session the submissions are the files in the class "
+        "folder; join split submissions from the terminal app instead. "
         + _NOT_IN_FOLDER_SESSION,
     ),
     (
@@ -302,6 +316,16 @@ def create_app(
         workers=workers,
     )
 
+    def caller(request: Request) -> Viewer:
+        """The owner (whoever runs this service), or the account that joined
+        from elsewhere, as `server/app.Workspaces.identify` decided."""
+        from opengrader.core.folder_access import current_account
+        from opengrader.core.workspace.sharing import viewer
+
+        owner = getattr(app.state, "owner", None) or current_account()
+        account = request.scope.get("state", {}).get("account")
+        return viewer(workspace, account or owner, owner)
+
     def require_assignment(assignment_id: str) -> None:
         workspace.assignment_source(assignment_id)
         if assignment_id in scan_jobs.stopping:
@@ -389,6 +413,38 @@ def create_app(
         if isinstance(exc, QAParseError):
             content["location"] = asdict(exc.location)
         return JSONResponse(content, status_code=422)
+
+    # A write the operating system refused. Without these the client gets a
+    # bare 500 ("Workspace request failed.") and a grader cannot tell a
+    # folder they may not write from a bug. A database write is one
+    # transaction, rolled back on the error, so nothing of it was committed.
+    @app.exception_handler(PermissionError)
+    async def not_permitted(_request: Request, exc: PermissionError):
+        where = f" {exc.filename}" if exc.filename else " the workspace folder"
+        return JSONResponse(
+            {
+                "detail": (
+                    f"The Opengrader server is not allowed to write{where}, so "
+                    "this change did not go through. The account that started "
+                    "it needs write access to the whole class folder."
+                )
+            },
+            status_code=503,
+        )
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def database_unwritable(_request: Request, exc: sqlite3.OperationalError):
+        return JSONResponse(
+            {
+                "detail": (
+                    f"The workspace database could not be written ({exc}), so "
+                    "nothing was saved. Check that the account running "
+                    "Opengrader can write the class folder's .opengrader "
+                    "folder and every file in it."
+                )
+            },
+            status_code=503,
+        )
 
     @api.get("/workspace")
     def get_workspace() -> WorkspaceInfo:
@@ -706,6 +762,23 @@ def create_app(
     ) -> GradeSaveResult:
         user = signed_in(request)
         actor = user.email if user else None
+        who = caller(request)
+        if who.login != who.owner:
+            # Someone who joined from their own account (a grader over SSH).
+            from opengrader.core.workspace.sharing import change_needs_approval, request_change
+
+            actor = who.login
+            graded_by = change_needs_approval(workspace, assignment_id, submission_id, question_id, who)
+            if graded_by is not None:
+                request_change(
+                    workspace, assignment_id, submission_id, question_id, edit,
+                    requested_by=who.login, graded_by=graded_by,
+                )
+                raise HTTPException(
+                    403,
+                    f"{graded_by} graded this answer, so your change was not made: it "
+                    f"was sent to {who.owner} to approve.",
+                )
         if load_folder_session(root) is None:
             return workspace.save_grade(
                 assignment_id, submission_id, question_id, edit, actor=actor
@@ -726,6 +799,104 @@ def create_app(
                     )
                 }
             )
+
+    @api.get("/me")
+    def me(request: Request) -> Viewer:
+        """Who this caller is here: the owner, or an account that joined."""
+        return caller(request)
+
+    def require_instructor(request: Request) -> Viewer:
+        who = caller(request)
+        if who.role != "instructor":
+            raise HTTPException(403, f"Only an instructor can do that; ask {who.owner}.")
+        return who
+
+    @api.get("/sharing")
+    def get_sharing(request: Request) -> SharingInfo:
+        from opengrader.core.workspace.sharing import accounts, sharing_group
+
+        who = require_instructor(request)
+        return SharingInfo(owner=who.owner, group=sharing_group(workspace), accounts=accounts(workspace))
+
+    @api.put("/sharing")
+    def put_sharing(update: SharingUpdate, request: Request) -> SharingInfo:
+        """Share with a group of accounts on this computer, or stop; set who
+        is an instructor. Only the owner: it decides who may write here."""
+        from opengrader.core.workspace.sharing import (
+            accounts,
+            set_account,
+            set_sharing_group,
+            sharing_group,
+            sharing_problems,
+        )
+
+        who = caller(request)
+        if who.login != who.owner:
+            raise HTTPException(403, f"Only {who.owner}, who owns this workspace, can change who shares it.")
+        if update.off:
+            set_sharing_group(workspace, None)
+        elif update.group:
+            problems = sharing_problems(workspace.root, update.group)
+            if problems:
+                raise HTTPException(422, " ".join(problems))
+            set_sharing_group(workspace, update.group)
+        for account in update.accounts:
+            if account.login == who.owner:
+                raise HTTPException(422, f"{who.owner} owns this workspace and is always an instructor.")
+            set_account(workspace, account)
+        if changed := getattr(app.state, "sharing_changed", None):
+            changed()
+        return SharingInfo(owner=who.owner, group=sharing_group(workspace), accounts=accounts(workspace))
+
+    @api.get("/assignments/{assignment_id}/change-requests")
+    def list_change_requests(assignment_id: str, request: Request) -> list[ChangeRequest]:
+        from opengrader.core.workspace.sharing import change_requests
+
+        require_instructor(request)
+        require_assignment(assignment_id)
+        return change_requests(workspace, assignment_id)
+
+    @api.post("/assignments/{assignment_id}/change-requests/{request_id}/{decision}")
+    def decide_change_request(
+        assignment_id: str, request_id: int, decision: str, request: Request
+    ) -> ChangeRequest:
+        from opengrader.core.workspace.sharing import decide_change
+
+        who = require_instructor(request)
+        if decision not in ("approve", "dismiss"):
+            raise HTTPException(404, "Approve or dismiss.")
+        return decide_change(
+            workspace, assignment_id, request_id, approve=decision == "approve", by=who.login
+        )
+
+    @api.post("/assignments/{assignment_id}/submissions/replace")
+    def replace_submissions(
+        assignment_id: str, request: ReplaceSubmissions
+    ) -> ReplacedSubmissions:
+        """After two pieces of one paper were joined and read again in the
+        class folder: drop both and publish the joined file afresh. Their
+        grades go with them — the client carries the ones still valid over
+        to the new submission, through the ordinary save."""
+        from opengrader.core.workspace.intake import publish_new_files
+        from opengrader.core.workspace.writeback import locate_submissions_dir
+
+        require_assignment(assignment_id)
+        if not all(key.startswith("pipeline:") for key in request.source_keys):
+            raise ValueError("Only submissions read from a class folder can be replaced.")
+        folder = locate_submissions_dir(workspace, assignment_id)
+        if folder is None:
+            raise ValueError(
+                "This assignment's submissions folder could not be found; it may have moved."
+            )
+        workspace.delete_submissions(assignment_id, request.source_keys)
+        _published, problems = publish_new_files(workspace, assignment_id, folder)
+        return ReplacedSubmissions(
+            submission_ids={
+                key: workspace.submission_for_source(assignment_id, key)
+                for key in request.source_keys
+            },
+            problems=problems,
+        )
 
     @api.get("/assets/{name}")
     def asset(name: str) -> FileResponse:

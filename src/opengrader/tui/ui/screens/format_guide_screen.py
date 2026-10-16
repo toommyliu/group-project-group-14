@@ -104,7 +104,7 @@ ____
 OUTCOMES_TEMPLATE = """\
 Quiz title: CS 146 Quiz 3 — Sorting
 
-# Tip: when most of an exam measures the same outcome, put one Outcome line
+# Tip: when most of an assignment measures the same outcome, put one Outcome line
 # here, before question 1 — it then applies to every question after it, and a
 # question can still add its own. Uncomment to try it:
 #   Outcome: CLO1

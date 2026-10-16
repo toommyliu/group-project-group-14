@@ -489,3 +489,100 @@ def test_f2_comes_back_to_the_list_on_the_assignment_just_graded(service) -> Non
         run_command(tui_command, ["--workspace", service.root])
 
     assert [c.kwargs["highlight"] for c in home_cls.call_args_list] == [None, older.id]
+
+
+def test_make_workspace_imports_each_assignment_folder_into_one_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil
+
+    from opengrader.core.workspace.context import inputs_for_assignment
+    from opengrader.core.workspace.intake import publish_pipeline
+    from opengrader.core.workspace.writeback import locate_submissions_dir
+    from opengrader.server.workspace.client import ServiceConnection, WorkspaceClient
+    from opengrader.tui.make_workspace import MakeWorkspaceRequest, make_workspace
+
+    root = tmp_path / "Fall 2026"
+    for name, sample in (("Quiz 1", "cs146-quiz1"), ("Quiz 2", "cmpe30-quiz2")):
+        shutil.copytree(
+            Path("samples") / sample,
+            root / name,
+            ignore=shutil.ignore_patterns(".opengrader", "._*"),
+        )
+    workspace = Workspace.create(root)
+    connection = ServiceConnection(
+        root=str(root), url="http://localhost", pid=0,
+        workspace_id=workspace.info().id,
+    )
+    started: list[Path] = []
+
+    def ensure(path):
+        started.append(path)
+        return connection
+
+    monkeypatch.setattr("opengrader.server.workspace.client.ensure_service", ensure)
+
+    def request(self, method, path, body, **kwargs):
+        assignment_id = path.removeprefix("/api/assignments/").removesuffix("/imports")
+        return publish_pipeline(workspace, assignment_id, body).model_dump_json().encode()
+
+    monkeypatch.setattr(WorkspaceClient, "request", request)
+    said: list[str] = []
+
+    made = make_workspace(
+        MakeWorkspaceRequest(
+            root=root,
+            assignments=tuple(
+                (root / name / "qa.md", root / name / "student-submissions")
+                for name in ("Quiz 1", "Quiz 2")
+            ),
+        ),
+        echo=said.append,
+    )
+
+    assert made == root.resolve() and started == [root.resolve()]
+    assignments = workspace.assignments()
+    assert len(assignments) == 2
+    for name in ("Quiz 1", "Quiz 2"):
+        assignment_id = workspace.assignment_id_for_folder(root / name)
+        saved = inputs_for_assignment(workspace, assignment_id)
+        assert saved is not None and saved.folder == name
+        assert saved.qa == "qa.md"
+        assert locate_submissions_dir(workspace, assignment_id) == (
+            root / name / "student-submissions"
+        ).resolve()
+    assert any("Quiz 2" in line for line in said)
+
+
+def test_classic_makes_the_workspace_it_was_asked_for_and_opens_it(
+    no_service, tmp_path
+) -> None:
+    from opengrader.tui.make_workspace import MakeWorkspaceRequest
+
+    asked = MakeWorkspaceRequest(root=tmp_path, assignments=())
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.make_workspace.make_workspace", return_value=tmp_path) as make,
+        patch("opengrader.tui.main._run_workspace") as run_workspace,
+    ):
+        app_cls.return_value.run.return_value = asked
+        run_command(classic_command, [])
+
+    make.assert_called_once()
+    assert make.call_args.args == (asked,)
+    run_workspace.assert_called_once_with(tmp_path)
+
+
+def test_classic_opens_an_existing_workspace_without_making_one(no_service, tmp_path) -> None:
+    from opengrader.tui.make_workspace import OpenWorkspaceRequest
+
+    with (
+        patch("opengrader.tui.main.TuiApp", autospec=True) as app_cls,
+        patch("opengrader.tui.make_workspace.make_workspace") as make,
+        patch("opengrader.tui.main._run_workspace") as run_workspace,
+    ):
+        app_cls.return_value.run.return_value = OpenWorkspaceRequest(root=tmp_path)
+        run_command(classic_command, [])
+
+    make.assert_not_called()
+    run_workspace.assert_called_once_with(tmp_path.resolve())

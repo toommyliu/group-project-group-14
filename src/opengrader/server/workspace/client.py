@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 from pydantic import BaseModel
 
 from opengrader.core.workspace.models import WorkspaceEvent, WorkspaceInfo
-from opengrader.server.transport import ServiceError, request
+from opengrader.server.transport import ACCOUNT_HEADER, ServiceError, request
 
 logger = logging.getLogger(__name__)
 SERVICE_LOCK = Path(".opengrader/service.lock")
@@ -29,6 +29,11 @@ class ServiceConnection(BaseModel):
     # service.json from a server started before tokens existed has none.
     token: str = ""
     server_url: str = ""
+    # Set when this account joined a workspace another account owns
+    # (`join_workspace`): it is sent with every request, and nothing of the
+    # workspace's own folder is written from this side.
+    account: str = ""
+    owner: str = ""
 
 
 class WorkspaceInUse(RuntimeError):
@@ -54,7 +59,10 @@ class WorkspaceClient:
         timeout: float = 10,
     ) -> bytes:
         base = self.connection.server_url if path == "/api/shutdown" and self.connection.server_url else self.connection.url
-        return request(base, self.connection.token, method, path, body, timeout=timeout)
+        return request(
+            base, self.connection.token, method, path, body, timeout=timeout,
+            account=self.connection.account,
+        )
 
     def observe(
         self, after: int, callback: Callable[[WorkspaceEvent], None]
@@ -66,9 +74,12 @@ class WorkspaceClient:
             cursor = after
             while not stopped.is_set():
                 try:
+                    headers = {"Authorization": f"Bearer {self.connection.token}"}
+                    if self.connection.account:
+                        headers[ACCOUNT_HEADER] = self.connection.account
                     with urlopen(
-                        Request(f"{self.connection.url}/api/events?after={cursor}",
-                                headers={"Authorization": f"Bearer {self.connection.token}"}), timeout=20
+                        Request(f"{self.connection.url}/api/events?after={cursor}", headers=headers),
+                        timeout=20,
                     ) as stream:
                         for line in stream:
                             if stopped.is_set():
@@ -208,3 +219,86 @@ def ensure_service(root: Path) -> ServiceConnection:
     # Activate the workspace before callers publish or subscribe to it.
     WorkspaceClient(connection).request("GET", "/api/workspace", timeout=20)
     return connection
+
+
+class WorkspaceNotShared(RuntimeError):
+    """This account cannot join the workspace another account owns; the
+    message says why and what to ask for."""
+
+
+CONNECTION_NOTE = Path(".opengrader/connection.json")
+
+
+def owned_by_another_account(root: Path) -> bool:
+    from opengrader.core.workspace.store import DATABASE
+
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:  # Windows: one account per computer, as before
+        return False
+    try:
+        return (root / DATABASE).stat().st_uid != getuid()
+    except OSError:
+        return False
+
+
+def join_workspace(root: Path) -> ServiceConnection:
+    """Connect to the service of the account that owns this workspace,
+    through the note its server leaves for the group it is shared with.
+    Nothing in the workspace folder is written from this side."""
+    import json
+
+    from opengrader.core.folder_access import current_account, owner_of
+    from opengrader.core.workspace.store import DATABASE
+
+    root = root.expanduser().resolve()
+    owner = owner_of(root / DATABASE) or "another account"
+    me = current_account()
+    note = root / CONNECTION_NOTE
+    try:
+        data = json.loads(note.read_text())
+    except FileNotFoundError:
+        raise WorkspaceNotShared(
+            f"This workspace belongs to {owner} and is not open to other accounts "
+            f"right now. Ask {owner} to share it (opengrader share --group <group> "
+            f"{root}) and to keep Opengrader running for it (opengrader tui {root} "
+            "starts it)."
+        ) from None
+    except PermissionError:
+        raise WorkspaceNotShared(
+            f"This workspace belongs to {owner}, who shares it with a group your "
+            f"account ({me}) is not in. Ask {owner} to add you to it; then log "
+            "out and in again."
+        ) from None
+    except (OSError, ValueError) as exc:
+        raise WorkspaceNotShared(f"The note for joining {owner}'s workspace cannot be read: {exc}") from None
+    try:
+        connection = ServiceConnection(
+            root=str(root),
+            url=str(data["url"]),
+            pid=int(data["pid"]),
+            workspace_id=str(data["workspace_id"]),
+            token=str(data["token"]),
+            account=me,
+            owner=str(data.get("owner") or owner),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise WorkspaceNotShared(f"The note for joining {owner}'s workspace is damaged; ask {owner} to open it again.") from None
+    try:
+        WorkspaceClient(connection).request("GET", "/api/me", timeout=5)
+    except ServiceError as exc:
+        if exc.status == 0:
+            raise WorkspaceNotShared(
+                f"{connection.owner}'s Opengrader is not running, so their workspace "
+                f"cannot be joined now. Ask {connection.owner} to start it "
+                f"(opengrader tui {root})."
+            ) from None
+        raise WorkspaceNotShared(str(exc)) from None
+    return connection
+
+
+def connect_workspace(root: Path) -> ServiceConnection:
+    """This account's own service for a workspace it owns; the owner's, joined,
+    for one another account owns."""
+    if owned_by_another_account(root.expanduser().resolve()):
+        return join_workspace(root)
+    return ensure_service(root)

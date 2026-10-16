@@ -211,6 +211,13 @@ class WorkspaceHome(App[str | None]):
     def action_write_back(self) -> None:
         from opengrader.tui.ui.screens.write_back_screen import WriteBackScreen
 
+        if self.client.connection.account:
+            self.notify(
+                f"Only {self.client.connection.owner}, who owns this workspace, can "
+                "write its grades to the class folder's files."
+            )
+            return
+
         listing = self.query_one("#assignments", ListView)
         if not self.assignments or listing.index is None:
             self.notify("Choose an assignment first.")

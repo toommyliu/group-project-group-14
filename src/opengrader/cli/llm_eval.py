@@ -47,7 +47,7 @@ Examples:
   uv run llm-eval --solutions solutions.md --input out/student-submissions/ --limit 40 --json
 
 \b
-Pool past classes of the same exam for a bigger sample (one shared answer key):
+Pool past classes of the same assignment for a bigger sample (one shared answer key):
   uv run llm-eval --solutions solutions.md \\
       --input 2026-spring/student-submissions/ \\
       --input 2025-fall/student-submissions/ \\
@@ -472,7 +472,7 @@ def _default_generate_factory(
         "A graded submission file, or a directory of them. The more free "
         "responses a human has graded, the sharper the answer — so repeat "
         "this to pool several classes that share this answer key (the same "
-        "exam given in past terms). Same rubric and same point scale, just "
+        "assignment given in past terms). Same rubric and same point scale, just "
         "more students."
     ),
 )
@@ -514,7 +514,7 @@ def _default_generate_factory(
     metavar="RATE",
     help=(
         "How often a recommended threshold's grades must match the human's, "
-        "0-1. Raise it for a high-stakes exam."
+        "0-1. Raise it for a high-stakes assignment."
     ),
 )
 @click.option(

@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, RichLog, Static
+from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
 from opengrader.cli import canvas_export, run_command
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
@@ -95,8 +95,11 @@ class CanvasExportScreen(ModalScreen[None]):
         assignment: str = "",
         workspace_root: str = "",
         workspace_assignment: str = "",
+        sections: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
+        # Offered as a filter only when the submissions record sections.
+        self._sections = tuple(sections)
         self._initial_submissions = submissions_path
         self._initial_course = course
         self._initial_assignment = assignment
@@ -143,6 +146,17 @@ class CanvasExportScreen(ModalScreen[None]):
                 placeholder="e.g. Quiz 1",
                 id="canvas-export-assignment",
             )
+            if self._sections:
+                yield self._field_label(
+                    "Section",
+                    "one Canvas course per section? post each to its own course",
+                )
+                yield Select(
+                    [("Every section", ""), *((name, name) for name in self._sections)],
+                    value="",
+                    allow_blank=False,
+                    id="canvas-export-section",
+                )
             yield Checkbox(
                 "Dry run (preview only, nothing is posted)",
                 value=True,
@@ -212,6 +226,10 @@ class CanvasExportScreen(ModalScreen[None]):
                 "--workspace-assignment", self._workspace_assignment,
             ]
         argv += ["--course", course, "--assignment", assignment]
+        if self._sections:
+            section = self.query_one("#canvas-export-section", Select).value
+            if isinstance(section, str) and section:
+                argv += ["--section", section]
         if self.query_one("#canvas-export-dry-run", Checkbox).value:
             argv.append("--dry-run")
 

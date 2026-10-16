@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, RichLog, Select, Static
+from textual.widgets import Button, Checkbox, Input, RichLog, Select, Static
 
 from opengrader.cli import return_bundle, run_command
 from opengrader.tui.ui.screens.path_picker_screen import PathPickerScreen
@@ -92,6 +92,16 @@ class ReturnBundleScreen(ModalScreen[None]):
     #return-bundle-buttons Button {
         margin-left: 1;
     }
+
+    #return-bundle-by-section {
+        margin-top: 1;
+    }
+
+    #return-bundle-sections-hint {
+        width: 100%;
+        height: auto;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [Binding("escape", "cancel", "Close")]
@@ -104,8 +114,12 @@ class ReturnBundleScreen(ModalScreen[None]):
         default_name: str = "",
         workspace_root: str = "",
         workspace_assignment: str = "",
+        sections: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
+        # The class sections these submissions record; the by-section choice
+        # is offered only when there are some.
+        self._sections = tuple(sections)
         self._submissions_path = submissions_path
         self._initial_output = output_path
         self._default_name = default_name
@@ -143,6 +157,18 @@ class ReturnBundleScreen(ModalScreen[None]):
                 placeholder="e.g. quiz-1-return-2026-07-28",
                 id="return-bundle-name",
             )
+            if self._sections:
+                yield Checkbox("One folder per section", id="return-bundle-by-section")
+                shown = ", ".join(self._sections[:4])
+                if len(self._sections) > 4:
+                    shown += f" and {len(self._sections) - 4} more"
+                yield Static(
+                    f"{len(self._sections)} sections ({shown}): each gets its own "
+                    "folder with its students' PDFs, gradebook and analysis. The "
+                    "class-wide gradebook, with a section column, stays at the top.",
+                    id="return-bundle-sections-hint",
+                    markup=False,
+                )
             log = RichLog(id="return-bundle-log", wrap=True, auto_scroll=True)
             log.border_title = "Output"
             yield log
@@ -214,6 +240,8 @@ class ReturnBundleScreen(ModalScreen[None]):
             argv += ["--output", output]
         if name:
             argv += ["--name", name]
+        if self._sections and self.query_one("#return-bundle-by-section", Checkbox).value:
+            argv.append("--by-section")
 
         self.query_one("#return-bundle-run", Button).disabled = True
         log = self.query_one("#return-bundle-log", RichLog)

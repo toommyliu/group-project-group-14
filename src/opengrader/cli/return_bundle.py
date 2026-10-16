@@ -33,6 +33,7 @@ Examples:
   uv run return-bundle --submissions out/student-submissions/ --student-pdfs --analysis
   uv run return-bundle --submissions out/ --output ~/returns --name quiz1-return --all
   uv run return-bundle --submissions out/student-submissions/ --content gradebook-student
+  uv run return-bundle --submissions out/student-submissions/ --by-section
 
 \b
 Contents:
@@ -41,6 +42,13 @@ Contents:
   gradebook-student  gradebook CSV + student PDFs
   analysis           class analysis report PDF
   all                everything (default when no content flag is given)
+
+\b
+By section (--by-section):
+  One folder per class section ("Section 01/", and "No section/" for any
+  submission without one), each holding the chosen content for that
+  section's students. The class-wide gradebook (with a section column) and
+  analysis stay at the top of the bundle.
 """
 
 
@@ -125,6 +133,11 @@ def _resolve_content(
     is_flag=True,
     help="Withhold student names from filenames and summary pages.",
 )
+@click.option(
+    "--by-section",
+    is_flag=True,
+    help="Also split the bundle into one folder per class section.",
+)
 def command(
     *,
     submissions: str | None,
@@ -139,6 +152,7 @@ def command(
     include_all: bool,
     solutions: str | None,
     anonymous: bool,
+    by_section: bool,
 ) -> None:
     """Package graded submissions into a return bundle directory."""
     content = _resolve_content(
@@ -197,6 +211,7 @@ def command(
             qa_document=qa_document,
             curve=curve,
             submissions=workspace_submissions,
+            by_section=by_section,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -209,6 +224,8 @@ def command(
         print(f"  student PDFs: {result.student_count} written")
     if result.analysis_path is not None:
         print(f"  analysis: {result.analysis_path}")
+    for folder in result.section_dirs:
+        print(f"  section: {folder}")
     for warning in result.warnings:
         print(f"  warning: {warning}", file=sys.stderr)
 

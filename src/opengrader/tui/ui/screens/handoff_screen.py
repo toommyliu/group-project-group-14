@@ -204,7 +204,7 @@ class GraderPacketScreen(OutlineButtons, ModalScreen[None]):
                 yield Static(
                     "Makes a copy of this class another grader can take away and "
                     "grade on their own machine, then hand back for merging. Names "
-                    "and student ids are replaced by codes, and the scanned exams "
+                    "and student ids are replaced by codes, and the scanned assignments "
                     "stay here.",
                     id="packet-hint",
                 )

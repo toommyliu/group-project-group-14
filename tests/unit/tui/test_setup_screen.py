@@ -2021,7 +2021,11 @@ def test_pipeline_preview_calls_plan_pipeline_and_writes_nothing(
             await pilot.pause()
             output = app.query_one("#pipe-preview-output")
             assert not output.has_class("hidden")
-            assert "split" in str(output.render())
+            # Plain words first; the tools' plan is folded away below.
+            summary = str(app.query_one("#pipe-preview-summary").render())
+            assert "Split it into one PDF per student" in summary
+            details = str(app.query_one("#pipe-preview-details").render())
+            assert "split" in details and "submission-splitter" in details
 
     asyncio.run(run())
 

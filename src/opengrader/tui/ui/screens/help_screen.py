@@ -440,6 +440,30 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
         "automated-grading.",
     ),
     (
+        "Grading with other accounts",
+        "On a computer several people reach over SSH, the professor shares the "
+        "workspace with a group (opengrader share --group <group>, CLI "
+        "opengrader-share) and each grader runs opengrader tui <folder> from "
+        "their own account: they join the professor's Opengrader, so only the "
+        "professor's account writes the files, and the history shows who gave "
+        "each grade. Graders grade where there is no grade and change their "
+        "own; a change to someone else's grade goes to the instructor, who "
+        "approves or dismisses it with Shift+Q. In a plain class folder "
+        "(opengrader classic) each account writes the files itself: the folder "
+        "must be writable by all of them, and two graders on different "
+        "questions of one student no longer get in each other's way.",
+    ),
+    (
+        "When the split looks wrong",
+        "Before reading the scans the run stops wherever a submission is not "
+        "the usual length or a printed page is missing or repeated (a "
+        "six-page paper split 5 + 1), shows a proposed fix, and lets you open "
+        "the PDFs first. Found later, while grading: Shift+X on either piece "
+        "joins it with the submission scanned next to it, reads it again and "
+        "keeps every grade given while its answer was on screen. CLI: "
+        "opengrader run --fix-split / --keep-split, merge-submissions.",
+    ),
+    (
         "Grade while it runs",
         "Extraction is the longest stage, so don't wait for it: with 'Start "
         "grading as submissions arrive' ticked (the default) the grading "
@@ -473,7 +497,7 @@ _PIPELINE_ROWS: list[tuple[str, str]] = [
     (
         "Create answer key",
         "In Helper Tools, beside Generate template — the two things you do "
-        "before the exam is printed. Builds the QA answer-key markdown from a "
+        "before the assignment is printed. Builds the QA answer-key markdown from a "
         "plain-text assignment file (.md/.txt) or a PDF. A born-digital PDF "
         "is read directly from its text layer; a scanned or image-based PDF "
         "is read with OCR, and with the handwriting model too when 'Read "
@@ -549,7 +573,7 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "(used by Extract, by Split for a page number nothing else can read, "
         "and by Create answer key on a scan) and 'Suggest grades for written "
         "answers' (used by Auto-grade / --llm). They are separate because "
-        "they are separate decisions: a scanned exam whose rubric settles "
+        "they are separate decisions: a scanned assignment whose rubric settles "
         "every answer wants the first and not the second.",
     ),
     (

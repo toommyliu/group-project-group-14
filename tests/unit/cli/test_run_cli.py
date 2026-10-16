@@ -673,25 +673,25 @@ def test_a_flag_overrides_what_the_folder_offered(tmp_path, captured, capsys) ->
 def test_two_possible_scans_stop_the_run_and_name_both(tmp_path, captured, capsys) -> None:
     folder = tmp_path / "class"
     folder.mkdir()
-    (folder / "period1.pdf").write_bytes(b"%PDF-1.4\n")
-    (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "morning.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "afternoon.pdf").write_bytes(b"%PDF-1.4\n")
 
     with pytest.raises(SystemExit) as raised:
         run_command(run_module.command, [str(folder)])
     assert raised.value.code == 2
     err = capsys.readouterr().err
-    assert "--scan" in err and "period1.pdf" in err and "period2.pdf" in err
+    assert "--scan" in err and "morning.pdf" in err and "afternoon.pdf" in err
     assert "request" not in captured
 
 
 def test_an_explicit_scan_settles_an_ambiguous_folder(tmp_path, captured) -> None:
     folder = tmp_path / "class"
     folder.mkdir()
-    (folder / "period1.pdf").write_bytes(b"%PDF-1.4\n")
-    (folder / "period2.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "morning.pdf").write_bytes(b"%PDF-1.4\n")
+    (folder / "afternoon.pdf").write_bytes(b"%PDF-1.4\n")
 
-    run_command(run_module.command, [str(folder), "--scan", str(folder / "period2.pdf")])
-    assert captured["request"].scan == folder / "period2.pdf"
+    run_command(run_module.command, [str(folder), "--scan", str(folder / "afternoon.pdf")])
+    assert captured["request"].scan == folder / "afternoon.pdf"
 
 
 def test_two_templates_are_left_out_with_a_warning_not_a_stop(
@@ -1030,3 +1030,150 @@ def test_stopping_at_the_page_order_question_leaves_the_run_paused(tmp_path, mon
     report = run_command(run_module.command, _argv(tmp_path))
 
     assert len(calls) == 1 and report.page_order_review_needed
+
+
+def _split_pause(tmp_path: Path) -> PipelineReport:
+    paused = StageOutcome(
+        stage=STAGE_EXTRACT,
+        status=StageStatus.PAUSED,
+        message="the split looks wrong in 1 place(s) — check it before extraction",
+        detail=(
+            "split-review:\n1. submission-0001: 5 page(s) where 6 are expected; "
+            "submission-0002: 1 page(s) where 6 are expected\n"
+            "   Merge submission-0001 and submission-0002 (5 + 1 pages) into one "
+            "6-page submission.\nin split"
+        ),
+    )
+    return _report(tmp_path, _outcome(STAGE_SPLIT, StageStatus.RAN), paused, submissions=0)
+
+
+def test_the_split_answers_land_in_the_request(tmp_path, captured) -> None:
+    run_command(run_module.command, _argv(tmp_path))
+    assert (captured["request"].fix_split, captured["request"].keep_split) == (False, False)
+
+    run_command(run_module.command, _argv(tmp_path, "--fix-split"))
+    assert captured["request"].fix_split is True
+
+    run_command(run_module.command, _argv(tmp_path, "--keep-split"))
+    assert captured["request"].keep_split is True
+
+
+def test_a_run_paused_on_the_split_says_how_to_answer_when_nobody_can_be_asked(
+    tmp_path, captured, capsys
+) -> None:
+    captured["report"] = _split_pause(tmp_path)
+
+    code = _exit_status(_argv(tmp_path, "--qa", str(tmp_path / "qa.md")))
+
+    out = capsys.readouterr().out
+    assert code == 0 and "publication" not in captured
+    assert "Merge submission-0001 and submission-0002" in out
+    assert "--fix-split" in out and "--keep-split" in out
+
+
+def test_in_a_terminal_the_split_is_asked_and_the_run_carries_on(tmp_path, monkeypatch) -> None:
+    from opengrader.core.pages import split_review
+
+    calls: list[PipelineRequest] = []
+    asked: list[Path] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request)
+        if len(calls) == 1:
+            return _split_pause(tmp_path)
+        return _report(tmp_path, _outcome(STAGE_EXTRACT, StageStatus.RAN, "ok"))
+
+    def review(split_dir, *, ask, write, answer):
+        asked.append(Path(split_dir))
+        return True
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(split_review, "review_split_in_terminal", review)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+
+    report = run_command(run_module.command, _argv(tmp_path))
+
+    assert asked == [tmp_path / "cohort" / "split"]
+    assert len(calls) == 2
+    assert not report.split_review_needed
+
+
+def test_stopping_at_the_split_question_leaves_the_run_paused(tmp_path, monkeypatch) -> None:
+    from opengrader.core.pages import split_review
+
+    calls: list[PipelineRequest] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request)
+        return _split_pause(tmp_path)
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(split_review, "review_split_in_terminal", lambda *_a, **_k: False)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+
+    report = run_command(run_module.command, _argv(tmp_path))
+
+    assert len(calls) == 1 and report.split_review_needed
+
+
+def test_a_folder_of_section_scans_runs_them_one_per_section(tmp_path, captured, capsys) -> None:
+    folder = tmp_path / "class"
+    folder.mkdir()
+    for name in ("section-01.pdf", "section-02.pdf"):
+        (folder / name).write_bytes(b"%PDF-1.4\n")
+    (folder / "roster-section-01.tsv").write_text("1\tAda\n", encoding="utf-8")
+    (folder / "roster-section-02.tsv").write_text("2\tBo\n", encoding="utf-8")
+
+    run_command(run_module.command, [str(folder)])
+
+    request = captured["request"]
+    assert request.scan == folder.resolve()
+    assert request.section_scans == (
+        f"{folder / 'section-01.pdf'}=Section 01",
+        f"{folder / 'section-02.pdf'}=Section 02",
+    )
+    assert request.section_rosters == (
+        f"{folder / 'roster-section-01.tsv'}=Section 01",
+        f"{folder / 'roster-section-02.tsv'}=Section 02",
+    )
+    assert "one per section" in capsys.readouterr().out
+
+
+def test_section_scans_can_be_named_by_hand(tmp_path, captured) -> None:
+    one = tmp_path / "scans" / "mw.pdf"
+    two = tmp_path / "scans" / "tth.pdf"
+    one.parent.mkdir()
+    one.write_bytes(b"%PDF-1.4\n")
+    two.write_bytes(b"%PDF-1.4\n")
+
+    run_command(
+        run_module.command,
+        [
+            "--section-scan", f"{one}=MW",
+            "--section-scan", f"{two}=TTh",
+            "--out", str(tmp_path / "cohort"),
+        ],
+    )
+
+    request = captured["request"]
+    assert request.section_scans == (f"{one}=MW", f"{two}=TTh")
+    assert request.scan == one.parent.resolve()
+
+
+def test_one_section_named_twice_is_a_usage_error(tmp_path, captured, capsys) -> None:
+    scan = tmp_path / "section-01.pdf"
+    scan.write_bytes(b"%PDF-1.4\n")
+
+    status = _exit_status(
+        ["--section-scan", str(scan), "--section-scan", f"{scan}=Section 1",
+         "--out", str(tmp_path / "cohort")]
+    )
+
+    assert status == 2
+    assert "both section" in capsys.readouterr().err
+    assert "request" not in captured
+
+
+def test_scan_and_section_scans_together_are_refused(tmp_path, captured) -> None:
+    assert _exit_status(_argv(tmp_path, "--section-scan", str(tmp_path / "x.pdf"))) == 2
+    assert "request" not in captured

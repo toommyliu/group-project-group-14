@@ -39,7 +39,7 @@ Examples:
   uv run automated-grading --solutions solutions.md --input student-0001.submission.md
   uv run automated-grading --solutions solutions.md --input ./student-submissions/
   uv run automated-grading --solutions Solutions/solutions.md --input samples/student_responses.md
-  uv run automated-grading --solutions Solutions/final_exam_solutions.md --input ./Solutions/student_submissions/
+  uv run automated-grading --solutions Solutions/final_solutions.md --input ./Solutions/student_submissions/
   uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm
   uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm --llm-model llama3.1 --llm-min-confidence 0.8
   uv run automated-grading --solutions solutions.md --input ./student-submissions/ --llm --dry-run
@@ -162,7 +162,7 @@ class _Hooks:
         "Only write AI suggestions at or above this confidence (0-1); "
         "weaker ones are left for manual grading. "
         "Run 'llm-eval' against already-graded submissions to find the "
-        "value your model and exam actually support."
+        "value your model and assignment actually support."
     ),
 )
 @click.option(

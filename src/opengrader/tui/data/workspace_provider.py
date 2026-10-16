@@ -1,5 +1,6 @@
 """Present service records to the TUI and preserve unacknowledged edits."""
 
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -18,7 +19,13 @@ from opengrader.core.workspace.models import (
 )
 from opengrader.server.workspace.client import ServiceError, WorkspaceClient
 from opengrader.server.workspace.drafts import Draft, DraftJournal
-from opengrader.tui.data.models import QuestionSeed, RubricOptionSeed, StudentSummary
+from opengrader.tui.data.models import (
+    QuestionSeed,
+    RubricOptionSeed,
+    SplitNeighbours,
+    SplitPiece,
+    StudentSummary,
+)
 from opengrader.core.analytics.score_statistics import (
     QuestionStatistics,
     statistics_from_scores,
@@ -31,8 +38,16 @@ class WorkspaceProvider:
         self.assignment = assignment
         self.assignment_label = assignment.title
         self.base = f"/api/assignments/{assignment.id}"
-        self.cache = Path(client.connection.root) / ".opengrader/client-cache"
-        self.journal = DraftJournal(self.cache.parent / "drafts", assignment.id)
+        if client.connection.account:
+            # Joined from another account: the workspace folder is its owner's,
+            # so this side keeps its cache and unsent grades in its own home.
+            from opengrader.server.home import resolve_data_home
+
+            local = resolve_data_home() / "joined" / client.connection.workspace_id
+        else:
+            local = Path(client.connection.root) / ".opengrader"
+        self.cache = local / "client-cache"
+        self.journal = DraftJournal(local / "drafts", assignment.id)
         info = WorkspaceInfo.model_validate_json(client.request("GET", "/api/workspace"))
         self.course_label = info.course.number
         self.cursor = info.event_cursor
@@ -42,6 +57,107 @@ class WorkspaceProvider:
 
     def close(self) -> None:
         self.journal.close()
+
+    @property
+    def joined(self) -> bool:
+        """Opened from an account other than the workspace's owner."""
+        return bool(self.client.connection.account)
+
+    def viewer(self) -> "Viewer | None":
+        """Who the service takes this session for; None from an older service."""
+        from opengrader.core.workspace.models import Viewer
+
+        try:
+            return Viewer.model_validate_json(self.client.request("GET", "/api/me"))
+        except (ServiceError, ValueError):
+            return None
+
+    def change_requests(self) -> list["ChangeRequest"]:
+        from opengrader.core.workspace.models import ChangeRequest
+
+        return TypeAdapter(list[ChangeRequest]).validate_json(
+            self.client.request("GET", f"{self.base}/change-requests")
+        )
+
+    def decide_change_request(self, request_id: int, *, approve: bool) -> None:
+        decision = "approve" if approve else "dismiss"
+        self.client.request("POST", f"{self.base}/change-requests/{request_id}/{decision}")
+        self.invalidate_summaries()
+
+    def split_neighbours(self, student_item_id: str) -> SplitNeighbours:
+        """This submission and the ones scanned either side of it, which are
+        the only ones it can be joined with (`X`)."""
+        from opengrader.core.submissions.merge_split import MergeUnavailable
+        from opengrader.server.workspace.merge import neighbours_in_workspace
+
+        if self.joined:
+            raise MergeUnavailable(
+                f"Only {self.client.connection.owner}, who owns this workspace, can "
+                "join split submissions: it rewrites files in the class folder."
+            )
+        before, here, after = neighbours_in_workspace(
+            Path(self.client.connection.root),
+            self.assignment.id,
+            int(student_item_id.removeprefix("s")),
+        )
+        return SplitNeighbours(
+            self._split_piece(int(student_item_id.removeprefix("s")), here),
+            self._split_piece(*before) if before else None,
+            self._split_piece(*after) if after else None,
+        )
+
+    def _split_piece(self, submission_id: int, piece) -> SplitPiece:  # noqa: ANN001 - merge_split.Piece
+        from opengrader.core.submissions.merge_split import page_count
+
+        summary = next((s for s in self._submission_summaries() if s.id == submission_id), None)
+        graded = (
+            sum(1 for score in summary.question_scores.values() if score is not None)
+            if summary is not None
+            else 0
+        )
+        return SplitPiece(f"s{submission_id}", piece.stem, page_count(piece), graded)
+
+    def join_split_submissions(
+        self,
+        first_item_id: str,
+        second_item_id: str,
+        *,
+        status: Callable[[str], None] | None = None,
+        send_to_cloud_confirmed: bool = False,
+    ) -> tuple[str, "JoinResult"]:
+        """Join the second onto the first; both are replaced by a new
+        submission. Returns its item id and what was carried over."""
+        from opengrader.core.submissions.merge_split import MergeUnavailable
+        from opengrader.server.workspace.merge import merge_in_workspace
+
+        if self.joined:
+            raise MergeUnavailable(
+                f"Only {self.client.connection.owner}, who owns this workspace, can "
+                "join split submissions: it rewrites files in the class folder."
+            )
+        first_id = int(first_item_id.removeprefix("s"))
+        second_id = int(second_item_id.removeprefix("s"))
+        joined = {str(first_id), str(second_id)}
+        if any(key.split("/", 1)[0] in joined for key in self.journal.value.answers):
+            raise MergeUnavailable(
+                "A grade on one of these submissions has not reached the server "
+                "yet. Grade it again so it saves, then join them."
+            )
+        new_id, result = merge_in_workspace(
+            self.client,
+            self.assignment.id,
+            first_id,
+            second_id,
+            status=status,
+            # The app asks with its own dialog, then calls again confirmed.
+            prompt_cloud_send=False,
+            send_to_cloud_confirmed=send_to_cloud_confirmed,
+        )
+        self.loaded = {
+            key: answer for key, answer in self.loaded.items() if key.split("/", 1)[0] not in joined
+        }
+        self.invalidate_summaries()
+        return f"s{new_id}", result
 
     def list_students(self, course_id: int | None) -> list[StudentSummary]:
         if course_id is None:
@@ -264,6 +380,12 @@ class WorkspaceProvider:
             except ServiceError as exc:
                 if exc.current is not None:
                     self.conflict = key, exc.current
+                elif exc.status == 403:
+                    # Refused, not lost in transit: kept as a request for an
+                    # instructor, or not this account's to change. Retrying
+                    # it later would only ask again.
+                    del self.journal.value.answers[key]
+                    self.journal.write()
                 raise
             self.loaded[key] = result.answer
             self.invalidate_summaries()

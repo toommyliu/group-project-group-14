@@ -64,6 +64,13 @@ class GradingLog:
                 return entry
         return None
 
+    def clear(self) -> None:
+        """Forget every entry, so nothing is undone against a student that
+        moved (submissions joined underneath the session)."""
+        if self._entries:
+            self._entries.clear()
+            self._version += 1
+
     def drop_entry(self, entry: GradingLogEntry) -> bool:
         for index, candidate in enumerate(self._entries):
             if candidate is entry:

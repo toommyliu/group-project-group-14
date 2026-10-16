@@ -222,7 +222,7 @@ class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
                 )
                 yield Static(
                     "Fills each answer's transcription from the answer "
-                    "image, which is what Extract needs on a scanned exam. "
+                    "image, which is what Extract needs on a scanned assignment. "
                     "It is also the last resort for page-number footers "
                     "during Split, and for reading a scanned answer key.",
                     classes="ai-note",
@@ -239,7 +239,7 @@ class AISettingsScreen(OutlineButtons, ModalScreen[AISettings | None]):
                     yield Static(
                         "The fast local OCR reads every answer first and a "
                         "model call is spent only where it read poorly or "
-                        "not at all — much faster on an exam whose answers "
+                        "not at all — much faster on an assignment whose answers "
                         "are mostly short and legible, and it cannot lose "
                         "an answer, since a model that reads nothing leaves "
                         "the OCR text standing.",

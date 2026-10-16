@@ -118,7 +118,7 @@ def _print_pattern_scope(report: AnswerPatternReport) -> None:
             print(f"    not analyzed ({label}): {', '.join(question_ids)}")
     if not report.analyzed:
         print(
-            "    Nothing to compare: this exam has no rule-graded question with a "
+            "    Nothing to compare: this assignment has no rule-graded question with a "
             "spread of wrong answers.\n"
             "    (True/False questions are excluded by design — with one wrong "
             "answer available, every\n"

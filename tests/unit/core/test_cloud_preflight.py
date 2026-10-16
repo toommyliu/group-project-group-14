@@ -412,3 +412,25 @@ class TestNeverUnderstates:
             "answer-image": "one answer image per question found in the answer key"
         }
         assert body["statement"].startswith("One answer image per question")
+
+
+class TestSectionScans:
+    def test_students_are_counted_across_every_section_scan(self, tmp_path, cloud_spec):
+        resolved = _consented(cloud_spec)
+        scans = tmp_path / "scans"
+        _pdf(scans / "section-01.pdf", pages=4)
+        _pdf(scans / "section-02.pdf", pages=6)
+        request = _request(
+            tmp_path,
+            scans,
+            pages_per_submission=2,
+            section_scans=(str(scans / "section-01.pdf"), str(scans / "section-02.pdf")),
+            llm=LlmOptions(read_handwriting=True),
+        )
+
+        preflight = plan_cloud_egress(request, resolved)
+
+        assert preflight is not None
+        # 4 / 2 + 6 / 2: both sections, not just the first.
+        assert preflight.students == 5
+        assert preflight.sends_anything

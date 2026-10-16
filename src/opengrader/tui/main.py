@@ -130,7 +130,7 @@ def tui_command(
         if qa_file and submissions:
             # Kept for scripts: a folder named outright is graded the classic
             # way, in place and with no service.
-            _grade_folder(qa_file, submissions)
+            _after_classic(_grade_folder(qa_file, submissions))
             return
         target = (folder or workspace or Path.cwd()).expanduser().resolve()
         root = workspace or _workspace_for(target)
@@ -173,12 +173,31 @@ def classic_command(
     )
     try:
         if qa_file and submissions:
-            _grade_folder(qa_file, submissions)
+            result = _grade_folder(qa_file, submissions)
         else:
-            TuiApp().run()
-    except (OSError, ValueError) as exc:
+            result = TuiApp().run()
+        _after_classic(result)
+    except (OSError, ValueError, RuntimeError) as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(2)
+
+
+def _after_classic(result: object) -> None:
+    """Act on the Start grading card's workspace button, if it was pressed.
+
+    Classic never opens a workspace itself: the button closes the app with a
+    request, and the workspace opens here — made first, or as it is.
+    """
+    from opengrader.tui.make_workspace import (
+        MakeWorkspaceRequest,
+        OpenWorkspaceRequest,
+        make_workspace,
+    )
+
+    if isinstance(result, MakeWorkspaceRequest):
+        _run_workspace(make_workspace(result, echo=click.echo))
+    elif isinstance(result, OpenWorkspaceRequest):
+        _run_workspace(result.root.expanduser().resolve())
 
 
 def _choose_course(here: Path) -> Path | None:
@@ -198,10 +217,10 @@ def _workspace_for(folder: Path) -> Path | None:
     return discover_workspace(folder)
 
 
-def _grade_folder(qa_file: Path, submissions: Path) -> None:
+def _grade_folder(qa_file: Path, submissions: Path):
     # F2 comes back to the Start grading card inside the app, so one run
     # covers any number of folders.
-    TuiApp(qa_file_path=qa_file, submissions_path=submissions).run()
+    return TuiApp(qa_file_path=qa_file, submissions_path=submissions).run()
 
 
 def _open_folder_as_workspace(folder: Path) -> tuple[Path, str | None]:
@@ -223,43 +242,15 @@ def _open_folder_as_workspace(folder: Path) -> tuple[Path, str | None]:
 def _import_as_workspace(qa_file, submissions):
     import os
 
-    from opengrader.core.workspace.context import inputs_for_assignment, stored_path
-    from opengrader.core.workspace.models import (
-        AssignmentInputs,
-        PipelineOutput,
-        PipelinePublication,
-    )
     from opengrader.core.workspace.store import Workspace
     from opengrader.server.workspace.client import WorkspaceClient, ensure_service
+    from opengrader.tui.make_workspace import import_assignment
 
     qa = Path(qa_file).expanduser().resolve()
     subs = Path(submissions).expanduser().resolve()
     root = Path(os.path.commonpath([qa.parent, subs]))
     client = WorkspaceClient(ensure_service(root))
-    workspace = Workspace(root)
-    assignment_id = workspace.assignment_id_for_folder(root)
-    output = PipelineOutput(
-        qa_markdown=qa.read_text(encoding="utf-8"),
-        submissions_dir=str(subs),
-    )
-    result = PipelinePublication.model_validate_json(
-        client.request(
-            "POST", f"/api/assignments/{assignment_id}/imports", output, timeout=300
-        )
-    )
-    saved = inputs_for_assignment(workspace, assignment_id)
-    if saved is None:
-        saved = AssignmentInputs(
-            id=assignment_id,
-            folder=".",
-            scan="",
-            output=stored_path(root, subs.parent),
-            qa=stored_path(root, qa),
-        )
-    workspace.save_assignment_inputs(
-        saved.model_copy(update={"submissions": stored_path(root, subs)})
-    )
-    return root, result.assignment.id
+    return root, import_assignment(client, Workspace(root), root, qa, subs)
 
 
 def _run_workspace(
@@ -270,7 +261,7 @@ def _run_workspace(
     from opengrader.core.workspace.context import assignment_for_directory
     from opengrader.core.workspace.models import Assignment
     from opengrader.core.workspace.store import Workspace
-    from opengrader.server.workspace.client import WorkspaceClient, ensure_service
+    from opengrader.server.workspace.client import WorkspaceClient, connect_workspace
     from opengrader.tui.data.workspace_provider import WorkspaceProvider
     from opengrader.tui.workspace_home import (
         PROCESS_WORKSPACE,
@@ -279,8 +270,9 @@ def _run_workspace(
     )
 
     target = (target or root).expanduser().resolve()
-    client = WorkspaceClient(ensure_service(root))
+    client = WorkspaceClient(connect_workspace(root))
     root = Path(client.connection.root).resolve()
+    joined = bool(client.connection.account)
     # Listed first next time; keeps the assignment it last recorded.
     record_recent("workspace", root, title=root.name)
     last = recent_workspace(root)
@@ -293,8 +285,12 @@ def _run_workspace(
 
     assignments = fetch()
     try:
-        selected = assignment_for_directory(
-            Workspace(root), target, assignment_id=assignment
+        # Read from the database itself, which only its owner can read; a
+        # joining account picks from the list instead.
+        selected = (
+            assignment
+            if joined
+            else assignment_for_directory(Workspace(root), target, assignment_id=assignment)
         )
     except ValueError:
         if assignment is not None:
@@ -309,6 +305,14 @@ def _run_workspace(
             selected = WorkspaceHome(client, target, highlight=highlight).run()
             if selected is None:
                 return
+            if selected == PROCESS_WORKSPACE and joined:
+                click.echo(
+                    f"Only {client.connection.owner}, who owns this workspace, can read "
+                    "new scans into it.",
+                    err=True,
+                )
+                selected = None
+                continue
             if selected == PROCESS_WORKSPACE:
                 from opengrader.cli import run
 

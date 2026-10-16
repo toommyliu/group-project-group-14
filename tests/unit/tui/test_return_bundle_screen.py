@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 
 from textual.app import App
-from textual.widgets import Input, Select
+from textual.widgets import Checkbox, Input, Select
 
 from opengrader.tui.tui import TuiApp
 from opengrader.tui.ui.screens import PathPickerScreen, ReturnBundleScreen
@@ -168,3 +168,45 @@ def test_browse_fills_output_and_uses_directory_mode(tmp_path: Path) -> None:
             assert output_input.value == str(tmp_path)
 
     asyncio.run(run())
+
+
+class _SectionedProvider(FakeDataProvider):
+    def available_sections(self) -> list[str]:
+        return ["Section 01", "Section 02"]
+
+
+def test_by_section_is_offered_only_when_there_are_sections(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        bundle_module, "run_command", lambda _command, argv: calls.append(argv)
+    )
+
+    async def run() -> None:
+        provider = _SectionedProvider()
+        provider.submissions_path = str(tmp_path)  # type: ignore[attr-defined]
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH, data_provider=provider)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            await pilot.press("b")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ReturnBundleScreen)
+            box = screen.query_one("#return-bundle-by-section", Checkbox)
+            assert not box.value
+            box.value = True
+            await pilot.pause()
+            await pilot.click("#return-bundle-run")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            assert calls and calls[0][-1] == "--by-section"
+
+    asyncio.run(run())
+
+    async def without() -> None:
+        app = _BundleApp(str(tmp_path))
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert not app.screen.query("#return-bundle-by-section")
+
+    asyncio.run(without())

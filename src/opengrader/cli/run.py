@@ -24,6 +24,7 @@ from opengrader.core.pipeline import (
     StageStatus,
     plan_pipeline,
     run_pipeline,
+    section_requests,
 )
 
 EPILOG = """\
@@ -38,6 +39,7 @@ Examples:
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm --auto-ollama
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
   uv run opengrader-run cs146-quiz1/ --draft-rubrics    # AI drafts missing rubric items, then pauses
+  uv run opengrader-run --section-scan s1.pdf --section-scan s2.pdf --qa qa.md --out quiz1/
 
 \b
 Class folder:
@@ -47,6 +49,15 @@ Class folder:
   PDFs when there is no bundle). Two files that could both be the scan or the
   answer key stop the run and are named; two rosters or templates are left
   out with a warning. The folder doubles as --out.
+
+\b
+One scan per section:
+  Several scans whose names each say their section (section-01.pdf,
+  Sec B.pdf — in the folder or in one subfolder of it) are one assignment
+  scanned a section at a time. Each is checked, split and read on its own,
+  every submission is tagged with its section, and all of them are graded
+  together in submissions/. Rosters named the same way are paired with them.
+  By hand: --section-scan PDF[=SECTION], once per section.
 
 \b
 Resuming:
@@ -211,6 +222,20 @@ def _print_summary(report: PipelineReport) -> None:
         # by _resolve_cloud_confirmation before this summary ran.
         return
 
+    if report.split_review_needed:
+        paused = next(o for o in report.stages if o.status is StageStatus.PAUSED)
+        print("\nPaused before extraction: the split looks wrong in some places.")
+        for line in paused.detail.splitlines()[1:]:
+            print(f"  {line}")
+        print(
+            "Nothing was changed or extracted. Run the same command again with one of:\n"
+            "  --fix-split   apply the proposed fixes (a problem with no fix still waits)\n"
+            "  --keep-split  leave the split as it is; those submissions are right\n"
+            "or fix those PDFs yourself and run again: a submission you mend is not\n"
+            "asked about, and in a terminal you are asked here instead."
+        )
+        return
+
     if report.page_order_review_needed:
         paused = next(o for o in report.stages if o.status is StageStatus.PAUSED)
         print("\nPaused before extraction: some submissions look out of order.")
@@ -330,6 +355,18 @@ class _Inputs:
     roster: str | None
     blank_template: str | None
     pages_per_submission: int | None
+    section_scans: tuple[str, ...] = ()
+    section_rosters: tuple[str, ...] = ()
+
+
+def _scans_folder(entries: tuple[str, ...]) -> str:
+    """The folder several section scans are in: what `scan` names for them."""
+    import os
+
+    from opengrader.core.roster import parse_roster_arg
+
+    parents = [str(parse_roster_arg(entry)[0].expanduser().resolve().parent) for entry in entries]
+    return os.path.commonpath(parents)
 
 
 _FOLDER_ROLE_FLAGS = (
@@ -365,8 +402,21 @@ def _resolve_class_folder(folder: str | None, inputs: _Inputs, *, stream) -> Non
     for line in describe_class_folder(found):
         stream.write(f"  {line}\n")
 
+    if found.section_scans and not inputs.scan and not inputs.section_scans:
+        inputs.section_scans = tuple(
+            f"{item.path}={item.section}" for item in found.section_scans
+        )
+        inputs.scan = _scans_folder(inputs.section_scans)
+        if found.section_rosters and not inputs.roster and not inputs.section_rosters:
+            inputs.section_rosters = tuple(
+                f"{item.path}={item.section}" for item in found.section_rosters
+            )
+
     blocking: list[str] = []
     for role, dest, flag in _FOLDER_ROLE_FLAGS:
+        if dest == "scan" and inputs.section_scans:
+            # The scans are listed above, one per section.
+            continue
         given = getattr(inputs, dest)
         if given:
             stream.write(f"  = {ROLE_LABELS[role]:<15} {given} (from {flag})\n")
@@ -445,6 +495,45 @@ def _resolve_cloud_confirmation(
     return confirmed_request, new_report
 
 
+def _resolve_split_review(
+    request: PipelineRequest,
+    report: PipelineReport,
+    narrator: "_Narrator",
+    *,
+    as_json: bool,
+) -> PipelineReport:
+    """`report` paused before extraction because the split looks wrong
+    somewhere. A TTY without --json is asked what to do and the run carries
+    on; anything else is told how to answer and stays paused."""
+    from opengrader.core.pages.split_review import (
+        pending_split_findings,
+        review_split_in_terminal,
+    )
+    from opengrader.core.pipeline import answer_split_review
+
+    stream = sys.stderr if as_json else sys.stdout
+
+    def write(line: str) -> None:
+        stream.write(f"{line}\n")
+        stream.flush()
+
+    if not (sys.stdin.isatty() and not as_json):
+        return report
+    # With one scan per section, the section the run stopped at.
+    review_dir = next(
+        (folder for folder in request.review_dirs if pending_split_findings(folder)),
+        request.extract_source,
+    )
+    if not review_split_in_terminal(
+        review_dir,
+        ask=input,
+        write=write,
+        answer=lambda fix, keep: answer_split_review(request, review_dir, fix=fix, keep=keep),
+    ):
+        return report
+    return _run_pipeline(request, narrator, as_json=as_json)
+
+
 def _resolve_page_order(
     request: PipelineRequest,
     report: PipelineReport,
@@ -465,7 +554,14 @@ def _resolve_page_order(
 
     if not (sys.stdin.isatty() and not as_json):
         return report
-    if not review_in_terminal(request.extract_source, ask=input, write=write):
+    from opengrader.core.pages.order_review import pending_findings
+
+    # With one scan per section, the section the run stopped at.
+    review_dir = next(
+        (folder for folder in request.review_dirs if pending_findings(folder)),
+        request.extract_source,
+    )
+    if not review_in_terminal(review_dir, ask=input, write=write):
         return report
     return _run_pipeline(request, narrator, as_json=as_json)
 
@@ -668,6 +764,29 @@ def _save_inputs(
     help="Tab-separated roster (ID<TAB>NAME); names and IDs are matched to it.",
 )
 @click.option(
+    "--section-scan",
+    "section_scans",
+    multiple=True,
+    metavar="PDF[=SECTION]",
+    help=(
+        "One scan per class section, instead of --scan: repeat once per "
+        "section. SECTION defaults to what the file's name says "
+        "(section-01.pdf is 'Section 01'). Every submission is tagged with its "
+        "section; all are graded together."
+    ),
+)
+@click.option(
+    "--section-roster",
+    "section_rosters",
+    multiple=True,
+    metavar="TSV[=SECTION]",
+    help=(
+        "A section's own roster, repeatable. With --section-scan each section "
+        "uses the roster naming the same section (else --roster); with one "
+        "--scan, students are routed to the section whose roster holds them."
+    ),
+)
+@click.option(
     "--blank-template",
     metavar="PDF",
     help=(
@@ -781,6 +900,24 @@ def _save_inputs(
     ),
 )
 @click.option(
+    "--fix-split",
+    is_flag=True,
+    help=(
+        "Where the split looks wrong (a submission of the wrong length, say "
+        "a six-page assignment split 5 + 1) and a fix can be worked out, "
+        "apply it and carry on. A problem with no fix still pauses the run."
+    ),
+)
+@click.option(
+    "--keep-split",
+    is_flag=True,
+    help=(
+        "Leave the split as it is where it looks wrong, and carry on. Without "
+        "this or --fix-split the run pauses before extraction so you can "
+        "check (asked here in a terminal)."
+    ),
+)
+@click.option(
     "--read-without-key",
     is_flag=True,
     help=(
@@ -834,6 +971,8 @@ def command(
     assignment: str | None,
     qa: str | None,
     roster: str | None,
+    section_scans: tuple[str, ...],
+    section_rosters: tuple[str, ...],
     blank_template: str | None,
     pages_per_submission: int | None,
     jobs: int | None,
@@ -847,6 +986,8 @@ def command(
     draft_rubrics: bool,
     reorder_pages: bool,
     keep_page_order: bool,
+    fix_split: bool,
+    keep_split: bool,
     read_without_key: bool,
     force: bool,
     fresh: bool,
@@ -870,7 +1011,13 @@ def command(
         roster=roster,
         blank_template=blank_template,
         pages_per_submission=pages_per_submission,
+        section_scans=tuple(section_scans),
+        section_rosters=tuple(section_rosters),
     )
+    if inputs.section_scans:
+        if inputs.scan:
+            raise click.UsageError("give --scan or --section-scan, not both")
+        inputs.scan = _scans_folder(inputs.section_scans)
     try:
         target = _run_target(folder, inputs, assignment)
         root = (
@@ -891,10 +1038,14 @@ def command(
         output_dir=Path(inputs.out),
         qa_file=Path(inputs.qa) if inputs.qa else None,
         roster=Path(inputs.roster) if inputs.roster else None,
+        section_rosters=inputs.section_rosters,
+        section_scans=inputs.section_scans,
         blank_template=Path(inputs.blank_template) if inputs.blank_template else None,
         pages_per_submission=inputs.pages_per_submission,
         reorder_pages=reorder_pages,
         keep_page_order=keep_page_order,
+        fix_split=fix_split,
+        keep_split=keep_split,
         read_without_key=read_without_key,
         llm=LlmOptions(
             read_handwriting=llm if llm is not None else ai.read_handwriting,
@@ -913,6 +1064,11 @@ def command(
         send_to_cloud_confirmed=yes_send_to_cloud,
     )
 
+    try:
+        section_requests(request)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from None
+
     if dry_run:
         _print_plan(request)
         return None
@@ -930,6 +1086,14 @@ def command(
         request, report = _resolve_cloud_confirmation(
             request, report, narrator, as_json=as_json
         )
+
+    # Asked in a terminal one at a time; each answer re-runs, and the re-run
+    # may stop at the next question (another section, or the page order).
+    while report.split_review_needed:
+        answered = _resolve_split_review(request, report, narrator, as_json=as_json)
+        if answered is report:
+            break
+        report = answered
 
     if report.page_order_review_needed:
         report = _resolve_page_order(request, report, narrator, as_json=as_json)

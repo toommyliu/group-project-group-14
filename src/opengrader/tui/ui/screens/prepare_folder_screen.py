@@ -30,6 +30,7 @@ ACTION_CREATE_KEY = "create-key"
 ACTION_AUTO_GRADE = "auto-grade"
 ACTION_OPEN = "open"
 ACTION_SKIP = "skip"
+ACTION_WORKSPACE = "workspace"
 
 _BUTTON_PREFIX = "prepare-folder-"
 

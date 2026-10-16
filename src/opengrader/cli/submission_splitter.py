@@ -239,12 +239,14 @@ def _split_by_page_catalog(
 
     from opengrader.core.pages.catalog import CATALOG_DIRNAME, build_catalog, scan_pages
     from opengrader.core.pages.split import (
+        number_of,
         plan_submissions,
         shared_order_note,
         template_positions,
         write_sidecar,
         write_split_pdf,
     )
+    from opengrader.core.pages.split_review import SplitPage, SplitPart, typical_submission
     from opengrader.core.submissions.splitter import write_scan_warnings
 
     emit("Matching scanned pages to each other…")
@@ -292,7 +294,51 @@ def _split_by_page_catalog(
         write_extra_pages_map(output, extra_pages)
     flagged = sum(1 for submission in planned if submission.warnings)
     emit(f"Wrote {len(planned)} split PDFs to: {output}" + (f" ({flagged} flagged for review)" if flagged else ""))
+    parts = [
+        SplitPart(
+            submission.name,
+            tuple(SplitPage(number_of(catalog, m), m.group is not None) for m in submission.pages),
+        )
+        for submission in planned
+    ]
+    usual_length, usual_pages = typical_submission(parts)
+    if not _review_split(
+        output, parts, pages_per_submission or usual_length, usual_pages, emit, interactive=interactive
+    ):
+        return
     _review_scan_order(planned, positions, emit, output=output, reorder_only=reorder_only, interactive=interactive)
+
+
+def _review_split(
+    output: Path,
+    parts,
+    expected_pages: int | None,
+    printed_pages,
+    emit: Callable[[str], None],
+    *,
+    interactive: bool,
+) -> bool:
+    """Note where the split looks wrong (a submission of the wrong length, a
+    printed page missing or repeated) for a person to confirm before
+    extraction. False when the person, asked here, chose to stop."""
+    from opengrader.core.pages.split_review import (
+        describe_split_pending,
+        pending_split_findings,
+        record_split_review,
+        review_split_in_terminal,
+    )
+
+    findings = record_split_review(output, parts, expected_pages, printed_pages)
+    if not findings:
+        return True
+    if interactive:
+        return review_split_in_terminal(output, ask=input, write=emit)
+    pending = pending_split_findings(output)
+    print(f"Warning: {len(pending)} place(s) where the split looks wrong; extraction "
+          "should wait until they are checked:", file=sys.stderr)
+    for line in describe_split_pending(pending):
+        print(f"  {line}", file=sys.stderr)
+    return True
 
 
 def _review_scan_order(
@@ -751,6 +797,23 @@ def command(
                 "No extra work pages recorded: telling them apart needs --blank-template "
                 "(or --reorder). Pages were left as scanned."
             )
+
+        from opengrader.core.pages.split_review import SplitPage, SplitPart, typical_submission
+        from opengrader.core.submissions.extra_pages import read_extra_pages_for
+
+        parts = []
+        for pdf_path in created:
+            extra = set(read_extra_pages_for(pdf_path) or ())
+            count = len(PdfReader(str(pdf_path)).pages)
+            parts.append(SplitPart(
+                pdf_path.stem,
+                tuple(SplitPage(matched=position not in extra) for position in range(1, count + 1)),
+            ))
+        expected = pages_per_submission or typical_submission(parts)[0]
+        _review_split(
+            Path(output), parts, expected, (), emit,
+            interactive=status_callback is None and sys.stdin.isatty(),
+        )
     finally:
         if started_server:
             emit("Stopping auto-started Ollama server...")

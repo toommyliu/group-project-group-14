@@ -64,6 +64,24 @@ _RECUTS = """CREATE TABLE IF NOT EXISTS recuts (
 _STAFF = """CREATE TABLE staff (
     email TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('instructor', 'grader'))
 )"""
+# Sharing a workspace with other accounts on the same computer (graders who
+# reach it over SSH): which accounts are instructors, the group allowed to
+# join, and the changes a grader asked for to a grade someone else gave.
+_ACCOUNTS = """CREATE TABLE IF NOT EXISTS accounts (
+    login TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('instructor', 'grader')),
+    may_change_others INTEGER NOT NULL DEFAULT 0
+)"""
+_SHARING = """CREATE TABLE IF NOT EXISTS sharing (
+    id INTEGER PRIMARY KEY CHECK (id = 1), group_name TEXT NOT NULL
+)"""
+_CHANGE_REQUESTS = """CREATE TABLE IF NOT EXISTS change_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_id TEXT NOT NULL,
+    submission_id INTEGER NOT NULL, question_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL, graded_by TEXT NOT NULL, edit TEXT NOT NULL,
+    created TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'dismissed')),
+    decided_by TEXT, decided TEXT
+)"""
 _MIGRATIONS: dict[int, tuple[str, ...]] = {
     4: ("CREATE TABLE graders (email TEXT PRIMARY KEY)",),
     # Version 6 meant outlines on one development branch and students on
@@ -82,6 +100,7 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE workspace ADD COLUMN term TEXT",
         "ALTER TABLE workspace ADD COLUMN year INTEGER",
     ),
+    10: (_ACCOUNTS, _SHARING, _CHANGE_REQUESTS),
 }
 _VERSION = max(_MIGRATIONS) + 1
 _SCHEMA = f"""
@@ -130,6 +149,9 @@ CREATE TABLE feedback_jobs (
 {_OUTLINES};
 {_STUDENTS};
 {_RECUTS};
+{_ACCOUNTS};
+{_SHARING};
+{_CHANGE_REQUESTS};
 PRAGMA user_version = {_VERSION};
 """
 
@@ -647,7 +669,7 @@ class Workspace:
                 ).fetchone()
                 if row is None:
                     continue
-                for table in ("recuts", "feedback_jobs", "answers"):
+                for table in ("recuts", "feedback_jobs", "answers", "change_requests"):
                     db.execute(
                         f"DELETE FROM {table} WHERE assignment_id=? AND submission_id=?",
                         (assignment_id, row[0]),
@@ -660,7 +682,7 @@ class Workspace:
 
     def delete_assignment(self, assignment_id: str) -> None:
         with self.connect(write=True) as db:
-            for table in ("recuts", "feedback_jobs", "answers", "submissions", "history", "outlines"):
+            for table in ("recuts", "feedback_jobs", "answers", "change_requests", "submissions", "history", "outlines"):
                 db.execute(
                     f"DELETE FROM {table} WHERE assignment_id=?", (assignment_id,)
                 )

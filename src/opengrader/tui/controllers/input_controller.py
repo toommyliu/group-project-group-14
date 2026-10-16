@@ -75,6 +75,8 @@ class InputCommand(str, Enum):
     OPEN_BACKUP = "open_backup"
     OPEN_RELEASE = "open_release"
     OPEN_WORK_CLAIMS = "open_work_claims"
+    JOIN_SPLIT_SUBMISSIONS = "join_split_submissions"
+    OPEN_CHANGE_REQUESTS = "open_change_requests"
     OPEN_COMMENT_LIBRARY = "open_comment_library"
     OPEN_FORMAT_GUIDE = "open_format_guide"
 
@@ -265,6 +267,22 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
         "D",
         InputCommand.OPEN_WORK_CLAIMS,
         "Work Claims",
+        (InputContext.QA, InputContext.GRADE),
+    ),
+    # For a paper the splitter cut in two: join it with the submission
+    # scanned just before or after it, read it again, keep its grades.
+    CommandBindingSpec(
+        "X",
+        InputCommand.JOIN_SPLIT_SUBMISSIONS,
+        "Join split",
+        (InputContext.GRADE,),
+    ),
+    # A workspace shared with other accounts: changes graders asked for to
+    # grades someone else gave, for an instructor to approve or dismiss.
+    CommandBindingSpec(
+        "Q",
+        InputCommand.OPEN_CHANGE_REQUESTS,
+        "Requests",
         (InputContext.QA, InputContext.GRADE),
     ),
     CommandBindingSpec(

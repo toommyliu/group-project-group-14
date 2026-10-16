@@ -97,7 +97,7 @@ function TemplateForm() {
           description={
             file
               ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB`
-              : 'Drop the exam or quiz PDF here. It should be the same layout students receive.'
+              : 'Drop the assignment PDF here. It should be the same layout students receive.'
           }
           buttonLabel={file ? 'Choose a different PDF' : 'Select PDF'}
           inputLabel="Template PDF"

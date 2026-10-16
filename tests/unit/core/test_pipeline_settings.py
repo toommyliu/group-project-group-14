@@ -119,3 +119,21 @@ def test_the_answer_key_points_are_remembered_and_a_bad_value_is_ignored() -> No
         json.dumps({"version": 1, "answer_key_points": -3}), encoding="utf-8"
     )
     assert load_machine_settings().answer_key_points is None
+
+
+def test_section_scans_round_trip_as_typed(tmp_path) -> None:
+    settings = FolderPipelineSettings(
+        use_section_scans=True,
+        section_scans=("/scans/mw.pdf=MW", "/scans/section-2.pdf"),
+    )
+    save_folder_settings(tmp_path, settings)
+
+    assert load_folder_settings(tmp_path) == settings
+
+
+def test_section_scans_ticked_with_none_typed_keep_what_the_folder_finds(tmp_path) -> None:
+    save_folder_settings(tmp_path, FolderPipelineSettings(use_section_scans=True))
+
+    saved = json.loads(folder_settings_path(tmp_path).read_text(encoding="utf-8"))
+    assert saved["use_section_scans"] is True
+    assert "section_scans" not in saved

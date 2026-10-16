@@ -13,7 +13,11 @@ from opengrader.core.class_folder import (
     ROLE_TEMPLATE,
     describe_class_folder,
     find_answer_key_source,
+    find_assignment_folders,
+    is_workspace,
     scan_class_folder,
+    section_key,
+    section_name,
 )
 
 
@@ -94,8 +98,9 @@ def test_two_answer_keys_with_no_tiebreak_are_ambiguous(tmp_path) -> None:
 
 
 def test_two_unlabelled_pdfs_are_ambiguous_rather_than_guessed(tmp_path) -> None:
-    _touch(tmp_path / "period1.pdf")
-    _touch(tmp_path / "period2.pdf")
+    # Names that say nothing; ones naming a section each are section scans.
+    _touch(tmp_path / "morning.pdf")
+    _touch(tmp_path / "afternoon.pdf")
 
     found = scan_class_folder(tmp_path)
     assert found.scan is None
@@ -293,3 +298,190 @@ def test_a_finished_answer_key_or_a_template_is_not_its_own_source(tmp_path) -> 
     _touch(tmp_path / "answer-sheet-template.pdf")
 
     assert find_answer_key_source(tmp_path) is None
+
+
+# One scan per class section --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "section"),
+    [
+        ("section-01.pdf", "Section 01"),
+        ("Sec B scans.pdf", "Section B"),
+        ("sect_2.tsv", "Section 2"),
+        ("CS146_Sec03_quiz.pdf", "Section 03"),
+        ("period 3.pdf", "Period 3"),
+        ("period1.pdf", "Period 1"),
+        ("second.pdf", None),
+        ("sections-a.pdf", None),
+        ("sec-ond.pdf", None),
+        ("submissions.pdf", None),
+    ],
+)
+def test_a_files_section_is_read_from_its_name(name: str, section: str | None) -> None:
+    assert section_name(name) == section
+
+
+def test_section_spellings_of_one_section_match() -> None:
+    assert section_key("Section 01") == section_key("section 1") == "section 1"
+    assert section_key("Section 1") != section_key("Section 10")
+
+
+def test_scans_named_after_their_sections_are_one_assignment(tmp_path) -> None:
+    _touch(tmp_path / "qa.md", QA_TEXT)
+    two = _touch(tmp_path / "section-2.pdf")
+    ten = _touch(tmp_path / "section-10.pdf")
+    one = _touch(tmp_path / "section-01.pdf")
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.scan is None
+    assert found.ambiguity(ROLE_SCAN) is None
+    assert [(item.path, item.section) for item in found.section_scans] == [
+        (one, "Section 01"),
+        (two, "Section 2"),
+        (ten, "Section 10"),
+    ]
+    line = next(line for line in describe_class_folder(found) if "scanned" in line)
+    assert line.startswith("✓") and "section-01.pdf (Section 01)" in line
+
+
+def test_section_scans_in_one_subfolder_are_not_a_folder_of_split_pdfs(tmp_path) -> None:
+    _touch(tmp_path / "qa.md", QA_TEXT)
+    _touch(tmp_path / "scans" / "Sec A.pdf")
+    _touch(tmp_path / "scans" / "Sec B.pdf")
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.scan is None
+    assert [item.section for item in found.section_scans] == ["Section A", "Section B"]
+
+
+def test_a_folder_of_split_pdfs_is_still_one(tmp_path) -> None:
+    _touch(tmp_path / "split" / "submission-0001.pdf")
+    _touch(tmp_path / "split" / "submission-0002.pdf")
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.scan == tmp_path / "split"
+    assert found.section_scans == ()
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ("section-01.pdf", "section-1.pdf"),  # the same section twice
+        ("section-01.pdf", "morning.pdf"),  # one says nothing
+    ],
+)
+def test_section_scans_must_each_name_a_different_section(tmp_path, names) -> None:
+    for name in names:
+        _touch(tmp_path / name)
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.section_scans == ()
+    assert found.ambiguity(ROLE_SCAN) is not None
+
+
+def test_rosters_named_after_the_sections_go_with_their_scans(tmp_path) -> None:
+    _touch(tmp_path / "section-01.pdf")
+    _touch(tmp_path / "section-02.pdf")
+    one = _touch(tmp_path / "roster-section-01.tsv", "1\tAda\n")
+    two = _touch(tmp_path / "roster-section-02.tsv", "2\tBo\n")
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.roster is None
+    assert found.ambiguity(ROLE_ROSTER) is None
+    assert [(item.path, item.section) for item in found.section_rosters] == [
+        (one, "Section 01"),
+        (two, "Section 02"),
+    ]
+
+
+def test_section_rosters_without_section_scans_stay_ambiguous(tmp_path) -> None:
+    _touch(tmp_path / "submissions.pdf")
+    _touch(tmp_path / "roster-section-01.tsv", "1\tAda\n")
+    _touch(tmp_path / "roster-section-02.tsv", "2\tBo\n")
+
+    found = scan_class_folder(tmp_path)
+
+    assert found.section_rosters == ()
+    assert found.ambiguity(ROLE_ROSTER) is not None
+
+
+# A folder of assignments ------------------------------------------------------
+
+
+def _assignment(folder: Path, title: str, *, graded: bool = True) -> Path:
+    _touch(folder / "qa.md", QA_TEXT.replace("title: Quiz", f"title: {title}"))
+    if graded:
+        _touch(folder / "submissions" / "a" / "a.submission.md", "---\n---\n")
+        _touch(folder / "submissions" / "b" / "b.submission.md", "---\n---\n")
+    else:
+        _touch(folder / "scan.pdf")
+    return folder
+
+
+def test_subfolders_with_their_own_answer_keys_are_assignments(tmp_path) -> None:
+    quiz = _assignment(tmp_path / "Quiz 1", "Quiz 1")
+    midterm = _assignment(tmp_path / "Midterm", "Midterm", graded=False)
+    _touch(tmp_path / "notes" / "readme.txt", "not an assignment")
+
+    found = find_assignment_folders(tmp_path)
+
+    assert {item.folder for item in found.assignments} == {quiz, midterm}
+    assert [item.folder for item in found.ready] == [quiz]
+    assert found.is_workspace_candidate
+
+
+def test_one_assignment_is_not_a_workspace(tmp_path) -> None:
+    _assignment(tmp_path / "Quiz 1", "Quiz 1")
+
+    assert not find_assignment_folders(tmp_path).is_workspace_candidate
+
+
+def test_subfolders_sharing_one_answer_key_are_sections_not_assignments(tmp_path) -> None:
+    one = _assignment(tmp_path / "Quiz 1 - Sec 1", "Quiz 1")
+    two = _assignment(tmp_path / "Quiz 1 - Sec 2", "Quiz 1")
+    _assignment(tmp_path / "Midterm", "Midterm")
+
+    found = find_assignment_folders(tmp_path)
+
+    assert found.same_key == ((one, two),)
+    assert not found.is_workspace_candidate
+
+
+def test_a_subfolder_that_is_a_workspace_is_never_nested(tmp_path) -> None:
+    _assignment(tmp_path / "Quiz 1", "Quiz 1")
+    _assignment(tmp_path / "Quiz 2", "Quiz 2")
+    _touch(tmp_path / "Old" / ".opengrader" / "workspace.sqlite3", "")
+
+    found = find_assignment_folders(tmp_path)
+
+    assert found.workspaces == (tmp_path / "Old",)
+    assert not found.is_workspace_candidate
+
+
+def test_a_browser_session_on_a_class_folder_is_not_a_workspace(tmp_path) -> None:
+    _touch(tmp_path / "real" / ".opengrader" / "workspace.sqlite3", "")
+    session = tmp_path / "session"
+    _touch(session / ".opengrader" / "workspace.sqlite3", "")
+    _touch(session / ".opengrader" / "folder-session.json", "{}")
+
+    assert is_workspace(tmp_path / "real")
+    assert not is_workspace(session)
+    assert not is_workspace(tmp_path)
+
+
+def test_an_assignment_once_opened_in_the_browser_is_still_an_assignment(tmp_path) -> None:
+    _assignment(tmp_path / "Quiz 1", "Quiz 1")
+    quiz2 = _assignment(tmp_path / "Quiz 2", "Quiz 2")
+    _touch(quiz2 / ".opengrader" / "workspace.sqlite3", "")
+    _touch(quiz2 / ".opengrader" / "folder-session.json", "{}")
+
+    found = find_assignment_folders(tmp_path)
+
+    assert found.workspaces == ()
+    assert len(found.assignments) == 2 and found.is_workspace_candidate

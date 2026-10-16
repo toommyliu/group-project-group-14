@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
@@ -42,6 +43,11 @@ PIPELINE_STAGES: tuple[str, ...] = (
     STAGE_AUTO_GRADE,
 )
 
+# With one scan per section, these run once for each section's scan…
+SECTION_STAGES: tuple[str, ...] = (STAGE_SCAN_CHECK, STAGE_SPLIT, STAGE_EXTRACT)
+# …and these once for the whole class, over every section's submissions.
+COHORT_STAGES: tuple[str, ...] = (STAGE_DRAFT_RUBRICS, STAGE_AUTO_GRADE)
+
 _STAGE_COMMANDS = {
     STAGE_SPLIT: "submission-splitter",
     STAGE_EXTRACT: "submission-extractor",
@@ -54,6 +60,8 @@ _STAGE_COMMANDS = {
 PAGE_ORDER_DETAIL = "page-order:"
 # …and when the scans cannot be read until there is an answer key.
 ANSWER_KEY_DETAIL = "answer-key:"
+# …and when the split looks wrong somewhere (a submission of the wrong length).
+SPLIT_REVIEW_DETAIL = "split-review:"
 
 
 class StageStatus(str, Enum):
@@ -94,6 +102,16 @@ class PipelineRequest:
     # student is routed to the section whose roster holds their ID. When given,
     # these are used instead of `roster`.
     section_rosters: tuple[str, ...] = ()
+    # One scanned bundle per class section instead of one stack: `PDF[=SECTION]`
+    # entries (the section defaults to what the file's name says, so
+    # `section-01.pdf` is "Section 01"). Each scan is checked, split and read
+    # on its own, every submission is tagged with its section, and all of them
+    # land in the one submissions/ folder, graded together against one answer
+    # key. A section's roster is the `section_rosters` entry naming the same
+    # section, else `roster`. `scan` is then only the folder they are in.
+    section_scans: tuple[str, ...] = ()
+    # Set only on the per-section requests `section_requests` builds.
+    section: str = ""
     blank_template: Path | None = None
     # Answer boxes for an assignment Opengrader did not generate. It answers
     # the same question as `blank_template` (where are the answers?), so the
@@ -107,6 +125,12 @@ class PipelineRequest:
     # them as scanned and carry on. Without it (or reorder_pages) the run pauses
     # before extraction for a person to confirm, sort, or rearrange them.
     keep_page_order: bool = False
+    # The answer to "the split looks wrong here" given up front: apply every
+    # proposed fix (fix_split), or leave the split as it is (keep_split).
+    # Without either the run pauses before extraction for a person to look.
+    # One-shot, like `force`: never remembered.
+    fix_split: bool = False
+    keep_split: bool = False
     # The answer to "these scans need an answer key to find their questions"
     # given up front: read them anyway, by whatever numbers the pages print.
     # One-shot, like `force`: never remembered.
@@ -135,7 +159,18 @@ class PipelineRequest:
 
     @property
     def split_dir(self) -> Path:
+        if self.section:
+            # Each section's PDFs and their page-order findings apart.
+            return self.output_dir / "split" / section_slug(self.section)
         return self.output_dir / "split"
+
+    @property
+    def review_dirs(self) -> tuple[Path, ...]:
+        """Where split submissions can wait for a page-order answer: the one
+        split folder, or each section's."""
+        if self.section_scans:
+            return tuple(item.extract_source for item in section_requests(self))
+        return (self.extract_source,)
 
     @property
     def submissions_dir(self) -> Path:
@@ -157,6 +192,8 @@ class StagePlan:
     reason: str
     argv: tuple[str, ...] = ()
     status: StageStatus = StageStatus.RAN
+    # The class section this step is for, with one scan per section.
+    section: str = ""
 
     @property
     def command(self) -> str:
@@ -231,6 +268,15 @@ class PipelineReport:
         )
 
     @property
+    def split_review_needed(self) -> bool:
+        """True when the run paused before extraction because the split looks
+        wrong somewhere and nobody has answered for it yet."""
+        return any(
+            outcome.status is StageStatus.PAUSED and outcome.detail.startswith(SPLIT_REVIEW_DETAIL)
+            for outcome in self.stages
+        )
+
+    @property
     def answer_key_needed(self) -> bool:
         """True when the run stopped before extraction because nothing says
         where the questions are on these scans, and there is no answer key."""
@@ -275,10 +321,96 @@ class PipelineProgress:
             self.on_response(name, item)
 
 
+def section_slug(section: str) -> str:
+    """A section's name as a folder and file-name prefix: "Section 01" → section-01."""
+    return re.sub(r"[^a-z0-9]+", "-", section.strip().lower()).strip("-") or "section"
+
+
+def section_requests(request: PipelineRequest) -> tuple[PipelineRequest, ...]:
+    """One request per section scan, or () for a single-stack run.
+
+    Raises ValueError when two scans would be the same section, or when two
+    folders of already-split PDFs hold a file of the same name: their
+    submissions would be written over each other.
+    """
+    if not request.section_scans:
+        return ()
+    from opengrader.core.class_folder import section_key, section_name
+
+    rosters: dict[str, Path] = {}
+    for path, name in map(parse_roster_arg, request.section_rosters):
+        rosters[section_key(name or section_name(path) or path.stem)] = path
+
+    built: list[PipelineRequest] = []
+    sections: dict[str, Path] = {}
+    slugs: dict[str, Path] = {}
+    split_names: dict[str, Path] = {}
+    for path, name in map(parse_roster_arg, request.section_scans):
+        section = name or section_name(path) or path.stem
+        key = section_key(section)
+        slug = section_slug(section)
+        other = sections.get(key) or slugs.get(slug)
+        if other is not None:
+            raise ValueError(
+                f"{other.name} and {path.name} are both section {section!r}. "
+                "Name each scan's section (PDF=SECTION)."
+            )
+        sections[key] = path
+        slugs[slug] = path
+        if path.is_dir():
+            for pdf in path.glob("*.pdf"):
+                clash = split_names.get(pdf.stem)
+                if clash is not None:
+                    raise ValueError(
+                        f"{clash.name}/ and {path.name}/ both hold {pdf.name}; "
+                        "their submissions would overwrite each other. Rename one."
+                    )
+                split_names[pdf.stem] = path
+        built.append(
+            replace(
+                request,
+                scan=path,
+                section=section,
+                section_scans=(),
+                section_rosters=(),
+                roster=rosters.get(key, request.roster),
+            )
+        )
+    return tuple(built)
+
+
+def _stage_order(request: PipelineRequest) -> tuple[tuple[PipelineRequest, str], ...]:
+    """Every stage of a run, with the request it runs for, in order."""
+    sections = section_requests(request)
+    if not sections:
+        return tuple((request, stage) for stage in PIPELINE_STAGES)
+    return tuple(
+        (section, stage) for section in sections for stage in SECTION_STAGES
+    ) + tuple((request, stage) for stage in COHORT_STAGES)
+
+
+def _for_section(request: PipelineRequest, text: str) -> str:
+    return f"{request.section}: {text}" if request.section else text
+
+
 def plan_pipeline(request: PipelineRequest) -> tuple[StagePlan, ...]:
-    """A forecast only: execution replans after each stage as earlier outputs invalidate reuse."""
-    ledger = _read_ledger(request)
-    return tuple(_plan_stage(request, stage, ledger) for stage in PIPELINE_STAGES)
+    """A forecast only: execution replans after each stage as earlier outputs invalidate reuse.
+
+    With one scan per section, the first three stages are planned once per
+    section, each plan's reason naming its section.
+    """
+    plans: list[StagePlan] = []
+    for item, stage in _stage_order(request):
+        plan = _plan_stage(item, stage, _read_ledger(item))
+        plans.append(
+            replace(plan, reason=_for_section(item, plan.reason), section=item.section)
+        )
+    return tuple(plans)
+
+
+def _ledger_key(request: PipelineRequest, stage: str) -> str:
+    # One record per section for the stages that run per section.
+    return f"{stage}:{section_slug(request.section)}" if request.section else stage
 
 
 def _plan_stage(
@@ -351,7 +483,7 @@ def _plan_stage(
         )
 
     source, settings_id = _stage_ledger_key(request, stage)
-    record = ledger.get(stage)
+    record = ledger.get(_ledger_key(request, stage))
     if record_is_reusable(
         record,
         output_dir=request.output_dir,
@@ -403,6 +535,9 @@ def _split_argv(request: PipelineRequest) -> tuple[str, ...]:
         argv += ["--blank-template", str(request.blank_template)]
     if request.reorder_pages:
         argv.append("--reorder")
+    if request.section:
+        # Every section's submissions are read into one folder, by file name.
+        argv += ["--filename-prefix", section_slug(request.section)]
     # No --yes-send-to-cloud here: the splitter's only vision calls are
     # whole-page reads (page numbers, Name/ID headers), which
     # GuardedVisionReader always routes to a local reader — a split run
@@ -425,6 +560,8 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv += ["--id-file", entry]
     elif request.roster is not None:
         argv += ["--id-file", str(request.roster)]
+    if request.section:
+        argv += ["--section", request.section]
     if request.blank_template is not None:
         argv += ["--blank-template", str(request.blank_template)]
     if request.region_map is not None:
@@ -522,7 +659,10 @@ def auto_grade_pending(output_dir: str | Path) -> bool:
     read, so this is cheap enough to ask every time a folder is opened.
     """
     ledger = read_manifest(output_dir, filename=RUN_LEDGER_FILENAME)
-    return STAGE_EXTRACT in ledger and STAGE_AUTO_GRADE not in ledger
+    extracted = any(
+        key == STAGE_EXTRACT or key.startswith(f"{STAGE_EXTRACT}:") for key in ledger
+    )
+    return extracted and STAGE_AUTO_GRADE not in ledger
 
 
 def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
@@ -555,6 +695,8 @@ def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
         # Only when on, so ledgers written before the option existed still match.
         if request.reorder_pages:
             settings["reorder"] = True
+        if request.section:
+            settings["filename_prefix"] = section_slug(request.section)
         return (input_fingerprint(request.scan), settings_fingerprint(settings))
 
     if stage == STAGE_EXTRACT:
@@ -576,6 +718,8 @@ def _stage_ledger_key(request: PipelineRequest, stage: str) -> tuple[str, str]:
             ]
         if request.region_map is not None:
             settings["region_map"] = file_fingerprint(request.region_map)
+        if request.section:
+            settings["section"] = request.section
         return (
             input_fingerprint(request.extract_source),
             settings_fingerprint(settings),
@@ -622,7 +766,7 @@ def _record_stage(
     append_record(
         request.output_dir,
         ExtractionRecord(
-            key=stage,
+            key=_ledger_key(request, stage),
             source=str(_stage_source(request, stage)),
             source_sha256=source,
             settings_id=settings_id,
@@ -697,6 +841,20 @@ def run_pipeline(
     from opengrader.core.cloud_preflight import plan_cloud_egress
 
     reporter = progress or PipelineProgress()
+    try:
+        order = _stage_order(request)
+    except ValueError as exc:
+        return PipelineReport(
+            stages=(
+                StageOutcome(
+                    stage=PIPELINE_STAGES[0],
+                    status=StageStatus.FAILED,
+                    message=str(exc),
+                ),
+            ),
+            submissions_dir=request.submissions_dir,
+            qa_file=request.qa_file,
+        )
     request.output_dir.mkdir(parents=True, exist_ok=True)
 
     resolved = _resolved_for_request(request)
@@ -708,8 +866,8 @@ def run_pipeline(
     run_start = utc_timestamp()
     with egress.recording(request.submissions_dir):
         outcomes: list[StageOutcome] = []
-        for stage in PIPELINE_STAGES:
-            plan = _plan_stage(request, stage, _read_ledger(request))
+        for item, stage in order:
+            plan = _plan_stage(item, stage, _read_ledger(item))
             reporter.stage_start(stage)
             started = time.monotonic()
 
@@ -718,11 +876,11 @@ def run_pipeline(
                     stage=stage,
                     status=plan.status,
                     message=plan.reason,
-                    outputs=_recorded_outputs(request, stage, plan),
+                    outputs=_recorded_outputs(item, stage, plan),
                 )
             else:
                 try:
-                    outcome = _execute(request, plan, reporter, started)
+                    outcome = _execute(item, plan, reporter, started)
                 except KeyboardInterrupt:
                     raise
                 except (SystemExit, Exception) as exc:  # noqa: BLE001
@@ -734,6 +892,7 @@ def run_pipeline(
                         duration_seconds=time.monotonic() - started,
                     )
 
+            outcome = replace(outcome, message=_for_section(item, outcome.message))
             outcomes.append(outcome)
             reporter.stage_finish(outcome)
             if outcome.status in (StageStatus.FAILED, StageStatus.BLOCKED, StageStatus.PAUSED):
@@ -914,13 +1073,18 @@ def _run_extract(
     from opengrader.cli import submission_extractor
     from opengrader.core.submissions.processor import ExtractionProgress
 
-    paused = _answer_key_gate(request, plan, started) or _page_order_gate(
-        request, plan, progress, started
+    paused = (
+        _split_review_gate(request, plan, progress, started)
+        or _answer_key_gate(request, plan, started)
+        or _page_order_gate(request, plan, progress, started)
     )
     if paused is not None:
         return paused
 
     source, settings_id = _stage_ledger_key(request, plan.stage)
+    from opengrader.core.submissions.merge_split import record_extract_command
+
+    record_extract_command(request.submissions_dir, request.extract_source, plan.argv[1:])
     submission_extractor.run_cli(
         list(plan.argv[1:]),
         progress=ExtractionProgress(
@@ -931,6 +1095,11 @@ def _run_extract(
     )
 
     outputs = sorted(request.submissions_dir.rglob("*.submission.md"))
+    if request.section:
+        # The folder holds every section's submissions; this one's are the
+        # ones read from its own PDFs (<stem>/<stem>.submission.md).
+        stems = {path.stem for path in request.extract_source.glob("*.pdf")}
+        outputs = [path for path in outputs if path.parent.name in stems]
     duration = time.monotonic() - started
     _record_stage(
         request,
@@ -987,6 +1156,98 @@ def _answer_key_gate(
         ),
         duration_seconds=time.monotonic() - started,
     )
+
+
+def _split_review_gate(
+    request: PipelineRequest,
+    plan: StagePlan,
+    progress: PipelineProgress,
+    started: float,
+) -> StageOutcome | None:
+    """Extraction waits while the split looks wrong somewhere: a submission
+    of the wrong length, or a printed page missing or repeated. It is asked
+    before anything else, because mending it changes which pages are which
+    submission — and extraction records each answer's page by position."""
+    from opengrader.core.pages.split_review import (
+        describe_split_pending,
+        pending_split_findings,
+    )
+
+    split_dir = request.extract_source
+    if not split_dir.is_dir():
+        return None
+    progress.status("Checking the split for submissions of the wrong length…")
+    pending = pending_split_findings(split_dir)
+    if not pending:
+        return None
+    if request.fix_split or request.keep_split:
+        answer_split_review(
+            request,
+            split_dir,
+            fix=[f.key for f in pending if f.has_fix] if request.fix_split else [],
+            # A finding with no fix to apply still waits, unless kept.
+            keep=[f.key for f in pending] if request.keep_split else [],
+        )
+        pending = pending_split_findings(split_dir)
+        if not pending:
+            return None
+    return StageOutcome(
+        stage=plan.stage,
+        status=StageStatus.PAUSED,
+        message=(
+            f"the split looks wrong in {len(pending)} place(s) — check it "
+            "before extraction"
+        ),
+        detail="\n".join(
+            [SPLIT_REVIEW_DETAIL, *describe_split_pending(pending), f"in {split_dir}"]
+        ),
+        duration_seconds=time.monotonic() - started,
+    )
+
+
+def answer_split_review(
+    request: PipelineRequest,
+    split_dir: Path,
+    *,
+    fix: Sequence[str],
+    keep: Sequence[str],
+) -> list[str]:
+    """Apply the proposed fixes named in `fix`, mark the rest of `keep` as
+    right as split, and return the fixes made."""
+    from opengrader.core.pages.split_review import answer_split
+
+    applied = answer_split(split_dir, fix, keep)
+    if applied:
+        rerecord_split(request.output_dir, split_dir)
+    return applied
+
+
+def rerecord_split(output_dir: Path, split_dir: Path) -> None:
+    """Tell the run ledger that the split PDFs in `split_dir` changed.
+
+    A fix can remove a split PDF (5 + 1 pages become one file), and the
+    ledger only reuses a split whose outputs all exist — so without a new
+    record the next run would split the scan afresh and undo the fix. The
+    record keeps its scan and settings fingerprints: the same scan, split
+    with the same settings, then mended by a person.
+    """
+    target = split_dir.resolve()
+    base = output_dir.resolve()
+    for key, record in read_manifest(output_dir, filename=RUN_LEDGER_FILENAME).items():
+        if key != STAGE_SPLIT and not key.startswith(f"{STAGE_SPLIT}:"):
+            continue
+        paths = [Path(item) if Path(item).is_absolute() else base / item for item in record.outputs]
+        if not paths or any(path.resolve().parent != target for path in paths):
+            continue
+        append_record(
+            output_dir,
+            replace(
+                record,
+                outputs=relative_outputs(output_dir, sorted(target.glob("*.pdf"))),
+                completed_at=utc_timestamp(),
+            ),
+            filename=RUN_LEDGER_FILENAME,
+        )
 
 
 def _page_order_gate(
@@ -1157,7 +1418,7 @@ def _recorded_outputs(
 ) -> tuple[str, ...]:
     if plan.status is not StageStatus.REUSED:
         return ()
-    record = _read_ledger(request).get(stage)
+    record = _read_ledger(request).get(_ledger_key(request, stage))
     if record is None:
         return ()
     base = request.output_dir
