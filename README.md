@@ -21,7 +21,7 @@
 
 ## Project Description
 
-Grading paper assignments is slow, and the tools that speed it up (like Gradescope) are cloud services that are expensive, rigid, and require uploading student work to a third party. **Opengrader** is a local, offline-first grading toolkit: it turns a markdown answer key into a printable assignment, splits and reads the scanned submissions, and gives instructors and TAs a fast question-by-question rubric grader in the terminal or the browser, with optional AI help that runs on your own machine by default.
+Grading paper assignments is slow, and the tools that speed it up (like Gradescope) are cloud services that are expensive, rigid, and require uploading student work to a third party. **Opengrader** is a local, offline-first grading toolkit: it turns a markdown answer key into a printable assignment, splits and reads the scanned submissions, and gives instructors and TAs a fast question-by-question rubric grader in the terminal or the browser. Opengrader does the grading and leaves the AI to you: hand the written answers to the AI assistant you already use (Claude, ChatGPT, Codex, …) in a redacted copy that carries no student names or IDs, or connect a local or cloud model.
 
 ---
 
@@ -31,12 +31,13 @@ Grading paper assignments is slow, and the tools that speed it up (like Gradesco
 
 | Step | What you can do |
 | --- | --- |
-| **1. Answer key** | Write a `qa.md` answer key ([format guide](docs/QA_file.md)), or draft one from an existing Word, text, or PDF answer key with `create-answer-key`. |
+| **1. Answer key** | Write a `qa.md` answer key ([format guide](src/opengrader/guides/qa-format.md)), or draft one from an existing Word, text, or PDF answer key with `create-answer-key`. |
 | **2. Printable assignment** | Generate assignment PDFs with answer boxes, multiple versions, optional QR codes, and bubble sheets. |
 | **3. Scan intake** | Check a scanned stack for rotated, blank, or missing pages, split it into one PDF per student, and import phone photos. |
 | **4. Reading answers** | Crop every answer and read each student's name and ID (Tesseract / PP-OCR, plus an optional local vision model for handwriting). |
 | **5. Grading** | Grade question by question in the terminal app (images shown inline) or the web app, with rubrics, comments, undo, and anonymous grading on by default. |
 | **6. Auto-grading** | Score multiple choice, true/false, and numeric answers automatically; an AI model can suggest grades for written answers, which a human reviews. |
+| **6b. Your AI assistant** | `opengrader agent prepare` makes a copy with every student as an `og-…` code (no names, IDs or scans); your assistant transcribes and grades there through `opengrader agent` commands; `opengrader agent apply` merges its suggestions back as AI grades for you to confirm. `opengrader ai-readme` is the page to give the assistant. |
 | **7. Hand back** | Write grades and comments onto each student's PDF, export a gradebook CSV, or push scores to Canvas. |
 
 `opengrader run` chains steps 3–6 into one resumable command. The desktop app (`opengrader classic`) gives you every step as buttons.
@@ -67,7 +68,7 @@ flowchart LR
 
     subgraph Ingest
         SCAN["Scanned stack PDF"] -->|scan-check + submission-splitter| SPLIT["One PDF per student"]
-        SPLIT -->|"submission-extractor<br/>(OCR + optional local AI)"| SUB["student.submission.md<br/>+ answer crops"]
+        SPLIT -->|"submission-extractor<br/>(OCR + optional AI)"| SUB["student.submission.md<br/>+ answer crops"]
     end
 
     subgraph Grade
@@ -92,7 +93,8 @@ flowchart LR
 | **Local service** | `src/opengrader/server/` | A FastAPI service bound to `localhost` that stores a shared grading workspace in SQLite. |
 | **Web app** | `src/opengrader/web/` | A React/Vite browser client for the same workspace. |
 | **Installers** | `packaging/` | Double-click installers and self-updating launchers for macOS, Windows, and Linux. |
-| **Local AI (optional)** | external | An [Ollama](https://ollama.com/) server on `127.0.0.1:11434` for handwriting reading and grade suggestions. |
+| **Your AI assistant (optional)** | external | Any assistant that can run commands (Claude Code, Codex, Gemini CLI, Cursor, …), working in a redacted packet (`opengrader agent`). |
+| **Local AI (optional)** | external | An [Ollama](https://ollama.com/) server you run on `127.0.0.1:11434`. Opengrader connects to it but never installs, starts or downloads it (`opengrader ai-readme --local`). |
 
 **Two ways to store grades:**
 
@@ -111,7 +113,7 @@ flowchart LR
 | [Git](https://git-scm.com/) | any | Cloning the repo | |
 | [Tesseract OCR](https://tesseract-ocr.github.io/tessdoc/Installation.html) | 5.x (tested on 5.5) | Reading scans | Without it, scans extract to empty answers. |
 | [Homebrew](https://brew.sh/) | any | Installing the above on macOS | |
-| [Ollama](https://ollama.com/) | recent release (tested on 0.23) | *Optional:* handwriting reading and AI grade suggestions | The two default models need several GB of disk. |
+| [Ollama](https://ollama.com/) | recent release (tested on 0.23) | *Optional:* a local model for handwriting reading and grade suggestions | You install and start it yourself; the two default models need several GB of disk. |
 | [Node.js](https://nodejs.org/) (includes npm) | 22 or newer (CI uses 24) | *Optional:* building the web app, once | |
 | A scanner or phone camera | — | Bringing in real submissions | Sample scans are included in `samples/` so you can try it without one. |
 | Canvas account + [`canvas-sak`](https://pypi.org/project/canvas-sak/) setup | — | *Optional:* pushing grades to Canvas | |
@@ -193,12 +195,15 @@ See [packaging/README.md](packaging/README.md) for details and uninstall steps.
    uv run opengrader doctor
    ```
 
-6. *(Optional)* **Set up local AI.** Either open the desktop app → **Tools → AI setup → Set up local AI** (it downloads the models for you), or by hand:
-   ```bash
-   ollama serve &                 # start the Ollama server
-   ollama pull qwen3.5:9b         # handwriting reader
-   ollama pull qwen2.5vl:7b       # grade suggestions
-   ```
+6. *(Optional)* **Set up an AI.** Opengrader does not set one up for you. Pick one:
+   - **Your AI assistant** (recommended): nothing to install here. See *Working with your AI assistant* under Running the Prototype.
+   - **A local model**, so nothing leaves the computer. Start Ollama yourself, then choose it in **Tools → AI models & providers → Open AI setup** (`uv run opengrader ai-readme --local` prints every step):
+     ```bash
+     ollama serve &                 # start the Ollama server
+     ollama pull qwen3.5:9b         # handwriting reader
+     ollama pull qwen2.5vl:7b       # grade suggestions
+     ```
+   - **A cloud provider** with an API key: **Tools → AI models & providers → Manage providers**, opt-in and consented.
 
 7. *(Optional)* **Build the web app** (needed once):
    ```bash
@@ -294,7 +299,70 @@ This is what the desktop icon opens. Pick a class folder (with a scan and an ans
 uv run opengrader run path/to/assignment-folder/
 ```
 
-Point it at a folder holding the scanned PDF and the answer key (and optionally a roster and a blank template). It checks the scan, splits it, reads every answer, auto-grades what it can, and opens the grading app. Run the same command again and it picks up where it left off. Add `--dry-run` to preview the plan, or `--llm --auto-ollama` to let local AI suggest grades for written answers.
+Point it at a folder holding the scanned PDF and the answer key (and optionally a roster and a blank template). It checks the scan, splits it, reads every answer, auto-grades what it can, and opens the grading app. Run the same command again and it picks up where it left off. Add `--dry-run` to preview the plan, or `--llm` to let the AI chosen in AI setup suggest grades for written answers (start Ollama first if it is a local one).
+
+<details>
+<summary><b>Working with your AI assistant</b> (Claude, ChatGPT, Codex, … with no student names or IDs)</summary>
+
+Small local models grade written answers poorly. The assistant you already use does much better, and Opengrader keeps student identities away from it. The assistant always works in its own folder beside the class folder, never in it.
+
+**Class folders only, for now.** The assistant works with class folders (the desktop app's classic mode), where grades live in each student's `.submission.md`. A **workspace** (`opengrader tui`, the browser app) keeps its grades in its own database, so an assistant's work would never reach it. Opengrader refuses rather than let that happen silently, and the Tools card says so when you choose a workspace.
+
+**In the desktop app:** **Tools → AI assistant**. Choose the class folder and it offers only what fits:
+
+| The class folder has | You see |
+| --- | --- |
+| A blank assignment, no answer key | **Draft a standard key** (no AI: every question, its points and the standard rubric, answers blank) and **Write the key with my assistant…** |
+| An answer key with blank answers | **Type the answers…**, **Answers from a list…**, or **Write the key with my assistant…** |
+| An answer key and submissions | **Grade…** and, for questions with no partial credit yet, **Draft rubrics…** |
+
+Scanning, splitting and reading the scans always stay on your computer: whole pages carry names.
+
+An answers list is a plain text file, one question a line, numbered like the answer form:
+
+```text
+1: H2O; Water
+2) B
+3a. 101
+4.
+Paris
+City of Light
+```
+
+Several accepted answers go on one line separated by `;` or `|` (a comma followed by a space works too when a line has neither, so `1,000` stays one answer), or on lines of their own under the question, as for 4. A line needs `1:`, `1.`, `1)` or `1 -` to start a question, so a bare `2` is an answer, and a blank line ends a question. From a terminal: `opengrader qa-file fill-answers --qa-file qa.md --answers answers.txt`.
+
+**From a terminal**, the same jobs:
+
+```bash
+uv run opengrader agent answer-key --class-folder class [--source key.docx]   # the assistant writes or fills qa.md
+uv run opengrader agent use-key --folder class-ai-answer-key --to class/qa.md
+uv run opengrader agent prepare --submissions class/submissions --qa-file class/qa.md            # grading
+uv run opengrader agent prepare --submissions class/submissions --qa-file class/qa.md --rubrics  # drafting rubrics
+```
+
+Start your assistant **inside the folder Opengrader made** and ask it to do what `AGENTS.md` there says (Claude Code reads `CLAUDE.md`, which points to it). For grading it checks the key with `opengrader agent check-key`, looks at each answer image, and records transcriptions and rubric choices with `opengrader agent transcribe` and `opengrader agent grade`; Opengrader checks every choice against the rubric and works out the points. When the key looks wrong, or a question has no partial credit, it records a fix with `opengrader agent suggest` instead of acting on it. You accept or dismiss each one (**Suggestions…** in the app, or `opengrader agent suggestions` / `accept` / `dismiss`), and an accepted fix changes only that question of your key.
+
+Chat apps without a shell (Claude Desktop, ChatGPT) connect to a copy as an MCP server instead (**Copy MCP setup**, or `opengrader agent mcp-config --packet <copy>`). The assistant then has no file access at all, only the grading tools.
+
+When it is done:
+
+```bash
+uv run opengrader agent apply --submissions class/submissions --incoming class-ai-assistant/<name> --yes --delete-copy
+```
+
+Its grades arrive marked as AI grades. In the grading app, **v** steps through a question's unconfirmed AI grades and **y** confirms one; picking another rubric option changes it, and the review queue and `grade-check` flag the low-confidence ones. The three-way merge never overwrites a grade you made, and `grade-restore` can undo it.
+
+**What protects student data:** the copy itself, not instructions to the assistant.
+- Every student is an `og-…` code. The scans, the name and ID crops, and the key that maps codes to students stay in your class folder.
+- Only the answers the job needs go in: the ones still to grade (`--question` narrows it further; `--with-graded` adds your graded ones as examples), or, for rubrics, the answers to the questions being drafted.
+- Names and IDs are scrubbed from answer text and comments, and Opengrader refuses to make a copy that still contains one.
+- Every answer image is read with Tesseract first. One showing the student's name or ID, or one that cannot be read, stays with you.
+- The copy's `.claude/settings.json` stops Claude Code reading outside it and sandboxes its shell commands. Other assistants have no such file, so start them in the copy.
+- Tesseract misses messy handwriting, so a name scrawled inside an answer box can still get through.
+
+The copy is still student work: use the account your school approved, turn off training on your data on a personal plan, and delete the copy once it is merged (`--delete-copy`). `uv run opengrader ai-readme` is the page to give your assistant.
+
+</details>
 
 ### The web app
 
@@ -319,7 +387,7 @@ uv run opengrader qa-file generate-template --qa-file qa.md --output-pdf templat
 uv run opengrader scan-check --input scans/all.pdf --pages-per-submission 6
 uv run opengrader submission-splitter --input scans/all.pdf --output split/ --fix-rotation
 
-# 3. Read each student's answers (add --llm-responses to transcribe handwriting with local AI)
+# 3. Read each student's answers (add --llm-responses to transcribe handwriting with the AI in AI setup)
 uv run opengrader submission-extractor --input split/ --output student-submissions/ --qa-file qa.md
 
 # 4. Auto-grade what can be matched (add --llm for AI suggestions on written answers)
@@ -353,7 +421,7 @@ AI settings are saved once in `config.json` in your user config folder:
 - Linux: `~/.config/opengrader/`
 - Windows: `%APPDATA%\Opengrader\`
 
-Edit them from the desktop app under **Tools → AI setup**. Command-line flags override saved settings, which override the built-in defaults. API keys are never stored here; they go in your OS password store.
+Edit them from the desktop app under **Tools → AI models & providers → Open AI setup**. Command-line flags override saved settings, which override the built-in defaults. API keys are never stored here; they go in your OS password store.
 
 </details>
 
@@ -438,7 +506,13 @@ Before the **Project Expo on December 11**, we plan to:
 - [ ] **Close the remaining AI safety gaps**: mask the name/ID area out of answer crops before any cloud send, and limit the size of model responses.
 - [ ] **Measure accuracy**: report how often handwriting reading and AI grade suggestions agree with human graders (using `llm-eval` and `transcribe-eval`).
 - [ ] **Polish the Expo demo**: a one-click demo folder, an updated demo video, and a poster.
-- [ ] **Choose and add a license.**
+- [x] **Choose and add a license.** MIT; see below.
+
+---
+
+## License
+
+Opengrader is released under the [MIT License](LICENSE). The third-party packages it uses keep their own licenses, listed in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).
 
 ---
 

@@ -484,44 +484,6 @@ def test_run_cli_reports_progress(tmp_path: Path) -> None:
     assert {name for name, _ in questions} == {"a.submission.md", "b.submission.md"}
 
 
-def test_run_cli_auto_ollama_emits_pull_status(tmp_path: Path, monkeypatch) -> None:
-    import opengrader.cli.automated_grading as ag
-    from opengrader.core.app_config import local_ai
-
-    pulled: list[str] = []
-
-    def fake_start(host, *, emit, **_kwargs):  # noqa: ANN001
-        emit("Starting the AI server…")
-        return None
-
-    monkeypatch.setattr(local_ai, "start_server", fake_start)
-    monkeypatch.setattr(local_ai, "installed_models", lambda host, **_k: [])
-    monkeypatch.setattr(
-        local_ai, "pull_model", lambda host, model, **_k: pulled.append(model)
-    )
-    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
-    monkeypatch.setattr("opengrader.core.llm.generate", lambda **k: "{}")
-
-    solutions_path = tmp_path / "solutions.md"
-    solutions_path.write_text(SOLUTIONS_MD)
-    submission_path = tmp_path / "student.submission.md"
-    submission_path.write_text(SUBMISSION_MD)
-
-    messages: list[str] = []
-    ag.run_cli(
-        [
-            "--solutions", str(solutions_path),
-            "--input", str(submission_path),
-            "--llm", "--auto-ollama",
-        ],
-        status_callback=messages.append,
-    )
-
-    assert any("Starting the AI server" in m for m in messages)
-    assert any("Downloading model" in m for m in messages)
-    assert pulled == [app_config.resolve().text_model]
-
-
 def test_an_unknown_version_gets_no_answer_key_rather_than_the_first(tmp_path: Path) -> None:
     from opengrader.cli.automated_grading import _solution_entries_for_submission
     from opengrader.core.submissions import StudentSubmissionDocument

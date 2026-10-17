@@ -83,7 +83,6 @@ class LlmOptions:
     vision_model: str = ""
     text_model: str = ""
     host: str = ""
-    auto_ollama: bool = False
     min_confidence: float | None = None
 
     @property
@@ -582,8 +581,6 @@ def _extract_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv += ["--ollama-model", request.llm.vision_model]
         if request.llm.host:
             argv += ["--ollama-host", request.llm.host]
-        if request.llm.auto_ollama:
-            argv.append("--auto-ollama")
     if request.send_to_cloud_confirmed:
         argv.append("--yes-send-to-cloud")
     return tuple(argv)
@@ -636,8 +633,6 @@ def _auto_grade_argv(request: PipelineRequest) -> tuple[str, ...]:
             argv += ["--llm-model", request.llm.text_model]
         if request.llm.host:
             argv += ["--llm-host", request.llm.host]
-        if request.llm.auto_ollama:
-            argv.append("--auto-ollama")
         if request.llm.min_confidence is not None:
             argv += ["--llm-min-confidence", str(request.llm.min_confidence)]
         if request.send_to_cloud_confirmed:

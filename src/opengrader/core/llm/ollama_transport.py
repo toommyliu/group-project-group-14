@@ -6,8 +6,6 @@ This module is what is left: the same four names `ollama_client.py` and
 `core/ocr/ollama_vlm.py` have always called, implemented over the shared
 transport with `transport.NO_RETRY` so a local server that is not answering
 still fails on the first try, exactly as it did before the split.
-`pull_model_events` was added later for `core/app_config/local_ai.py`, which
-downloads a model through the server instead of running `ollama pull`.
 
 `request` is imported and kept as a module attribute, unused directly, purely
 because `tests/unit/core/llm/test_ollama_client.py` and
@@ -19,8 +17,7 @@ through — the tests do not need to change for the transport to move.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from urllib import request
+from urllib import request  # noqa: F401 - patched by tests, see above
 
 from . import transport
 from .dialects.ollama import DIALECT as _OLLAMA
@@ -34,7 +31,6 @@ __all__ = [
     "parse_json_object",
     "fetch_model_names",
     "generate_raw",
-    "pull_model_events",
 ]
 
 DEFAULT_HOST = "http://127.0.0.1:11434"
@@ -109,28 +105,3 @@ def generate_raw(
         raise error_factory(transport.redact(reported))
     return _OLLAMA.reply_text(parsed)
 
-
-def pull_model_events(
-    *,
-    host: str,
-    model: str,
-    idle_timeout_seconds: float,
-    error_factory: ErrorFactory,
-    on_open: Callable[[Callable[[], None]], None] | None = None,
-) -> Iterator[dict]:
-    """What the server reports while it downloads `model`, one object at a time.
-
-    Each object has a `status`; the ones for a file being downloaded also
-    carry its `digest`, `total` and `completed` bytes. A failure the server
-    reports part-way (`{"error": ...}`) is yielded like any other object,
-    for the caller to put into words.
-    """
-    return transport.stream_json_lines(
-        url=_OLLAMA.pull_endpoint(host),
-        payload=_OLLAMA.pull_body(model),
-        headers=_OLLAMA.auth_headers(None),
-        service=_SERVICE,
-        timeout_seconds=idle_timeout_seconds,
-        error_factory=error_factory,
-        on_open=on_open,
-    )

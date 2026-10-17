@@ -15,9 +15,6 @@ What lives here:
 * `redact` and `register_secret` — the one redaction point. Every error message
   this module produces passes through `redact` before it is raised, so a
   caller cannot forget.
-* `stream_json_lines` — one request whose reply arrives a line at a time: a
-  local server reporting a model download as it goes. Not model-reply
-  streaming, which stays out of scope.
 * `parse_json_object` — shared by all three dialects, because every one of
   them asks for JSON and every model occasionally wraps it in prose or a fence.
   It used to live in `ollama_transport`; that module re-exports it.
@@ -29,11 +26,9 @@ no HTTP. The two halves only meet in `core/llm/dialect_client.py`.
 
 from __future__ import annotations
 
-import http.client
 import json
 import random
 import re
-import socket
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -64,7 +59,6 @@ __all__ = [
     "concurrency_limit",
     "concurrency_slot",
     "send_json",
-    "stream_json_lines",
     "parse_json_object",
 ]
 
@@ -430,86 +424,6 @@ def _decode(raw: str, *, where: str, error_factory: ErrorFactory) -> dict:
             redact(f"unexpected response from {where}: expected a JSON object")
         )
     return parsed
-
-
-def _cut_connection(response: object) -> None:
-    # Closing a response another thread is reading from waits for that read
-    # to finish, which is the wait we are trying to end. Shutting the socket
-    # down underneath it makes the read return at once. Best effort: a
-    # response with no socket to find (a test stand-in) is simply left alone.
-    raw = getattr(getattr(response, "fp", None), "raw", None)
-    sock = getattr(raw, "_sock", None)
-    if sock is None:
-        return
-    try:
-        sock.shutdown(socket.SHUT_RDWR)
-    except OSError:
-        pass
-
-
-def stream_json_lines(
-    *,
-    url: str,
-    payload: Mapping[str, object] | None = None,
-    headers: Mapping[str, str] | None = None,
-    service: str = "",
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
-    error_factory: ErrorFactory = TransportError,
-    on_open: Callable[[Callable[[], None]], None] | None = None,
-) -> Iterator[dict]:
-    """One POST whose reply is a JSON object per line, yielded as each arrives.
-
-    For a request that reports on itself for minutes — a model download — so
-    there is no retry and no concurrency slot: holding a slot would stop
-    every other call for as long as the download ran. `timeout_seconds` is
-    how long the service may go quiet between lines, not a limit on the
-    whole reply.
-
-    `on_open` is handed a function that cuts the connection from another
-    thread, which is the only way to stop a read that is waiting on a
-    stalled network. Failures raise `error_factory(message)`, redacted like
-    every other message from this module. Lines that are not JSON objects
-    are skipped.
-    """
-    where = f"{service} at {url}" if service else url
-    body = json.dumps(payload).encode("utf-8") if payload is not None else None
-    content_headers = {"Content-Type": "application/json"} if body is not None else {}
-    req = request.Request(url, data=body, headers=content_headers, method="POST")
-    for name, value in (headers or {}).items():
-        req.add_unredirected_header(name, value)
-    try:
-        with request.urlopen(req, timeout=timeout_seconds) as response:
-            if on_open is not None:
-                on_open(lambda: _cut_connection(response))
-            for raw in response:
-                if isinstance(raw, bytes):
-                    raw = raw.decode("utf-8", errors="replace")
-                text = str(raw).strip()
-                if not text:
-                    continue
-                try:
-                    parsed = json.loads(text)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(parsed, dict):
-                    yield parsed
-    except error.HTTPError as exc:
-        status = int(getattr(exc, "code", 0) or 0)
-        try:
-            detail = _detail(_read_body(exc))
-        except Exception:  # noqa: BLE001 - a body we cannot read is not the failure
-            detail = ""
-        raise error_factory(
-            redact(f"{where} returned HTTP {status}: {detail or exc.reason}")
-        ) from exc
-    except error.URLError as exc:
-        raise error_factory(redact(f"failed to reach {where}: {exc.reason}")) from exc
-    except TimeoutError as exc:
-        raise error_factory(
-            redact(f"{where} sent nothing for {timeout_seconds:g} s")
-        ) from exc
-    except (OSError, http.client.HTTPException) as exc:
-        raise error_factory(redact(f"lost the connection to {where}: {exc}")) from exc
 
 
 # ---------------------------------------------------------------------------

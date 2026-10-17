@@ -525,35 +525,8 @@ def test_default_generate_factory_wires_grade_suggestion_schema(monkeypatch) -> 
     monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
     monkeypatch.setattr("opengrader.core.llm.generate", fake_generate)
 
-    factory = llm_eval._default_generate_factory(
-        "http://127.0.0.1:11434", 30.0, auto_ollama=False
-    )
+    factory = llm_eval._default_generate_factory("http://127.0.0.1:11434", 30.0)
     generate_fn = factory("qwen2.5vl:7b")
     generate_fn("some prompt")
 
     assert captured_kwargs["response_format"] == GRADE_SUGGESTION_SCHEMA
-
-
-def test_auto_ollama_gets_each_compared_model_ready(monkeypatch) -> None:
-    from opengrader.core import app_config
-    from opengrader.core.app_config import local_ai
-
-    asked: list[tuple[str, tuple[str, ...]]] = []
-
-    def fake_prepare_for_run(host, models, *, emit):  # noqa: ANN001
-        asked.append((host, tuple(models)))
-
-    monkeypatch.setattr(local_ai, "prepare_for_run", fake_prepare_for_run)
-    monkeypatch.setattr(app_config, "ensure_ready", lambda *_a, **_k: None)
-    monkeypatch.setattr("opengrader.core.llm.generate", lambda **_k: "{}")
-
-    factory = llm_eval._default_generate_factory(
-        "http://127.0.0.1:11434", 30.0, auto_ollama=True
-    )
-    factory("first:1")
-    factory("second:1")
-
-    assert asked == [
-        ("http://127.0.0.1:11434", ("first:1",)),
-        ("http://127.0.0.1:11434", ("second:1",)),
-    ]

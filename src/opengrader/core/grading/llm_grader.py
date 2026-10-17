@@ -311,7 +311,7 @@ def suggest_free_response_grade(
     if not chosen:
         return None
 
-    points = _points_for_selection(chosen, rubric_options, possible_points)
+    points = points_for_selection(chosen, rubric_options, possible_points)
     return GradeSuggestion(
         rubric_labels=tuple(option.label for option in chosen),
         points_awarded=points,
@@ -341,7 +341,7 @@ def _resolve_selection(
     return resolved_base + bonus
 
 
-def _points_for_selection(
+def points_for_selection(
     chosen: Sequence[RubricChoice],
     rubric_options: Sequence[RubricChoice],
     possible_points: float,

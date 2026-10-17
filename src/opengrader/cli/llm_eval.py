@@ -11,7 +11,6 @@ import click
 
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
-from opengrader.core.app_config import local_ai
 from opengrader.core.grading.evaluation import (
     DEFAULT_BUCKET_SIZE,
     DEFAULT_MIN_SAMPLE,
@@ -429,20 +428,12 @@ def report_to_dict(report: LlmEvalReport) -> dict[str, object]:
 
 
 def _default_generate_factory(
-    host: str, timeout_seconds: float, *, auto_ollama: bool
+    host: str, timeout_seconds: float
 ) -> Callable[[str], GenerateFn]:
     def factory(model: str) -> GenerateFn:
         resolved = app_config.with_overrides(
             host=host, text_model=model, timeout_seconds=timeout_seconds
         )
-        if auto_ollama and resolved.kind == "local":
-            # Once per model compared: the server is started by the first
-            # call and found running by the rest.
-            local_ai.prepare_for_run(
-                resolved.host,
-                (model,),
-                emit=lambda msg: print(msg, file=sys.stderr),
-            )
         try:
             app_config.ensure_ready(resolved, purpose="text")
         except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
@@ -496,15 +487,6 @@ def _default_generate_factory(
     default=app_config.DEFAULT_TIMEOUT_SECONDS,
     show_default=True,
     help="Per-request timeout in seconds.",
-)
-@click.option(
-    "--auto-ollama",
-    is_flag=True,
-    help=(
-        "Start 'ollama serve' if nothing is listening and pull each model "
-        "first. Off by default so a scripted run fails fast rather than "
-        "downloading several GB."
-    ),
 )
 @click.option(
     "--target-agreement",
@@ -617,7 +599,6 @@ def command(
     llm_models: tuple[str, ...],
     llm_host: str,
     llm_timeout: float,
-    auto_ollama: bool,
     target_agreement: float,
     points_tolerance: float,
     min_sample: int,
@@ -710,7 +691,7 @@ def command(
             )
 
     factory = generate_factory or _default_generate_factory(
-        llm_host, llm_timeout, auto_ollama=auto_ollama
+        llm_host, llm_timeout
     )
     print(
         f"Evaluating {len(models)} model(s) over {len(targets)} human-graded "

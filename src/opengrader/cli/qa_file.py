@@ -154,6 +154,35 @@ def validate_command(qa_file: str) -> None:
         raise FileNotFoundError(f"QA file not found: {qa_path}")
     load_qa_markdown(qa_path)
     print(f"QA file is valid: {qa_path}")
+    from opengrader.core.qa_file.check import check_answer_key
+
+    for warning in check_answer_key(qa_path.read_text(encoding="utf-8")).warnings:
+        print(f"  warning: {warning}")
+
+
+@command.command("fill-answers")
+@click.option("--qa-file", required=True, help="Path to QA markdown file (changed in place).")
+@click.option(
+    "--answers",
+    "answers_file",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="A list, one question a line: '1: H2O; Water', '2) B', '3a. 101'.",
+)
+def fill_answers_command(qa_file: str, answers_file: Path) -> None:
+    """Fill an answer key's answers from a plain list (no AI)."""
+    from opengrader.core.qa_file.answer_list import apply_answer_list
+
+    qa_path = Path(qa_file)
+    try:
+        result = apply_answer_list(qa_path.read_text(encoding="utf-8"), answers_file.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise click.ClickException(f"nothing was changed: {exc}") from None
+    if result.filled:
+        qa_path.write_text(result.markdown, encoding="utf-8")
+    print(f"Filled {len(result.filled)} answer(s) in {qa_path} ({len(result.unchanged)} already had them).")
+    for problem in result.problems:
+        print(f"  skipped {problem}")
 
 
 @command.command("generate-template")

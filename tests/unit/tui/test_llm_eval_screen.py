@@ -114,7 +114,8 @@ def test_running_against_this_assignment_uses_the_session_paths(monkeypatch) -> 
     assert argv[:4] == ["--solutions", "/exam/solutions.md", "--input", "/exam/subs"]
     assert "--target-agreement" in argv
     assert argv[argv.index("--target-agreement") + 1] == "0.9"
-    assert "--auto-ollama" in argv
+    # Opengrader no longer starts a local AI for a run.
+    assert "--auto-ollama" not in argv
     assert "--limit" not in argv
 
 

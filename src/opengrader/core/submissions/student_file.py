@@ -946,7 +946,9 @@ def set_assignment_version_file(
     return submission_path.stat().st_mtime_ns
 
 
-_FILE_REFERENCE_KEYS = ("source_pdf", "name_image_path", "id_image_path")
+# The frontmatter keys (`name_image`, not the dataclass field `name_image_path`):
+# a redacted packet must not point at the crop of a student's name or ID.
+_FILE_REFERENCE_KEYS = ("source_pdf", "name_image", "id_image")
 
 
 def blank_submission_file_references_markdown(content: str) -> str:

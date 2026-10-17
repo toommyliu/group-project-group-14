@@ -40,12 +40,15 @@ from opengrader.tui.ui.button_roles import OutlineButtons
 _OPTION_LABEL_WIDTH = 90
 
 
+# A local server that is up answers its model list at once.
+_LOCAL_CHECK_SECONDS = 3.0
+
+
 def ai_suggest_ready() -> bool:
     """Can the configured AI be asked from here, with nothing to set up?
 
-    A local AI: its server is answering and the grading model is installed —
-    or the server is not running but can be started without asking: Ollama is
-    on this computer and AI setup's "Start the AI automatically" is on.
+    A local AI: its server is answering and has the grading model. Opengrader
+    never starts one; the teacher runs Ollama (`opengrader ai-readme --local`).
     A cloud provider: it is the one chosen and agreed to in AI setup — and it
     is not contacted to find out, because any request there carries its key.
     Called off the main thread (the local check talks to the server).
@@ -54,54 +57,21 @@ def ai_suggest_ready() -> bool:
         resolved = app_config.resolve()
         if resolved.kind == "cloud":
             return resolved.cloud_allowed and not resolved.cloud_consent_required
-        from opengrader.core.app_config import local_ai
-
-        if not local_ai.server_listening(resolved.host):
-            return bool(
-                resolved.auto_start
-                and local_ai.is_this_computer(resolved.host)
-                and local_ai.find_ollama()
-            )
-        installed = local_ai.installed_models(resolved.host)
-        return not local_ai.missing_models((resolved.text_model,), installed)
+        app_config.ensure_ready(
+            app_config.with_overrides(resolved, timeout_seconds=_LOCAL_CHECK_SECONDS),
+            purpose="text",
+        )
+        return True
     except Exception:  # noqa: BLE001 - not ready is the answer, whatever went wrong
         return False
 
 
-def ai_generate(
-    resolved: "app_config.ResolvedAI",
-    *,
-    emit: Callable[[str], None] = lambda _message: None,
-    started: list | None = None,
-) -> Callable[[str], str]:
+def ai_generate(resolved: "app_config.ResolvedAI") -> Callable[[str], str]:
     """The guarded call to the configured text model (worker thread).
 
-    A local AI that is not running is started first, when AI setup says it
-    may be ("Start the AI automatically"); a server started here is added to
-    `started` for the caller to stop. Starting is all that happens: a model
-    that is not downloaded is reported, never fetched from a form.
+    A local AI that is not running, or lacks the model, is reported by
+    `ensure_ready`; nothing is started or downloaded from a form.
     """
-    if resolved.kind != "cloud":
-        from opengrader.core.app_config import local_ai
-
-        if not local_ai.server_listening(resolved.host):
-            if not resolved.auto_start:
-                raise local_ai.LocalAIError(
-                    "The local AI is not running. Start it from AI setup (Tools)."
-                )
-            emit("Starting the local AI…")
-            server = local_ai.start_server(resolved.host, emit=emit)
-            if server is not None and started is not None:
-                started.append(server)
-        missing = local_ai.missing_models(
-            (resolved.text_model,), local_ai.installed_models(resolved.host)
-        )
-        if missing:
-            raise local_ai.LocalAIError(
-                f"The AI model {missing[0]} is not downloaded yet. Open AI "
-                "setup (Tools) and press Set up local AI; nothing is "
-                "downloaded from here."
-            )
     app_config.ensure_ready(resolved, purpose="text")
     return app_config.text_generate(resolved, response_format=ANSWER_SUGGEST_SCHEMA)
 
@@ -201,8 +171,6 @@ class AnswerFillScreen(OutlineButtons, ModalScreen[bool]):
         self._fields: list[AnswerField] = []
         self._problem = ""
         self._read_at: float | None = None
-        # Local AI servers this form started; stopped when it closes.
-        self._started_servers: list = []
         try:
             self._text = self._path.read_text(encoding="utf-8")
             self._read_at = os.stat(self._path).st_mtime
@@ -271,15 +239,6 @@ class AnswerFillScreen(OutlineButtons, ModalScreen[bool]):
         self.query_one("#answers-ai-status").display = False
         if self._fields:
             self._check_ai()
-
-    def on_unmount(self) -> None:
-        # A server started for this form is not left running behind it.
-        for server in self._started_servers:
-            try:
-                server.stop()
-            except Exception:  # noqa: BLE001 - closing the form must not fail
-                pass
-        self._started_servers.clear()
 
     @work(thread=True, exclusive=True, group="answers-ai-check")
     def _check_ai(self) -> None:
@@ -363,11 +322,7 @@ class AnswerFillScreen(OutlineButtons, ModalScreen[bool]):
         try:
             # Recorded beside the answer key, like Create answer key's own calls.
             with egress.recording(self._path.parent):
-                generate = ai_generate(
-                    resolved,
-                    emit=lambda message: self.app.call_from_thread(self._ai_status, message.strip()),
-                    started=self._started_servers,
-                )
+                generate = ai_generate(resolved)
                 self.app.call_from_thread(
                     self._ai_status, f"Asking the AI about {len(wanted)} question(s)…"
                 )

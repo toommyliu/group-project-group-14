@@ -23,7 +23,6 @@ from opengrader.core.submissions import (
     write_extra_pages_map,
 )
 from opengrader.core import app_config
-from opengrader.core.app_config import local_ai
 
 if TYPE_CHECKING:  # pragma: no cover
     from opengrader.core.ocr.vision_reader import VisionReader
@@ -38,10 +37,10 @@ Examples:
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --start-page 3
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --blank-template templates/blank.pdf
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder --auto-ollama
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --blank-template templates/blank.pdf --extra-work-pages --auto-ollama
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --reorder
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --blank-template templates/blank.pdf --extra-work-pages
   uv run submission-splitter --input scans/all-submissions.pdf --output split/   # no page count → match pages to each other, flag missing pages
-  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --detect-boundaries --auto-ollama --dry-run
+  uv run submission-splitter --input scans/all-submissions.pdf --output split/ --detect-boundaries --dry-run
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation
   uv run submission-splitter --input scans/all-submissions.pdf --output split/ --pages-per-submission 6 --fix-rotation --fix-order
 """
@@ -572,11 +571,6 @@ def _report_scan_order(planned, emit: Callable[[str], None], *, shared_note: str
     help="Ollama request timeout in seconds.",
 )
 @click.option(
-    "--auto-ollama",
-    is_flag=True,
-    help="Automatically start the Ollama server and pull the vision model if not available.",
-)
-@click.option(
     "--llm-page-numbers/--no-llm-page-numbers",
     default=ai_default("read_handwriting"),
     show_default="from AI Setup",
@@ -611,7 +605,6 @@ def command(
     ollama_model: str,
     ollama_host: str,
     ollama_timeout: float,
-    auto_ollama: bool,
     llm_page_numbers: bool,
 ) -> None:
     """Split one scanned PDF that contains many student submissions into
@@ -680,144 +673,130 @@ def command(
     uses_ordering_pass = reorder or blank_template or auto_reorder
     may_use_vlm = llm_page_numbers and (use_boundary or uses_ordering_pass)
 
-    started_server = None
-    try:
-        if may_use_vlm:
-            resolved_for_reorder = app_config.with_overrides(
-                host=ollama_host,
-                vision_model=ollama_model,
-                timeout_seconds=ollama_timeout,
-            )
-            if auto_ollama and resolved_for_reorder.provider.kind == "local":
-                try:
-                    started_server = local_ai.prepare_for_run(
-                        ollama_host, (ollama_model,), emit=emit
-                    )
-                except local_ai.OllamaNotInstalled as exc:
-                    print(f"Error: {exc}", file=sys.stderr)
-                    sys.exit(1)
-            # No cloud pre-flight here: every vision call the splitter makes
-            # (page-number footers and Name/ID headers, used only to detect
-            # boundaries and reorder pages) is a whole-page read, and
-            # GuardedVisionReader (core/ocr/vision_reader.py) always redirects
-            # those to a local reader instead of a cloud host. A splitter run
-            # never sends anything to the cloud, so there is nothing to
-            # confirm — see _verified_vision_reader below, which still exits
-            # 2 if a cloud provider is selected without consent.
-        vision_reader = (
-            _verified_vision_reader(resolved_for_reorder, emit) if may_use_vlm else None
+    if may_use_vlm:
+        resolved_for_reorder = app_config.with_overrides(
+            host=ollama_host,
+            vision_model=ollama_model,
+            timeout_seconds=ollama_timeout,
         )
+        # No cloud pre-flight here: every vision call the splitter makes
+        # (page-number footers and Name/ID headers, used only to detect
+        # boundaries and reorder pages) is a whole-page read, and
+        # GuardedVisionReader (core/ocr/vision_reader.py) always redirects
+        # those to a local reader instead of a cloud host. A splitter run
+        # never sends anything to the cloud, so there is nothing to
+        # confirm — see _verified_vision_reader below, which still exits
+        # 2 if a cloud provider is selected without consent.
+    vision_reader = (
+        _verified_vision_reader(resolved_for_reorder, emit) if may_use_vlm else None
+    )
 
-        boundary_warnings: list[str] = []
-        if use_boundary:
-            emit("Detecting submission boundaries (page numbers and Name/ID headers)…")
-            ranges, boundary_warnings = plan_boundary_ranges(
-                input_pdf,
+    boundary_warnings: list[str] = []
+    if use_boundary:
+        emit("Detecting submission boundaries (page numbers and Name/ID headers)…")
+        ranges, boundary_warnings = plan_boundary_ranges(
+            input_pdf,
+            vision_reader=vision_reader,
+            expected_pages=_expected_pages_per_submission(
+                pages_per_submission, blank_template
+            ),
+            filename_prefix=filename_prefix,
+            zero_pad_width=zero_pad_width,
+            progress_callback=emit,
+        )
+        emit(f"Detected {len(ranges)} submission(s).")
+    else:
+        ranges = plan_submission_ranges(
+            total_pages=total_pages,
+            pages_per_submission=pages_per_submission,
+            start_page=start_page,
+            end_page=end_page,
+            filename_prefix=filename_prefix,
+            zero_pad_width=zero_pad_width,
+        )
+        boundary_warnings = [f"{group.name}: {warning}" for group in ranges for warning in group.warnings]
+
+    emit(f"Input: {input_pdf} ({total_pages} pages)")
+    emit(f"Planned student splits: {len(ranges)}")
+    for page_range in ranges:
+        emit(f"  - {page_range.name}: pages {page_range.start_page}-{page_range.end_page}")
+    for warning in boundary_warnings:
+        print(f"Warning: {warning}", file=sys.stderr)
+
+    if dry_run:
+        emit("Dry run complete. No files written.")
+        return
+
+    created = split_scanned_submission_pdf(
+        input_pdf=input_pdf,
+        output_dir=output,
+        ranges=ranges,
+    )
+    emit(f"Wrote {len(created)} split PDFs to: {Path(output)}")
+
+    if uses_ordering_pass:
+        emit("Checking page order and reordering if necessary...")
+
+        if blank_template and not blank_template_layout:
+            print("Warning: Could not detect page number layout from blank template. Falling back to generic detection.", file=sys.stderr)
+        if (
+            blank_template_layout
+            and pages_per_submission is not None
+            and pages_per_submission != blank_template_layout.total_pages
+        ):
+            print(f"Warning: --pages-per-submission ({pages_per_submission}) does not match "
+                  f"the blank template page count ({blank_template_layout.total_pages}).")
+
+        extra_pages_by_stem: dict[str, tuple[int, ...]] = {}
+
+        for index, pdf_path in enumerate(created, start=1):
+            emit(f"[{index}/{len(created)}] Reordering {pdf_path.name}…")
+            result = reorder_pdf_pages(
+                pdf_path,
                 vision_reader=vision_reader,
-                expected_pages=_expected_pages_per_submission(
-                    pages_per_submission, blank_template
-                ),
-                filename_prefix=filename_prefix,
-                zero_pad_width=zero_pad_width,
-                progress_callback=emit,
+                blank_template_layout=blank_template_layout,
+                extra_work_pages=extra_work_pages,
             )
-            emit(f"Detected {len(ranges)} submission(s).")
-        else:
-            ranges = plan_submission_ranges(
-                total_pages=total_pages,
-                pages_per_submission=pages_per_submission,
-                start_page=start_page,
-                end_page=end_page,
-                filename_prefix=filename_prefix,
-                zero_pad_width=zero_pad_width,
-            )
-            boundary_warnings = [f"{group.name}: {warning}" for group in ranges for warning in group.warnings]
-
-        emit(f"Input: {input_pdf} ({total_pages} pages)")
-        emit(f"Planned student splits: {len(ranges)}")
-        for page_range in ranges:
-            emit(f"  - {page_range.name}: pages {page_range.start_page}-{page_range.end_page}")
-        for warning in boundary_warnings:
-            print(f"Warning: {warning}", file=sys.stderr)
-
-        if dry_run:
-            emit("Dry run complete. No files written.")
-            return
-
-        created = split_scanned_submission_pdf(
-            input_pdf=input_pdf,
-            output_dir=output,
-            ranges=ranges,
-        )
-        emit(f"Wrote {len(created)} split PDFs to: {Path(output)}")
-
-        if uses_ordering_pass:
-            emit("Checking page order and reordering if necessary...")
-
-            if blank_template and not blank_template_layout:
-                print("Warning: Could not detect page number layout from blank template. Falling back to generic detection.", file=sys.stderr)
-            if (
-                blank_template_layout
-                and pages_per_submission is not None
-                and pages_per_submission != blank_template_layout.total_pages
-            ):
-                print(f"Warning: --pages-per-submission ({pages_per_submission}) does not match "
-                      f"the blank template page count ({blank_template_layout.total_pages}).")
-
-            extra_pages_by_stem: dict[str, tuple[int, ...]] = {}
-
-            for index, pdf_path in enumerate(created, start=1):
-                emit(f"[{index}/{len(created)}] Reordering {pdf_path.name}…")
-                result = reorder_pdf_pages(
-                    pdf_path,
-                    vision_reader=vision_reader,
-                    blank_template_layout=blank_template_layout,
-                    extra_work_pages=extra_work_pages,
-                )
-                if result.changed:
-                    emit(f"  - Reordered: {pdf_path.name}")
-                else:
-                    emit(f"  - Order verified: {pdf_path.name}")
-                if extra_work_pages:
-                    extra_pages_by_stem[pdf_path.stem] = result.extra_work_pages
-                    if result.extra_work_pages:
-                        pages = ", ".join(str(p) for p in result.extra_work_pages)
-                        emit(f"  - Extra work page(s) at the end: {pages}")
-
+            if result.changed:
+                emit(f"  - Reordered: {pdf_path.name}")
+            else:
+                emit(f"  - Order verified: {pdf_path.name}")
             if extra_work_pages:
-                map_path = write_extra_pages_map(Path(output), extra_pages_by_stem)
-                marked = sum(1 for pages in extra_pages_by_stem.values() if pages)
-                emit(
-                    f"Recorded extra work pages for {marked} of "
-                    f"{len(extra_pages_by_stem)} submission(s): {map_path}"
-                )
-        elif extra_work_pages:
-            write_extra_pages_map(Path(output), {pdf_path.stem: () for pdf_path in created})
+                extra_pages_by_stem[pdf_path.stem] = result.extra_work_pages
+                if result.extra_work_pages:
+                    pages = ", ".join(str(p) for p in result.extra_work_pages)
+                    emit(f"  - Extra work page(s) at the end: {pages}")
+
+        if extra_work_pages:
+            map_path = write_extra_pages_map(Path(output), extra_pages_by_stem)
+            marked = sum(1 for pages in extra_pages_by_stem.values() if pages)
             emit(
-                "No extra work pages recorded: telling them apart needs --blank-template "
-                "(or --reorder). Pages were left as scanned."
+                f"Recorded extra work pages for {marked} of "
+                f"{len(extra_pages_by_stem)} submission(s): {map_path}"
             )
-
-        from opengrader.core.pages.split_review import SplitPage, SplitPart, typical_submission
-        from opengrader.core.submissions.extra_pages import read_extra_pages_for
-
-        parts = []
-        for pdf_path in created:
-            extra = set(read_extra_pages_for(pdf_path) or ())
-            count = len(PdfReader(str(pdf_path)).pages)
-            parts.append(SplitPart(
-                pdf_path.stem,
-                tuple(SplitPage(matched=position not in extra) for position in range(1, count + 1)),
-            ))
-        expected = pages_per_submission or typical_submission(parts)[0]
-        _review_split(
-            Path(output), parts, expected, (), emit,
-            interactive=status_callback is None and sys.stdin.isatty(),
+    elif extra_work_pages:
+        write_extra_pages_map(Path(output), {pdf_path.stem: () for pdf_path in created})
+        emit(
+            "No extra work pages recorded: telling them apart needs --blank-template "
+            "(or --reorder). Pages were left as scanned."
         )
-    finally:
-        if started_server:
-            emit("Stopping auto-started Ollama server...")
-            started_server.stop()
+
+    from opengrader.core.pages.split_review import SplitPage, SplitPart, typical_submission
+    from opengrader.core.submissions.extra_pages import read_extra_pages_for
+
+    parts = []
+    for pdf_path in created:
+        extra = set(read_extra_pages_for(pdf_path) or ())
+        count = len(PdfReader(str(pdf_path)).pages)
+        parts.append(SplitPart(
+            pdf_path.stem,
+            tuple(SplitPage(matched=position not in extra) for position in range(1, count + 1)),
+        ))
+    expected = pages_per_submission or typical_submission(parts)[0]
+    _review_split(
+        Path(output), parts, expected, (), emit,
+        interactive=status_callback is None and sys.stdin.isatty(),
+    )
 
 
 def run_cli(

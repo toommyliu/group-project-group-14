@@ -53,3 +53,4 @@ def resolved_ai() -> ResolvedAI:
 
 def ai_default(field: str) -> Callable[[], Any]:
     return lambda: getattr(resolved_ai(), field)
+

@@ -287,19 +287,18 @@ def test_llm_escalates_transcription_rather_than_transcribing_everything(tmp_pat
             read_handwriting=True,
             vision_model="qwen2.5vl:7b",
             host="http://box:11434",
-            auto_ollama=True,
         ),
     )
     argv = plan_pipeline(request)[2].argv
     assert "--llm-escalate" in argv
     assert "--llm-responses" not in argv
-    assert argv[-5:] == (
+    assert argv[-4:] == (
         "--ollama-model",
         "qwen2.5vl:7b",
         "--ollama-host",
         "http://box:11434",
-        "--auto-ollama",
     )
+    assert "--auto-ollama" not in argv
 
 
 def test_auto_grade_argv_carries_the_text_model_and_the_confidence_floor(tmp_path) -> None:

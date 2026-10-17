@@ -15,9 +15,13 @@ from typing import TYPE_CHECKING
 
 import click
 
-from opengrader.cli import CONTEXT_SETTINGS, ai_default, resolved_ai, run_command
+from opengrader.cli import (
+    CONTEXT_SETTINGS,
+    ai_default,
+    resolved_ai,
+    run_command,
+)
 from opengrader.core import app_config
-from opengrader.core.app_config import local_ai
 from opengrader.core.ocr import OcrConfig
 from opengrader.core.ocr.math_ocr import (
     MATH_BACKEND_NAMES,
@@ -691,11 +695,6 @@ class _Hooks:
     help="Ollama server URL.",
 )
 @click.option(
-    "--auto-ollama",
-    is_flag=True,
-    help="Automatically start the Ollama server and pull the vision model if not available.",
-)
-@click.option(
     "--ollama-timeout",
     type=float,
     default=ai_default("timeout_seconds"),
@@ -935,7 +934,6 @@ def command(
     no_split_subquestions: bool,
     ollama_model: str,
     ollama_host: str,
-    auto_ollama: bool,
     ollama_timeout: float,
     no_ollama_qa: bool,
     llm_responses: bool,
@@ -1208,20 +1206,6 @@ def command(
         vision_model=ollama_model,
         timeout_seconds=ollama_timeout,
     )
-
-    started_server = None
-    if (
-        auto_ollama
-        and bubble_sheet_layout is None
-        and effective_ai.provider.kind == "local"
-    ):
-        try:
-            started_server = local_ai.prepare_for_run(
-                ollama_host, (ollama_model,), emit=print
-            )
-        except local_ai.OllamaNotInstalled as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            sys.exit(1)
 
     ocr_config = None
     vision_reader = None
@@ -1631,9 +1615,6 @@ def command(
     finally:
         if refine_staging is not None:
             shutil.rmtree(refine_staging, ignore_errors=True)
-        if started_server:
-            print("Stopping auto-started Ollama server...")
-            started_server.stop()
 
 
 def run_cli(

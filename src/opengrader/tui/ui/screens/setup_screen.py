@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from dataclasses import replace
 
-from textual import events, work
+from textual import events, on, work
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll, Horizontal
 from textual.message import Message
@@ -88,6 +88,7 @@ from opengrader.tui.ui.screens.backup_screen import BackupScreen
 from opengrader.tui.ui.screens.cloud_consent_screen import CloudPreflightConfirmScreen
 from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
 from opengrader.tui.ui.screens.course_grades_screen import CourseGradesScreen
+from opengrader.tui.ui.screens.assistant_screen import AnswerKeyAssistantScreen, AssistantScreen
 from opengrader.tui.ui.screens.handoff_screen import GraderPacketScreen, MergeScreen
 from opengrader.tui.ui.screens.llm_eval_screen import LlmEvalScreen
 from opengrader.tui.ui.screens.provider_screen import ProviderScreen
@@ -360,6 +361,7 @@ class SetupScreen(OutlineButtons, Vertical):
         "tmpl-output": ("any", "Choose the output template PDF"),
         "policy-submissions": ("directory", "Choose the submissions directory"),
         "handoff-submissions": ("directory", "Choose the submissions directory"),
+        "assistant-folder": ("directory", "Choose the class folder"),
         "backup-submissions": ("directory", "Choose the submissions directory"),
         "tui-class-folder": ("directory", "Choose the class folder"),
         "tui-qa-path": ("file", "Choose the QA markdown file"),
@@ -418,9 +420,6 @@ class SetupScreen(OutlineButtons, Vertical):
     @staticmethod
     def _ai() -> app_config.ResolvedAI:
         return app_config.resolve()
-
-    def _auto_ollama_argv(self) -> list[str]:
-        return ["--auto-ollama"] if self._ai().auto_start else []
 
     def _pipe_jobs(self) -> int | None:
         """The parallel-jobs override: None for automatic, -1 for a bad entry."""
@@ -909,56 +908,97 @@ class SetupScreen(OutlineButtons, Vertical):
                     )
 
                 with Collapsible(
-                    title="AI setup — choose the models, once, for everything",
+                    title="AI assistant — Claude, ChatGPT, … with no names or IDs",
+                    id="section-assistant",
+                    collapsed=True,
+                ):
+                    yield self._field_label(
+                        "Class folder", "blank = the one on the Start grading card"
+                    )
+                    yield self._path_row("Path to the class folder…", "assistant-folder")
+                    yield Static("", id="assistant-state", classes="card-hint")
+                    yield Static(
+                        "Lets the AI assistant you already use do the AI work. "
+                        "Only the jobs that fit the folder are offered: the "
+                        "answer key while there is none or it has blank "
+                        "answers (no student data involved), then grading and "
+                        "drafting partial credit once there are submissions. "
+                        "Scanning, splitting and reading scans stay on this "
+                        "computer.",
+                        classes="card-hint",
+                    )
+                    yield Static(
+                        "The assistant always works in its own folder beside "
+                        "the class folder, never in it. For grading that is a "
+                        "copy where every student is a code: names, IDs and "
+                        "scans stay here, every answer image is checked for "
+                        "the student's name first, and the copy refuses to "
+                        "exist if a name or ID is still in it. Its grades come "
+                        "back as AI grades for you to confirm, and a grade you "
+                        "made is never changed.",
+                        classes="card-hint",
+                    )
+                    with Horizontal(classes="card-actions", id="assistant-key-actions"):
+                        yield Button(
+                            "Draft a standard key",
+                            id="run-assistant-draft-key",
+                            classes=button_roles.LAUNCH,
+                            compact=True,
+                        )
+                        yield Button(
+                            "Type the answers…",
+                            id="run-assistant-type-answers",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+                        yield Button(
+                            "Answers from a list…",
+                            id="run-assistant-list-answers",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+                        yield Button(
+                            "Write the key with my assistant…",
+                            id="run-assistant-key",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+                    with Horizontal(classes="card-actions", id="assistant-grade-actions"):
+                        yield Button(
+                            "Draft rubrics…",
+                            id="run-assistant-rubrics",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+                        yield Button(
+                            "Grade…",
+                            id="run-assistant",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+
+                with Collapsible(
+                    title="AI models & providers — Opengrader's own AI (optional, advanced)",
                     id="section-ai",
                     collapsed=True,
                 ):
                     yield Static(
-                        "Opengrader can use AI for two jobs: reading a "
-                        "student's handwriting, and suggesting grades for "
-                        "written answers against your rubric. Both are "
-                        "optional — everything works without them — and both "
-                        "are set up here rather than in each step, because "
-                        "which model you have installed is a fact about this "
-                        "computer, not about today's assignment.",
+                        "Most teachers do not need this: the AI assistant tool "
+                        "above lets the assistant you already use do the AI "
+                        "work. This is for having Opengrader call a model "
+                        "itself while it reads scans and auto-grades: a local "
+                        "model you run in Ollama ('opengrader ai-readme "
+                        "--local' has the steps), or a cloud service.",
                         classes="card-hint",
                     )
                     yield Static(
-                        "What you save here applies everywhere: Prepare an "
-                        "assignment above, the tools below, and the same "
-                        "commands run from a terminal. Test connection says "
-                        "whether the models are actually there before a long "
-                        "run finds out for you.",
-                        classes="card-hint",
-                    )
-                    yield Static(
-                        self._ai_summary_text(),
-                        id="ai-current-summary",
-                        classes="card-hint",
-                    )
-                    yield self._card_actions(
-                        Button(
-                            "Open AI setup",
-                            id="run-ai-settings",
-                            classes=button_roles.OPEN,
-                            compact=True,
-                        )
-                    )
-
-                with Collapsible(
-                    title="AI providers — connect a service your department runs",
-                    id="section-providers",
-                    collapsed=True,
-                ):
-                    yield Static(
-                        "Opengrader's AI runs on this computer unless you add "
-                        "another service here: a small file naming where the "
-                        "service is and which models to ask for. 'Set up a "
-                        "provider' walks you through it: pick the service, "
-                        "paste its key, test it. The key is kept in this "
-                        "computer's password store, never in an Opengrader "
-                        "file. Once added, a provider appears in AI setup, "
-                        "where you choose it.",
+                        "AI setup chooses the provider and models and what the "
+                        "AI does (read handwriting, suggest grades). It applies "
+                        "everywhere: Prepare an assignment above, the tools "
+                        "below, and the same commands in a terminal. Providers "
+                        "adds a service your department runs: pick it, paste "
+                        "its key (kept in this computer's password store, never "
+                        "in an Opengrader file) and test it.",
                         classes="card-hint",
                     )
                     yield Static(
@@ -968,14 +1008,24 @@ class SetupScreen(OutlineButtons, Vertical):
                         "choose one.",
                         classes="card-hint",
                     )
-                    yield self._card_actions(
-                        Button(
+                    yield Static(
+                        self._ai_summary_text(),
+                        id="ai-current-summary",
+                        classes="card-hint",
+                    )
+                    with Horizontal(classes="card-actions"):
+                        yield Button(
+                            "Open AI setup",
+                            id="run-ai-settings",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+                        yield Button(
                             "Manage providers",
                             id="run-providers",
                             classes=button_roles.OPEN,
                             compact=True,
                         )
-                    )
 
                 with Collapsible(
                     title="Browser app (optional) — grade a class folder in a web browser",
@@ -1522,6 +1572,7 @@ class SetupScreen(OutlineButtons, Vertical):
 
     def on_mount(self) -> None:
         self._restore_machine_settings()
+        self._refresh_assistant_card()
 
     def on_descendant_blur(self, event: events.DescendantBlur) -> None:
         # Leaving the class-folder box counts as choosing that folder.
@@ -1644,6 +1695,18 @@ class SetupScreen(OutlineButtons, Vertical):
             self._open_course_grades()
         elif event.button.id == "run-policy":
             self._run_policy()
+        elif event.button.id == "run-assistant":
+            self._open_assistant()
+        elif event.button.id == "run-assistant-key":
+            self._open_assistant_key()
+        elif event.button.id == "run-assistant-rubrics":
+            self._open_assistant(purpose="rubrics")
+        elif event.button.id == "run-assistant-draft-key":
+            self._assistant_draft_key()
+        elif event.button.id == "run-assistant-type-answers":
+            self._assistant_type_answers()
+        elif event.button.id == "run-assistant-list-answers":
+            self._assistant_list_answers()
         elif event.button.id == "run-handoff-pack":
             self._open_grader_packet()
         elif event.button.id == "run-handoff-merge":
@@ -1670,6 +1733,160 @@ class SetupScreen(OutlineButtons, Vertical):
         if own:
             return own
         return self._session_paths()[1]
+
+    # -- AI assistant card ----------------------------------------------------
+
+    def _assistant_folder(self) -> str:
+        return self._clean_path(self.query_one("#assistant-folder", Input).value) or self._clean_path(
+            self.query_one("#tui-class-folder", Input).value
+        )
+
+    def _assistant_state(self):  # noqa: ANN202 - ClassState | None
+        from opengrader.core.agent.class_state import read_class_state
+
+        folder = self._assistant_folder()
+        if not folder or not Path(folder).is_dir():
+            return None
+        try:
+            return read_class_state(folder)
+        except (OSError, ValueError):
+            return None
+
+    def _refresh_assistant_card(self) -> None:
+        """Say what the folder has, and offer only the jobs that fit it."""
+        state = self._assistant_state()
+        shown = {
+            "run-assistant-draft-key": bool(state and state.can_draft_standard_key),
+            "run-assistant-type-answers": bool(state and state.qa_file and state.unanswered and not state.key_problem),
+            "run-assistant-list-answers": bool(state and state.qa_file and state.unanswered and not state.key_problem),
+            "run-assistant-key": bool(state and state.needs_key),
+            "run-assistant-rubrics": bool(state and state.can_draft_rubrics),
+            "run-assistant": bool(state and state.can_grade),
+        }
+        for button_id, visible in shown.items():
+            self.query_one(f"#{button_id}", Button).display = visible
+        self.query_one("#assistant-key-actions").display = any(
+            shown[b] for b in ("run-assistant-draft-key", "run-assistant-type-answers", "run-assistant-list-answers", "run-assistant-key")
+        )
+        self.query_one("#assistant-grade-actions").display = shown["run-assistant-rubrics"] or shown["run-assistant"]
+        if state is None:
+            text = "Choose a class folder to see what your assistant can do with it."
+        else:
+            text = f"Found: {state.describe()}."
+            if state.can_draft_standard_key:
+                text += " Draft a standard key from the blank assignment, then add its answers."
+            elif state.qa_file is None:
+                text += " Write the key with your assistant from your own answer key."
+            elif not state.submission_count:
+                text += " Grading and rubrics appear once the scans are read."
+        self.query_one("#assistant-state", Static).update(text)
+
+    @on(Input.Changed, "#assistant-folder")
+    def _on_assistant_folder_changed(self, event: Input.Changed) -> None:
+        self._refresh_assistant_card()
+
+    @on(Collapsible.Expanded, "#section-assistant")
+    def _on_assistant_card_opened(self, event: Collapsible.Expanded) -> None:
+        self._refresh_assistant_card()
+
+    def _open_assistant(self, purpose: str = "grading") -> None:
+        state = self._assistant_state()
+        if state is None or not state.can_grade:
+            self.app.notify("Choose a class folder with an answer key and submissions.", severity="error")
+            return
+        self.app.push_screen(
+            AssistantScreen(
+                submissions_path=str(state.submissions),
+                qa_file_path=str(state.qa_file),
+                purpose=purpose,
+            ),
+            lambda _result: self._refresh_assistant_card(),
+        )
+
+    def _open_assistant_key(self) -> None:
+        state = self._assistant_state()
+        if state is None:
+            self.app.notify("Choose the class folder first.", severity="error")
+            return
+        self.app.push_screen(
+            AnswerKeyAssistantScreen(
+                class_folder=str(state.folder),
+                qa_file=str(state.qa_file) if state.qa_file else "",
+                submissions=str(state.submissions) if state.submissions else "",
+            ),
+            lambda _result: self._refresh_assistant_card(),
+        )
+
+    def _assistant_draft_key(self) -> None:
+        from opengrader.core.qa_file.draft_key import draft_from_blank_template
+
+        state = self._assistant_state()
+        if state is None or not state.can_draft_standard_key:
+            return
+        points = load_machine_settings().answer_key_points or DEFAULT_QUESTION_POINTS
+        key = draft_from_blank_template(state.blank_template, default_points=points)
+        if key is None:
+            self.app.notify(
+                f"{state.blank_template.name} has no text to read questions from (a scanned "
+                "template?). Write the key with your assistant instead.",
+                severity="warning",
+            )
+            return
+        output = state.folder / "qa.md"
+        try:
+            with output.open("x", encoding="utf-8") as handle:
+                handle.write(key.markdown)
+        except OSError as exc:
+            self.app.notify(f"Could not write {output.name}: {exc}", severity="error")
+            return
+        defaulted = f", {key.defaulted} given the standard points" if key.defaulted else ""
+        self.app.notify(
+            f"Drafted {output.name}: {key.graded} question(s){defaulted}, every answer blank. "
+            "Add the answers next."
+        )
+        self._refresh_assistant_card()
+
+    def _assistant_type_answers(self) -> None:
+        state = self._assistant_state()
+        if state is None or state.qa_file is None:
+            return
+        self.app.push_screen(
+            AnswerFillScreen(state.qa_file), lambda _saved: self._refresh_assistant_card()
+        )
+
+    def _assistant_list_answers(self) -> None:
+        state = self._assistant_state()
+        if state is None or state.qa_file is None:
+            return
+
+        def chosen(path: Path | None) -> None:
+            if path is not None:
+                self._apply_answer_list(state.qa_file, path)
+
+        self.app.push_screen(
+            PathPickerScreen(
+                title="Choose the answers list (1: H2O; Water)", mode="file", start_path=state.folder
+            ),
+            chosen,
+        )
+
+    def _apply_answer_list(self, qa_file: Path, answers: Path) -> None:
+        from opengrader.core.qa_file.answer_list import apply_answer_list
+
+        try:
+            result = apply_answer_list(
+                qa_file.read_text(encoding="utf-8"), answers.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            self.app.notify(f"Nothing was changed: {exc}", severity="error")
+            return
+        if result.filled:
+            qa_file.write_text(result.markdown, encoding="utf-8")
+        message = f"Filled {len(result.filled)} answer(s) in {qa_file.name}."
+        if result.problems:
+            message += f" {len(result.problems)} line(s) skipped: " + "; ".join(result.problems[:3])
+        self.app.notify(message, severity="warning" if result.problems else "information", timeout=12)
+        self._refresh_assistant_card()
 
     def _open_grader_packet(self) -> None:
         submissions = self._handoff_submissions("handoff-submissions")
@@ -3441,7 +3658,6 @@ class SetupScreen(OutlineButtons, Vertical):
             read_handwriting=current.read_handwriting,
             grade_written=current.grade_written,
             host=current.host,
-            auto_ollama=current.auto_start,
         )
 
         request = PipelineRequest(
@@ -4094,7 +4310,6 @@ class SetupScreen(OutlineButtons, Vertical):
             template = self._clean_path(self.query_one("#ak-template-path", Input).value)
             if template:
                 argv.extend(["--blank-template", template])
-        argv.extend(self._auto_ollama_argv())
 
         self._ak_total = 0
         self._ak_output = output_md

@@ -412,7 +412,6 @@ class LlmEvalScreen(OutlineButtons, ModalScreen[float | None]):
                 return None
             argv += ["--limit", str(limit)]
 
-        argv.append("--auto-ollama")
         return argv
 
     @on(Button.Pressed, "#llm-eval-run")

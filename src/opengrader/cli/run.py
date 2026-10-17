@@ -36,7 +36,7 @@ Examples:
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --pages-per-submission 6
   uv run opengrader-run --scan split/ --qa qa.md --out cohort/          # already-split PDFs
   uv run opengrader-run --scan scans/bundle.pdf --out cohort/ --dry-run # show the plan, do nothing
-  uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm --auto-ollama
+  uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --llm
   uv run opengrader-run --scan scans/bundle.pdf --qa qa.md --out cohort/ --json   # for scripts
   uv run opengrader-run cs146-quiz1/ --draft-rubrics    # AI drafts missing rubric items, then pauses
   uv run opengrader-run --section-scan s1.pdf --section-scan s2.pdf --qa qa.md --out quiz1/
@@ -848,12 +848,6 @@ def _save_inputs(
     ),
 )
 @click.option(
-    "--auto-ollama/--no-auto-ollama",
-    default=ai_default("auto_start"),
-    show_default="from AI Setup",
-    help="Start 'ollama serve' and pull the models if they are not there.",
-)
-@click.option(
     "--llm-min-confidence",
     type=float,
     help=(
@@ -980,7 +974,6 @@ def command(
     llm_vision_model: str,
     llm_text_model: str,
     ollama_host: str,
-    auto_ollama: bool,
     llm_min_confidence: float | None,
     auto_grade: bool,
     draft_rubrics: bool,
@@ -1053,7 +1046,6 @@ def command(
             vision_model=llm_vision_model,
             text_model=llm_text_model,
             host=ollama_host,
-            auto_ollama=auto_ollama,
             min_confidence=llm_min_confidence,
         ),
         jobs=jobs,

@@ -39,7 +39,8 @@ course_code: "CS146"
 assignment_title: "Quiz 1"
 assignment_version: "A"
 source_pdf: "../../split/Ada_Lovelace.pdf"
-name_image_path: "identifiers/name.png"
+name_image: "identifiers/name.png"
+id_image: "identifiers/id.png"
 student_score: ""
 ---
 
@@ -247,6 +248,8 @@ def test_a_packet_leaves_the_scan_and_the_identity_crop_behind(
     result = build_packet(cohort, tmp_path / "out", packet_id="p1")
     assert not list(result.packet_path.rglob("*.pdf"))
     assert not list(result.packet_path.rglob("identifiers/*"))
+    packed = next(result.packet_path.rglob("*.submission.md")).read_text()
+    assert "identifiers/" not in packed
     assert result.copied_crops == 1
     assert list(result.packet_path.rglob("responses/q1.png"))
 

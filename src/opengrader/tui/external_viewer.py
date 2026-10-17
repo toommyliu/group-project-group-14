@@ -123,3 +123,32 @@ def open_in_text_editor(path: str | Path) -> str:
     except (OSError, ValueError) as exc:
         raise ExternalViewerError(f"could not launch {command[0]!r}: {exc}") from exc
     return target.name
+
+
+def open_folder(path: str | Path) -> str:
+    """Show a folder in the computer's file manager (Finder, Explorer, …).
+
+    So a teacher can drag it into an assistant app, or open it from there,
+    without typing its path.
+    """
+    target = Path(path)
+    if not target.is_dir():
+        raise ExternalViewerError(f"folder not found: {target}")
+    if sys.platform == "win32":
+        try:
+            os.startfile(str(target))  # type: ignore[attr-defined]  # noqa: S606
+        except OSError as exc:
+            raise ExternalViewerError(f"could not open {target.name}: {exc}") from exc
+        return target.name
+    command = ["open", str(target)] if sys.platform == "darwin" else ["xdg-open", str(target)]
+    try:
+        subprocess.Popen(  # noqa: S603
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise ExternalViewerError(f"could not launch {command[0]!r}: {exc}") from exc
+    return target.name

@@ -209,7 +209,6 @@ def test_a_resolved_host_override_moves_kind_with_it(providers_dir) -> None:
 
     assert resolved.provider.name == "ollama"
     assert resolved.kind == "cloud"
-    assert resolved.auto_start is False
 
 
 @pytest.mark.parametrize(

@@ -107,7 +107,6 @@ def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
             "--llm-vision-model", "qwen2.5vl:7b",
             "--llm-text-model", "llama3.1",
             "--ollama-host", "http://box:11434",
-            "--auto-ollama",
             "--llm-min-confidence", "0.75",
             "--force",
             "--fresh",
@@ -126,7 +125,6 @@ def test_every_option_lands_in_the_request(tmp_path, captured) -> None:
     assert request.llm.vision_model == "qwen2.5vl:7b"
     assert request.llm.text_model == "llama3.1"
     assert request.llm.host == "http://box:11434"
-    assert request.llm.auto_ollama is True
     assert request.llm.min_confidence == 0.75
 
 
@@ -195,14 +193,10 @@ def test_no_auto_grade_still_works_with_ai_setup_on(tmp_path, captured) -> None:
     assert captured["request"].auto_grade is False
 
 
-def test_auto_ollama_defaults_from_ai_setup(tmp_path, captured) -> None:
-    app_config.save_settings(app_config.AISettings(auto_start=False))
-    run_command(run_module.command, _argv(tmp_path))
-    assert captured["request"].llm.auto_ollama is False
-
-    app_config.save_settings(app_config.AISettings(auto_start=True))
-    run_command(run_module.command, _argv(tmp_path))
-    assert captured["request"].llm.auto_ollama is True
+def test_the_removed_auto_ollama_flag_is_refused(tmp_path, captured) -> None:
+    # Opengrader never starts or stocks a local AI, so there is no flag for it.
+    assert _exit_status(_argv(tmp_path, "--auto-ollama")) == 2
+    assert "request" not in captured
 
 
 def test_absent_paths_stay_none_rather_than_becoming_dot(tmp_path, captured) -> None:

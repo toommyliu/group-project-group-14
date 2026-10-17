@@ -11,7 +11,6 @@ import click
 
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, run_command
 from opengrader.core import app_config
-from opengrader.core.app_config import local_ai
 from opengrader.core.grading.answer_cache import AnswerGradeCache
 from opengrader.core.grading.rubric_draft import has_partial_credit_items
 from opengrader.core.grading.llm_grader import (
@@ -182,15 +181,6 @@ class _Hooks:
     ),
 )
 @click.option(
-    "--auto-ollama",
-    is_flag=True,
-    help=(
-        "Before grading, start 'ollama serve' if nothing is listening and "
-        "pull the grading model. Mirrors the split/extract/answer-key steps; "
-        "off by default so scripted runs fail fast instead of downloading."
-    ),
-)
-@click.option(
     "--dry-run",
     is_flag=True,
     help="Print what would change (including AI suggestions) without writing.",
@@ -224,7 +214,6 @@ def command(
     llm_timeout: float,
     llm_min_confidence: float,
     llm_min_transcription_confidence: float,
-    auto_ollama: bool,
     dry_run: bool,
     no_journal: bool,
     yes_send_to_cloud: bool,
@@ -269,14 +258,6 @@ def command(
             text_model=text_model,
             timeout_seconds=llm_timeout,
         )
-        if auto_ollama and resolved.kind == "local":
-            try:
-                local_ai.prepare_for_run(
-                    resolved.host, (resolved.text_model,), emit=emit
-                )
-            except local_ai.OllamaNotInstalled as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                sys.exit(1)
         if resolved.kind == "cloud":
             from opengrader.core.cloud_preflight import CloudPreflight, cli_confirm_cloud_send
 

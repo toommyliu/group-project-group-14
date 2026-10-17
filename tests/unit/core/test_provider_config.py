@@ -42,7 +42,6 @@ def test_a_single_changed_field_resolves_alone_others_still_default() -> None:
             math_backend="pix2tex",
             timeout_seconds=45.0,
             min_confidence=0.42,
-            auto_start=False,
         ),
         app_config.AISettings(host="http://only-host-changed:9999"),
     ],
@@ -211,14 +210,15 @@ def test_resolve_picks_up_the_fake_providers_defaults(fake_cloud_provider) -> No
     assert resolved.text_model == spec.default_text_model
 
 
-def test_auto_start_is_forced_off_for_a_cloud_provider(fake_cloud_provider) -> None:
-    spec, _text, _vision, _calls = fake_cloud_provider
-
-    resolved = app_config.resolve(
-        app_config.AISettings(provider=spec.name, auto_start=True), environ={}
+def test_a_config_from_when_runs_could_start_ollama_still_loads() -> None:
+    # `auto_start` is gone; a config.json written before keeps its other
+    # settings, and the next save drops the old key.
+    settings = app_config.AISettings.from_dict(
+        {"auto_start": True, "text_model": "t-model", "read_handwriting": True}
     )
 
-    assert resolved.auto_start is False
+    assert settings.text_model == "t-model" and settings.read_handwriting is True
+    assert "auto_start" not in settings.to_dict()
 
 
 def test_cloud_provider_sends_data_off_machine(fake_cloud_provider) -> None:

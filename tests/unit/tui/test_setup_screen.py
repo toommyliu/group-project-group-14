@@ -11,6 +11,8 @@ from opengrader.tui.ui.screens.setup_screen import SetupScreen
 
 from .fakes import DEFAULT_IMAGE_PATH
 
+PROJECT_SAMPLES = __import__('pathlib').Path(__file__).resolve().parents[3] / "samples"
+
 
 def test_setup_scroll_reaches_the_very_last_section() -> None:
     async def run() -> None:
@@ -1304,7 +1306,6 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
             vision_model="llava",
             text_model="llama3.1",
             host="http://192.168.1.50:9999",
-            auto_start=True,
             read_handwriting=True,
             grade_written=True,
             auto_grade=False,
@@ -1357,7 +1358,6 @@ def test_pipeline_request_maps_every_control(tmp_path) -> None:  # noqa: ANN001
     assert request.llm.vision_model == ""
     assert request.llm.text_model == ""
     assert request.llm.host == "http://192.168.1.50:9999"
-    assert request.llm.auto_ollama is True
     assert request.auto_grade is False
 
 
@@ -1388,7 +1388,6 @@ def test_pipeline_request_defaults_when_every_disclosure_is_off(tmp_path) -> Non
     assert request.llm.grade_written == resolved.grade_written
     assert request.llm.enabled is False
     assert request.llm.host == resolved.host
-    assert request.llm.auto_ollama == resolved.auto_start
     assert request.auto_grade == resolved.auto_grade
 
 
@@ -2257,3 +2256,74 @@ def test_create_answer_key_says_nothing_extra_when_points_were_all_stated(monkey
     seen = _create_answer_key(monkeypatch, tmp_path, report=(0, 8))
 
     assert "Answer key created." in seen["notices"]
+
+
+def _template_pdf(path) -> None:  # noqa: ANN001
+    import fitz
+
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 100), "1. What is water? (5 points)", fontsize=12)
+    page.insert_text((72, 200), "2. Name a prime number. (5 points)", fontsize=12)
+    document.save(str(path))
+
+
+def _assistant_buttons(app) -> set[str]:  # noqa: ANN001
+    ids = (
+        "run-assistant-draft-key",
+        "run-assistant-type-answers",
+        "run-assistant-list-answers",
+        "run-assistant-key",
+        "run-assistant-rubrics",
+        "run-assistant",
+    )
+    return {button_id for button_id in ids if app.query_one(f"#{button_id}", Button).display}
+
+
+def test_the_ai_assistant_card_offers_only_what_the_class_folder_is_ready_for(tmp_path) -> None:  # noqa: ANN001
+    import shutil
+
+    from opengrader.tui.ui.screens.assistant_screen import AssistantScreen
+
+    blank = tmp_path / "new-class"
+    blank.mkdir()
+    _template_pdf(blank / "template.pdf")
+    answers = tmp_path / "answers.txt"
+    answers.write_text("1: H2O; Water\n2: 2, 3, 5\n")
+    graded = tmp_path / "graded-class"
+    shutil.copytree(PROJECT_SAMPLES / "cmpe30-quiz2", graded, ignore=shutil.ignore_patterns("._*", ".opengrader"))
+
+    async def run():  # noqa: ANN202
+        app = TuiApp(default_image_path=DEFAULT_IMAGE_PATH)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            screen = app.query_one(SetupScreen)
+            nothing = _assistant_buttons(app)
+            app.query_one("#assistant-folder", Input).value = str(blank)
+            await pilot.pause()
+            before_key = _assistant_buttons(app)
+            screen._assistant_draft_key()
+            await pilot.pause()
+            drafted = _assistant_buttons(app)
+            screen._apply_answer_list(blank / "qa.md", answers)
+            await pilot.pause()
+            filled = _assistant_buttons(app)
+            app.query_one("#assistant-folder", Input).value = str(graded)
+            await pilot.pause()
+            with_submissions = _assistant_buttons(app)
+            state_text = str(app.query_one("#assistant-state", Static).render())
+            screen._open_assistant(purpose="rubrics")
+            await pilot.pause()
+            opened = app.screen
+            return nothing, before_key, drafted, filled, with_submissions, state_text, (type(opened), opened._purpose)
+
+    nothing, before_key, drafted, filled, with_submissions, state_text, opened = asyncio.run(run())
+
+    assert nothing == set()
+    assert before_key == {"run-assistant-draft-key", "run-assistant-key"}
+    assert drafted == {"run-assistant-type-answers", "run-assistant-list-answers", "run-assistant-key"}
+    assert filled == set()  # every answer is in; no submissions yet
+    assert "H2O" in (blank / "qa.md").read_text()
+    assert with_submissions == {"run-assistant-rubrics", "run-assistant"}
+    assert "1 submission(s)" in state_text
+    assert opened == (AssistantScreen, "rubrics")

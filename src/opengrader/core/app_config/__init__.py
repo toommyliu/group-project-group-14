@@ -100,10 +100,10 @@ __all__ = [
 
 DEFAULT_PROVIDER = "ollama"
 DEFAULT_HOST = "http://127.0.0.1:11434"
-# The models a fresh install uses, and the ones "Set up local AI" downloads
-# when AI setup names no others. To recommend a different model, change the
-# name here: the setup hint, the help screen, the Ollama clients' own
-# defaults and the download all read these two lines.
+# The models a fresh install uses when AI setup names no others. To
+# recommend a different model, change the name here: the setup hint, the
+# help screen, `opengrader ai-readme --local` and the Ollama clients' own
+# defaults all read these two lines.
 DEFAULT_VISION_MODEL = "qwen3.5:9b"
 DEFAULT_TEXT_MODEL = "qwen2.5vl:7b"
 DEFAULT_TIMEOUT_SECONDS = 120.0
@@ -320,11 +320,11 @@ OLLAMA = ProviderSpec(
     default_vision_model=DEFAULT_VISION_MODEL,
     default_text_model=DEFAULT_TEXT_MODEL,
     setup_hint=(
-        "Press Set up local AI in AI setup: it starts Ollama and downloads "
-        f"{DEFAULT_VISION_MODEL} for handwriting and {DEFAULT_TEXT_MODEL} for "
-        "grading. By hand: install Ollama, run ollama serve, then ollama pull "
-        "each model. 'Check this computer' in Helper Tools reports exactly "
-        "what is missing."
+        "Opengrader does not start or download a local AI. Install Ollama, "
+        f"run ollama serve, then ollama pull {DEFAULT_VISION_MODEL} for "
+        f"handwriting and ollama pull {DEFAULT_TEXT_MODEL} for grading "
+        "('opengrader ai-readme --local' has the steps). 'Check this "
+        "computer' in Helper Tools reports exactly what is missing."
     ),
     text_config_factory=_ollama_text_config,
     vision_config_factory=_ollama_vision_config,
@@ -442,7 +442,9 @@ class AISettings:
     math_backend: str = ""
     timeout_seconds: float | None = None
     min_confidence: float | None = None
-    auto_start: bool = True
+    # (`auto_start`, which let a run start Ollama and download models, is
+    # gone: Opengrader connects to a local AI the teacher runs. An old
+    # config.json that still has it loads; the next save drops it.)
     read_handwriting: bool = False
     # None = never chosen: resolve() turns it ON for a cloud host (the largest
     # single cost reduction) and OFF for a local one. An explicit
@@ -479,7 +481,6 @@ class AISettings:
             "math_backend",
             "timeout_seconds",
             "min_confidence",
-            "auto_start",
             "read_handwriting",
             "escalate_only",
             "transcribe_math",
@@ -508,7 +509,6 @@ class AISettings:
             math_backend=_as_text(data.get("math_backend"), ""),
             timeout_seconds=_as_positive_float(data.get("timeout_seconds")),
             min_confidence=_as_unit_float(data.get("min_confidence")),
-            auto_start=_as_bool(data.get("auto_start"), True),
             read_handwriting=_as_bool(data.get("read_handwriting"), False),
             escalate_only=_as_optional_bool(data.get("escalate_only")),
             transcribe_math=_as_bool(data.get("transcribe_math"), False),
@@ -646,7 +646,6 @@ class ResolvedAI:
     math_backend: str
     timeout_seconds: float
     min_confidence: float
-    auto_start: bool
     # Kept out of repr: a ResolvedAI printed in a message or a log must not
     # carry the key with it.
     api_key: str | None = field(repr=False)
@@ -1014,7 +1013,6 @@ def resolve(
             if base.min_confidence is not None
             else DEFAULT_MIN_CONFIDENCE
         ),
-        auto_start=base.auto_start and kind == "local",
         api_key=resolve_api_key(provider, environ=env, settings=base),
         read_handwriting=base.read_handwriting,
         escalate_only=escalate and base.read_handwriting,

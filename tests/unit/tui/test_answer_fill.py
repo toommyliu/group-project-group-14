@@ -318,15 +318,13 @@ def test_opening_a_file_that_is_not_there_is_an_error_not_a_blank_editor(tmp_pat
 # --- Suggest answers with AI -------------------------------------------------
 
 
-def _ai(monkeypatch, *, ready: bool = True, reply=None, error: str = "", server=None) -> list[str]:  # noqa: ANN001
+def _ai(monkeypatch, *, ready: bool = True, reply=None, error: str = "") -> list[str]:  # noqa: ANN001
     """An AI that is (or is not) ready; returns the prompts it was sent."""
     import json
 
     prompts: list[str] = []
 
-    def generate_for(_resolved, *, emit=None, started=None):  # noqa: ANN001, ANN202
-        if started is not None and server is not None:
-            started.append(server)
+    def generate_for(_resolved):  # noqa: ANN001, ANN202
         def generate(prompt: str) -> str:
             prompts.append(prompt)
             if error:
@@ -477,124 +475,47 @@ def test_a_cloud_ai_is_asked_first_and_no_means_nothing_is_sent(tmp_path, monkey
     assert text == "Au" and len(prompts) == 1
 
 
-# --- a local AI that is installed but not running ----------------------------
+# --- a local AI: Opengrader connects to it, never starts it -----------------
 
 
-class _Local:
-    """Stands in for `local_ai`: an Ollama that is, or is not, running."""
-
-    LocalAIError = RuntimeError
-
-    def __init__(self, *, listening=False, binary="/usr/local/bin/ollama", models=("grader:1",)) -> None:  # noqa: ANN001
-        self.listening, self.binary, self.models = listening, binary, list(models)
-        self.started = 0
-        self.stopped = 0
-
-    def server_listening(self, _host):  # noqa: ANN001, ANN201
-        return self.listening
-
-    def is_this_computer(self, _host):  # noqa: ANN001, ANN201
-        return True
-
-    def find_ollama(self):  # noqa: ANN201
-        return self.binary
-
-    def installed_models(self, _host):  # noqa: ANN001, ANN201
-        return list(self.models)
-
-    def missing_models(self, wanted, installed):  # noqa: ANN001, ANN201
-        return tuple(model for model in wanted if model not in installed)
-
-    def start_server(self, _host, *, emit):  # noqa: ANN001, ANN201
-        self.started += 1
-        self.listening = True
-        return self
-
-    def stop(self) -> None:
-        self.stopped += 1
-
-
-def _local_ai(monkeypatch, local: _Local, *, auto_start: bool):  # noqa: ANN001, ANN202
+def _local(monkeypatch, *, answering: bool):  # noqa: ANN001, ANN202
     from types import SimpleNamespace
 
-    import opengrader.core.app_config as real_config
+    resolved = SimpleNamespace(
+        kind="local", host="http://127.0.0.1:11434", text_model="grader:1", timeout_seconds=120.0
+    )
+    checked: list[float] = []
 
-    resolved = SimpleNamespace(kind="local", host="http://127.0.0.1:11434", text_model="grader:1", auto_start=auto_start)
-    monkeypatch.setattr(real_config, "local_ai", local, raising=False)
+    def ensure_ready(current, *, purpose):  # noqa: ANN001, ANN202
+        checked.append(current.timeout_seconds)
+        if not answering:
+            raise RuntimeError("Could not reach Ollama at http://127.0.0.1:11434")
+
     monkeypatch.setattr(answer_fill_screen.app_config, "resolve", lambda: resolved)
-    monkeypatch.setattr(answer_fill_screen.app_config, "ensure_ready", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        answer_fill_screen.app_config,
+        "with_overrides",
+        lambda current, **changes: SimpleNamespace(**{**vars(current), **changes}),
+    )
+    monkeypatch.setattr(answer_fill_screen.app_config, "ensure_ready", ensure_ready)
     monkeypatch.setattr(answer_fill_screen.app_config, "text_generate", lambda *_a, **_k: "the model")
-    return resolved
+    return resolved, checked
 
 
-def test_the_ai_button_is_offered_for_a_local_ai_that_may_be_started(monkeypatch) -> None:  # noqa: ANN001
-    stopped = _Local(listening=False)
-
-    _local_ai(monkeypatch, stopped, auto_start=True)
-    assert answer_fill_screen.ai_suggest_ready() is True
-    # Checking is not starting.
-    assert stopped.started == 0
-
-    _local_ai(monkeypatch, stopped, auto_start=False)
-    assert answer_fill_screen.ai_suggest_ready() is False
-    _local_ai(monkeypatch, _Local(listening=False, binary=None), auto_start=True)
-    assert answer_fill_screen.ai_suggest_ready() is False
-    # Running, but without the grading model: nothing to ask.
-    _local_ai(monkeypatch, _Local(listening=True, models=()), auto_start=True)
-    assert answer_fill_screen.ai_suggest_ready() is False
-    _local_ai(monkeypatch, _Local(listening=True), auto_start=False)
+def test_the_ai_button_is_offered_only_for_a_local_ai_that_is_answering(monkeypatch) -> None:  # noqa: ANN001
+    _local(monkeypatch, answering=True)
     assert answer_fill_screen.ai_suggest_ready() is True
 
-
-def test_asking_starts_the_local_ai_and_hands_back_what_it_started(monkeypatch) -> None:  # noqa: ANN001
-    local = _Local(listening=False)
-    resolved = _local_ai(monkeypatch, local, auto_start=True)
-    started: list = []
-    said: list[str] = []
-
-    generate = answer_fill_screen.ai_generate(resolved, emit=said.append, started=started)
-
-    assert generate == "the model" and local.started == 1 and started == [local]
-    assert said == ["Starting the local AI…"]
-    # Already running: nothing is started, so nothing is handed back to stop.
-    again: list = []
-    answer_fill_screen.ai_generate(resolved, started=again)
-    assert local.started == 1 and again == []
+    _resolved, checked = _local(monkeypatch, answering=False)
+    assert answer_fill_screen.ai_suggest_ready() is False
+    # A quick check: a server that is not there is not waited on for a whole request.
+    assert checked and checked[0] <= 5
 
 
-def test_a_missing_model_is_reported_and_never_downloaded(monkeypatch) -> None:  # noqa: ANN001
-    local = _Local(listening=False, models=())
-    resolved = _local_ai(monkeypatch, local, auto_start=True)
+def test_asking_a_local_ai_that_is_not_running_says_so_and_starts_nothing(monkeypatch) -> None:  # noqa: ANN001
+    resolved, _checked = _local(monkeypatch, answering=True)
+    assert answer_fill_screen.ai_generate(resolved) == "the model"
 
-    with pytest.raises(RuntimeError, match="not downloaded yet"):
-        answer_fill_screen.ai_generate(resolved, started=[])
-
-    assert not hasattr(local, "pull_model")
-
-
-def test_a_local_ai_that_may_not_be_started_is_left_alone(monkeypatch) -> None:  # noqa: ANN001
-    local = _Local(listening=False)
-    resolved = _local_ai(monkeypatch, local, auto_start=False)
-
-    with pytest.raises(RuntimeError, match="not running"):
+    resolved, _checked = _local(monkeypatch, answering=False)
+    with pytest.raises(RuntimeError, match="Could not reach"):
         answer_fill_screen.ai_generate(resolved)
-
-    assert local.started == 0
-
-
-def test_a_server_the_form_started_is_stopped_when_the_form_closes(tmp_path, monkeypatch, pipeline_calls) -> None:  # noqa: ANN001
-    folder = _keyed_folder(tmp_path)
-    server = _Local()
-    _ai(monkeypatch, reply=[("1", ["Au"])], server=server)
-
-    async def steps(session: _Session):  # noqa: ANN202
-        await _add_answers(session, folder)
-        await _suggest(session)
-        running_while_open = server.stopped
-        session.app.screen.query_one("#answers-cancel", Button).press()
-        await _form_closed(session)
-        await session.pilot.pause()
-        return running_while_open
-
-    assert _drive(steps) == 0
-    assert server.stopped == 1

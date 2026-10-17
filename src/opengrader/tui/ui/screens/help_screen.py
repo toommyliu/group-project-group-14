@@ -610,15 +610,18 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
         "listed as not installed and the vision model keeps working.",
     ),
     (
-        "The quick way",
-        "Press 'Set up local AI' in AI setup. It starts the AI server, tells "
-        "you which models are missing, and on a second press downloads them "
-        "with the progress on screen — the models named in AI setup, or the "
-        "recommended ones where a field is blank, and only for the jobs that "
-        "are ticked: the handwriting model for reading scans or names, the "
-        "grading model for suggesting grades. On a Mac with Homebrew it "
-        "can install Ollama as well. Steps 1-3 below are the same thing by "
-        "hand.",
+        "An AI assistant instead",
+        "Local models small enough for a laptop read handwriting and grade "
+        "noticeably worse than the large assistants (Claude, ChatGPT, …). "
+        "To grade with one you already use, without names or IDs ever "
+        "reaching it: 'opengrader agent prepare' makes a redacted copy for "
+        "it, and 'opengrader ai-readme' is the page to give it.",
+    ),
+    (
+        "A local model: you run it",
+        "Opengrader connects to a local AI; it does not install, start or "
+        "download one. Steps 1-3 are done once, by hand — "
+        "'opengrader ai-readme --local' prints them.",
     ),
     (
         "1 · Install Ollama",
@@ -628,22 +631,17 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
     (
         "2 · Start the server",
-        "Leave 'Start the AI automatically when needed' ticked in AI setup and "
-        "a step starts 'ollama serve' for you if it isn't already running, at "
-        "http://127.0.0.1:11434. Untick it — on a metered connection, or where "
-        "you want to control when a multi-gigabyte download happens — and a "
-        "step reports that the AI isn't up rather than starting it. Running "
-        "the CLIs by hand? Start it yourself or let the desktop app.",
+        "Open the Ollama app, or run 'ollama serve' and leave it running. It "
+        "answers at http://127.0.0.1:11434. A step that needs the AI while "
+        "it is not running says so instead of starting it.",
     ),
     (
         "3 · Get the model",
-        "With that same box ticked, a step also downloads the model it needs "
-        "on first use, reporting how far it has got. By hand: for "
-        f"handwriting, run 'ollama pull {DEFAULT_VISION_MODEL}'; for grading, "
-        f"'ollama pull {DEFAULT_TEXT_MODEL}' — several GB each. 'ollama "
-        "list' shows what you have, and 'Check this computer' in Tools (F3, "
-        "classic) reports whether the models AI setup names are actually "
-        "installed.",
+        f"For handwriting, run 'ollama pull {DEFAULT_VISION_MODEL}'; for "
+        f"grading, 'ollama pull {DEFAULT_TEXT_MODEL}' — several GB each. "
+        "'ollama list' shows what you have, and 'Check this computer' in "
+        "Tools (F3, classic) reports whether the models AI setup names are "
+        "actually installed.",
     ),
     (
         "Choosing a model",
@@ -691,20 +689,17 @@ _LOCAL_AI_ROWS: list[tuple[str, str]] = [
     ),
     (
         "Cloud AI?",
-        "Not today: 'Ollama on this computer (offline)' is the only provider "
-        "in the list, and nothing you grade leaves the machine. The provider "
-        "is a dropdown rather than an assumption because that is the honest "
-        "shape — if a hosted provider is ever added it appears there with its "
-        "own models and its own API-key row, and the screen states plainly "
-        "that choosing it sends student handwriting off this computer. "
-        "Offline stays the default, and a key is read from this computer's "
-        "password store or an environment variable, never written to an "
-        "Opengrader file.",
+        "Opt-in: AI providers in Tools adds a hosted service with your API "
+        "key, and AI setup asks for your consent before anything is sent. "
+        "A student's name or ID is never sent to a cloud provider, and a key "
+        "is kept in this computer's password store or an environment "
+        "variable, never in an Opengrader file. 'opengrader data-flow' "
+        "states what would leave the machine.",
     ),
     (
         "If it isn't ready",
-        "If the 'ollama' binary is missing, a step reports it (install Ollama, "
-        "then retry) — 'Check this computer' names the exact command. You can "
+        "If Ollama is not running or a model is missing, a step reports it — "
+        "'Check this computer' names the exact command. You can "
         "always skip the AI in Auto-grade: objective "
         "answers are still scored and free responses are left for you to grade "
         "by hand.",

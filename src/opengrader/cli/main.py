@@ -116,6 +116,18 @@ COMMANDS: tuple[Subcommand, ...] = (
         aliases=("opengrader-data-flow",),
     ),
     Subcommand(
+        name="ai-readme",
+        target="opengrader.cli.agent:ai_readme_command",
+        summary="what your AI assistant needs to know to use Opengrader safely",
+        section=SECTION_START,
+    ),
+    Subcommand(
+        name="agent",
+        target="opengrader.cli.agent:command",
+        summary="grade written answers with your own AI assistant, with no names or IDs",
+        section=SECTION_GRADE,
+    ),
+    Subcommand(
         name="create-answer-key",
         target="opengrader.cli.answer_key:command",
         summary="turn an existing answer key into a QA markdown draft",
