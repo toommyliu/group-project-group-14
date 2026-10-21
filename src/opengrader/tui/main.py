@@ -218,7 +218,7 @@ def _workspace_for(folder: Path) -> Path | None:
 
 
 def _grade_folder(qa_file: Path, submissions: Path):
-    # F2 comes back to the Start grading card inside the app, so one run
+    # F3 (Home) comes back to the Start grading card inside the app, so one run
     # covers any number of folders.
     return TuiApp(qa_file_path=qa_file, submissions_path=submissions).run()
 

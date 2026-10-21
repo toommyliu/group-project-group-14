@@ -263,3 +263,28 @@ def test_a_class_folder_graders_cannot_reach_is_named_with_the_fix(tmp_path):
         root.chmod(0o755)
 
     assert len(problems) == 1 and "cannot reach" in problems[0]
+
+
+def test_only_the_owner_merges_an_ai_assistants_copy_or_replaces_the_key(shared):
+    _share(shared)
+    bob = _as(shared, "bob")
+    body = {"actor": "agent:ai-assistant-x", "grades": [
+        {"submission_id": 1, "question_id": "q1", "rubric_labels": ["Correct"], "analysis": ""}
+    ]}
+    url = _api(shared, f"/assignments/{shared['aid']}/agent-grades")
+
+    refused = shared["client"].post(url, json=body, headers=bob)
+    assert refused.status_code == 403  # graders only grade; the route checks for the owner too
+    key = shared["workspace"].assignment_source(shared["aid"])
+    replaced = shared["client"].put(
+        _api(shared, f"/assignments/{shared['aid']}/answer-key"),
+        json={"qa_markdown": key, "expected_qa_markdown": key}, headers=bob,
+    )
+    assert replaced.status_code == 403
+
+    # The owner's merge: an open answer is graded, one the owner graded is a request.
+    assert _save(shared, "q2", "Correct").status_code == 200
+    body["grades"].append({"submission_id": 1, "question_id": "q2", "rubric_labels": ["Incorrect"], "analysis": ""})
+    merged = shared["client"].post(url, json=body)
+    assert merged.status_code == 200, merged.text
+    assert [o["outcome"] for o in merged.json()["outcomes"]] == ["saved", "requested"]

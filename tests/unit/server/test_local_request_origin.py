@@ -191,7 +191,9 @@ def test_service_launcher_installs_origin_protection(tmp_path, monkeypatch):
                 "Sec-Fetch-Site": "cross-site",
             })
             assert response.status_code == 403
-            assert client.post("/api/jobs/assignment/1/retry").status_code == 204
+            # Past the origin check; the empty workspace then has no such
+            # submission, so the route itself answers 404.
+            assert client.post("/api/jobs/assignment/1/retry").status_code != 403
     finally:
         WorkspaceClient(connection).request("POST", "/api/shutdown")
 

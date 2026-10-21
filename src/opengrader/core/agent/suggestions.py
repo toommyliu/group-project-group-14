@@ -24,7 +24,6 @@ it, so the assistant grades the rest with the corrected key.
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -37,10 +36,9 @@ from opengrader.core.qa_file.markdown import (
     QARubricFlatOption,
     find_qa_question,
     flatten_rubric_options,
-    load_qa_markdown,
     parse_qa_markdown,
+    render_qa_markdown,
     replace_qa_rubric_options,
-    save_qa_markdown,
 )
 from opengrader.core.submissions.student_file import load_student_submission_markdown
 
@@ -50,9 +48,13 @@ __all__ = [
     "SUGGESTION_KINDS",
     "Suggestion",
     "accept_suggestion",
+    "describe_accepted",
     "dismiss_suggestion",
+    "fixed_key",
     "list_suggestions",
     "parse_partial",
+    "pending_fix",
+    "record_accepted",
     "suggest",
 ]
 
@@ -296,40 +298,63 @@ def _labels_in_use(submissions: Path, question: str) -> set[str]:
     return used
 
 
-def accept_suggestion(
-    packet: str | Path, suggestion_id: str, *, qa_file: str | Path, submissions: str | Path
-) -> str:
-    """Apply a suggestion's fix to the class's answer key (teacher only)."""
-    root = Path(packet)
-    suggestion = _find(root, suggestion_id)
+def pending_fix(packet: str | Path, suggestion_id: str) -> Suggestion:
+    """The suggestion, if it is still open and carries a fix to accept."""
+    suggestion = _find(Path(packet), suggestion_id)
     if suggestion.decision:
         raise AgentError(f"{suggestion.id} was already {suggestion.decision}")
     if not suggestion.fixable:
         raise AgentError(f"{suggestion.id} has no fix to apply; read it and change the key yourself")
-    key_path = Path(qa_file)
-    markdown = key_path.read_text(encoding="utf-8")
+    return suggestion
+
+
+def fixed_key(markdown: str, suggestion: Suggestion, *, labels_in_use: set[str]) -> str:
+    """The answer key `markdown` with the suggestion's fix in it.
+
+    Only that question changes. A rubric that would drop an option a saved
+    grade uses (`labels_in_use`) is refused, as editing it by hand would be.
+    """
     if suggestion.correct:
-        key_path.write_text(
-            _with_answers(markdown, suggestion.question, suggestion.version, suggestion.correct),
-            encoding="utf-8",
+        return _with_answers(markdown, suggestion.question, suggestion.version, suggestion.correct)
+    document = parse_qa_markdown(markdown)
+    options = _with_partial(document, suggestion.question, suggestion.version, suggestion.partial)
+    lost = sorted(labels_in_use - {o.label for o in options})
+    if lost:
+        raise AgentError(
+            f"not applied: grades already saved for {suggestion.question} use "
+            + ", ".join(repr(label) for label in lost)
+            + ", which this rubric drops"
         )
-        done = f"{suggestion.question} now accepts {'; '.join(suggestion.correct)}"
-    else:
-        document = load_qa_markdown(key_path)
-        options = _with_partial(document, suggestion.question, suggestion.version, suggestion.partial)
-        lost = sorted(_labels_in_use(Path(submissions), suggestion.question) - {o.label for o in options})
-        if lost:
-            raise AgentError(
-                f"not applied: grades already saved for {suggestion.question} use "
-                + ", ".join(repr(label) for label in lost)
-                + ", which this rubric drops"
-            )
-        save_qa_markdown(document, key_path)
-        done = f"{suggestion.question} has a new partial-credit rubric"
+    return render_qa_markdown(document)
+
+
+def describe_accepted(suggestion: Suggestion) -> str:
+    if suggestion.correct:
+        return f"{suggestion.question} now accepts {'; '.join(suggestion.correct)}"
+    return f"{suggestion.question} has a new partial-credit rubric"
+
+
+def record_accepted(packet: str | Path, suggestion: Suggestion, key_markdown: str) -> None:
+    """Mark it accepted and give the copy the corrected key.
+
+    The assistant grades the rest with the key as it now is.
+    """
+    root = Path(packet)
     _decide(root, suggestion.id, "accepted")
-    # The assistant grades the rest with the key as it now is.
-    shutil.copyfile(key_path, packet_qa_path(root))
-    return done
+    packet_qa_path(root).write_text(key_markdown, encoding="utf-8")
+
+
+def accept_suggestion(
+    packet: str | Path, suggestion_id: str, *, qa_file: str | Path, submissions: str | Path
+) -> str:
+    """Apply a suggestion's fix to the class's answer key (teacher only)."""
+    suggestion = pending_fix(packet, suggestion_id)
+    key_path = Path(qa_file)
+    used = set() if suggestion.correct else _labels_in_use(Path(submissions), suggestion.question)
+    markdown = fixed_key(key_path.read_text(encoding="utf-8"), suggestion, labels_in_use=used)
+    key_path.write_text(markdown, encoding="utf-8")
+    record_accepted(packet, suggestion, markdown)
+    return describe_accepted(suggestion)
 
 
 def dismiss_suggestion(packet: str | Path, suggestion_id: str) -> None:

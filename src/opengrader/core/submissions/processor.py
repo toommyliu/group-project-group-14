@@ -1289,7 +1289,7 @@ def _question_with_mapped_crop(
     )
 
 
-def _source_pdf_relpath(pdf_path: Path, submission_dir: Path) -> str:
+def source_pdf_relpath(pdf_path: Path, submission_dir: Path) -> str:
     try:
         return os.path.relpath(pdf_path, submission_dir)
     except ValueError:
@@ -1564,7 +1564,7 @@ def _build_document_from_assignment_template(
         course_code=title_metadata.course_code,
         assignment_title=title_metadata.assignment_title,
         assignment_version=title_metadata.assignment_version,
-        source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
+        source_pdf=source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
         name_image_path=name_image,
         id_image_path=id_image,
@@ -1637,7 +1637,7 @@ def _build_document_from_page_catalog(
         course_code=title.course_code,
         assignment_title=title.assignment_title,
         assignment_version=title.assignment_version,
-        source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
+        source_pdf=source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
         name_image_path=crops.name_image,
         id_image_path=crops.id_image,
@@ -1729,7 +1729,7 @@ def _build_document_from_text_layer_only(
         course_code=None,
         assignment_title=_assignment_title_from_lines(lines),
         assignment_version=None,
-        source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
+        source_pdf=source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
         name_confidence=100.0 if raw_name else None,
         id_confidence=100.0 if raw_id else None,
@@ -1866,7 +1866,7 @@ def _build_document_from_ocr_result(
         course_code=None,
         assignment_title="",
         assignment_version=submission_result.version_id,
-        source_pdf=_source_pdf_relpath(pdf_path, submission_dir),
+        source_pdf=source_pdf_relpath(pdf_path, submission_dir),
         student_score="",
         name_image_path=name_image_path,
         id_image_path=id_image_path,
@@ -1898,7 +1898,6 @@ def build_student_submission_document_unified(
     blank_assignment_template: AssignmentTemplate | None,
     progress_callback: Callable[[str], None],
     roster: list[_RosterEntry] | None = None,
-    update: bool = False,
     refresh_layout: bool = False,
     resolve_ambiguous: "AmbiguityResolver | None" = None,
     llm_responses: bool = False,

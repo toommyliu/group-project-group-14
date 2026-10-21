@@ -510,6 +510,338 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Me
+         * @description Who this caller is here: the owner, or an account that joined.
+         */
+        get: operations["me_api_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sharing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sharing */
+        get: operations["get_sharing_api_sharing_get"];
+        /**
+         * Put Sharing
+         * @description Share with a group of accounts on this computer, or stop; set who
+         *     is an instructor. Only the owner: it decides who may write here.
+         */
+        put: operations["put_sharing_api_sharing_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Change Requests */
+        get: operations["list_change_requests_api_assignments__assignment_id__change_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/change-requests/{request_id}/{decision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Change Request */
+        post: operations["decide_change_request_api_assignments__assignment_id__change_requests__request_id___decision__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/agent-grades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Agent Grades
+         * @description An AI assistant's copy merged back (`core/agent/workspace.py`).
+         *
+         *     The assistant is a grader account of its own here (`merge.actor`),
+         *     under the same rule a grader who joined from another account has:
+         *     it may grade an answer nobody has graded, or one it graded last; a
+         *     grade anyone else gave becomes a change request the owner approves
+         *     or dismisses (`Q`). Each grade goes through `save_grade`, so it is
+         *     checked against the current rubric, scored and recorded like any
+         *     other. Only the owner sends a copy home: it made the copy.
+         */
+        post: operations["save_agent_grades_api_assignments__assignment_id__agent_grades_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/answer-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace Assignment Key
+         * @description Store a whole answer key while grading is under way (owner only).
+         *
+         *     Before any submission this is the Answer key page's own save. After,
+         *     it is `answer_key.replace_answer_key(strict=True)`: the questions must
+         *     stay the same, a renamed or re-pointed rubric is carried into the
+         *     grades and re-scored, and a key that would drop a rubric option a
+         *     saved grade uses is refused whole (422). Used for fixes an AI
+         *     assistant suggested and the teacher accepted; whether the
+         *     assignment's qa.md file follows is the caller's business, because
+         *     write-back never carries the key to files.
+         */
+        put: operations["replace_assignment_key_api_assignments__assignment_id__answer_key_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Assistant Overview
+         * @description What the assignment is ready for, and the copies and key folders made so far.
+         */
+        get: operations["assistant_overview_api_assignments__assignment_id__assistant_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/copies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Copy
+         * @description A redacted copy for the assistant (every answer image is read for
+         *     the student's name first, so this takes a moment).
+         */
+        post: operations["make_copy_api_assignments__assignment_id__assistant_copies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/copies/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Copy */
+        delete: operations["delete_copy_api_assignments__assignment_id__assistant_copies__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/copies/{name}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Merge
+         * @description What merging the copy back would do; nothing is written.
+         */
+        get: operations["preview_merge_api_assignments__assignment_id__assistant_copies__name__merge_get"];
+        put?: never;
+        /**
+         * Merge Copy
+         * @description Merge it back: AI grades where nobody graded, change requests elsewhere.
+         */
+        post: operations["merge_copy_api_assignments__assignment_id__assistant_copies__name__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/copies/{name}/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Copy Suggestions */
+        get: operations["copy_suggestions_api_assignments__assignment_id__assistant_copies__name__suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/copies/{name}/suggestions/{suggestion_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Fix
+         * @description Store the fix in the workspace's key, and in qa.md when `key_file` says so.
+         */
+        post: operations["accept_fix_api_assignments__assignment_id__assistant_copies__name__suggestions__suggestion_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/copies/{name}/suggestions/{suggestion_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss Fix */
+        post: operations["dismiss_fix_api_assignments__assignment_id__assistant_copies__name__suggestions__suggestion_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/key-folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make Key Folder
+         * @description A folder beside the workspace with the assignment's key and no student work.
+         */
+        post: operations["make_key_folder_api_assignments__assignment_id__assistant_key_folders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/assistant/key-folders/use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Use Key Folder
+         * @description Store the key the assistant wrote, checked first.
+         */
+        post: operations["use_key_folder_api_assignments__assignment_id__assistant_key_folders_use_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/submissions/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace Submissions
+         * @description After two pieces of one paper were joined and read again in the
+         *     class folder: drop both and publish the joined file afresh. Their
+         *     grades go with them — the client carries the ones still valid over
+         *     to the new submission, through the ordinary save.
+         */
+        post: operations["replace_submissions_api_assignments__assignment_id__submissions_replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assets/{name}": {
         parameters: {
             query?: never;
@@ -1115,6 +1447,93 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcceptFix */
+        AcceptFix: {
+            /** Key File */
+            key_file?: ("update" | "leave") | null;
+        };
+        /**
+         * AccountRole
+         * @description An account on this computer that can open the workspace, and its role.
+         *
+         *     The account that runs the service owns the workspace and is always an
+         *     instructor. Others join through it as graders unless made instructors.
+         */
+        AccountRole: {
+            /** Login */
+            login: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "instructor" | "grader";
+            /**
+             * May Change Others
+             * @default false
+             */
+            may_change_others: boolean;
+        };
+        /**
+         * AgentGrade
+         * @description One answer an AI assistant graded in its copy, coming home.
+         */
+        AgentGrade: {
+            /** Submission Id */
+            submission_id: number;
+            /** Question Id */
+            question_id: string;
+            /** Rubric Labels */
+            rubric_labels: string[];
+            /**
+             * Score Mode
+             * @default rubric
+             * @enum {string}
+             */
+            score_mode: "rubric" | "manual";
+            /** Points Awarded */
+            points_awarded?: number | null;
+            /**
+             * Analysis
+             * @default
+             */
+            analysis: string;
+        };
+        /** AgentGradeOutcome */
+        AgentGradeOutcome: {
+            /** Submission Id */
+            submission_id: number;
+            /** Question Id */
+            question_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "saved" | "requested" | "changed" | "refused" | "missing";
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+        };
+        /**
+         * AgentGrades
+         * @description An assistant's copy merged back (`core/agent/workspace.py`).
+         *
+         *     `actor` names the copy (`agent:<copy>`), which the service treats as a
+         *     grader account of its own: it fills what nobody graded, and anything
+         *     else becomes a change request for the teacher.
+         */
+        AgentGrades: {
+            /** Actor */
+            actor: string;
+            /** Grades */
+            grades: components["schemas"]["AgentGrade"][];
+        };
+        /** AgentGradesResult */
+        AgentGradesResult: {
+            /** Outcomes */
+            outcomes: components["schemas"]["AgentGradeOutcome"][];
+        };
         /** AnalyzeScan */
         AnalyzeScan: {
             /** Expected Revision */
@@ -1187,6 +1606,29 @@ export interface components {
             choices: components["schemas"]["AnswerChoice"][];
             /** Answers */
             answers: string[];
+        };
+        /**
+         * AnswerKeyReplace
+         * @description A whole answer key, stored over the one the editor started from.
+         */
+        AnswerKeyReplace: {
+            /** Qa Markdown */
+            qa_markdown: string;
+            /** Expected Qa Markdown */
+            expected_qa_markdown: string;
+        };
+        /** AnswerKeyReplaced */
+        AnswerKeyReplaced: {
+            /**
+             * Refreshed
+             * @default 0
+             */
+            refreshed: number;
+            /**
+             * Regraded
+             * @default 0
+             */
+            regraded: number;
         };
         /**
          * AnswersEdit
@@ -1288,6 +1730,104 @@ export interface components {
             /** Questions */
             questions: components["schemas"]["AssignmentQuestionStatistics"][];
         };
+        /** AssistantCopy */
+        AssistantCopy: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "grading" | "rubrics";
+            /** Students */
+            students: number;
+            /** Ungraded */
+            ungraded: number;
+            /** Graded By Agent */
+            graded_by_agent: number;
+            /** Open Suggestions */
+            open_suggestions: number;
+            /** Mcp Setup */
+            mcp_setup: string;
+        };
+        /** AssistantKeyFolder */
+        AssistantKeyFolder: {
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Has Key */
+            has_key: boolean;
+        };
+        /** AssistantLines */
+        AssistantLines: {
+            /** Lines */
+            lines: string[];
+            /**
+             * Grades
+             * @default 0
+             */
+            grades: number;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+        };
+        /** AssistantOverview */
+        AssistantOverview: {
+            /** Title */
+            title: string;
+            /** Submission Count */
+            submission_count: number;
+            /** Unanswered */
+            unanswered: number;
+            /** Rubric Gaps */
+            rubric_gaps: number;
+            /** Can Grade */
+            can_grade: boolean;
+            /** Can Draft Rubrics */
+            can_draft_rubrics: boolean;
+            /** Key File */
+            key_file: string | null;
+            /** Output Dir */
+            output_dir: string;
+            /** Copies */
+            copies: components["schemas"]["AssistantCopy"][];
+            /** Key Folders */
+            key_folders: components["schemas"]["AssistantKeyFolder"][];
+            prompts: components["schemas"]["AssistantPrompts"];
+        };
+        /** AssistantPrompts */
+        AssistantPrompts: {
+            /** Grading */
+            grading: string;
+            /** Rubrics */
+            rubrics: string;
+            /** Key */
+            key: string;
+        };
+        /** AssistantSuggestion */
+        AssistantSuggestion: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Question */
+            question: string;
+            /** Version */
+            version: string;
+            /** Message */
+            message: string;
+            /** Fix */
+            fix: string;
+            /** Fixable */
+            fixable: boolean;
+            /** Decision */
+            decision: string;
+        };
         /** AuthStatus */
         AuthStatus: {
             /** Enabled */
@@ -1309,6 +1849,51 @@ export interface components {
             email: string;
             /** Name */
             name: string;
+        };
+        /**
+         * ChangeRequest
+         * @description A grader's change to a grade someone else gave, waiting for an instructor.
+         */
+        ChangeRequest: {
+            /** Id */
+            id: number;
+            /** Assignment Id */
+            assignment_id: string;
+            /** Submission Id */
+            submission_id: number;
+            /** Question Id */
+            question_id: string;
+            /** Requested By */
+            requested_by: string;
+            /** Graded By */
+            graded_by: string;
+            /** Created */
+            created: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "dismissed";
+            /** Rubric Labels */
+            rubric_labels: string[];
+            /** Points Awarded */
+            points_awarded: number | null;
+            /**
+             * Score Mode
+             * @enum {string}
+             */
+            score_mode: "rubric" | "manual";
+            /** Analysis */
+            analysis: string;
+            /**
+             * Current Rubric Labels
+             * @default []
+             */
+            current_rubric_labels: string[];
+            /** Current Points */
+            current_points?: number | null;
+            /** Decided By */
+            decided_by?: string | null;
         };
         /** CourseDetails */
         CourseDetails: {
@@ -1478,6 +2063,22 @@ export interface components {
             student_id: string;
             /** Name */
             name: string;
+        };
+        /** MakeCopy */
+        MakeCopy: {
+            /**
+             * Purpose
+             * @default grading
+             * @enum {string}
+             */
+            purpose: "grading" | "rubrics";
+            /** Questions */
+            questions?: string[];
+            /**
+             * With Graded
+             * @default false
+             */
+            with_graded: boolean;
         };
         /** NewVersion */
         NewVersion: {
@@ -1879,8 +2480,10 @@ export interface components {
          * RegradeResult
          * @description What grading a class folder again with its answer key did.
          *
-         *     `updated` counts the grades that changed; `problems` names anything that
-         *     could not be read, graded or brought back into the browser.
+         *     `updated` counts the grades that changed; `kept` the grades a person
+         *     gave that grading would have scored otherwise and left alone; `problems`
+         *     names anything that could not be read, graded or brought back into the
+         *     browser.
          */
         RegradeResult: {
             /**
@@ -1893,6 +2496,33 @@ export interface components {
              * @default 0
              */
             updated: number;
+            /**
+             * Kept
+             * @default 0
+             */
+            kept: number;
+            /**
+             * Problems
+             * @default []
+             */
+            problems: string[];
+        };
+        /**
+         * ReplaceSubmissions
+         * @description Submissions whose files were read again (two pieces of one paper the
+         *     splitter cut apart, now joined): drop them and publish what the folder
+         *     holds now. Keys are `pipeline:<path in the submissions folder>`.
+         */
+        ReplaceSubmissions: {
+            /** Source Keys */
+            source_keys: string[];
+        };
+        /** ReplacedSubmissions */
+        ReplacedSubmissions: {
+            /** Submission Ids */
+            submission_ids: {
+                [key: string]: number | null;
+            };
             /**
              * Problems
              * @default []
@@ -2124,6 +2754,30 @@ export interface components {
             /** Count */
             count: number;
         };
+        /** SharingInfo */
+        SharingInfo: {
+            /** Owner */
+            owner: string;
+            /** Group */
+            group: string | null;
+            /** Accounts */
+            accounts: components["schemas"]["AccountRole"][];
+        };
+        /** SharingUpdate */
+        SharingUpdate: {
+            /** Group */
+            group?: string | null;
+            /**
+             * Off
+             * @default false
+             */
+            off: boolean;
+            /**
+             * Accounts
+             * @default []
+             */
+            accounts: components["schemas"]["AccountRole"][];
+        };
         /** Staff */
         Staff: {
             /** Domain */
@@ -2289,6 +2943,18 @@ export interface components {
             /** Page Count */
             page_count: number;
         };
+        /** UseKey */
+        UseKey: {
+            /** Name */
+            name: string;
+            /** Key File */
+            key_file?: ("update" | "leave") | null;
+            /**
+             * Replace
+             * @default false
+             */
+            replace: boolean;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2321,6 +2987,23 @@ export interface components {
             graded: {
                 [key: string]: number;
             };
+        };
+        /**
+         * Viewer
+         * @description Who this request comes from, as the service sees it.
+         */
+        Viewer: {
+            /** Login */
+            login: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "instructor" | "grader";
+            /** Owner */
+            owner: string;
+            /** May Change Others */
+            may_change_others: boolean;
         };
         /** VisualEditInput */
         VisualEditInput: {
@@ -3337,6 +4020,576 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GradeSaveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    me_api_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Viewer"];
+                };
+            };
+        };
+    };
+    get_sharing_api_sharing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharingInfo"];
+                };
+            };
+        };
+    };
+    put_sharing_api_sharing_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharingUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharingInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_change_requests_api_assignments__assignment_id__change_requests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequest"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_change_request_api_assignments__assignment_id__change_requests__request_id___decision__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                request_id: number;
+                decision: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequest"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_agent_grades_api_assignments__assignment_id__agent_grades_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentGrades"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentGradesResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_assignment_key_api_assignments__assignment_id__answer_key_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerKeyReplace"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnswerKeyReplaced"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_overview_api_assignments__assignment_id__assistant_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantOverview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    make_copy_api_assignments__assignment_id__assistant_copies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MakeCopy"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantCopy"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_copy_api_assignments__assignment_id__assistant_copies__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_merge_api_assignments__assignment_id__assistant_copies__name__merge_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_copy_api_assignments__assignment_id__assistant_copies__name__merge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    copy_suggestions_api_assignments__assignment_id__assistant_copies__name__suggestions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSuggestion"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_fix_api_assignments__assignment_id__assistant_copies__name__suggestions__suggestion_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                name: string;
+                suggestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptFix"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_fix_api_assignments__assignment_id__assistant_copies__name__suggestions__suggestion_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                name: string;
+                suggestion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    make_key_folder_api_assignments__assignment_id__assistant_key_folders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyFolder"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    use_key_folder_api_assignments__assignment_id__assistant_key_folders_use_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UseKey"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantLines"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_submissions_api_assignments__assignment_id__submissions_replace_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceSubmissions"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplacedSubmissions"];
                 };
             };
             /** @description Validation Error */

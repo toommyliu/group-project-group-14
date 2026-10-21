@@ -128,8 +128,9 @@ class TuiApp(App[Literal["switch_assignment"]]):
         **Folder mode** (`opengrader classic`, and anything that is not a
         workspace): no arguments opens Tools — the Start grading card, every
         pipeline step and helper tool — and `qa_file_path` + `submissions_path`
-        grade a folder in place. F2 comes back to the Start grading card and
-        F3 moves between Tools and grading. Never touches the workspace service.
+        grade a folder in place. F3 (Home) moves between grading and Tools,
+        landing on the Start grading card; F2 does the same, unlisted. Never
+        touches the workspace service.
 
         **Workspace mode** (`opengrader tui`): `data_provider` is a
         `WorkspaceProvider` handed in by the launcher. Grading only — there is
@@ -470,16 +471,21 @@ class TuiApp(App[Literal["switch_assignment"]]):
         record_class_folder(qa, submissions)
 
     def _toggle_start_page(self) -> None:
-        """F3 (folder mode only): Tools and its helper tools, and back again."""
+        """F3 (folder mode only): Home — Tools on its Start grading card — and back again."""
         if not self.has_tools_page:
             return
         if self.workflow_state.current_page != PAGE_SETUP:
-            if self.grade_controller.commit_pending_comment():
-                return
-            self.switch_to(PAGE_SETUP)
+            self._go_home()
             return
         if self.workflow_state.session_open:
             self.switch_to(PAGE_QA_PICKER)
+
+    def _go_home(self) -> None:
+        # Save a half-typed comment first; if that fails, stay put.
+        if self.grade_controller.commit_pending_comment():
+            return
+        self.switch_to(PAGE_SETUP)
+        self.get_setup_screen().focus_launch_card()
 
     def _setup_screen_extraction_active(self) -> bool:
         try:
@@ -1418,14 +1424,13 @@ class TuiApp(App[Literal["switch_assignment"]]):
             grade_screen.adjust_sidebar_width(grade_screen.SIDEBAR_RESIZE_STEP)
 
     def _switch_assignment(self) -> None:
-        # Save a half-typed comment first; if that fails, stay put.
-        if self.grade_controller.commit_pending_comment():
-            return
         if self.has_tools_page:
             # Folder mode: choosing another folder is the Start grading card's
-            # job, and it lives in this app — no need to exit and relaunch.
-            self.switch_to(PAGE_SETUP)
-            self.get_setup_screen().focus_launch_card()
+            # job, and it lives in this app — F2 is F3's Home, unlisted.
+            self._go_home()
+            return
+        # Save a half-typed comment first; if that fails, stay put.
+        if self.grade_controller.commit_pending_comment():
             return
         # Workspace mode: the launcher shows the assignment list again.
         self.exit("switch_assignment")
@@ -1445,6 +1450,12 @@ class TuiApp(App[Literal["switch_assignment"]]):
         if (
             normalized_command is InputCommand.OPEN_START_PAGE
             and not self.has_tools_page
+        ):
+            return False
+
+        # Change requests exist only in a workspace shared with other accounts.
+        if normalized_command is InputCommand.OPEN_CHANGE_REQUESTS and not callable(
+            getattr(self.data_provider, "change_requests", None)
         ):
             return False
 
@@ -1480,6 +1491,10 @@ class TuiApp(App[Literal["switch_assignment"]]):
             self._status_bar_binding(binding)
             for binding in self.input_controller.visible_bindings()
             if self._input_command_available(binding.command)
+            # Folder mode: F2 does what F3 (Home) does; list it once.
+            and not (
+                binding.command is InputCommand.SWITCH_ASSIGNMENT and self.has_tools_page
+            )
         ]
         status_bar.show_bindings(visible_bindings)
 

@@ -87,6 +87,7 @@ from opengrader.tui.ui.screens.answer_fill_screen import AnswerFillScreen
 from opengrader.tui.ui.screens.backup_screen import BackupScreen
 from opengrader.tui.ui.screens.cloud_consent_screen import CloudPreflightConfirmScreen
 from opengrader.tui.ui.screens.doctor_screen import DoctorScreen
+from opengrader.tui.ui.screens.grade_without_ai_screen import GradeWithoutAIScreen
 from opengrader.tui.ui.screens.course_grades_screen import CourseGradesScreen
 from opengrader.tui.ui.screens.assistant_screen import AnswerKeyAssistantScreen, AssistantScreen
 from opengrader.tui.ui.screens.handoff_screen import GraderPacketScreen, MergeScreen
@@ -453,7 +454,7 @@ class SetupScreen(OutlineButtons, Vertical):
 
                 with Vertical(id="launch-section") as launch_card:
                     # Choosing what to grade: `opengrader classic` (and the
-                    # desktop icon) start here. F2 while grading comes back.
+                    # desktop icon) start here. F3 (Home) while grading comes back.
                     launch_card.border_title = "▸ Start grading"
                     yield Static(
                         "Choose a class folder (or a grader packet) — its answer "
@@ -569,7 +570,7 @@ class SetupScreen(OutlineButtons, Vertical):
                     yield Static(
                         "Choose the class folder and press Run Pipeline: the "
                         "scanned bundle, answer key, roster and blank template "
-                        "inside it are found for you, and split/, submissions/ "
+                        "inside it are found for you, and student-pdfs/, submissions/ "
                         "and the run record are built there too. Preview shows "
                         "the plan without writing anything. What you set here is "
                         "remembered for this folder.",
@@ -3015,7 +3016,7 @@ class SetupScreen(OutlineButtons, Vertical):
 
         work = (
             "the scan is checked, split into one PDF per student, and every "
-            "answer is read. That builds split/ and submissions/ inside the "
+            "answer is read. That builds student-pdfs/ and submissions/ inside the "
             "folder and can take a few minutes."
         )
         if has_key:
@@ -3956,6 +3957,9 @@ class SetupScreen(OutlineButtons, Vertical):
         asap: bool,
     ) -> None:
         self._pipe_reset_buttons()
+        # A run re-started after a question, while grading was already open.
+        launched_early = launched_early or getattr(self, "_pipe_opened_before_rerun", False)
+        self._pipe_opened_before_rerun = False
 
         if report.cloud_confirmation_needed:
             self._confirm_cloud_and_rerun(report, request, asap, qa_path)
@@ -3996,6 +4000,19 @@ class SetupScreen(OutlineButtons, Vertical):
 
         if report.answer_key_needed:
             self._wait_for_answer_key(request)
+            return
+
+        if report.ai_unavailable:
+            paused = next(
+                o for o in report.stages if o.status is StageStatus.PAUSED
+            )
+            problem = " ".join(paused.detail.splitlines()[1:])
+            self._pipe_status("Waiting for you to choose whether to auto-grade without AI…")
+            self.run_worker(
+                self._ask_grade_without_ai(problem, request, asap, launched_early, qa_path),
+                exclusive=True,
+                group="pipeline-grade-without-ai",
+            )
             return
 
         if report.paused_for_review:
@@ -4129,6 +4146,27 @@ class SetupScreen(OutlineButtons, Vertical):
             )
             return
         self._pipe_start(replace(request, send_to_cloud_confirmed=True), asap, qa_path)
+
+    async def _ask_grade_without_ai(
+        self,
+        problem: str,
+        request: PipelineRequest,
+        asap: bool,
+        launched_early: bool,
+        qa_path: str,
+    ) -> None:
+        """The pipeline paused before auto-grading: the AI can't be reached.
+        Run again either way: graded without AI, or with auto-grading off, so
+        the submissions are published and ready to grade by hand."""
+        without_ai = await self.app.push_screen_wait(GradeWithoutAIScreen(problem))
+        rerun = (
+            replace(request, grade_without_ai=True)
+            if without_ai
+            else replace(request, auto_grade=False)
+        )
+        # Grading already open stays the one window; the re-run opens nothing.
+        self._pipe_opened_before_rerun = launched_early
+        self._pipe_start(rerun, asap and not launched_early, qa_path)
 
     def _confirm_split_and_rerun(
         self, request: PipelineRequest, asap: bool, qa_path: str

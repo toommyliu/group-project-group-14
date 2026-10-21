@@ -76,6 +76,10 @@ def default_agent_output_dir(submissions_path: str | Path) -> Path:
     return class_folder.parent / f"{class_folder.name}-ai-assistant"
 
 
+def default_agent_packet_id(purpose: str, stamp: datetime) -> str:
+    return f"ai-{'rubrics' if purpose == PURPOSE_RUBRICS else 'assistant'}-{stamp:%Y-%m-%d-%H%M}"
+
+
 def prepare_agent_packet(
     submissions_path: str | Path,
     qa_file_path: str | Path,
@@ -102,11 +106,47 @@ def prepare_agent_packet(
     (`rubric_gaps`), with every answer to them, graded or not — what students
     actually wrote is what a rubric is drafted from — and no grading.
     """
+    submissions = Path(submissions_path)
+    refuse_workspace(submissions)
+    return build_agent_packet(
+        submissions,
+        qa_file_path,
+        Path(output_path) if output_path else default_agent_output_dir(submissions),
+        fence=submissions.resolve().parent,
+        packet_id=packet_id,
+        run_as=run_as,
+        questions=questions,
+        include_graded=include_graded,
+        check_crops=check_crops,
+        purpose=purpose,
+        now=now,
+    )
+
+
+def build_agent_packet(
+    submissions: Path,
+    qa_file_path: str | Path,
+    output_path: Path,
+    *,
+    fence: Path,
+    packet_id: str = "",
+    run_as: str = "",
+    questions: Sequence[str] = (),
+    include_graded: bool = False,
+    check_crops: bool = True,
+    purpose: str = PURPOSE_GRADING,
+    now: datetime | None = None,
+) -> AgentPacket:
+    """`prepare_agent_packet` without the class-folder checks.
+
+    `submissions` is whatever folder of `.submission.md` files the packet is
+    made from: a class's own, or a workspace's grades written out for the
+    occasion (`core/agent/workspace.py`). `fence` is the folder the
+    assistant is kept out of — the class folder, or the whole workspace.
+    """
     if purpose not in (PURPOSE_GRADING, PURPOSE_RUBRICS):
         raise AgentError(f"purpose is {PURPOSE_GRADING!r} or {PURPOSE_RUBRICS!r}")
-    submissions = Path(submissions_path)
     qa_path = Path(qa_file_path)
-    refuse_workspace(submissions)
     qa_document = load_qa_markdown(qa_path)  # an answer key that does not parse is refused here
     if purpose == PURPOSE_RUBRICS:
         gaps = rubric_gaps(qa_document)
@@ -119,9 +159,8 @@ def prepare_agent_packet(
     stamp = now or datetime.now().astimezone()
     result = build_packet(
         submissions,
-        Path(output_path) if output_path else default_agent_output_dir(submissions),
-        packet_id=packet_id
-        or f"ai-{'rubrics' if purpose == PURPOSE_RUBRICS else 'assistant'}-{stamp:%Y-%m-%d-%H%M}",
+        output_path,
+        packet_id=packet_id or default_agent_packet_id(purpose, stamp),
         qa_file_path=qa_path,
         redact=True,
         include_pdfs=False,
@@ -138,9 +177,7 @@ def prepare_agent_packet(
         _write_instructions(
             result.packet_path, qa_path.name, manifest, run_as or self_command(), purpose
         )
-        write_assistant_settings(
-            result.packet_path, class_folder=submissions.resolve().parent, run_as=run_as or self_command()
-        )
+        write_assistant_settings(result.packet_path, class_folder=fence, run_as=run_as or self_command())
         _assert_no_identity(result.packet_path, result.key)
         status = packet_status(result.packet_path)
         if purpose == PURPOSE_GRADING and not status.ungraded and not include_graded:

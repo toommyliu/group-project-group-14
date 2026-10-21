@@ -13,8 +13,8 @@ from opengrader.core.app_config import DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL
 
 _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("q", "Quit Opengrader."),
-    ("F2", "Save pending feedback and choose something else to grade: the workspace's assignment list (opengrader tui), or the Start grading card (opengrader classic)."),
-    ("F3", "Tools, in opengrader classic only: every pipeline step and helper tool (doctor, AI setup and providers, sharing, backup). F3 again goes back to grading. A workspace (opengrader tui) is grading only."),
+    ("F3", "Home, in opengrader classic only: save pending feedback and go to Tools, on the Start grading card to choose something else to grade, with every pipeline step and helper tool below it (doctor, AI setup and providers, sharing, backup). F3 again goes back to grading. F2 does the same. A workspace (opengrader tui) has no Tools page."),
+    ("F2", "In a workspace (opengrader tui): save pending feedback and go back to the workspace's assignment list."),
     (
         "t",
         "Toggle teacher mode. Grading is anonymous by default — students "

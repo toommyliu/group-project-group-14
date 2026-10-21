@@ -6,7 +6,7 @@ read before there was an answer key to auto-grade them with. The card decides
 what to say and which choices to offer; this dialog only shows them and
 reports the one that was picked.
 
-Nothing is run from here. Preparing writes `split/` and `submissions/` into
+Nothing is run from here. Preparing writes `student-pdfs/` and `submissions/` into
 the folder and can take minutes, so it is always a choice — and a mistyped
 folder costs one Escape, not a run.
 """

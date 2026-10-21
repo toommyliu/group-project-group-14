@@ -87,7 +87,7 @@ class _StageRecorder:
 
 @pytest.fixture
 def stages(monkeypatch, tmp_path) -> _StageRecorder:
-    recorder = _StageRecorder(tmp_path / "cohort" / "split", tmp_path / "cohort" / "submissions")
+    recorder = _StageRecorder(tmp_path / "cohort" / "student-pdfs", tmp_path / "cohort" / "submissions")
     monkeypatch.setattr(submission_splitter, "run_cli", recorder.split)
     monkeypatch.setattr(submission_extractor, "run_cli", recorder.extract)
     monkeypatch.setattr(automated_grading, "run_cli", recorder.grade)
@@ -168,7 +168,7 @@ def test_split_argv_always_fixes_rotation_and_order(tmp_path) -> None:
         "--input",
         str(request.scan),
         "--output",
-        str(tmp_path / "cohort" / "split"),
+        str(tmp_path / "cohort" / "student-pdfs"),
         "--fix-rotation",
         "--fix-order",
         "--extra-work-pages",
@@ -177,6 +177,13 @@ def test_split_argv_always_fixes_rotation_and_order(tmp_path) -> None:
         "--blank-template",
         str(tmp_path / "blank.pdf"),
     )
+
+
+def test_a_folder_split_before_the_rename_keeps_its_split_folder(tmp_path) -> None:
+    (tmp_path / "cohort" / "split").mkdir(parents=True)
+    assert _request(tmp_path).split_dir == tmp_path / "cohort" / "split"
+    (tmp_path / "cohort" / "student-pdfs").mkdir()
+    assert _request(tmp_path).split_dir == tmp_path / "cohort" / "student-pdfs"
 
 
 def test_split_never_sorts_pages_unless_asked(tmp_path) -> None:
@@ -200,7 +207,7 @@ def test_extract_argv_reads_the_split_dir_and_always_resumes(tmp_path) -> None:
     assert plan.argv == (
         "submission-extractor",
         "--input",
-        str(tmp_path / "cohort" / "split"),
+        str(tmp_path / "cohort" / "student-pdfs"),
         "--output",
         str(tmp_path / "cohort" / "submissions"),
         "--resume",
@@ -371,6 +378,66 @@ def test_auto_grading_is_pending_only_after_a_run_that_read_scans_without_it(
     qa.write_text("# key\n", encoding="utf-8")
     run_pipeline(_request(tmp_path, qa_file=qa))
     assert auto_grade_pending(cohort) is False
+
+
+def _grading_ai_down(monkeypatch) -> None:
+    from opengrader.core import app_config
+
+    def refuse(*_args, **_kwargs) -> None:
+        raise app_config.AIUnavailableError("Ollama isn't running. Open the Ollama app, then try again.")
+
+    monkeypatch.setattr(app_config, "ensure_ready", refuse)
+
+
+def test_auto_grade_pauses_before_grading_when_its_ai_cannot_be_reached(
+    tmp_path, stages, clean_scan, monkeypatch
+) -> None:
+    _grading_ai_down(monkeypatch)
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    report = run_pipeline(_request(tmp_path, qa_file=qa, llm=LlmOptions(grade_written=True)))
+
+    assert STAGE_AUTO_GRADE not in stages.stages()
+    assert report.stage(STAGE_AUTO_GRADE).status is StageStatus.PAUSED
+    assert report.ai_unavailable and report.ok
+    assert "Ollama isn't running." in report.stage(STAGE_AUTO_GRADE).detail
+    # Not recorded, so the next run grades.
+    assert auto_grade_pending(tmp_path / "cohort") is True
+
+
+def test_grading_without_ai_is_recorded_as_such_so_a_later_run_with_it_grades_again(
+    tmp_path, stages, clean_scan, monkeypatch
+) -> None:
+    from opengrader.core import app_config
+    from opengrader.core.pipeline import _stage_ledger_key
+
+    _grading_ai_down(monkeypatch)
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    request = _request(tmp_path, qa_file=qa, llm=LlmOptions(grade_written=True))
+    report = run_pipeline(replace(request, grade_without_ai=True))
+
+    assert "--llm" not in stages.argv_for(STAGE_AUTO_GRADE)
+    assert report.stage(STAGE_AUTO_GRADE).status is StageStatus.RAN
+    assert report.stage(STAGE_AUTO_GRADE).message.endswith("without AI")
+    without = _stage_ledger_key(replace(request, llm=LlmOptions(grade_written=False)), STAGE_AUTO_GRADE)
+    with_ai = _stage_ledger_key(request, STAGE_AUTO_GRADE)
+    assert without != with_ai
+
+    monkeypatch.setattr(app_config, "ensure_ready", lambda *_args, **_kwargs: None)
+    again = run_pipeline(request)
+    assert again.stage(STAGE_AUTO_GRADE).status is StageStatus.RAN
+    assert "--llm" in stages.calls[-1][1]
+
+
+def test_auto_grade_without_its_ai_turned_on_never_checks_for_it(
+    tmp_path, stages, clean_scan, monkeypatch
+) -> None:
+    _grading_ai_down(monkeypatch)
+    qa = tmp_path / "qa.md"
+    qa.write_text("# key\n", encoding="utf-8")
+    report = run_pipeline(_request(tmp_path, qa_file=qa))
+    assert report.stage(STAGE_AUTO_GRADE).status is StageStatus.RAN
 
 
 def test_stages_run_in_order_and_report_what_they_did(tmp_path, stages, clean_scan) -> None:
@@ -1071,7 +1138,7 @@ def _split_catalog(tmp_path, lines) -> None:
                       layout=page_layout(printed, printed_only=True), page_number=1, copies_read=2)
     save_catalog(
         PageCatalog(groups={"g01": group}, matches=[PageMatch(page, "g01", np.eye(3), 100)]),
-        tmp_path / "cohort" / "split" / CATALOG_DIRNAME,
+        tmp_path / "cohort" / "student-pdfs" / CATALOG_DIRNAME,
     )
 
 

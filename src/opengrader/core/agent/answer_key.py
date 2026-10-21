@@ -49,6 +49,7 @@ __all__ = [
     "KeyWorkspace",
     "check_key_file",
     "default_key_folder",
+    "make_key_folder",
     "prepare_key_folder",
     "prepare_key_workspace",
     "use_key",
@@ -74,7 +75,11 @@ def _unique(parent: Path, name: str) -> Path:
 
 
 def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return text_digest(path.read_bytes())
+
+
+def text_digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def default_key_folder(class_folder: str | Path) -> Path:
@@ -138,21 +143,47 @@ def prepare_key_folder(
         workspace = _unique(anchor, f"{(document or key).stem}-ai-answer-key")  # type: ignore[union-attr]
 
     identities = _identities(Path(submissions).expanduser() if submissions else None)
+    marker: dict[str, object] = {}
     if key is not None:
-        _assert_no_student(key.read_text(encoding="utf-8"), identities, "the answer key")
+        marker = {"base_key": str(key), "base_hash": _digest(key)}
+    return make_key_folder(
+        workspace,
+        key=key.read_bytes() if key is not None else None,
+        document=document,
+        identities=identities,
+        marker=marker,
+        run_as=run_as,
+    )
 
-    (workspace / ".opengrader").mkdir(parents=True)
-    marker: dict[str, object] = {"agent_format": AGENT_FORMAT, "kind": KIND_ANSWER_KEY}
+
+def make_key_folder(
+    folder: Path,
+    *,
+    key: bytes | None,
+    document: Path | None,
+    identities: list[tuple[str, str]],
+    marker: dict[str, object],
+    run_as: str = "",
+) -> KeyWorkspace:
+    """Write the assistant's folder: the key (as it is now), the teacher's
+    document, the format guide and the instructions.
+
+    `marker` says where the key came from, so the finished one goes back
+    only over the key it started from.
+    """
     if key is not None:
-        shutil.copyfile(key, workspace / KEY_FILENAME)
-        marker["base_key"] = str(key)
-        marker["base_hash"] = _digest(key)
+        _assert_no_student(key.decode("utf-8"), identities, "the answer key")
+
+    (folder / ".opengrader").mkdir(parents=True)
+    marker = {"agent_format": AGENT_FORMAT, "kind": KIND_ANSWER_KEY, **marker}
+    if key is not None:
+        (folder / KEY_FILENAME).write_bytes(key)
     copied: Path | None = None
     if document is not None:
-        copied = workspace / document.name
+        copied = folder / document.name
         shutil.copy2(document, copied)
         marker["source"] = document.name
-    (workspace / FORMAT_FILENAME).write_text(guide_text("qa-format.md"), encoding="utf-8")
+    (folder / FORMAT_FILENAME).write_text(guide_text("qa-format.md"), encoding="utf-8")
 
     if key is not None and document is not None:
         task = (
@@ -167,18 +198,24 @@ def prepare_key_folder(
         )
     else:
         task = f"Write `qa.md` from the teacher's answer key, `{copied.name}`."  # type: ignore[union-attr]
-    (workspace / INSTRUCTIONS_FILENAME).write_text(
+    (folder / INSTRUCTIONS_FILENAME).write_text(
         guide_text("agent-answer-key.md")
         .replace("{og}", run_as or self_command())
         .replace("{task}", task)
         .replace("{source}", copied.name if copied is not None else "qa.md"),
         encoding="utf-8",
     )
-    (workspace / CLAUDE_FILENAME).write_text(f"@{INSTRUCTIONS_FILENAME}\n", encoding="utf-8")
-    (workspace / ".opengrader" / AGENT_MARKER_FILENAME).write_text(
+    (folder / CLAUDE_FILENAME).write_text(f"@{INSTRUCTIONS_FILENAME}\n", encoding="utf-8")
+    (folder / ".opengrader" / AGENT_MARKER_FILENAME).write_text(
         json.dumps(marker, indent=2) + "\n", encoding="utf-8"
     )
-    return KeyWorkspace(path=workspace, source=copied, has_key=key is not None)
+    return KeyWorkspace(path=folder, source=copied, has_key=key is not None)
+
+
+def write_marker(folder: Path, marker: dict[str, object]) -> None:
+    (folder / ".opengrader" / AGENT_MARKER_FILENAME).write_text(
+        json.dumps(marker, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def prepare_key_workspace(
@@ -224,7 +261,5 @@ def use_key(workspace: str | Path, destination: str | Path, *, replace: bool = F
     # round with the assistant replaces it without asking, unless it changes.
     marker = dict(read_marker(folder))
     marker["base_key"], marker["base_hash"] = str(target.resolve()), _digest(target)
-    (folder / ".opengrader" / AGENT_MARKER_FILENAME).write_text(
-        json.dumps(marker, indent=2) + "\n", encoding="utf-8"
-    )
+    write_marker(folder, marker)
     return result

@@ -28,7 +28,7 @@ def _submissions_dir(folder: Path) -> Path:
             return candidate
     raise click.UsageError(
         f"No read submissions found in {folder}: give the class folder the "
-        "pipeline wrote (it holds split/ and submissions/)."
+        "pipeline wrote (it holds student-pdfs/ and submissions/)."
     )
 
 
@@ -56,7 +56,7 @@ def _workspace_assignment(submissions: Path) -> tuple[Path, str] | None:
     type=click.Path(file_okay=False, path_type=Path),
     default=Path("."),
     show_default=True,
-    help="The class folder (holding split/ and submissions/), or its submissions folder.",
+    help="The class folder (holding student-pdfs/ and submissions/), or its submissions folder.",
 )
 def command(first: str, second: str, folder: Path) -> None:
     """Join SECOND onto FIRST: two pieces of one paper the splitter cut apart

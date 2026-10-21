@@ -18,6 +18,7 @@ import {
   submissionsQuery,
 } from './api/queries';
 import { authQuery, admitted } from './api/auth';
+import { assistantQuery } from './api/assistant';
 import { outlineQuery } from './api/outline';
 import { rosterQuery } from './api/roster';
 import { scansQuery } from './api/scans';
@@ -408,6 +409,34 @@ export const statisticsRoute = createRoute({
   notFoundComponent: RouteNotFound,
 });
 
+export const assistantRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/assignments/$assignmentId/assistant',
+  remountDeps: ({ params }) => params.assignmentId,
+  beforeLoad: async ({ context }) => {
+    // The workspace's owner gives its work to an assistant; a class folder
+    // open from classic is its files, and classic's own card handles it.
+    const auth = await context.queryClient.ensureQueryData(authQuery);
+    if (auth.enabled && auth.role !== 'instructor') throw notFound();
+    if (await folderSessionAssignmentId(context.queryClient)) throw notFound();
+  },
+  loader: async ({ context, params: { assignmentId } }) => {
+    const assignment = await requireAssignment(
+      context.queryClient,
+      assignmentId
+    );
+    const overview = await context.queryClient.fetchQuery({
+      ...assistantQuery(assignmentId),
+      staleTime: 0,
+    });
+    return { assignment, overview };
+  },
+  component: lazyRouteComponent(() => import('./routes/assistant-page')),
+  pendingComponent: AssignmentLoading,
+  errorComponent: RouteError,
+  notFoundComponent: RouteNotFound,
+});
+
 export const peopleRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/people',
@@ -468,6 +497,7 @@ export function createAppRouter(queryClient: QueryClient) {
       reviewRoute,
       reviewSubmissionRoute,
       statisticsRoute,
+      assistantRoute,
       peopleRoute,
       courseSettingsRoute,
     ]),

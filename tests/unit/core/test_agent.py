@@ -637,4 +637,4 @@ def test_a_workspace_is_refused_with_a_reason(cls: Path) -> None:
     state = read_class_state(cls / "submissions")
     assert state.workspace == cls.resolve()
     assert not (state.needs_key or state.can_grade or state.can_draft_rubrics or state.can_draft_standard_key)
-    assert "classic mode" in state.describe()
+    assert "press A on its assignment list" in state.describe()

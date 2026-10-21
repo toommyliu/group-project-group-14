@@ -57,7 +57,7 @@ class ClassState:
         if self.workspace is not None:
             return (
                 f"a workspace ({self.workspace.name}), whose grades live in its database. "
-                "The AI assistant works with class folders (classic mode) for now"
+                "Open it (opengrader tui) and press A on its assignment list for the AI assistant"
             )
         parts: list[str] = []
         if self.qa_file is None:

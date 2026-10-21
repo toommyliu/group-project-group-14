@@ -4,6 +4,7 @@ from pathlib import Path
 import fitz
 
 from opengrader.core.pages.split import SIDECAR_SUFFIX
+from opengrader.core.submissions.scan_notes import SCAN_NOTES_DIRNAME, note_path
 from opengrader.core.pages.split_review import (
     APPLIED,
     FIXED,
@@ -145,10 +146,12 @@ def test_applying_the_merge_rewrites_the_files_and_removes_the_empty_one(tmp_pat
 
     first = tmp_path / "submission-0001.pdf"
     assert _labels(first) == ["A1", "A2", "A3", "A4", "A5", "A6"]
-    assert [p["page_number"] for p in json.loads(first.with_suffix(SIDECAR_SUFFIX).read_text())["pages"]] == SIX
+    assert [p["page_number"] for p in json.loads(note_path(first, SIDECAR_SUFFIX).read_text())["pages"]] == SIX
+    assert not first.with_suffix(SIDECAR_SUFFIX).exists()
     assert read_scan_warnings(first) == ()
     for leftover in ("submission-0002.pdf", "submission-0002.scan.json", "submission-0002" + SIDECAR_SUFFIX):
         assert not (tmp_path / leftover).exists()
+        assert not (tmp_path / SCAN_NOTES_DIRNAME / leftover).exists()
     assert "submission-0002" not in read_extra_pages_map(tmp_path)
     assert _labels(tmp_path / "submission-0003.pdf")[0] == "B1"
     assert pending_split_findings(tmp_path) == []

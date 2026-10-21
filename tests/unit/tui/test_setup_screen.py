@@ -135,6 +135,7 @@ def test_the_screens_the_tools_page_opens_have_outline_buttons() -> None:
         "course_grades": ["CourseGradesScreen"],
         "doctor": ["DoctorScreen"],
         "format_guide": ["FormatGuideScreen"],
+        "grade_without_ai": ["GradeWithoutAIScreen"],
         "handoff": ["GraderPacketScreen", "MergeScreen"],
         "llm_eval": ["LlmEvalScreen"],
         "page_order": ["PageOrderScreen"],
@@ -854,7 +855,7 @@ def test_the_re_read_reuses_the_pipeline_cards_folders_and_never_resumes(
     monkeypatch, tmp_path
 ) -> None:
     argv = _run_refine_argv(monkeypatch, tmp_path)["argv"]
-    assert argv[argv.index("--input") + 1] == str(tmp_path / "class" / "split")
+    assert argv[argv.index("--input") + 1] == str(tmp_path / "class" / "student-pdfs")
     assert argv[argv.index("--output") + 1] == str(tmp_path / "class" / "submissions")
     assert "--refine" in argv
     # The extractor refuses --refine with --resume.

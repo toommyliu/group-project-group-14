@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ from opengrader.core.grading.automated import (
     DEFAULT_LLM_MIN_CONFIDENCE, JOURNAL_ACTOR_AUTO, JOURNAL_ACTOR_LLM,
     RunJournal as _RunJournal, grade_student_file,
 )
+from opengrader.core.grading.ownership import AutoGrades
 
 
 EPILOG = """\
@@ -92,6 +94,16 @@ def questions_without_partial_credit(qa_doc: QADocument) -> list[str]:
             if question_id not in missing:
                 missing.append(question_id)
     return missing
+
+
+@contextlib.contextmanager
+def _saved(auto_grades: AutoGrades, *, dry_run: bool):
+    """Whatever was graded is remembered, also when the run stops early."""
+    try:
+        yield
+    finally:
+        if not dry_run:
+            auto_grades.save()
 
 
 def _submission_paths(input_path: Path) -> list[Path]:
@@ -186,6 +198,15 @@ class _Hooks:
     help="Print what would change (including AI suggestions) without writing.",
 )
 @click.option(
+    "--overwrite-grades",
+    is_flag=True,
+    help=(
+        "Re-score every answer, including grades a person gave or changed. "
+        "Without this, auto-grading only changes grades it wrote itself and "
+        "that nobody has changed since, and says which ones it kept."
+    ),
+)
+@click.option(
     "--no-journal",
     is_flag=True,
     help=(
@@ -215,6 +236,7 @@ def command(
     llm_min_confidence: float,
     llm_min_transcription_confidence: float,
     dry_run: bool,
+    overwrite_grades: bool,
     no_journal: bool,
     yes_send_to_cloud: bool,
 ) -> None:
@@ -327,16 +349,18 @@ def command(
     run_journal: _RunJournal | None = None
     if not dry_run and not no_journal:
         run_journal = _RunJournal(input_path)
+    auto_grades = AutoGrades(input_path)
+    kept = 0
 
     answer_cache = AnswerGradeCache()
 
     from opengrader.core import egress
 
-    with egress.recording(input_path):
+    with egress.recording(input_path), _saved(auto_grades, dry_run=dry_run):
         for index, md_file in enumerate(paths, start=1):
             progress.file_start(md_file.name, index, total)
             try:
-                grade_student_file(
+                kept += len(grade_student_file(
                     md_file,
                     qa_doc,
                     llm_generate=llm_generate,
@@ -350,10 +374,18 @@ def command(
                         name, qid
                     ),
                     journal=run_journal,
-                )
+                    auto_grades=auto_grades,
+                    overwrite_grades=overwrite_grades,
+                ))
             except ValueError as exc:
                 failures += 1
                 print(f"Error grading {md_file}: {exc}", file=sys.stderr)
+
+    if kept:
+        print(
+            f"\nKept {kept} grade(s) a person gave, where auto-grading would score "
+            "otherwise. Add --overwrite-grades to re-score them too."
+        )
 
     grouping_summary = answer_cache.summary_line()
     if grouping_summary:

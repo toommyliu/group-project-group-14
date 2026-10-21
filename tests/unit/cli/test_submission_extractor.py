@@ -1387,3 +1387,325 @@ def test_the_region_map_contents_are_in_the_resume_fingerprint(monkeypatch, tmp_
 
     assert first_id != second_id
     assert calls == ["submission-0001", "submission-0001"]
+
+
+# Reading again over a file a person worked on (core/submissions/reread.py).
+
+def _reading_build(monkeypatch, reads: list, student_ids: list[str] | None = None) -> None:
+    """A builder that writes a real file: three answers, read as "AI …" when
+    an AI reader is passed in and blank without one, as the real one does.
+    The student ID it reads is the last of `student_ids` (default "41")."""
+    from opengrader.core.submissions.student_file import (
+        StudentSubmissionQuestion,
+        render_student_submission_markdown,
+    )
+
+    def fake_build(**kwargs):
+        reads.append(kwargs)
+        pdf = Path(kwargs["pdf_path"])
+        folder = Path(kwargs["output_dir"]) / pdf.stem
+        (folder / "responses").mkdir(parents=True, exist_ok=True)
+        ai = kwargs["vision_reader"] is not None
+        questions = []
+        for qid in ("q1", "q2", "q3"):
+            (folder / "responses" / f"{qid}.png").write_bytes(b"png")
+            questions.append(
+                StudentSubmissionQuestion(
+                    question_id=qid,
+                    prompt=f"Question {qid}",
+                    possible_points=10,
+                    response_image_path=f"responses/{qid}.png",
+                    response_text=f"AI {qid}" if ai else "",
+                    response_source="vision-model" if ai else None,
+                )
+            )
+        student_id = (student_ids or ["41"])[-1]
+        document = replace(_doc(), student_id=student_id, id_confidence=50.0, questions=questions)
+        markdown = folder / f"{pdf.stem}.submission.md"
+        markdown.write_text(render_student_submission_markdown(document))
+        return document, markdown
+
+    monkeypatch.setattr(batch_module, "build_student_submission_document_unified", fake_build)
+    monkeypatch.setattr(extractor_cli, "_load_blank_assignment_template", lambda _p: object())
+
+
+def _ai(monkeypatch, *, up: bool) -> None:
+    def ensure_ready(*_args, **_kwargs) -> None:
+        if not up:
+            raise app_config.AIUnavailableError("Ollama isn't running.")
+
+    monkeypatch.setattr(app_config, "ensure_ready", ensure_ready)
+
+
+def _extract_reading(tmp_path: Path, *extra: str) -> None:
+    blank = tmp_path / "blank.pdf"
+    blank.write_bytes(b"%PDF-1.4\n")
+    run_cli([
+        "--input", str(tmp_path / "scans"),
+        "--output", str(tmp_path / "out"),
+        "--blank-template", str(blank),
+        "--llm-responses",
+        "--resume",
+        *extra,
+    ])
+
+
+def _grade_q1_and_type_q2(markdown: Path) -> None:
+    from opengrader.core.submissions.student_file import (
+        StudentSubmissionGradeUpdate,
+        update_student_submission_file,
+    )
+
+    update_student_submission_file(
+        markdown, StudentSubmissionGradeUpdate(question_id="q1", points_awarded=7, rubric_labels=(), analysis="Close")
+    )
+    update_student_submission_file(
+        markdown, StudentSubmissionGradeUpdate(question_id="q2", response_text="0b110", response_source="human")
+    )
+
+
+def _questions(markdown: Path) -> dict:
+    from opengrader.core.submissions.student_file import load_student_submission_markdown
+
+    return {q.question_id: q for q in load_student_submission_markdown(markdown).questions}
+
+
+def test_when_the_ai_comes_back_only_untouched_answers_take_its_reading(monkeypatch, tmp_path) -> None:
+    reads: list = []
+    _reading_build(monkeypatch, reads)
+    _scan_dir(tmp_path)
+    markdown = tmp_path / "out" / "submission-0001" / "submission-0001.submission.md"
+
+    _ai(monkeypatch, up=False)
+    _extract_reading(tmp_path)
+    _grade_q1_and_type_q2(markdown)
+    graded = markdown.read_text()
+
+    _ai(monkeypatch, up=True)
+    _extract_reading(tmp_path)
+
+    questions = _questions(markdown)
+    assert (questions["q1"].points_awarded, questions["q1"].analysis, questions["q1"].response_text) == (7.0, "Close", "")
+    assert (questions["q2"].response_text, questions["q2"].response_source) == ("0b110", "human")
+    assert (questions["q3"].response_text, questions["q3"].response_source) == ("AI q3", "vision-model")
+    # Only q3's lines changed: everything else is exactly as the person left it.
+    changed = [line for line in markdown.read_text().splitlines() if line not in graded.splitlines()]
+    assert all("q3" in line or "AI q3" in line or "vision-model" in line for line in changed)
+
+    # Recorded under the AI's settings: the next run reads nothing.
+    _extract_reading(tmp_path)
+    assert len(reads) == 2
+
+
+def test_any_other_reread_keeps_the_grades_in_the_new_reading(monkeypatch, tmp_path) -> None:
+    reads: list = []
+    _reading_build(monkeypatch, reads)
+    _scan_dir(tmp_path)
+    markdown = tmp_path / "out" / "submission-0001" / "submission-0001.submission.md"
+
+    _ai(monkeypatch, up=True)
+    _extract_reading(tmp_path)
+    _grade_q1_and_type_q2(markdown)
+    _extract_reading(tmp_path, "--dpi", "250")
+
+    questions = _questions(markdown)
+    assert len(reads) == 2
+    assert questions["q1"].points_awarded == 7.0
+    assert questions["q2"].response_text == "0b110"
+    assert questions["q3"].response_text == "AI q3"
+    assert 'source_pdf: "../../scans/submission-0001.pdf"' in markdown.read_text()
+    assert not list((tmp_path / "out").rglob("*.tmp"))
+
+
+def test_a_changed_pdf_of_the_same_student_keeps_its_grades(monkeypatch, tmp_path, capsys) -> None:
+    reads: list = []
+    _reading_build(monkeypatch, reads)
+    scans = _scan_dir(tmp_path)
+    markdown = tmp_path / "out" / "submission-0001" / "submission-0001.submission.md"
+
+    _ai(monkeypatch, up=True)
+    _extract_reading(tmp_path)
+    _grade_q1_and_type_q2(markdown)
+    # The split changed this file's pages, but it is still the same student.
+    (scans / "submission-0001.pdf").write_bytes(b"%PDF-1.4\n% pages re-split\n")
+    _extract_reading(tmp_path)
+
+    assert _questions(markdown)["q1"].points_awarded == 7.0
+    assert "grades stayed on submission-0001" in " ".join(capsys.readouterr().out.split())
+
+
+def _forget_readings(tmp_path: Path) -> None:
+    """As a folder read before the ledger recorded anything."""
+    for manifest in (tmp_path / "out").rglob("extraction-manifest.jsonl"):
+        manifest.unlink()
+
+
+def test_an_older_folder_keeps_its_grades_when_the_scan_is_the_same_student(monkeypatch, tmp_path) -> None:
+    reads: list = []
+    _reading_build(monkeypatch, reads)
+    _scan_dir(tmp_path)
+    markdown = tmp_path / "out" / "submission-0001" / "submission-0001.submission.md"
+
+    _ai(monkeypatch, up=True)
+    _extract_reading(tmp_path)
+    _grade_q1_and_type_q2(markdown)
+    _forget_readings(tmp_path)
+    _extract_reading(tmp_path)
+
+    assert len(reads) == 2
+    assert _questions(markdown)["q1"].points_awarded == 7.0
+    assert _questions(markdown)["q2"].response_text == "0b110"
+    # Recorded now: protected the normal way from here on.
+    _extract_reading(tmp_path)
+    assert len(reads) == 2
+
+
+def test_an_older_folder_is_left_alone_when_the_scan_names_someone_else(monkeypatch, tmp_path, capsys) -> None:
+    reads: list = []
+    ids = ["41"]
+    _reading_build(monkeypatch, reads, ids)
+    _scan_dir(tmp_path)
+    markdown = tmp_path / "out" / "submission-0001" / "submission-0001.submission.md"
+
+    _ai(monkeypatch, up=True)
+    _extract_reading(tmp_path)
+    _grade_q1_and_type_q2(markdown)
+    graded = markdown.read_text()
+    _forget_readings(tmp_path)
+    ids.append("99")
+    _extract_reading(tmp_path)
+
+    assert markdown.read_text() == graded
+    out = " ".join(capsys.readouterr().out.split())  # the output wraps long lines
+    assert "Left as it was: submission-0001.submission.md has grades" in out
+    assert "reads as John Smith (99), not John Smith (41)" in out
+    assert "submission-0001" not in read_manifest(tmp_path / "out")
+    assert not list((tmp_path / "out").rglob("*.tmp"))
+
+
+def test_the_update_flag_is_gone(monkeypatch, tmp_path) -> None:
+    _reading_build(monkeypatch, [])
+    _scan_dir(tmp_path)
+    with pytest.raises(click.exceptions.NoSuchOption):
+        extractor_cli.command.make_context(
+            "submission-extractor",
+            ["--input", str(tmp_path / "scans"), "--output", str(tmp_path / "out"), "--update"],
+        )
+
+
+# The scan is split again: grades follow their student (core/submissions/resplit.py).
+
+def _student_pdf(scans: Path, stem: str, student_id: str) -> None:
+    (scans / f"{stem}.pdf").write_bytes(f"%PDF-1.4\n% student {student_id}\n".encode())
+
+
+def _identity_build(monkeypatch, reads: list) -> None:
+    """Like _reading_build, but each PDF says whose it is."""
+    from opengrader.core.submissions.student_file import (
+        StudentSubmissionQuestion,
+        render_student_submission_markdown,
+    )
+
+    def fake_build(**kwargs):
+        pdf = Path(kwargs["pdf_path"])
+        reads.append(pdf.stem)
+        student_id = pdf.read_text().rsplit(" ", 1)[-1].strip()
+        folder = Path(kwargs["output_dir"]) / pdf.stem
+        (folder / "responses").mkdir(parents=True, exist_ok=True)
+        questions = []
+        for qid in ("q1", "q2"):
+            (folder / "responses" / f"{qid}.png").write_bytes(b"png")
+            questions.append(
+                StudentSubmissionQuestion(
+                    question_id=qid,
+                    prompt=f"Question {qid}",
+                    possible_points=10,
+                    response_image_path=f"responses/{qid}.png",
+                    response_text=f"{student_id}'s {qid}",
+                )
+            )
+        document = replace(
+            _doc(), student_id=student_id, student_name=f"Student {student_id}",
+            id_confidence=90.0, name_confidence=90.0, source_pdf=f"{pdf.stem}.pdf", questions=questions,
+        )
+        markdown = folder / f"{pdf.stem}.submission.md"
+        markdown.write_text(render_student_submission_markdown(document))
+        return document, markdown
+
+    monkeypatch.setattr(batch_module, "build_student_submission_document_unified", fake_build)
+    monkeypatch.setattr(extractor_cli, "_load_blank_assignment_template", lambda _p: object())
+
+
+def _give(markdown: Path, points: float, comment: str) -> None:
+    from opengrader.core.submissions.student_file import (
+        StudentSubmissionGradeUpdate,
+        update_student_submission_file,
+    )
+
+    update_student_submission_file(
+        markdown, StudentSubmissionGradeUpdate(question_id="q1", points_awarded=points, rubric_labels=(), analysis=comment)
+    )
+
+
+def _graded(tmp_path: Path, stem: str) -> tuple[str, float | None, str]:
+    from opengrader.core.submissions.student_file import load_student_submission_markdown
+
+    document = load_student_submission_markdown(tmp_path / "out" / stem / f"{stem}.submission.md")
+    q1 = document.questions[0]
+    return document.student_id, q1.points_awarded, q1.analysis
+
+
+def _two_graded_students(monkeypatch, tmp_path: Path) -> tuple[Path, list]:
+    reads: list = []
+    _identity_build(monkeypatch, reads)
+    scans = tmp_path / "scans"
+    scans.mkdir()
+    _student_pdf(scans, "submission-0001", "41")
+    _student_pdf(scans, "submission-0002", "42")
+    _ai(monkeypatch, up=True)
+    _extract_reading(tmp_path, "--jobs", "1")  # the fake reader lives in this process
+    _give(tmp_path / "out" / "submission-0001" / "submission-0001.submission.md", 7, "For 41")
+    _give(tmp_path / "out" / "submission-0002" / "submission-0002.submission.md", 3, "For 42")
+    return scans, reads
+
+
+def test_after_a_new_split_each_students_grades_follow_them(monkeypatch, tmp_path, capsys) -> None:
+    scans, reads = _two_graded_students(monkeypatch, tmp_path)
+    # Split again: the two students' pages now land in each other's file.
+    _student_pdf(scans, "submission-0001", "42")
+    _student_pdf(scans, "submission-0002", "41")
+    _extract_reading(tmp_path, "--jobs", "1")  # the fake reader lives in this process
+
+    assert _graded(tmp_path, "submission-0001") == ("42", 3.0, "For 42")
+    assert _graded(tmp_path, "submission-0002") == ("41", 7.0, "For 41")
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Student 41 (41)'s grades moved from submission-0001 to submission-0002." in out
+    # Every student was placed, so no backup is left behind.
+    assert not list((tmp_path / "out" / ".opengrader" / "displaced-grades").rglob("*.md"))
+    # Recorded under the new PDFs: the next run reads nothing.
+    before = len(reads)
+    _extract_reading(tmp_path, "--jobs", "1")  # the fake reader lives in this process
+    assert len(reads) == before
+
+
+def test_a_student_the_new_split_no_longer_has_keeps_their_grades_in_the_backup(monkeypatch, tmp_path, capsys) -> None:
+    scans, _reads = _two_graded_students(monkeypatch, tmp_path)
+    _student_pdf(scans, "submission-0002", "43")
+    _extract_reading(tmp_path, "--jobs", "1")  # the fake reader lives in this process
+
+    assert _graded(tmp_path, "submission-0001") == ("41", 7.0, "For 41")
+    assert _graded(tmp_path, "submission-0002") == ("43", None, "")
+    backups = list((tmp_path / "out" / ".opengrader" / "displaced-grades").rglob("*.md"))
+    assert [path.name for path in backups] == ["submission-0002.md"]
+    assert "For 42" in backups[0].read_text()
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Student 42 (42)'s grades from submission-0002: no file names them now; kept in the backup." in out
+    # Nothing that looks for submissions finds the backup.
+    assert len(list((tmp_path / "out").rglob("*.submission.md"))) == 2
+
+
+def test_an_unchanged_pdf_is_not_treated_as_a_new_split(monkeypatch, tmp_path, capsys) -> None:
+    scans, reads = _two_graded_students(monkeypatch, tmp_path)
+    _student_pdf(scans, "submission-0002", "43")
+    _extract_reading(tmp_path, "--jobs", "1")  # the fake reader lives in this process
+    assert reads.count("submission-0001") == 1

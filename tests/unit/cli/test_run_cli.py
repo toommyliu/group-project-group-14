@@ -89,7 +89,7 @@ def test_the_required_pair_is_scan_and_out(tmp_path, captured) -> None:
     request = captured["request"]
     assert request.scan == tmp_path / "bundle.pdf"
     assert request.output_dir == tmp_path / "cohort"
-    assert request.split_dir == tmp_path / "cohort" / "split"
+    assert request.split_dir == tmp_path / "cohort" / "student-pdfs"
     assert request.submissions_dir == tmp_path / "cohort" / "submissions"
 
 
@@ -1003,7 +1003,7 @@ def test_in_a_terminal_the_page_order_is_asked_and_the_run_carries_on(tmp_path, 
 
     report = run_command(run_module.command, _argv(tmp_path))
 
-    assert asked == [tmp_path / "cohort" / "split"]
+    assert asked == [tmp_path / "cohort" / "student-pdfs"]
     assert len(calls) == 2 and calls[0] == calls[1]
     assert not report.page_order_review_needed
 
@@ -1087,7 +1087,7 @@ def test_in_a_terminal_the_split_is_asked_and_the_run_carries_on(tmp_path, monke
 
     report = run_command(run_module.command, _argv(tmp_path))
 
-    assert asked == [tmp_path / "cohort" / "split"]
+    assert asked == [tmp_path / "cohort" / "student-pdfs"]
     assert len(calls) == 2
     assert not report.split_review_needed
 
@@ -1171,3 +1171,58 @@ def test_one_section_named_twice_is_a_usage_error(tmp_path, captured, capsys) ->
 def test_scan_and_section_scans_together_are_refused(tmp_path, captured) -> None:
     assert _exit_status(_argv(tmp_path, "--section-scan", str(tmp_path / "x.pdf"))) == 2
     assert "request" not in captured
+
+
+def _ai_pause(tmp_path: Path) -> PipelineReport:
+    paused = StageOutcome(
+        stage=STAGE_AUTO_GRADE,
+        status=StageStatus.PAUSED,
+        message="the AI can't be reached; nothing graded yet",
+        detail="ai-unavailable:\nOllama isn't running. Open the Ollama app, then try again.",
+    )
+    return _report(tmp_path, _outcome(STAGE_EXTRACT, StageStatus.RAN), paused)
+
+
+def test_the_grade_without_ai_answer_lands_in_the_request(tmp_path, captured) -> None:
+    run_command(run_module.command, _argv(tmp_path))
+    assert captured["request"].grade_without_ai is False
+    run_command(run_module.command, _argv(tmp_path, "--grade-without-ai"))
+    assert captured["request"].grade_without_ai is True
+
+
+@pytest.mark.parametrize(
+    ("answer", "grade_without_ai", "auto_grade"),
+    [("", True, True), ("y", True, True), ("n", False, False)],
+)
+def test_in_a_terminal_grading_without_ai_is_asked_and_the_run_carries_on(
+    tmp_path, monkeypatch, capsys, answer, grade_without_ai, auto_grade
+) -> None:
+    calls: list[PipelineRequest] = []
+
+    def fake_run(request: PipelineRequest, *, progress=None):
+        calls.append(request)
+        if len(calls) == 1:
+            return _ai_pause(tmp_path)
+        return _report(tmp_path, _outcome(STAGE_AUTO_GRADE, StageStatus.RAN, "ok"))
+
+    monkeypatch.setattr(run_module, "run_pipeline", fake_run)
+    monkeypatch.setattr(run_module.sys, "stdin", _FakeStdin())
+    monkeypatch.setattr("builtins.input", lambda _prompt="": answer)
+
+    report = run_command(run_module.command, _argv(tmp_path))
+
+    assert len(calls) == 2
+    assert (calls[1].grade_without_ai, calls[1].auto_grade) == (grade_without_ai, auto_grade)
+    assert not report.ai_unavailable
+
+
+def test_without_a_terminal_the_ai_pause_says_how_to_answer(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(run_module, "run_pipeline", lambda request, *, progress=None: _ai_pause(tmp_path))
+
+    report = run_command(run_module.command, _argv(tmp_path))
+
+    out = capsys.readouterr().out
+    assert report.ai_unavailable
+    assert "Paused before auto-grading" in out
+    assert "--grade-without-ai" in out and "--no-auto-grade" in out
+    assert "ai-unavailable:" not in out

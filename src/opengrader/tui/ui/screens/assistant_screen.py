@@ -17,12 +17,20 @@ it (`core.agent.class_state`). Each job opens one dialog here:
 
 There is no "make a folder" step to remember: the first press of the job's
 main button makes it, and a folder or copy made earlier is picked up again.
+
+The same dialogs serve a workspace assignment (`WorkspaceTarget`, opened from
+the workspace's assignment list with A through `WorkspaceAssistantMenu`):
+copies are made from the database and merged back through the workspace
+service (`core/agent/workspace.py`, `WorkspaceAgentMergeScreen`), and a
+change to the answer key asks whether the assignment's qa.md file follows
+(`KeyFileChoiceScreen`).
 """
 
 from __future__ import annotations
 
 import shlex
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from textual import on, work
@@ -50,11 +58,29 @@ from opengrader.core.agent import (
 from opengrader.core.agent.answer_key import KEY_FILENAME, default_key_folder, prepare_key_folder
 from opengrader.core.agent.common import (
     AGENT_MARKER_FILENAME,
+    GRADING_PROMPT,
+    KEY_PROMPT,
     KIND_ANSWER_KEY,
+    RUBRIC_PROMPT,
     PURPOSE_GRADING,
     PURPOSE_RUBRICS,
     packet_purpose,
     read_marker,
+)
+from opengrader.core.agent.workspace import (
+    KeyFileChoiceNeeded,
+    WorkspaceApplyPlan,
+    accept_workspace_suggestion,
+    apply_workspace_plan,
+    default_workspace_output_dir,
+    delete_workspace_packet,
+    list_workspace_packets,
+    plan_workspace_apply,
+    prepare_workspace_key_folder,
+    prepare_workspace_packet,
+    read_assignment,
+    use_workspace_key,
+    workspace_key_folders,
 )
 from opengrader.core.handoff.packet import PacketError
 from opengrader.tui import clipboard
@@ -63,20 +89,9 @@ from opengrader.tui.ui import button_roles
 from opengrader.tui.ui.button_roles import OutlineButtons
 from opengrader.tui.ui.screens.handoff_screen import MergeScreen, _browse_into
 
-# What the teacher says to the assistant once it is open in the folder. The
-# folder's AGENTS.md carries the rules; this only points at it.
-STARTER_PROMPT = (
-    "Read AGENTS.md in this folder and follow it exactly: grade the answers "
-    "that are still open, then give me a short summary."
-)
-KEY_PROMPT = (
-    "Read AGENTS.md in this folder and follow it exactly: do the task it gives "
-    "you on qa.md, check it, then tell me what you were unsure of."
-)
-RUBRIC_PROMPT = (
-    "Read AGENTS.md in this folder and follow it exactly: draft partial-credit "
-    "rubrics from the answers, then give me a short summary."
-)
+# What the teacher says to the assistant once it is open in the folder
+# (`core/agent/common.py`, shared with the browser).
+STARTER_PROMPT = GRADING_PROMPT
 
 _CSS = """
 {name} {{
@@ -178,15 +193,43 @@ def _log(screen: ModalScreen, lines: Sequence[str]) -> None:
         log.write(line)
 
 
+@dataclass(frozen=True)
+class WorkspaceTarget:
+    """One workspace assignment, and its service (`WorkspaceClient.request`)."""
+
+    root: Path
+    assignment_id: str
+    title: str
+    request: Callable[..., bytes]
+
+
+def _ask_key_file(screen: ModalScreen, path: Path, then: Callable[[str], None]) -> None:
+    """Ask whether qa.md follows a key change; `then` runs only on an answer."""
+
+    def answered(choice: str | None) -> None:
+        if choice:
+            then(choice)
+
+    screen.app.push_screen(KeyFileChoiceScreen(path), answered)
+
+
 class AssistantScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = _CSS.format(name="AssistantScreen")
     BINDINGS = [Binding("escape", "close", "Close")]
 
-    def __init__(self, *, submissions_path: str, qa_file_path: str, purpose: str = PURPOSE_GRADING) -> None:
+    def __init__(
+        self,
+        *,
+        submissions_path: str = "",
+        qa_file_path: str = "",
+        purpose: str = PURPOSE_GRADING,
+        workspace: WorkspaceTarget | None = None,
+    ) -> None:
         super().__init__()
         self._submissions = submissions_path
         self._qa_file = qa_file_path
         self._purpose = purpose
+        self._workspace = workspace
         self._packets: list[Path] = []
         self._delete_armed = False
 
@@ -220,14 +263,24 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
                         "you to confirm (v, then y, while grading).",
                         classes="assistant-hint",
                     )
-                submissions = Path(self._submissions).resolve()
-                yield Static(
-                    f"[b]Class[/b] [dim]{submissions.parent.name}/{submissions.name}[/dim]   "
-                    f"[b]Answer key[/b] [dim]{Path(self._qa_file).name if self._qa_file else '(none chosen)'}[/dim]   "
-                    f"[b]Copies go to[/b] [dim]{default_agent_output_dir(self._submissions).name}/ "
-                    "beside the class folder[/dim]",
-                    classes="assistant-hint",
-                )
+                if self._workspace is not None:
+                    target = self._workspace
+                    yield Static(
+                        f"[b]Workspace[/b] [dim]{target.root.name}[/dim]   "
+                        f"[b]Assignment[/b] [dim]{target.title}[/dim]   "
+                        f"[b]Copies go to[/b] [dim]{default_workspace_output_dir(target.root).name}/ "
+                        "beside the workspace[/dim]",
+                        classes="assistant-hint",
+                    )
+                else:
+                    submissions = Path(self._submissions).resolve()
+                    yield Static(
+                        f"[b]Class[/b] [dim]{submissions.parent.name}/{submissions.name}[/dim]   "
+                        f"[b]Answer key[/b] [dim]{Path(self._qa_file).name if self._qa_file else '(none chosen)'}[/dim]   "
+                        f"[b]Copies go to[/b] [dim]{default_agent_output_dir(self._submissions).name}/ "
+                        "beside the class folder[/dim]",
+                        classes="assistant-hint",
+                    )
                 yield Static(
                     "Use the account your school approved if it has one; on a personal "
                     "plan, turn off training on your data in the assistant's settings first.",
@@ -258,8 +311,9 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
                 self,
                 [
                     "Press Make a copy. It takes a moment (every answer image is read "
-                    "for the student's name first) and changes nothing in your class "
-                    "folder except recording the key it needs to merge the copy back.",
+                    "for the student's name first) and changes nothing in your "
+                    f"{'workspace' if self._workspace else 'class folder'} except recording "
+                    "the key it needs to merge the copy back.",
                 ],
             )
 
@@ -267,9 +321,12 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
 
     def _reload_packets(self, select: Path | None = None) -> None:
         try:
-            self._packets = [
-                path for path in list_agent_packets(self._submissions) if packet_purpose(path) == self._purpose
-            ]
+            found = (
+                list_workspace_packets(self._workspace.root, self._workspace.assignment_id)
+                if self._workspace is not None
+                else list_agent_packets(self._submissions)
+            )
+            self._packets = [path for path in found if packet_purpose(path) == self._purpose]
         except (OSError, ValueError):
             self._packets = []
         picker = self.query_one("#assistant-packet", Select)
@@ -340,7 +397,7 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
     @on(Button.Pressed, "#assistant-prepare")
     def _on_prepare(self, event: Button.Pressed) -> None:
         event.stop()
-        if not self._qa_file:
+        if self._workspace is None and not self._qa_file:
             self.app.notify("Choose the answer key first (on the Tools card).", severity="error")
             return
         event.button.disabled = True
@@ -350,7 +407,12 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
     @work(thread=True, exclusive=True, group="assistant-prepare")
     def _prepare(self) -> None:
         try:
-            packet = prepare_agent_packet(self._submissions, self._qa_file, purpose=self._purpose)
+            if self._workspace is not None:
+                packet = prepare_workspace_packet(
+                    self._workspace.root, self._workspace.assignment_id, purpose=self._purpose
+                )
+            else:
+                packet = prepare_agent_packet(self._submissions, self._qa_file, purpose=self._purpose)
         except (AgentError, PacketError, OSError, ValueError) as exc:
             self.app.call_from_thread(self._prepare_failed, str(exc))
             return
@@ -441,7 +503,12 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
                 self._show_packet(self._current())
 
         self.app.push_screen(
-            SuggestionsScreen(packet=packet, qa_file_path=self._qa_file, submissions_path=self._submissions),
+            SuggestionsScreen(
+                packet=packet,
+                qa_file_path=self._qa_file,
+                submissions_path=self._submissions,
+                workspace=self._workspace,
+            ),
             closed,
         )
 
@@ -462,6 +529,9 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
             )
             self._show_packet(self._current(), intro=intro)
 
+        if self._workspace is not None:
+            self.app.push_screen(WorkspaceAgentMergeScreen(self._workspace, packet), merged)
+            return
         self.app.push_screen(
             MergeScreen(submissions_path=self._submissions, incoming_path=str(packet)), merged
         )
@@ -479,7 +549,10 @@ class AssistantScreen(OutlineButtons, ModalScreen[None]):
             self.app.notify("Press Really delete? to delete the copy. Merge it back first.")
             return
         try:
-            delete_packet(packet, self._submissions)
+            if self._workspace is not None:
+                delete_workspace_packet(packet, self._workspace.root, self._workspace.assignment_id)
+            else:
+                delete_packet(packet, self._submissions)
         except (AgentError, OSError) as exc:
             self.app.notify(f"Not deleted: {exc}", severity="error")
             return
@@ -523,17 +596,28 @@ class SuggestionsScreen(OutlineButtons, ModalScreen[None]):
     """
     BINDINGS = [Binding("escape", "close", "Close")]
 
-    def __init__(self, *, packet: Path, qa_file_path: str, submissions_path: str) -> None:
+    def __init__(
+        self,
+        *,
+        packet: Path,
+        qa_file_path: str = "",
+        submissions_path: str = "",
+        workspace: WorkspaceTarget | None = None,
+    ) -> None:
         super().__init__()
         self._packet = packet
         self._qa_file = qa_file_path
         self._submissions = submissions_path
+        self._workspace = workspace
+        # Asked once per dialog, on the first fix accepted (`KeyFileChoiceScreen`).
+        self._key_file: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical() as dialog:
             dialog.border_title = "▸ The assistant's suggested fixes"
+            where = "the workspace's answer key" if self._workspace else "your answer key"
             yield Static(
-                "Accept writes the fix into your answer key (only that question) and "
+                f"Accept writes the fix into {where} (only that question) and "
                 "into the assistant's copy, so it grades the rest with the corrected "
                 "key. A rubric change is refused if a grade you already saved uses an "
                 "option it would drop. Dismiss records that you said no.",
@@ -583,6 +667,9 @@ class SuggestionsScreen(OutlineButtons, ModalScreen[None]):
             return
         event.stop()
         log = self.query_one(RichLog)
+        if action == "accept" and self._workspace is not None:
+            self._accept_in_workspace(suggestion_id)
+            return
         try:
             if action == "accept":
                 if not self._qa_file:
@@ -596,6 +683,32 @@ class SuggestionsScreen(OutlineButtons, ModalScreen[None]):
                 log.write(f"{suggestion_id} dismissed.")
         except (AgentError, OSError, ValueError) as exc:
             log.write(f"{suggestion_id} not applied: {exc}")
+        self._render_list()
+
+    def _accept_in_workspace(self, suggestion_id: str) -> None:
+        assert self._workspace is not None
+        log = self.query_one(RichLog)
+        try:
+            done = accept_workspace_suggestion(
+                self._packet,
+                suggestion_id,
+                root=self._workspace.root,
+                assignment_id=self._workspace.assignment_id,
+                request=self._workspace.request,
+                key_file=self._key_file,  # type: ignore[arg-type]
+            )
+        except KeyFileChoiceNeeded as asked:
+
+            def chosen(choice: str) -> None:
+                self._key_file = choice
+                self._accept_in_workspace(suggestion_id)
+
+            _ask_key_file(self, asked.path, chosen)
+            return
+        except (AgentError, OSError, ValueError) as exc:
+            log.write(f"{suggestion_id} not applied: {exc}")
+        else:
+            log.write(f"{suggestion_id}: {done}.")
         self._render_list()
 
     def action_close(self) -> None:
@@ -622,20 +735,36 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
     DEFAULT_CSS = _CSS.format(name="AnswerKeyAssistantScreen")
     BINDINGS = [Binding("escape", "close", "Close")]
 
-    def __init__(self, *, class_folder: str, qa_file: str = "", submissions: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        class_folder: str = "",
+        qa_file: str = "",
+        submissions: str = "",
+        workspace: WorkspaceTarget | None = None,
+    ) -> None:
         super().__init__()
         self._class = Path(class_folder)
         self._qa_file = Path(qa_file) if qa_file else None
         self._submissions = submissions
         self._destination = self._qa_file or self._class / KEY_FILENAME
+        # The assistant's folder (named before workspaces could be targets).
         self._workspace: Path | None = None
+        self._target = workspace
+        self._key_file: str | None = None
         self._replace_armed = False
 
     def compose(self) -> ComposeResult:
         with Vertical() as dialog:
             dialog.border_title = "▸ AI assistant — the answer key"
             with VerticalScroll(classes="assistant-top"):
-                if self._qa_file is not None:
+                if self._target is not None:
+                    task = (
+                        f"Your assistant fills the blank answers in {self._target.title}'s answer key, "
+                        "or corrects it, from the questions themselves or from your own answer key "
+                        "if you add it below."
+                    )
+                elif self._qa_file is not None:
                     task = (
                         f"Your assistant fills the blank answers in {self._qa_file.name}, from the "
                         "questions themselves or from your own answer key if you add it below."
@@ -645,8 +774,9 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
                         "Your assistant writes qa.md, the answer key Opengrader grades with, from "
                         "your own answer key (Word, PDF, notes): choose it below."
                     )
+                beside = "the workspace" if self._target is not None else "the class folder"
                 yield Static(
-                    task + " It works in its own folder beside the class folder, with no student "
+                    task + f" It works in its own folder beside {beside}, with no student "
                     "work in it, and checks the key before you use it.",
                     classes="assistant-hint",
                 )
@@ -654,8 +784,12 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
                 with Horizontal(classes="path-row"):
                     yield Input(placeholder="Path to key.docx / key.pdf / notes.md…", id="key-source")
                     yield Button("Browse", id="key-source-browse", classes=button_roles.OPEN, compact=True)
+                if self._target is not None:
+                    destination = f"the workspace's {self._target.title} (you choose whether its qa.md follows)"
+                else:
+                    destination = f"{self._destination.parent.name}/{self._destination.name}"
                 yield Static(
-                    f"[b]The finished key goes to[/b]  [dim]{self._destination.parent.name}/{self._destination.name}[/dim]",
+                    f"[b]The finished key goes to[/b]  [dim]{destination}[/dim]",
                     classes="assistant-hint",
                 )
             log = RichLog(wrap=True, markup=False, auto_scroll=False)
@@ -672,11 +806,15 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
                 yield Button("Close", id="key-close", compact=True)
 
     def on_mount(self) -> None:
-        earlier = key_folders(self._class)
+        if self._target is not None:
+            earlier = workspace_key_folders(self._target.root, self._target.assignment_id)
+        else:
+            earlier = key_folders(self._class)
         if earlier:
             self._set_workspace(earlier[0], [f"Picking up the folder made earlier: {earlier[0].name}."])
             return
-        _log(self, ["Press Give it to my assistant. Opengrader makes its folder beside the class folder."])
+        beside = "the workspace" if self._target is not None else "the class folder"
+        _log(self, [f"Press Give it to my assistant. Opengrader makes its folder beside {beside}."])
 
     def _set_workspace(self, workspace: Path, intro: Sequence[str]) -> None:
         self._workspace = workspace
@@ -697,16 +835,24 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
             self._set_workspace(self._workspace, [f"Your assistant's folder is {self._workspace.name}."])
             return
         try:
-            workspace = prepare_key_folder(
-                qa_file=self._qa_file,
-                source=Path(raw).expanduser() if raw else None,
-                class_folder=self._class,
-                submissions=self._submissions or None,
-            )
+            if self._target is not None:
+                workspace = prepare_workspace_key_folder(
+                    self._target.root,
+                    self._target.assignment_id,
+                    source=Path(raw).expanduser() if raw else None,
+                )
+            else:
+                workspace = prepare_key_folder(
+                    qa_file=self._qa_file,
+                    source=Path(raw).expanduser() if raw else None,
+                    class_folder=self._class,
+                    submissions=self._submissions or None,
+                )
         except (AgentError, OSError) as exc:
             _log(self, ["Nothing was given to the assistant:", "", str(exc)])
             return
-        self._set_workspace(workspace.path, [f"Made {workspace.path.name}, beside the class folder."])
+        beside = "the workspace" if self._target is not None else "the class folder"
+        self._set_workspace(workspace.path, [f"Made {workspace.path.name}, beside {beside}."])
 
     @on(Button.Pressed, "#key-check")
     def _on_check(self, event: Button.Pressed) -> None:
@@ -726,6 +872,9 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
         event.stop()
         if self._workspace is None:
             return
+        if self._target is not None:
+            self._use_in_workspace(event.button)
+            return
         replace = self._replace_armed
         try:
             result = use_key(self._workspace, self._destination, replace=replace)
@@ -743,6 +892,39 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
         lines += [f"  warning: {warning}" for warning in result.warnings]
         _log(self, lines)
         self.app.notify("Answer key copied into the class folder.")
+
+    def _use_in_workspace(self, button: Button) -> None:
+        assert self._target is not None and self._workspace is not None
+        replace = self._replace_armed
+        try:
+            result, note = use_workspace_key(
+                self._workspace,
+                root=self._target.root,
+                assignment_id=self._target.assignment_id,
+                request=self._target.request,
+                replace_changed=replace,
+                key_file=self._key_file,  # type: ignore[arg-type]
+            )
+        except KeyFileChoiceNeeded as asked:
+
+            def chosen(choice: str) -> None:
+                self._key_file = choice
+                self._use_in_workspace(button)
+
+            _ask_key_file(self, asked.path, chosen)
+            return
+        except AgentError as exc:
+            if not replace and "on purpose" in str(exc):
+                self._replace_armed = True
+                button.label = "Replace it?"
+                _log(self, [f"{self._target.title}'s answer key changed since the assistant started. Press Replace it? to store this one anyway."])
+            else:
+                _log(self, [str(exc)])
+            return
+        self._replace_armed = False
+        button.label = "Use this key"
+        _log(self, [note, *(f"  warning: {warning}" for warning in result.warnings)])
+        self.app.notify("Answer key stored in the workspace.")
 
     @on(Button.Pressed, "#key-copy-path")
     def _on_copy_path(self, event: Button.Pressed) -> None:
@@ -767,6 +949,237 @@ class AnswerKeyAssistantScreen(OutlineButtons, ModalScreen[None]):
     def _on_close(self, event: Button.Pressed) -> None:
         event.stop()
         self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class KeyFileChoiceScreen(OutlineButtons, ModalScreen[str | None]):
+    """Whether a change to a workspace's answer key goes into its qa.md too.
+
+    The teacher's call, asked when it matters: write-back carries grades to
+    the class folder's files but never the answer key, so a key changed only
+    in the workspace and its qa.md part ways. Dismisses with "update",
+    "leave", or None (nothing is changed).
+    """
+
+    DEFAULT_CSS = """
+    KeyFileChoiceScreen {
+        align: center middle;
+    }
+    KeyFileChoiceScreen > Vertical {
+        width: 80;
+        max-width: 95%;
+        height: auto;
+        background: $surface;
+        border: round $accent;
+        border-title-align: left;
+        border-title-color: $accent;
+        border-title-style: bold;
+        padding: 1 2;
+    }
+    KeyFileChoiceScreen Static {
+        width: 100%;
+        height: auto;
+        margin-bottom: 1;
+    }
+    KeyFileChoiceScreen Horizontal {
+        height: auto;
+        align-horizontal: right;
+    }
+    KeyFileChoiceScreen Button {
+        margin-left: 1;
+    }
+    """
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self._path = path
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as dialog:
+            dialog.border_title = "▸ The answer key file"
+            yield Static(
+                f"This assignment's answer key also lives in [b]{self._path.name}[/b] "
+                f"[dim]({self._path.parent})[/dim]. Writing grades to files never carries "
+                "the key, so say whether this change goes there too."
+            )
+            yield Static(
+                "[dim]Update qa.md too: the file gets the same change (only that question, "
+                "when it differs from the workspace's key). Workspace only: the file stays "
+                "as it is.[/dim]"
+            )
+            with Horizontal():
+                yield Button("Update qa.md too", id="key-file-update", classes=button_roles.LAUNCH, compact=True)
+                yield Button("Workspace only", id="key-file-leave", compact=True)
+                yield Button("Cancel", id="key-file-cancel", compact=True)
+
+    @on(Button.Pressed)
+    def _on_button(self, event: Button.Pressed) -> None:
+        event.stop()
+        choice = {"key-file-update": "update", "key-file-leave": "leave"}.get(event.button.id or "")
+        self.dismiss(choice)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class WorkspaceAgentMergeScreen(OutlineButtons, ModalScreen[bool]):
+    """Merge an assistant's copy back into a workspace; dismisses True once merged.
+
+    Opens on a preview (`plan_workspace_apply`); nothing is sent to the
+    workspace service until Merge. An answer someone graded meanwhile
+    becomes a change request there, never a grade.
+    """
+
+    DEFAULT_CSS = _CSS.format(name="WorkspaceAgentMergeScreen")
+    BINDINGS = [Binding("escape", "close", "Close")]
+
+    def __init__(self, target: WorkspaceTarget, packet: Path) -> None:
+        super().__init__()
+        self._target = target
+        self._packet = packet
+        self._plan: WorkspaceApplyPlan | None = None
+        self._merged = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as dialog:
+            dialog.border_title = "▸ Merge the assistant's work back"
+            yield Static(
+                "The assistant's grades are saved as AI grades for you to confirm (v, then y, "
+                "while grading). An answer graded here since the copy was made is never "
+                "overwritten: the assistant's grade waits as a change request (Q).",
+                classes="assistant-hint",
+            )
+            log = RichLog(wrap=True, markup=False, auto_scroll=False)
+            log.border_title = self._packet.name
+            yield log
+            with Horizontal(classes="assistant-buttons"):
+                yield Button("Merge", id="ws-merge-apply", classes=button_roles.LAUNCH, compact=True, disabled=True)
+                yield Button("Close", id="ws-merge-close", compact=True)
+
+    def on_mount(self) -> None:
+        _log(self, ["Comparing the copy with the workspace…"])
+        self._load_plan()
+
+    @work(thread=True, exclusive=True, group="workspace-agent-merge")
+    def _load_plan(self) -> None:
+        try:
+            plan = plan_workspace_apply(self._target.root, self._target.assignment_id, self._packet)
+        except (AgentError, OSError, ValueError) as exc:
+            self.app.call_from_thread(_log, self, ["Nothing can be merged:", "", str(exc)])
+            return
+        self.app.call_from_thread(self._show_plan, plan)
+
+    def _show_plan(self, plan: WorkspaceApplyPlan) -> None:
+        if not self.is_attached:
+            return
+        self._plan = plan
+        _log(self, [*plan.lines(), "", "Press Merge to save them." if plan.grades else ""])
+        self.query_one("#ws-merge-apply", Button).disabled = not plan.grades
+
+    @on(Button.Pressed, "#ws-merge-apply")
+    def _on_merge(self, event: Button.Pressed) -> None:
+        event.stop()
+        if self._plan is None:
+            return
+        event.button.disabled = True
+        self._apply(self._plan)
+
+    @work(thread=True, exclusive=True, group="workspace-agent-merge")
+    def _apply(self, plan: WorkspaceApplyPlan) -> None:
+        try:
+            outcome = apply_workspace_plan(plan, self._target.request)
+        except AgentError as exc:
+            self.app.call_from_thread(_log, self, [str(exc)])
+            return
+        self.app.call_from_thread(self._applied, outcome.lines())
+
+    def _applied(self, lines: list[str]) -> None:
+        if not self.is_attached:
+            return
+        self._merged = True
+        _log(self, lines)
+        self.app.notify("Merged into the workspace.")
+
+    @on(Button.Pressed, "#ws-merge-close")
+    def _on_close(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(self._merged)
+
+    def action_close(self) -> None:
+        self.dismiss(self._merged)
+
+
+class WorkspaceAssistantMenu(OutlineButtons, ModalScreen[None]):
+    """The jobs an assistant can do for one workspace assignment, as the
+    classic card offers them for a class folder: only those that fit now."""
+
+    DEFAULT_CSS = _CSS.format(name="WorkspaceAssistantMenu").replace("height: 88%;", "height: auto;")
+    BINDINGS = [Binding("escape", "close", "Close")]
+
+    def __init__(self, *, root: Path, assignment_id: str, request: Callable[..., bytes]) -> None:
+        super().__init__()
+        self._root = root
+        self._assignment_id = assignment_id
+        self._request = request
+        self._title = ""
+
+    def compose(self) -> ComposeResult:
+        with Vertical() as dialog:
+            dialog.border_title = "▸ AI assistant"
+            yield Static("", id="ws-assistant-state", classes="assistant-hint")
+            yield Static(
+                "Your own assistant (Claude, ChatGPT, Codex, …) works in a copy beside the "
+                "workspace with no names, IDs or scans; nothing it does reaches your grades "
+                "until you merge it back.",
+                classes="assistant-hint",
+            )
+            with Horizontal(classes="assistant-buttons"):
+                yield Button("Answer key…", id="ws-assistant-key", classes=button_roles.OPEN, compact=True)
+                yield Button("Draft rubrics…", id="ws-assistant-rubrics", classes=button_roles.OPEN, compact=True)
+                yield Button("Grade…", id="ws-assistant-grade", classes=button_roles.OPEN, compact=True)
+                yield Button("Close", id="ws-assistant-close", compact=True)
+
+    def on_mount(self) -> None:
+        self._refresh_state()
+
+    def _refresh_state(self) -> None:
+        try:
+            state = read_assignment(self._root, self._assignment_id)
+        except AgentError as exc:
+            self.query_one("#ws-assistant-state", Static).update(str(exc))
+            for button_id in ("ws-assistant-key", "ws-assistant-rubrics", "ws-assistant-grade"):
+                self.query_one(f"#{button_id}", Button).display = False
+            return
+        self._title = state.title
+        self.query_one("#ws-assistant-state", Static).update(f"[b]{state.describe()}[/b]")
+        # The key can always be checked or corrected; grading needs work to grade.
+        self.query_one("#ws-assistant-rubrics", Button).display = state.can_draft_rubrics
+        self.query_one("#ws-assistant-grade", Button).display = state.can_grade
+
+    def _target(self) -> WorkspaceTarget:
+        return WorkspaceTarget(self._root, self._assignment_id, self._title, self._request)
+
+    @on(Button.Pressed)
+    def _on_button(self, event: Button.Pressed) -> None:
+        event.stop()
+        button_id = event.button.id or ""
+        if button_id == "ws-assistant-close":
+            self.dismiss(None)
+            return
+
+        def closed(_result: None) -> None:
+            if self.is_attached:
+                self._refresh_state()
+
+        if button_id == "ws-assistant-key":
+            self.app.push_screen(AnswerKeyAssistantScreen(workspace=self._target()), closed)
+        elif button_id == "ws-assistant-grade":
+            self.app.push_screen(AssistantScreen(workspace=self._target()), closed)
+        elif button_id == "ws-assistant-rubrics":
+            self.app.push_screen(AssistantScreen(workspace=self._target(), purpose=PURPOSE_RUBRICS), closed)
 
     def action_close(self) -> None:
         self.dismiss(None)

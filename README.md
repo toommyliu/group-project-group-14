@@ -1,5 +1,7 @@
 # Opengrader
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > **Grade paper assignments faster, right on your own computer.** Print an assignment, scan the stack, and grade it question by question, without sending student work to anyone else's server.
 
 **Quick links:** [Install](#installation) · [Run it](#running-the-prototype) · [Demo](#demo) · [Tests](#testing)
@@ -299,14 +301,27 @@ This is what the desktop icon opens. Pick a class folder (with a scan and an ans
 uv run opengrader run path/to/assignment-folder/
 ```
 
-Point it at a folder holding the scanned PDF and the answer key (and optionally a roster and a blank template). It checks the scan, splits it, reads every answer, auto-grades what it can, and opens the grading app. Run the same command again and it picks up where it left off. Add `--dry-run` to preview the plan, or `--llm` to let the AI chosen in AI setup suggest grades for written answers (start Ollama first if it is a local one).
+Point it at a folder holding the scanned PDF and the answer key (and optionally a roster and a blank template). It checks the scan, splits it, reads every answer, auto-grades what it can, and opens the grading app. Inside the folder it builds `student-pdfs/` (one PDF per student; what the split noticed about each one is kept in `student-pdfs/scan-notes/`) and `submissions/`. Run the same command again and it picks up where it left off. Add `--dry-run` to preview the plan, or `--llm` to let the AI chosen in AI setup suggest grades for written answers (start Ollama first if it is a local one). If that AI can't be reached, the run stops before auto-grading and asks whether to grade without it; in a script, add `--grade-without-ai` or `--no-auto-grade` to answer up front.
+
+<details>
+<summary><b>Run it without <code>uv run</code></b> (from any folder)</summary>
+
+Once the global `opengrader` command is installed (step 8 of *Option B: Developer setup*), drop the `uv run` and run it from any folder:
+
+```bash
+opengrader run path/to/assignment-folder/
+```
+
+It runs the same command from your checkout, so every flag above works the same. Without the global command, use `uv run opengrader run …` from inside the repo.
+
+</details>
 
 <details>
 <summary><b>Working with your AI assistant</b> (Claude, ChatGPT, Codex, … with no student names or IDs)</summary>
 
 Small local models grade written answers poorly. The assistant you already use does much better, and Opengrader keeps student identities away from it. The assistant always works in its own folder beside the class folder, never in it.
 
-**Class folders only, for now.** The assistant works with class folders (the desktop app's classic mode), where grades live in each student's `.submission.md`. A **workspace** (`opengrader tui`, the browser app) keeps its grades in its own database, so an assistant's work would never reach it. Opengrader refuses rather than let that happen silently, and the Tools card says so when you choose a workspace.
+**Class folders and workspaces.** The same jobs work in both. A class folder (the desktop app's classic mode) uses the Tools card below. In a **workspace** (`opengrader tui`, the browser app), press **A** on the assignment list, or open **AI assistant** in the browser's sidebar. The copy is made from the workspace's own grades and merged back through its service. There the assistant counts as a grader of its own: it fills answers nobody has graded, and its grade on an answer someone graded after the copy was made waits as a change request you approve or dismiss (**Q** while grading). A reading it types helps it grade but is not stored, because a workspace keeps the scan's reading. When you accept a fix to the answer key, you choose whether the assignment's `qa.md` gets it too: writing grades back to files never carries the key.
 
 **In the desktop app:** **Tools → AI assistant**. Choose the class folder and it offers only what fits:
 
@@ -338,6 +353,10 @@ uv run opengrader agent answer-key --class-folder class [--source key.docx]   # 
 uv run opengrader agent use-key --folder class-ai-answer-key --to class/qa.md
 uv run opengrader agent prepare --submissions class/submissions --qa-file class/qa.md            # grading
 uv run opengrader agent prepare --submissions class/submissions --qa-file class/qa.md --rubrics  # drafting rubrics
+
+# the same in a workspace: name it and the assignment instead
+uv run opengrader agent prepare --workspace course --assignment "Quiz 1"
+uv run opengrader agent answer-key --workspace course --assignment "Quiz 1"
 ```
 
 Start your assistant **inside the folder Opengrader made** and ask it to do what `AGENTS.md` there says (Claude Code reads `CLAUDE.md`, which points to it). For grading it checks the key with `opengrader agent check-key`, looks at each answer image, and records transcriptions and rubric choices with `opengrader agent transcribe` and `opengrader agent grade`; Opengrader checks every choice against the rubric and works out the points. When the key looks wrong, or a question has no partial credit, it records a fix with `opengrader agent suggest` instead of acting on it. You accept or dismiss each one (**Suggestions…** in the app, or `opengrader agent suggestions` / `accept` / `dismiss`), and an accepted fix changes only that question of your key.
@@ -348,6 +367,8 @@ When it is done:
 
 ```bash
 uv run opengrader agent apply --submissions class/submissions --incoming class-ai-assistant/<name> --yes --delete-copy
+# a workspace (accept / use-key also take --key-file update|leave):
+uv run opengrader agent apply --workspace course --assignment "Quiz 1" --incoming course-ai-assistant/<name> --yes
 ```
 
 Its grades arrive marked as AI grades. In the grading app, **v** steps through a question's unconfirmed AI grades and **y** confirms one; picking another rubric option changes it, and the review queue and `grade-check` flag the low-confidence ones. The three-way merge never overwrites a grade you made, and `grade-restore` can undo it.

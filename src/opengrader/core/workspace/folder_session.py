@@ -769,6 +769,7 @@ def regrade_folder(
     import io
 
     from opengrader.core.grading.automated import RunJournal, grade_student_file
+    from opengrader.core.grading.ownership import AutoGrades
 
     folder = locate_submissions_dir(workspace, assignment_id)
     path = answer_key_path(workspace, assignment_id)
@@ -785,19 +786,28 @@ def regrade_folder(
         raise WriteBackError(f"{path.name} could not be read: {exc}") from exc
 
     journal = RunJournal(folder, operator=actor)
+    auto_grades = AutoGrades(folder)
     files = 0
-    for student_file in sorted(folder.rglob("*.submission.md")):
-        files += 1
-        try:
-            # The shared grader reports to a terminal; a server has none.
-            with contextlib.redirect_stdout(io.StringIO()):
-                grade_student_file(student_file, document, journal=journal)
-        except (OSError, ValueError) as exc:
-            problems.append(f"{student_file.name}: {exc}")
+    kept = 0
+    try:
+        for student_file in sorted(folder.rglob("*.submission.md")):
+            files += 1
+            try:
+                # The shared grader reports to a terminal; a server has none.
+                with contextlib.redirect_stdout(io.StringIO()):
+                    kept += len(
+                        grade_student_file(
+                            student_file, document, journal=journal, auto_grades=auto_grades
+                        )
+                    )
+            except (OSError, ValueError) as exc:
+                problems.append(f"{student_file.name}: {exc}")
+    finally:
+        auto_grades.save()
 
     after = sync_folder(workspace, assignment_id)
     problems.extend(problem for problem in after.problems if problem not in problems)
-    return RegradeResult(files=files, updated=after.updated, problems=problems)
+    return RegradeResult(files=files, updated=after.updated, kept=kept, problems=problems)
 
 
 # ---------------------------------------------------------------------------

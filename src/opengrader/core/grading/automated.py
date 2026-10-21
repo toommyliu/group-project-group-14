@@ -10,6 +10,7 @@ from pathlib import Path
 from opengrader.core import app_config
 from opengrader.core.grading import suggest_free_response_grade
 from opengrader.core.grading.answer_cache import AnswerGradeCache, answer_grade_key
+from opengrader.core.grading.ownership import AutoGrades, Owner, same_points
 from opengrader.core.grading.llm_grader import (
     GenerateFn,
     GradeSuggestion,
@@ -119,7 +120,16 @@ def grade_student_file(
     dry_run: bool = False,
     question_callback: Callable[[str], None] | None = None,
     journal: "RunJournal | None" = None,
-) -> None:
+    auto_grades: AutoGrades | None = None,
+    overwrite_grades: bool = False,
+) -> tuple[str, ...]:
+    """Grade one submission file in place. Returns the questions where a
+    person's grade was kept although auto-grading would score them otherwise.
+
+    With `auto_grades`, a grade a person gave is never scored over (see
+    `ownership`); `overwrite_grades` re-scores those too. The caller saves
+    `auto_grades` once its run is over.
+    """
     document = load_student_submission_markdown(student_path)
     if qa_doc.version_questions:
         from opengrader.core.grading.versions import match_version
@@ -132,7 +142,7 @@ def grade_student_file(
                 f"Skipped {student_path.name}: {match.describe()} "
                 "(review queue: press R in the grading app)"
             )
-            return
+            return ()
     solutions = solution_entries_for_submission(qa_doc, document)
     version = solution_version_for_submission(qa_doc, document)
     cache = answer_cache if answer_cache is not None else AnswerGradeCache()
@@ -142,7 +152,9 @@ def grade_student_file(
     ai_applied: list[str] = []
     ai_skipped: list[str] = []
     unreadable_skipped: list[str] = []
+    kept: list[str] = []
     pending_journal: list[_PendingRecord] = []
+    written: list[tuple[str, float | None, tuple[str, ...], str]] = []
     for question in document.questions:
         entry = solutions.get(question.question_id)
         if entry is None:
@@ -215,6 +227,24 @@ def grade_student_file(
                     f"{round(llm_min_confidence * 100)}%)"
                 )
 
+        if auto_grades is not None and not overwrite_grades and points_awarded is not None:
+            if auto_grades.grade_owner(student_path, document, question) is Owner.PERSON:
+                new_rubric = tuple(question.rubric_labels if rubric_labels is None else rubric_labels)
+                if not same_points(points_awarded, question.points_awarded) or new_rubric != tuple(
+                    question.rubric_labels
+                ):
+                    kept.append(
+                        f"{question.question_id} (auto-grade gives {points_awarded:g}/{entry.points:g})"
+                    )
+                points_awarded, rubric_labels, analysis = None, None, None
+            else:
+                comment = auto_grades.comment_owner(student_path, document, question)
+                if comment is Owner.PERSON:
+                    analysis = None
+                elif analysis is None and comment is Owner.AUTO:
+                    # Its own "Correct" from before, on an answer it now scores otherwise.
+                    analysis = ""
+
         updated = update_student_submission_markdown(
             updated,
             StudentSubmissionGradeUpdate(
@@ -225,6 +255,15 @@ def grade_student_file(
                 analysis=analysis,
             ),
         )
+        if points_awarded is not None:
+            written.append(
+                (
+                    question.question_id,
+                    points_awarded,
+                    tuple(question.rubric_labels if rubric_labels is None else rubric_labels),
+                    question.analysis if analysis is None else analysis,
+                )
+            )
 
         if journal is not None:
             pending_journal.extend(
@@ -244,6 +283,11 @@ def grade_student_file(
             student_path.write_text(updated)
             if journal is not None:
                 _flush_journal(journal, document, pending_journal)
+        if auto_grades is not None:
+            for question_id, points, rubric, analysis in written:
+                auto_grades.remember(
+                    student_path, question_id, points=points, rubric=rubric, analysis=analysis
+                )
         print(f"Successfully graded and updated {student_path.name}")
 
     for line in ai_applied:
@@ -252,6 +296,10 @@ def grade_student_file(
         print(f"  AI low confidence, left for manual review: {line}")
     for line in unreadable_skipped:
         print(f"  Transcription too weak to grade, left for manual review: {line}")
+    for line in kept:
+        print(f"  Kept a grade a person gave: {line}")
+    return tuple(kept)
+
 
 
 @dataclass(frozen=True)

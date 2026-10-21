@@ -36,6 +36,7 @@ from opengrader.core.submissions.extra_pages import (
     resolve_extra_pages_path,
     write_extra_pages_map,
 )
+from opengrader.core.submissions.scan_notes import SCAN_WARNINGS_SUFFIX, remove_note, write_note
 from opengrader.core.submissions.splitter import write_scan_warnings
 
 from .split import SIDECAR_SUFFIX, read_sidecar
@@ -278,7 +279,7 @@ def _reread(directory: Path, pdf: Path) -> tuple[SplitPage, ...] | None:
 
 
 def _write_sidecar(pdf: Path, groups: Sequence[str | None], numbers: Sequence[int | None]) -> None:
-    pdf.with_suffix(SIDECAR_SUFFIX).write_text(json.dumps({
+    write_note(pdf, SIDECAR_SUFFIX, json.dumps({
         "pages": [{"group": group, "page_number": number} for group, number in zip(groups, numbers)],
     }, indent=1) + "\n")
 
@@ -516,11 +517,9 @@ def _recut(
         os.replace(temporary, pdf)
         entries = [entry for _, _, entry in pages[start:end]]
         if all(entry is not None for entry in entries):
-            pdf.with_suffix(SIDECAR_SUFFIX).write_text(
-                json.dumps({"pages": entries}, indent=1) + "\n"
-            )
+            write_note(pdf, SIDECAR_SUFFIX, json.dumps({"pages": entries}, indent=1) + "\n")
         else:
-            pdf.with_suffix(SIDECAR_SUFFIX).unlink(missing_ok=True)
+            remove_note(pdf, SIDECAR_SUFFIX)
         piece = SplitPart(name, tuple(infos[start:end]))
         notes = [f"{problem}." for problem in part_problems(piece, expected, printed)]
         unmatched = sum(1 for page in piece.pages if not page.matched)
@@ -532,8 +531,9 @@ def _recut(
         )
     for name in finding.names[len(chunks):]:
         pdf = directory / f"{name}.pdf"
-        for leftover in (pdf, pdf.with_suffix(".scan.json"), pdf.with_suffix(SIDECAR_SUFFIX)):
-            leftover.unlink(missing_ok=True)
+        pdf.unlink(missing_ok=True)
+        for suffix in (SCAN_WARNINGS_SUFFIX, SIDECAR_SUFFIX):
+            remove_note(pdf, suffix)
     if resolve_extra_pages_path(directory).exists():
         write_extra_pages_map(directory, extra)
     return True

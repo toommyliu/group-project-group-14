@@ -2284,14 +2284,14 @@ def test_a_bare_app_opens_tools_and_the_pipeline_can_open_a_folder(tmp_path) -> 
     asyncio.run(run())
 
 
-def test_f3_moves_between_tools_and_grading_and_f2_returns_to_start_grading(
+def test_f3_is_home_on_the_start_grading_card_and_f2_does_the_same_unlisted(
     tmp_path,
 ) -> None:
     from opengrader.tui.state import PAGE_SETUP
 
     qa, subs = _copy_sample(tmp_path)
 
-    async def run() -> tuple[bool, str, str, str | None]:
+    async def run() -> tuple[bool, str, str, str | None, str | None, str]:
         app = TuiApp(
             default_image_path=DEFAULT_IMAGE_PATH,
             qa_file_path=qa,
@@ -2300,9 +2300,11 @@ def test_f3_moves_between_tools_and_grading_and_f2_returns_to_start_grading(
         async with app.run_test(size=(140, 45)) as pilot:
             await pilot.pause()
             assert app.workflow_state.current_page == PAGE_QA_PICKER
+            footer = str(app.query_one("#status-bar-bindings", Static).render())
             await pilot.press("f3")
             await pilot.pause()
             assert app.workflow_state.current_page == PAGE_SETUP
+            home_focus = app.focused.id if app.focused else None
             visible = {b.command for b in app.input_controller.visible_bindings()}
             assert InputCommand.OPEN_START_PAGE in visible  # "Back to grading"
             await pilot.press("f3")
@@ -2316,14 +2318,20 @@ def test_f3_moves_between_tools_and_grading_and_f2_returns_to_start_grading(
                 app.is_running,
                 app.query_one("#tui-qa-path", Input).value,
                 app.query_one("#tui-sub-path", Input).value,
+                home_focus,
                 app.focused.id if app.focused else None,
+                footer,
             )
 
-    running, qa_field, subs_field, focused = asyncio.run(run())
+    running, qa_field, subs_field, home_focus, focused, footer = asyncio.run(run())
     assert running
     assert (qa_field, subs_field) == (str(qa), str(subs))  # what is open
-    # The folder just graded is now a recent one, so F2 lands on that list.
-    assert focused == "launch-recent-list"
+    # The folder just graded is now a recent one, so Home lands on that list.
+    assert home_focus == focused == "launch-recent-list"
+    assert "Home" in footer
+    assert "Switch assignment" not in footer
+    assert "Requests" not in footer  # change requests are a shared workspace's
+
 
 
 def test_start_grading_finds_the_answer_key_and_submissions_in_a_class_folder(
@@ -2517,6 +2525,8 @@ def test_a_workspace_session_is_grading_only_and_f2_exits_to_its_list(
             visible = {b.command for b in app.input_controller.visible_bindings()
                        if app._input_command_available(b.command)}
             assert InputCommand.OPEN_START_PAGE not in visible
+            assert InputCommand.SWITCH_ASSIGNMENT in visible
+            assert InputCommand.OPEN_CHANGE_REQUESTS in visible
             await pilot.press("f3")  # no Tools to go to
             await pilot.pause()
             assert app.workflow_state.current_page == PAGE_QA_PICKER
@@ -2534,9 +2544,11 @@ def test_grade_screen_names_the_provider_and_undo_keeps_it(tmp_path) -> None:
     shutil.copytree("samples/cs146-quiz1/student-submissions", submissions)
     first = submissions / "submission-0001" / "submission-0001.submission.md"
     original = first.read_text()
-    first.write_text(
-        original.replace("  - Read by: tesseract\n", "  - Read by: tesseract (Test Cloud)\n", 1)
-    )
+    # The sample carries no reading of its own; give q1 one, in the order the
+    # file writer puts these fields.
+    reading = "  - Read by: tesseract (Test Cloud)\n  - Confidence: 72\n  - Response text: "
+    assert "  - Response text: " in original
+    first.write_text(original.replace("  - Response text: ", reading, 1))
 
     async def run() -> tuple[str, str, str]:
         app = TuiApp(

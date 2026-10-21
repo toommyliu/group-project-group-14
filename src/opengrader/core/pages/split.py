@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from opengrader.core.submissions.scan_notes import read_note_path, write_note
+
 from .catalog import PageCatalog, PageMatch
 
 SIDECAR_SUFFIX = ".pages.json"
@@ -249,15 +251,13 @@ def _submission_cost(numbers: list[int | None], expected: list[int]) -> float:
 
 
 def write_sidecar(pdf_path: Path, submission: PlannedSubmission, catalog: PageCatalog) -> Path:
-    path = pdf_path.with_suffix(SIDECAR_SUFFIX)
-    path.write_text(json.dumps({
+    return write_note(pdf_path, SIDECAR_SUFFIX, json.dumps({
         "pages": [{"group": m.group, "page_number": number_of(catalog, m)} for m in submission.pages],
     }, indent=1) + "\n")
-    return path
 
 
 def read_sidecar(pdf_path: Path) -> dict | None:
-    path = pdf_path.with_suffix(SIDECAR_SUFFIX)
+    path = read_note_path(pdf_path, SIDECAR_SUFFIX)
     if not path.exists():
         return None
     return json.loads(path.read_text())

@@ -11,6 +11,7 @@ import sqlite3
 from tempfile import NamedTemporaryFile
 from zipfile import ZIP_STORED, ZipFile
 from threading import RLock
+from uuid import uuid4
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -56,7 +57,12 @@ from opengrader.core.workspace.intake import publish_pipeline, publish_submissio
 from opengrader.core.workspace.recut import recutting_assignments
 from opengrader.core.submissions import load_student_submission_markdown
 from opengrader.core.workspace.models import (
+    AgentGradeOutcome,
+    AgentGrades,
+    AgentGradesResult,
     Answer,
+    AnswerKeyReplace,
+    AnswerKeyReplaced,
     Assignment,
     AssignmentSummary,
     FeedbackJob,
@@ -93,6 +99,7 @@ from opengrader.server.assignment_qa import (
 from opengrader.server.auth import add_auth_routes, signed_in
 from opengrader.server.roster import add_roster_routes
 from opengrader.server.students import add_student_routes
+from opengrader.server.assistant import add_assistant_routes
 from opengrader.server.settings import ServerSettings
 from opengrader.server.scan_store import ScanStore
 from opengrader.server.scan_jobs import ScanJobs, ScanWorkers
@@ -131,6 +138,13 @@ _FOLDER_SESSION_REFUSALS = (
         "In a folder session the answer key is the file in the class folder, "
         "so only a question's rubric can be edited here. "
         + _NOT_IN_FOLDER_SESSION,
+    ),
+    (
+        None,
+        re.compile(r"/api/assignments/[^/]+/(agent-grades|answer-key|assistant(/.*)?)/?"),
+        "In a folder session the grades and the answer key are the class "
+        "folder's files, so an AI assistant's copy of it is merged back into "
+        "them from the terminal app (classic mode). " + _NOT_IN_FOLDER_SESSION,
     ),
     (
         "POST",
@@ -868,6 +882,138 @@ def create_app(
         return decide_change(
             workspace, assignment_id, request_id, approve=decision == "approve", by=who.login
         )
+
+    def require_owner(request: Request, what: str) -> Viewer:
+        who = caller(request)
+        if who.login != who.owner:
+            raise HTTPException(403, f"Only {who.owner}, who owns this workspace, can {what}.")
+        return who
+
+    def merge_agent_grades(assignment_id: str, merge: AgentGrades, owner: str) -> AgentGradesResult:
+        from opengrader.core.workspace.sharing import change_needs_approval, request_change
+
+        require_assignment(assignment_id)
+        assistant = Viewer(login=merge.actor, role="grader", owner=owner, may_change_others=False)
+        outcomes: list[AgentGradeOutcome] = []
+        for grade in merge.grades:
+            where = {"submission_id": grade.submission_id, "question_id": grade.question_id}
+            try:
+                current = workspace.answer(assignment_id, grade.submission_id, grade.question_id)
+                edit = GradeEdit(
+                    request_id=uuid4(),
+                    expected_revision=current.revision,
+                    expected_context_revision=current.context_revision,
+                    rubric_labels=grade.rubric_labels,
+                    score_mode=grade.score_mode,
+                    points_awarded=grade.points_awarded,
+                    analysis=grade.analysis,
+                )
+                graded_by = change_needs_approval(
+                    workspace, assignment_id, grade.submission_id, grade.question_id, assistant
+                )
+                if graded_by is not None:
+                    request_change(
+                        workspace, assignment_id, grade.submission_id, grade.question_id, edit,
+                        requested_by=merge.actor, graded_by=graded_by,
+                    )
+                    outcomes.append(AgentGradeOutcome(**where, outcome="requested", message=graded_by))
+                    continue
+                workspace.save_grade(
+                    assignment_id, grade.submission_id, grade.question_id, edit, actor=merge.actor
+                )
+                outcomes.append(AgentGradeOutcome(**where, outcome="saved"))
+            except WorkspaceNotFound as exc:
+                outcomes.append(AgentGradeOutcome(**where, outcome="missing", message=str(exc)))
+            except WorkspaceConflict as exc:
+                # Saved by someone in the moment between reading and writing.
+                outcomes.append(AgentGradeOutcome(**where, outcome="changed", message=str(exc)))
+            except ValueError as exc:
+                outcomes.append(AgentGradeOutcome(**where, outcome="refused", message=str(exc)))
+        return AgentGradesResult(outcomes=outcomes)
+
+    def store_answer_key(assignment_id: str, edit: AnswerKeyReplace, actor: str) -> AnswerKeyReplaced:
+        from opengrader.core.workspace.answer_key import replace_answer_key
+
+        with registry_lock:
+            require_assignment(assignment_id)
+            parse_qa_markdown(edit.qa_markdown)  # 422 with its location
+            if workspace.assignment_source(assignment_id) != edit.expected_qa_markdown:
+                raise WorkspaceConflict(
+                    "The answer key changed since this edit started. Read it again and retry."
+                )
+            total, _ = workspace.submission_counts(assignment_id)
+            if total == 0:
+                if scan_store.list(assignment_id):
+                    raise WorkspaceConflict("Assignments with uploaded scans cannot be edited.")
+                workspace.update_assignment(
+                    assignment_id, edit.qa_markdown, edit.expected_qa_markdown
+                )
+                result = AnswerKeyReplaced()
+            else:
+                update = replace_answer_key(
+                    workspace, assignment_id, edit.qa_markdown, strict=True, actor=actor
+                )
+                result = AnswerKeyReplaced(refreshed=update.refreshed, regraded=len(update.regraded))
+            extraction_source(assignment_id)
+        return result
+
+    @api.post("/assignments/{assignment_id}/agent-grades")
+    def save_agent_grades(
+        assignment_id: str, merge: AgentGrades, request: Request
+    ) -> AgentGradesResult:
+        """An AI assistant's copy merged back (`core/agent/workspace.py`).
+
+        The assistant is a grader account of its own here (`merge.actor`),
+        under the same rule a grader who joined from another account has:
+        it may grade an answer nobody has graded, or one it graded last; a
+        grade anyone else gave becomes a change request the owner approves
+        or dismisses (`Q`). Each grade goes through `save_grade`, so it is
+        checked against the current rubric, scored and recorded like any
+        other. Only the owner sends a copy home: it made the copy.
+        """
+        who = require_owner(request, "merge an AI assistant's work into it")
+        return merge_agent_grades(assignment_id, merge, who.owner)
+
+    @api.put("/assignments/{assignment_id}/answer-key")
+    def replace_assignment_key(
+        assignment_id: str, edit: AnswerKeyReplace, request: Request
+    ) -> AnswerKeyReplaced:
+        """Store a whole answer key while grading is under way (owner only).
+
+        Before any submission this is the Answer key page's own save. After,
+        it is `answer_key.replace_answer_key(strict=True)`: the questions must
+        stay the same, a renamed or re-pointed rubric is carried into the
+        grades and re-scored, and a key that would drop a rubric option a
+        saved grade uses is refused whole (422). Used for fixes an AI
+        assistant suggested and the teacher accepted; whether the
+        assignment's qa.md file follows is the caller's business, because
+        write-back never carries the key to files.
+        """
+        who = require_owner(request, "replace its answer key")
+        return store_answer_key(assignment_id, edit, who.login)
+
+    def in_process(who: Viewer):  # noqa: ANN202 - a WorkspaceClient.request
+        """The two routes above as `core/agent/workspace.py`'s `request`, for
+        the browser's assistant page: the same code, no HTTP to ourselves."""
+
+        def send(method: str, path: str, body: BaseModel | None = None, *, timeout: float = 0) -> bytes:
+            parts = path.strip("/").split("/")
+            try:
+                if parts[-1] == "agent-grades" and method == "POST":
+                    result: BaseModel = merge_agent_grades(parts[2], AgentGrades.model_validate(body), who.owner)
+                elif parts[-1] == "answer-key" and method == "PUT":
+                    result = store_answer_key(parts[2], AnswerKeyReplace.model_validate(body), who.login)
+                else:
+                    raise RuntimeError(f"{method} {path} is not served in process")
+            except HTTPException as exc:
+                raise RuntimeError(str(exc.detail)) from exc
+            except (WorkspaceConflict, WorkspaceNotFound, ValueError) as exc:
+                raise RuntimeError(str(exc)) from exc
+            return result.model_dump_json().encode()
+
+        return send
+
+    add_assistant_routes(api, workspace, require_assignment, require_owner, in_process)
 
     @api.post("/assignments/{assignment_id}/submissions/replace")
     def replace_submissions(

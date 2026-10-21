@@ -19,6 +19,7 @@ from opengrader.core.pages.order_review import (
     write_order_review,
 )
 from opengrader.core.pages.split import SIDECAR_SUFFIX
+from opengrader.core.submissions.scan_notes import note_path
 from opengrader.core.submissions.extra_pages import read_extra_pages_map, write_extra_pages_map
 from opengrader.core.submissions.splitter import read_scan_warnings, write_scan_warnings
 
@@ -67,7 +68,8 @@ def test_sorting_moves_the_pages_and_everything_that_addresses_them_by_position(
     assert sort_pages(tmp_path, ["submission-0001"]) == ["submission-0001"]
 
     assert _footers(pdf) == ["Page 1", "Page 2", "Page 3", "scratch"]
-    assert [page["group"] for page in json.loads(pdf.with_suffix(SIDECAR_SUFFIX).read_text())["pages"]] == ["g1", "g2", "g3", None]
+    assert [page["group"] for page in json.loads(note_path(pdf, SIDECAR_SUFFIX).read_text())["pages"]] == ["g1", "g2", "g3", None]
+    assert not pdf.with_suffix(SIDECAR_SUFFIX).exists()
     assert read_extra_pages_map(tmp_path) == {"submission-0001": (4,)}
     assert read_scan_warnings(pdf) == ("Missing page(s) 4.",)
     assert read_order_review(tmp_path)[0][0].status == SORTED
@@ -135,7 +137,7 @@ def test_pages_put_in_order_by_hand_are_no_longer_asked_about(tmp_path: Path, mo
 
     assert read_order_review(tmp_path)[0][0].status == FIXED
     assert read_scan_warnings(pdf) == ("Missing page(s) 4.",)
-    assert [page["group"] for page in json.loads(pdf.with_suffix(SIDECAR_SUFFIX).read_text())["pages"]] == ["g1", "g2", "g3"]
+    assert [page["group"] for page in json.loads(note_path(pdf, SIDECAR_SUFFIX).read_text())["pages"]] == ["g1", "g2", "g3"]
 
 
 def test_a_hand_edit_that_is_still_out_of_order_is_asked_about_as_it_now_reads(tmp_path: Path, monkeypatch):

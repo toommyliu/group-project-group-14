@@ -888,6 +888,46 @@ def set_student_identity_markdown(
     return updated + "\n" if had_trailing_newline else updated
 
 
+def set_submission_frontmatter_markdown(
+    content: str,
+    *,
+    student_name: str | None = None,
+    student_score: str | None = None,
+    scan_warnings: tuple[str, ...] | None = None,
+    source_pdf: str | None = None,
+) -> str:
+    """Set a name a person gave, the overall score, the scan warnings, or
+    where the scan is, leaving the rest of the file as written. None leaves a
+    field alone."""
+    had_trailing_newline = content.endswith("\n")
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("submission markdown is missing YAML frontmatter")
+    end = next(
+        (i for i in range(1, len(lines)) if lines[i].strip() == "---"),
+        None,
+    )
+    if end is None:
+        raise ValueError("submission markdown frontmatter is not terminated")
+
+    fm = lines[1:end]
+    if student_name is not None:
+        fm = _set_frontmatter_scalar(fm, "student_name", student_name)
+        fm = _drop_frontmatter_scalar(fm, "student_name_confidence")
+    if student_score is not None:
+        fm = _set_frontmatter_scalar(fm, "student_score", student_score)
+    if source_pdf is not None:
+        fm = _set_frontmatter_scalar(fm, "source_pdf", source_pdf)
+    if scan_warnings is not None:
+        fm = _drop_frontmatter_block(fm, "scan_warnings")
+        if scan_warnings:
+            fm.append("scan_warnings: " + json.dumps(list(scan_warnings)))
+
+    lines[1:end] = fm
+    updated = "\n".join(lines)
+    return updated + "\n" if had_trailing_newline else updated
+
+
 def set_student_identity_file(
     path: str | Path,
     *,

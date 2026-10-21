@@ -63,7 +63,7 @@ short or zero data retention. Delete the copy once its work is merged back
 
 ## What you can help with, stage by stage
 
-Only in **class folders** (the desktop app's classic mode), where grades live in each student's `.submission.md`. A **workspace** (a folder with `.opengrader/workspace.sqlite3`) keeps its grades in a database the assistant's work would never reach, so Opengrader refuses to make a copy of one. Tell the teacher that, instead of working around it.
+The same in a **class folder** (the desktop app's classic mode) and in a **workspace** (`opengrader tui`, the browser app). Your copy and every command in it are identical; only the teacher's commands differ (`--workspace <folder> --assignment <title>` instead of `--submissions`). In a workspace your grade on an answer someone graded after the copy was made arrives as a change request the teacher approves or dismisses, and a reading you type with `og agent transcribe` helps you grade but is not stored there. Never open the workspace folder or its `.opengrader/` database: it holds every name.
 
 | Stage | Can you help? | How |
 | --- | --- | --- |
@@ -84,6 +84,10 @@ you:       read AGENTS.md there, then og agent status / tasks / transcribe / gra
 teacher:   opengrader agent apply --submissions … --incoming <packet> --yes
            → your suggestions arrive as AI grades in the grading app, to confirm or change
 ```
+
+In a workspace the teacher uses `prepare --workspace … --assignment …` and
+`apply --workspace … --assignment …` (or presses A on the assignment list);
+the middle is the same.
 
 Every packet has its own `AGENTS.md` (and a `CLAUDE.md` that points to it).
 It gives the exact command to run Opengrader from that folder and the full

@@ -38,6 +38,7 @@ it('reads saved preferences and falls back to defaults for invalid values', asyn
     sidebarExpanded: true,
     pdfAction: 'open',
     theme: 'system',
+    rosterNameOrder: 'last',
   });
 });
 

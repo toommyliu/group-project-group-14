@@ -383,3 +383,38 @@ class TestEnsureReady:
 
         # vision purpose should pass since vision_model IS in the list
         assert app_config.ensure_ready(resolved, purpose="vision") is None
+
+
+# ensure_ready when Ollama does not answer
+
+def _ollama_down(monkeypatch, *, installed: bool, host: str = app_config.DEFAULT_HOST) -> str:
+    import shutil
+
+    def refused(resolved: app_config.ResolvedAI) -> list[str]:
+        raise OSError("failed to reach Ollama at /api/tags: [Errno 61] Connection refused")
+
+    monkeypatch.setattr(app_config, "available_models", refused)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/ollama" if installed else None)
+    monkeypatch.setattr(app_config.sys, "platform", "linux")  # no /Applications/Ollama.app check
+    with pytest.raises(app_config.AIUnavailableError) as excinfo:
+        app_config.ensure_ready(app_config.for_provider("ollama", host=host), purpose="vision")
+    return str(excinfo.value)
+
+
+def test_ollama_not_running_says_so_and_how_to_start_it(monkeypatch) -> None:
+    message = _ollama_down(monkeypatch, installed=True)
+    assert message.startswith("Ollama isn't running.")
+    assert "ollama serve" in message
+    assert "Errno" not in message and "/api/tags" not in message
+
+
+def test_ollama_not_installed_says_where_to_get_it(monkeypatch) -> None:
+    message = _ollama_down(monkeypatch, installed=False)
+    assert message.startswith("Ollama isn't installed.")
+    assert "https://ollama.com" in message
+
+
+def test_ollama_on_another_computer_names_that_host(monkeypatch) -> None:
+    message = _ollama_down(monkeypatch, installed=False, host="http://gpu-box:11434")
+    assert "http://gpu-box:11434" in message
+    assert "installed" not in message

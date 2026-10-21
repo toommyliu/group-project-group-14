@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 
+from .scan_notes import SCAN_WARNINGS_SUFFIX, read_note_path, write_note
+
 
 @dataclass(frozen=True)
 class SubmissionPageRange:
@@ -112,11 +114,11 @@ def split_scanned_submission_pdf(
 
 
 def write_scan_warnings(pdf: Path, warnings: tuple[str, ...]) -> None:
-    pdf.with_suffix(".scan.json").write_text(json.dumps({"warnings": list(warnings)}, indent=2) + "\n")
+    write_note(pdf, SCAN_WARNINGS_SUFFIX, json.dumps({"warnings": list(warnings)}, indent=2) + "\n")
 
 
 def read_scan_warnings(pdf: Path) -> tuple[str, ...]:
-    path = pdf.with_suffix(".scan.json")
+    path = read_note_path(pdf, SCAN_WARNINGS_SUFFIX)
     if not path.exists():
         return ()
     data = json.loads(path.read_text())

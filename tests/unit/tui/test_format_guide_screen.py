@@ -81,6 +81,8 @@ def test_the_outcomes_template_is_offered_and_copyable() -> None:
         app = TuiApp()
         async with app.run_test(size=(150, 50)) as pilot:
             await pilot.pause()
+            # Classic starts in the class-folder box, which would take the key.
+            app.set_focus(None)
             await pilot.press("t")
             await pilot.pause()
             screen = app.screen

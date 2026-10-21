@@ -15,7 +15,11 @@ import click
 from opengrader.cli import CONTEXT_SETTINGS, ai_default, resolved_ai
 from opengrader.core.workspace.models import AssignmentInputs
 from opengrader.core.pipeline import (
+    AI_UNAVAILABLE_DETAIL,
+    ANSWER_KEY_DETAIL,
+    PAGE_ORDER_DETAIL,
     PIPELINE_STAGES,
+    SPLIT_REVIEW_DETAIL,
     LlmOptions,
     PipelineProgress,
     PipelineReport,
@@ -25,6 +29,12 @@ from opengrader.core.pipeline import (
     plan_pipeline,
     run_pipeline,
     section_requests,
+)
+
+# The first line of a pause's detail says which question it is; it is for
+# PipelineReport to read, not for a person.
+_PAUSE_TAGS = frozenset(
+    {AI_UNAVAILABLE_DETAIL, ANSWER_KEY_DETAIL, PAGE_ORDER_DETAIL, SPLIT_REVIEW_DETAIL}
 )
 
 EPILOG = """\
@@ -74,7 +84,8 @@ Drafting rubrics (--draft-rubrics):
 
 \b
 What it builds under --out:
-  split/                       per-student PDFs (skipped when --scan is a directory)
+  student-pdfs/                one PDF per student (skipped when --scan is a directory)
+  student-pdfs/scan-notes/     what the split noticed about each PDF (warnings, page matches)
   submissions/                 the *.submission.md folder for file utilities
   .opengrader/run-ledger.jsonl the stage ledger that makes a re-run resumable
 
@@ -135,7 +146,8 @@ class _Narrator:
             and outcome.detail
         ):
             for line in outcome.detail.splitlines():
-                self._write(f"    {line}\n")
+                if line not in _PAUSE_TAGS:
+                    self._write(f"    {line}\n")
 
     def status(self, message: str) -> None:
         self._close_ticks()
@@ -250,6 +262,19 @@ def _print_summary(report: PipelineReport) -> None:
         )
         return
 
+    if report.ai_unavailable:
+        paused = next(o for o in report.stages if o.status is StageStatus.PAUSED)
+        print("\nPaused before auto-grading: the AI can't be reached.")
+        for line in paused.detail.splitlines()[1:]:
+            print(f"  {line}")
+        print(
+            "Nothing was graded or published. Run the same command again with one of:\n"
+            "  --grade-without-ai  grade only what can be checked exactly against the key\n"
+            "  --no-auto-grade     skip auto-grading and grade everything yourself\n"
+            "or start the AI first. In a terminal you are asked here instead."
+        )
+        return
+
     if report.answer_key_needed:
         paused = next(o for o in report.stages if o.status is StageStatus.PAUSED)
         print("\nPaused before extraction: these scans need an answer key.")
@@ -316,6 +341,7 @@ def _report_to_dict(report: PipelineReport) -> dict[str, object]:
     return {
         "ok": report.ok,
         "paused_for_review": report.paused_for_review,
+        "ai_unavailable": report.ai_unavailable,
         "ready_to_grade": report.ready_to_grade,
         "submission_count": report.submission_count,
         "submissions_dir": str(report.submissions_dir),
@@ -566,6 +592,37 @@ def _resolve_page_order(
     return _run_pipeline(request, narrator, as_json=as_json)
 
 
+def _resolve_ai_unavailable(
+    request: PipelineRequest,
+    report: PipelineReport,
+    narrator: "_Narrator",
+    *,
+    as_json: bool,
+) -> PipelineReport:
+    """`report` paused before auto-grading because the AI that grades written
+    answers can't be reached. A TTY without --json is asked whether to grade
+    without it (yes, the default) or skip auto-grading, and the run carries
+    on; anything else is told how to answer and stays paused."""
+    stream = sys.stderr if as_json else sys.stdout
+    if not (sys.stdin.isatty() and not as_json):
+        return report
+    stream.write(
+        "\n  Yes: grade without AI now. Only answers that can be checked exactly\n"
+        "       against the answer key are scored; the rest are left for you.\n"
+        "  No:  skip auto-grading. Start the AI and run this again to auto-grade.\n"
+    )
+    stream.flush()
+    try:
+        answer = input("Auto-grade without AI? [Y/n] ").strip().lower()
+    except EOFError:
+        return report
+    if answer in ("", "y", "yes"):
+        return _run_pipeline(replace(request, grade_without_ai=True), narrator, as_json=as_json)
+    if answer in ("n", "no"):
+        return _run_pipeline(replace(request, auto_grade=False), narrator, as_json=as_json)
+    return report
+
+
 def _run_pipeline(
     request: PipelineRequest, narrator: "_Narrator", *, as_json: bool
 ) -> PipelineReport:
@@ -742,7 +799,7 @@ def _save_inputs(
 @click.option(
     "--out",
     help=(
-        "Cohort folder to build: split/, submissions/ and the run ledger. "
+        "Cohort folder to build: student-pdfs/, submissions/ and the run ledger. "
         "Required without a class folder."
     ),
 )
@@ -912,6 +969,16 @@ def _save_inputs(
     ),
 )
 @click.option(
+    "--grade-without-ai",
+    is_flag=True,
+    help=(
+        "If the AI that grades written answers can't be reached (Ollama not "
+        "running, say), auto-grade without it: only answers that can be checked "
+        "exactly against the answer key are scored, the rest are left for you. Without this "
+        "the run pauses before auto-grading (asked here in a terminal)."
+    ),
+)
+@click.option(
     "--read-without-key",
     is_flag=True,
     help=(
@@ -981,6 +1048,7 @@ def command(
     keep_page_order: bool,
     fix_split: bool,
     keep_split: bool,
+    grade_without_ai: bool,
     read_without_key: bool,
     force: bool,
     fresh: bool,
@@ -1039,6 +1107,7 @@ def command(
         keep_page_order=keep_page_order,
         fix_split=fix_split,
         keep_split=keep_split,
+        grade_without_ai=grade_without_ai,
         read_without_key=read_without_key,
         llm=LlmOptions(
             read_handwriting=llm if llm is not None else ai.read_handwriting,
@@ -1089,6 +1158,9 @@ def command(
 
     if report.page_order_review_needed:
         report = _resolve_page_order(request, report, narrator, as_json=as_json)
+
+    if report.ai_unavailable:
+        report = _resolve_ai_unavailable(request, report, narrator, as_json=as_json)
 
     report = replace(report, workspace=root)
     # A paused run published nothing on purpose: the answer key is about to be

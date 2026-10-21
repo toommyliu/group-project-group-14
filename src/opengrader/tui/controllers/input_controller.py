@@ -115,8 +115,8 @@ class CommandBindingSpec:
 INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
     CommandBindingSpec("q", InputCommand.APP_QUIT, "Quit", (InputContext.GLOBAL,)),
     # F2 leaves grading to choose something else: the workspace's assignment
-    # list (`opengrader tui`), or the Start grading card (`opengrader classic`).
-    # There is nothing to leave on the Tools page itself, so it is not bound there.
+    # list (`opengrader tui`). In `opengrader classic` it is F3's Home, kept
+    # out of the footer. There is nothing to leave on the Tools page itself.
     CommandBindingSpec(
         "f2",
         InputCommand.SWITCH_ASSIGNMENT,
@@ -126,7 +126,7 @@ INPUT_BINDINGS: tuple[CommandBindingSpec, ...] = (
     CommandBindingSpec(
         "f3",
         InputCommand.OPEN_START_PAGE,
-        "Tools",
+        "Home",
         (InputContext.QA, InputContext.GRADE),
     ),
     CommandBindingSpec(

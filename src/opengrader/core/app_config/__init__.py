@@ -934,6 +934,34 @@ def missing_key_help(provider: ProviderSpec) -> str:
     )
 
 
+def ollama_unreachable_help(host: str) -> str:
+    """What every surface says when Ollama does not answer: the problem, then the fix.
+
+    Short on purpose. The raw connection error ("[Errno 61] Connection
+    refused") tells a teacher nothing, so it is not repeated here.
+    """
+    import shutil
+    from urllib.parse import urlparse
+
+    if urlparse(host).hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return (
+            f"Ollama isn't answering at {host}. Check that it is running on "
+            "that computer, then try again. You can also grade without AI."
+        )
+    installed = shutil.which("ollama") is not None or (
+        sys.platform == "darwin" and Path("/Applications/Ollama.app").exists()
+    )
+    if not installed:
+        return (
+            "Ollama isn't installed. Get it from https://ollama.com, then try "
+            "again. You can also grade without AI."
+        )
+    return (
+        "Ollama isn't running. Open the Ollama app (or run 'ollama serve'), "
+        "then try again. You can also grade without AI."
+    )
+
+
 def resolve_api_key(
     provider: ProviderSpec,
     *,
@@ -1317,6 +1345,8 @@ def ensure_ready(
     try:
         models = available_models(current)
     except Exception as exc:  # provider client errors are provider-specific
+        if provider.name == OLLAMA.name:
+            raise AIUnavailableError(ollama_unreachable_help(current.host)) from exc
         raise AIUnavailableError(
             f"Could not reach {provider.label} at {current.host}: {exc}"
         ) from exc

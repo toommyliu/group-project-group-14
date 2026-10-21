@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 from textual.app import App, ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Label, ListItem, ListView, Static
 
 from opengrader.core.workspace.models import Assignment
@@ -28,6 +28,7 @@ class WorkspaceHome(App[str | None]):
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh assignments"),
         ("w", "write_back", "Write grades to files"),
+        ("a", "assistant", "AI assistant"),
     ]
     DEFAULT_CSS = """
     #workspace-home {
@@ -52,8 +53,13 @@ class WorkspaceHome(App[str | None]):
         height: 1fr;
     }
 
-    #write-back {
+    #assignment-actions {
+        height: auto;
         margin-top: 1;
+    }
+
+    #assistant {
+        margin-left: 1;
     }
 
     #picker-title,
@@ -131,15 +137,25 @@ class WorkspaceHome(App[str | None]):
             with Vertical(id="assignment-picker"):
                 yield Label("Choose an assignment to grade", id="picker-title")
                 yield ListView(id="assignments")
-                yield Button(
-                    "Write grades to files (W)",
-                    id="write-back",
-                    tooltip=(
-                        "Copy this assignment's workspace grades into its "
-                        ".submission.md files, so exports and backups see them. "
-                        "Shows a preview first."
-                    ),
-                )
+                with Horizontal(id="assignment-actions"):
+                    yield Button(
+                        "Write grades to files (W)",
+                        id="write-back",
+                        tooltip=(
+                            "Copy this assignment's workspace grades into its "
+                            ".submission.md files, so exports and backups see them. "
+                            "Shows a preview first."
+                        ),
+                    )
+                    yield Button(
+                        "AI assistant (A)",
+                        id="assistant",
+                        tooltip=(
+                            "Your own AI assistant writes or checks the answer key, "
+                            "drafts rubrics or grades, in a copy with no names or IDs. "
+                            "Its grades come back for you to confirm."
+                        ),
+                    )
             with Vertical(id="empty-workspace"):
                 yield Label("Set up your first assignment", id="empty-title")
                 yield Static(
@@ -207,6 +223,29 @@ class WorkspaceHome(App[str | None]):
             self.exit(PROCESS_WORKSPACE)
         elif event.button.id == "write-back":
             self.action_write_back()
+        elif event.button.id == "assistant":
+            self.action_assistant()
+
+    def action_assistant(self) -> None:
+        from opengrader.tui.ui.screens.assistant_screen import WorkspaceAssistantMenu
+
+        if self.client.connection.account:
+            self.notify(
+                f"Only {self.client.connection.owner}, who owns this workspace, can give "
+                "its work to an AI assistant."
+            )
+            return
+        listing = self.query_one("#assignments", ListView)
+        if not self.assignments or listing.index is None:
+            self.notify("Choose an assignment first.")
+            return
+        self.push_screen(
+            WorkspaceAssistantMenu(
+                root=Path(self.client.connection.root),
+                assignment_id=self.assignments[listing.index].id,
+                request=self.client.request,
+            )
+        )
 
     def action_write_back(self) -> None:
         from opengrader.tui.ui.screens.write_back_screen import WriteBackScreen

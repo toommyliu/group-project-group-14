@@ -1075,3 +1075,105 @@ def test_no_hint_without_llm(tmp_path) -> None:
         status_callback=messages.append,
     )
     assert not any(m.startswith("Note:") for m in messages)
+
+
+# Auto-grading again never scores over a grade a person gave
+# (core/grading/ownership.py).
+
+def _cohort_case(tmp_path: Path) -> tuple[Path, Path, Path]:
+    solutions = tmp_path / "solutions.md"
+    solutions.write_text(SOLUTIONS_MD)
+    submissions = tmp_path / "submissions"
+    (submissions / "s1").mkdir(parents=True)
+    student = submissions / "s1" / "s1.submission.md"
+    student.write_text(SUBMISSION_MD)
+    return solutions, submissions, student
+
+
+def _by_hand(student: Path, question_id: str, **fields) -> None:
+    from opengrader.core.submissions import StudentSubmissionGradeUpdate, update_student_submission_file
+
+    update_student_submission_file(student, StudentSubmissionGradeUpdate(question_id=question_id, **fields))
+
+
+def _auto_grade(solutions: Path, submissions: Path, *extra: str) -> None:
+    run_cli(["--solutions", str(solutions), "--input", str(submissions), *extra])
+
+
+def test_partial_credit_given_by_hand_survives_grading_again(tmp_path: Path, capsys) -> None:
+    solutions, submissions, student = _cohort_case(tmp_path)
+    _auto_grade(solutions, submissions)
+    assert _reload(student)["q1"].points_awarded == 10
+
+    _by_hand(student, "q1", points_awarded=7, rubric_labels=())
+    _auto_grade(solutions, submissions)
+
+    assert _reload(student)["q1"].points_awarded == 7
+    out = capsys.readouterr().out
+    assert "Kept a grade a person gave: q1 (auto-grade gives 10/10)" in out
+    assert "Kept 1 grade(s) a person gave" in out
+
+
+def test_overwrite_grades_re_scores_them_as_before(tmp_path: Path) -> None:
+    solutions, submissions, student = _cohort_case(tmp_path)
+    _auto_grade(solutions, submissions)
+    _by_hand(student, "q1", points_awarded=7, rubric_labels=())
+    _auto_grade(solutions, submissions, "--overwrite-grades")
+    assert _reload(student)["q1"].points_awarded == 10
+
+
+def test_a_fixed_answer_key_still_re_scores_what_auto_grading_wrote(tmp_path: Path) -> None:
+    solutions, submissions, student = _cohort_case(tmp_path)
+    # q2's key wrongly says A, which this student chose.
+    solutions.write_text(SOLUTIONS_MD.replace("    - C\n  - **Rubric**", "    - A\n  - **Rubric**", 1))
+    _auto_grade(solutions, submissions)
+    assert (_reload(student)["q2"].points_awarded, _reload(student)["q2"].analysis) == (10, "Correct")
+
+    solutions.write_text(SOLUTIONS_MD)
+    _auto_grade(solutions, submissions)
+    # Re-scored, and its own "Correct" does not stay on a wrong answer.
+    assert (_reload(student)["q2"].points_awarded, _reload(student)["q2"].analysis) == (0, "")
+
+
+def test_a_comment_given_by_hand_stays_while_the_score_follows_the_key(tmp_path: Path) -> None:
+    solutions, submissions, student = _cohort_case(tmp_path)
+    solutions.write_text(SOLUTIONS_MD.replace("    - C\n  - **Rubric**", "    - A\n  - **Rubric**", 1))
+    _auto_grade(solutions, submissions)
+    _by_hand(student, "q2", analysis="Good reasoning, see me about 29.")
+
+    solutions.write_text(SOLUTIONS_MD)
+    _auto_grade(solutions, submissions)
+    q2 = _reload(student)["q2"]
+    assert (q2.points_awarded, q2.analysis) == (0, "Good reasoning, see me about 29.")
+
+
+def test_a_folder_graded_before_the_record_falls_back_to_the_history(tmp_path: Path) -> None:
+    from opengrader.core.grading.ownership import RECORD_FILENAME
+
+    solutions, submissions, student = _cohort_case(tmp_path)
+    solutions.write_text(SOLUTIONS_MD.replace("    - C\n  - **Rubric**", "    - A\n  - **Rubric**", 1))
+    _auto_grade(solutions, submissions)
+    (submissions / ".opengrader" / RECORD_FILENAME).unlink()
+
+    solutions.write_text(SOLUTIONS_MD)
+    _auto_grade(solutions, submissions)
+    # The history says the auto-grader wrote q2's 10: still its to change.
+    assert _reload(student)["q2"].points_awarded == 0
+
+
+def test_a_grade_that_came_with_the_file_is_a_persons(tmp_path: Path) -> None:
+    solutions, submissions, student = _cohort_case(tmp_path)
+    # Graded before any auto-grading ran here, and never journalled.
+    student.write_text(SUBMISSION_MD.replace("  - Response text: b.\n  - Possible points:\n  - Points:", "  - Response text: b.\n  - Possible points:\n  - Points: 7", 1))
+    assert _reload(student)["q1"].points_awarded == 7
+
+    _auto_grade(solutions, submissions)
+    assert _reload(student)["q1"].points_awarded == 7
+
+
+def test_a_dry_run_remembers_nothing(tmp_path: Path) -> None:
+    from opengrader.core.grading.ownership import RECORD_FILENAME
+
+    solutions, submissions, _student = _cohort_case(tmp_path)
+    _auto_grade(solutions, submissions, "--dry-run")
+    assert not (submissions / ".opengrader" / RECORD_FILENAME).exists()

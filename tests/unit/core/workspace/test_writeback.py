@@ -204,8 +204,12 @@ def test_a_student_id_fixed_in_the_file_still_matches_by_path(cls) -> None:
 
 def test_blank_placeholders_for_questions_a_file_lacks_are_not_noise(cls) -> None:
     """The workspace adds a blank answer for every question the extraction
-    missed (the sample files have no q5a–q6d). Blank, they are not reported;
+    missed (here q5a, cut from the first file). Blank, they are not reported;
     graded, they are, since a file cannot gain a question."""
+    path = cls["files"][0]
+    before, remainder = path.read_text().split("- q5a:", 1)
+    _, after = remainder.split("- q5b:", 1)
+    path.write_text(before + "- q5b:" + after)
     assert plan_write_back(cls["root"], cls["aid"]).plan.unknown_questions == ()
 
     _ws_grade(cls, 0, "q5a", 2)

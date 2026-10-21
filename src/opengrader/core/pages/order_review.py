@@ -11,6 +11,7 @@ from opengrader.core.submissions.extra_pages import (
     resolve_extra_pages_path,
     write_extra_pages_map,
 )
+from opengrader.core.submissions.scan_notes import write_note
 from opengrader.core.submissions.splitter import read_scan_warnings, write_scan_warnings
 
 from .split import SIDECAR_SUFFIX, describe_order, order_breaks, order_keys, order_warning, read_sidecar, sorted_order
@@ -222,7 +223,7 @@ def _sort_pdf(directory: Path, pdf: Path, finding: OrderFinding) -> bool:
 
 
 def _write_groups(directory: Path, pdf: Path, groups: Sequence[str | None], numbers: Sequence[int | None]) -> None:
-    pdf.with_suffix(SIDECAR_SUFFIX).write_text(json.dumps({
+    write_note(pdf, SIDECAR_SUFFIX, json.dumps({
         "pages": [{"group": group, "page_number": number} for group, number in zip(groups, numbers)],
     }, indent=1) + "\n")
     extra = read_extra_pages_map(directory)

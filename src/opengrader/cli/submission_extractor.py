@@ -77,6 +77,7 @@ from opengrader.core.submissions.manifest import (
     settings_fingerprint,
     utc_timestamp,
 )
+from opengrader.core.submissions.scan_notes import SCAN_WARNINGS_SUFFIX, read_note_path
 from opengrader.core.submissions.refine import (
     DEFAULT_REFINE_FLOOR,
     REJECTION_LABELS,
@@ -85,12 +86,23 @@ from opengrader.core.submissions.refine import (
     merge_refined_responses,
     refine_candidate,
 )
+from opengrader.core.submissions.reread import (
+    ai_reading_upgrades,
+    has_teacher_work,
+    is_graded,
+    keep_teacher_work,
+    same_student,
+)
 from opengrader.core.submissions.student_file import (
     StudentSubmissionDocument,
     StudentSubmissionGradeUpdate,
     load_student_submission_markdown,
     update_student_submission_file,
 )
+from opengrader.core.submissions.processor import source_pdf_relpath
+from opengrader.core.submissions.resplit import Displaced, back_up, carry_grades, install_staged
+from opengrader.core.grading.ownership import AutoGrades
+from opengrader.core.submissions.transcription import SOURCE_HUMAN
 from opengrader.core.history import (
     AspectValue,
     GradeJournal,
@@ -342,6 +354,207 @@ def _catalog_fingerprint(catalog: PageCatalog | None) -> str:
 
 
 JOURNAL_ACTOR_REFINE = "submission-extractor:refine"
+JOURNAL_ACTOR_AI_READING = "submission-extractor:ai-reading"
+
+# Why a re-read of an existing .submission.md is read into a staging folder
+# first instead of over the file (see core/submissions/reread.py).
+_REREAD_AI_UPGRADE = "ai-upgrade"
+_REREAD_KEEP_WORK = "keep-work"
+# No ledger record says which PDF the file was read from (a folder read
+# before the ledger kept fingerprints): merged only if it is the same student.
+_REREAD_UNVERIFIED = "unverified"
+# The PDF changed (the scan was split again): the grades follow their student
+# to whichever file now holds them, once the whole run is read (resplit.py).
+_REREAD_RESPLIT = "resplit"
+
+
+def _reread_mode(
+    pdf_path: Path,
+    markdown_path: Path,
+    record: ExtractionRecord | None,
+    *,
+    source_sha256: str,
+    without_ai_settings: str | None,
+    output_dir: Path,
+) -> str:
+    """How to re-read a PDF whose .submission.md a person worked on: only
+    the AI's new readings of untouched answers (nothing else changed since),
+    or all of it with their work laid back over it. "" when nobody worked on
+    it: straight over the file, as a first reading would.
+
+    Only a re-read of the very PDF the file was read from is merged in
+    place. After the split changed, the same file name may be another
+    student, so the grades are carried to whichever file now names their
+    student. With no record of the PDF at all (a folder read before the
+    ledger kept one), the new reading is merged only if it names the same
+    student.
+    """
+    if not markdown_path.exists():
+        return ""
+    try:
+        worked_on = has_teacher_work(load_student_submission_markdown(markdown_path))
+    except (OSError, ValueError):
+        # Unreadable: read aside, and the merge leaves it untouched.
+        worked_on = True
+    if not worked_on:
+        return ""
+    if record is None:
+        return _REREAD_UNVERIFIED
+    if record.source_sha256 != source_sha256:
+        return _REREAD_RESPLIT
+    if without_ai_settings is not None and record_is_reusable(
+        record, output_dir=output_dir, source_sha256=source_sha256, settings_id=without_ai_settings
+    ):
+        return _REREAD_AI_UPGRADE
+    return _REREAD_KEEP_WORK
+
+
+def _displaced(stem: str, markdown_path: Path) -> Displaced:
+    """A graded file as it is before its changed PDF is read again."""
+    text = markdown_path.read_text()
+    try:
+        document = load_student_submission_markdown(markdown_path)
+    except (OSError, ValueError):
+        document = None
+    return Displaced(stem=stem, markdown=text, document=document)
+
+
+def _is_same_student(
+    markdown_path: Path, staged_markdown: Path, *, emit: "Callable[[str], None]"
+) -> bool:
+    """For a graded file with no record of the scan it was read from: only
+    the same student's reading may be merged into it. Otherwise the file is
+    left as it was, and the run says so; it is not recorded, so the next run
+    asks again."""
+    try:
+        existing = load_student_submission_markdown(markdown_path)
+        fresh = load_student_submission_markdown(staged_markdown)
+    except (OSError, ValueError) as exc:
+        emit(f"  Warning: could not compare it with its file ({exc}); the file was left as it was.")
+        return False
+    if same_student(existing, fresh):
+        return True
+
+    def who(document: StudentSubmissionDocument) -> str:
+        name = (document.student_name or "").strip() or "no name"
+        return f"{name} ({document.student_id.strip()})" if document.student_id.strip() else name
+
+    emit(
+        f"  Left as it was: {markdown_path.name} has grades, nothing records which scan it "
+        f"was read from, and the scan now reads as {who(fresh)}, not {who(existing)}."
+    )
+    emit(
+        "  If it is the same student, set their name and ID in the file and run again; "
+        "if it is not, move or delete the file to read the scan fresh."
+    )
+    return False
+
+
+def _adopt_ai_readings(
+    markdown_path: Path,
+    staged_markdown: Path,
+    *,
+    journal: "GradeJournal | None",
+    operator: str,
+    emit: "Callable[[str], None]",
+) -> bool:
+    """An AI reader is available now and was not when this was read: take
+    its reading for every answer nobody graded or typed in. False when the
+    file could not be read, so it is not recorded as done."""
+    try:
+        existing = load_student_submission_markdown(markdown_path)
+        fresh = load_student_submission_markdown(staged_markdown)
+    except (OSError, ValueError) as exc:
+        emit(f"  Warning: could not add the AI's reading ({exc}); the file was left as it was.")
+        return False
+
+    upgrades = ai_reading_upgrades(existing, fresh)
+    for upgrade in upgrades:
+        update_student_submission_file(
+            markdown_path,
+            StudentSubmissionGradeUpdate(
+                question_id=upgrade.question_id,
+                response_text=upgrade.new_text,
+                response_confidence=upgrade.new_confidence,
+                clear_response_confidence=upgrade.new_confidence is None,
+                response_source=upgrade.new_source,
+                clear_response_source=upgrade.new_source is None,
+                response_provider=upgrade.new_provider,
+            ),
+        )
+        if journal is None:
+            continue
+        try:
+            journal.append(
+                kind="transcription",
+                student_id=existing.student_id or "",
+                student_name=existing.student_name or "",
+                question_id=upgrade.question_id,
+                summary=f"read with AI (run by {operator})",
+                old=journal_payload(
+                    "transcription",
+                    AspectValue(
+                        text=upgrade.old_text,
+                        confidence=upgrade.old_confidence,
+                        source=upgrade.old_source,
+                    ),
+                ),
+                new=journal_payload(
+                    "transcription",
+                    AspectValue(
+                        text=upgrade.new_text,
+                        confidence=upgrade.new_confidence,
+                        source=upgrade.new_source,
+                    ),
+                ),
+            )
+        except OSError:
+            pass
+
+    left = sum(
+        1
+        for question in existing.questions
+        if is_graded(question) or question.response_source == SOURCE_HUMAN
+    )
+    kept = f"; {left} graded or typed-in answer(s) left as they were" if left else ""
+    emit(f"  Read with AI: {len(upgrades)} answer(s) updated{kept}")
+    return True
+
+
+def _swap_in_keeping_work(
+    pdf_path: Path,
+    markdown_path: Path,
+    staging_dir: Path,
+    output_dir: Path,
+    outputs: Sequence[str],
+    *,
+    emit: "Callable[[str], None]",
+) -> bool:
+    """A re-read of a file a person has worked on: write their grades,
+    typed-in readings and identity into the new reading, then move it into
+    place. False when either file could not be read, so it is left as it was."""
+    staged_markdown = staging_dir / markdown_path.relative_to(output_dir)
+    try:
+        existing = load_student_submission_markdown(markdown_path)
+        fresh = load_student_submission_markdown(staged_markdown)
+        kept = keep_teacher_work(existing, fresh, staged_markdown.read_text())
+    except (OSError, ValueError) as exc:
+        emit(f"  Warning: could not keep the grades in it ({exc}); the file was left as it was.")
+        return False
+
+    install_staged(
+        staging_dir,
+        output_dir,
+        outputs,
+        source_pdf=source_pdf_relpath(pdf_path, markdown_path.parent),
+        markdown=kept.markdown,
+    )
+
+    if kept.kept_grades:
+        emit(f"  Kept the grades on {kept.kept_grades} answer(s)")
+    for warning in kept.warnings:
+        emit(f"  {warning}")
+    return True
 
 
 def _plan_refine(
@@ -792,12 +1005,7 @@ class _Hooks:
 @click.option(
     "--refresh-layout",
     is_flag=True,
-    help="Re-run layout detection (template alignment or dark scan) even during an update.",
-)
-@click.option(
-    "--update",
-    is_flag=True,
-    help="Only update student metadata (name/ID) and transcription in existing .submission.md files.",
+    help="Re-run layout detection (template alignment or dark scan).",
 )
 @click.option(
     "--jobs",
@@ -944,7 +1152,6 @@ def command(
     legacy_layout: bool,
     debug: bool,
     refresh_layout: bool,
-    update: bool,
     requested_jobs: int | None,
     resume: bool,
     fail_fast: bool,
@@ -963,11 +1170,7 @@ def command(
     ai = resolved_ai()
 
     if refine:
-        conflicting = [
-            name
-            for name, active in (("--resume", resume), ("--update", update))
-            if active
-        ]
+        conflicting = [name for name, active in (("--resume", resume),) if active]
         if conflicting:
             print(
                 f"error: --refine cannot be combined with {', '.join(conflicting)}. "
@@ -1264,12 +1467,12 @@ def command(
                     emit=lambda message: print(message, file=sys.stderr),
                     interactive=hooks.prompt_cloud_send,
                 )
-        print(f"Using Ollama vision model: {ollama_model}")
         try:
             vision_reader = app_config.vision_reader(effective_ai)
             # Even with --adopt-only: whether the reader is ready is part of
             # the settings, so this pass must see what a reading would.
             app_config.ensure_ready(effective_ai, purpose="vision")
+            print(f"Using Ollama vision model: {ollama_model}")
         except (app_config.CloudConsentRequired, app_config.CloudDisabledError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             print(
@@ -1279,7 +1482,7 @@ def command(
             )
             sys.exit(2)
         except Exception as exc:
-            print(f"Warning: Ollama model not available ({exc}). Proceeding without VLM for text extraction.", file=sys.stderr)
+            print(f"Note: {exc}\n      The scans are read without AI this time.", file=sys.stderr)
             vision_reader = None
 
     print(f"Found {len(pdfs)} submission PDF(s)")
@@ -1369,7 +1572,9 @@ def command(
             "skip_ollama_qa": no_ollama_qa,
             "vlm_model": effective_ai.vision_model if vision_reader else "",
             "save_layout_debug": debug,
-            "update": update,
+            # What the removed --update flag set; kept constant so the
+            # settings every earlier reading was recorded under still match.
+            "update": False,
             "refresh_layout": refresh_layout,
             "page_catalog": _catalog_fingerprint(page_catalog),
             # Only when the answer key moved a region, so a rubric edit — or a
@@ -1385,15 +1590,16 @@ def command(
     legacy_settings_id = settings_fingerprint(
         {
             **settings_base,
-            "scan_warnings": {pdf.name: file_fingerprint(pdf.with_suffix(".scan.json")) for pdf in pdfs},
+            "scan_warnings": {pdf.name: file_fingerprint(read_note_path(pdf, SCAN_WARNINGS_SUFFIX)) for pdf in pdfs},
         }
     )
 
-    def settings_for(pdf_path: Path) -> str:
+    def settings_for(pdf_path: Path, *, without_ai: bool = False) -> str:
         return settings_fingerprint(
             {
                 **settings_base,
-                "scan_warnings": {pdf_path.name: file_fingerprint(pdf_path.with_suffix(".scan.json"))},
+                **({"vlm_model": ""} if without_ai else {}),
+                "scan_warnings": {pdf_path.name: file_fingerprint(read_note_path(pdf_path, SCAN_WARNINGS_SUFFIX))},
             }
         )
 
@@ -1424,6 +1630,16 @@ def command(
 
     job_output_dir = refine_staging or output_dir
 
+    # Every PDF's last reading, resumed or not: a re-read of the same PDF over
+    # a file a person worked on is read aside and merged (see reread.py).
+    known = ledger if resume else read_manifest(output_dir)
+    reread_staging: Path | None = None
+    reread_modes: dict[str, str] = {}
+    # Graded files whose PDF changed, as they were, and their new readings.
+    displaced: dict[str, Displaced] = {}
+    resplit_read: list[ExtractionOutcome] = []
+    all_stems = [pdf.stem for pdf in pdfs]
+
     jobs: list[ExtractionJob] = []
     skipped: list[Path] = []
     unread: list[Path] = []
@@ -1451,14 +1667,30 @@ def command(
             continue
 
         expected_md = output_dir / pdf_path.stem / f"{pdf_path.stem}.submission.md"
-        performing_update = update and expected_md.exists()
-        if update and not performing_update:
-            emit(f"{pdf_path.name}: .submission.md missing, performing full extraction.")
+
+        reread_mode = "" if refine else _reread_mode(
+            pdf_path,
+            expected_md,
+            known.get(pdf_path.stem),
+            source_sha256=source_sha256,
+            without_ai_settings=(
+                settings_for(pdf_path, without_ai=True)
+                if resume and vision_reader is not None
+                else None
+            ),
+            output_dir=output_dir,
+        )
+        if reread_mode:
+            if reread_staging is None:
+                reread_staging = Path(tempfile.mkdtemp(prefix="opengrader-reread-"))
+            reread_modes[pdf_path.stem] = reread_mode
+        if reread_mode == _REREAD_RESPLIT:
+            displaced[pdf_path.stem] = _displaced(pdf_path.stem, expected_md)
 
         jobs.append(
             ExtractionJob(
                 pdf_path=pdf_path,
-                output_dir=job_output_dir,
+                output_dir=reread_staging if reread_mode else job_output_dir,
                 ocr_config=ocr_config,
                 dpi=render_dpi,
                 split_subquestions=not no_split_subquestions,
@@ -1467,7 +1699,6 @@ def command(
                 save_layout_debug=debug,
                 blank_assignment_template=blank_assignment_template,
                 roster=roster,
-                update=performing_update,
                 refresh_layout=refresh_layout,
                 llm_responses=llm_responses,
                 llm_math=llm_math,
@@ -1520,6 +1751,11 @@ def command(
         else None
     )
     refine_operator = current_actor()
+    ai_reading_journal = (
+        GradeJournal(resolve_history_dir(output_dir), actor=JOURNAL_ACTOR_AI_READING)
+        if any(mode == _REREAD_AI_UPGRADE for mode in reread_modes.values())
+        else None
+    )
     refine_tally = {"adopted": 0, "changed": 0}
 
     def report_outcome(outcome: ExtractionOutcome) -> None:
@@ -1550,11 +1786,46 @@ def command(
             emit("")
             return
 
-        emit(f"  Identity: {outcome.identity}")
+        markdown_path = outcome.markdown_path
+        reread_mode = reread_modes.get(outcome.key)
+        if reread_mode == _REREAD_RESPLIT:
+            # Placed once every file is read: the student may be in another one.
+            emit(f"  Identity: {outcome.identity}")
+            emit("  The scan was split again; its grades are placed after the last file.")
+            emit("")
+            resplit_read.append(outcome)
+            return
+        if reread_mode and reread_staging is not None and markdown_path is not None:
+            live = output_dir / markdown_path.relative_to(reread_staging)
+            if reread_mode == _REREAD_AI_UPGRADE:
+                merged = _adopt_ai_readings(
+                    live,
+                    markdown_path,
+                    journal=ai_reading_journal,
+                    operator=refine_operator,
+                    emit=emit,
+                )
+            else:
+                emit(f"  Identity: {outcome.identity}")
+                merged = (
+                    reread_mode == _REREAD_KEEP_WORK
+                    or _is_same_student(live, markdown_path, emit=emit)
+                ) and _swap_in_keeping_work(
+                    outcome.pdf_path, live, reread_staging, output_dir, outcome.outputs, emit=emit
+                )
+            if not merged:
+                emit("")
+                return
+            markdown_path = live
+        else:
+            emit(f"  Identity: {outcome.identity}")
         if outcome.section:
             emit(f"  Section: {outcome.section}")
-        emit(f"  Wrote: {outcome.markdown_path}")
+        emit(f"  Wrote: {markdown_path}")
         emit("")
+        record_reading(outcome)
+
+    def record_reading(outcome: ExtractionOutcome) -> None:
         append_record(
             output_dir,
             ExtractionRecord(
@@ -1570,6 +1841,43 @@ def command(
             ),
         )
 
+    def place_resplit_grades() -> None:
+        """Back up the displaced graded files, put every new reading in
+        place, then let each student's grades find their file."""
+        if not resplit_read or reread_staging is None:
+            return
+        emit("The scan was split again since some files were graded:")
+        backup = back_up([displaced[outcome.key] for outcome in resplit_read], output_dir)
+        for outcome in resplit_read:
+            live = output_dir / outcome.key / f"{outcome.key}.submission.md"
+            install_staged(
+                reread_staging,
+                output_dir,
+                outcome.outputs,
+                source_pdf=source_pdf_relpath(outcome.pdf_path, live.parent),
+            )
+            record_reading(outcome)
+        files = {stem: output_dir / stem / f"{stem}.submission.md" for stem in all_stems}
+        placed = carry_grades(
+            [displaced[outcome.key] for outcome in resplit_read],
+            files,
+            [outcome.key for outcome in resplit_read],
+            backup,
+            emit=emit,
+        )
+        # What auto-grading remembers writing follows the grades too, so it
+        # never mistakes a person's grade for its own on the file they moved to.
+        moves: dict[Path, Path | None] = {
+            output_dir / outcome.key / f"{outcome.key}.submission.md": None for outcome in resplit_read
+        }
+        moves.update({files[old]: files[new] for old, new in placed.carried})
+        auto_grades = AutoGrades(output_dir)
+        auto_grades.move(moves)
+        auto_grades.save()
+        if placed.backup_dir is not None:
+            emit(f"  The grades not placed are kept in {placed.backup_dir}.")
+        emit("")
+
     try:
         with (progress_bar or contextlib.nullcontext()):
             report = run_extraction_batch(
@@ -1581,6 +1889,7 @@ def command(
                 resolve_ambiguous=resolve_ambiguous,
                 fail_fast=fail_fast,
             )
+        place_resplit_grades()
         _print_reading_summary(report, escalate_floor=escalate_floor, emit=emit)
         if refine and refine_candidates:
             _print_refine_summary(
@@ -1615,6 +1924,8 @@ def command(
     finally:
         if refine_staging is not None:
             shutil.rmtree(refine_staging, ignore_errors=True)
+        if reread_staging is not None:
+            shutil.rmtree(reread_staging, ignore_errors=True)
 
 
 def run_cli(

@@ -186,12 +186,15 @@ class FolderSyncResult(BaseModel):
 class RegradeResult(BaseModel):
     """What grading a class folder again with its answer key did.
 
-    `updated` counts the grades that changed; `problems` names anything that
-    could not be read, graded or brought back into the browser.
+    `updated` counts the grades that changed; `kept` the grades a person
+    gave that grading would have scored otherwise and left alone; `problems`
+    names anything that could not be read, graded or brought back into the
+    browser.
     """
 
     files: int = 0
     updated: int = 0
+    kept: int = 0
     problems: list[str] = []
 
 
@@ -400,3 +403,50 @@ class ChangeRequest(BaseModel):
     current_rubric_labels: list[str] = []
     current_points: float | None = None
     decided_by: str | None = None
+
+
+class AgentGrade(BaseModel):
+    """One answer an AI assistant graded in its copy, coming home."""
+
+    submission_id: int
+    question_id: str
+    rubric_labels: list[str]
+    score_mode: Literal["rubric", "manual"] = "rubric"
+    points_awarded: float | None = None
+    analysis: str = Field(default="", max_length=50000)
+
+
+class AgentGrades(BaseModel):
+    """An assistant's copy merged back (`core/agent/workspace.py`).
+
+    `actor` names the copy (`agent:<copy>`), which the service treats as a
+    grader account of its own: it fills what nobody graded, and anything
+    else becomes a change request for the teacher.
+    """
+
+    actor: str = Field(pattern=r"^agent:[\w.-]+$", max_length=200)
+    grades: list[AgentGrade]
+
+
+class AgentGradeOutcome(BaseModel):
+    submission_id: int
+    question_id: str
+    outcome: Literal["saved", "requested", "changed", "refused", "missing"]
+    message: str = ""
+
+
+class AgentGradesResult(BaseModel):
+    outcomes: list[AgentGradeOutcome]
+
+
+class AnswerKeyReplace(BaseModel):
+    """A whole answer key, stored over the one the editor started from."""
+
+    qa_markdown: str
+    expected_qa_markdown: str
+
+
+class AnswerKeyReplaced(BaseModel):
+    # Stored answers brought up to the new key, and grades re-scored by it.
+    refreshed: int = 0
+    regraded: int = 0

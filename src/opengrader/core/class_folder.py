@@ -52,7 +52,7 @@ _ANSWER_PDF_WORDS = frozenset({"answer", "answers", "solution", "solutions", "ke
 _ANSWER_SOURCE_SUFFIXES = frozenset({".pdf", ".docx", ".txt", ".md"})
 _SCAN_WORDS = frozenset({"scan", "scans", "scanned", "submission", "submissions", "bundle"})
 _ROSTER_WORDS = frozenset({"roster", "students", "ids", "class"})
-_SPLIT_DIR_NAMES = ("split", "split-submissions", "split-pdfs")
+_SPLIT_DIR_NAMES = ("student-pdfs", "split", "split-submissions", "split-pdfs")
 # Folders the pipeline writes into; their PDFs are never a fresh input.
 _GENERATED_DIRS = frozenset({"submissions", "student-submissions", "grader-copies"})
 

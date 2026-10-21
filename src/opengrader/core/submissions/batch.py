@@ -48,7 +48,6 @@ class ExtractionJob:
     save_layout_debug: bool = False
     blank_assignment_template: AssignmentTemplate | None = None
     roster: list[_RosterEntry] | None = None
-    update: bool = False
     refresh_layout: bool = False
     llm_responses: bool = False
     llm_math: bool = False
@@ -175,7 +174,6 @@ def _execute_job(
             blank_assignment_template=job.blank_assignment_template,
             page_catalog=job.page_catalog,
             roster=job.roster,
-            update=job.update,
             refresh_layout=job.refresh_layout,
             resolve_ambiguous=None,
             llm_responses=job.llm_responses,
@@ -343,7 +341,6 @@ def _execute_job_inline(
             blank_assignment_template=job.blank_assignment_template,
             page_catalog=job.page_catalog,
             roster=job.roster,
-            update=job.update,
             refresh_layout=job.refresh_layout,
             resolve_ambiguous=resolve_ambiguous,
             llm_responses=job.llm_responses,

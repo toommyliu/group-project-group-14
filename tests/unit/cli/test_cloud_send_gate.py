@@ -313,6 +313,17 @@ def _consented(spec) -> None:
     app_config.save_settings(settings)
 
 
+def _blank_pdf(path: Path) -> None:
+    # A real PDF with no text: the answer-key tool reads a PDF's own text
+    # first, and a stub that will not open exits 1 before the cloud gate.
+    import fitz
+
+    doc = fitz.open()
+    doc.new_page(width=612, height=792)
+    doc.save(str(path))
+    doc.close()
+
+
 def test_automated_grading_refuses_a_real_cloud_send_without_the_flag(
     tmp_path: Path, gate_cloud_spec, capsys
 ) -> None:
@@ -456,7 +467,7 @@ def test_answer_key_refuses_a_real_cloud_send_without_the_flag(
 ) -> None:
     _consented(gate_cloud_spec)
     key_pdf = tmp_path / "key.pdf"
-    key_pdf.write_bytes(b"%PDF-1.4\n")
+    _blank_pdf(key_pdf)
 
     with pytest.raises(SystemExit) as excinfo:
         answer_key.run_cli(
@@ -515,7 +526,7 @@ def test_answer_key_never_prompts_when_its_caller_owns_the_terminal(
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("builtins.input", _no_input)
     key_pdf = tmp_path / "key.pdf"
-    key_pdf.write_bytes(b"%PDF-1.4\n")
+    _blank_pdf(key_pdf)
     messages: list[str] = []
 
     with pytest.raises(CloudConfirmationNeeded) as excinfo:

@@ -43,6 +43,12 @@ PIPELINE_STAGES: tuple[str, ...] = (
     STAGE_AUTO_GRADE,
 )
 
+# Where the split stage writes one PDF per student.
+SPLIT_DIRNAME = "student-pdfs"
+# What runs before that name wrote; a folder that has one keeps using it, so
+# resuming a run does not split the scan again.
+LEGACY_SPLIT_DIRNAME = "split"
+
 # With one scan per section, these run once for each section's scan…
 SECTION_STAGES: tuple[str, ...] = (STAGE_SCAN_CHECK, STAGE_SPLIT, STAGE_EXTRACT)
 # …and these once for the whole class, over every section's submissions.
@@ -62,6 +68,9 @@ PAGE_ORDER_DETAIL = "page-order:"
 ANSWER_KEY_DETAIL = "answer-key:"
 # …and when the split looks wrong somewhere (a submission of the wrong length).
 SPLIT_REVIEW_DETAIL = "split-review:"
+# Prefix of the PAUSED auto-grade outcome's detail when the AI that grades
+# written answers cannot be reached (Ollama not running, say).
+AI_UNAVAILABLE_DETAIL = "ai-unavailable:"
 
 
 class StageStatus(str, Enum):
@@ -134,6 +143,10 @@ class PipelineRequest:
     # given up front: read them anyway, by whatever numbers the pages print.
     # One-shot, like `force`: never remembered.
     read_without_key: bool = False
+    # The answer to "the AI that grades written answers can't be reached"
+    # given up front: auto-grade without it. Without this the run pauses
+    # before auto-grading for a person to decide. One-shot, like `force`.
+    grade_without_ai: bool = False
     llm: LlmOptions = LlmOptions()
     jobs: int | None = None
     auto_grade: bool = True
@@ -158,10 +171,14 @@ class PipelineRequest:
 
     @property
     def split_dir(self) -> Path:
+        root = self.output_dir / SPLIT_DIRNAME
+        legacy = self.output_dir / LEGACY_SPLIT_DIRNAME
+        if not root.exists() and legacy.is_dir():
+            root = legacy
         if self.section:
             # Each section's PDFs and their page-order findings apart.
-            return self.output_dir / "split" / section_slug(self.section)
-        return self.output_dir / "split"
+            return root / section_slug(self.section)
+        return root
 
     @property
     def review_dirs(self) -> tuple[Path, ...]:
@@ -272,6 +289,15 @@ class PipelineReport:
         wrong somewhere and nobody has answered for it yet."""
         return any(
             outcome.status is StageStatus.PAUSED and outcome.detail.startswith(SPLIT_REVIEW_DETAIL)
+            for outcome in self.stages
+        )
+
+    @property
+    def ai_unavailable(self) -> bool:
+        """True when the run paused before auto-grading because the AI that
+        grades written answers could not be reached."""
+        return any(
+            outcome.status is StageStatus.PAUSED and outcome.detail.startswith(AI_UNAVAILABLE_DETAIL)
             for outcome in self.stages
         )
 
@@ -1351,6 +1377,26 @@ def _run_auto_grade(
 ) -> StageOutcome:
     from opengrader.cli import automated_grading
 
+    without_ai = False
+    if request.llm.grade_written:
+        problem = _grading_ai_problem(request)
+        if problem and not request.grade_without_ai:
+            return StageOutcome(
+                stage=plan.stage,
+                status=StageStatus.PAUSED,
+                message="the AI can't be reached; nothing graded yet",
+                detail=f"{AI_UNAVAILABLE_DETAIL}\n{problem}",
+                duration_seconds=time.monotonic() - started,
+            )
+        if problem:
+            # Recorded as a pass without AI, so a later run that can reach
+            # it grades the written answers again.
+            without_ai = True
+            request = replace(request, llm=replace(request.llm, grade_written=False))
+            plan = replace(plan, argv=_auto_grade_argv(request))
+            reason = problem.split(". ", 1)[0].rstrip(".")
+            progress.status(f"{reason}. Grading without AI: only exact matches with the key are scored.")
+
     source, settings_id = _stage_ledger_key(request, plan.stage)
     automated_grading.run_cli(
         list(plan.argv[1:]),
@@ -1379,10 +1425,30 @@ def _run_auto_grade(
     return StageOutcome(
         stage=plan.stage,
         status=StageStatus.RAN,
-        message=f"graded {len(outputs)} submission(s) against {key_name}",
+        message=(
+            f"graded {len(outputs)} submission(s) against {key_name}"
+            + (" without AI" if without_ai else "")
+        ),
         duration_seconds=duration,
         outputs=tuple(str(path) for path in outputs),
     )
+
+
+def _grading_ai_problem(request: PipelineRequest) -> str:
+    """Why the AI that grades written answers cannot be used, or "" when it can.
+
+    A cloud provider still waiting for consent is not this question: the
+    grading command refuses that itself, with its own fix.
+    """
+    from opengrader.core import app_config
+
+    try:
+        app_config.ensure_ready(_resolved_for_request(request), purpose="text")
+    except (app_config.CloudConsentRequired, app_config.CloudDisabledError):
+        return ""
+    except app_config.AIUnavailableError as exc:
+        return str(exc)
+    return ""
 
 
 def _template_page_count(template: Path) -> int:

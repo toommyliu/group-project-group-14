@@ -60,6 +60,23 @@ def guide_text(name: str) -> str:
     )
 
 
+# What the teacher says to the assistant once it is open in its folder; the
+# folder's AGENTS.md carries the rules, this only points at it. Shown by the
+# terminal app and the browser alike.
+GRADING_PROMPT = (
+    "Read AGENTS.md in this folder and follow it exactly: grade the answers "
+    "that are still open, then give me a short summary."
+)
+KEY_PROMPT = (
+    "Read AGENTS.md in this folder and follow it exactly: do the task it gives "
+    "you on qa.md, check it, then tell me what you were unsure of."
+)
+RUBRIC_PROMPT = (
+    "Read AGENTS.md in this folder and follow it exactly: draft partial-credit "
+    "rubrics from the answers, then give me a short summary."
+)
+
+
 # The two kinds of folder an assistant works in. A grading packet holds
 # (redacted) student work; an answer-key workspace holds none at all.
 KIND_GRADING = "grading"
@@ -108,16 +125,24 @@ def packet_qa(packet: Path) -> QADocument:
 
 # A workspace (`opengrader tui`, the browser app) keeps its grades in this
 # database, not in `.submission.md` files: an assistant's grades merged into
-# files there would never reach it. The assistant works with class folders.
+# files there would never reach it, so its copies are made and merged back
+# through the workspace instead (`core/agent/workspace.py`).
 WORKSPACE_DATABASE = Path(".opengrader") / "workspace.sqlite3"
 
 
 def workspace_root(path: str | Path) -> Path | None:
-    """The workspace `path` is in (itself or a folder above it), or None."""
+    """The workspace `path` is in (itself or a folder above it), or None.
+
+    A class folder once opened in the browser has the database too, but it
+    is still graded from its files (`class_folder.is_workspace`), so the
+    class-folder workflow is the right one there.
+    """
+    from opengrader.core.class_folder import is_workspace
+
     here = Path(path).expanduser().resolve()
     for candidate in (here, *here.parents):
         if (candidate / WORKSPACE_DATABASE).is_file():
-            return candidate
+            return candidate if is_workspace(candidate) else None
     return None
 
 
@@ -126,7 +151,8 @@ def refuse_workspace(path: str | Path) -> None:
     if root is not None:
         raise AgentError(
             f"{root} is a workspace: its grades live in its database, not in "
-            ".submission.md files, so an assistant's work would never reach it. "
-            "The AI assistant works with class folders (the desktop app's "
-            "classic mode) for now."
+            ".submission.md files, so a copy made from its files would never "
+            "reach it. Make the copy from the workspace instead: "
+            f"opengrader agent prepare --workspace {shlex.quote(str(root))} "
+            "(or press A on its assignment list)."
         )

@@ -1,9 +1,10 @@
 """Work with an AI assistant the teacher already uses, without student identities.
 
 The teacher runs `prepare`, `apply`, `accept`/`dismiss`, `answer-key`,
-`use-key` and `delete` on the class folder; the assistant runs the rest from
-inside its packet, or reaches the same operations as MCP tools (`mcp`). The
-rules live in `core/agent/`.
+`use-key` and `delete` on the class folder — or, with `--workspace`, on a
+workspace assignment (`core/agent/workspace.py`); the assistant runs the rest
+from inside its packet, or reaches the same operations as MCP tools (`mcp`).
+The rules live in `core/agent/`.
 """
 
 from __future__ import annotations
@@ -48,6 +49,11 @@ The teacher, on the class folder:
   opengrader agent apply --submissions class/submissions --incoming <packet> --yes
 
 \b
+The teacher, on a workspace (opengrader tui, the browser app):
+  opengrader agent prepare --workspace course --assignment "Quiz 1"
+  opengrader agent apply --workspace course --assignment "Quiz 1" --incoming <packet> --yes
+
+\b
 The assistant, inside the packet:
   opengrader agent status
   opengrader agent tasks --json --question q2
@@ -83,6 +89,45 @@ def _packet(kind: str = "grading") -> Path:
         _fail(str(exc))
 
 
+_WORKSPACE_HELP = "A workspace folder (opengrader tui, the browser app) instead of a class folder."
+_ASSIGNMENT_HELP = "With --workspace: the assignment, by title or id (needed when it has several)."
+_KEY_FILE_HELP = (
+    "With --workspace: also write the change into the assignment's qa.md file (update), or "
+    "store it only in the workspace (leave). Required when the assignment has such a file."
+)
+
+
+def _workspace_target(raw_workspace: str, raw_assignment: str) -> tuple[Path, str]:
+    """The workspace and assignment, for the account that owns it only."""
+    from opengrader.core.agent.workspace import require_workspace, resolve_assignment
+    from opengrader.server.workspace.client import owned_by_another_account
+
+    try:
+        root = require_workspace(raw_workspace)
+        if owned_by_another_account(root):
+            _fail(
+                f"{root} belongs to another account: only its owner gives its work to an "
+                "AI assistant and merges it back"
+            )
+        return root, resolve_assignment(root, raw_assignment)
+    except AgentError as exc:
+        _fail(str(exc))
+
+
+def _workspace_request(root: Path):  # noqa: ANN202 - WorkspaceClient.request
+    """The workspace service, started if it is not running: it alone writes the database."""
+    from opengrader.server.workspace.client import WorkspaceClient, ensure_service
+
+    try:
+        return WorkspaceClient(ensure_service(root)).request
+    except (RuntimeError, OSError) as exc:
+        _fail(f"the workspace's service could not be reached: {exc}")
+
+
+def _workspace_flags(root: Path, assignment_id: str) -> str:
+    return f"--workspace {shlex.quote(str(root))} --assignment {shlex.quote(assignment_id)}"
+
+
 @click.group("agent", cls=Group, context_settings=CONTEXT_SETTINGS, epilog=EPILOG)
 def command() -> None:
     """Grade written answers with your own AI assistant (Claude, ChatGPT, …)
@@ -92,13 +137,15 @@ def command() -> None:
 
 
 @command.command("prepare")
-@click.option("--submissions", "raw_submissions", required=True, help="The class's submissions folder.")
-@click.option("--qa-file", "raw_qa", required=True, help="The answer key (qa.md).")
+@click.option("--submissions", "raw_submissions", default="", help="The class's submissions folder.")
+@click.option("--qa-file", "raw_qa", default="", help="The answer key (qa.md).")
+@click.option("--workspace", "raw_workspace", default="", help=_WORKSPACE_HELP)
+@click.option("--assignment", "raw_assignment", default="", help=_ASSIGNMENT_HELP)
 @click.option(
     "--out",
     "raw_out",
     default="",
-    help="Where to make the packet (default: <class folder>-ai-assistant/, beside the class folder).",
+    help="Where to make the packet (default: <class folder>-ai-assistant/, beside the class folder or workspace).",
 )
 @click.option("--name", default="", help="Packet name (default: ai-assistant-<date-time>).")
 @click.option("--question", "questions", multiple=True, help="Only this question (repeat for several).")
@@ -120,6 +167,8 @@ def command() -> None:
 def prepare_command(
     raw_submissions: str,
     raw_qa: str,
+    raw_workspace: str,
+    raw_assignment: str,
     raw_out: str,
     name: str,
     questions: tuple[str, ...],
@@ -128,24 +177,40 @@ def prepare_command(
     no_crop_check: bool,
 ) -> None:
     """Make a redacted packet for an AI assistant (run by the teacher)."""
-    submissions = Path(raw_submissions).expanduser()
-    qa_file = Path(raw_qa).expanduser()
-    for path, what in ((submissions, "submissions folder"), (qa_file, "answer key")):
-        if not path.exists():
-            _fail(f"{what} not found: {path}")
-    try:
-        packet = prepare_agent_packet(
-            submissions,
-            qa_file,
-            Path(raw_out).expanduser() if raw_out else None,
-            packet_id=name,
-            questions=questions,
-            include_graded=with_graded,
-            check_crops=not no_crop_check,
-            purpose="rubrics" if rubrics else "grading",
-        )
-    except (AgentError, PacketError, ValueError) as exc:
-        _fail(str(exc))
+    options = dict(
+        packet_id=name,
+        questions=questions,
+        include_graded=with_graded,
+        check_crops=not no_crop_check,
+        purpose="rubrics" if rubrics else "grading",
+    )
+    out = Path(raw_out).expanduser() if raw_out else None
+    if raw_workspace:
+        from opengrader.core.agent.workspace import prepare_workspace_packet
+
+        if raw_submissions or raw_qa:
+            _fail("give either --workspace or --submissions and --qa-file, not both")
+        root, assignment_id = _workspace_target(raw_workspace, raw_assignment)
+        try:
+            packet = prepare_workspace_packet(root, assignment_id, out, **options)
+        except (AgentError, PacketError, ValueError) as exc:
+            _fail(str(exc))
+        merge_command = f"opengrader agent apply {_workspace_flags(root, assignment_id)}"
+        keep_out = "workspace"
+    else:
+        if not raw_submissions or not raw_qa:
+            _fail("give --submissions and --qa-file (a class folder), or --workspace")
+        submissions = Path(raw_submissions).expanduser()
+        qa_file = Path(raw_qa).expanduser()
+        for path, what in ((submissions, "submissions folder"), (qa_file, "answer key")):
+            if not path.exists():
+                _fail(f"{what} not found: {path}")
+        try:
+            packet = prepare_agent_packet(submissions, qa_file, out, **options)
+        except (AgentError, PacketError, ValueError) as exc:
+            _fail(str(exc))
+        merge_command = f"opengrader agent apply --submissions {shlex.quote(str(submissions))}"
+        keep_out = "class folder"
     print(f"Made {packet.path}")
     print(f"  {packet.students} student(s), {packet.tasks} answer(s) left to grade.")
     print("  Names, IDs, scans and name/ID crops were left out; every student is an og-… code.")
@@ -169,12 +234,11 @@ def prepare_command(
         )
     print(
         "\nNext: start your AI assistant inside that folder and ask it to grade.\n"
-        "It reads AGENTS.md there. Keep it out of your class folder."
+        f"It reads AGENTS.md there. Keep it out of your {keep_out}."
     )
     print(
         "\nWhen it is done, merge its suggestions back (you review them in the app):\n"
-        f"  opengrader agent apply --submissions {shlex.quote(str(submissions))} "
-        f"--incoming {shlex.quote(str(packet.path))} --yes"
+        f"  {merge_command} --incoming {shlex.quote(str(packet.path))} --yes"
     )
 
 
@@ -311,20 +375,36 @@ def record_command(results, model: str) -> None:  # noqa: ANN001
 
 
 @command.command("apply")
-@click.option("--submissions", "raw_submissions", required=True, help="Your class's submissions folder.")
+@click.option("--submissions", "raw_submissions", default="", help="Your class's submissions folder.")
+@click.option("--workspace", "raw_workspace", default="", help=_WORKSPACE_HELP)
+@click.option("--assignment", "raw_assignment", default="", help=_ASSIGNMENT_HELP)
 @click.option("--incoming", "raw_incoming", required=True, help="The packet folder the assistant worked in.")
 @click.option("--yes", is_flag=True, help="Actually write. Without it the merge is only previewed.")
 @click.option("--delete-copy", is_flag=True, help="Delete the assistant's copy once the merge is written.")
 @click.pass_context
 def apply_command(
-    ctx: click.Context, raw_submissions: str, raw_incoming: str, yes: bool, delete_copy: bool
+    ctx: click.Context,
+    raw_submissions: str,
+    raw_workspace: str,
+    raw_assignment: str,
+    raw_incoming: str,
+    yes: bool,
+    delete_copy: bool,
 ) -> None:
     """Merge the assistant's suggestions back (run by the teacher).
 
     The same three-way merge as 'grade-merge apply': an answer you graded
-    meanwhile is never overwritten, and 'grade-restore' can undo it.
+    meanwhile is never overwritten, and 'grade-restore' can undo it. In a
+    workspace such an answer gets a change request instead, for you to
+    approve or dismiss (Q while grading).
     """
     from opengrader.cli.grade_merge import apply_command as merge_apply
+
+    if raw_workspace:
+        _apply_to_workspace(raw_workspace, raw_assignment, raw_incoming, yes=yes, delete_copy=delete_copy)
+        return
+    if not raw_submissions:
+        _fail("give --submissions (a class folder) or --workspace")
 
     ctx.invoke(
         merge_apply,
@@ -357,16 +437,70 @@ def apply_command(
             print(f"Deleted the copy at {raw_incoming}.")
 
 
+def _apply_to_workspace(
+    raw_workspace: str, raw_assignment: str, raw_incoming: str, *, yes: bool, delete_copy: bool
+) -> None:
+    from opengrader.core.agent.workspace import (
+        apply_workspace_plan,
+        delete_workspace_packet,
+        plan_workspace_apply,
+    )
+
+    root, assignment_id = _workspace_target(raw_workspace, raw_assignment)
+    try:
+        plan = plan_workspace_apply(root, assignment_id, raw_incoming)
+    except AgentError as exc:
+        _fail(str(exc))
+    for line in plan.lines():
+        print(line)
+    if not yes:
+        print("\nNothing was written. Add --yes to merge it.")
+        return
+    try:
+        outcome = apply_workspace_plan(plan, _workspace_request(root))
+    except AgentError as exc:
+        _fail(str(exc))
+    print()
+    for line in outcome.lines():
+        print(line)
+    print(
+        "\nThe assistant's grades are marked as AI grades: press v on a question while "
+        "grading to step through them and y to confirm each."
+    )
+    pending = [s for s in list_suggestions(plan.packet) if not s.decision]
+    if pending:
+        print(
+            f"\nThe assistant also suggested {len(pending)} fix(es) to the answer key; see them with: "
+            f"opengrader agent suggestions --incoming {shlex.quote(raw_incoming)}"
+        )
+    if delete_copy:
+        try:
+            delete_workspace_packet(plan.packet, root, assignment_id)
+        except AgentError as exc:
+            _fail(str(exc))
+        print(f"Deleted the copy at {raw_incoming}.")
+
+
 @command.command("delete")
-@click.option("--submissions", "raw_submissions", required=True, help="Your class's submissions folder.")
+@click.option("--submissions", "raw_submissions", default="", help="Your class's submissions folder.")
+@click.option("--workspace", "raw_workspace", default="", help=_WORKSPACE_HELP)
+@click.option("--assignment", "raw_assignment", default="", help=_ASSIGNMENT_HELP)
 @click.option("--incoming", "raw_incoming", required=True, help="The assistant's copy to delete.")
 @click.option("--yes", is_flag=True, help="Really delete it.")
-def delete_command(raw_submissions: str, raw_incoming: str, yes: bool) -> None:
+def delete_command(raw_submissions: str, raw_workspace: str, raw_assignment: str, raw_incoming: str, yes: bool) -> None:
     """Delete an assistant's copy once its work is merged back (run by the teacher)."""
     if not yes:
         _fail("deleting a copy cannot be undone; add --yes once its work is merged back")
     try:
-        delete_packet(raw_incoming, raw_submissions)
+        if raw_workspace:
+            from opengrader.core.agent.workspace import delete_workspace_packet
+
+            root, assignment_id = _workspace_target(raw_workspace, raw_assignment)
+            delete_workspace_packet(raw_incoming, root, assignment_id)
+        elif raw_submissions:
+            delete_packet(raw_incoming, raw_submissions)
+        else:
+            _fail("give --submissions (a class folder) or --workspace")
     except AgentError as exc:
         _fail(str(exc))
     print(f"Deleted {raw_incoming}.")
@@ -446,14 +580,40 @@ def suggestions_command(raw_incoming: str, as_json: bool) -> None:
 @command.command("accept")
 @click.argument("suggestion_id")
 @click.option("--incoming", "raw_incoming", required=True, help="The assistant's copy.")
-@click.option("--qa-file", "raw_qa", required=True, help="Your class's answer key, which is changed.")
-@click.option("--submissions", "raw_submissions", required=True, help="Your class's submissions folder.")
-def accept_command(suggestion_id: str, raw_incoming: str, raw_qa: str, raw_submissions: str) -> None:
+@click.option("--qa-file", "raw_qa", default="", help="Your class's answer key, which is changed.")
+@click.option("--submissions", "raw_submissions", default="", help="Your class's submissions folder.")
+@click.option("--workspace", "raw_workspace", default="", help=_WORKSPACE_HELP)
+@click.option("--assignment", "raw_assignment", default="", help=_ASSIGNMENT_HELP)
+@click.option("--key-file", type=click.Choice(("update", "leave")), default=None, help=_KEY_FILE_HELP)
+def accept_command(
+    suggestion_id: str,
+    raw_incoming: str,
+    raw_qa: str,
+    raw_submissions: str,
+    raw_workspace: str,
+    raw_assignment: str,
+    key_file: str | None,
+) -> None:
     """Apply a suggested fix to your answer key (run by the teacher)."""
     try:
-        done = accept_suggestion(
-            _incoming(raw_incoming), suggestion_id, qa_file=raw_qa, submissions=raw_submissions
-        )
+        if raw_workspace:
+            from opengrader.core.agent.workspace import accept_workspace_suggestion
+
+            root, assignment_id = _workspace_target(raw_workspace, raw_assignment)
+            done = accept_workspace_suggestion(
+                _incoming(raw_incoming),
+                suggestion_id,
+                root=root,
+                assignment_id=assignment_id,
+                request=_workspace_request(root),
+                key_file=key_file,  # type: ignore[arg-type]
+            )
+        elif raw_qa and raw_submissions:
+            done = accept_suggestion(
+                _incoming(raw_incoming), suggestion_id, qa_file=raw_qa, submissions=raw_submissions
+            )
+        else:
+            _fail("give --qa-file and --submissions (a class folder), or --workspace")
     except (AgentError, ValueError) as exc:
         _fail(str(exc))
     print(f"{suggestion_id}: {done}. The copy now has the corrected key.")
@@ -474,10 +634,29 @@ def dismiss_command(suggestion_id: str, raw_incoming: str) -> None:
 @command.command("answer-key")
 @click.option("--class-folder", "raw_class", default="", help="The class folder: its qa.md (if any) goes to the assistant.")
 @click.option("--source", "raw_source", default="", help="Your own answer key (.docx, .pdf, .md, .txt), if you have one.")
-def answer_key_command(raw_class: str, raw_source: str) -> None:
+@click.option("--workspace", "raw_workspace", default="", help=_WORKSPACE_HELP)
+@click.option("--assignment", "raw_assignment", default="", help=_ASSIGNMENT_HELP)
+def answer_key_command(raw_class: str, raw_source: str, raw_workspace: str, raw_assignment: str) -> None:
     """A folder where an assistant writes or fills qa.md (no student data)."""
     from opengrader.core.agent.answer_key import prepare_key_folder
     from opengrader.core.class_folder import scan_class_folder
+
+    if raw_workspace:
+        from opengrader.core.agent.workspace import prepare_workspace_key_folder
+
+        root, assignment_id = _workspace_target(raw_workspace, raw_assignment)
+        try:
+            folder = prepare_workspace_key_folder(root, assignment_id, source=raw_source or None)
+        except AgentError as exc:
+            _fail(str(exc))
+        print(f"Made {folder.path}")
+        print("Start your AI assistant inside it and ask it to do what AGENTS.md says; it holds no student work.")
+        print(
+            "When it is done, store the key in the workspace (choose whether its qa.md file follows):\n"
+            f"  opengrader agent use-key --folder {shlex.quote(str(folder.path))} "
+            f"{_workspace_flags(root, assignment_id)} --key-file update"
+        )
+        return
 
     qa_file = submissions = None
     if raw_class:
@@ -505,14 +684,41 @@ def answer_key_command(raw_class: str, raw_source: str) -> None:
 
 
 @command.command("use-key")
-@click.option("--folder", "raw_workspace", required=True, help="The assistant's answer-key folder.")
-@click.option("--to", "raw_to", required=True, help="Where the answer key goes (your class folder's qa.md).")
+@click.option("--folder", "raw_folder", required=True, help="The assistant's answer-key folder.")
+@click.option("--to", "raw_to", default="", help="Where the answer key goes (your class folder's qa.md).")
+@click.option("--workspace", "raw_workspace", default="", help=_WORKSPACE_HELP)
+@click.option("--assignment", "raw_assignment", default="", help=_ASSIGNMENT_HELP)
+@click.option("--key-file", type=click.Choice(("update", "leave")), default=None, help=_KEY_FILE_HELP)
 @click.option("--replace", is_flag=True, help="Replace an answer key already there.")
-def use_key_command(raw_workspace: str, raw_to: str, replace: bool) -> None:
-    """Copy the assistant's finished answer key into your class folder."""
+def use_key_command(
+    raw_folder: str, raw_to: str, raw_workspace: str, raw_assignment: str, key_file: str | None, replace: bool
+) -> None:
+    """Copy the assistant's finished answer key into your class folder (or workspace)."""
+    if raw_workspace:
+        from opengrader.core.agent.workspace import use_workspace_key
+
+        root, assignment_id = _workspace_target(raw_workspace, raw_assignment)
+        try:
+            find_packet_root(raw_folder, kind=KIND_ANSWER_KEY)
+            result, note = use_workspace_key(
+                raw_folder,
+                root=root,
+                assignment_id=assignment_id,
+                request=_workspace_request(root),
+                replace_changed=replace,
+                key_file=key_file,  # type: ignore[arg-type]
+            )
+        except AgentError as exc:
+            _fail(str(exc))
+        print(note)
+        for warning in result.warnings:
+            print(f"  warning: {warning}")
+        return
+    if not raw_to:
+        _fail("give --to (your class folder's qa.md) or --workspace")
     try:
-        find_packet_root(raw_workspace, kind=KIND_ANSWER_KEY)
-        result = use_key(raw_workspace, raw_to, replace=replace)
+        find_packet_root(raw_folder, kind=KIND_ANSWER_KEY)
+        result = use_key(raw_folder, raw_to, replace=replace)
     except AgentError as exc:
         _fail(str(exc))
     print(f"Copied the answer key to {raw_to}.")

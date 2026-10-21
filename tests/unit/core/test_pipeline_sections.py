@@ -104,7 +104,7 @@ def test_each_section_gets_its_own_request_named_after_its_file(tmp_path) -> Non
     assert [item.scan.name for item in sections] == ["section-01.pdf", "section-02.pdf"]
     assert all(not item.section_scans for item in sections)
     # Each section's split stays apart; the submissions are shared.
-    assert sections[0].split_dir == tmp_path / "class" / "split" / "section-01"
+    assert sections[0].split_dir == tmp_path / "class" / "student-pdfs" / "section-01"
     assert {item.submissions_dir for item in sections} == {
         tmp_path / "class" / "submissions"
     }
@@ -178,10 +178,10 @@ def test_the_plan_reads_each_section_then_grades_the_class_once(tmp_path) -> Non
     assert plans[0].reason.startswith("Section 01: ")
     assert plans[3].reason.startswith("Section 02: ")
     split = plans[1].argv
-    assert _value(split, "--output") == str(tmp_path / "class" / "split" / "section-01")
+    assert _value(split, "--output") == str(tmp_path / "class" / "student-pdfs" / "section-01")
     assert _value(split, "--filename-prefix") == "section-01"
     extract = plans[5].argv
-    assert _value(extract, "--input") == str(tmp_path / "class" / "split" / "section-02")
+    assert _value(extract, "--input") == str(tmp_path / "class" / "student-pdfs" / "section-02")
     assert _value(extract, "--output") == str(tmp_path / "class" / "submissions")
     assert _value(extract, "--section") == "Section 02"
     assert _value(plans[-1].argv, "--input") == str(tmp_path / "class" / "submissions")
@@ -226,7 +226,7 @@ def test_a_bad_section_list_fails_the_run_before_anything_is_written(tmp_path, s
     assert not report.ok
     assert report.stages[0].status is StageStatus.FAILED
     assert stages.calls == []
-    assert not (tmp_path / "class" / "split").exists()
+    assert not (tmp_path / "class" / "student-pdfs").exists()
 
 
 def test_auto_grading_is_pending_after_sections_were_read_without_it(
@@ -242,6 +242,6 @@ def test_review_dirs_are_each_sections_split_folder(tmp_path) -> None:
     request = _request(tmp_path)
 
     assert request.review_dirs == (
-        tmp_path / "class" / "split" / "section-01",
-        tmp_path / "class" / "split" / "section-02",
+        tmp_path / "class" / "student-pdfs" / "section-01",
+        tmp_path / "class" / "student-pdfs" / "section-02",
     )

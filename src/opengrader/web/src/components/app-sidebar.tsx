@@ -5,6 +5,7 @@ import { Link, useMatchRoute } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
   BookOpen,
+  Bot,
   ChartColumn,
   ClipboardCheck,
   FileText,
@@ -126,11 +127,20 @@ export function AppSidebar() {
         title: 'Statistics',
         icon: ChartColumn,
       },
+      {
+        to: '/assignments/$assignmentId/assistant',
+        title: 'AI assistant',
+        icon: Bot,
+      },
     ] as const
   ).filter(
     (destination) =>
-      !folderSession ||
-      (destination.title !== 'Scans' && destination.title !== 'Outline')
+      (!folderSession ||
+        (destination.title !== 'Scans' &&
+          destination.title !== 'Outline' &&
+          destination.title !== 'AI assistant')) &&
+      // The owner's page: a grader who joined grades, and is not shown it.
+      (destination.title !== 'AI assistant' || managesPeople)
   );
   return (
     <>
