@@ -1,13 +1,11 @@
 import random
-from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from opengrader.core.pages.features import align, page_box, page_features, rectify
-
-FONT = Path(__file__).resolve().parents[4] / "assets" / "fonts" / "cmu" / "cmunrm.ttf"
+from opengrader.core.pdf.templates.fonts import CMU_REGULAR_FILE as FONT
 
 
 def _page(seed: int = 3) -> Image.Image:

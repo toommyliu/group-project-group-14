@@ -1547,7 +1547,6 @@ dependencies = [
     { name = "pymupdf" },
     { name = "pypdf" },
     { name = "pytesseract" },
-    { name = "pytest" },
     { name = "python-docx" },
     { name = "pyyaml" },
     { name = "rapidocr" },
@@ -1556,7 +1555,6 @@ dependencies = [
     { name = "textual" },
     { name = "textual-image" },
     { name = "typing-extensions" },
-    { name = "update" },
     { name = "uvicorn" },
 ]
 
@@ -1577,6 +1575,7 @@ browser = [
 ]
 dev = [
     { name = "pip-licenses" },
+    { name = "pytest" },
     { name = "textual-dev" },
 ]
 
@@ -1604,7 +1603,6 @@ requires-dist = [
     { name = "pymupdf", specifier = ">=1.25.3,<2.0.0" },
     { name = "pypdf", specifier = ">=6.9.1,<7.0.0" },
     { name = "pytesseract", specifier = ">=0.3.13" },
-    { name = "pytest", specifier = ">=9.0.2" },
     { name = "python-docx", specifier = ">=1.1.0,<2.0.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rapidocr", specifier = ">=3.9,<4" },
@@ -1613,7 +1611,6 @@ requires-dist = [
     { name = "textual", specifier = ">=8.1.1,<9.0.0" },
     { name = "textual-image", specifier = ">=0.8.5,<0.9.0" },
     { name = "typing-extensions", specifier = ">=4.4.0" },
-    { name = "update", specifier = ">=0.0.1,<0.0.2" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
 ]
 provides-extras = ["math", "photos", "pydantic-ai"]
@@ -1622,6 +1619,7 @@ provides-extras = ["math", "photos", "pydantic-ai"]
 browser = [{ name = "pytest-playwright", specifier = ">=0.10.0" }]
 dev = [
     { name = "pip-licenses", specifier = ">=5.0.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
     { name = "textual-dev", specifier = ">=1.8.0" },
 ]
 
@@ -2461,15 +2459,6 @@ wheels = [
 ]
 
 [[package]]
-name = "style"
-version = "1.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6d/43/1aea4a07f3755195e6bf4b4f1a6667eda4bd1d23c5f5d12e92d894d8a052/style-1.1.0.tar.gz", hash = "sha256:8eb365fc15039b19b728bd4e6e85fb7daf24e7aeeec6a15a666f97484c564005", size = 3766, upload-time = "2017-08-25T15:11:35.151Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4c/0b/6be2071e20c621e7beb01b86e8474c2ec344a9750ba5315886f24d6e7386/style-1.1.0-py2.py3-none-any.whl", hash = "sha256:6485a4bcb84629341a5fd1587fe3ac4887daa4741f0c8a1d01b9c3c8a263afe7", size = 6427, upload-time = "2017-08-25T15:11:34.439Z" },
-]
-
-[[package]]
 name = "sympy"
 version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2786,17 +2775,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/78/67/9a363818028526e2d4579334460df777115bdec1bb77c08f9db88f6389f2/uc_micro_py-2.0.0.tar.gz", hash = "sha256:c53691e495c8db60e16ffc4861a35469b0ba0821fe409a8a7a0a71864d33a811", size = 6611, upload-time = "2026-03-01T06:31:27.526Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/61/73/d21edf5b204d1467e06500080a50f79d49ef2b997c79123a536d4a17d97c/uc_micro_py-2.0.0-py3-none-any.whl", hash = "sha256:3603a3859af53e5a39bc7677713c78ea6589ff188d70f4fee165db88e22b242c", size = 6383, upload-time = "2026-03-01T06:31:26.257Z" },
-]
-
-[[package]]
-name = "update"
-version = "0.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "style" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/c4/dfe8a392edd35cc635c35cd3b20df6a746aacdeb39b685d1668b56bf819b/update-0.0.1-py2.py3-none-any.whl", hash = "sha256:a25522b4bf60e3e3c1a3ff3ca3a4f5a328ac4b8ff400fdc9614483147e313323", size = 2882, upload-time = "2017-11-13T21:12:53.479Z" },
 ]
 
 [[package]]

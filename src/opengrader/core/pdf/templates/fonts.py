@@ -11,16 +11,7 @@ DEFAULT_FONT = "times-roman"
 DEFAULT_FONT_BOLD = "times-bold"
 
 
-def _default_cmu_assets_dir() -> Path:
-    current = Path(__file__).resolve()
-    for parent in current.parents:
-        candidate = parent / "assets" / "fonts" / "cmu"
-        if candidate.exists():
-            return candidate
-    return current.parents[5] / "assets" / "fonts" / "cmu"
-
-
-CMU_ASSETS_DIR = _default_cmu_assets_dir()
+CMU_ASSETS_DIR = Path(__file__).resolve().parents[3] / "assets" / "fonts" / "cmu"
 CMU_REGULAR_FILE = CMU_ASSETS_DIR / "cmunrm.ttf"
 CMU_BOLD_FILE = CMU_ASSETS_DIR / "cmunbx.ttf"
 

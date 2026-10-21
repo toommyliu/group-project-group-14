@@ -9207,12 +9207,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------
 
-** style; version 1.1.0 (MIT) -- https://github.com/lmittmann/style
-
-License text unavailable from package metadata.
-
-------
-
 ** textual; version 8.1.1 (MIT License) -- https://github.com/Textualize/textual
 
 MIT License
@@ -9821,12 +9815,6 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-------
-
-** update; version 0.0.1 (MIT) -- https://github.com/lmittmann/update
-
-License text unavailable from package metadata.
 
 ------
 
@@ -26976,8 +26964,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ** Computer Modern; version 0.7.0 -- https://sourceforge.net/projects/cm-unicode/
 
 Files:
-- assets/fonts/cmu/cmunrm.ttf
-- assets/fonts/cmu/cmunbx.ttf
+- src/opengrader/assets/fonts/cmu/cmunrm.ttf
+- src/opengrader/assets/fonts/cmu/cmunbx.ttf
 
 Copyright (C) Authors of original metafont fonts:
 Donald Ervin Knuth (cm, concrete fonts)

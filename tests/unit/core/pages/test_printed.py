@@ -1,4 +1,5 @@
 from opengrader.core.pages.printed import TextLine, merge_lines, split_field_labels
+from opengrader.core.pdf.templates.fonts import CMU_REGULAR_FILE
 
 
 def test_a_title_merged_with_field_labels_is_cut_at_each_label():
@@ -38,12 +39,9 @@ def test_what_a_student_wrote_after_a_label_is_not_part_of_the_printed_label():
 
 
 def _title_image(subscript: str | None) -> "Image.Image":
-    from pathlib import Path
-
     from PIL import Image, ImageDraw, ImageFont
 
-    fonts = Path(__file__).resolve().parents[4] / "assets" / "fonts" / "cmu"
-    regular, small = ImageFont.truetype(str(fonts / "cmunrm.ttf"), 40), ImageFont.truetype(str(fonts / "cmunrm.ttf"), 28)
+    regular, small = ImageFont.truetype(str(CMU_REGULAR_FILE), 40), ImageFont.truetype(str(CMU_REGULAR_FILE), 28)
     image = Image.new("RGB", (900, 90), "white")
     pen = ImageDraw.Draw(image)
     x = 20 + pen.textlength("CMPE 30 Quiz 2", font=regular)
@@ -91,11 +89,9 @@ def test_a_label_is_cut_where_the_recognizer_saw_its_word_start():
 
 
 def _field_image(label: str, written: str, beside: str = "") -> "Image.Image":
-    from pathlib import Path
-
     from PIL import Image, ImageDraw, ImageFont
 
-    font = ImageFont.truetype(str(Path(__file__).resolve().parents[4] / "assets" / "fonts" / "cmu" / "cmunrm.ttf"), 34)
+    font = ImageFont.truetype(str(CMU_REGULAR_FILE), 34)
     image = Image.new("RGB", (1000, 130), "white")
     pen = ImageDraw.Draw(image)
     pen.text((20, 30), f"{label} {written}", fill="black", font=font)
@@ -115,13 +111,11 @@ def test_a_field_reads_what_was_written_without_its_label_or_the_print_beside_it
 
 
 def test_the_first_letter_of_the_next_label_is_not_read_as_writing():
-    from pathlib import Path
-
     from PIL import Image, ImageDraw, ImageFont
 
     from opengrader.core.pages.printed import read_field
 
-    font = ImageFont.truetype(str(Path(__file__).resolve().parents[4] / "assets" / "fonts" / "cmu" / "cmunrm.ttf"), 34)
+    font = ImageFont.truetype(str(CMU_REGULAR_FILE), 34)
     image = Image.new("RGB", (420, 130), "white")
     pen = ImageDraw.Draw(image)
     pen.text((20, 30), "Name: Ann Lee", fill="black", font=font)

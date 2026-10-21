@@ -17,8 +17,8 @@ OUTPUT_FILE = ROOT / "THIRD_PARTY_LICENSES"
 WEB_DIR = ROOT / "src" / "opengrader" / "web"
 WEB_NODE_MODULES = WEB_DIR / "node_modules"
 CMU_FONT_FILES = (
-    ROOT / "assets" / "fonts" / "cmu" / "cmunrm.ttf",
-    ROOT / "assets" / "fonts" / "cmu" / "cmunbx.ttf",
+    ROOT / "src" / "opengrader" / "assets" / "fonts" / "cmu" / "cmunrm.ttf",
+    ROOT / "src" / "opengrader" / "assets" / "fonts" / "cmu" / "cmunbx.ttf",
 )
 NOTICE_SEPARATOR = "------"
 RUNTIME_PRUNES = ("pytest",)
@@ -28,8 +28,8 @@ CMU_NOTICE = """
 ** Computer Modern; version 0.7.0 -- https://sourceforge.net/projects/cm-unicode/
 
 Files:
-- assets/fonts/cmu/cmunrm.ttf
-- assets/fonts/cmu/cmunbx.ttf
+- src/opengrader/assets/fonts/cmu/cmunrm.ttf
+- src/opengrader/assets/fonts/cmu/cmunbx.ttf
 
 Copyright (C) Authors of original metafont fonts:
 Donald Ervin Knuth (cm, concrete fonts)
