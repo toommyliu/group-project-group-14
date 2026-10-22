@@ -30,6 +30,7 @@ it('reads saved preferences and falls back to defaults for invalid values', asyn
   stored.set('opengrader.grading-shortcuts', 'yes');
   const { usePreferences } = await load();
   expect(usePreferences.getState()).toEqual({
+    anonymousGrading: false,
     gradingShortcuts: true,
     gradingBindings: {},
     editorWidth: 50,

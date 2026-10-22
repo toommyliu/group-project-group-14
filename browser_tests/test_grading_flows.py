@@ -106,6 +106,92 @@ def test_saved_grade_updates_another_tab_without_reloading(page, browser_app):
     ).to_have_attribute("aria-pressed", "true")
 
 
+def test_anonymous_grading_survives_navigation_reload_and_syncs_tabs(page, browser_app):
+    page.goto(browser_app.grade_url)
+    selector = page.get_by_label("Submission", exact=True)
+    expect(selector).to_contain_text("Alice Example")
+    other = page.context.new_page()
+    other.goto(browser_app.grade_url)
+
+    toggle = page.get_by_role("switch", name="Anonymous grading", exact=True)
+    toggle.focus()
+    toggle.press("Space")
+    expect(toggle).to_be_checked()
+    expect(selector).to_contain_text("Submission 1")
+    expect(selector).not_to_have_attribute("title", re.compile("Alice"))
+    expect(other.get_by_label("Submission", exact=True)).to_contain_text("Submission 1")
+
+    selector.click()
+    options = page.get_by_role("listbox")
+    expect(options).to_contain_text("Submission 1")
+    expect(options).to_contain_text("Submission 2")
+    expect(options).not_to_contain_text("Alice")
+    expect(options).not_to_contain_text("Bob")
+    page.keyboard.press("Escape")
+
+    page.get_by_role("button", name=re.compile(r"^Partially Correct")).click()
+    saved(page)
+    page.get_by_role("button", name="Next", exact=True).click()
+    expect(selector).to_contain_text("Submission 2")
+    page.get_by_role("button", name="Previous", exact=True).click()
+    page.reload()
+    expect(toggle).to_be_checked()
+    expect(selector).to_contain_text("Submission 1")
+    expect(score(page)).to_have_value("6")
+
+    other.get_by_role("switch", name="Anonymous grading", exact=True).click()
+    expect(toggle).not_to_be_checked()
+    expect(selector).to_contain_text("Alice Example")
+
+
+def test_anonymous_review_hides_identity_search_roster_and_scan_link(page, browser_app):
+    response = page.request.post(
+        f"{browser_app.course_url}/api/roster/students",
+        data={"sid": "0003", "first_name": "Carol", "last_name": "Missing"},
+    )
+    assert response.ok
+    page.goto(f"{browser_app.assignment_url}/review")
+    table = page.get_by_role("table", name="Grades", exact=True)
+    expect(table).to_contain_text("Alice Example")
+    expect(table).to_contain_text("0001")
+    page.get_by_role("columnheader", name="Student", exact=True).click()
+    page.get_by_role("tab", name=re.compile("No submission")).click()
+    expect(table).to_contain_text("Carol Missing")
+    page.get_by_role("switch", name="Anonymous grading", exact=True).click()
+    expect(table).to_contain_text("Submission 1")
+    expect(table).to_contain_text("Submission 2")
+    for identity in ("Alice Example", "Bob Example", "Carol Missing", "0001", "0002"):
+        expect(table).not_to_contain_text(identity)
+    expect(page.get_by_role("tab", name=re.compile("No submission"))).to_have_count(0)
+    expect(page.get_by_role("columnheader", name="Student", exact=True)).to_have_count(0)
+
+    search = page.get_by_role("searchbox", name="Filter by submission number")
+    search.fill("Alice")
+    expect(table.get_by_role("link", name="Submission 1", exact=True)).to_have_count(0)
+    search.fill("0001")
+    expect(table.get_by_role("link", name="Submission 1", exact=True)).to_have_count(0)
+    search.fill("2")
+    expect(table.get_by_role("link", name="Submission 2", exact=True)).to_be_visible()
+    expect(table.get_by_role("link", name="Submission 1", exact=True)).to_have_count(0)
+    search.fill("")
+
+    page.get_by_role("button", name="Download feedback PDFs", exact=True).click()
+    dialog = page.get_by_role("alertdialog")
+    expect(dialog).to_contain_text("Submission 1")
+    expect(dialog).not_to_contain_text("Alice")
+    expect(dialog).not_to_contain_text("Bob")
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+
+    table.get_by_role("link", name="Submission 1", exact=True).click()
+    expect(page.get_by_role("heading", level=1)).to_have_text("Submission 1")
+    expect(page.get_by_text("SID 0001", exact=True)).to_have_count(0)
+    expect(page.get_by_role("link", name="Open the scanned PDF")).to_have_count(0)
+    page.get_by_role("switch", name="Anonymous grading", exact=True).click()
+    expect(page.get_by_role("heading", level=1)).to_have_text("Alice Example")
+    expect(page.get_by_text(re.compile("SID 0001"))).to_be_visible()
+    expect(page.get_by_role("link", name="Open the scanned PDF")).to_be_visible()
+
+
 def test_failed_save_preserves_draft_and_conflict_can_use_saved_answer(page, browser_app):
     page.goto(browser_app.grade_url)
     other = page.context.new_page()
@@ -143,7 +229,9 @@ def test_review_csv_contains_the_saved_grade(page, browser_app):
     page.goto(browser_app.grade_url)
     page.get_by_role("button", name=re.compile(r"^Partially Correct")).click()
     saved(page)
+    page.get_by_role("switch", name="Anonymous grading", exact=True).click()
     page.goto(f"{browser_app.assignment_url}/review")
+    expect(page.get_by_role("table", name="Grades")).not_to_contain_text("Alice Example")
     with page.expect_download() as pending:
         page.get_by_role("button", name="Download CSV", exact=True).click()
     download = pending.value

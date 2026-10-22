@@ -19,6 +19,9 @@ import {
 } from '@/api/queries';
 import { reviewSubmissionRoute } from '@/router';
 import { percentText, scoreText, versionColumns } from '@/lib/grade-columns';
+import { submissionIdentity } from '@/lib/submission-identity';
+import { usePreferences } from '@/stores/preferences';
+import { AnonymousGrading } from '@/components/anonymous-grading';
 import { PageHeading } from '@/components/page-heading';
 import { GradingText } from '@/components/grading-text';
 import { FeedbackPdfButton } from '@/components/feedback-pdf-button';
@@ -30,6 +33,7 @@ import {
 } from '@/components/ui/tooltip';
 
 export default function ReviewSubmissionPage() {
+  const anonymous = usePreferences((state) => state.anonymousGrading);
   const loaded = reviewSubmissionRoute.useLoaderData();
   const { assignment, submissionId } = loaded;
   const submissions = useQuery({
@@ -60,6 +64,7 @@ export default function ReviewSubmissionPage() {
     );
   const previous = submissions.data[index - 1];
   const next = submissions.data[index + 1];
+  const identity = submissionIdentity(submission, anonymous);
 
   const columns =
     versionColumns(qa.data.document).get(submission.version ?? '') ?? [];
@@ -123,37 +128,40 @@ export default function ReviewSubmissionPage() {
         </div>
       </div>
       <PageHeading
-        title={submission.student_name || 'No student'}
+        title={identity.name}
         description={[
-          submission.student_id && `SID ${submission.student_id}`,
+          identity.sid && `SID ${identity.sid}`,
           `Submission #${submission.id}`,
           submission.version && `Version ${submission.version}`,
         ]
           .filter(Boolean)
           .join(' · ')}
         actions={
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <a
-                    href={workspaceUrl(
-                      `/api/assignments/${encodeURIComponent(assignment.id)}/submissions/${submission.id}/pdf`
-                    )}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label="Open the scanned PDF"
-                    className={cn(
-                      buttonVariants({ variant: 'ghost', size: 'icon' }),
-                      'size-11'
-                    )}
-                  />
-                }
-              >
-                <FileText aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipContent>Open the scanned PDF</TooltipContent>
-            </Tooltip>
+          <div className="flex flex-wrap items-center gap-1">
+            <AnonymousGrading />
+            {!anonymous && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <a
+                      href={workspaceUrl(
+                        `/api/assignments/${encodeURIComponent(assignment.id)}/submissions/${submission.id}/pdf`
+                      )}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Open the scanned PDF"
+                      className={cn(
+                        buttonVariants({ variant: 'ghost', size: 'icon' }),
+                        'size-11'
+                      )}
+                    />
+                  }
+                >
+                  <FileText aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>Open the scanned PDF</TooltipContent>
+              </Tooltip>
+            )}
             <FeedbackPdfButton
               assignmentId={assignment.id}
               submissionId={submission.id}

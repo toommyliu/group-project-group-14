@@ -44,14 +44,15 @@ def test_courses_are_grouped_by_term_and_the_last_opened_available_one_is_chosen
         async with app.run_test(size=(110, 30)) as pilot:
             await pilot.pause()
             listing = app.query_one(OptionList)
-            rows = [
-                _plain(listing.get_option_at_index(i).prompt)
+            prompts = [
+                listing.get_option_at_index(i).prompt
                 for i in range(listing.option_count)
             ]
             await pilot.press("enter")
-        return rows, app.return_value
+        return prompts, app.return_value
 
-    rows, chosen = asyncio.run(run())
+    prompts, chosen = asyncio.run(run())
+    rows = [_plain(prompt) for prompt in prompts]
     assert rows == [
         "Fall 2026",
         f"CS 146   Data Structures\n         {live}",

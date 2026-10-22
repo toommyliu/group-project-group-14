@@ -13,6 +13,9 @@ import {
 import { rosterQuery, studentName, type Student } from '@/api/roster';
 import { reviewRoute } from '@/router';
 import { searchable } from '@/lib/search';
+import { submissionIdentity } from '@/lib/submission-identity';
+import { usePreferences } from '@/stores/preferences';
+import { AnonymousGrading } from '@/components/anonymous-grading';
 import {
   percentText,
   scoreText,
@@ -54,6 +57,7 @@ type SortKey = 'id' | 'student' | 'total';
 type Filter = 'all' | 'graded' | 'progress' | 'missing';
 type Row = {
   submission: Submission;
+  identity: ReturnType<typeof submissionIdentity>;
   own: Column[];
   scores: (number | null | undefined)[];
   complete: boolean;
@@ -78,6 +82,7 @@ function csvCell(value: string) {
 }
 
 export default function ReviewPage() {
+  const anonymous = usePreferences((state) => state.anonymousGrading);
   const loaded = reviewRoute.useLoaderData();
   const { assignment } = loaded;
   const submissions = useQuery({
@@ -101,7 +106,7 @@ export default function ReviewPage() {
   );
   const [text, setText] = useState('');
   const search = useDeferredValue(searchable(text));
-  const [filter, setFilter] = useState<Filter>('all');
+  const [chosenFilter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<{ by: SortKey; descending: boolean }>({
     by: 'id',
     descending: false,
@@ -122,6 +127,7 @@ export default function ReviewPage() {
     );
     return {
       submission,
+      identity: submissionIdentity(submission, anonymous),
       own,
       scores,
       complete: graded.length === own.length && own.length > 0,
@@ -138,6 +144,10 @@ export default function ReviewPage() {
     .filter((student) => !sids.has(student.sid))
     .toSorted((a, b) => collator.compare(studentName(a), studentName(b)));
   const showMissing = combined || versions.length < 2;
+  const filter =
+    chosenFilter === 'missing' && (anonymous || !showMissing)
+      ? 'all'
+      : chosenFilter;
   const complete = versionRows.filter((row) => row.complete);
   const average = complete.length
     ? complete.reduce((sum, row) => sum + row.total / (row.possible || 1), 0) /
@@ -155,25 +165,22 @@ export default function ReviewPage() {
               (filter === 'all' ||
                 (filter === 'graded' ? row.complete : !row.complete)) &&
               found(
-                row.submission.student_name,
-                row.submission.student_id,
+                row.identity.name,
+                row.identity.sid,
                 `#${row.submission.id}`
               )
           )
           .toSorted((a, b) => {
             const order =
-              sort.by === 'student'
-                ? collator.compare(
-                    a.submission.student_name,
-                    b.submission.student_name
-                  )
+              sort.by === 'student' && !anonymous
+                ? collator.compare(a.identity.name, b.identity.name)
                 : sort.by === 'total'
                   ? a.total / (a.possible || 1) - b.total / (b.possible || 1)
                   : a.submission.id - b.submission.id;
             return sort.descending ? -order : order;
           });
   const shownMissing =
-    filter !== 'missing'
+    anonymous || filter !== 'missing'
       ? []
       : sort.by === 'student' && sort.descending
         ? missing
@@ -262,33 +269,34 @@ export default function ReviewPage() {
             : undefined
         }
         actions={
-          rows.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={download}>
-                <Download aria-hidden="true" />
-                {versions.length > 1 && !combined
-                  ? `Download version ${view} CSV`
-                  : 'Download CSV'}
-              </Button>
-              <FeedbackDownload
-                assignmentId={assignment.id}
-                filename={`${assignment.title || 'Assignment'}${versions.length > 1 && !combined ? ` (Version ${view})` : ''} feedback.zip`}
-                label={
-                  versions.length > 1 && !combined
-                    ? `Download version ${view} feedback PDFs`
-                    : 'Download feedback PDFs'
-                }
-                rows={versionRows.map((row) => ({
-                  submissionId: row.submission.id,
-                  name:
-                    row.submission.student_name ||
-                    `Submission ${row.submission.id}`,
-                  complete: row.complete,
-                  job: feedback.get(row.submission.id),
-                }))}
-              />
-            </div>
-          )
+          <div className="flex flex-wrap gap-2">
+            <AnonymousGrading />
+            {rows.length > 0 && (
+              <>
+                <Button variant="outline" onClick={download}>
+                  <Download aria-hidden="true" />
+                  {versions.length > 1 && !combined
+                    ? `Download version ${view} CSV`
+                    : 'Download CSV'}
+                </Button>
+                <FeedbackDownload
+                  assignmentId={assignment.id}
+                  filename={`${assignment.title || 'Assignment'}${versions.length > 1 && !combined ? ` (Version ${view})` : ''} feedback.zip`}
+                  label={
+                    versions.length > 1 && !combined
+                      ? `Download version ${view} feedback PDFs`
+                      : 'Download feedback PDFs'
+                  }
+                  rows={versionRows.map((row) => ({
+                    submissionId: row.submission.id,
+                    name: row.identity.name,
+                    complete: row.complete,
+                    job: feedback.get(row.submission.id),
+                  }))}
+                />
+              </>
+            )}
+          </div>
         }
       />
       {(submissions.isError || qa.isError) && (
@@ -351,7 +359,7 @@ export default function ReviewPage() {
                   label: 'In progress',
                   count: versionRows.length - complete.length,
                 },
-                ...(showMissing && roster.data?.length
+                ...(!anonymous && showMissing && roster.data?.length
                   ? [
                       {
                         value: 'missing' as const,
@@ -387,7 +395,11 @@ export default function ReviewPage() {
                 </Select>
               )}
               <FilterField
-                label="Filter by name or SID"
+                label={
+                  anonymous
+                    ? 'Filter by submission number'
+                    : 'Filter by name or SID'
+                }
                 value={text}
                 onChange={setText}
                 className="min-w-0 flex-1 sm:w-auto @4xl:w-64 @4xl:flex-none"
@@ -407,11 +419,15 @@ export default function ReviewPage() {
                     sorted={sorted('id')}
                     onSort={() => sortBy('id')}
                   />
-                  <SortableHead
-                    label="Student"
-                    sorted={sorted('student')}
-                    onSort={() => sortBy('student')}
-                  />
+                  {anonymous ? (
+                    <PeopleHead>Submission</PeopleHead>
+                  ) : (
+                    <SortableHead
+                      label="Student"
+                      sorted={sorted('student')}
+                      onSort={() => sortBy('student')}
+                    />
+                  )}
                   {combined && <PeopleHead>Version</PeopleHead>}
                   {columns.map((column) => (
                     <PeopleHead
@@ -458,7 +474,11 @@ export default function ReviewPage() {
                   <TableEmpty
                     icon={<SearchX />}
                     title={`Nothing matches “${text.trim()}”`}
-                    description="Search by a student's name, student ID, or submission number."
+                    description={
+                      anonymous
+                        ? 'Search by submission number.'
+                        : "Search by a student's name, student ID, or submission number."
+                    }
                     action={
                       <Button variant="outline" onClick={() => setText('')}>
                         Clear search
@@ -495,7 +515,7 @@ export default function ReviewPage() {
 
 function ReviewRow({
   assignmentId,
-  row: { submission, scores, complete, total, possible },
+  row: { submission, identity, scores, complete, total, possible },
   feedback,
   own,
   showVersion,
@@ -527,11 +547,11 @@ function ReviewRow({
             !submission.student_name && 'text-muted-foreground'
           )}
         >
-          {submission.student_name || 'No student'}
+          {identity.name}
         </Link>
-        {submission.student_id && (
+        {identity.sid && (
           <span className="text-xs text-muted-foreground tabular-nums">
-            {submission.student_id}
+            {identity.sid}
           </span>
         )}
       </PeopleCell>

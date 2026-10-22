@@ -5,6 +5,7 @@ import {
 } from '@/lib/grading-shortcuts';
 
 export type Preferences = {
+  anonymousGrading: boolean;
   gradingShortcuts: boolean;
   gradingBindings: GradingBindings;
   editorWidth: number;
@@ -26,6 +27,13 @@ type Definition<T> = {
 };
 
 const definitions: { [K in keyof Preferences]: Definition<Preferences[K]> } = {
+  anonymousGrading: {
+    storageKey: 'opengrader.anonymous-grading',
+    defaultValue: false,
+    parse: (value) =>
+      value === 'true' ? true : value === 'false' ? false : undefined,
+    serialize: String,
+  },
   gradingBindings: {
     storageKey: 'opengrader.grading-bindings',
     defaultValue: {},

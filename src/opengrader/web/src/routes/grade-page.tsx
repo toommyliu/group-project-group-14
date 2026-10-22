@@ -13,12 +13,15 @@ import {
   type Submission,
 } from '@/api/queries';
 import { nextUngraded } from '@/lib/grading';
+import { submissionIdentity } from '@/lib/submission-identity';
+import { usePreferences } from '@/stores/preferences';
 import { validateGradingSearch } from '@/routes/assignment-data';
 import { gradeRoute } from '@/router';
 import { AnswerView } from '@/components/answer-view';
 import { AiDrafts, QuestionAiStatus } from '@/components/ai-drafts';
 import { questionAiLabel } from '@/lib/ai-draft';
 import { GradingShortcuts } from '@/components/grading-shortcuts';
+import { AnonymousGrading } from '@/components/anonymous-grading';
 import { LoadingIndicator } from '@/components/loading';
 import { PageHeading } from '@/components/page-heading';
 import { Button } from '@/components/ui/button';
@@ -41,21 +44,17 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 
-function submissionName({ id, student_name }: Submission) {
-  return student_name.trim() || `Submission ${id}`;
-}
-
-function submissionDetail({ id, student_name, version }: Submission) {
-  return [student_name.trim() && `#${id}`, version && `Version ${version}`]
-    .filter(Boolean)
-    .join(' · ');
-}
-
-function SubmissionLabel({ submission }: { submission: Submission }) {
-  const detail = submissionDetail(submission);
+function SubmissionLabel({
+  submission,
+  anonymous,
+}: {
+  submission: Submission;
+  anonymous: boolean;
+}) {
+  const { name, detail } = submissionIdentity(submission, anonymous);
   return (
     <>
-      <span className="truncate">{submissionName(submission)}</span>
+      <span className="truncate">{name}</span>
       {detail && (
         <span className="shrink-0 text-muted-foreground">{detail}</span>
       )}
@@ -69,6 +68,8 @@ export default function GradePage({
   data: typeof gradeRoute.types.loaderData;
 }) {
   const { assignment, submission, questions, question } = data;
+  const anonymous = usePreferences((state) => state.anonymousGrading);
+  const identity = submission && submissionIdentity(submission, anonymous);
   const { data: submissions } = useQuery({
     ...submissionsQuery(assignment.id),
     initialData: data.submissions,
@@ -327,6 +328,7 @@ export default function GradePage({
         title="Grade"
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <AnonymousGrading />
             <AiDrafts assignmentId={assignment.id} />
             <GradingShortcuts />
           </div>
@@ -367,16 +369,16 @@ export default function GradePage({
             >
               <SelectTrigger
                 id="submission"
-                title={[
-                  submissionName(submission),
-                  submissionDetail(submission),
-                ]
+                title={[identity?.name, identity?.detail]
                   .filter(Boolean)
                   .join(' · ')}
                 className="min-h-11 min-w-0 flex-1 text-sm sm:w-72 sm:flex-none"
               >
                 <SelectValue className="min-w-0">
-                  <SubmissionLabel submission={submission} />
+                  <SubmissionLabel
+                    submission={submission}
+                    anonymous={anonymous}
+                  />
                 </SelectValue>
                 <LoadingIndicator
                   loading={loadingSubmission}
@@ -394,7 +396,7 @@ export default function GradePage({
                     value={item.id}
                     className="[&>div]:min-w-0 [&>div]:shrink"
                   >
-                    <SubmissionLabel submission={item} />
+                    <SubmissionLabel submission={item} anonymous={anonymous} />
                     {question && (
                       <span className="ms-auto shrink-0 ps-4 text-muted-foreground tabular-nums">
                         {!(question.id in item.question_scores)
