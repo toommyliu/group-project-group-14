@@ -85,10 +85,11 @@ def test_naming_the_protocol_skips_asking_altogether():
 
 @pytest.mark.skipif(os.name == "nt", reason="needs a POSIX pseudo-terminal")
 def test_a_terminal_that_answers_late_is_still_heard(monkeypatch):
-    """A terminal at the end of an SSH connection, answering after 0.3 s:
-    three times the 0.1 s the library allowed each question."""
     import pty
 
+    from textual_image._terminal import get_cell_size, probe_terminal
+
+    original_capabilities = probe_terminal()
     master, slave = pty.openpty()
     stdin = os.fdopen(slave, "r", closefd=False)
     stdout = os.fdopen(os.dup(slave), "w")
@@ -107,7 +108,12 @@ def test_a_terminal_that_answers_late_is_still_heard(monkeypatch):
     thread.start()
     try:
         answers = ask_terminal({"SSH_CONNECTION": "x"})
+        capability = detect_graphics_capability(
+            environ={}, is_tty=True, query=lambda: answers
+        )
+        image_cell_size = get_cell_size()
     finally:
+        setattr(probe_terminal, "_result", original_capabilities)
         thread.join(timeout=5)
         stdout.close()
         stdin.close()
@@ -116,6 +122,8 @@ def test_a_terminal_that_answers_late_is_still_heard(monkeypatch):
 
     assert answers is not None and answers.answered
     assert answers.kitty and answers.cell_size == (9, 18)
+    assert capability.protocol == "kitty"
+    assert image_cell_size == (9, 18)
     # Waited as long as the answer took, not the whole 2 s allowed over SSH.
     assert 0.25 < answers.seconds < 1.5
     assert bytes(asked) == terminal_query.QUERY

@@ -3,10 +3,6 @@
 When the terminal cannot be recognised from its environment — usual over
 SSH, which passes on few of its variables — the app has to ask it: can you
 draw Sixel images, Kitty graphics, and how many pixels is a character cell?
-`textual_image` asks those one at a time and gives each answer 0.1 s, which
-a terminal at the far end of a network connection can miss: the app then
-settles for blocky previews, and the late answer turns up as stray
-characters once the app is running.
 
 Here the questions go out together, followed by the one every terminal
 answers (DA1, "who are you?"). Terminals answer in the order asked, so once

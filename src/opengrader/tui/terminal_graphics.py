@@ -140,15 +140,10 @@ def _detect_from_environment(
 
 
 def _load_textual_image_quietly() -> None:
-    """Import `textual_image` without its own terminal questions.
+    """Import before Textual reads stdin, with the library's probe disabled.
 
-    On import it asks the terminal, one question at a time with 0.1 s each,
-    whether it draws Sixel or Kitty images and how big a cell is: too short
-    over SSH, and the late answers then arrive as stray characters in the
-    app. Our widgets pick their renderer from our own detection
-    (`terminal_query`, one round trip), so the library is imported while
-    stdout says it is not a terminal, and only the window size the system
-    knows is kept for its cell size (`_prime_cell_size` fills in the rest).
+    Opengrader probes graphics and cell size before starting Textual, so
+    the library must not issue queries whose replies could reach the app.
     Windows keeps the library's own questions: there is no POSIX terminal to
     ask the way `terminal_query` does.
     """
@@ -175,16 +170,15 @@ def _load_textual_image_quietly() -> None:
 
 
 def _prime_cell_size(answered: tuple[int, int] | None) -> None:
-    """Tell `textual_image` how big a cell is: the system's window size when
-    it knows, else the terminal's answer, else its usual default."""
     try:
-        from textual_image._terminal import CellSize, get_cell_size
+        from textual_image._terminal import CellSize, probe_terminal
     except Exception:  # pragma: no cover
         return
     from opengrader.tui.terminal_query import system_cell_size
 
     width, height = system_cell_size() or answered or (10, 20)
-    setattr(get_cell_size, "_result", CellSize(width, height))
+    capabilities = probe_terminal()._replace(cell_size=CellSize(width, height))
+    setattr(probe_terminal, "_result", capabilities)
 
 
 _load_textual_image_quietly()
