@@ -381,8 +381,8 @@ class AIDraftMixin:
             return
         if draft is None:
             grade_screen.set_rubric_editor_status(
-                "The AI's draft could not be used (it did not propose at least "
-                "two usable partial-credit items that add up). Nothing changed — "
+                "The AI returned no usable partial-credit criteria. The samples "
+                "may not contain mistakes that warrant partial credit. Nothing changed — "
                 "try again, or write the items yourself."
             )
             return

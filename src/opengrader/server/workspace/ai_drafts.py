@@ -1,4 +1,4 @@
-"""AI draft grades for a whole assignment, run in the background for the browser."""
+"""AI rubric drafts and background grade drafts for the browser."""
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +8,7 @@ from typing import Literal
 from urllib.parse import unquote
 from uuid import uuid4
 
+from anyio import from_thread
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -22,7 +23,17 @@ from opengrader.core.grading.llm_grader import (
     confirm_ai_analysis,
     format_ai_analysis,
 )
+from opengrader.core.grading.rubric_draft import (
+    RUBRIC_DRAFT_SCHEMA,
+    RubricDraftError,
+    RubricDraftRequest,
+    build_rubric_draft_prompt,
+    sample_answers,
+    validate_rubric_draft,
+)
 from opengrader.core.llm.transport import redact
+from opengrader.core.qa_file import QARubricItem, find_qa_question, parse_qa_markdown
+from opengrader.core.qa_file.markdown import _rubric_from_flat_options
 from opengrader.core.submissions.answer_groups import (
     AnswerGroup,
     GroupableResponse,
@@ -74,6 +85,20 @@ class AIReview(BaseModel):
     expected_context_revision: str
 
 
+class RubricDraftInput(BaseModel):
+    version: str | None = None
+    answers: list[str] | None = None
+    expected_answers: list[str]
+    send_to_cloud: bool = False
+
+
+class RubricDraftResult(BaseModel):
+    rubric: list[QARubricItem]
+    rationale: str
+    sample_count: int
+    student_count: int
+
+
 @dataclass(frozen=True)
 class _Batch:
     question: Question
@@ -93,7 +118,9 @@ def _ungraded_by_question(
     return by_question
 
 
-def _ungraded(workspace: Workspace, assignment_id: str, question_id: str) -> list[Answer]:
+def _ungraded(
+    workspace: Workspace, assignment_id: str, question_id: str
+) -> list[Answer]:
     return [
         workspace.answer(assignment_id, submission.id, question_id)
         for submission in workspace.submissions(assignment_id)
@@ -137,7 +164,7 @@ def _batches(answers: list[Answer]) -> list[_Batch]:
     return batches
 
 
-def _resolve() -> app_config.ResolvedAI:
+def _resolve(request: Request) -> app_config.ResolvedAI:
     try:
         resolved = app_config.resolve()
     except Exception as exc:  # noqa: BLE001 - a broken config is reported, not raised
@@ -145,7 +172,45 @@ def _resolve() -> app_config.ResolvedAI:
     problems = resolved.problems()
     if problems:
         raise HTTPException(409, "AI isn't ready on this server. " + " ".join(problems))
+    status = viewer(request)
+    if resolved.kind == "cloud" and status.enabled and status.role != "instructor":
+        raise HTTPException(
+            403,
+            f"Only instructors can send student work to {resolved.provider.label}.",
+        )
     return resolved
+
+
+def _transcribe_answer(
+    workspace: Workspace,
+    assignment_id: str,
+    answer: Answer,
+    resolved: app_config.ResolvedAI,
+    reader: object,
+) -> Literal["read", "unreadable", "changed"]:
+    name = unquote(answer.response_image_url.rsplit("/", 1)[-1])
+    text, confidence, _source, _provider = transcribe_crop(
+        workspace.asset(f"assets/{name}"),
+        question_id=answer.question.id,
+        vision_reader=reader,
+        progress_callback=lambda _line: None,
+        math_latex=resolved.transcribe_math,
+        escalate_floor=DEFAULT_ESCALATION_FLOOR if resolved.escalate_only else None,
+    )
+    if not text.strip() or confidence == 0.0:
+        return "unreadable"
+    try:
+        workspace.save_transcription(
+            assignment_id,
+            answer.submission_id,
+            answer.question.id,
+            text.strip(),
+            expected_revision=answer.revision,
+            actor=ACTOR_READER,
+        )
+    except WorkspaceConflict:
+        return "changed"
+    return "read"
 
 
 def add_ai_draft_routes(
@@ -161,13 +226,7 @@ def add_ai_draft_routes(
     cancels: dict[str, Event] = {}
 
     def plan(request: Request, assignment_id: str):
-        resolved = _resolve()
-        status = viewer(request)
-        if resolved.kind == "cloud" and status.enabled and status.role != "instructor":
-            raise HTTPException(
-                403,
-                f"Only instructors can send student work to {resolved.provider.label}.",
-            )
+        resolved = _resolve(request)
         work = {
             question_id: answers
             for question_id, answers in _ungraded_by_question(
@@ -197,6 +256,147 @@ def add_ai_draft_routes(
         queued = [work[run.question_id] for run in runs if run.status == "queued"]
         return resolved, runs, queued
 
+    def rubric_context(assignment_id: str, question_id: str, version: str | None):
+        question = find_qa_question(
+            parse_qa_markdown(workspace.assignment_source(assignment_id)),
+            question_id,
+            version=version,
+        )
+        if question.choices or getattr(question, "subquestions", None):
+            raise HTTPException(
+                422, "AI rubric drafting is for individual written questions."
+            )
+        if question.points <= 0 or question.points != int(question.points):
+            raise HTTPException(
+                422, "AI rubric drafting needs a positive whole-number point value."
+            )
+        answers = [
+            workspace.answer(assignment_id, submission.id, question_id)
+            for submission in workspace.submissions(assignment_id)
+            if (submission.version or None) == (version or None)
+            and question_id in submission.question_scores
+        ]
+        if not any(
+            answer.response_text.strip() or answer.response_image_url
+            for answer in answers
+        ):
+            raise HTTPException(
+                422,
+                "No written answers to learn from yet. Add student submissions first.",
+            )
+        return question, answers
+
+    @api.get("/assignments/{assignment_id}/questions/{question_id}/rubric/draft/plan")
+    def rubric_plan(
+        request: Request,
+        assignment_id: str,
+        question_id: str,
+        version: str | None = None,
+    ) -> DraftPlan:
+        resolved = _resolve(request)
+        _question, answers = rubric_context(assignment_id, question_id, version)
+        images = len(_unread(answers))
+        confirm = None
+        if resolved.kind == "cloud":
+            preflight = CloudPreflight(
+                provider_label=resolved.provider.label,
+                host=resolved.host,
+                counts={"answer-image": images, "graded-text": 1},
+                students=len(answers),
+            )
+            confirm = "\n\n".join(
+                part
+                for part in (
+                    preflight.statement(),
+                    app_config.egress_statement(resolved),
+                )
+                if part
+            )
+        return DraftPlan(
+            images=images,
+            calls=images + 1,
+            provider=resolved.provider.label,
+            confirm=confirm,
+        )
+
+    @api.post("/assignments/{assignment_id}/questions/{question_id}/rubric/draft")
+    def make_rubric_draft(
+        request: Request, assignment_id: str, question_id: str, body: RubricDraftInput
+    ) -> RubricDraftResult:
+        resolved = _resolve(request)
+        if resolved.kind == "cloud" and not body.send_to_cloud:
+            raise HTTPException(
+                409, "Confirm sending the answers to the cloud AI before drafting."
+            )
+        question, answers = rubric_context(assignment_id, question_id, body.version)
+        if question.answers != body.expected_answers:
+            raise WorkspaceConflict(
+                "The accepted answers changed. Close the editor and reopen it before drafting."
+            )
+        try:
+            app_config.ensure_ready(resolved, purpose="text")
+            unread = _unread(answers)
+            if unread:
+                app_config.ensure_ready(resolved, purpose="vision")
+                reader = app_config.vision_reader(resolved)
+                for answer in unread:
+                    if from_thread.run(request.is_disconnected):
+                        raise HTTPException(499, "Rubric drafting was cancelled.")
+                    _transcribe_answer(
+                        workspace, assignment_id, answer, resolved, reader
+                    )
+                _current, answers = rubric_context(
+                    assignment_id, question_id, body.version
+                )
+            samples = sample_answers(
+                group_responses(
+                    GroupableResponse(
+                        str(answer.submission_id),
+                        answer.response_text,
+                        answer.question.question_type,
+                    )
+                    for answer in answers
+                )
+            )
+            if not samples:
+                raise HTTPException(
+                    422,
+                    "No written answers could be read. Transcribe an answer before drafting.",
+                )
+            if from_thread.run(request.is_disconnected):
+                raise HTTPException(499, "Rubric drafting was cancelled.")
+            draft_request = RubricDraftRequest(
+                question_id=question_id,
+                prompt=question.prompt,
+                expected_answers=tuple(
+                    body.answers if body.answers is not None else question.answers
+                ),
+                possible_points=question.points,
+                samples=samples,
+            )
+            generate = app_config.text_generate(
+                resolved, response_format=RUBRIC_DRAFT_SCHEMA
+            )
+            draft = validate_rubric_draft(
+                generate(build_rubric_draft_prompt(draft_request)), draft_request
+            )
+        except RubricDraftError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                502, redact(str(exc)) or "The AI request failed. Try drafting again."
+            ) from exc
+        return RubricDraftResult(
+            rubric=_rubric_from_flat_options(
+                list(draft.options), points=question.points
+            ),
+            rationale=draft.rationale,
+            sample_count=draft.sample_count,
+            student_count=draft.student_count,
+        )
+
     def read_answers(
         run: QuestionRun,
         cancel: Event,
@@ -209,30 +409,13 @@ def add_ai_draft_routes(
         for answer in unread:
             if cancel.is_set():
                 return
-            name = unquote(answer.response_image_url.rsplit("/", 1)[-1])
-            text, confidence, _source, _provider = transcribe_crop(
-                workspace.asset(f"assets/{name}"),
-                question_id=answer.question.id,
-                vision_reader=reader,
-                progress_callback=lambda _line: None,
-                math_latex=resolved.transcribe_math,
-                escalate_floor=(
-                    DEFAULT_ESCALATION_FLOOR if resolved.escalate_only else None
-                ),
+            result = _transcribe_answer(
+                workspace, assignment_id, answer, resolved, reader
             )
-            if text.strip() and confidence != 0.0:
-                try:
-                    workspace.save_transcription(
-                        assignment_id,
-                        answer.submission_id,
-                        answer.question.id,
-                        text.strip(),
-                        expected_revision=answer.revision,
-                        actor=ACTOR_READER,
-                    )
-                    run.read += 1
-                except WorkspaceConflict:
-                    run.skipped += 1
+            if result == "read":
+                run.read += 1
+            elif result == "changed":
+                run.skipped += 1
             else:
                 run.unreadable += 1
             run.done += 1
@@ -296,7 +479,10 @@ def add_ai_draft_routes(
                 run.done += 1
 
     def run_job(
-        job: DraftJob, cancel: Event, resolved: app_config.ResolvedAI, assignment_id: str
+        job: DraftJob,
+        cancel: Event,
+        resolved: app_config.ResolvedAI,
+        assignment_id: str,
     ) -> None:
         try:
             app_config.ensure_ready(resolved, purpose="text")
@@ -357,11 +543,17 @@ def add_ai_draft_routes(
             )
             confirm = "\n\n".join(
                 part
-                for part in (preflight.statement(), app_config.egress_statement(resolved))
+                for part in (
+                    preflight.statement(),
+                    app_config.egress_statement(resolved),
+                )
                 if part
             )
         return DraftPlan(
-            images=images, calls=calls, provider=resolved.provider.label, confirm=confirm
+            images=images,
+            calls=calls,
+            provider=resolved.provider.label,
+            confirm=confirm,
         )
 
     @api.post("/assignments/{assignment_id}/ai-drafts")
@@ -387,7 +579,9 @@ def add_ai_draft_routes(
             job = DraftJob(questions=runs)
             jobs[assignment_id] = job
             cancels[assignment_id] = Event()
-            executor.submit(run_job, job, cancels[assignment_id], resolved, assignment_id)
+            executor.submit(
+                run_job, job, cancels[assignment_id], resolved, assignment_id
+            )
             return job
 
     @api.post("/assignments/{assignment_id}/ai-drafts/cancel", status_code=204)

@@ -367,7 +367,7 @@ def test_an_answer_key_that_cannot_be_written_changes_nothing(session) -> None:
     assert _rubric(session) == expected
 
 
-def test_outside_a_folder_session_a_rubric_is_not_edited_while_grading(plain) -> None:
+def test_outside_a_folder_session_a_rubric_edit_stays_in_the_workspace(plain) -> None:
     before_text = plain["qa"].read_text(encoding="utf-8")
     rubric = _rubric(plain)
     edited = _rebalanced(rubric, 8, 2)
@@ -377,8 +377,8 @@ def test_outside_a_folder_session_a_rubric_is_not_edited_while_grading(plain) ->
         json={"version": "A", "rubric": edited, "expected_rubric": rubric},
     )
 
-    assert response.status_code == 409
-    assert "class folder is open from classic" in response.json()["detail"]
+    assert response.status_code == 200
+    assert _partial(_rubric(plain))[0]["points_delta"] == 8
     assert plain["qa"].read_text(encoding="utf-8") == before_text
 
 

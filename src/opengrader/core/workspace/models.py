@@ -137,14 +137,6 @@ class ReplacedSubmissions(BaseModel):
 
 
 class RubricEditResult(BaseModel):
-    """What saving a question's rubric — or answers — from the browser did.
-
-    `regraded` counts the saved grades that followed a renamed or re-pointed
-    item. `problems` names any of those grades whose `.submission.md` could
-    not be written yet; the answer key file itself is always written before
-    anything else changes, so a result means it holds the new rubric.
-    """
-
     changed: bool
     regraded: int = 0
     problems: list[str] = []

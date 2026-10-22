@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/components/error-alert';
 import { Check, Eraser, PenLine, TriangleAlert } from 'lucide-react';
 import {
@@ -10,6 +10,11 @@ import {
 } from '@/api/queries';
 import { parseAiDraft } from '@/lib/ai-draft';
 import { errorMessage } from '@/lib/error-message';
+import {
+  rubricEditorQuery,
+  rubricEditorChanged,
+  type RubricEditorDraft,
+} from '@/lib/rubric-editor-draft';
 import { useGradeEditor } from '@/hooks/use-grade-editor';
 import { useFolderSession } from '@/hooks/use-folder-session';
 import { RubricEditSheet } from './rubric-edit-sheet';
@@ -45,9 +50,20 @@ export function GradePanel({
   navigating: boolean;
   onNext: (() => void) | undefined;
 }) {
-  // A rubric can be edited mid-grading only where the answer key is a file
-  // the edit is written into at once: a class folder opened from classic.
   const folderSession = useFolderSession();
+  const { data: rubricDraft } = useQuery<RubricEditorDraft>(
+    rubricEditorQuery(assignmentId, question.id, answer.version ?? null)
+  );
+  const rubricStatus =
+    rubricDraft?.generation.status === 'running'
+      ? 'Drafting rubric with AI…'
+      : rubricDraft?.generation.status === 'failed'
+        ? 'AI rubric draft failed · Open Edit for details'
+        : rubricDraft?.aiDraft
+          ? 'AI rubric draft ready · Review and save'
+          : rubricDraft && rubricEditorChanged(rubricDraft)
+            ? 'Rubric changes not saved'
+            : null;
   const [editingRubric, setEditingRubric] = useState(false);
   const {
     saved,
@@ -121,22 +137,28 @@ export function GradePanel({
           <h2 id="rubric-heading" className="font-semibold">
             Rubric
           </h2>
-          {folderSession && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ms-1.5 self-center text-muted-foreground"
-              disabled={rubricLocked}
-              title={
-                rubricLocked
-                  ? 'Available once this grade has finished saving'
-                  : 'Edit this question’s answers and rubric in the answer key'
-              }
-              onClick={() => setEditingRubric(true)}
-            >
-              <PenLine aria-hidden="true" />
-              Edit<span className="sr-only"> answers and rubric</span>
-            </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="-ms-1.5 self-center text-muted-foreground"
+            disabled={rubricLocked}
+            title={
+              rubricLocked
+                ? 'Available once this grade has finished saving'
+                : 'Edit this question’s rubric in the answer key'
+            }
+            onClick={() => setEditingRubric(true)}
+          >
+            <PenLine aria-hidden="true" />
+            Edit
+            <span className="sr-only">
+              {folderSession ? ' answers and rubric' : ' rubric'}
+            </span>
+          </Button>
+          {rubricStatus && (
+            <p role="status" className="text-sm text-muted-foreground">
+              {rubricStatus}
+            </p>
           )}
           <p
             role="status"
@@ -409,17 +431,15 @@ export function GradePanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {folderSession && (
-        <RubricEditSheet
-          assignmentId={assignmentId}
-          target={
-            editingRubric
-              ? { questionId: question.id, version: answer.version }
-              : null
-          }
-          onClose={() => setEditingRubric(false)}
-        />
-      )}
+      <RubricEditSheet
+        assignmentId={assignmentId}
+        target={
+          editingRubric
+            ? { questionId: question.id, version: answer.version }
+            : null
+        }
+        onClose={() => setEditingRubric(false)}
+      />
       <GradeRecoveryDialog
         mode={
           reloadOpen ? 'reload' : blocker.status === 'blocked' ? 'leave' : null

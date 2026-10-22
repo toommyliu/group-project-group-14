@@ -67,6 +67,9 @@ beforeEach(async () => {
       </QueryClientProvider>
     )
   );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -75,7 +78,10 @@ afterEach(async () => {
 });
 
 it('retains a rubric draft and its original conflict baseline after a background refresh', async () => {
-  await act(async () => container.querySelector('button')!.click());
+  await act(async () => {
+    container.querySelector('button')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
   await act(async () => {
     const updatedAt = Date.now() + 1000;
     client.setQueryData(
@@ -102,7 +108,10 @@ it('replaces the draft only when the grader explicitly reloads after a conflict'
   vi.mocked(saveRubric).mockRejectedValueOnce(
     new ApiError(409, { detail: 'Changed' })
   );
-  await act(async () => container.querySelector('button')!.click());
+  await act(async () => {
+    container.querySelector('button')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
   const save = [...container.querySelectorAll('button')].find(
     (button) => button.textContent === 'Save'
   )!;

@@ -273,7 +273,6 @@ export async function updateAssignment(
 export type RubricItem = components['schemas']['QARubricItem-Input'];
 export type RubricEditResult = components['schemas']['RubricEditResult'];
 
-/** Save one question's rubric — and its answers, when given — into the class folder's answer key (a folder session). */
 export async function saveRubric(
   assignmentId: string,
   questionId: string,
@@ -283,6 +282,48 @@ export async function saveRubric(
     await client.PUT(
       '/api/assignments/{assignment_id}/questions/{question_id}/rubric',
       {
+        params: {
+          path: { assignment_id: assignmentId, question_id: questionId },
+        },
+        body,
+      }
+    )
+  );
+}
+
+export async function planRubricDraft(
+  assignmentId: string,
+  questionId: string,
+  version: string | null,
+  signal: AbortSignal
+) {
+  return readData(
+    await client.GET(
+      '/api/assignments/{assignment_id}/questions/{question_id}/rubric/draft/plan',
+      {
+        signal,
+        params: {
+          path: { assignment_id: assignmentId, question_id: questionId },
+          query: { version },
+        },
+      }
+    )
+  );
+}
+
+export type RubricDraftResult = components['schemas']['RubricDraftResult'];
+
+export async function draftRubric(
+  assignmentId: string,
+  questionId: string,
+  body: components['schemas']['RubricDraftInput'],
+  signal: AbortSignal
+) {
+  return readData(
+    await client.POST(
+      '/api/assignments/{assignment_id}/questions/{question_id}/rubric/draft',
+      {
+        signal,
         params: {
           path: { assignment_id: assignmentId, question_id: questionId },
         },

@@ -163,9 +163,15 @@ def test_bad_deductions_are_dropped(bad) -> None:
     assert len(labels) == 4
 
 
-def test_only_bad_items_yields_none() -> None:
+def test_only_bad_items_yields_none_but_a_single_mistake_is_valid() -> None:
     assert parse_rubric_draft(_reply([{"description": "x", "deduction": 0}]), _request()) is None
-    assert parse_rubric_draft(_reply([GOOD[0]]), _request()) is None
+    draft = parse_rubric_draft(_reply([GOOD[0]]), _request())
+    assert draft is not None
+    partial = [o for o in draft.options if o.kind == "partial"]
+    assert [(o.label, o.points_delta, o.selection_mode) for o in partial] == [
+        ("Partially Correct", -5.0, "exclusive")
+    ]
+    assert partial[0].default_comment == "Connect halving to order."
 
 
 def test_negative_deduction_uses_absolute_value() -> None:

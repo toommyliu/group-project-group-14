@@ -78,15 +78,21 @@ class RubricDraft:
     student_count: int
 
 
+class RubricDraftError(ValueError):
+    """The model response cannot form a rubric the instructor can review."""
+
+
 def has_partial_credit_items(options: Iterable[object]) -> bool:
     """True when a rubric already describes specific partial-credit mistakes.
 
-    Every QA rubric carries a bare "Partially Correct" line; that placeholder
-    alone is not a described mistake, so it does not count.
+    A bare "Partially Correct" line without feedback is only a placeholder.
     """
     return any(
         getattr(option, "kind", "") == "partial"
-        and getattr(option, "label", "").strip() != "Partially Correct"
+        and (
+            getattr(option, "label", "").strip() != "Partially Correct"
+            or bool(getattr(option, "default_comment", None))
+        )
         for option in options
     )
 
@@ -142,12 +148,15 @@ def build_rubric_draft_prompt(request: RubricDraftRequest) -> str:
             "",
             'The rubric already has "Correct" (+0) and "Incorrect" '
             f"(-{points:g}). Do NOT propose those, nor \"Partially Correct\" itself.",
-            "Propose 2 to 5 partial-credit items. Each must describe a specific "
+            "Propose 1 to 5 distinct partial-credit items. Each must describe a specific "
             "mistake or omission that actually appears in the sample answers; do "
-            "not invent generic items.",
+            "not invent generic items or repeat a mistake to fill the list. "
+            "If only one mistake appears, return just one item. If none warrant "
+            "partial credit, return an empty list.",
             f"Each deduction is the points lost for that mistake, strictly "
             f"between 0 and {points:g}. Use larger deductions for more serious "
-            f"errors. The deductions together should total {points:g} points.",
+            f"errors. If there are multiple items, their deductions together "
+            f"should total {points:g} points. A single item keeps its own deduction.",
             "Return STRICT JSON only, no prose, with this shape:",
             '{"partial_credit": [{"description": "<short label of the mistake>", '
             '"deduction": 0.0, "comment": "<one short sentence of student-facing '
@@ -218,56 +227,87 @@ def _normalize_to_total(deductions: list[float], points: float) -> list[float] |
     return scaled
 
 
-def parse_rubric_draft(raw: str, request: RubricDraftRequest) -> RubricDraft | None:
+def validate_rubric_draft(raw: str, request: RubricDraftRequest) -> RubricDraft:
+    """Read a model response, explaining why a rejected draft cannot be used."""
     parsed = parse_json_object(raw)
     if not isinstance(parsed, dict):
-        return None
+        raise RubricDraftError("The AI did not return a JSON object for the rubric.")
     items = parsed.get("partial_credit")
     if not isinstance(items, list):
-        return None
+        raise RubricDraftError("The AI did not return a list of partial-credit criteria.")
     points = float(request.possible_points)
     if not math.isfinite(points) or points <= 0 or points != int(points):
-        return None
+        raise RubricDraftError("Rubric drafting needs a positive whole-number point value.")
 
     drafted: list[tuple[str, float, str | None]] = []
     seen: set[str] = set()
+    rejected: list[str] = []
     for item in items:
         if not isinstance(item, dict):
+            rejected.append("The AI returned a criterion without a description and deduction.")
             continue
         label = _sanitize_label(item.get("description"))
-        if not label or label.lower() in _RESERVED_LABELS:
+        if not label:
+            rejected.append("The AI returned a criterion without a description.")
+            continue
+        if label.lower() in _RESERVED_LABELS:
+            rejected.append(f'“{label}” is already a standard rubric option.')
             continue
         deduction = _coerce_deduction(item.get("deduction"), points)
-        if deduction is None or label.lower() in seen:
+        if deduction is None:
+            amount = _cap(_one_line(str(item.get("deduction"))), 30, word_boundary=False)
+            rejected.append(
+                f'“{label}” deducts {amount} points. Partial credit for this '
+                f'{points:g}-point question must deduct more than 0 and less than {points:g}.'
+            )
+            continue
+        if label.lower() in seen:
             continue
         seen.add(label.lower())
         drafted.append((label, deduction, _sanitize_comment(item.get("comment"))))
         if len(drafted) == MAX_DRAFT_ITEMS:
             break
-    if len(drafted) < 2:
-        return None
+    if not drafted:
+        detail = " ".join(dict.fromkeys(rejected[:3])) or (
+            "The AI suggested no partial-credit items for these answers."
+        )
+        rationale = _sanitize_comment(parsed.get("rationale"))
+        if rationale:
+            detail += f" The AI's explanation: {rationale}"
+        raise RubricDraftError(detail + " Your rubric has not changed.")
 
-    deductions = _normalize_to_total([d for _, d, _ in drafted], points)
-    if deductions is None:
-        return None
-
-    rubric = [
-        QARubricItem(label="Correct", points_delta=0.0),
-        QARubricItem(
+    if len(drafted) == 1:
+        label, deduction, comment = drafted[0]
+        partial = QARubricItem(
+            label="Partially Correct",
+            points_delta=-deduction,
+            default_comment=comment or label,
+        )
+    else:
+        deductions = _normalize_to_total([d for _, d, _ in drafted], points)
+        if deductions is None:
+            raise RubricDraftError(
+                f"The AI's deductions could not be combined into a {points:g}-point rubric."
+            )
+        partial = QARubricItem(
             label="Partially Correct",
             subitems=[
                 QARubricItem(label=label, points_delta=-deduction, default_comment=comment)
                 for (label, _, comment), deduction in zip(drafted, deductions)
             ],
-        ),
+        )
+
+    rubric = [
+        QARubricItem(label="Correct", points_delta=0.0),
+        partial,
         QARubricItem(label="Incorrect", points_delta=-points),
     ]
     options = flatten_rubric_options(rubric)
     try:
         roundtrip = _rubric_from_flat_options(options, points=int(points))
         _validate_rubric_points(roundtrip, points=int(points), context="drafted rubric")
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise RubricDraftError(f"The AI's rubric failed validation: {exc}") from exc
 
     return RubricDraft(
         question_id=request.question_id,
@@ -276,6 +316,13 @@ def parse_rubric_draft(raw: str, request: RubricDraftRequest) -> RubricDraft | N
         sample_count=len(request.samples),
         student_count=sum(sample.count for sample in request.samples),
     )
+
+
+def parse_rubric_draft(raw: str, request: RubricDraftRequest) -> RubricDraft | None:
+    try:
+        return validate_rubric_draft(raw, request)
+    except RubricDraftError:
+        return None
 
 
 def draft_rubric(

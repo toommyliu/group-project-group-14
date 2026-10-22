@@ -189,7 +189,7 @@ function Criterion({
       data-rubric-index={index}
       className={`space-y-2 bg-background py-2 ${isDragging ? 'opacity-60' : ''} ${isDropTarget ? 'ring-2 ring-ring' : ''}`}
     >
-      <div className="flex items-start gap-2">
+      <div className="grid grid-cols-[2rem_minmax(0,1fr)_auto_2rem] items-start gap-2">
         <Button
           ref={handleRef}
           type="button"
@@ -201,7 +201,7 @@ function Criterion({
         >
           <GripVertical aria-hidden="true" />
         </Button>
-        <Label className="block min-w-0 flex-1 text-sm leading-normal">
+        <Label className="col-span-3 block min-w-0 text-sm leading-normal @min-[28rem]:col-span-1">
           <span className="sr-only">Criterion {index + 1}</span>
           <Input
             value={item.label}
@@ -211,18 +211,21 @@ function Criterion({
             }
           />
         </Label>
-        <PointsInput
-          label={item.label}
-          value={item.points_delta}
-          bounds={bounds}
-          bonus={bonus}
-          disabled={disabled}
-          onChange={(points_delta) => onChange({ ...item, points_delta })}
-        />
+        <div className="col-start-2 justify-self-start @min-[28rem]:col-start-auto">
+          <PointsInput
+            label={item.label}
+            value={item.points_delta}
+            bounds={bounds}
+            bonus={bonus}
+            disabled={disabled}
+            onChange={(points_delta) => onChange({ ...item, points_delta })}
+          />
+        </div>
         <Button
           type="button"
           variant="ghost"
           size="icon"
+          className="col-start-4"
           disabled={disabled}
           aria-label={`Remove ${item.label}`}
           title="Remove criterion"
@@ -286,7 +289,7 @@ function CriteriaList({
           requestAnimationFrame(() => handle.focus());
       }}
     >
-      <ul data-rubric-list className="divide-y border-s ps-2">
+      <ul data-rubric-list className="@container divide-y border-s ps-2">
         {items.map((item, index) => (
           <Criterion
             key={item.id}

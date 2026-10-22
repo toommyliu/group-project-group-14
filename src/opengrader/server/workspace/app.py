@@ -571,24 +571,17 @@ def create_app(
     def save_rubric(
         assignment_id: str, question_id: str, edit: RubricEdit, request: Request
     ) -> RubricEditResult:
-        """Edit one question's rubric while grading; a folder session only.
-
-        There the answer key is a file, and the edit is written into it at
-        once (`folder_session.edit_rubric`). A workspace's key has no file
-        to keep in step, and its grades reach files only by write-back, which
-        does not carry the answer key — so it keeps the rule that the key is
-        edited before submissions arrive.
-        """
         require_assignment(assignment_id)
         user = signed_in(request)
-        with folder_lock(root):
+        with registry_lock, folder_lock(root):
             session = load_folder_session(root)
-            if session is None or session.assignment_id != assignment_id:
+            if session is not None and session.assignment_id != assignment_id:
+                raise HTTPException(409, "This assignment is not open in the class folder.")
+            if session is None and edit.answers is not None:
                 raise HTTPException(
                     409,
-                    "A rubric can be edited while grading only when a class "
-                    "folder is open from classic mode. In a workspace, edit "
-                    "it on the Answer key page before submissions are added.",
+                    "Accepted answers can be edited while grading only when "
+                    "a class folder is open from classic mode.",
                 )
             result = edit_answer_key(
                 workspace,
@@ -605,8 +598,7 @@ def create_app(
                 ],
                 actor=user.email if user else None,
             )
-        if result.changed:
-            with registry_lock:
+            if result.changed:
                 extraction_source(assignment_id)
         return result
 

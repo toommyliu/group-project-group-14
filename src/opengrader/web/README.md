@@ -63,8 +63,20 @@ An assignment follows the same steps as the sidebar:
 5. **Grade** each question across the class, then **Review grades** and
    download them as CSV.
 
-The answer key is locked once scans are uploaded, and the outline's questions
-once submissions exist. You can still move the outline's boxes. Saving asks for
+Once scans are uploaded, the answer key's structure is locked. On **Grade**,
+choose **Edit rubric** to change a question's rubric while grading. **Draft with
+AI** proposes partial-credit criteria from student answers using the server's
+configured AI provider. It reads scanned answers when needed and reuses their
+transcriptions on later requests. Closing the panel keeps the request running
+and retains unsaved edits in the current browser tab; reopen it to review the
+result. **Cancel AI** stops the request, and **Discard draft** removes unsaved
+edits. Reloading the page discards unsaved drafts. Review or edit the draft,
+then **Save** to apply it. Saved grades follow renamed or re-scored items; an
+item that a saved grade uses cannot be removed. In a class-folder session, **Edit answers and
+rubric** also saves changes into the folder's answer key.
+
+The outline's questions are locked once submissions exist. You can still move
+the outline's boxes. Saving asks for
 confirmation, then crops every submission of that version again from its scan.
 Scores, comments, and students picked by hand stay. If the name or ID box
 moved, submissions matched automatically are matched to the roster again.

@@ -601,45 +601,26 @@ def edit_answer_key(
     *,
     actor: str | None = None,
 ) -> RubricEditResult:
-    """Save questions' rubrics and answers into the answer-key file, then
-    everywhere else.
-
-    In order, so that a failure leaves the class folder consistent:
-
-    1. the file is read, and anything it gained since the import is taken;
-    2. every edit is checked before anything is written: refused if the
-       rubric or the answers are no longer what the editor opened, if a
-       rubric drops an item saved grades still use, or if the result would
-       not be a valid answer key;
-    3. the file is written once, with only those questions' sections changed
-       — a rubric and its answers together, never one without the other;
-    4. the workspace takes the new key, renaming and re-scoring the grades
-       that selected a changed rubric item;
-    5. each of those grades is written into its `.submission.md`.
-
-    Answers change no grade by themselves: what was graded stays graded until
-    auto-grading is run again. A grade whose file cannot be written in step 5
-    is reported and written by the next sync, as a failed grade save is.
-    Call under `folder_lock`.
-    """
     from opengrader.core.qa_file.answers import answer_edit, answer_fields, clean_answers
 
-    path = answer_key_path(workspace, assignment_id)
-    if path is None:
-        raise WriteBackError(
-            "The answer key file could not be found in the class folder; it "
-            "may have moved. Nothing was changed."
-        )
-    try:
-        text, fingerprint = _read_answer_key(path)
-    except FileChanged as exc:
-        raise WorkspaceConflict(
-            f"{path.name} is being saved by another program. Try again in a moment."
-        ) from exc
-    if _unix_newlines(text) != workspace.assignment_source(assignment_id):
-        # Changed in the folder since the browser last looked. Refuse rather
-        # than merge: what the editor showed may no longer be what is there.
-        replace_answer_key(workspace, assignment_id, _unix_newlines(text), strict=False)
+    session = load_folder_session(workspace.root)
+    path = None
+    text = workspace.assignment_source(assignment_id)
+    if session is not None:
+        path = answer_key_path(workspace, assignment_id)
+        if path is None:
+            raise WriteBackError(
+                "The answer key file could not be found in the class folder; it "
+                "may have moved. Nothing was changed."
+            )
+        try:
+            text, fingerprint = _read_answer_key(path)
+        except FileChanged as exc:
+            raise WorkspaceConflict(
+                f"{path.name} is being saved by another program. Try again in a moment."
+            ) from exc
+        if _unix_newlines(text) != workspace.assignment_source(assignment_id):
+            replace_answer_key(workspace, assignment_id, _unix_newlines(text), strict=False)
 
     document = parse_qa_markdown(text)
     fields = {(field.version or None, field.key): field for field in answer_fields(text)}
@@ -662,14 +643,15 @@ def edit_answer_key(
                 )
             rubric = edit.rubric
         change: QuestionEdit | None = None
-        if edit.answers is not None:
+        if edit.answers is not None or edit.expected_answers is not None:
             field = fields[(version, edit.question_id)]
             if field.answers != clean_answers(field, edit.expected_answers or []):
                 raise WorkspaceConflict(
                     "These answers were changed somewhere else since you opened "
                     "them. Close this and open it again to see the current answers."
                 )
-            change = answer_edit(field, question, edit.answers)
+            if edit.answers is not None:
+                change = answer_edit(field, question, edit.answers)
         if change is None:
             if rubric == question.rubric:
                 continue
@@ -704,22 +686,25 @@ def edit_answer_key(
     source = _unix_newlines(edited_text)
     check_answer_key(workspace, assignment_id, source, relabel=relabel)
 
-    try:
-        _replace_atomically(path, edited_text, fingerprint)
-    except FileChanged as exc:
-        raise WorkspaceConflict(
-            f"{path.name} changed while it was being saved, so "
-            "nothing was written. Open it again and retry."
-        ) from exc
-    except OSError as exc:
-        raise WriteBackError(
-            f"{path.name} could not be written, so the answer key was not "
-            f"changed: {exc}"
-        ) from exc
+    if path is not None:
+        try:
+            _replace_atomically(path, edited_text, fingerprint)
+        except FileChanged as exc:
+            raise WorkspaceConflict(
+                f"{path.name} changed while it was being saved, so "
+                "nothing was written. Open it again and retry."
+            ) from exc
+        except OSError as exc:
+            raise WriteBackError(
+                f"{path.name} could not be written, so the answer key was not "
+                f"changed: {exc}"
+            ) from exc
 
     update = replace_answer_key(
         workspace, assignment_id, source, relabel=relabel, actor=actor
     )
+    if path is None:
+        return RubricEditResult(changed=True, regraded=len(update.regraded))
     problems: list[str] = []
     for submission_id, changed_question in update.regraded:
         written = write_through(workspace, assignment_id, submission_id, changed_question)

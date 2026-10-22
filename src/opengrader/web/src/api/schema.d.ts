@@ -266,16 +266,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Save Rubric
-         * @description Edit one question's rubric while grading; a folder session only.
-         *
-         *     There the answer key is a file, and the edit is written into it at
-         *     once (`folder_session.edit_rubric`). A workspace's key has no file
-         *     to keep in step, and its grades reach files only by write-back, which
-         *     does not carry the answer key — so it keeps the rule that the key is
-         *     edited before submissions arrive.
-         */
+        /** Save Rubric */
         put: operations["save_rubric_api_assignments__assignment_id__questions__question_id__rubric_put"];
         post?: never;
         delete?: never;
@@ -1316,6 +1307,40 @@ export interface paths {
         put?: never;
         /** Import Roster */
         post: operations["import_roster_api_roster_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/questions/{question_id}/rubric/draft/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rubric Plan */
+        get: operations["rubric_plan_api_assignments__assignment_id__questions__question_id__rubric_draft_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/questions/{question_id}/rubric/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make Rubric Draft */
+        post: operations["make_rubric_draft_api_assignments__assignment_id__questions__question_id__rubric_draft_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2734,6 +2759,31 @@ export interface components {
             before: components["schemas"]["StudentDetails"];
             after: components["schemas"]["StudentDetails"];
         };
+        /** RubricDraftInput */
+        RubricDraftInput: {
+            /** Version */
+            version?: string | null;
+            /** Answers */
+            answers?: string[] | null;
+            /** Expected Answers */
+            expected_answers: string[];
+            /**
+             * Send To Cloud
+             * @default false
+             */
+            send_to_cloud: boolean;
+        };
+        /** RubricDraftResult */
+        RubricDraftResult: {
+            /** Rubric */
+            rubric: components["schemas"]["QARubricItem-Output"][];
+            /** Rationale */
+            rationale: string;
+            /** Sample Count */
+            sample_count: number;
+            /** Student Count */
+            student_count: number;
+        };
         /**
          * RubricEdit
          * @description One question's rubric as the editor leaves it, and as it found it.
@@ -2754,15 +2804,7 @@ export interface components {
             /** Expected Answers */
             expected_answers?: string[] | null;
         };
-        /**
-         * RubricEditResult
-         * @description What saving a question's rubric — or answers — from the browser did.
-         *
-         *     `regraded` counts the saved grades that followed a renamed or re-pointed
-         *     item. `problems` names any of those grades whose `.submission.md` could
-         *     not be written yet; the answer key file itself is always written before
-         *     anything else changes, so a result means it holds the new rubric.
-         */
+        /** RubricEditResult */
         RubricEditResult: {
             /** Changed */
             changed: boolean;
@@ -5789,6 +5831,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RosterImport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rubric_plan_api_assignments__assignment_id__questions__question_id__rubric_draft_plan_get: {
+        parameters: {
+            query?: {
+                version?: string | null;
+            };
+            header?: never;
+            path: {
+                assignment_id: string;
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    make_rubric_draft_api_assignments__assignment_id__questions__question_id__rubric_draft_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RubricDraftInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubricDraftResult"];
                 };
             };
             /** @description Validation Error */
