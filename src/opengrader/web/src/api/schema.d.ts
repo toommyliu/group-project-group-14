@@ -2001,7 +2001,7 @@ export interface components {
              * @default starting
              * @enum {string}
              */
-            status: "starting" | "running" | "done" | "failed" | "cancelled";
+            status: "starting" | "running" | "cancelling" | "done" | "failed" | "cancelled";
             /**
              * Message
              * @default

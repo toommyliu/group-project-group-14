@@ -28,7 +28,11 @@ function plural(count: number, noun: string) {
 }
 
 function active(job: DraftJob | null | undefined) {
-  return job?.status === 'starting' || job?.status === 'running';
+  return (
+    job?.status === 'starting' ||
+    job?.status === 'running' ||
+    job?.status === 'cancelling'
+  );
 }
 
 function working(run: QuestionRun) {
@@ -41,6 +45,8 @@ function total(job: DraftJob, key: 'drafted' | 'low_confidence') {
 
 function jobSummary(job: DraftJob) {
   if (job.status === 'starting') return 'Starting the AI…';
+  if (job.status === 'cancelling')
+    return 'Cancelling AI after the current request…';
   if (job.status === 'failed') return job.message;
   if (job.status === 'running') {
     const queued = job.questions.filter((run) => run.status !== 'skipped');
@@ -98,7 +104,7 @@ export function AiDrafts({ assignmentId }: { assignmentId: string }) {
       {active(job) ? (
         <Button
           variant="outline"
-          disabled={busy}
+          disabled={busy || job?.status === 'cancelling'}
           onClick={() =>
             void attempt(async () => {
               await cancelAiDrafts(assignmentId);
@@ -106,7 +112,7 @@ export function AiDrafts({ assignmentId }: { assignmentId: string }) {
             })
           }
         >
-          Cancel AI
+          {job?.status === 'cancelling' ? 'Cancelling AI…' : 'Cancel AI'}
         </Button>
       ) : (
         <>

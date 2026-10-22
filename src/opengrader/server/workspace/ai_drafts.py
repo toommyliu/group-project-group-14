@@ -62,7 +62,9 @@ class QuestionRun(BaseModel):
 
 
 class DraftJob(BaseModel):
-    status: Literal["starting", "running", "done", "failed", "cancelled"] = "starting"
+    status: Literal[
+        "starting", "running", "cancelling", "done", "failed", "cancelled"
+    ] = "starting"
     message: str = ""
     questions: list[QuestionRun]
 
@@ -302,7 +304,9 @@ def add_ai_draft_routes(
                 resolved, response_format=GRADE_SUGGESTION_SCHEMA
             )
             reader = None
-            job.status = "running"
+            with lock:
+                if not cancel.is_set():
+                    job.status = "running"
             for run in job.questions:
                 if run.status == "skipped":
                     continue
@@ -321,10 +325,13 @@ def add_ai_draft_routes(
                 )
                 if not cancel.is_set():
                     run.status = "done"
-            job.status = "cancelled" if cancel.is_set() else "done"
+            with lock:
+                job.status = "cancelled" if cancel.is_set() else "done"
         except Exception as exc:  # noqa: BLE001 - shown to the grader
-            job.status = "failed"
-            job.message = redact(str(exc)) or "The AI request failed."
+            with lock:
+                job.status = "cancelled" if cancel.is_set() else "failed"
+                if job.status == "failed":
+                    job.message = redact(str(exc)) or "The AI request failed."
         for run in job.questions:
             if run.status in ("queued", "reading", "drafting"):
                 run.status = "stopped"
@@ -364,7 +371,7 @@ def add_ai_draft_routes(
                 (
                     (key, job)
                     for key, job in jobs.items()
-                    if job.status in ("starting", "running")
+                    if job.status in ("starting", "running", "cancelling")
                 ),
                 None,
             )
@@ -385,16 +392,20 @@ def add_ai_draft_routes(
 
     @api.post("/assignments/{assignment_id}/ai-drafts/cancel", status_code=204)
     def cancel_drafts(assignment_id: str) -> Response:
-        cancel = cancels.get(assignment_id)
-        if cancel is not None:
-            cancel.set()
+        with lock:
+            job = jobs.get(assignment_id)
+            if job is not None and job.status in ("starting", "running"):
+                cancels[assignment_id].set()
+                job.status = "cancelling"
         return Response(status_code=204)
 
     @api.delete("/assignments/{assignment_id}/ai-drafts", status_code=204)
     def dismiss_drafts(assignment_id: str) -> Response:
         with lock:
             job = jobs.get(assignment_id)
-            if job is not None and job.status in ("starting", "running"):
+            if job is not None and job.status in (
+                "starting", "running", "cancelling"
+            ):
                 raise HTTPException(409, "Cancel the AI before dismissing it.")
             jobs.pop(assignment_id, None)
         return Response(status_code=204)

@@ -376,7 +376,8 @@ export function aiDraftJobQuery(assignmentId: string) {
       ).data ?? null,
     refetchInterval: (query) =>
       query.state.data?.status === 'starting' ||
-      query.state.data?.status === 'running'
+      query.state.data?.status === 'running' ||
+      query.state.data?.status === 'cancelling'
         ? 1000
         : false,
   });

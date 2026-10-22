@@ -238,15 +238,45 @@ def test_grader_changes_are_preserved_while_ai_is_running(
 
 
 def test_cancel_keeps_completed_grades_and_stops_remaining_questions(
-    page, browser_app, fake_ollama, output_path
+    page, browser_app, fake_ollama, monkeypatch, output_path
 ):
-    _prompts, _images, gate = fake_ollama
+    prompts, _images, gate = fake_ollama
+    request_started = Event()
+    wait = gate.wait
+
+    def wait_for_reply(timeout):
+        request_started.set()
+        return wait(timeout)
+
+    monkeypatch.setattr(gate, "wait", wait_for_reply)
     gate.clear()
     page.goto(browser_app.grade_url)
     page.get_by_role("button", name="Draft grades with AI").click()
+    assert request_started.wait(5)
     expect(status(page, "AI is drafting grades: 1 of 2")).to_be_visible()
-    page.get_by_role("button", name="Cancel AI", exact=True).click()
-    gate.set()
+    try:
+        page.get_by_role("button", name="Cancel AI", exact=True).click()
+        expect(
+            status(page, "Cancelling AI after the current request…")
+        ).to_be_visible(timeout=3000)
+        expect(page.get_by_role("button", name="Cancelling AI…")).to_be_disabled()
+        job_url = (
+            f"{browser_app.course_url}/api/assignments/"
+            f"{browser_app.assignment_id}/ai-drafts"
+        )
+        assert page.request.get(job_url).json()["status"] == "cancelling"
+        assert page.request.post(job_url).json()["status"] == "cancelling"
+        assert page.request.delete(job_url).status == 409
+        page.reload()
+        expect(
+            status(page, "Cancelling AI after the current request…")
+        ).to_be_visible(timeout=3000)
+        expect(page.get_by_role("button", name="Cancelling AI…")).to_be_disabled()
+        page.screenshot(
+            path=str(Path(output_path) / "cancelling.png"), full_page=True
+        )
+    finally:
+        gate.set()
     expect(status(page, "Cancelled after drafting 1 grade")).to_be_visible()
     page.reload()
     expect(page.get_by_role("spinbutton", name="Score", exact=True)).to_have_value("6")
@@ -258,6 +288,10 @@ def test_cancel_keeps_completed_grades_and_stops_remaining_questions(
     ).json()
     assert other["points_awarded"] is None
     assert second_question["points_awarded"] is None
+    assert len(prompts) == 1
+    (Path(output_path) / "cancelled-job.json").write_text(
+        json.dumps(page.request.get(job_url).json(), indent=2)
+    )
     page.screenshot(path=str(Path(output_path) / "cancelled.png"), full_page=True)
 
 
