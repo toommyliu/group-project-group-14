@@ -14,6 +14,7 @@ from opengrader.server.home import resolve_data_home
 
 
 logger = logging.getLogger(__name__)
+VITE_PORT = 5173
 
 
 def _stop(process: subprocess.Popen, *, timeout: float = 5) -> None:
@@ -85,6 +86,10 @@ def _start_api(port: int, root: Path | None) -> subprocess.Popen:
             str(port),
             *(["--workspace", str(root)] if root is not None else []),
         ],
+        env={
+            **os.environ,
+            "OPENGRADER_DEV_URL": f"http://127.0.0.1:{VITE_PORT}",
+        },
         start_new_session=os.name == "posix",
     )
 
@@ -96,6 +101,8 @@ def _start_vite(node: str, web: Path, port: int) -> subprocess.Popen:
             str(web / "node_modules" / "vite" / "bin" / "vite.js"),
             "--host",
             "127.0.0.1",
+            "--port",
+            str(VITE_PORT),
             "--strictPort",
         ],
         cwd=web,

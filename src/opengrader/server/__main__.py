@@ -65,7 +65,8 @@ def serve(
             # Shared workspaces tell other accounts this address.
             app.state.workspaces.base_url = connection.url
             if on_ready is None:
-                print(f"Open {connection.url}/courses", flush=True)
+                app_url = os.environ.get("OPENGRADER_DEV_URL", connection.url)
+                print(f"Open {app_url}/courses", flush=True)
             try:
                 server.run(sockets=[listener])
             finally:
