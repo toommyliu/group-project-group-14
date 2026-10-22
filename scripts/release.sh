@@ -4,6 +4,13 @@ cd "$(dirname "$0")/.."
 
 fail() { echo "release: $1" >&2; exit 1; }
 
+[[ $# -eq 1 ]] || fail "usage: scripts/release.sh {testpypi|pypi}"
+case "$1" in
+  testpypi|pypi) ;;
+  *) fail "unknown registry '$1'; expected testpypi or pypi" ;;
+esac
+[[ -n "${UV_PUBLISH_TOKEN:-}" ]] || fail "set UV_PUBLISH_TOKEN in the environment before releasing"
+
 npm --prefix src/opengrader/web ci
 npm --prefix src/opengrader/web run build
 
@@ -32,4 +39,4 @@ assert CMU_REGULAR_FILE.is_file() and CMU_BOLD_FILE.is_file(), CMU_REGULAR_FILE
 '
 
 ls -lh dist
-echo "Ready to upload. TestPyPI: uv publish --publish-url https://test.pypi.org/legacy/  PyPI: uv publish"
+uv publish --index "$1" "$wheel" "$sdist"
