@@ -1,7 +1,15 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ErrorAlert } from '@/components/error-alert';
 import { Check, Eraser, PenLine, TriangleAlert } from 'lucide-react';
-import type { Answer, Question } from '@/api/queries';
+import {
+  answerQuery,
+  confirmAiDraft,
+  type Answer,
+  type Question,
+} from '@/api/queries';
+import { parseAiDraft } from '@/lib/ai-draft';
+import { errorMessage } from '@/lib/error-message';
 import { useGradeEditor } from '@/hooks/use-grade-editor';
 import { useFolderSession } from '@/hooks/use-folder-session';
 import { RubricEditSheet } from './rubric-edit-sheet';
@@ -82,6 +90,26 @@ export function GradePanel({
   // first so the edit sees it (and can carry it along).
   const rubricLocked = busy || saving || dirty || Boolean(error);
   const { shortcut, shortcutAria } = useGradingShortcutHints();
+  const client = useQueryClient();
+  const aiDraft = parseAiDraft(saved.analysis);
+  const unreviewed = aiDraft !== null && !aiDraft.reviewed;
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
+  async function confirmDraft() {
+    setConfirming(true);
+    setConfirmError('');
+    try {
+      const result = await confirmAiDraft(assignmentId, saved);
+      client.setQueryData(
+        answerQuery(assignmentId, answer.submission_id, question.id).queryKey,
+        result.answer
+      );
+    } catch (caught) {
+      setConfirmError(errorMessage(caught));
+    } finally {
+      setConfirming(false);
+    }
+  }
   return (
     <section
       className="min-w-0"
@@ -120,9 +148,22 @@ export function GradePanel({
                 ? 'Saving…'
                 : dirty
                   ? 'Saving…'
-                  : message ||
-                    (saved.points_awarded === null ? 'Not graded' : 'Saved')}
+                  : unreviewed
+                    ? `AI draft${aiDraft.confidence !== null ? ` · ${aiDraft.confidence}% confident` : ''}`
+                    : message ||
+                      (saved.points_awarded === null ? 'Not graded' : 'Saved')}
           </p>
+          {unreviewed && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-auto min-h-11 max-w-full whitespace-normal focus-visible:ring-2"
+              disabled={rubricLocked || confirming}
+              onClick={() => void confirmDraft()}
+            >
+              Confirm AI grade
+            </Button>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <Label htmlFor="grade-score" className="sr-only">
@@ -196,6 +237,7 @@ export function GradePanel({
           </p>
         )}
       </div>
+      {confirmError && <ErrorAlert className="mb-4" error={confirmError} />}
       {recovered.length > 0 && (
         <div className="mb-4 grid gap-2">
           <p>
@@ -221,7 +263,7 @@ export function GradePanel({
           return (
             <div
               key={index}
-              className={`border has-[>button:focus-visible]:border-ring has-[>button:focus-visible]:ring-1 has-[>button:focus-visible]:ring-ring/50 ${selected ? 'border-foreground bg-muted' : 'border-border'}`}
+              className={`border has-[>button:focus-visible]:border-ring has-[>button:focus-visible]:ring-1 has-[>button:focus-visible]:ring-ring/50 ${selected ? 'border-foreground bg-muted' : 'border-border'} ${selected && unreviewed ? 'border-dashed' : ''}`}
             >
               <Button
                 variant="ghost"

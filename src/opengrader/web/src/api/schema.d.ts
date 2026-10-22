@@ -1322,6 +1322,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assignments/{assignment_id}/ai-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Draft Job */
+        get: operations["draft_job_api_assignments__assignment_id__ai_drafts_get"];
+        put?: never;
+        /** Start Drafts */
+        post: operations["start_drafts_api_assignments__assignment_id__ai_drafts_post"];
+        /** Dismiss Drafts */
+        delete: operations["dismiss_drafts_api_assignments__assignment_id__ai_drafts_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/ai-drafts/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Draft Plan */
+        get: operations["draft_plan_api_assignments__assignment_id__ai_drafts_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/ai-drafts/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Drafts */
+        post: operations["cancel_drafts_api_assignments__assignment_id__ai_drafts_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}/ai-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Draft */
+        post: operations["confirm_draft_api_assignments__assignment_id__submissions__submission_id__answers__question_id__ai_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assignments/{assignment_id}/submissions/{submission_id}/student": {
         parameters: {
             query?: never;
@@ -1447,6 +1517,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIReview */
+        AIReview: {
+            /** Expected Revision */
+            expected_revision: string;
+            /** Expected Context Revision */
+            expected_context_revision: string;
+        };
         /** AcceptFix */
         AcceptFix: {
             /** Key File */
@@ -1916,6 +1993,33 @@ export interface components {
             versions?: components["schemas"]["VersionEdit"][] | null;
             /** Question Orders */
             question_orders?: components["schemas"]["QuestionOrder"][] | null;
+        };
+        /** DraftJob */
+        DraftJob: {
+            /**
+             * Status
+             * @default starting
+             * @enum {string}
+             */
+            status: "starting" | "running" | "done" | "failed" | "cancelled";
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /** Questions */
+            questions: components["schemas"]["QuestionRun"][];
+        };
+        /** DraftPlan */
+        DraftPlan: {
+            /** Images */
+            images: number;
+            /** Calls */
+            calls: number;
+            /** Provider */
+            provider: string;
+            /** Confirm */
+            confirm: string | null;
         };
         /** FeedbackJob */
         FeedbackJob: {
@@ -2410,6 +2514,57 @@ export interface components {
             source_lines: number[];
             /** Parent Source Line */
             parent_source_line?: number | null;
+        };
+        /** QuestionRun */
+        QuestionRun: {
+            /** Question Id */
+            question_id: string;
+            /**
+             * Status
+             * @default queued
+             * @enum {string}
+             */
+            status: "queued" | "reading" | "drafting" | "done" | "skipped" | "stopped";
+            /**
+             * Done
+             * @default 0
+             */
+            done: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Read
+             * @default 0
+             */
+            read: number;
+            /**
+             * Unreadable
+             * @default 0
+             */
+            unreadable: number;
+            /**
+             * Drafted
+             * @default 0
+             */
+            drafted: number;
+            /**
+             * Low Confidence
+             * @default 0
+             */
+            low_confidence: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
         };
         /** QuestionStatistics */
         QuestionStatistics: {
@@ -5634,6 +5789,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RosterImport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_job_api_assignments__assignment_id__ai_drafts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftJob"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_drafts_api_assignments__assignment_id__ai_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_drafts_api_assignments__assignment_id__ai_drafts_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_plan_api_assignments__assignment_id__ai_drafts_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_drafts_api_assignments__assignment_id__ai_drafts_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_draft_api_assignments__assignment_id__submissions__submission_id__answers__question_id__ai_review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assignment_id: string;
+                submission_id: number;
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GradeSaveResult"];
                 };
             };
             /** @description Validation Error */

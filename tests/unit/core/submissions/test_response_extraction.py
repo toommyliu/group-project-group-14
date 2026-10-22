@@ -375,12 +375,12 @@ def test_successful_blank_reading_does_not_transcribe_printed_question(monkeypat
             return ""
 
     monkeypatch.setattr(processor, "_ocr_image_with_confidence", lambda *args, **kwargs: ("Minimum score", 95.0))
-    reading = processor._transcribe_crop(
+    reading = processor.transcribe_crop(
         tmp_path / "q1.png", question_id="q1", vision_reader=BlankReader(),
         progress_callback=lambda message: None,
     )
     assert reading == ("", None, "vision-model", None)
-    escalated = processor._transcribe_crop(
+    escalated = processor.transcribe_crop(
         tmp_path / "q1.png", question_id="q1", vision_reader=BlankReader(),
         progress_callback=lambda message: None, escalate_floor=99,
     )

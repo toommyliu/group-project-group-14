@@ -108,6 +108,7 @@ from opengrader.server.scans import add_scan_routes
 from opengrader.server.outline import add_outline_routes
 from opengrader.server.recut import start_recut
 from opengrader.server.web import add_web_routes
+from opengrader.server.workspace.ai_drafts import add_ai_draft_routes
 from opengrader.server.workspace.jobs import FeedbackJobs
 
 
@@ -378,6 +379,7 @@ def create_app(
         try:
             yield
         finally:
+            await run_in_threadpool(close_ai_drafts)
             await run_in_threadpool(scan_jobs.close)
             if process_jobs and feedback_scheduler is not None:
                 await run_in_threadpool(feedback_scheduler.remove, jobs)
@@ -793,6 +795,17 @@ def create_app(
                     f"{graded_by} graded this answer, so your change was not made: it "
                     f"was sent to {who.owner} to approve.",
                 )
+        return commit_grade(
+            assignment_id, submission_id, question_id, edit, actor
+        )
+
+    def commit_grade(
+        assignment_id: str,
+        submission_id: int,
+        question_id: str,
+        edit: GradeEdit,
+        actor: str | None,
+    ) -> GradeSaveResult:
         if load_folder_session(root) is None:
             return workspace.save_grade(
                 assignment_id, submission_id, question_id, edit, actor=actor
@@ -1163,6 +1176,7 @@ def create_app(
         api, workspace, scan_jobs, registry_lock, require_assignment, extraction_source
     )
     add_roster_routes(api, workspace)
+    close_ai_drafts = add_ai_draft_routes(api, workspace, commit_grade, save)
     add_student_routes(api, workspace, scan_jobs, require_assignment)
     # Included last: the router copies its routes at inclusion time.
     app.include_router(api)

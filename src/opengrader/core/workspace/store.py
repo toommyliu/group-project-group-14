@@ -921,6 +921,51 @@ class Workspace:
             )
             return result
 
+    def save_transcription(
+        self,
+        assignment_id: str,
+        submission_id: int,
+        question_id: str,
+        text: str,
+        *,
+        expected_revision: str,
+        actor: str,
+    ) -> Answer:
+        from opengrader.core.workspace.intake import context_revision
+
+        with self.connect(write=True) as db:
+            before = self._answer(db, assignment_id, submission_id, question_id)
+            if before.revision != expected_revision:
+                raise WorkspaceConflict("This answer changed while it was being read.", before)
+            after = before.model_copy(
+                update={
+                    "revision": str(int(before.revision) + 1),
+                    "response_text": text,
+                    "context_revision": context_revision(before.question, text),
+                }
+            )
+            db.execute(
+                "UPDATE answers SET value=? WHERE assignment_id=? AND submission_id=? AND question_id=?",
+                (after.model_dump_json(), assignment_id, submission_id, question_id),
+            )
+            db.execute(
+                "INSERT INTO history (assignment_id, submission_id, question_id, actor, timestamp, before, after) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    assignment_id,
+                    submission_id,
+                    question_id,
+                    actor,
+                    datetime.now(timezone.utc).isoformat(),
+                    before.model_dump_json(),
+                    after.model_dump_json(),
+                ),
+            )
+            db.execute(
+                "INSERT INTO events (assignment_id, submission_id, question_id, revision) VALUES (?, ?, ?, ?)",
+                (assignment_id, submission_id, question_id, after.revision),
+            )
+            return after
+
     def events(self, after: int = 0) -> list[WorkspaceEvent]:
         with self.connect() as db:
             return [
@@ -970,6 +1015,7 @@ class Workspace:
                         possible_points=answers[
                             question.question_id
                         ].question.possible_points,
+                        response_text=answers[question.question_id].response_text,
                         points_awarded=answers[question.question_id].points_awarded,
                         rubric_labels=answers[question.question_id].rubric_labels,
                         analysis=answers[question.question_id].analysis,

@@ -114,6 +114,7 @@ student_name: {name}
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
+        app.state.workspaces.base_url = f"http://127.0.0.1:{port}"
         server = uvicorn.Server(
             uvicorn.Config(
                 app,

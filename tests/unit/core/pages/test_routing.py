@@ -33,7 +33,7 @@ def _catalog_document(tmp_path: Path, monkeypatch, **options):
     )
     monkeypatch.setattr(extract, "crop_submission", lambda *_a, **_k: crops)
     transcribed = []
-    monkeypatch.setattr(processor, "_transcribe_crop",
+    monkeypatch.setattr(processor, "transcribe_crop",
                         lambda path, **_k: (transcribed.append(path.name), ("a heap", 90.0, "vision-model", "local"))[1])
 
     class Reader:

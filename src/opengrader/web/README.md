@@ -110,9 +110,12 @@ course with two small submissions and an automatically assigned localhost port
 for every test. They cover PDF scan upload, answer-key import and assignment
 creation, decimal scores and feedback across navigation and reloads, live
 updates between tabs, failed saves and conflict recovery, and downloaded grade
-CSV contents. They do
-not run OCR, AI providers, or background PDF workers, and do not use your courses
-or server home. Pages and servers shut down after each test.
+CSV contents. AI draft flows use a local fake provider to check scanned-answer
+transcription, draft review, progress, cancellation, shared grading permissions,
+edits made while the AI is running, and safe shutdown during a request.
+They do not call external AI providers or run background PDF workers, and do
+not use your courses or server home.
+Pages and servers shut down after each test.
 
 The default `uv run pytest` continues to run `tests/`; browser tests are an
 explicit separate run so unit tests do not require a browser installation.

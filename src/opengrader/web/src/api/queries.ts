@@ -360,3 +360,73 @@ export async function saveAnswer(
     )
   );
 }
+
+export type DraftJob = components['schemas']['DraftJob'];
+export type QuestionRun = components['schemas']['QuestionRun'];
+
+export function aiDraftJobQuery(assignmentId: string) {
+  return queryOptions({
+    queryKey: ['assignments', assignmentId, 'ai-drafts'],
+    queryFn: async ({ signal }) =>
+      (
+        await client.GET('/api/assignments/{assignment_id}/ai-drafts', {
+          params: { path: { assignment_id: assignmentId } },
+          signal,
+        })
+      ).data ?? null,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'starting' ||
+      query.state.data?.status === 'running'
+        ? 1000
+        : false,
+  });
+}
+
+export async function planAiDrafts(assignmentId: string) {
+  return readData(
+    await client.GET('/api/assignments/{assignment_id}/ai-drafts/plan', {
+      params: { path: { assignment_id: assignmentId } },
+    })
+  );
+}
+
+export async function startAiDrafts(assignmentId: string) {
+  return readData(
+    await client.POST('/api/assignments/{assignment_id}/ai-drafts', {
+      params: { path: { assignment_id: assignmentId } },
+    })
+  );
+}
+
+export async function cancelAiDrafts(assignmentId: string) {
+  await client.POST('/api/assignments/{assignment_id}/ai-drafts/cancel', {
+    params: { path: { assignment_id: assignmentId } },
+  });
+}
+
+export async function dismissAiDrafts(assignmentId: string) {
+  await client.DELETE('/api/assignments/{assignment_id}/ai-drafts', {
+    params: { path: { assignment_id: assignmentId } },
+  });
+}
+
+export async function confirmAiDraft(assignmentId: string, answer: Answer) {
+  return readData(
+    await client.POST(
+      '/api/assignments/{assignment_id}/submissions/{submission_id}/answers/{question_id}/ai-review',
+      {
+        params: {
+          path: {
+            assignment_id: assignmentId,
+            submission_id: answer.submission_id,
+            question_id: answer.question.id,
+          },
+        },
+        body: {
+          expected_revision: answer.revision,
+          expected_context_revision: answer.context_revision,
+        },
+      }
+    )
+  );
+}

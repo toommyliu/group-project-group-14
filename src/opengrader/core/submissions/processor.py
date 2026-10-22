@@ -1321,7 +1321,7 @@ def _fill_responses_with_vlm(
         response_provider = question.response_provider
         if not response_text and question.response_image_path:
             crop_path = submission_dir / question.response_image_path
-            reading = _transcribe_crop(
+            reading = transcribe_crop(
                 crop_path,
                 question_id=question.question_id,
                 vision_reader=vision_reader,
@@ -1344,7 +1344,7 @@ def _fill_responses_with_vlm(
     return filled
 
 
-def _transcribe_crop(
+def transcribe_crop(
     crop_path: Path,
     *,
     question_id: str,
@@ -1602,7 +1602,7 @@ def _build_document_from_page_catalog(
     questions = []
     for question in crops.questions:
         if transcribe and question.response_image_path:
-            text, confidence, source, provider = _transcribe_crop(
+            text, confidence, source, provider = transcribe_crop(
                 submission_dir / question.response_image_path,
                 question_id=question.question_id,
                 vision_reader=reader,
@@ -1832,7 +1832,7 @@ def _build_document_from_ocr_result(
         if q_res.output_path:
             crop_path = Path(q_res.output_path)
             response_text, response_confidence, response_source, response_provider = (
-                _transcribe_crop(
+                transcribe_crop(
                     crop_path,
                     question_id=q_res.question_id,
                     vision_reader=None if skip_ollama_qa else vision_reader,

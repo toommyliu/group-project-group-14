@@ -400,7 +400,7 @@ def test_a_cohort_survives_a_reader_that_fails_after_the_first_submission(
 ):
     """Failure containment on the submission-extractor's batch path
     (batch.py's `run_extraction_batch` -> processor.py's
-    `_build_document_from_ocr_result` / `_transcribe_crop`): a vision/cloud
+    `_build_document_from_ocr_result` / `transcribe_crop`): a vision/cloud
     reader that answers the first submission and then raises for every one
     after it (the network "stopped answering" mid-cohort) must not abort the
     run. Every submission still gets a `Response text` and a `Read by`,

@@ -40,8 +40,8 @@ from opengrader.server.transport import ACCOUNT_HEADER
 # Where a workspace shared with other accounts tells them how to join.
 CONNECTION_NOTE = Path(".opengrader/connection.json")
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-# The one change a grader who joined someone else's workspace may make.
 _GRADE_SAVE = re.compile(r"/api/assignments/[^/]+/submissions/\d+/answers/[^/]+/?")
+_GRADE_REVIEW = re.compile(r"/api/assignments/[^/]+/submissions/\d+/answers/[^/]+/ai-review/?")
 
 
 def server_owner() -> str:
@@ -401,7 +401,10 @@ class Workspaces:
                 if (
                     scope["method"] not in _SAFE_METHODS
                     and who.role != "instructor"
-                    and not (scope["method"] == "PUT" and _GRADE_SAVE.fullmatch(get_route_path(scope)))
+                    and not (
+                        scope["method"] == "PUT" and _GRADE_SAVE.fullmatch(get_route_path(scope))
+                        or scope["method"] == "POST" and _GRADE_REVIEW.fullmatch(get_route_path(scope))
+                    )
                 ):
                     await JSONResponse(
                         {"detail": f"Only an instructor can do that in {self.owner}'s workspace; graders grade."},

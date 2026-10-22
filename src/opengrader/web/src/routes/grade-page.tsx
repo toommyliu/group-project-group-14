@@ -6,11 +6,18 @@ import {
   useGradingShortcutHints,
   useGradingHotkeys,
 } from '@/hooks/use-grading-hotkeys';
-import { submissionsQuery, answerQuery, type Submission } from '@/api/queries';
+import {
+  aiDraftJobQuery,
+  submissionsQuery,
+  answerQuery,
+  type Submission,
+} from '@/api/queries';
 import { nextUngraded } from '@/lib/grading';
 import { validateGradingSearch } from '@/routes/assignment-data';
 import { gradeRoute } from '@/router';
 import { AnswerView } from '@/components/answer-view';
+import { AiDrafts, QuestionAiStatus } from '@/components/ai-drafts';
+import { questionAiLabel } from '@/lib/ai-draft';
 import { GradingShortcuts } from '@/components/grading-shortcuts';
 import { LoadingIndicator } from '@/components/loading';
 import { PageHeading } from '@/components/page-heading';
@@ -72,6 +79,7 @@ export default function GradePage({
     initialData: data.answer ?? undefined,
     refetchOnWindowFocus: false,
   });
+  const { data: aiJob } = useQuery(aiDraftJobQuery(assignment.id));
   const navigating = useRouterState({ select: (state) => state.isLoading });
   const { shortcut, shortcutAria } = useGradingShortcutHints();
   const hint = (label: string, action: GradingAction) =>
@@ -232,6 +240,9 @@ export default function GradePage({
           >
             {questions.map((item) => {
               const counts = progress.get(item.id);
+              const ai = questionAiLabel(
+                aiJob?.questions.find((run) => run.question_id === item.id)
+              );
               return (
                 <SelectItem
                   key={item.id}
@@ -243,6 +254,7 @@ export default function GradePage({
                   </span>
                   {counts && (
                     <span className="ms-auto shrink-0 ps-4 text-muted-foreground tabular-nums">
+                      {ai && `${ai} · `}
                       {counts.graded} of {counts.total} graded
                     </span>
                   )}
@@ -277,6 +289,7 @@ export default function GradePage({
           <ChevronRight aria-hidden="true" />
         </Button>
       </div>
+      <QuestionAiStatus assignmentId={assignment.id} questionId={question.id} />
       <div className="grid gap-1.5">
         <div className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground tabular-nums">
           <span>
@@ -312,7 +325,12 @@ export default function GradePage({
       <PageHeading
         className={submission && 'mb-4'}
         title="Grade"
-        actions={<GradingShortcuts />}
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <AiDrafts assignmentId={assignment.id} />
+            <GradingShortcuts />
+          </div>
+        }
       />
       {submission ? (
         <>
