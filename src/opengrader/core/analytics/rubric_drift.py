@@ -80,12 +80,21 @@ def find_rubric_changes(entries: Sequence[GradeJournalEntry]) -> dict[str, Rubri
 
 
 def detect_rubric_drift(entries: Sequence[GradeJournalEntry]) -> list[StaleGrade]:
+    # Preserve journal order when the system clock gives successive writes the
+    # same timestamp (common on Windows).
+    entries = sorted(entries, key=lambda entry: entry.timestamp)
     changes = find_rubric_changes(entries)
     if not changes:
         return []
 
-    latest_grade: dict[tuple[str, str], GradeJournalEntry] = {}
-    for entry in entries:
+    change_positions = {
+        entry.question_id: position
+        for position, entry in enumerate(entries)
+        if entry.kind == "rubric"
+        and _options(entry.old) != _options(entry.new)
+    }
+    latest_grade: dict[tuple[str, str], tuple[int, GradeJournalEntry]] = {}
+    for position, entry in enumerate(entries):
         if entry.kind != "grade" or not entry.question_id:
             continue
         if entry.question_id not in changes:
@@ -93,14 +102,12 @@ def detect_rubric_drift(entries: Sequence[GradeJournalEntry]) -> list[StaleGrade
         key = student_key(entry.student_id, entry.student_name)
         if not key:
             continue
-        previous = latest_grade.get((key, entry.question_id))
-        if previous is None or entry.timestamp >= previous.timestamp:
-            latest_grade[(key, entry.question_id)] = entry
+        latest_grade[(key, entry.question_id)] = (position, entry)
 
     stale: list[StaleGrade] = []
-    for (key, question_id), entry in latest_grade.items():
+    for (key, question_id), (position, entry) in latest_grade.items():
         change = changes[question_id]
-        if entry.timestamp >= change.timestamp:
+        if position >= change_positions[question_id]:
             continue
         stale.append(
             StaleGrade(

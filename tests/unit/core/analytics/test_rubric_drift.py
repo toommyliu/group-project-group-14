@@ -68,6 +68,16 @@ def test_grade_after_a_rubric_edit_is_not_stale():
     assert stale == []
 
 
+def test_equal_timestamps_preserve_journal_order():
+    timestamp = "2026-08-01T10:00:00+00:00"
+    grade = _grade(at=timestamp)
+    rubric = _rubric(at=timestamp)
+
+    assert len(detect_rubric_drift([grade, rubric])) == 1
+    assert detect_rubric_drift([rubric, grade]) == []
+    assert detect_rubric_drift([grade, rubric, grade]) == []
+
+
 def test_a_regrade_after_the_edit_clears_an_earlier_stale_grade():
     entries = [
         _grade(at="2026-08-01T09:00:00+00:00"),
