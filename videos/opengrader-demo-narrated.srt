@@ -1,0 +1,108 @@
+1
+00:00:01,000 --> 00:00:11,870
+Welcome to Opengrader. For the smoothest run, a class folder holds four files: the scanned submissions, the QA answer key, the class roster, and the blank template.
+
+2
+00:00:12,470 --> 00:00:24,850
+Only the submissions and the QA file are required. The roster puts a name and student ID on every paper, and the template shows Opengrader where each answer is, so the run is faster and more accurate.
+
+3
+00:00:25,450 --> 00:00:37,380
+And if you don't have a QA file yet, Opengrader can create one for you, from an answer key you already have, in Word, PDF, text, or Markdown, or with help from your own AI assistant.
+
+4
+00:00:38,330 --> 00:00:43,870
+Here, all four files are in the folder, so we run opengrader run on the class folder.
+
+5
+00:00:44,280 --> 00:00:55,580
+Opengrader finds the scanned bundle, the answer key, the roster, and the template, then starts the scan check, looking at every page for rotation, order, blank pages, and scan quality.
+
+6
+00:00:58,480 --> 00:01:09,160
+Next, the split stage matches the scanned pages to the blank template, and cuts the bundle into one PDF per student. Here, twelve pages become six submissions.
+
+7
+00:01:11,267 --> 00:01:17,797
+The extract stage reads all six submissions in parallel, and the roster matches each paper to a student.
+
+8
+00:01:18,267 --> 00:01:24,647
+Then auto-grade checks the answers against the QA file, and a summary lists every stage that ran.
+
+9
+00:01:27,520 --> 00:01:35,460
+When the pipeline finishes, the grading interface opens, with the questions and students on the left, and the question's details on the right.
+
+10
+00:01:38,147 --> 00:01:46,207
+We open question one and grade it student by student. The scanned answer is shown beside the expected answer and the rubric.
+
+11
+00:01:48,187 --> 00:01:55,437
+Picking a rubric item sets the score. This student circled Queue, which is correct, so they get full credit.
+
+12
+00:01:58,187 --> 00:02:04,237
+Students who chose Stack or Heap are marked incorrect, and the progress counter updates as we go.
+
+13
+00:02:07,737 --> 00:02:13,477
+The layout can be switched, so the scan sits below the grading panel with more room to read it.
+
+14
+00:02:15,737 --> 00:02:24,357
+Comments can be added to any answer. Here we leave, Good job, on a correct answer, and, Wrong answer, on an incorrect one.
+
+15
+00:02:27,857 --> 00:02:36,307
+Back on the question list, the statistics and score distribution for question one are updated, and the grading log records every grade and comment.
+
+16
+00:02:38,327 --> 00:02:44,857
+Now let's return the graded work. Pressing the B key opens the Export return bundle window.
+
+17
+00:02:45,207 --> 00:02:54,447
+We name the bundle folder, choose Student PDFs only, and press Export. Opengrader writes an annotated PDF for all six students.
+
+18
+00:02:55,827 --> 00:03:01,587
+The new folder appears inside the class folder, with one annotated PDF per student.
+
+19
+00:03:05,087 --> 00:03:12,817
+Opening a student's PDF shows the total score at the top, and each comment, like Good job, attached right next to the answer.
+
+20
+00:03:14,907 --> 00:03:23,597
+Grading can also be done in the browser. Back in the terminal, we run opengrader web, with the workspace option pointing at the class folder.
+
+21
+00:03:26,033 --> 00:03:32,413
+The browser opens on the assignments page, showing the quiz, its submissions, and what is left to grade.
+
+22
+00:03:32,763 --> 00:03:37,823
+The answer key page lists every question, with its correct answer and rubric.
+
+23
+00:03:38,173 --> 00:03:44,153
+On the grade page, the grades from the terminal are already here, including the Good job comment.
+
+24
+00:03:44,503 --> 00:03:54,483
+On question two, we click a rubric item and type feedback, like Try again. It saves automatically, and Next ungraded jumps straight to the next student.
+
+25
+00:03:57,983 --> 00:04:02,353
+We work through the rest of the class the same way, one click per answer.
+
+26
+00:04:05,853 --> 00:04:13,003
+Review grades shows every student's scores in one table, with downloads for a CSV or the feedback PDFs.
+
+27
+00:04:13,353 --> 00:04:19,233
+And the statistics page charts the mean score for each question, so you can see how the class did.
+

@@ -804,7 +804,7 @@ class TuiApp(App[Literal["switch_assignment"]]):
         )
 
     def _show_help(self) -> None:
-        self.push_screen(HelpScreen())
+        self.push_screen(HelpScreen(self.workflow_state.current_page))
 
     def _show_format_guide(self) -> None:
         self.push_screen(FormatGuideScreen())

@@ -492,7 +492,13 @@ Tests use the real scanned quizzes in `samples/` as fixtures.
 
 ## Demo
 
-**Demo video:** _Coming soon. The link will be added here._
+**Demo video** (4.5 min, narrated):
+
+https://github.com/user-attachments/assets/f4352f5d-af4e-4ce9-bed4-e0f48aceb68e
+
+If the player doesn't load, [download the MP4](videos/opengrader-demo-narrated.mp4) · [captions](videos/opengrader-demo-narrated.srt)
+
+The demo starts with a class folder holding the scanned submissions, the QA answer key, the class roster, and the blank template, then runs `opengrader run` on it: the scan check, splitting the scan into one PDF per student, reading the answers, and auto-grading. It then grades question by question in the terminal app with rubric items and comments, exports annotated PDFs for students, and finishes the grading in the browser with `opengrader web`, including the review table and per-question statistics.
 
 ### Screenshots
 

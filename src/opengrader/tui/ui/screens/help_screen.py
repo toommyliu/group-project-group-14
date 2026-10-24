@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from dataclasses import dataclass
 
+from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Button, Input, Static
 
 from opengrader.core.app_config import DEFAULT_TEXT_MODEL, DEFAULT_VISION_MODEL
+from opengrader.tui.state.route import PAGE_GRADE, PAGE_QA_PICKER, PAGE_SETUP
 
 _GLOBAL_ROWS: list[tuple[str, str]] = [
     ("q", "Quit Opengrader."),
@@ -181,6 +183,13 @@ _SHARING_ROWS: list[tuple[str, str]] = [
         "\"this is not the grade you gave me\". From a terminal: grade-check "
         "and grade-release.",
     ),
+    (
+        "shift+Q",
+        "Instructors in a workspace shared with other accounts: the changes "
+        "graders have asked for to grades someone else gave. Approve one to "
+        "make the change, or dismiss it. Not available in a class folder, "
+        "where nobody needs to ask.",
+    ),
 ]
 
 _QA_PICKER_ROWS: list[tuple[str, str]] = [
@@ -345,7 +354,7 @@ _GRADING_ROWS: list[tuple[str, str]] = [
     ("+ · - · 0", "Zoom the response image in, out, or back to fit."),
     (
         ", · .",
-        "Turn the displayed image a quarter turn left (,) or right (.) — for "
+        "Rotate the displayed image a quarter turn left (,) or right (.) — for "
         "an answer the student wrote sideways in the box, or a page the scan "
         "check could not orient. The view only: the scan, the transcription "
         "and the grade are untouched. The current angle is shown next to the "
@@ -377,6 +386,13 @@ _GRADING_ROWS: list[tuple[str, str]] = [
         "Shrink / widen the sidebar (its height in top-bottom layout).",
     ),
     ("ctrl+v", "Toggle side-by-side vs top-bottom layout."),
+    (
+        "shift+X",
+        "This paper is only part of a student's work because the splitter "
+        "cut one paper in two: join it with the submission scanned just "
+        "before or after it. The joined paper is read again and the grades "
+        "both pieces had are kept. CLI: merge-submissions.",
+    ),
     ("esc", "Back to the QA picker."),
 ]
 
@@ -908,6 +924,18 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
         "CLI: grading-policy.",
     ),
     (
+        "Workspace",
+        "Keep a whole course in one place and grade it in your web browser. "
+        "The Workspace card at the bottom of Helper Tools (classic) reads the "
+        "folder you choose — one class folder whose scans have been read, or "
+        "a folder holding several — says what it would do, and asks before "
+        "making anything. Files are not moved or deleted, and grades already "
+        "given come along. Afterwards grade in the workspace, not the files: "
+        "Launch Grading on that class asks first, and W in the workspace's "
+        "assignment list copies its grades back into the files. "
+        "CLI: tui FOLDER makes one from a class folder.",
+    ),
+    (
         "Needs review",
         "List submissions that likely need a human — probable OCR/extraction "
         "errors, missing/duplicate IDs, and low-confidence AI grades — most "
@@ -1122,6 +1150,160 @@ _SCRIPT_ROWS: list[tuple[str, str]] = [
 ]
 
 
+# Which sections belong to each page of the app. The help opens with these
+# first, under the screen's name, so the keys you can press right now are
+# the first thing you read instead of six sections down.
+_SCREEN_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    PAGE_SETUP: ("Tools", ("PIPELINE",)),
+    PAGE_QA_PICKER: ("the QA picker", ("QA PICKER",)),
+    PAGE_GRADE: ("the grade screen", ("GRADING", "RUBRIC EDITOR")),
+}
+
+
+@dataclass(frozen=True)
+class _Section:
+    title: str
+    caption: str
+    rows: list[tuple[str, str]]
+    key_class: str = "help-key"
+
+
+def _sections() -> list[_Section]:
+    return [
+        _Section("ANYWHERE", "", _GLOBAL_ROWS),
+        _Section(
+            "REPORTS & AUDITS",
+            "Hold shift and the letter opens a report about the whole "
+            "class — from the QA picker or mid-grading, either way. "
+            "The ones marked teacher mode name people; the rest show "
+            "student IDs, so they stay safe while grading anonymously.",
+            _REPORT_ROWS,
+        ),
+        _Section(
+            "SHARING & BACKUPS",
+            "Also shift and a letter, but these change something "
+            "instead of reporting on it: hand this class to another "
+            "grader, take their marking back, or protect the folder. "
+            "From the QA picker or mid-grading, either way — and "
+            "nothing is written until you confirm it.",
+            _SHARING_ROWS,
+        ),
+        _Section(
+            "QA PICKER",
+            "Choose one question, then grade it for every student.",
+            _QA_PICKER_ROWS,
+        ),
+        _Section(
+            "GRADING",
+            "One question at a time, student by student.",
+            _GRADING_ROWS,
+        ),
+        _Section("RUBRIC EDITOR", "Open with e while grading.", _RUBRIC_EDITOR_ROWS),
+        _Section(
+            "PIPELINE",
+            "Prepare an assignment: one card on the start-up screen "
+            "takes a scan all the way to graded work, and running it "
+            "again does only what is left. Each stage is also a "
+            "command for a terminal: uv run opengrader --help lists "
+            "every one, and uv run opengrader <command> --help "
+            "explains one. The standalone names (uv run "
+            "submission-splitter, …) still work too.",
+            _PIPELINE_ROWS,
+            key_class="help-tool",
+        ),
+        _Section(
+            "AI SETUP (OPTIONAL)",
+            "Set up once in Helper Tools → AI setup, then used by "
+            "every step and every command. Powers handwriting reading "
+            "(Extract) and free-response grade suggestions "
+            "(Auto-grade). Runs on this computer; nothing you grade "
+            "leaves it.",
+            _LOCAL_AI_ROWS,
+            key_class="help-tool",
+        ),
+        _Section(
+            "TERMINAL IMAGES",
+            "How answer crops get drawn, and what to do when they "
+            "don't. Run tui --check-graphics to see what was detected.",
+            _TERMINAL_GRAPHICS_ROWS,
+            key_class="help-tool",
+        ),
+        _Section(
+            "TOOLS & SCRIPTS",
+            "Standalone commands you reach for as needed, in or out "
+            "of the app.",
+            _SCRIPT_ROWS,
+            key_class="help-tool",
+        ),
+    ]
+
+
+def _search_words(query: str) -> list[str]:
+    return query.casefold().split()
+
+
+# A search this short is most likely a key: "x" means the x key far more
+# often than every description with an x in it, so matching keys are listed
+# first, under their own heading.
+_KEY_SEARCH_MAX = 3
+
+# How a section is named beside a key listed under "Keys matching…".
+_SECTION_LABELS = {
+    "ANYWHERE": "Anywhere",
+    "REPORTS & AUDITS": "Reports",
+    "SHARING & BACKUPS": "Sharing",
+    "QA PICKER": "QA picker",
+    "GRADING": "Grade screen",
+    "RUBRIC EDITOR": "Rubric editor",
+}
+
+
+def _key_rank(key: str, query: str) -> int | None:
+    """Where a row goes among the keys matching a short search, or None.
+
+    0 is the key itself, 1 its Shift version — so "x" lists x, then shift+X.
+    A capital letter asks for the Shift key, so "X" swaps the two. A digit
+    finds the rubric rows ("1-9", "shift+1-9").
+    """
+    wanted = query.casefold()
+    shift_first = len(query) == 1 and query.isalpha() and query.isupper()
+    plain = shifted = False
+    for part in (piece.strip().casefold() for piece in key.split("·")):
+        digit_range = wanted.isdigit() and wanted != "0"
+        if part == wanted or (digit_range and part == "1-9"):
+            plain = True
+        elif part == f"shift+{wanted}" or (digit_range and part == "shift+1-9"):
+            shifted = True
+    if plain and not (shifted and shift_first):
+        return 1 if shift_first else 0
+    if shifted:
+        return 0 if shift_first else 1
+    return None
+
+
+class _HelpRow(Horizontal):
+    """One key and what it does, plus the text a search is matched against."""
+
+    def __init__(self, section: str, key: str, description: str, key_class: str) -> None:
+        super().__init__(
+            Static(key, classes=key_class, markup=False),
+            Static(description, classes="help-desc", markup=False),
+            classes="help-row",
+        )
+        self.section = section
+        self.key = key
+        # Only the key sections hold keys; the others' first column names a
+        # tool or a numbered step ("3 · Get the model"), never a key to rank.
+        self.is_key = key_class == "help-key"
+        self.description = description
+        # The section title is searched too, so "grading undo" finds z on
+        # the grade screen and not the picker's z.
+        self.search_text = f"{section} {key} {description}".casefold()
+
+    def matches(self, words: list[str]) -> bool:
+        return all(word in self.search_text for word in words)
+
+
 class HelpScreen(ModalScreen[None]):
     DEFAULT_CSS = """
     HelpScreen {
@@ -1146,10 +1328,25 @@ class HelpScreen(ModalScreen[None]):
         color: $text-muted;
     }
 
+    #help-search {
+        margin-top: 1;
+    }
+
     #help-body {
         height: 1fr;
         margin-top: 1;
         scrollbar-size: 1 1;
+    }
+
+    #help-empty {
+        width: 100%;
+        height: auto;
+        color: $text-muted;
+    }
+
+    HelpScreen .help-block, #help-key-matches {
+        width: 100%;
+        height: auto;
     }
 
     HelpScreen .help-section {
@@ -1163,6 +1360,10 @@ class HelpScreen(ModalScreen[None]):
 
     HelpScreen .help-section.-first {
         margin-top: 0;
+    }
+
+    HelpScreen .help-section.-current {
+        color: $accent;
     }
 
     HelpScreen .help-caption {
@@ -1208,107 +1409,146 @@ class HelpScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close_help", "Close"),
         Binding("question_mark", "close_help", "Close", key_display="?"),
+        Binding("slash", "focus_search", "Search", key_display="/"),
     ]
+
+    def __init__(self, page: str | None = None) -> None:
+        """``page`` is where help was opened from (``PAGE_GRADE`` …); its
+        sections are shown first. ``None`` keeps the plain order."""
+        super().__init__()
+        self._page = page
+
+    def _ordered_sections(self) -> tuple[str | None, list[tuple[_Section, bool]]]:
+        sections = _sections()
+        screen_name, current_titles = _SCREEN_SECTIONS.get(self._page or "", (None, ()))
+        current = [s for title in current_titles for s in sections if s.title == title]
+        rest = [s for s in sections if s.title not in current_titles]
+        return screen_name, [(s, True) for s in current] + [(s, False) for s in rest]
 
     @staticmethod
     def _section(
-        title: str,
-        caption: str,
-        rows: list[tuple[str, str]],
+        section: _Section,
         *,
-        key_class: str = "help-key",
         first: bool = False,
-    ) -> Iterable[Static | Horizontal]:
-        classes = "help-section -first" if first else "help-section"
-        yield Static(f"[b]{title}[/b]", classes=classes)
-        if caption:
-            yield Static(caption, classes="help-caption")
-        for key, description in rows:
-            yield Horizontal(
-                Static(key, classes=key_class, markup=False),
-                Static(description, classes="help-desc", markup=False),
-                classes="help-row",
-            )
+        current_screen: str | None = None,
+    ) -> Vertical:
+        classes = "help-section"
+        if first:
+            classes += " -first"
+        title = section.title
+        if current_screen:
+            classes += " -current"
+            title = f"{title} — keys for {current_screen}"
+        children: list[Static | Horizontal] = [Static(f"[b]{title}[/b]", classes=classes)]
+        if section.caption:
+            children.append(Static(section.caption, classes="help-caption"))
+        children.extend(
+            _HelpRow(section.title, key, description, section.key_class)
+            for key, description in section.rows
+        )
+        return Vertical(*children, classes="help-block")
 
     def compose(self) -> ComposeResult:
+        screen_name, sections = self._ordered_sections()
+        if screen_name:
+            hint = (
+                f"You are on {screen_name}: its keys come first, then every "
+                "other command. Press / to search, esc or ? to close."
+            )
+        else:
+            hint = "Every command, grouped by screen. Press / to search, esc or ? to close."
         with Vertical(id="help-dialog") as dialog:
             dialog.border_title = "▸ Help"
-            yield Static(
-                "Every command, grouped by screen. Press esc or ? to close.",
-                id="help-hint",
+            yield Static(hint, id="help-hint")
+            yield Input(
+                placeholder="Search keys and commands (/)",
+                id="help-search",
+                compact=True,
             )
             with VerticalScroll(id="help-body"):
-                yield from self._section("ANYWHERE", "", _GLOBAL_ROWS, first=True)
-                yield from self._section(
-                    "REPORTS & AUDITS",
-                    "Hold shift and the letter opens a report about the whole "
-                    "class — from the QA picker or mid-grading, either way. "
-                    "The ones marked teacher mode name people; the rest show "
-                    "student IDs, so they stay safe while grading anonymously.",
-                    _REPORT_ROWS,
-                )
-                yield from self._section(
-                    "SHARING & BACKUPS",
-                    "Also shift and a letter, but these change something "
-                    "instead of reporting on it: hand this class to another "
-                    "grader, take their marking back, or protect the folder. "
-                    "From the QA picker or mid-grading, either way — and "
-                    "nothing is written until you confirm it.",
-                    _SHARING_ROWS,
-                )
-                yield from self._section(
-                    "QA PICKER",
-                    "Choose one question, then grade it for every student.",
-                    _QA_PICKER_ROWS,
-                )
-                yield from self._section(
-                    "GRADING",
-                    "One question at a time, student by student.",
-                    _GRADING_ROWS,
-                )
-                yield from self._section(
-                    "RUBRIC EDITOR",
-                    "Open with e while grading.",
-                    _RUBRIC_EDITOR_ROWS,
-                )
-                yield from self._section(
-                    "PIPELINE",
-                    "Prepare an assignment: one card on the start-up screen "
-                    "takes a scan all the way to graded work, and running it "
-                    "again does only what is left. Each stage is also a "
-                    "command for a terminal: uv run opengrader --help lists "
-                    "every one, and uv run opengrader <command> --help "
-                    "explains one. The standalone names (uv run "
-                    "submission-splitter, …) still work too.",
-                    _PIPELINE_ROWS,
-                    key_class="help-tool",
-                )
-                yield from self._section(
-                    "AI SETUP (OPTIONAL)",
-                    "Set up once in Helper Tools → AI setup, then used by "
-                    "every step and every command. Powers handwriting reading "
-                    "(Extract) and free-response grade suggestions "
-                    "(Auto-grade). Runs on this computer; nothing you grade "
-                    "leaves it.",
-                    _LOCAL_AI_ROWS,
-                    key_class="help-tool",
-                )
-                yield from self._section(
-                    "TERMINAL IMAGES",
-                    "How answer crops get drawn, and what to do when they "
-                    "don't. Run tui --check-graphics to see what was detected.",
-                    _TERMINAL_GRAPHICS_ROWS,
-                    key_class="help-tool",
-                )
-                yield from self._section(
-                    "TOOLS & SCRIPTS",
-                    "Standalone commands you reach for as needed, in or out "
-                    "of the app.",
-                    _SCRIPT_ROWS,
-                    key_class="help-tool",
-                )
+                yield Static("", id="help-empty", markup=False)
+                yield Vertical(id="help-key-matches")
+                for index, (section, is_current) in enumerate(sections):
+                    yield self._section(
+                        section,
+                        first=index == 0,
+                        current_screen=screen_name if is_current else None,
+                    )
             with Horizontal(id="help-buttons"):
                 yield Button("Close", id="help-close", compact=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#help-empty", Static).display = False
+        self.query_one("#help-key-matches").display = False
+        # Focus the list, not the search box: with the box focused, the
+        # ? that opened this help could not close it again.
+        self.query_one("#help-body", VerticalScroll).focus()
+
+    @on(Input.Changed, "#help-search")
+    async def _on_search_changed(self, event: Input.Changed) -> None:
+        query = event.value.strip()
+        words = _search_words(query)
+        rows = list(self.query(".help-block _HelpRow").results(_HelpRow))
+        ranked: list[tuple[int, int, _HelpRow]] = []
+        if 0 < len(query) <= _KEY_SEARCH_MAX and len(words) == 1:
+            for order, row in enumerate(rows):
+                rank = _key_rank(row.key, query) if row.is_key else None
+                if rank is not None:
+                    ranked.append((rank, order, row))
+        # Sections are in on-screen order, so within a rank the keys of the
+        # screen help was opened from come first.
+        ranked.sort(key=lambda item: item[:2])
+        on_top = {id(row) for _rank, _order, row in ranked}
+
+        shown = len(ranked)
+        for block in self.query(".help-block"):
+            block_rows = list(block.query(_HelpRow))
+            for row in block_rows:
+                row.display = id(row) not in on_top and row.matches(words)
+            visible = sum(1 for row in block_rows if row.display)
+            # A section's caption explains its whole table, so it is shown
+            # only when nothing is filtered out.
+            for caption in block.query(".help-caption"):
+                caption.display = not words
+            block.display = visible > 0
+            shown += visible
+
+        matches = self.query_one("#help-key-matches", Vertical)
+        await matches.remove_children()
+        if ranked:
+            await matches.mount(
+                # Text, not markup: what was typed may hold a [ of its own.
+                Static(
+                    Text(f"KEYS MATCHING “{query}”", style="bold"),
+                    classes="help-section -first -current",
+                ),
+                *(
+                    _HelpRow(
+                        row.section,
+                        row.key,
+                        f"{_SECTION_LABELS.get(row.section, row.section.capitalize())}: "
+                        f"{row.description}",
+                        "help-key",
+                    )
+                    for _rank, _order, row in ranked
+                ),
+            )
+        matches.display = bool(ranked)
+
+        empty = self.query_one("#help-empty", Static)
+        empty.update(f"Nothing in the help matches “{query}”.")
+        empty.display = shown == 0
+        self.query_one("#help-body", VerticalScroll).scroll_home(animate=False)
+
+    @on(Input.Submitted, "#help-search")
+    def _on_search_submitted(self, event: Input.Submitted) -> None:
+        # Enter finishes the search, as / does in the QA picker: the list
+        # takes the keys again, so ↑/↓ scroll and ? closes.
+        event.stop()
+        self.query_one("#help-body", VerticalScroll).focus()
+
+    def action_focus_search(self) -> None:
+        self.query_one("#help-search", Input).focus()
 
     def action_close_help(self) -> None:
         self.dismiss(None)

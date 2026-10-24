@@ -27,8 +27,10 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -38,6 +40,9 @@ from textual.widgets import Button, Static
 from opengrader.core import browser_app, homebrew
 from opengrader.tui.ui import button_roles
 from opengrader.core.recents import short_path
+
+if TYPE_CHECKING:
+    from opengrader.tui.make_workspace import MakeWorkspaceRequest
 
 POLL_SECONDS = 15.0
 
@@ -116,20 +121,51 @@ class BrowserLauncher(Vertical):
     # -- opening ---------------------------------------------------------
 
     def open_folder(self, qa_path: str | Path, submissions_path: str | Path) -> None:
-        """What *Open in browser* does with the card's answer key + submissions.
+        """What *Open in browser* does with the card's answer key + submissions."""
+        self._when_web_app_ready(
+            lambda build, brew: self._open_worker(
+                str(qa_path), str(submissions_path), build, brew
+            )
+        )
+
+    def open_workspace(
+        self,
+        root: Path,
+        request: MakeWorkspaceRequest | None = None,
+        *,
+        on_progress: Callable[[str], None] | None = None,
+        on_done: Callable[[Path, str | None], None] | None = None,
+    ) -> None:
+        """Open a workspace's assignment list in the browser — made first
+        from `request` when given (the Workspace card in Helper Tools).
+
+        `on_progress` gets each status line and `on_done(root, error)` the
+        outcome (`error` None when it worked), both on the app's thread, so a card far from this status
+        line can show them too. Nothing is made while the web app still
+        needs building and that question is open: a Cancel there makes
+        nothing (`on_done` is not called).
+        """
+        self._when_web_app_ready(
+            lambda build, brew: self._workspace_worker(
+                root, request, build, brew, on_progress, on_done
+            )
+        )
+
+    def _when_web_app_ready(self, start: Callable[[bool, str | None], None]) -> None:
+        """Call `start(build, install_with)` once the web app can be served.
 
         `web_dist_state()` decides what happens: missing asks to build first
         (offering to install Node.js when Homebrew can, or else just
         saying why it can't); stale — sources have changed since the
         last build — offers a rebuild but doesn't force one, since a stale
-        bundle still mostly works; ready opens straight away.
+        bundle still mostly works; ready starts straight away.
         """
         if self.busy:
             self.app.notify("The browser app is still starting — one moment.")
             return
         state = browser_app.web_dist_state()
         if state == "ready":
-            self._open_worker(str(qa_path), str(submissions_path), False)
+            start(False, None)
             return
         if state == "missing" and not browser_app.web_buildable():
             self.app.notify(
@@ -150,7 +186,7 @@ class BrowserLauncher(Vertical):
                 severity="warning",
                 timeout=12,
             )
-            self._open_worker(str(qa_path), str(submissions_path), False)
+            start(False, None)
             return
 
         from opengrader.tui.ui.screens.browser_build_screen import BrowserBuildScreen
@@ -160,11 +196,11 @@ class BrowserLauncher(Vertical):
 
         def _answer(choice: str | None) -> None:
             if choice == "build":
-                self._open_worker(str(qa_path), str(submissions_path), True)
+                start(True, None)
             elif choice == "install" and brew:
-                self._open_worker(str(qa_path), str(submissions_path), True, brew)
+                start(True, brew)
             elif choice == "open":
-                self._open_worker(str(qa_path), str(submissions_path), False)
+                start(False, None)
 
         self.app.push_screen(
             BrowserBuildScreen(
@@ -173,17 +209,10 @@ class BrowserLauncher(Vertical):
             _answer,
         )
 
-    @work(thread=True, exclusive=True, group="browser-launch")
-    def _open_worker(
-        self,
-        qa_path: str,
-        submissions_path: str,
-        build: bool,
-        install_with: str | None = None,
-    ) -> None:
-        """`install_with` is Homebrew's path when Node.js goes in first."""
+    def _ready_web_app(self, build: bool, install_with: str | None) -> bool:
+        """Install Node.js and build the web app, as asked; False on failure
+        (already shown). Runs on a worker thread."""
         app = self.app
-        app.call_from_thread(self._set_busy, "Starting the browser app…")
         if install_with:
 
             def on_install_line(line: str) -> None:
@@ -208,7 +237,7 @@ class BrowserLauncher(Vertical):
                 if self.is_attached:
                     detail = f"\n{exc.tail}" if exc.tail else ""
                     app.call_from_thread(self._fail, f"{exc}{detail}", keep=True)
-                return
+                return False
             finally:
                 self._install_process = None
         if build:
@@ -223,8 +252,23 @@ class BrowserLauncher(Vertical):
             except browser_app.WebBuildError as exc:
                 detail = f"\n{exc.tail}" if exc.tail else ""
                 app.call_from_thread(self._fail, f"{exc}{detail}", keep=True)
-                return
+                return False
             app.call_from_thread(self._set_busy, "Starting the browser app…")
+        return True
+
+    @work(thread=True, exclusive=True, group="browser-launch")
+    def _open_worker(
+        self,
+        qa_path: str,
+        submissions_path: str,
+        build: bool,
+        install_with: str | None = None,
+    ) -> None:
+        """`install_with` is Homebrew's path when Node.js goes in first."""
+        app = self.app
+        app.call_from_thread(self._set_busy, "Starting the browser app…")
+        if not self._ready_web_app(build, install_with):
+            return
         try:
             from opengrader.server.workspace.client import ensure_service
 
@@ -252,12 +296,62 @@ class BrowserLauncher(Vertical):
                 severity="warning",
                 timeout=15,
             )
-        self._remember(root, assignment_id, qa_path, submissions_path)
+        from opengrader.core.recents import record_class_folder
+
+        # The Start grading card lists it, as if it had been graded here.
+        record_class_folder(qa_path, submissions_path)
+        self._remember(root, assignment_id)
         page = f"{connection.url}/assignments/{assignment_id}"
         opened = self._open_url(page)
         app.call_from_thread(
             self._show_running, root, connection.url, page, opened, folder_session
         )
+
+    @work(thread=True, exclusive=True, group="browser-launch")
+    def _workspace_worker(
+        self,
+        root: Path,
+        request: MakeWorkspaceRequest | None,
+        build: bool,
+        install_with: str | None,
+        on_progress: Callable[[str], None] | None,
+        on_done: Callable[[Path, str | None], None] | None,
+    ) -> None:
+        app = self.app
+
+        def say(message: str) -> None:
+            app.call_from_thread(self._set_busy, message)
+            if on_progress is not None:
+                app.call_from_thread(on_progress, message)
+
+        def done(error: str | None) -> None:
+            if on_done is not None:
+                app.call_from_thread(on_done, root, error)
+
+        say("Starting the browser app…")
+        if not self._ready_web_app(build, install_with):
+            done("The browser app could not be prepared; the Start grading card says why.")
+            return
+        try:
+            from opengrader.server.workspace.client import ensure_service
+
+            if request is not None:
+                from opengrader.tui.make_workspace import make_workspace
+
+                root = make_workspace(request, echo=lambda line: say(line.strip()))
+            say("Opening the workspace in your browser…")
+            connection = ensure_service(root)
+        except Exception as exc:  # noqa: BLE001 - shown to the user, app stays up
+            verb = "make" if request is not None else "open"
+            message = f"Could not {verb} the workspace: {exc}"
+            app.call_from_thread(self._fail, message, keep=True)
+            done(message)
+            return
+        self._remember(root, None)
+        page = f"{connection.url}/assignments"
+        opened = self._open_url(page)
+        app.call_from_thread(self._show_running, root, connection.url, page, opened, False)
+        done(None)
 
     def _remember_install(self, process: subprocess.Popen[str]) -> None:
         self._install_process = process
@@ -270,15 +364,11 @@ class BrowserLauncher(Vertical):
             process.terminate()
 
     @staticmethod
-    def _remember(
-        root: Path, assignment_id: str, qa_path: str, submissions_path: str
-    ) -> None:
-        from opengrader.core.recents import record_class_folder, record_recent
+    def _remember(root: Path, assignment_id: str | None) -> None:
+        from opengrader.core.recents import record_recent
 
-        # The Start grading card lists it, as if it had been graded here.
-        record_class_folder(qa_path, submissions_path)
         # `opengrader tui` lists it, so writing grades back (W) is one step away.
-        record_recent("workspace", root, assignment=assignment_id)
+        record_recent("workspace", root, title=root.name, assignment=assignment_id)
         try:
             browser_app.save_browser_preferences(
                 replace(

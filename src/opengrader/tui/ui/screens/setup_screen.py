@@ -103,12 +103,12 @@ from opengrader.tui.ui.screens.prepare_folder_screen import (
     ACTION_PREPARE,
     ACTION_SETTINGS,
     ACTION_SKIP,
-    ACTION_WORKSPACE,
     PrepareFolderScreen,
 )
 from opengrader.tui.ui.screens.region_map_screen import RegionMapScreen
 from opengrader.tui.ui.widgets.browser_health import BrowserHealth
 from opengrader.tui.ui.widgets.browser_launcher import BrowserLauncher
+from opengrader.tui.ui.widgets.workspace_card import WorkspaceCard
 from opengrader.tui.ui.widgets.recent_list import RecentList
 
 _CPU_COUNT = os.cpu_count() or 1
@@ -1571,6 +1571,24 @@ class SetupScreen(OutlineButtons, Vertical):
                         )
                     )
 
+                with Vertical(id="file-tools-hidden", classes="hidden"):
+                    yield Static("", id="file-tools-hidden-text", classes="card-hint", markup=False)
+                    yield self._card_actions(
+                        Button(
+                            "Show them anyway",
+                            id="file-tools-show",
+                            classes=button_roles.OPEN,
+                            compact=True,
+                        )
+                    )
+
+                with Collapsible(
+                    title="Workspace — a whole course in one place, graded in your browser",
+                    id="section-workspace",
+                    collapsed=True,
+                ):
+                    yield WorkspaceCard(id="workspace-card")
+
     def on_mount(self) -> None:
         self._restore_machine_settings()
         self._refresh_assistant_card()
@@ -1684,6 +1702,9 @@ class SetupScreen(OutlineButtons, Vertical):
             self._add_answers()
         elif event.button.id == "workspace-button":
             self._on_workspace_button()
+        elif event.button.id == "file-tools-show":
+            self._file_tools_shown_for = self._chosen_workspace()
+            self._refresh_file_tools()
         elif event.button.id == "run-answer-key":
             self._run_answer_key()
         elif event.button.id == "run-refine":
@@ -1896,6 +1917,9 @@ class SetupScreen(OutlineButtons, Vertical):
                 "Choose the submissions folder to share.", severity="error"
             )
             return
+        self._warn_if_workspace(
+            submissions, "A grader copy made now leaves out what was graded there."
+        )
         self.app.push_screen(
             GraderPacketScreen(
                 submissions_path=submissions,
@@ -1910,6 +1934,9 @@ class SetupScreen(OutlineButtons, Vertical):
                 "Choose the submissions folder to merge into.", severity="error"
             )
             return
+        self._warn_if_workspace(
+            submissions, "Merged grades go into the files, not the workspace."
+        )
         self.app.push_screen(MergeScreen(submissions_path=submissions))
 
     def _open_backup(self) -> None:
@@ -1919,6 +1946,9 @@ class SetupScreen(OutlineButtons, Vertical):
                 "Choose the submissions folder to back up.", severity="error"
             )
             return
+        self._warn_if_workspace(
+            submissions, "A backup made now does not hold what was graded there."
+        )
         self.app.push_screen(BackupScreen(submissions_path=submissions))
 
     def _open_region_map(self) -> None:
@@ -2538,6 +2568,7 @@ class SetupScreen(OutlineButtons, Vertical):
         self.query_one("#tui-sub-path", Input).value = str(submissions)
         autofilled["tui-sub-path"] = str(submissions)
         self._refresh_answers_button()
+        self._refresh_file_tools()
 
     async def refresh_recents(self) -> None:
         """Re-read the last `RECENT_FOLDERS_SHOWN` class folders from recents."""
@@ -2646,6 +2677,8 @@ class SetupScreen(OutlineButtons, Vertical):
         self._autofill("tui-qa-path", found.qa_file)
         self._autofill("tui-sub-path", found.submissions)
         self._launch_folder_scanned = folder
+        self.query_one(WorkspaceCard).suggest_folder(found.folder)
+        self._refresh_file_tools()
         self._refresh_answers_button()
 
         lines = describe_class_folder(found, GRADING_ROLES, include_notes=False)
@@ -2726,8 +2759,8 @@ class SetupScreen(OutlineButtons, Vertical):
         )
         if found.qa_file is not None and found.submissions is not None:
             lines.append(
-                "Launch Grading grades the files here in place instead; those "
-                "grades reach the workspace only when it imports the folder again."
+                "Launch Grading asks first: the workspace has the newest grades, "
+                "so grading these files in place would leave them behind."
             )
         return lines
 
@@ -2804,14 +2837,11 @@ class SetupScreen(OutlineButtons, Vertical):
         return lines
 
     def _offer_workspace(self) -> None:
-        """Make this folder of assignments a workspace, after asking.
-
-        Classic never opens a workspace itself: on a yes the app closes with
-        a `MakeWorkspaceRequest`, and `classic_command` imports the ready
-        assignments and opens the workspace's assignment list.
+        """Make this folder of assignments a workspace, after asking — the
+        Workspace card's own question (`WorkspaceCard.ask`), so a yes goes
+        through `on_workspace_card_chosen`: the browser keeps classic open,
+        this window closes it with a `MakeWorkspaceRequest`.
         """
-        from opengrader.tui.make_workspace import MakeWorkspaceRequest
-
         found: AssignmentFolders | None = getattr(self, "_launch_assignments", None)
         if found is None or not found.is_workspace_candidate:
             self.app.notify(
@@ -2834,45 +2864,13 @@ class SetupScreen(OutlineButtons, Vertical):
                 timeout=10,
             )
             return
-        waiting = [item for item in found.assignments if item not in ready]
-        note = (
-            "Each ready assignment is imported with the grades already in its "
-            "files, and the workspace's assignment list opens. From then on "
-            "grade them there (here, in the browser app, or with opengrader "
-            "tui), not in place: the files stay as they are, and W in the "
-            "assignment list writes the workspace's grades back to them."
-        )
-        if waiting:
-            names = ", ".join(f"{item.folder.name}/" for item in waiting)
-            note += (
-                f" Not prepared yet, so left out: {names}. Add each later with "
-                "`opengrader run <its folder>`, which publishes into this workspace."
-            )
+        from opengrader.tui.make_workspace import plan_workspace
 
-        def answered(action: str | None) -> None:
-            if action == ACTION_WORKSPACE:
-                self.app.exit(
-                    MakeWorkspaceRequest(
-                        root=found.folder,
-                        assignments=tuple(
-                            (item.qa_file, item.submissions)  # type: ignore[misc]
-                            for item in ready
-                        ),
-                    )
-                )
-
-        self.app.push_screen(
-            PrepareFolderScreen(
-                "Make this folder a workspace?",
-                "\n".join(
-                    [f"Folder: {found.folder}"]
-                    + self._assignment_folders_lines(found, advice=False)
-                ),
-                note,
-                [(ACTION_WORKSPACE, "Make workspace")],
-            ),
-            answered,
-        )
+        plan = plan_workspace(found.folder)
+        if plan.action != "make":
+            self.app.notify(" ".join(plan.lines), severity="error", timeout=10)
+            return
+        self.query_one(WorkspaceCard).ask(plan)
 
     def _launch_grading(self, *, browser: bool = False) -> None:
         """Open the card's folder for grading, or offer to get it ready first.
@@ -2913,8 +2911,138 @@ class SetupScreen(OutlineButtons, Vertical):
         the grade screen (Launch Grading) or the browser app (Open in browser)."""
         if getattr(self, "_launch_to_browser", False):
             self.query_one(BrowserLauncher).open_folder(qa_path, sub_path)
-        else:
+            return
+        from opengrader.core.workspace.folder_session import shared_workspace_for
+
+        root = shared_workspace_for(sub_path)
+        if root is None:
             self.post_message(self.LaunchRequested(qa_path, sub_path))
+        else:
+            self._offer_workspace_instead(root, qa_path, sub_path)
+
+    def _offer_workspace_instead(self, root: Path, qa_path: str, sub_path: str) -> None:
+        """This class was made a workspace: grading its files in place would
+        work on grades the workspace has moved past, so ask where to go."""
+
+        def answered(choice: str | None) -> None:
+            if choice == "browser":
+                self.query_one(BrowserLauncher).open_workspace(root)
+            elif choice == "terminal":
+                self._open_workspace(root)
+            elif choice == "files":
+                self.post_message(self.LaunchRequested(qa_path, sub_path))
+
+        self.app.push_screen(
+            PrepareFolderScreen(
+                "This class is a workspace now",
+                f"Workspace: {root}",
+                "Its newest grades are in the workspace, so grading the files "
+                "here would leave them behind — and grades given here would not "
+                "reach the workspace. Open the workspace instead. Grade the files "
+                "anyway only if nobody uses the workspace any more.",
+                [
+                    ("files", "Grade the files anyway"),
+                    ("terminal", "Open workspace here"),
+                    ("browser", "Open in browser"),
+                ],
+            ),
+            answered,
+        )
+
+    # -- the Workspace card (Helper Tools) ------------------------------------
+
+    def on_workspace_card_chosen(self, event: WorkspaceCard.Chosen) -> None:
+        """The card's yes: make (or open) the workspace, then open it where
+        the teacher chose. Classic stays open for the browser; the terminal
+        choice closes it and `main._after_classic` takes over, as for the
+        Start grading card's own workspace button."""
+        event.stop()
+        plan = event.plan
+        if getattr(self, "extraction_in_progress", False):
+            self.app.notify(
+                "A folder is being prepared. Make the workspace when it is done.",
+                severity="warning",
+            )
+            return
+        if event.where == "terminal":
+            if plan.action == "make" and plan.request is not None:
+                self.app.exit(plan.request)
+            elif plan.root is not None:
+                self._open_workspace(plan.root)
+            return
+        card = event.card
+        if plan.action == "make" and plan.request is not None:
+            root, request = plan.request.root, plan.request
+        elif plan.root is not None:
+            root, request = plan.root, None
+        else:
+            return
+        self.query_one(BrowserLauncher).open_workspace(
+            root,
+            request,
+            on_progress=card.show_progress,
+            on_done=self._workspace_made,
+        )
+
+    def _workspace_made(self, root: Path, error: str | None) -> None:
+        self.query_one(WorkspaceCard).finished(root, error)
+        # The Start grading card now offers Open workspace for that folder.
+        launch = self._clean_path(self.query_one("#tui-class-folder", Input).value)
+        if error is None and launch and Path(launch).is_dir():
+            self._scan_launch_folder()
+        self._refresh_file_tools()
+
+    # Helper tools that work on a class folder's .submission.md files. In a
+    # workspace those files are behind the workspace's grades, so the cards
+    # are hidden while the class chosen here is one.
+    _FILE_TOOL_SECTIONS = ("section-policy", "section-handoff", "section-backup")
+
+    def _chosen_workspace(self) -> Path | None:
+        """The real workspace holding the class chosen on the Start grading
+        card (or, with none typed, the one being graded), else None."""
+        from opengrader.core.workspace.store import discover_workspace
+
+        chosen = self._clean_path(
+            self.query_one("#tui-class-folder", Input).value
+        ) or self._clean_path(self.query_one("#tui-sub-path", Input).value)
+        if not chosen or not Path(chosen).exists():
+            return None
+        root = discover_workspace(Path(chosen))
+        return root if root is not None and is_workspace(root) else None
+
+    def _refresh_file_tools(self) -> None:
+        """Hide Share with another grader, Set grading policy and Backup for
+        a class in a workspace, with a note saying why. *Show them anyway*
+        brings them back for that workspace only; their own warnings
+        (`_warn_if_workspace`) still apply."""
+        root = self._chosen_workspace()
+        hide = root is not None and root != getattr(self, "_file_tools_shown_for", None)
+        for section in self._FILE_TOOL_SECTIONS:
+            self.query_one(f"#{section}").set_class(hide, "hidden")
+        self.query_one("#file-tools-hidden").set_class(not hide, "hidden")
+        if hide:
+            self.query_one("#file-tools-hidden-text", Static).update(
+                f"Share with another grader, Set grading policy and Backup are "
+                f"hidden: this class is in the workspace “{root.name}”. They work "
+                "on the students' files, and the newest grades are in the "
+                "workspace. To use them anyway, copy the grades into the files "
+                "first (W, Write grades back, in the workspace's assignment list)."
+            )
+
+    def _warn_if_workspace(self, submissions: str, consequence: str) -> None:
+        """A tool that works on the files, pointed at a class that became a
+        workspace: the files may be behind the workspace's grades."""
+        from opengrader.core.workspace.folder_session import shared_workspace_for
+
+        if not submissions or shared_workspace_for(submissions) is None:
+            return
+        self.app.notify(
+            "This class is a workspace, so its newest grades are there, not in "
+            f"these files. {consequence} Copy them into the files first: W "
+            "(Write grades back) in the workspace's assignment list.",
+            severity="warning",
+            timeout=15,
+        )
 
     def _offer_to_prepare(self, found: ClassFolderScan) -> None:
         """The folder has nothing to grade yet: say what it would take.
@@ -4305,6 +4433,23 @@ class SetupScreen(OutlineButtons, Vertical):
                 "Not sent — the cloud send was declined. Nothing left this computer."
             )
 
+    def _warn_if_key_in_workspace(self, output_md: str) -> None:
+        """A workspace keeps its own copy of each answer key, so a new key
+        file written into one changes nothing it grades with."""
+        from opengrader.core.class_folder import is_workspace
+        from opengrader.core.workspace.store import discover_workspace
+
+        root = discover_workspace(Path(output_md).expanduser().parent)
+        if root is None or not is_workspace(root):
+            return
+        self.app.notify(
+            "This folder is in a workspace, which keeps its own copy of the "
+            "answer key: the file written now will not change what the "
+            "workspace grades with. Edit the key in the browser instead.",
+            severity="warning",
+            timeout=15,
+        )
+
     def _run_answer_key(self) -> None:
         input_file = self._clean_path(self.query_one("#ak-input", Input).value)
         output_md = self._clean_path(self.query_one("#ak-output", Input).value)
@@ -4349,6 +4494,7 @@ class SetupScreen(OutlineButtons, Vertical):
             if template:
                 argv.extend(["--blank-template", template])
 
+        self._warn_if_key_in_workspace(output_md)
         self._ak_total = 0
         self._ak_output = output_md
         bar = self.query_one("#ak-progress-bar", ProgressBar)
@@ -4566,6 +4712,9 @@ class SetupScreen(OutlineButtons, Vertical):
             mode="multi" if locked else "solo",
             anonymity_locked=locked,
             traversal_shuffle=shuffle,
+        )
+        self._warn_if_workspace(
+            submissions, "The policy applies to grading these files, not to the workspace."
         )
         try:
             write_policy(submissions, policy)

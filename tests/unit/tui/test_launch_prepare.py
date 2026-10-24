@@ -1044,17 +1044,18 @@ def test_a_folder_of_assignments_is_offered_as_a_workspace(tmp_path) -> None:  #
         session.app.query_one("#launch-button", Button).press()
         await session.asked()
         buttons = _buttons(session.app)
-        note = _text(session.app, "#prepare-folder-note")
-        session.app.screen.query_one("#prepare-folder-workspace", Button).press()
+        found = _text(session.app, "#prepare-folder-found")
+        # The Workspace card's question: this window closes classic.
+        session.app.screen.query_one("#prepare-folder-terminal", Button).press()
         await _settle(session.pilot, lambda: session.app.return_value is not None)
-        return shown, card, buttons, note, session.app.return_value
+        return shown, card, buttons, found, session.app.return_value
 
-    shown, card, buttons, note, result = _drive(steps)
+    shown, card, buttons, found, result = _drive(steps)
 
     assert shown
     assert "holds 3 assignment(s)" in card and "Final/" in card
-    assert "workspace" in buttons
-    assert "Final/" in note  # not prepared yet: left out, and said so
+    assert "terminal" in buttons and "browser" in buttons
+    assert "Left out for now" in found and "Final" in found  # not prepared yet
     assert isinstance(result, MakeWorkspaceRequest)
     assert result.root == root
     assert sorted(result.assignments) == sorted(
