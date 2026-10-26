@@ -1,0 +1,73 @@
+Class folder cs146-quiz1
+  ✓ scanned bundle  submissions.pdf
+  ✓ answer key      qa.md
+  · roster          none found
+  ✓ blank template  template-vA.pdf
+
+
+▸ scan-check
+    Checking submissions.pdf (1/1)…
+    Checking page 1/6…
+    Checking page 2/6…
+    Checking page 3/6…
+    Checking page 4/6…
+    Checking page 5/6…
+    Checking page 6/6…
+  ✓ 6 page(s) checked — no problems found  (3.0s)
+
+▸ split
+    Matching scanned pages to each other…
+      New printed page g01 (page 1, 3 question label(s))
+      New printed page g02 (page 2, 5 question label(s))
+      New printed page g03 (page 3, 5 question label(s))
+      New printed page g04 (page 1, 3 question label(s))
+      Matched 6/6 pages to 4 printed page(s)
+    Found 4 printed page(s); confirming their layout on other copies…
+    Matching the printed pages to the blank template…
+      4 of 4 printed page(s) found in the blank template
+    Input: cs146-quiz1/submissions.pdf (6 pages, 3 printed page(s) per submission)
+    Planned student splits: 2
+      - submission-0001: scan pages 1, 2, 3
+      - submission-0002: scan pages 4, 5, 6
+    Wrote 2 split PDFs to: cs146-quiz1/student-pdfs
+  ✓ split into 2 per-student PDF(s)  (5.8s)
+
+▸ extract
+    Checking the split for submissions of the wrong length…
+    Checking for submissions whose page order needs confirming…
+Found 2 submission PDF(s)
+    Extracting 2 submissions across 2 parallel workers
+    [1/2] submission-0002.pdf (1.3s)
+      Identity: ‘= alk ey 2 (44)
+      Wrote: cs146-quiz1/submissions/submission-0002/submission-0002.submission.md
+    
+    [2/2] submission-0001.pdf (1.3s)
+      Identity: ee. ae {A ) (5)
+      Wrote: cs146-quiz1/submissions/submission-0001/submission-0001.submission.md
+    
+  ✓ 2 submission(s) ready to grade  (1.7s)
+
+▸ draft-rubrics
+  · not requested (--draft-rubrics drafts missing rubric items)
+
+▸ auto-grade
+    submission-0001.submission.md (2)
+Successfully graded and updated submission-0001.submission.md
+    submission-0002.submission.md (2)
+Successfully graded and updated submission-0002.submission.md
+
+This run was recorded in the audit journal. To undo it:
+  uv run grade-restore apply --submissions cs146-quiz1/submissions --without-actor automated-grading --yes
+  ✓ graded 2 submission(s) against qa.md
+    Publishing results to the workspace.
+
+Summary
+  ✓ scan-check   ran      6 page(s) checked — no problems found
+  ✓ split        ran      split into 2 per-student PDF(s)
+  ✓ extract      ran      2 submission(s) ready to grade
+  · draft-rubrics skipped  not requested (--draft-rubrics drafts missing rubric items)
+  ✓ auto-grade   ran      graded 2 submission(s) against qa.md
+  ✓ publish      ran      2 submission(s) available in CS146: Quiz 1.
+
+2 submission(s) ready in cs146-quiz1/submissions
+Open for grading: uv run opengrader tui --workspace cs146-quiz1 --assignment b5c49be3-82f6-5b4d-af9e-5546475f4115
