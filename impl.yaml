@@ -1,0 +1,34 @@
+project_name: "Opengrader"
+project_type: "hybrid"            # CLI + terminal app + local web app
+
+impl_claim: "`uv run opengrader run` on the bundled 6-page scan of samples/cs146-quiz1 splits it into 2 per-student PDFs, crops all 22 answers into gradeable submissions, and loads them into the terminal and web grading apps, in under a minute on a laptop with no network or AI."
+
+languages: ["python", "typescript"]
+hardware_required: false
+
+setup:
+  - "brew install uv tesseract        # macOS; on Linux install uv and the tesseract-ocr package"
+  - "uv sync --all-groups --extra pydantic-ai --extra photos"
+build:
+  - "npm --prefix src/opengrader/web ci"
+  - "npm --prefix src/opengrader/web run build"
+test:
+  - "uv run pytest"
+  - "uv run --group browser playwright install chromium"
+  - "uv run --group browser pytest browser_tests --browser chromium"
+run:
+  - "mkdir -p /tmp/og-demo && cp samples/cs146-quiz1/{qa.md,submissions.pdf,template-vA.pdf} /tmp/og-demo/"
+  - "uv run opengrader run /tmp/og-demo --no-llm"
+  - "uv run opengrader tui /tmp/og-demo"
+  - "uv run opengrader web --workspace /tmp/og-demo"
+
+mock_mode:
+  available: true
+  commands:
+    - "uv run opengrader run /tmp/og-demo --no-llm   # the sample scans in samples/ stand in for a scanner"
+
+demo:
+  video: "https://github.com/user-attachments/assets/f4352f5d-af4e-4ce9-bed4-e0f48aceb68e"
+  screenshots: ["docs/screenshots/web-grade.png"]
+
+notes: "No scanner, account, or network is needed: samples/ holds real scanned quizzes. The tui and web commands are interactive; quit the terminal app with q and stop the web app with `uv run opengrader stop`. Without --llm, written answers are cropped for a human to grade but not transcribed or auto-scored. AI features need Ollama running locally or a cloud API key, and are optional. Tested on macOS; Windows and Linux are untested."
