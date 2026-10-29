@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,8 +21,6 @@ from opengrader.core.workspace.models import AssignmentInputs, PipelineOutput, S
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.workspace.app import create_app
 
-REPO = Path(__file__).resolve().parents[3]
-
 # The sample's two submissions are "tommy liv" (ID 123456789) and a second
 # student; the rosters below put the first of them on the roster.
 TSV = "123456789\tTommy Liu\n555000111\tAndy Cortes\n"
@@ -34,11 +31,11 @@ CSV = (
 )
 
 
-def _folder(tmp_path: Path, roster_name: str | None, roster_text: str = "") -> dict:
+def _folder(
+    tmp_path: Path, roster_name: str | None, roster_text: str = "", *, copy_cs146_sample
+) -> dict:
     root = tmp_path / "quiz"
-    shutil.copytree(
-        REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader")
-    )
+    copy_cs146_sample(root)
     if roster_name:
         (root / roster_name).write_text(roster_text, encoding="utf-8")
     store = Workspace.create(root)
@@ -69,9 +66,14 @@ def _folder(tmp_path: Path, roster_name: str | None, roster_text: str = "") -> d
 
 
 @pytest.fixture(params=["roster.tsv", "roster.csv"])
-def session(request, tmp_path: Path):
+def session(request, tmp_path: Path, copy_cs146_sample):
     """A folder session whose class folder has a roster, in each shape."""
-    ctx = _folder(tmp_path, request.param, TSV if request.param.endswith(".tsv") else CSV)
+    ctx = _folder(
+        tmp_path,
+        request.param,
+        TSV if request.param.endswith(".tsv") else CSV,
+        copy_cs146_sample=copy_cs146_sample,
+    )
     with TestClient(create_app(ctx["root"], process_jobs=False)) as client:
         ctx["client"] = client
         assert client.post("/api/folder-session/sync").json()["problems"] == []
@@ -118,8 +120,8 @@ def test_the_folders_roster_is_the_browsers_roster(session) -> None:
     assert students["123456789"]["email"] == ("tommy@example.edu" if csv else None)
 
 
-def test_a_folder_without_a_roster_has_no_people_page(tmp_path: Path) -> None:
-    ctx = _folder(tmp_path, None)
+def test_a_folder_without_a_roster_has_no_people_page(tmp_path: Path, copy_cs146_sample) -> None:
+    ctx = _folder(tmp_path, None, copy_cs146_sample=copy_cs146_sample)
     with TestClient(create_app(ctx["root"], process_jobs=False)) as client:
         result = client.post("/api/folder-session/sync").json()
         info = client.get("/api/workspace").json()["folder_session"]["roster"]
@@ -175,8 +177,9 @@ def test_a_roster_file_that_goes_away_empties_the_people_page(session) -> None:
 
 def test_the_roster_the_pipeline_was_pointed_at_wins_over_the_one_in_the_folder(
     tmp_path: Path,
+    copy_cs146_sample,
 ) -> None:
-    ctx = _folder(tmp_path, "roster.tsv", TSV)
+    ctx = _folder(tmp_path, "roster.tsv", TSV, copy_cs146_sample=copy_cs146_sample)
     elsewhere = tmp_path / "registrar" / "enrolled.tsv"
     elsewhere.parent.mkdir()
     elsewhere.write_text("42\tAlan Turing\n", encoding="utf-8")
@@ -193,8 +196,8 @@ def test_the_roster_the_pipeline_was_pointed_at_wins_over_the_one_in_the_folder(
     assert info["files"] == ["enrolled.tsv"]
 
 
-def test_one_roster_per_section_is_shown_but_not_edited(tmp_path: Path) -> None:
-    ctx = _folder(tmp_path, None)
+def test_one_roster_per_section_is_shown_but_not_edited(tmp_path: Path, copy_cs146_sample) -> None:
+    ctx = _folder(tmp_path, None, copy_cs146_sample=copy_cs146_sample)
     (ctx["root"] / "sec1.tsv").write_text("1\tAda Lovelace\n", encoding="utf-8")
     (ctx["root"] / "sec2.tsv").write_text("2\tGrace Hopper\n", encoding="utf-8")
     save_folder_settings(
@@ -461,8 +464,8 @@ def test_a_match_whose_file_cannot_be_written_is_left_unnamed(
 
 
 @pytest.fixture
-def workspace(tmp_path: Path):
-    ctx = _folder(tmp_path, None)
+def workspace(tmp_path: Path, copy_cs146_sample):
+    ctx = _folder(tmp_path, None, copy_cs146_sample=copy_cs146_sample)
     (ctx["root"] / ".opengrader" / "folder-session.json").unlink()
     roster_store.add_student(
         ctx["store"], StudentDetails(sid="123456789", first_name="Tommy", last_name="Liu")

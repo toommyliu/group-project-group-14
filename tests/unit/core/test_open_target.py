@@ -14,9 +14,9 @@ SAMPLE = REPO / "samples" / "cs146-quiz1"
 
 
 @pytest.fixture
-def quiz(tmp_path: Path) -> Path:
+def quiz(tmp_path: Path, copy_cs146_sample) -> Path:
     target = tmp_path / "quiz"
-    shutil.copytree(SAMPLE, target, ignore=shutil.ignore_patterns(".opengrader"))
+    copy_cs146_sample(target)
     return target
 
 

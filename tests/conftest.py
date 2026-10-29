@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 import pytest
 
 from opengrader.core import app_config
@@ -54,3 +57,27 @@ def _isolate_key_store():
         yield
     finally:
         keystore.set_backend(None)
+
+
+@pytest.fixture
+def copy_cs146_sample():
+    """Copy the two-submission fixture without local processing outputs."""
+    source = Path(__file__).resolve().parents[1] / "samples" / "cs146-quiz1"
+    submissions = source / "student-submissions"
+
+    def copy(destination: Path) -> Path:
+        def ignore(directory: str, names: list[str]) -> set[str]:
+            if Path(directory) == submissions:
+                return set(names) - {"submission-0001", "submission-0002"}
+            return {".opengrader"} & set(names)
+
+        shutil.copytree(source, destination, ignore=ignore)
+        return destination
+
+    return copy
+
+
+@pytest.fixture
+def pydantic_ai_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise provider wiring without installing or calling the optional SDK."""
+    monkeypatch.setattr(app_config.manifests, "_pydantic_ai_available", lambda: True)

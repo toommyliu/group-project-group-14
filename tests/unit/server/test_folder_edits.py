@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import os
-import shutil
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -25,8 +24,6 @@ from opengrader.core.workspace.models import AssignmentInputs, PipelineOutput
 from opengrader.core.workspace.store import Workspace
 from opengrader.server.workspace.app import create_app
 
-REPO = Path(__file__).resolve().parents[3]
-
 # Version A, question 1 of the sample: Correct (+10), two partial items
 # (+7 and +3), Incorrect (+0). Submission 1 is version A, submission 2 is B.
 # The answer-key format requires partial items to add up to the question's
@@ -36,11 +33,9 @@ MOSTLY_WRONG = "Partially Correct - Conversion process mostly incorrect"
 
 
 @pytest.fixture
-def quiz(tmp_path: Path):
+def quiz(tmp_path: Path, copy_cs146_sample):
     root = tmp_path / "quiz"
-    shutil.copytree(
-        REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader")
-    )
+    copy_cs146_sample(root)
     store = Workspace.create(root)
     published = publish_pipeline(
         store,
@@ -744,13 +739,13 @@ def test_outside_a_folder_session_answers_are_not_edited_while_grading(plain) ->
     assert _fields(plain)["q1"]["answers"] == ["101"]
 
 
-def test_a_drafted_keys_option_lines_become_choices_when_one_is_picked(tmp_path) -> None:
+def test_a_drafted_keys_option_lines_become_choices_when_one_is_picked(
+    tmp_path, copy_cs146_sample
+) -> None:
     from opengrader.core.qa_file.draft_key import draft_from_text
 
     root = tmp_path / "drafted"
-    shutil.copytree(
-        REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader")
-    )
+    copy_cs146_sample(root)
     # The same number of questions as the sample's submissions carry, so the
     # folder publishes; the second is multiple choice with nothing marked.
     lines = [f"{n}. Question {n}?" for n in range(1, 6)]

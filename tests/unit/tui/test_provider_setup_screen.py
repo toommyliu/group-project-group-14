@@ -284,7 +284,7 @@ def test_cancelling_at_the_first_step_changes_nothing(service) -> None:
     assert list(app_config.manifests_dir().glob("*.toml")) == []
 
 
-def test_an_advanced_service_skips_the_key_and_says_how_to_sign_in(service) -> None:
+def test_an_advanced_service_skips_the_key_and_says_how_to_sign_in(service, pydantic_ai_available) -> None:
     async def run() -> tuple[str, str, str, bool]:
         app = _Host(ProviderSetupScreen())
         async with app.run_test(size=_SIZE) as pilot:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import uuid
 from pathlib import Path
 
@@ -24,13 +23,11 @@ from opengrader.core.workspace.writeback import (
     plan_write_back,
 )
 
-REPO = Path(__file__).resolve().parents[4]
-
 
 @pytest.fixture
-def cls(tmp_path: Path):
+def cls(tmp_path: Path, copy_cs146_sample):
     root = tmp_path / "quiz"
-    shutil.copytree(REPO / "samples" / "cs146-quiz1", root, ignore=shutil.ignore_patterns(".opengrader"))
+    copy_cs146_sample(root)
     store = Workspace.create(root)
     published = publish_pipeline(
         store,

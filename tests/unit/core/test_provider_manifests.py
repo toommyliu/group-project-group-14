@@ -544,7 +544,7 @@ def test_a_pydantic_ai_manifest_loads_normally_when_the_package_is_present(
 
 
 def test_a_pydantic_ai_manifest_resolves_to_its_own_config_and_reader_types(
-    providers_dir,
+    pydantic_ai_available, providers_dir,
 ) -> None:
     """Wiring only — never imports `pydantic_ai` itself, so it runs either way."""
     from opengrader.core.llm.pydantic_ai_client import PydanticAIConfig
@@ -574,7 +574,7 @@ def test_a_pydantic_ai_manifest_resolves_to_its_own_config_and_reader_types(
 
 
 def test_a_pydantic_ai_manifest_with_a_custom_host_becomes_the_base_url(
-    providers_dir,
+    pydantic_ai_available, providers_dir,
 ) -> None:
     """A prefix that honours a base URL and names a real (non-loopback) host
     stays `kind = "cloud"` but the host is still handed to the SDK — e.g. a
@@ -649,7 +649,7 @@ def test_pydantic_ai_modules_never_import_the_package_at_module_scope() -> None:
     ],
 )
 def test_a_saved_model_from_another_prefix_cannot_leave_a_local_pydantic_ai_host(
-    providers_dir, saved_model: str
+    pydantic_ai_available, providers_dir, saved_model: str
 ) -> None:
     """A loopback manifest is `local`: no consent, and the guard lets it read
     names and IDs. If a model saved in AI setup (or passed with a flag) sent
@@ -673,7 +673,7 @@ def test_a_saved_model_from_another_prefix_cannot_leave_a_local_pydantic_ai_host
         app_config.text_generate(resolved)
 
 
-def test_a_flag_override_to_another_prefix_is_refused_too(providers_dir) -> None:
+def test_a_flag_override_to_another_prefix_is_refused_too(pydantic_ai_available, providers_dir) -> None:
     _write(
         providers_dir,
         "claude-direct",
@@ -692,7 +692,7 @@ def test_a_flag_override_to_another_prefix_is_refused_too(providers_dir) -> None
         app_config.vision_reader(resolved)
 
 
-def test_a_pydantic_ai_model_that_honours_the_host_is_pointed_at_it(providers_dir) -> None:
+def test_a_pydantic_ai_model_that_honours_the_host_is_pointed_at_it(pydantic_ai_available, providers_dir) -> None:
     _write(
         providers_dir,
         "claude-direct",
@@ -725,7 +725,7 @@ def test_a_cloud_manifest_must_use_https() -> None:
     ).kind == "local"
 
 
-def test_the_latency_probe_never_times_a_model_that_would_leave_the_host(providers_dir) -> None:
+def test_the_latency_probe_never_times_a_model_that_would_leave_the_host(pydantic_ai_available, providers_dir) -> None:
     """Timing the handwriting model used to copy the text model's config and
     swap in the handwriting model's id, skipping the check on where that id
     sends a request."""

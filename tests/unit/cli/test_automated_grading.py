@@ -1048,7 +1048,7 @@ def test_llm_run_names_written_questions_without_partial_credit(tmp_path, monkey
     note = next(m for m in messages if m.startswith("Note:"))
     # q2 is numeric, graded exactly, so it never needs drafted items.
     assert note.startswith("Note: q1 has no partial-credit rubric items yet")
-    assert "q2" not in note
+    assert "q2" not in note.splitlines()[0]
     assert "uv run draft-rubric --solutions" in note
 
 

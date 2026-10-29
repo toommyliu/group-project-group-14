@@ -413,7 +413,7 @@ def test_a_cloud_provider_is_never_asked_without_a_button_press(monkeypatch) -> 
 
 
 def test_each_provider_gets_one_line_saying_where_it_runs_and_if_it_is_ready(
-    monkeypatch,
+    monkeypatch, pydantic_ai_available,
 ) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     openai, bedrock = _install("openai"), _install("bedrock")
